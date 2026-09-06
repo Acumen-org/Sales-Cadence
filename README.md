@@ -15,6 +15,12 @@ Cadence never sends email or automates LinkedIn. Humans do every touch.
 
 Full list of assumptions: [DECISIONS.md](DECISIONS.md). Connecting a real workspace: [INTEGRATION.md](INTEGRATION.md).
 
+## Quickest start (Windows, no Docker)
+
+Double-click **start-cadence.cmd**. It installs dependencies on the first run, starts an embedded Postgres, applies migrations, seeds the demo workspace, starts the app and worker, and opens http://localhost:3100/login in your browser. The login page has one-click "sign in as" buttons for the demo users (mock mode only). Close the window to stop; data is kept in `.pgdata-dev`.
+
+The same thing from a terminal: `pnpm start:local`.
+
 ## Status
 
 | Phase | Scope | State |

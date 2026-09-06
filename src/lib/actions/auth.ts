@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { prisma } from '../db';
+import { env } from '../env';
 import { verifyPassword } from '../auth/password';
 import { createSession, destroySession } from '../auth/session';
 import { logAudit, userActor } from '../audit';
@@ -31,6 +32,21 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   await createSession(user.id);
   await logAudit({ entityType: 'user', entityId: user.id, action: 'login', actor: userActor(user) });
   redirect(next && next.startsWith('/') && !next.startsWith('//') ? next : '/tasks');
+}
+
+/**
+ * One-click sign-in for the demo workspace. Only works while TWENTY_MODE=mock and only for
+ * the seeded demo accounts, so it can never be used against a real deployment.
+ */
+export async function demoLoginAction(formData: FormData): Promise<void> {
+  if (env().TWENTY_MODE !== 'mock') redirect('/login');
+  const email = String(formData.get('email') ?? '').toLowerCase();
+  const allowed = /^(admin|alisa|leigh|andrew|karson|daniel|ria)@cadence\.local$/.test(email);
+  const user = allowed ? await prisma.user.findUnique({ where: { email } }) : null;
+  if (!user || !user.active) redirect('/login');
+  await createSession(user.id);
+  await logAudit({ entityType: 'user', entityId: user.id, action: 'login', actor: userActor(user), details: { demo: true } });
+  redirect('/tasks');
 }
 
 export async function logoutAction(): Promise<void> {
