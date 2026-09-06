@@ -4,6 +4,17 @@ Cadence is a self-hosted, multi-user sales sequencer that sits beside a self-hos
 
 Cadence never sends email or automates LinkedIn. Humans do every touch.
 
+## What it does
+
+- **Tasks**: today / overdue / upcoming, filter by pod and FO, Outreach-style task flow (one task at a time, brief on the right, Done / Skip / Snooze / Next).
+- **Sequences**: versioned step plans (day offsets, email / call / LinkedIn actions, either/or steps, templates with `{{firstName}} {{company}} {{jobTitle}} {{eventSource}} {{foFirstName}}`). Editing creates a new version; running enrollments pick it up at their next step.
+- **Campaigns**: enrol from pasted ids, a CSV export or a saved Twenty view; conflict preview (dnd, already enrolled, unknown); FO assignment by Twenty owner or round robin; daily ramp; funnel by step and FO; pause / stop / re-enrol non-repliers.
+- **People**: fast searchable list from a local cache of Twenty people with enrollment status, last touch, pod and FO; row actions enrol / exit.
+- **Reports**: by pod, FO, campaign, sequence and channel; overdue and stalled lists.
+- **Twenty integration**: webhooks + nightly reconcile complete email and call steps from Twenty activity, replies close open tasks, meetings and dnd flips are honoured, every completed action is written back as a `[Cadence] ...` note and open tasks are mirrored as Twenty Tasks. `CADENCE_DRY_RUN=true` logs writes without making them.
+
+Full list of assumptions: [DECISIONS.md](DECISIONS.md). Connecting a real workspace: [INTEGRATION.md](INTEGRATION.md).
+
 ## Status
 
 | Phase | Scope | State |
@@ -13,32 +24,35 @@ Cadence never sends email or automates LinkedIn. Humans do every touch.
 | 3 | Tasks page and brief | done |
 | 4 | Webhook ingestion, matching, completions, replies, Twenty sync out | done |
 | 5 | Sequences, Campaigns, People, Reports pages | done |
-| 6 | Real Twenty client, verify:schema, dry run, docs | pending |
+| 6 | Real Twenty client, verify:schema, dry run, docs | done |
 
 ## Stack
 
-TypeScript, Node 20, Next.js (App Router, server actions), Postgres, Prisma, Tailwind, Vitest, Docker Compose.
+TypeScript, Node 20, Next.js 15 (App Router, server actions), Postgres 16, Prisma 6, Tailwind 3, Vitest 3, Docker Compose. Tests run on an embedded Postgres, so no Docker is needed to run them.
 
 ## Run on Windows with Docker Desktop
 
 1. Install Docker Desktop and make sure it is running.
-2. Copy `.env.example` to `.env`. The defaults run against the built-in mock Twenty workspace, so nothing else is required for a first look.
+2. Copy `.env.example` to `.env`. The defaults run against the built-in mock Twenty workspace (3 pods, 6 users, 40 people), so nothing else is required for a first look.
 3. In PowerShell, from this folder:
 
    ```powershell
    docker compose up -d --build
    ```
 
-4. Open http://localhost:3100 and sign in with `admin@cadence.local` / `admin12345` (from `.env`), or one of the demo users (`alisa@cadence.local`, `leigh@cadence.local`, `andrew@cadence.local`, `karson@cadence.local`, `daniel@cadence.local`, `ria@cadence.local`, all `password123`).
+4. Open http://localhost:3100 and sign in with `admin@cadence.local` / `admin12345` (from `.env`), or one of the demo users (`alisa@cadence.local`, `leigh@cadence.local`, `andrew@cadence.local` are Senior FOs, `karson@cadence.local`, `daniel@cadence.local` Junior FOs, `ria@cadence.local` an Admin; all `password123`).
+5. Create a campaign (Campaigns > New campaign, pick the Twenty view "Pod Alisa - all people"), then open Tasks.
 
-The `web` container applies migrations and runs the seed on start (`SEED_ON_START=true`). The `worker` container runs the scheduler and nightly jobs. Postgres is published on `localhost:5433` so it never collides with Twenty's own database.
+The `web` container applies migrations and runs the seed on start (`SEED_ON_START=true`, idempotent). The `worker` container runs the scheduler every `WORKER_TICK_SECONDS`, the nightly reconcile at `RECONCILE_HOUR` and the cache refresh at `CACHE_REFRESH_HOUR`. Postgres is published on `localhost:5433` so it never collides with Twenty's own database.
 
 Useful commands:
 
 ```powershell
-docker compose logs -f web worker      # follow logs
-docker compose down                    # stop (data is kept in the cadence-db volume)
-docker compose down -v                 # stop and delete data
+docker compose logs -f web worker            # follow logs
+docker compose exec web pnpm verify:schema   # check the Twenty field mapping
+docker compose exec web pnpm reconcile 7     # replay the last 7 days of Twenty activity
+docker compose down                          # stop (data is kept in the cadence-db volume)
+docker compose down -v                       # stop and delete data
 ```
 
 ## Run on the Linux server
@@ -47,15 +61,20 @@ Same compose file, unchanged:
 
 ```bash
 cp .env.example .env
-# edit .env: TWENTY_MODE=graphql, TWENTY_API_URL, TWENTY_API_KEY, SESSION_SECRET, COOKIE_SECURE=true, SEED_PROFILE=core
+# edit .env:
+#   TWENTY_MODE=graphql  TWENTY_API_URL=https://twenty.example.com  TWENTY_API_KEY=...
+#   SESSION_SECRET=<long random>  COOKIE_SECURE=true  APP_URL=https://cadence.example.com
+#   SEED_PROFILE=core  ADMIN_EMAIL=you@company.com  ADMIN_PASSWORD=<strong>
+#   CADENCE_DRY_RUN=true  (for the pilot)
+#   TWENTY_WEBHOOK_SECRET=... or CADENCE_WEBHOOK_TOKEN=...
 docker compose up -d --build
 ```
 
-Put a reverse proxy (Caddy, nginx, Traefik) in front of port 3100 with TLS, then register the webhook URL in Twenty as described in [INTEGRATION.md](INTEGRATION.md). Start with `CADENCE_DRY_RUN=true` and one pod.
+Put a reverse proxy (Caddy, nginx, Traefik) in front of port 3100 with TLS, then follow [INTEGRATION.md](INTEGRATION.md): API key, webhooks, `verify:schema`, pods and users, dry run, pilot with one pod, then turn dry run off.
 
 ## Local development (no Docker)
 
-You need Node 20+ and pnpm 9 (`corepack enable` or `npm i -g pnpm`). A Postgres is needed for the app itself; `docker compose up -d db` is the quickest way to get one on port 5433.
+You need Node 20+ and pnpm 9 (`corepack enable` or `npm i -g pnpm`). The app itself needs a Postgres: `docker compose up -d db` gives you one on port 5433, `pnpm dev:db` starts an embedded one on port 5434 with no Docker at all (data in `.pgdata-dev`), or point `DATABASE_URL` at your own.
 
 ```bash
 pnpm install
@@ -66,26 +85,53 @@ pnpm dev                 # http://localhost:3000
 pnpm worker              # scheduler + nightly jobs, in a second terminal
 ```
 
-Tests do not need Docker or a running Postgres: `pnpm test` starts an embedded Postgres, applies the migrations, and runs everything against the mock Twenty client. Set `TEST_DATABASE_URL` to use an existing database instead.
+Tests need neither Docker nor a running Postgres: `pnpm test` starts an embedded Postgres, applies the migrations, and runs everything against the mock Twenty client. Set `TEST_DATABASE_URL` to use an existing database instead.
 
 ```bash
 pnpm typecheck
 pnpm test
+pnpm build
 ```
+
+## Roles
+
+| | Admin | Senior FO | Junior FO |
+|---|---|---|---|
+| Own tasks: complete, skip with reason, snooze | yes | yes | yes (snooze to next working day only) |
+| Pod tasks, pod filters | all pods | own pods | no |
+| Enrol, bulk-enrol, pause, exit, reassign within pod | all pods | own pods | no |
+| Campaigns | all | own pods | read-only own enrollments |
+| Reports | all | own pods | no |
+| Sequences (edit, versions) | yes | view | view |
+| Settings, users, pods | yes | no | no |
 
 ## Layout
 
 ```
-prisma/               schema, migrations, seed
-src/app/              Next.js routes (App Router)
-src/components/       UI
-src/lib/auth/         sessions, passwords, RBAC
-src/lib/engine/       enrollment engine: clocks, caps, tasks, ingestion, reconcile, sync out
-src/lib/sequences/    step schema and the default sequence
-src/lib/twenty/       twenty-schema.ts (all field names), client interface, mock, GraphQL client
-src/worker/           scheduler process
-scripts/              verify:schema, reconcile
-tests/                vitest (embedded Postgres)
+prisma/                 schema, migrations (hand-added partial unique index), seed
+scripts/                verify-schema.ts, reconcile.ts
+src/app/                Next.js routes: tasks, sequences, campaigns, people, reports, settings, api/webhooks/twenty
+src/components/         UI (no component library; inline SVG icons)
+src/lib/auth/           sessions, passwords, RBAC
+src/lib/engine/         clock, caps, versioning, tasks, enrollment, matching, ingest, reconcile, sync-out
+src/lib/sequences/      step schema and the default 23-day sequence
+src/lib/twenty/         twenty-schema.ts (all field names), types, client interface, mock + fixtures,
+                        graphql-client.ts (all queries), normalize, webhook-auth, urls
+src/worker/             scheduler process
+tests/                  vitest on embedded Postgres
 ```
 
-See [DECISIONS.md](DECISIONS.md) for every assumption and [INTEGRATION.md](INTEGRATION.md) for connecting a real Twenty workspace.
+## The default sequence
+
+| Day | Actions |
+|---|---|
+| 1 | Email 1, LinkedIn connect |
+| 3 | Call 1, then email OR LinkedIn message |
+| 6 | Email 2 |
+| 9 | LinkedIn message 2 |
+| 12 | Call 2, then email OR LinkedIn message |
+| 16 | LinkedIn message 3 |
+| 20 | Call 3, then email OR LinkedIn message |
+| 23 | Email 3 |
+
+Seeded as version 1 of "Default outbound (23 days)". Admins edit it in Sequences.

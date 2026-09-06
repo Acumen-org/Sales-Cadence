@@ -13,3 +13,5 @@ Thumbs.db
 coverage
 .vscode/*
 !.vscode/extensions.json
+.pgdata-dev
+tsconfig.tsbuildinfo
