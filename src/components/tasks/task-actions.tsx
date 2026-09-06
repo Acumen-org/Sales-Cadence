@@ -70,7 +70,10 @@ export function TaskActions(p: Props) {
             setPanel('none');
             setNote('');
             setDisposition('');
-            if (advance && p.nextUrl) router.push(p.nextUrl);
+            // Carry the confirmation in the URL so it survives the navigation / re-render.
+            const target = new URL(advance && p.nextUrl ? p.nextUrl : window.location.pathname + window.location.search, window.location.origin);
+            if (r.message) target.searchParams.set('flash', r.message);
+            router.push(target.pathname + target.search);
             router.refresh();
           }
         } catch (err) {
@@ -104,19 +107,19 @@ export function TaskActions(p: Props) {
     [submitComplete],
   );
 
-  const submitSkip = () => {
+  const submitSkip = useCallback(() => {
     const fd = new FormData();
     fd.set('taskId', p.taskId);
     fd.set('reasonKey', reasonKey);
     if (note.trim()) fd.set('note', note.trim());
     run(() => skipTaskAction(fd));
-  };
-  const submitSnooze = () => {
+  }, [note, p.taskId, reasonKey, run]);
+  const submitSnooze = useCallback(() => {
     const fd = new FormData();
     fd.set('taskId', p.taskId);
     fd.set('toDate', p.canPickSnoozeDate ? snoozeDate : 'next');
     run(() => snoozeTaskAction(fd));
-  };
+  }, [p.canPickSnoozeDate, p.taskId, run, snoozeDate]);
   const enrollmentOp = (fn: (fd: FormData) => Promise<ActionResult>, extra: Record<string, string> = {}, confirmText?: string) => {
     if (confirmText && !window.confirm(confirmText)) return;
     const fd = new FormData();
@@ -156,8 +159,7 @@ export function TaskActions(p: Props) {
       switch (e.key.toLowerCase()) {
         case 'd':
           e.preventDefault();
-          if (!p.altAction) startDone(p.action);
-          else setPanel((v) => (v === 'more' ? 'none' : 'more'));
+          startDone(p.action); // either/or: D = the primary action, click the second button for the alternative
           break;
         case 's':
           e.preventDefault();
@@ -189,7 +191,7 @@ export function TaskActions(p: Props) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [panel, disposition, pendingAction, p, router, startDone, submitComplete, reasonKey, note, snoozeDate]);
+  }, [panel, disposition, pendingAction, p, router, startDone, submitComplete, submitSkip, submitSnooze]);
 
   const big = p.size === 'lg';
   const primary = clsx('btn-primary', big && 'px-4 py-2 text-base');
@@ -252,7 +254,7 @@ export function TaskActions(p: Props) {
         >
           <div>
             <label className="mb-1 block">Call outcome (required)</label>
-            <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-1.5 [grid-template-columns:repeat(auto-fill,minmax(190px,1fr))]">
               {p.dispositions.map((d, i) => (
                 <label
                   key={d.key}

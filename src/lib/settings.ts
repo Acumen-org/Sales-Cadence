@@ -131,10 +131,13 @@ export const DEFAULT_SETTINGS: Settings = SettingsSchema.parse({});
 // ---------------------------------------------------------------------------
 
 const CACHE_MS = 5_000;
-let cache: { at: number; value: Settings } | undefined;
+// On globalThis, not module scope: Next.js bundles pages and server actions as separate module
+// instances in the same process, so a module-level cache would not see invalidations.
+const g = globalThis as unknown as { __cadenceSettingsCache?: { at: number; value: Settings } };
 
 export async function getSettings(): Promise<Settings> {
-  if (cache && Date.now() - cache.at < CACHE_MS) return cache.value;
+  const cached = g.__cadenceSettingsCache;
+  if (cached && Date.now() - cached.at < CACHE_MS) return cached.value;
   const rows = await prisma.setting.findMany();
   const raw: Record<string, unknown> = {};
   for (const row of rows) raw[row.key] = row.value;
@@ -143,7 +146,7 @@ export async function getSettings(): Promise<Settings> {
   if (!parsed.success) {
     console.warn('[settings] stored settings invalid, using defaults:', parsed.error.message);
   }
-  cache = { at: Date.now(), value };
+  g.__cadenceSettingsCache = { at: Date.now(), value };
   return value;
 }
 
@@ -159,7 +162,7 @@ export async function saveSettingsSection<K extends SettingsSection>(key: K, val
 }
 
 export function invalidateSettingsCache() {
-  cache = undefined;
+  g.__cadenceSettingsCache = undefined;
 }
 
 // ---------------------------------------------------------------------------

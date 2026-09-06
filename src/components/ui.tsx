@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import clsx from 'clsx';
-import type { ReactNode } from 'react';
+import { cloneElement, isValidElement, useId, type ReactElement, type ReactNode } from 'react';
 
 export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
@@ -169,11 +169,24 @@ export function Notice({ tone = 'info', children }: { tone?: 'info' | 'warn' | '
   return <div className={clsx('rounded-md border px-3 py-2 text-sm', cls)}>{children}</div>;
 }
 
+const FORM_CONTROLS = new Set(['input', 'select', 'textarea']);
+
+/**
+ * Label + control. A single input/select/textarea child gets an id (unless it has one) and the
+ * label points at it with htmlFor, so click-to-focus, screen readers and accessible queries work.
+ */
 export function Field({ label, children, hint, className }: { label: ReactNode; children: ReactNode; hint?: ReactNode; className?: string }) {
+  const autoId = useId();
+  const single = isValidElement(children) && typeof children.type === 'string' && FORM_CONTROLS.has(children.type);
+  const existingId = single ? (children as ReactElement<{ id?: string }>).props.id : undefined;
+  const controlId = single ? existingId ?? autoId : undefined;
+  const control = single && !existingId ? cloneElement(children as ReactElement<{ id?: string }>, { id: controlId }) : children;
   return (
     <div className={clsx('space-y-1', className)}>
-      <label className="block">{label}</label>
-      {children}
+      <label htmlFor={controlId} className="block">
+        {label}
+      </label>
+      {control}
       {hint ? <p className="text-xs text-slate-500">{hint}</p> : null}
     </div>
   );
