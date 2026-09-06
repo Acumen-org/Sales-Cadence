@@ -1,0 +1,15 @@
+node_modules
+.next
+out
+.env
+.env.local
+.env.*.local
+.pgdata-test
+.test-db-url
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+coverage
+.vscode/*
+!.vscode/extensions.json
