@@ -1,0 +1,178 @@
+import type { Prisma } from '@prisma/client';
+import { prisma } from '../db';
+import { logAudit, SYSTEM_ACTOR } from '../audit';
+import { cachedPersonName } from '../person-cache';
+import { getSettings } from '../settings';
+import { firstNameOf } from '../templates';
+import { getTwentyClient, type TwentyClient } from '../twenty';
+import { channelOf, type ActionType } from '../sequences/steps';
+
+/**
+ * Rule 7: Twenty sync out. Every completed action becomes an activity note on the person
+ * (`[Cadence] Email 2 sent by Alisa`); open tasks are optionally mirrored as Twenty Tasks.
+ * Cadence only edits records it created (ids stored on Task.twentyTaskId / twentyNoteId).
+ * Failures never block the engine: they are logged and audited for review.
+ */
+
+export type SyncTask = Prisma.TaskGetPayload<{
+  include: { enrollment: { include: { person: true; sequence: true } }; fo: true };
+}>;
+
+export const syncTaskInclude = { enrollment: { include: { person: true, sequence: true } }, fo: true } as const;
+
+export async function loadSyncTasks(ids: string[]): Promise<SyncTask[]> {
+  if (!ids.length) return [];
+  return prisma.task.findMany({ where: { id: { in: ids } }, include: syncTaskInclude });
+}
+
+export async function loadSyncTask(id: string): Promise<SyncTask | null> {
+  return prisma.task.findUnique({ where: { id }, include: syncTaskInclude });
+}
+
+function verbFor(action: ActionType): string {
+  const ch = channelOf(action);
+  if (ch === 'EMAIL') return 'sent';
+  if (ch === 'CALL') return 'made';
+  return 'done';
+}
+
+export function completionNoteTitle(task: Pick<SyncTask, 'label' | 'chosenAction' | 'action'> & { fo: { name: string } }, prefix: string): string {
+  const action = (task.chosenAction ?? task.action) as ActionType;
+  return `${prefix} ${task.label} ${verbFor(action)} by ${firstNameOf(task.fo.name)}`;
+}
+
+export function mirroredTaskTitle(task: SyncTask): string {
+  return `Cadence: ${task.label} - ${cachedPersonName(task.enrollment.person)}`;
+}
+
+async function recordWrite(client: TwentyClient, operation: string, objectType: string, payload: unknown, twentyId: string | null, taskId: string | null) {
+  if (client.kind === 'dry-run') return; // the dry-run wrapper records its own log
+  await prisma.twentyWrite.create({ data: { operation, objectType, payload: payload as object, twentyId, taskId, dryRun: false } });
+}
+
+async function reportFailure(task: SyncTask, operation: string, err: unknown) {
+  const message = err instanceof Error ? err.message : String(err);
+  console.warn(`[sync-out] ${operation} failed for task ${task.id}: ${message}`);
+  try {
+    await logAudit({ entityType: 'task', entityId: task.id, action: 'sync_failed', actor: SYSTEM_ACTOR, details: { operation, message } });
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Mirror freshly generated tasks as open Twenty Tasks. */
+export async function syncTasksCreated(tasks: SyncTask[]): Promise<void> {
+  if (!tasks.length) return;
+  const settings = await getSettings();
+  if (!settings.sync.mirrorOpenTasks) return;
+  let client: TwentyClient;
+  try {
+    client = await getTwentyClient();
+  } catch (err) {
+    await reportFailure(tasks[0], 'createTask', err);
+    return;
+  }
+  for (const task of tasks) {
+    if (task.twentyTaskId || task.state !== 'PENDING') continue;
+    const input = {
+      title: mirroredTaskTitle(task),
+      bodyMarkdown: `Sequence "${task.enrollment.sequence.name}", step ${task.stepIndex + 1} (day ${task.stepDay}).\nDue ${task.dueDate}. Managed by Cadence.`,
+      dueAt: task.dueAt.toISOString(),
+      assigneeMemberId: task.fo.twentyMemberId,
+      personId: task.enrollment.personId,
+      ...(settings.sync.writeCadenceTaskIdField ? { cadenceTaskId: task.id } : {}),
+    };
+    try {
+      const { id } = await client.createTask(input);
+      await prisma.task.update({ where: { id: task.id }, data: { twentyTaskId: id } });
+      await recordWrite(client, 'createTask', 'task', input, id, task.id);
+    } catch (err) {
+      await reportFailure(task, 'createTask', err);
+    }
+  }
+}
+
+/** Completion note + close the mirrored task. */
+export async function syncTaskCompleted(task: SyncTask): Promise<void> {
+  const settings = await getSettings();
+  if (!settings.sync.writeCompletionNotes && !task.twentyTaskId) return;
+  let client: TwentyClient;
+  try {
+    client = await getTwentyClient();
+  } catch (err) {
+    await reportFailure(task, 'createNote', err);
+    return;
+  }
+  if (settings.sync.writeCompletionNotes && !task.twentyNoteId) {
+    const action = (task.chosenAction ?? task.action) as ActionType;
+    const input = {
+      title: completionNoteTitle(task, settings.matching.cadencePrefix),
+      bodyMarkdown: [
+        `${task.label} (${action.toLowerCase().replace('_', ' ')}) completed by ${task.fo.name} in Cadence.`,
+        `Sequence "${task.enrollment.sequence.name}", step ${task.stepIndex + 1} (day ${task.stepDay}).`,
+        `Source: ${task.completionSource ?? 'MANUAL'}${task.evidenceId ? ` (${task.evidenceId})` : ''}.`,
+      ].join('\n'),
+      personId: task.enrollment.personId,
+      companyId: task.enrollment.companyId,
+    };
+    try {
+      const { id } = await client.createNote(input);
+      await prisma.task.update({ where: { id: task.id }, data: { twentyNoteId: id } });
+      await recordWrite(client, 'createNote', 'note', input, id, task.id);
+    } catch (err) {
+      await reportFailure(task, 'createNote', err);
+    }
+  }
+  if (task.twentyTaskId) {
+    try {
+      await client.updateTask(task.twentyTaskId, { status: 'DONE' });
+      await recordWrite(client, 'updateTask', 'task', { id: task.twentyTaskId, status: 'DONE' }, task.twentyTaskId, task.id);
+    } catch (err) {
+      await reportFailure(task, 'updateTask', err);
+    }
+  }
+}
+
+/** Skipped or cancelled: remove (or close) the mirrored task. */
+export async function syncTaskResolved(task: SyncTask): Promise<void> {
+  if (!task.twentyTaskId) return;
+  const settings = await getSettings();
+  let client: TwentyClient;
+  try {
+    client = await getTwentyClient();
+  } catch (err) {
+    await reportFailure(task, 'deleteTask', err);
+    return;
+  }
+  try {
+    if (settings.sync.deleteMirroredTaskOnSkip) {
+      await client.deleteTask(task.twentyTaskId);
+      await recordWrite(client, 'deleteTask', 'task', { id: task.twentyTaskId, reason: task.state }, task.twentyTaskId, task.id);
+    } else {
+      await client.updateTask(task.twentyTaskId, { status: 'DONE', title: `${mirroredTaskTitle(task)} (${task.state.toLowerCase()})` });
+      await recordWrite(client, 'updateTask', 'task', { id: task.twentyTaskId, status: 'DONE' }, task.twentyTaskId, task.id);
+    }
+    await prisma.task.update({ where: { id: task.id }, data: { twentyTaskId: null } });
+  } catch (err) {
+    await reportFailure(task, 'deleteTask', err);
+  }
+}
+
+/** Due date or assignee changed (snooze, reassign, resume). */
+export async function syncTaskRescheduled(task: SyncTask): Promise<void> {
+  if (!task.twentyTaskId) return;
+  let client: TwentyClient;
+  try {
+    client = await getTwentyClient();
+  } catch (err) {
+    await reportFailure(task, 'updateTask', err);
+    return;
+  }
+  try {
+    const dueAt = task.dueAt.toISOString();
+    await client.updateTask(task.twentyTaskId, { dueAt, title: mirroredTaskTitle(task) });
+    await recordWrite(client, 'updateTask', 'task', { id: task.twentyTaskId, dueAt }, task.twentyTaskId, task.id);
+  } catch (err) {
+    await reportFailure(task, 'updateTask', err);
+  }
+}

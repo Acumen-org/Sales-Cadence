@@ -9,7 +9,7 @@ Cadence never sends email or automates LinkedIn. Humans do every touch.
 | Phase | Scope | State |
 |---|---|---|
 | 1 | Scaffold, schema, auth and roles, mock Twenty client, seed with the default sequence | done |
-| 2 | Enrollment engine, clocks, caps, versioning | pending |
+| 2 | Enrollment engine, clocks, caps, versioning | done |
 | 3 | Tasks page and brief | pending |
 | 4 | Webhook ingestion, matching, completions, replies, Twenty sync out | pending |
 | 5 | Sequences, Campaigns, People, Reports pages | pending |
