@@ -525,7 +525,7 @@ export class TwentyGraphqlClient implements TwentyClient {
   // ---------------------------------------------------------------------------
 
   /** Objects and fields from the metadata API (includes select options). */
-  private async metadataObjects(): Promise<Array<{ id: string; nameSingular: string; namePlural: string; fields: Array<{ id: string; name: string; type: string; label?: string; isCustom?: boolean; options?: string[] }> }>> {
+  private async metadataObjects(): Promise<Array<{ id: string; nameSingular: string; namePlural: string; fields: Array<{ id: string; name: string; type: string; label?: string; isCustom?: boolean; options?: string[]; optionLabels?: Record<string, string> }> }>> {
     const data = await this.request<{ objects: Connection }>(
       `query Objects {
         objects(paging: { first: 500 }) {
@@ -546,6 +546,13 @@ export class TwentyGraphqlClient implements TwentyClient {
         label: typeof f.label === 'string' ? f.label : undefined,
         isCustom: Boolean(f.isCustom),
         options: Array.isArray(f.options) ? (f.options as Array<Raw | string>).map((opt) => (typeof opt === 'string' ? opt : String(opt.value ?? opt.label ?? ''))).filter(Boolean) : undefined,
+        optionLabels: Array.isArray(f.options)
+          ? Object.fromEntries(
+              (f.options as Array<Raw | string>)
+                .filter((opt): opt is Raw => typeof opt === 'object' && opt !== null && Boolean(opt.value))
+                .map((opt) => [String(opt.value), String(opt.label ?? opt.value)]),
+            )
+          : undefined,
       })),
     }));
   }
@@ -555,7 +562,7 @@ export class TwentyGraphqlClient implements TwentyClient {
       const objects = await this.metadataObjects();
       return {
         source: 'metadata',
-        objects: objects.map<TwentyObjectInfo>((o) => ({ nameSingular: o.nameSingular, namePlural: o.namePlural, fields: o.fields.map<TwentyFieldInfo>((f) => ({ name: f.name, type: f.type, label: f.label, isCustom: f.isCustom, options: f.options })) })),
+        objects: objects.map<TwentyObjectInfo>((o) => ({ nameSingular: o.nameSingular, namePlural: o.namePlural, fields: o.fields.map<TwentyFieldInfo>((f) => ({ name: f.name, type: f.type, label: f.label, isCustom: f.isCustom, options: f.options, optionLabels: f.optionLabels })) })),
       };
     } catch (metaErr) {
       // Fall back to GraphQL introspection of the types we care about.

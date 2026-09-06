@@ -38,9 +38,9 @@ test('a Senior FO creates a campaign with a conflict preview', async ({ page }) 
   await loginAs(page, 'Alisa');
   await page.goto('/campaigns/new');
   await page.getByLabel('Name', { exact: true }).fill('E2E SaaStr follow-up');
-  await page.getByLabel('Pod', { exact: true }).selectOption({ label: 'Pod Alisa (Alisa)' });
-  // person-07 is dnd in the fixtures: it must be listed as skipped, not enrolled
-  await page.getByLabel('Twenty person ids').fill('person-01\nperson-02\nperson-03\nperson-04\nperson-07');
+  await page.getByLabel('Pod', { exact: true }).selectOption({ label: "Alisa's pod (Alisa)" });
+  // Dummy Six is dnd in the demo workspace: it must be listed as skipped, not enrolled
+  await page.getByLabel('Twenty person ids').fill('dummy-01\ndummy-02\ndummy-03\ndummy-04\ndummy-06');
   await page.getByRole('button', { name: 'Preview conflicts' }).click();
   await expect(page.getByText(/4 will be enrolled, 1 skipped/)).toBeVisible();
   await expect(page.getByText('Do not contact', { exact: true })).toBeVisible();
@@ -55,7 +55,7 @@ test('the same person cannot be enrolled twice', async ({ page }) => {
   await loginAs(page, 'Alisa');
   await page.goto('/campaigns/new');
   await page.getByLabel('Name', { exact: true }).fill('E2E duplicate check');
-  await page.getByLabel('Twenty person ids').fill('person-01');
+  await page.getByLabel('Twenty person ids').fill('dummy-01');
   await page.getByRole('button', { name: 'Preview conflicts' }).click();
   await expect(page.getByText(/0 will be enrolled, 1 skipped/)).toBeVisible();
   await expect(page.getByText('Already in a sequence')).toBeVisible();
@@ -191,12 +191,16 @@ test('reports and people pages render with data', async ({ page }) => {
   await page.goto('/reports');
   await expect(page.getByText('Last 7 days')).toBeVisible();
   await page.goto('/reports?tab=pods');
-  await expect(page.getByText('Pod Alisa')).toBeVisible();
+  await expect(page.getByText("Alisa's pod")).toBeVisible();
   await page.goto('/people?status=approaching');
   await expect(page.locator('table').getByText('Approaching', { exact: true }).first()).toBeVisible();
-  await page.goto('/people?q=Halvorsen');
-  await page.getByRole('link', { name: 'Nina Halvorsen' }).click();
-  await expect(page.getByRole('heading', { name: 'Nina Halvorsen' })).toBeVisible();
+  await page.goto('/people?q=One');
+  await page.getByRole('link', { name: 'Dummy One' }).click();
+  await expect(page.getByRole('heading', { name: 'Dummy One' })).toBeVisible();
   await expect(page.getByText('Activity', { exact: true })).toBeVisible();
+  // pods discovered from Twenty show up in Settings for the admin to staff
+  await page.goto('/settings?tab=users');
+  await expect(page.getByText('discovered from Twenty')).toBeVisible();
+  await expect(page.getByText("Alisa's pod", { exact: true }).first()).toBeVisible();
   await logout(page);
 });

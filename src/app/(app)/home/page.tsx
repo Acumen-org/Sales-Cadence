@@ -68,7 +68,7 @@ export default async function HomePage() {
                 {h.replies.map((r) => (
                   <li key={r.id} className="flex items-center justify-between px-4 py-2 text-sm">
                     <Link href={`/people/${r.personId}`} className="text-slate-800 hover:underline">
-                      {r.name} <span className="text-slate-500">· {r.company}</span>
+                      {r.name} <span className="text-slate-500">· {r.company} · {r.fo}</span>
                     </Link>
                     <span className="text-xs text-slate-400">{formatInstant(r.at, user.timezone)}</span>
                   </li>
@@ -84,7 +84,7 @@ export default async function HomePage() {
                 {h.meetings.map((r) => (
                   <li key={r.id} className="flex items-center justify-between px-4 py-2 text-sm">
                     <Link href={`/people/${r.personId}`} className="text-slate-800 hover:underline">
-                      {r.name} <span className="text-slate-500">· {r.company}</span>
+                      {r.name} <span className="text-slate-500">· {r.company} · {r.fo}</span>
                     </Link>
                     <span className="text-xs text-slate-400">{formatInstant(r.at, user.timezone)}</span>
                   </li>

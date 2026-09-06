@@ -123,7 +123,10 @@ export type TwentyFieldInfo = {
   type: string;
   label?: string;
   isCustom?: boolean;
+  /** Select option values as stored on records. */
   options?: string[];
+  /** Human labels for those values, when the API exposes them. */
+  optionLabels?: Record<string, string>;
 };
 
 export type TwentyObjectInfo = {

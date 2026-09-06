@@ -9,6 +9,7 @@ import { getTwentyConnection } from '@/lib/settings';
 import { twentyPersonUrl } from '@/lib/twenty/urls';
 import { PeopleToolbar } from '@/components/people/people-toolbar';
 import { PeopleTable, type PeopleTableRow } from '@/components/people/people-table';
+import { SyncNow } from '@/components/people/sync-now';
 import { Card, EmptyState, ENROLLMENT_TONE, enrollmentStatusLabel, PageHeader, personStage } from '@/components/ui';
 
 const PAGE_SIZE = 100;
@@ -106,7 +107,12 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
       <PageHeader
         title="People"
         subtitle={`${total} people cached from Twenty${q || pod || status ? ' (filtered)' : ''}.`}
-        actions={<PeopleToolbar pods={pods.map((p) => ({ podOwnerValue: p.podOwnerValue, name: p.name }))} q={q} pod={pod} status={status} />}
+        actions={
+          <>
+            <PeopleToolbar pods={pods.map((p) => ({ podOwnerValue: p.podOwnerValue, name: p.name }))} q={q} pod={pod} status={status} />
+            {isAdmin(user) ? <SyncNow /> : null}
+          </>
+        }
       />
       <div className="space-y-3 p-6">
         <Card>

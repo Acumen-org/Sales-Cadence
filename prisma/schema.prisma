@@ -140,6 +140,8 @@ model Pod {
   id            String   @id @default(uuid())
   name          String   @unique
   podOwnerValue String   @unique
+  /// Set when Cadence created the pod itself because a person arrived with an unknown podOwner.
+  discoveredAt  DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

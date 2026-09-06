@@ -1,15 +1,44 @@
 import type { ListOptions, ListPeopleOptions, TwentyClient } from './client';
-import {
-  MOCK_COMPANIES,
-  MOCK_MEMBERS,
-  MOCK_MESSAGES,
-  MOCK_NOTES,
-  MOCK_OPPORTUNITIES,
-  MOCK_PEOPLE,
-  MOCK_TASKS,
-  MOCK_VIEWS,
-} from './fixtures';
+import { MOCK_COMPANIES, MOCK_MEMBERS, MOCK_MESSAGES, MOCK_NOTES, MOCK_OPPORTUNITIES, MOCK_PEOPLE, MOCK_TASKS, MOCK_VIEWS } from './fixtures';
+import { DEMO_COMPANIES, DEMO_MEMBERS, DEMO_MESSAGES, DEMO_NOTES, DEMO_OPPORTUNITIES, DEMO_PEOPLE, DEMO_POD_OPTIONS, DEMO_TASKS, DEMO_VIEWS } from './demo-fixtures';
 import { defaultTwentySchema } from './twenty-schema';
+
+export type MockDataset = 'demo' | 'test';
+
+/**
+ * Which fixture set the mock serves. The app uses the "demo" dummy workspace (two pods, twelve
+ * dummy people); the test suite pins MOCK_DATASET=test for its larger, older fixture set.
+ */
+export function mockDataset(): MockDataset {
+  return process.env.MOCK_DATASET === 'test' ? 'test' : 'demo';
+}
+
+function datasetFor(kind: MockDataset) {
+  if (kind === 'test') {
+    return {
+      people: MOCK_PEOPLE,
+      companies: MOCK_COMPANIES,
+      members: MOCK_MEMBERS,
+      notes: MOCK_NOTES,
+      messages: MOCK_MESSAGES,
+      tasks: MOCK_TASKS,
+      opportunities: MOCK_OPPORTUNITIES,
+      views: MOCK_VIEWS,
+      podOptions: defaultTwentySchema.podOwnerOptions.map((v) => ({ value: v, label: v })),
+    };
+  }
+  return {
+    people: DEMO_PEOPLE,
+    companies: DEMO_COMPANIES,
+    members: DEMO_MEMBERS,
+    notes: DEMO_NOTES,
+    messages: DEMO_MESSAGES,
+    tasks: DEMO_TASKS,
+    opportunities: DEMO_OPPORTUNITIES,
+    views: DEMO_VIEWS,
+    podOptions: DEMO_POD_OPTIONS,
+  };
+}
 import type {
   CreateNoteInput,
   CreateTaskInput,
@@ -76,15 +105,21 @@ export class MockTwentyClient implements TwentyClient {
     this.reset();
   }
 
-  reset() {
-    this.people = clone(MOCK_PEOPLE);
-    this.companies = clone(MOCK_COMPANIES);
-    this.members = clone(MOCK_MEMBERS);
-    this.notes = clone(MOCK_NOTES);
-    this.messages = clone(MOCK_MESSAGES);
-    this.tasks = clone(MOCK_TASKS);
-    this.opportunities = clone(MOCK_OPPORTUNITIES);
-    this.views = clone(MOCK_VIEWS);
+  dataset: MockDataset = 'demo';
+  podOptions: Array<{ value: string; label: string }> = [];
+
+  reset(kind: MockDataset = mockDataset()) {
+    const d = datasetFor(kind);
+    this.dataset = kind;
+    this.people = clone(d.people);
+    this.companies = clone(d.companies);
+    this.members = clone(d.members);
+    this.notes = clone(d.notes);
+    this.messages = clone(d.messages);
+    this.tasks = clone(d.tasks);
+    this.opportunities = clone(d.opportunities);
+    this.views = clone(d.views);
+    this.podOptions = clone(d.podOptions);
     this.writes = [];
     this.failNext = null;
     this.seq = 0;
@@ -327,15 +362,20 @@ export class MockTwentyClient implements TwentyClient {
   async introspect(): Promise<TwentyIntrospection> {
     this.maybeFail();
     const s = defaultTwentySchema;
-    const fields = (names: Record<string, string>, extra: TwentyFieldInfo[] = []): TwentyFieldInfo[] => [
-      { name: 'id', type: 'UUID' },
-      ...Object.values(names).map((name) => ({ name, type: 'TEXT' })),
-      ...extra,
-    ];
+    const fields = (names: Record<string, string>, extra: TwentyFieldInfo[] = []): TwentyFieldInfo[] => {
+      const detailed = new Set(extra.map((e) => e.name));
+      return [{ name: 'id', type: 'UUID' }, ...Object.values(names).filter((name) => !detailed.has(name)).map((name) => ({ name, type: 'TEXT' })), ...extra];
+    };
     return {
       source: 'mock',
       objects: [
-        { nameSingular: s.objects.person.singular, namePlural: s.objects.person.plural, fields: fields(s.person, [{ name: s.person.podOwner, type: 'SELECT', options: [...s.podOwnerOptions] }]) },
+        {
+          nameSingular: s.objects.person.singular,
+          namePlural: s.objects.person.plural,
+          fields: fields(s.person, [
+            { name: s.person.podOwner, type: 'SELECT', options: this.podOptions.map((o) => o.value), optionLabels: Object.fromEntries(this.podOptions.map((o) => [o.value, o.label])) },
+          ]),
+        },
         { nameSingular: s.objects.company.singular, namePlural: s.objects.company.plural, fields: fields(s.company) },
         { nameSingular: s.objects.note.singular, namePlural: s.objects.note.plural, fields: fields(s.note) },
         { nameSingular: s.objects.noteTarget.singular, namePlural: s.objects.noteTarget.plural, fields: fields(s.noteTarget) },

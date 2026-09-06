@@ -49,10 +49,12 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 }
 
 async function UsersTab() {
-  const [users, pods] = await Promise.all([
+  const [users, pods, peopleByPod] = await Promise.all([
     prisma.user.findMany({ include: { pods: true }, orderBy: [{ role: 'asc' }, { name: 'asc' }] }),
     prisma.pod.findMany({ include: { _count: { select: { users: true } } }, orderBy: { name: 'asc' } }),
+    prisma.personCache.groupBy({ by: ['podOwner'], where: { deletedAt: null }, _count: { _all: true } }),
   ]);
+  const peopleCount = new Map(peopleByPod.map((r) => [r.podOwner, r._count._all]));
   let members: MemberOption[] = [];
   try {
     const client = await getTwentyClient();
@@ -74,7 +76,7 @@ async function UsersTab() {
         active: u.active,
         podIds: u.pods.map((p) => p.podId),
       }))}
-      pods={pods.map((p) => ({ id: p.id, name: p.name, podOwnerValue: p.podOwnerValue, userCount: p._count.users }))}
+      pods={pods.map((p) => ({ id: p.id, name: p.name, podOwnerValue: p.podOwnerValue, userCount: p._count.users, peopleCount: peopleCount.get(p.podOwnerValue) ?? 0, discovered: Boolean(p.discoveredAt) }))}
       members={members}
     />
   );

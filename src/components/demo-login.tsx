@@ -2,11 +2,11 @@ import { demoLoginAction } from '@/lib/actions/auth';
 
 const DEMO_USERS = [
   { email: 'admin@cadence.local', label: 'Admin', hint: 'everything' },
-  { email: 'alisa@cadence.local', label: 'Alisa', hint: 'Senior FO, Pod Alisa' },
-  { email: 'leigh@cadence.local', label: 'Leigh', hint: 'Senior FO, Pod Leigh' },
-  { email: 'andrew@cadence.local', label: 'Andrew', hint: 'Senior FO, Pod Andrew' },
-  { email: 'karson@cadence.local', label: 'Karson', hint: 'Junior FO, Pod Alisa' },
-  { email: 'daniel@cadence.local', label: 'Daniel', hint: 'Junior FO, Pod Leigh' },
+  { email: 'alisa@cadence.local', label: 'Alisa', hint: "Senior FO, Alisa's pod" },
+  { email: 'andrew@cadence.local', label: 'Andrew', hint: "Senior FO, Andrew's pod" },
+  { email: 'karson@cadence.local', label: 'Karson', hint: "Junior FO, Alisa's pod" },
+  { email: 'daniel@cadence.local', label: 'Daniel', hint: "Junior FO, Andrew's pod" },
+  { email: 'ria@cadence.local', label: 'Ria', hint: 'second Admin' },
 ];
 
 /** Shown only in mock mode: sign in as any seeded demo user with one click. */
