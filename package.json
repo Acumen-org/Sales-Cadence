@@ -20,6 +20,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "worker": "tsx src/worker/index.ts",
+    "dev:db": "tsx scripts/dev-db.ts",
     "reconcile": "tsx scripts/reconcile.ts",
     "verify:schema": "tsx scripts/verify-schema.ts"
   },
