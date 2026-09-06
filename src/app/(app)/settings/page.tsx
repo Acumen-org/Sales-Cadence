@@ -5,8 +5,11 @@ import { prisma } from '@/lib/db';
 import { env } from '@/lib/env';
 import { getSettings } from '@/lib/settings';
 import { getTwentyClient } from '@/lib/twenty';
+import { recentEvents } from '@/lib/engine/ingest';
 import { PageHeader, Tabs, Notice, Card, KeyValue } from '@/components/ui';
 import { UsersPanel, type MemberOption } from '@/components/settings/users-panel';
+import { AdminTools } from '@/components/settings/admin-tools';
+import { ReviewButton } from '@/components/settings/review-button';
 
 const TABS = [
   { key: 'twenty', label: 'Twenty' },
@@ -87,6 +90,13 @@ async function TwentyTab({ mode, dryRun, baseUrl }: { mode: string; dryRun: bool
   } catch (err) {
     ping = `Not connected: ${err instanceof Error ? err.message : String(err)}`;
   }
+  const [settings, events, reviewCount, lastReconcile] = await Promise.all([
+    getSettings(),
+    recentEvents(40),
+    prisma.activityEvent.count({ where: { needsReview: true } }),
+    prisma.setting.findUnique({ where: { key: 'lastReconcile' } }),
+  ]);
+  const last = lastReconcile?.value as { at?: string } | null;
   return (
     <div className="space-y-4">
       {mode === 'mock' ? (
@@ -100,10 +110,46 @@ async function TwentyTab({ mode, dryRun, baseUrl }: { mode: string; dryRun: bool
               { k: 'Mode', v: mode },
               { k: 'Base URL', v: baseUrl || '-' },
               { k: 'Status', v: ping },
+              { k: 'Webhook URL', v: `${env().APP_URL.replace(/\/+$/, '')}/api/webhooks/twenty${env().CADENCE_WEBHOOK_TOKEN ? '?token=...' : ''}` },
+              { k: 'Last reconcile', v: last?.at ? new Date(last.at).toLocaleString('en-GB') : 'never' },
             ]}
           />
           <p className="mt-3 text-xs text-slate-500">Schema mapping, note title patterns and sync toggles become editable here in phase 5.</p>
         </div>
+      </Card>
+      <AdminTools defaultDays={settings.rules.reconcileLookbackDays} />
+      <Card title={`Recent activity events${reviewCount ? ` · ${reviewCount} need review` : ''}`}>
+        {events.length === 0 ? (
+          <div className="p-4 text-sm text-slate-500">No events yet. Webhooks and reconcile runs appear here.</div>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Received</th>
+                <th>Source</th>
+                <th>Event</th>
+                <th>Record</th>
+                <th>Result</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.map((ev) => (
+                <tr key={ev.id} className={ev.needsReview ? 'bg-amber-50/60' : undefined}>
+                  <td className="whitespace-nowrap text-xs">{ev.receivedAt.toLocaleString('en-GB')}</td>
+                  <td className="text-xs">{ev.source.toLowerCase()}</td>
+                  <td className="text-xs">{ev.eventName}</td>
+                  <td className="font-mono text-[11px]">{ev.externalId}</td>
+                  <td className="text-xs">
+                    {ev.result ?? <span className="text-slate-400">pending</span>}
+                    {ev.reviewNote ? <div className="text-amber-700">{ev.reviewNote}</div> : null}
+                  </td>
+                  <td className="text-right">{ev.needsReview ? <ReviewButton eventId={ev.id} /> : null}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </Card>
     </div>
   );

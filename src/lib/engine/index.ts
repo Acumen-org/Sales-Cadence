@@ -4,3 +4,6 @@ export * from './versioning';
 export * from './tasks';
 export * from './enrollment';
 export * from './sync-out';
+export * from './matching';
+export * from './ingest';
+export * from './reconcile';
