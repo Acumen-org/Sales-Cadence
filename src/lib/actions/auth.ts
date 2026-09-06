@@ -31,7 +31,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   }
   await createSession(user.id);
   await logAudit({ entityType: 'user', entityId: user.id, action: 'login', actor: userActor(user) });
-  redirect(next && next.startsWith('/') && !next.startsWith('//') ? next : '/tasks');
+  redirect(next && next.startsWith('/') && !next.startsWith('//') ? next : '/home');
 }
 
 /**
@@ -46,7 +46,7 @@ export async function demoLoginAction(formData: FormData): Promise<void> {
   if (!user || !user.active) redirect('/login');
   await createSession(user.id);
   await logAudit({ entityType: 'user', entityId: user.id, action: 'login', actor: userActor(user), details: { demo: true } });
-  redirect('/tasks');
+  redirect('/home');
 }
 
 export async function logoutAction(): Promise<void> {

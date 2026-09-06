@@ -8,8 +8,8 @@ import { cachedPersonName } from '@/lib/person-cache';
 import { getTwentyConnection } from '@/lib/settings';
 import { twentyPersonUrl } from '@/lib/twenty/urls';
 import { PeopleToolbar } from '@/components/people/people-toolbar';
-import { PersonRowActions } from '@/components/people/person-row-actions';
-import { Badge, Card, EmptyState, ENROLLMENT_TONE, PageHeader } from '@/components/ui';
+import { PeopleTable, type PeopleTableRow } from '@/components/people/people-table';
+import { Card, EmptyState, ENROLLMENT_TONE, enrollmentStatusLabel, PageHeader, personStage } from '@/components/ui';
 
 const PAGE_SIZE = 100;
 
@@ -35,10 +35,17 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     ];
   }
   if (pod) where.podOwner = pod;
-  if (status === 'enrolled') where.enrollments = { some: { status: { in: ['ACTIVE', 'PAUSED'] } } };
-  if (status === 'not_enrolled') where.enrollments = { none: { status: { in: ['ACTIVE', 'PAUSED'] } } };
+  // Outreach-style stages as filters
+  if (status === 'enrolled' || status === 'approaching') where.enrollments = { some: { status: { in: ['ACTIVE', 'PAUSED'] } } };
+  if (status === 'not_enrolled' || status === 'cold') {
+    where.enrollments = { none: {} };
+    where.dnd = false;
+    where.optedOut = false;
+  }
   if (status === 'replied') where.enrollments = { some: { status: { in: ['REPLIED', 'MEETING'] } } };
-  if (status === 'dnd') where.dnd = true;
+  if (status === 'unresponsive') where.AND = [{ enrollments: { some: { status: 'COMPLETED' } } }, { enrollments: { none: { status: { in: ['ACTIVE', 'PAUSED', 'REPLIED', 'MEETING'] } } } }];
+  if (status === 'dnd') where.OR = [{ dnd: true }, { optedOut: true }];
+  if (status === 'bad_data') where.OR = [{ badEmail: true }, { badPhone: true }, { enrollments: { some: { status: 'EXITED', exitReason: { in: ['bounced', 'bad_data'] } } } }];
 
   const visible = visiblePodIds(user);
   const [people, total, pods, sequences, conn] = await Promise.all([
@@ -58,7 +65,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     getTwentyConnection(),
   ]);
   const enrolPods = pods.filter((p) => visible === null || visible.includes(p.id)).map((p) => ({ id: p.id, name: p.name, podOwnerValue: p.podOwnerValue, fos: p.users.filter((u) => u.user.active).map((u) => ({ id: u.user.id, name: u.user.name })) }));
-  const podByOwner = new Map(pods.map((p) => [p.podOwnerValue, p.id]));
+  const podIdByOwner = Object.fromEntries(pods.map((p) => [p.podOwnerValue, p.id]));
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const pageHref = (n: number) => {
     const p = new URLSearchParams();
@@ -70,6 +77,30 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   };
   const showActions = isAdmin(user) || isSeniorFo(user);
 
+  const rows: PeopleTableRow[] = people.map((p) => {
+    const e = p.enrollments[0] ?? null;
+    const active = e && (e.status === 'ACTIVE' || e.status === 'PAUSED') ? e : null;
+    const touch = p.touches[0];
+    return {
+      id: p.id,
+      name: cachedPersonName(p),
+      jobTitle: p.jobTitle,
+      companyName: p.companyName,
+      podOwner: p.podOwner,
+      eventSource: p.eventSource,
+      stage: personStage(p, e),
+      dnd: p.dnd,
+      optedOut: p.optedOut,
+      badEmail: p.badEmail,
+      badPhone: p.badPhone,
+      enrollment: e ? { status: e.status, label: enrollmentStatusLabel(e), tone: ENROLLMENT_TONE[e.status] ?? 'gray', campaignName: e.campaign?.name ?? null, foName: e.fo.name } : null,
+      activeEnrollmentId: active?.id ?? null,
+      activeCanExit: active ? canManageEnrollment(actor, { foUserId: active.foUserId, podId: active.podId }) : false,
+      lastTouch: touch ? { summary: touch.summary, at: formatInstant(touch.occurredAt, user.timezone) } : null,
+      twentyUrl: twentyPersonUrl(conn.baseUrl, p.id),
+    };
+  });
+
   return (
     <>
       <PageHeader
@@ -79,88 +110,10 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
       />
       <div className="space-y-3 p-6">
         <Card>
-          {people.length === 0 ? (
+          {rows.length === 0 ? (
             <EmptyState title="No people match" hint="Adjust the filters, or refresh the cache from Settings > Twenty." />
           ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Company</th>
-                  <th>Pod</th>
-                  <th>Status</th>
-                  <th>FO</th>
-                  <th>Last touch</th>
-                  <th>Where we met</th>
-                  {showActions ? <th></th> : null}
-                </tr>
-              </thead>
-              <tbody>
-                {people.map((p) => {
-                  const e = p.enrollments[0];
-                  const active = e && (e.status === 'ACTIVE' || e.status === 'PAUSED') ? e : null;
-                  const touch = p.touches[0];
-                  const url = twentyPersonUrl(conn.baseUrl, p.id);
-                  return (
-                    <tr key={p.id}>
-                      <td>
-                        <div className="font-medium text-slate-900">
-                          {url ? (
-                            <a href={url} target="_blank" rel="noreferrer" className="hover:underline">
-                              {cachedPersonName(p)}
-                            </a>
-                          ) : (
-                            cachedPersonName(p)
-                          )}
-                        </div>
-                        <div className="text-xs text-slate-500">{p.jobTitle}</div>
-                      </td>
-                      <td>{p.companyName}</td>
-                      <td>{p.podOwner}</td>
-                      <td>
-                        {p.dnd ? <Badge tone="red">DND</Badge> : null}
-                        {e ? (
-                          <>
-                            <Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'} className={p.dnd ? 'ml-1' : undefined}>
-                              {e.status.toLowerCase()}
-                            </Badge>
-                            {e.campaign ? <div className="text-xs text-slate-500">{e.campaign.name}</div> : null}
-                          </>
-                        ) : !p.dnd ? (
-                          <span className="text-xs text-slate-400">not enrolled</span>
-                        ) : null}
-                      </td>
-                      <td>{active?.fo.name ?? e?.fo.name ?? ''}</td>
-                      <td className="text-xs">
-                        {touch ? (
-                          <>
-                            <div className="text-slate-700">{touch.summary}</div>
-                            <div className="text-slate-400">{formatInstant(touch.occurredAt, user.timezone)}</div>
-                          </>
-                        ) : (
-                          <span className="text-slate-400">-</span>
-                        )}
-                      </td>
-                      <td>{p.eventSource}</td>
-                      {showActions ? (
-                        <td className="text-right">
-                          <PersonRowActions
-                            personId={p.id}
-                            activeEnrollmentId={active?.id ?? null}
-                            dnd={p.dnd}
-                            canEnroll={canEnroll(actor)}
-                            canExit={active ? canManageEnrollment(actor, { foUserId: active.foUserId, podId: active.podId }) : false}
-                            sequences={sequences}
-                            pods={enrolPods}
-                            defaultPodId={p.podOwner ? podByOwner.get(p.podOwner) ?? null : null}
-                          />
-                        </td>
-                      ) : null}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <PeopleTable rows={rows} showActions={showActions} canEnroll={canEnroll(actor)} sequences={sequences} pods={enrolPods} podIdByOwner={podIdByOwner} />
           )}
         </Card>
         {pages > 1 ? (

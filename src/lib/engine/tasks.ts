@@ -2,7 +2,7 @@ import { Prisma, type CompletionSource, type Task, type TaskState } from '@prism
 import { prisma, type Tx } from '../db';
 import { logAudit, type AuditActor } from '../audit';
 import { addDays, isLocalDate, localDateToInstant, todayIn, toLocalDate, type LocalDate } from '../dates';
-import { channelOf, parseSteps, type ActionType } from '../sequences/steps';
+import { channelOf, enabledVariants, parseSteps, pickVariant, type ActionType } from '../sequences/steps';
 import { effectiveDailyCap, getSettings } from '../settings';
 import { findDateWithCapacity, loadFromRows, type DayLoad } from './caps';
 import { followingWorkingDay, nextWorkingDay, plannedDateForStep, shiftAfterStep, shouldGenerateNow } from './clock';
@@ -10,7 +10,13 @@ import { loadSyncTask, loadSyncTasks, syncTaskCompleted, syncTaskResolved, syncT
 import { resolveNextStep } from './versioning';
 
 /** Who is acting, what time it is (tests), and whether to skip Twenty writes. */
-export type EngineContext = { actor: AuditActor; now?: Date; skipSync?: boolean };
+export type EngineContext = {
+  actor: AuditActor;
+  now?: Date;
+  skipSync?: boolean;
+  /** Generate the next step now regardless of clock mode (used by "move to step"). */
+  forceGenerate?: boolean;
+};
 
 export const RESOLVED_STATES: TaskState[] = ['DONE', 'SKIPPED', 'CANCELLED'];
 
@@ -88,8 +94,11 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
       }
 
       const step = steps[nextIndex];
-      const planned = plannedDateForStep(e.startDate, step.day, shiftDays, rules.workingDays);
-      if (!shouldGenerateNow({ previousStepDone: stepDone, plannedDate: planned, today, mode: rules.clockMode, isFirstStep: e.currentStep < 0 })) {
+      let planned = plannedDateForStep(e.startDate, step.day, shiftDays, rules.workingDays);
+      if (ctx.forceGenerate) {
+        // Moved ahead by hand: the step is due now, never retroactively overdue.
+        if (planned < today) planned = nextWorkingDay(today, rules.workingDays);
+      } else if (!shouldGenerateNow({ previousStepDone: stepDone, plannedDate: planned, today, mode: rules.clockMode, isFirstStep: e.currentStep < 0 })) {
         return { outcome: 'waiting' as const, reason: `next step planned for ${planned}` };
       }
 
@@ -105,6 +114,13 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
       const taskIds: string[] = [];
       for (let i = 0; i < step.actions.length; i++) {
         const a = step.actions[i];
+        // A/B: balanced assignment across enabled variants for this action (all enrollments of the sequence).
+        let variantId: string | null = null;
+        if (enabledVariants(a).length) {
+          const rows = await tx.task.groupBy({ by: ['variantId'], where: { actionId: a.id, variantId: { not: null }, enrollment: { sequenceId: e.sequenceId } }, _count: { _all: true } });
+          const counts = new Map(rows.map((r) => [r.variantId as string, r._count._all]));
+          variantId = pickVariant(a, counts)?.id ?? null;
+        }
         const t = await tx.task.create({
           data: {
             enrollmentId: e.id,
@@ -121,6 +137,7 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
             dueDate,
             dueAt,
             plannedDate: planned,
+            variantId,
           },
         });
         taskIds.push(t.id);
@@ -165,7 +182,10 @@ export type CompleteTaskInput = {
   chosenAction?: ActionType | null;
   /** When the touch actually happened (observed completions). Defaults to now. */
   occurredAt?: Date | null;
+  /** Free-text note from the FO (call notes, context). Stored on the task and sent to Twenty. */
   note?: string | null;
+  /** Call outcome key (settings.rules.callDispositions). */
+  disposition?: string | null;
 };
 
 export type ResolveResult =
@@ -197,6 +217,8 @@ export async function completeTask(input: CompleteTaskInput, ctx: EngineContext)
         evidenceId: input.evidenceId ?? null,
         chosenAction: chosen,
         snoozedTo: null,
+        disposition: input.disposition ?? null,
+        note: input.note?.trim() || null,
       },
     });
     if (input.source === 'MANUAL') {
@@ -237,7 +259,7 @@ export async function completeTask(input: CompleteTaskInput, ctx: EngineContext)
   return { ok: true, task: tx_result.task, advance };
 }
 
-export async function skipTask(input: { taskId: string; reason: string }, ctx: EngineContext): Promise<ResolveResult> {
+export async function skipTask(input: { taskId: string; reason: string; note?: string | null }, ctx: EngineContext): Promise<ResolveResult> {
   const reason = input.reason.trim();
   if (!reason) return { ok: false, reason: 'invalid', detail: 'A skip reason is required.' };
   const res = await prisma.$transaction(async (tx) => {
@@ -246,7 +268,7 @@ export async function skipTask(input: { taskId: string; reason: string }, ctx: E
     if (task.state !== 'PENDING') return { ok: false as const, reason: 'already_resolved' as const };
     const updated = await tx.task.update({
       where: { id: task.id },
-      data: { state: 'SKIPPED', skipReason: reason, completedById: ctx.actor.type === 'USER' ? ctx.actor.id ?? null : null, snoozedTo: null },
+      data: { state: 'SKIPPED', skipReason: reason, note: input.note?.trim() || null, completedById: ctx.actor.type === 'USER' ? ctx.actor.id ?? null : null, snoozedTo: null },
     });
     await logAudit({ entityType: 'task', entityId: task.id, action: 'skipped', actor: ctx.actor, details: { reason, enrollmentId: task.enrollmentId } }, tx);
     return { ok: true as const, task: updated };

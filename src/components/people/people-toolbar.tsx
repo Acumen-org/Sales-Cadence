@@ -45,11 +45,13 @@ export function PeopleToolbar({ pods, q, pod, status }: Props) {
         ))}
       </select>
       <select value={status} onChange={(e) => update({ status: e.target.value || null })} className="text-sm">
-        <option value="">Any status</option>
-        <option value="enrolled">In a sequence</option>
-        <option value="not_enrolled">Not enrolled</option>
+        <option value="">Any stage</option>
+        <option value="cold">Cold (never enrolled)</option>
+        <option value="approaching">Approaching (in a sequence)</option>
         <option value="replied">Replied or meeting</option>
-        <option value="dnd">Do not contact</option>
+        <option value="unresponsive">Unresponsive (finished, no reply)</option>
+        <option value="bad_data">Bad data</option>
+        <option value="dnd">Do not contact / opted out</option>
       </select>
     </div>
   );

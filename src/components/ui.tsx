@@ -57,6 +57,48 @@ export const ENROLLMENT_TONE: Record<string, BadgeTone> = {
   EXITED: 'red',
 };
 
+/** Outreach-style wording for an enrollment's state. */
+export function enrollmentStatusLabel(e: { status: string; exitReason?: string | null }): string {
+  switch (e.status) {
+    case 'ACTIVE':
+      return 'Active';
+    case 'PAUSED':
+      return 'Paused';
+    case 'REPLIED':
+      return 'Finished (Replied)';
+    case 'MEETING':
+      return 'Meeting booked';
+    case 'COMPLETED':
+      return 'Finished (No reply)';
+    case 'EXITED': {
+      const r = e.exitReason ?? '';
+      if (r === 'bounced') return 'Bounced';
+      if (r === 'opted_out') return 'Opted out';
+      if (r === 'dnd') return 'Do not contact';
+      if (r === 'not_interested') return 'Not interested';
+      if (r === 'bad_data') return 'Bad data';
+      if (r === 'person_deleted') return 'Deleted in Twenty';
+      if (r.startsWith('campaign_')) return 'Campaign stopped';
+      return 'Removed';
+    }
+    default:
+      return e.status.toLowerCase();
+  }
+}
+
+/** Outreach-style prospect stage derived from flags and the latest enrollment. */
+export function personStage(p: { dnd: boolean; optedOut: boolean; badEmail: boolean; badPhone: boolean }, latest: { status: string; exitReason?: string | null } | null): { label: string; tone: BadgeTone } {
+  if (p.dnd || p.optedOut) return { label: 'Do not contact', tone: 'red' };
+  if (latest?.status === 'MEETING') return { label: 'Meeting booked', tone: 'purple' };
+  if (latest?.status === 'REPLIED') return { label: 'Replied', tone: 'green' };
+  if (latest?.status === 'EXITED' && (latest.exitReason === 'bounced' || latest.exitReason === 'bad_data')) return { label: 'Bad data', tone: 'red' };
+  if ((p.badEmail && p.badPhone) || (latest?.status !== 'ACTIVE' && latest?.status !== 'PAUSED' && (p.badEmail || p.badPhone))) return { label: 'Bad data', tone: 'red' };
+  if (latest?.status === 'ACTIVE' || latest?.status === 'PAUSED') return { label: 'Approaching', tone: 'blue' };
+  if (latest?.status === 'COMPLETED') return { label: 'Unresponsive', tone: 'amber' };
+  if (latest?.status === 'EXITED' && latest.exitReason === 'not_interested') return { label: 'Not interested', tone: 'gray' };
+  return { label: 'Cold', tone: 'gray' };
+}
+
 export const TASK_TONE: Record<string, BadgeTone> = {
   PENDING: 'blue',
   DONE: 'green',

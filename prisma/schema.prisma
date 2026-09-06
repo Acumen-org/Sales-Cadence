@@ -303,6 +303,12 @@ model Task {
   evidenceId        String?
   skipReason        String?
   cancelReason      String?
+  /// A/B template variant assigned at generation (email actions with variants).
+  variantId         String?
+  /// Call outcome key from settings.rules.callDispositions (calls only).
+  disposition       String?
+  /// Free-text note entered when completing or skipping (call notes, context).
+  note              String?
   /// Twenty Task mirrored while open (setting `mirrorOpenTasks`).
   twentyTaskId      String?
   /// Twenty Note written on completion.
@@ -338,6 +344,10 @@ model PersonCache {
   eventSource     String?
   statusOfMeeting String?
   city            String?
+  /// Cadence-local flags (Twenty is never written): opted out of outreach, bad contact data.
+  optedOut        Boolean   @default(false)
+  badEmail        Boolean   @default(false)
+  badPhone        Boolean   @default(false)
   raw             Json?
   twentyUpdatedAt DateTime?
   deletedAt       DateTime?

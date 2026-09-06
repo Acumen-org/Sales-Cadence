@@ -130,9 +130,51 @@ export function SequenceEditor({ sequenceId, initialSteps, action, submitLabel, 
                       <input value={a.subject ?? ''} onChange={(e) => updateAction(i, j, { subject: e.target.value })} className="w-full" />
                     </Field>
                   ) : null}
-                  <Field label={a.type === 'CALL' ? 'Call script' : 'Template'} className="mt-2">
+                  <Field label={a.type === 'CALL' ? 'Call script' : a.variants?.length ? 'Template (fallback when every variant is disabled)' : 'Template'} className="mt-2">
                     <textarea rows={4} value={a.template ?? ''} onChange={(e) => updateAction(i, j, { template: e.target.value })} className="w-full font-mono text-xs" />
                   </Field>
+                  {a.type === 'EMAIL' ? (
+                    <div className="mt-2 space-y-2">
+                      <label className="inline-flex items-center gap-1.5 text-sm font-normal text-slate-700">
+                        <input type="checkbox" checked={Boolean(a.replyInThread)} onChange={(e) => updateAction(i, j, { replyInThread: e.target.checked || undefined })} className="h-4 w-4 rounded" />
+                        Send as a reply in the existing thread
+                      </label>
+                      {(a.variants ?? []).map((v, k) => (
+                        <div key={v.id} className={`rounded-md border p-3 ${v.enabled === false ? 'border-slate-200 bg-slate-100 opacity-70' : 'border-violet-200 bg-violet-50/40'}`}>
+                          <div className="mb-2 flex flex-wrap items-center gap-2">
+                            <span className="text-xs font-semibold uppercase tracking-wide text-violet-700">A/B variant</span>
+                            <input value={v.label} onChange={(e) => updateAction(i, j, { variants: a.variants!.map((x, idx) => (idx === k ? { ...x, label: e.target.value } : x)) })} className="w-32 py-1 text-xs" />
+                            <label className="inline-flex items-center gap-1 text-xs font-normal text-slate-700">
+                              <input type="checkbox" checked={v.enabled !== false} onChange={(e) => updateAction(i, j, { variants: a.variants!.map((x, idx) => (idx === k ? { ...x, enabled: e.target.checked } : x)) })} className="h-3.5 w-3.5 rounded" /> enabled
+                            </label>
+                            <button type="button" className="btn-ghost btn-sm text-red-600" onClick={() => updateAction(i, j, { variants: a.variants!.filter((_, idx) => idx !== k).length ? a.variants!.filter((_, idx) => idx !== k) : undefined })}>
+                              <IconTrash size={12} />
+                            </button>
+                          </div>
+                          <Field label="Subject">
+                            <input value={v.subject ?? ''} onChange={(e) => updateAction(i, j, { variants: a.variants!.map((x, idx) => (idx === k ? { ...x, subject: e.target.value } : x)) })} className="w-full" />
+                          </Field>
+                          <Field label="Template" className="mt-2">
+                            <textarea rows={3} value={v.template ?? ''} onChange={(e) => updateAction(i, j, { variants: a.variants!.map((x, idx) => (idx === k ? { ...x, template: e.target.value } : x)) })} className="w-full font-mono text-xs" />
+                          </Field>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        className="btn-secondary btn-sm"
+                        onClick={() => {
+                          const n = (a.variants?.length ?? 0) + 1;
+                          const label = String.fromCharCode(64 + n);
+                          const existing = a.variants ?? [];
+                          // The first variant starts as a copy of the current template so A vs B is a fair test.
+                          const seed = existing.length ? [] : [{ id: newStepId('act'), label: 'A', subject: a.subject, template: a.template, enabled: true }];
+                          updateAction(i, j, { variants: [...existing, ...seed, { id: newStepId('act'), label: seed.length ? 'B' : label, subject: a.subject, template: a.template, enabled: true }] });
+                        }}
+                      >
+                        <IconPlus size={12} /> {a.variants?.length ? 'Add another variant' : 'Add A/B test'}
+                      </button>
+                    </div>
+                  ) : null}
                   {a.alternative ? (
                     <div className="mt-3 rounded-md border border-dashed border-slate-300 bg-white p-3">
                       <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Or instead</div>

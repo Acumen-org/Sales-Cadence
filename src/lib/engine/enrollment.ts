@@ -31,7 +31,7 @@ export type EnrollRequest = {
   actor: AuditActor;
 };
 
-export type EnrollConflictReason = 'not_found' | 'deleted' | 'dnd' | 'already_active' | 'no_fo' | 'duplicate' | 'invalid_start';
+export type EnrollConflictReason = 'not_found' | 'deleted' | 'dnd' | 'opted_out' | 'already_active' | 'no_fo' | 'duplicate' | 'invalid_start';
 
 export type EnrollConflict = { personId: string; name: string; reason: EnrollConflictReason; detail?: string; enrollmentId?: string };
 
@@ -135,6 +135,11 @@ export async function previewEnrollment(req: EnrollRequest, client?: TwentyClien
       conflicts.push({ personId: id, name, reason: 'dnd', detail: 'Do not contact is set in Twenty' });
       continue;
     }
+    if (p.optedOut) {
+      conflicts.push({ personId: id, name, reason: 'opted_out', detail: 'Asked not to be contacted (recorded in Cadence)' });
+      continue;
+    }
+    if (p.badEmail && p.badPhone) warnings.push(`${name}: email and phone are flagged as bad data.`);
     const existing = activeByPerson.get(id);
     if (existing) {
       conflicts.push({
@@ -401,6 +406,47 @@ export async function applyPersonFlags(
     exited.push(e.id);
   }
   return { exited };
+}
+
+/**
+ * Outreach "Mark Finished" / "Mark Replied": end the enrollment by hand.
+ * replied -> REPLIED (counts in reply rates); no_reply -> COMPLETED (Finished, no reply).
+ */
+export async function finishEnrollment(enrollmentId: string, kind: 'replied' | 'no_reply', opts: { actor: AuditActor } & Omit<EngineContext, 'actor'>): Promise<Enrollment> {
+  const now = opts.now ?? new Date();
+  if (kind === 'replied') {
+    const r = await markReplied(enrollmentId, { at: now, evidenceId: null, actor: opts.actor, skipSync: opts.skipSync });
+    return r.enrollment;
+  }
+  const { updated, cancelled } = await prisma.$transaction(async (tx) => {
+    const e = await tx.enrollment.findUnique({ where: { id: enrollmentId } });
+    if (!e) throw new Error('Enrollment not found');
+    if (!OCCUPYING_STATUSES.includes(e.status)) return { updated: e, cancelled: [] as { id: string }[] };
+    const cancelled = await cancelOpenTasks(tx, enrollmentId, 'finished_no_reply', opts.actor);
+    const updated = await tx.enrollment.update({ where: { id: enrollmentId }, data: { status: 'COMPLETED', completedAt: now, exitReason: 'finished_manually' } });
+    await logAudit({ entityType: 'enrollment', entityId: enrollmentId, action: 'finished', actor: opts.actor, details: { kind, cancelledTasks: cancelled.length } }, tx);
+    return { updated, cancelled };
+  });
+  await syncCancelled(cancelled.map((t) => t.id), { actor: opts.actor, skipSync: opts.skipSync });
+  return updated;
+}
+
+/** Cadence-local person flags (Twenty is never written): opted out, bad email, bad phone. */
+export async function setPersonFlags(personId: string, flags: { optedOut?: boolean; badEmail?: boolean; badPhone?: boolean }, actor: AuditActor) {
+  const data: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(flags)) if (typeof v === 'boolean') data[k] = v;
+  if (!Object.keys(data).length) return;
+  await prisma.personCache.update({ where: { id: personId }, data });
+  await logAudit({ entityType: 'person', entityId: personId, action: 'flags_updated', actor, details: data });
+}
+
+/** Opt a person out of outreach in Cadence and exit any live enrollment. */
+export async function optOutPerson(personId: string, opts: { actor: AuditActor; optedOut: boolean; now?: Date; skipSync?: boolean }) {
+  await setPersonFlags(personId, { optedOut: opts.optedOut }, opts.actor);
+  if (!opts.optedOut) return { exited: [] as string[] };
+  const active = await prisma.enrollment.findMany({ where: { personId, status: { in: OCCUPYING_STATUSES } }, select: { id: true } });
+  for (const e of active) await exitEnrollment(e.id, { reason: 'opted_out', actor: opts.actor, now: opts.now, skipSync: opts.skipSync });
+  return { exited: active.map((e) => e.id) };
 }
 
 /** Active enrollments of the same company (for the brief and the colleague rule). */

@@ -6,7 +6,7 @@ import { prisma } from '@/lib/db';
 import { todayIn } from '@/lib/dates';
 import { saveSequenceVersionAction, updateSequenceMetaAction } from '@/lib/actions/sequences';
 import { parseSteps, describeAction } from '@/lib/sequences/steps';
-import { sequenceFunnel, sequenceVersions } from '@/lib/sequences-query';
+import { sequenceFunnel, sequenceVersions, variantStats } from '@/lib/sequences-query';
 import { ActionForm } from '@/components/action-form';
 import { ActionIcon } from '@/components/icons';
 import { SequenceEditor } from '@/components/sequences/sequence-editor';
@@ -21,10 +21,11 @@ export default async function SequenceDetailPage({ params, searchParams }: { par
   const steps = sequence.activeVersion ? parseSteps(sequence.activeVersion.steps) : [];
   const today = todayIn(user.timezone);
   const admin = isAdmin(user);
-  const [funnel, versions, enrollmentsByVersion] = await Promise.all([
+  const [funnel, versions, enrollmentsByVersion, variants] = await Promise.all([
     sequenceFunnel(sequence.id, steps, today),
     sequenceVersions(sequence.id),
     prisma.enrollment.groupBy({ by: ['sequenceVersionId'], where: { sequenceId: sequence.id, status: { in: ['ACTIVE', 'PAUSED'] } }, _count: { _all: true } }),
+    variantStats(sequence.id, steps),
   ]);
   const activeOnVersion = new Map(enrollmentsByVersion.map((r) => [r.sequenceVersionId, r._count._all]));
   const tabs = [
@@ -52,6 +53,39 @@ export default async function SequenceDetailPage({ params, searchParams }: { par
       />
       <Tabs current={tab} tabs={tabs} />
       <div className="p-6">
+        {tab === 'steps' && variants.length ? (
+          <Card title="A/B tests" className="mb-4">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Step</th>
+                  <th>Variant</th>
+                  <th>Assigned</th>
+                  <th>Sent</th>
+                  <th>Replied after</th>
+                  <th>Reply rate</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {variants.map((v) => (
+                  <tr key={`${v.actionId}:${v.variantId}`} className={v.enabled ? undefined : 'opacity-60'}>
+                    <td>
+                      Step {v.stepIndex + 1} · {v.actionLabel}
+                    </td>
+                    <td className="font-medium">{v.variantLabel}</td>
+                    <td>{v.assigned}</td>
+                    <td>{v.done}</td>
+                    <td>{v.replied}</td>
+                    <td>{v.done ? `${Math.round(v.replyRate * 100)}%` : '-'}</td>
+                    <td>{v.enabled ? <Badge tone="green">active</Badge> : <Badge tone="gray">disabled</Badge>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="px-4 py-2 text-xs text-slate-500">Variants are assigned evenly at task creation. Disable the weaker one in the editor; existing tasks keep their variant.</p>
+          </Card>
+        ) : null}
         {tab === 'steps' ? (
           <Card title="Steps and funnel">
             <table className="table">
