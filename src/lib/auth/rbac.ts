@@ -15,6 +15,11 @@ export class ForbiddenError extends Error {
   }
 }
 
+/** Reduce any user-like object (SessionUser, Prisma User + pods) to an Actor. */
+export function toActor(user: { id: string; role: Role; podIds: string[] }): Actor {
+  return { id: user.id, role: user.role, podIds: user.podIds };
+}
+
 export const isAdmin = (a: Actor) => a.role === 'ADMIN';
 export const isSeniorFo = (a: Actor) => a.role === 'SENIOR_FO';
 export const isJuniorFo = (a: Actor) => a.role === 'JUNIOR_FO';

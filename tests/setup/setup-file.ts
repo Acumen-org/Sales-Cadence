@@ -8,4 +8,5 @@ if (!process.env.DATABASE_URL) {
   if (fs.existsSync(file)) process.env.DATABASE_URL = fs.readFileSync(file, 'utf8').trim();
 }
 process.env.TWENTY_MODE = 'mock';
+process.env.TWENTY_API_URL = process.env.TWENTY_API_URL ?? 'http://twenty.local:3000';
 process.env.CADENCE_DRY_RUN = process.env.CADENCE_DRY_RUN ?? 'false';
