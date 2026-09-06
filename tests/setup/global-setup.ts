@@ -56,6 +56,14 @@ export default async function setup() {
     } catch {
       /* ignore */
     }
-    if (embedded) await embedded.stop();
+    if (embedded) {
+      try {
+        await embedded.stop();
+      } catch (err) {
+        // Windows can report EBUSY while postgres releases its files; the directory is
+        // recreated from scratch on the next run anyway.
+        console.warn('[embedded-postgres] stop:', err instanceof Error ? err.message : String(err));
+      }
+    }
   };
 }

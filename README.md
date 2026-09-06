@@ -12,7 +12,7 @@ Cadence never sends email or automates LinkedIn. Humans do every touch.
 | 2 | Enrollment engine, clocks, caps, versioning | done |
 | 3 | Tasks page and brief | done |
 | 4 | Webhook ingestion, matching, completions, replies, Twenty sync out | done |
-| 5 | Sequences, Campaigns, People, Reports pages | pending |
+| 5 | Sequences, Campaigns, People, Reports pages | done |
 | 6 | Real Twenty client, verify:schema, dry run, docs | pending |
 
 ## Stack
