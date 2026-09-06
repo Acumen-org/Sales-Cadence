@@ -7,3 +7,4 @@ export * from './sync-out';
 export * from './matching';
 export * from './ingest';
 export * from './reconcile';
+export * from './outcomes';

@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import type { Settings } from '@/lib/settings';
 import { saveMatchingSettingsAction, saveRulesSettingsAction, saveSyncSettingsAction, saveTwentySettingsAction } from '@/lib/actions/settings';
 import { ActionForm } from '@/components/action-form';
@@ -120,12 +121,142 @@ export function RulesForm({ rules }: { rules: Settings['rules'] }) {
           <Check name="companyReplyPausesColleagues" label="A reply from anyone at a company pauses colleagues at that company" checked={rules.companyReplyPausesColleagues} />
           <Check name="meetingOnOpportunityCreated" label="An Opportunity created for a person marks a meeting" checked={rules.meetingOnOpportunityCreated} />
           <Check name="meetingOnStatusOfMeeting" label="person.statusOfMeeting set to a booked value marks a meeting" checked={rules.meetingOnStatusOfMeeting} />
+          <Check name="exitOnBounce" label="A skip reason flagged as bounce ends the sequence (Bounced)" checked={rules.exitOnBounce} />
+          <Check name="answeredCallIsReply" label="A call logged with an answered outcome counts as a reply and finishes the sequence" checked={rules.answeredCallIsReply} />
         </div>
+        <DispositionsEditor initial={rules.callDispositions} />
+        <SkipReasonsEditor initial={rules.skipReasons} />
         <button type="submit" className="btn-primary">
           Save rules
         </button>
       </ActionForm>
     </Card>
+  );
+}
+
+type Disposition = Settings['rules']['callDispositions'][number];
+type SkipReason = Settings['rules']['skipReasons'][number];
+const slug = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_|_$/g, '') || 'item';
+
+/** Editable list of call outcomes; serialised as JSON for the server action. */
+function DispositionsEditor({ initial }: { initial: Disposition[] }) {
+  const [rows, setRows] = useState<Disposition[]>(initial);
+  const update = (i: number, patch: Partial<Disposition>) => setRows((r) => r.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
+  return (
+    <div>
+      <input type="hidden" name="callDispositionsJson" value={JSON.stringify(rows)} />
+      <label className="mb-1 block">Call outcomes (dispositions)</label>
+      <p className="mb-2 text-xs text-slate-500">An FO must pick one to log a call. "Answered" outcomes count as a reply when the rule above is on.</p>
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Label</th>
+            <th>Key</th>
+            <th>Answered</th>
+            <th>Marks phone as bad</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((d, i) => (
+            <tr key={i}>
+              <td>
+                <input value={d.label} onChange={(e) => update(i, { label: e.target.value, key: rows[i].key || slug(e.target.value) })} className="w-full py-1 text-xs" />
+              </td>
+              <td>
+                <input value={d.key} onChange={(e) => update(i, { key: slug(e.target.value) })} className="w-32 py-1 font-mono text-xs" />
+              </td>
+              <td>
+                <input type="checkbox" checked={d.answered} onChange={(e) => update(i, { answered: e.target.checked })} className="h-4 w-4 rounded" />
+              </td>
+              <td>
+                <input type="checkbox" checked={d.badPhone} onChange={(e) => update(i, { badPhone: e.target.checked })} className="h-4 w-4 rounded" />
+              </td>
+              <td className="text-right">
+                <button type="button" className="btn-ghost btn-sm text-red-600" onClick={() => setRows((r) => r.filter((_, idx) => idx !== i))} disabled={rows.length <= 1}>
+                  Remove
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <button type="button" className="btn-secondary btn-sm mt-2" onClick={() => setRows((r) => [...r, { key: `outcome_${r.length + 1}`, label: 'New outcome', answered: false, badPhone: false }])}>
+        Add outcome
+      </button>
+    </div>
+  );
+}
+
+const EXIT_LABELS: Record<SkipReason['exit'], string> = {
+  none: 'Keep in sequence',
+  bounced: 'End: Bounced',
+  not_interested: 'End: Not interested',
+  opted_out: 'End: Opted out (never enrol again)',
+  bad_data: 'End: Bad data',
+};
+
+/** Editable list of skip reasons with their consequence. */
+function SkipReasonsEditor({ initial }: { initial: SkipReason[] }) {
+  const [rows, setRows] = useState<SkipReason[]>(initial);
+  const update = (i: number, patch: Partial<SkipReason>) => setRows((r) => r.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
+  return (
+    <div>
+      <input type="hidden" name="skipReasonsJson" value={JSON.stringify(rows)} />
+      <label className="mb-1 block">Skip reasons</label>
+      <p className="mb-2 text-xs text-slate-500">Offered when an FO skips a step. Reasons that end the sequence remove the person from it immediately.</p>
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Label</th>
+            <th>Key</th>
+            <th>Consequence</th>
+            <th>Bad email</th>
+            <th>Bad phone</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i}>
+              <td>
+                <input value={r.label} onChange={(e) => update(i, { label: e.target.value, key: rows[i].key || slug(e.target.value) })} className="w-full py-1 text-xs" />
+              </td>
+              <td>
+                <input value={r.key} onChange={(e) => update(i, { key: slug(e.target.value) })} className="w-32 py-1 font-mono text-xs" />
+              </td>
+              <td>
+                <select value={r.exit} onChange={(e) => update(i, { exit: e.target.value as SkipReason['exit'] })} className="py-1 text-xs">
+                  {(Object.keys(EXIT_LABELS) as SkipReason['exit'][]).map((k) => (
+                    <option key={k} value={k}>
+                      {EXIT_LABELS[k]}
+                    </option>
+                  ))}
+                </select>
+              </td>
+              <td>
+                <input type="checkbox" checked={r.badEmail} onChange={(e) => update(i, { badEmail: e.target.checked })} className="h-4 w-4 rounded" />
+              </td>
+              <td>
+                <input type="checkbox" checked={r.badPhone} onChange={(e) => update(i, { badPhone: e.target.checked })} className="h-4 w-4 rounded" />
+              </td>
+              <td className="text-right">
+                <button type="button" className="btn-ghost btn-sm text-red-600" onClick={() => setRows((x) => x.filter((_, idx) => idx !== i))} disabled={rows.length <= 1}>
+                  Remove
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <button type="button" className="btn-secondary btn-sm mt-2" onClick={() => setRows((x) => [...x, { key: `reason_${x.length + 1}`, label: 'New reason', exit: 'none', badEmail: false, badPhone: false }])}>
+        Add reason
+      </button>
+    </div>
   );
 }
 

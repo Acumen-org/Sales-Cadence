@@ -13,6 +13,17 @@ const list = (v: FormDataEntryValue | null) =>
     .map((s) => s.trim())
     .filter(Boolean);
 
+/** Parse a JSON array from a hidden field; undefined lets the zod default apply. */
+function jsonList(v: FormDataEntryValue | null): unknown {
+  if (typeof v !== 'string' || !v.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(v);
+    return Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function issues(err: { issues: Array<{ path: (string | number)[]; message: string }> }) {
   return err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
 }
@@ -73,8 +84,15 @@ export async function saveRulesSettingsAction(formData: FormData): Promise<Actio
     stalledDays: Number(formData.get('stalledDays')),
     reconcileLookbackDays: Number(formData.get('reconcileLookbackDays')),
     defaultDailyRampPerFo: Number(formData.get('defaultDailyRampPerFo')),
+    exitOnBounce: bool(formData.get('exitOnBounce')),
+    answeredCallIsReply: bool(formData.get('answeredCallIsReply')),
+    callDispositions: jsonList(formData.get('callDispositionsJson')),
+    skipReasons: jsonList(formData.get('skipReasonsJson')),
   });
   if (!parsed.success) return { ok: false, error: issues(parsed.error) };
+  const dupKeys = (list: Array<{ key: string }>) => list.map((x) => x.key).filter((k, i, a) => a.indexOf(k) !== i);
+  if (dupKeys(parsed.data.callDispositions).length) return { ok: false, error: `Duplicate call outcome keys: ${dupKeys(parsed.data.callDispositions).join(', ')}` };
+  if (dupKeys(parsed.data.skipReasons).length) return { ok: false, error: `Duplicate skip reason keys: ${dupKeys(parsed.data.skipReasons).join(', ')}` };
   await saveSettingsSection('rules', parsed.data);
   await logAudit({ entityType: 'settings', entityId: 'rules', action: 'updated', actor: userActor(admin), details: parsed.data });
   revalidatePath('/settings');

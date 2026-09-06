@@ -129,8 +129,12 @@ async function main() {
   if (!fs.existsSync(path.join(root, '.next', 'BUILD_ID'))) run(bin('next'), ['build'], env, 'building the app (first run only, a minute or two)');
 
   // 4. web + worker
+  // Spawn node directly (no shell wrapper) so the pids we track are the real processes and
+  // taskkill /T reliably takes the whole tree down on shutdown.
   log(`starting web on http://localhost:${port}`);
-  const web = spawn(bin('next'), ['start', '-p', String(port)], { stdio: 'inherit', env, shell: isWin });
+  const nextBin = path.join(root, 'node_modules', 'next', 'dist', 'bin', 'next');
+  const tsxBin = path.join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+  const web = spawn(process.execPath, [nextBin, 'start', '-p', String(port)], { stdio: 'inherit', env });
   children.push(web);
   web.on('exit', (code) => {
     if (!stopping) {
@@ -138,7 +142,7 @@ async function main() {
       void shutdown(code ?? 1);
     }
   });
-  const worker = spawn(bin('tsx'), ['src/worker/index.ts'], { stdio: 'inherit', env, shell: isWin });
+  const worker = spawn(process.execPath, [tsxBin, 'src/worker/index.ts'], { stdio: 'inherit', env });
   children.push(worker);
 
   await waitForHttp(`http://localhost:${port}/api/health`, 120_000);

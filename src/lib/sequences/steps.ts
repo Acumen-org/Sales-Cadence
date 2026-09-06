@@ -31,6 +31,16 @@ const AlternativeSchema = z.object({
   template: z.string().optional(),
 });
 
+/** An A/B template variant. Balanced random assignment at task generation; disable to retire it. */
+export const VariantSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  subject: z.string().optional(),
+  template: z.string().optional(),
+  enabled: z.boolean().default(true),
+});
+export type TemplateVariant = z.infer<typeof VariantSchema>;
+
 export const StepActionSchema = z.object({
   /** Stable id, preserved across versions so enrollments can be mapped between versions. */
   id: z.string().min(1),
@@ -42,6 +52,10 @@ export const StepActionSchema = z.object({
   template: z.string().optional(),
   /** Either/or: the FO may do this instead of `type`. */
   alternative: AlternativeSchema.optional(),
+  /** A/B test: when present with at least one enabled variant, each task gets one variant. */
+  variants: z.array(VariantSchema).optional(),
+  /** Hint for the FO: send this as a reply in the existing email thread. */
+  replyInThread: z.boolean().optional(),
 });
 
 export const SequenceStepSchema = z.object({
@@ -84,6 +98,16 @@ export const StepsSchema = z
             path: [i, 'actions', j, 'alternative'],
           });
         }
+        if (a.variants) {
+          const vids = new Set<string>();
+          for (const v of a.variants) {
+            if (vids.has(v.id)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Duplicate variant id ${v.id}`, path: [i, 'actions', j, 'variants'] });
+            vids.add(v.id);
+          }
+          if (a.variants.length && !a.variants.some((v) => v.enabled !== false)) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'At least one A/B variant must stay enabled (or remove the variants)', path: [i, 'actions', j, 'variants'] });
+          }
+        }
       }
     }
   });
@@ -117,4 +141,27 @@ export function describeStep(step: SequenceStep): string {
 
 export function lastDay(steps: SequenceStep[]): number {
   return steps.length ? steps[steps.length - 1].day : 0;
+}
+
+export function enabledVariants(action: Pick<StepAction, 'variants'>): TemplateVariant[] {
+  return (action.variants ?? []).filter((v) => v.enabled !== false);
+}
+
+/**
+ * Balanced random assignment (Outreach style): pick among the enabled variants with the fewest
+ * assignments so far; ties broken at random.
+ */
+export function pickVariant(action: Pick<StepAction, 'variants'>, counts: Map<string, number>, random: () => number = Math.random): TemplateVariant | null {
+  const enabled = enabledVariants(action);
+  if (!enabled.length) return null;
+  const min = Math.min(...enabled.map((v) => counts.get(v.id) ?? 0));
+  const pool = enabled.filter((v) => (counts.get(v.id) ?? 0) === min);
+  return pool[Math.floor(random() * pool.length)] ?? pool[0];
+}
+
+/** The subject/template the FO should use: the assigned variant if any, else the action's own copy. */
+export function resolveCopy(action: Pick<StepAction, 'subject' | 'template' | 'variants' | 'label'>, variantId: string | null | undefined): { subject?: string; template?: string; variantLabel: string | null } {
+  const v = variantId ? action.variants?.find((x) => x.id === variantId) : undefined;
+  if (v) return { subject: v.subject ?? action.subject, template: v.template ?? action.template, variantLabel: v.label };
+  return { subject: action.subject, template: action.template, variantLabel: null };
 }

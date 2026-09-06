@@ -6,7 +6,7 @@ import { plannedDateForStep } from './engine/clock';
 import { previewNextStep } from './engine/versioning';
 import { colleagueEnrollments } from './engine/enrollment';
 import { cachedPersonName } from './person-cache';
-import { describeStep, parseSteps, type SequenceStep, type StepAction } from './sequences/steps';
+import { describeStep, parseSteps, resolveCopy, type SequenceStep, type StepAction } from './sequences/steps';
 import { getSettings, getTwentyConnection } from './settings';
 import { renderTemplate, type TemplateVars } from './templates';
 import { getTwentyClient } from './twenty';
@@ -41,11 +41,18 @@ export type TaskBrief = {
   step: SequenceStep | null;
   action: RenderedAction;
   alternative: RenderedAction | null;
+  /** A/B variant label assigned to this task, if the action has variants. */
+  variantLabel: string | null;
+  /** Hint: send as a reply in the existing thread. */
+  replyInThread: boolean;
   touches: Array<{ id: string; channel: string; direction: string; occurredAt: Date; summary: string; actorLabel: string | null }>;
   notes: TwentyNote[];
   colleagues: ColleagueRow[];
   opportunities: TwentyOpportunity[];
   nextStep: { step: SequenceStep; plannedDate: LocalDate; description: string } | null;
+  /** Steps of the active version (for "move to step") and where the enrollment is. */
+  steps: { index: number; day: number; label: string }[];
+  currentStep: number;
   enrollment: { id: string; status: string; startDate: string; version: number; campaignName: string | null; sequenceName: string; foName: string; shiftDays: number };
   warnings: string[];
 };
@@ -96,10 +103,13 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
     eventSource: person.eventSource,
     foName: task.fo.name,
   };
+  const copy = actionDef ? resolveCopy(actionDef, task.variantId) : null;
   const action: RenderedAction = actionDef
-    ? render(actionDef, vars)
+    ? render({ type: actionDef.type, label: actionDef.label, subject: copy?.subject, template: copy?.template }, vars)
     : { type: task.action, label: task.label, subject: null, body: '', rawTemplate: null };
   const alternative = actionDef?.alternative ? render(actionDef.alternative, vars) : null;
+  const variantLabel = copy?.variantLabel ?? null;
+  const replyInThread = Boolean(actionDef?.replyInThread);
 
   const [touches, colleagues, notesResult, oppsResult] = await Promise.all([
     prisma.touch.findMany({ where: { personId: person.id }, orderBy: { occurredAt: 'desc' }, take: 5 }),
@@ -129,11 +139,15 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
     step,
     action,
     alternative,
+    variantLabel,
+    replyInThread,
     touches: touches.map((t) => ({ id: t.id, channel: t.channel, direction: t.direction, occurredAt: t.occurredAt, summary: t.summary, actorLabel: t.actorLabel })),
     notes: notesResult.notes,
     colleagues,
     opportunities: oppsResult.opportunities,
     nextStep,
+    steps: activeSteps.map((s, index) => ({ index, day: s.day, label: describeStep(s) })),
+    currentStep: enrollmentFull.currentStep,
     enrollment: {
       id: enrollmentFull.id,
       status: enrollmentFull.status,

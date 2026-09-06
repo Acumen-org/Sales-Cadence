@@ -6,9 +6,10 @@ import clsx from 'clsx';
 import type { SessionUser } from '@/lib/auth/current-user';
 import { ROLE_LABELS } from '@/lib/auth/rbac';
 import { logoutAction } from '@/lib/actions/auth';
-import { IconCampaigns, IconLogout, IconPeople, IconReports, IconSequences, IconSettings, IconTasks } from './icons';
+import { IconCampaigns, IconHome, IconLogout, IconPeople, IconReports, IconSequences, IconSettings, IconTasks } from './icons';
 
 const NAV = [
+  { href: '/home', label: 'Home', icon: IconHome },
   { href: '/tasks', label: 'Tasks', icon: IconTasks },
   { href: '/sequences', label: 'Sequences', icon: IconSequences },
   { href: '/people', label: 'People', icon: IconPeople },

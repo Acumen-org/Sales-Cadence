@@ -51,6 +51,7 @@ function GroupTable({ rows, first }: { rows: GroupRow[]; first: string }) {
 }
 
 const TABS = [
+  { key: 'activity', label: 'Activity' },
   { key: 'pods', label: 'By pod' },
   { key: 'fos', label: 'By FO' },
   { key: 'campaigns', label: 'By campaign' },
@@ -63,7 +64,7 @@ const TABS = [
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const user = await requireUser();
   if (!canViewReports(toActor(user))) redirect('/tasks');
-  const { tab = 'pods' } = await searchParams;
+  const { tab = 'activity' } = await searchParams;
   const settings = await getSettings();
   const today = todayIn(user.timezone);
   const r = await buildReports(user, today, settings.rules.stalledDays);
@@ -84,6 +85,54 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       </div>
       <div className="p-6">
         <Card>
+          {tab === 'activity' ? (
+            r.activity.length === 0 ? (
+              <EmptyState title="No activity yet" />
+            ) : (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th rowSpan={2}>FO</th>
+                    <th colSpan={6} className="text-center">
+                      Last 7 days
+                    </th>
+                    <th colSpan={4} className="text-center">
+                      Last 28 days
+                    </th>
+                  </tr>
+                  <tr>
+                    <th>Emails</th>
+                    <th>Calls</th>
+                    <th>Answered</th>
+                    <th>LinkedIn</th>
+                    <th>Replies</th>
+                    <th>Meetings</th>
+                    <th>Touches</th>
+                    <th>Observed in Twenty</th>
+                    <th>Replies</th>
+                    <th>Meetings</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {r.activity.map((a) => (
+                    <tr key={a.id}>
+                      <td className="font-medium text-slate-900">{a.name}</td>
+                      <td>{a.last7.emails}</td>
+                      <td>{a.last7.calls}</td>
+                      <td>{a.last7.answered}</td>
+                      <td>{a.last7.linkedin}</td>
+                      <td>{a.last7.replies}</td>
+                      <td>{a.last7.meetings}</td>
+                      <td>{a.last28.total}</td>
+                      <td>{a.last28.total ? `${Math.round((a.last28.observed / a.last28.total) * 100)}%` : '-'}</td>
+                      <td>{a.last28.replies}</td>
+                      <td>{a.last28.meetings}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )
+          ) : null}
           {tab === 'pods' ? <GroupTable rows={r.byPod} first="Pod" /> : null}
           {tab === 'fos' ? <GroupTable rows={r.byFo} first="FO" /> : null}
           {tab === 'campaigns' ? <GroupTable rows={r.byCampaign} first="Campaign" /> : null}

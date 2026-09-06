@@ -55,6 +55,49 @@ export const RulesSettingsSchema = z.object({
   reconcileLookbackDays: z.number().int().min(1).max(90).default(3),
   /** Default daily ramp (new enrollments per FO per day) for new campaigns. */
   defaultDailyRampPerFo: z.number().int().min(1).default(20),
+  /** A skip reason flagged as bounce ends the sequence (Outreach: Bounced state). */
+  exitOnBounce: z.boolean().default(true),
+  /** A call logged with an "answered" disposition counts as a reply and finishes the sequence. */
+  answeredCallIsReply: z.boolean().default(true),
+  /** Call outcomes an FO must pick when completing a call (Outreach: dispositions). */
+  callDispositions: z
+    .array(
+      z.object({
+        key: z.string().min(1),
+        label: z.string().min(1),
+        answered: z.boolean().default(false),
+        /** Mark the person's phone as bad data. */
+        badPhone: z.boolean().default(false),
+      }),
+    )
+    .default([
+      { key: 'connected', label: 'Connected', answered: true, badPhone: false },
+      { key: 'gatekeeper', label: 'Spoke to gatekeeper', answered: false, badPhone: false },
+      { key: 'voicemail', label: 'Left voicemail', answered: false, badPhone: false },
+      { key: 'no_answer', label: 'No answer', answered: false, badPhone: false },
+      { key: 'busy', label: 'Busy / call back', answered: false, badPhone: false },
+      { key: 'wrong_number', label: 'Wrong number', answered: false, badPhone: true },
+    ]),
+  /** Skip reasons offered to FOs; `exit` ends the enrollment with that reason. */
+  skipReasons: z
+    .array(
+      z.object({
+        key: z.string().min(1),
+        label: z.string().min(1),
+        exit: z.enum(['none', 'bounced', 'not_interested', 'opted_out', 'bad_data']).default('none'),
+        badEmail: z.boolean().default(false),
+        badPhone: z.boolean().default(false),
+      }),
+    )
+    .default([
+      { key: 'bounced', label: 'Email bounced', exit: 'bounced', badEmail: true, badPhone: false },
+      { key: 'wrong_details', label: 'Wrong or missing contact details', exit: 'bad_data', badEmail: false, badPhone: false },
+      { key: 'not_interested', label: 'Not interested', exit: 'not_interested', badEmail: false, badPhone: false },
+      { key: 'opted_out', label: 'Asked not to be contacted', exit: 'opted_out', badEmail: false, badPhone: false },
+      { key: 'already_talking', label: 'Already in conversation elsewhere', exit: 'none', badEmail: false, badPhone: false },
+      { key: 'no_linkedin', label: 'No LinkedIn profile', exit: 'none', badEmail: false, badPhone: false },
+      { key: 'other', label: 'Other', exit: 'none', badEmail: false, badPhone: false },
+    ]),
 });
 
 export const SyncSettingsSchema = z.object({

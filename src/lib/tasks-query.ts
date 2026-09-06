@@ -7,11 +7,26 @@ import { todayIn, type LocalDate } from './dates';
 export type TaskTab = 'today' | 'overdue' | 'upcoming' | 'done';
 export const TASK_TABS: TaskTab[] = ['today', 'overdue', 'upcoming', 'done'];
 
+export type TaskChannel = 'EMAIL' | 'CALL' | 'LINKEDIN';
+export const TASK_CHANNELS: TaskChannel[] = ['CALL', 'EMAIL', 'LINKEDIN'];
+
 export type TaskFilters = {
   tab: TaskTab;
   podId?: string | null;
   foUserId?: string | null;
+  /** Outreach-style task type bucket. */
+  channel?: TaskChannel | null;
 };
+
+export function channelWhere(channel: TaskChannel | null | undefined): Prisma.TaskWhereInput {
+  if (!channel) return {};
+  if (channel === 'LINKEDIN') return { action: { in: ['LINKEDIN_CONNECT', 'LINKEDIN_MESSAGE'] } };
+  return { action: channel };
+}
+
+export function parseChannel(v: string | undefined): TaskChannel | null {
+  return TASK_CHANNELS.includes(v as TaskChannel) ? (v as TaskChannel) : null;
+}
 
 export const taskRowInclude = {
   enrollment: { include: { person: true, sequence: { select: { id: true, name: true } }, pod: { select: { id: true, name: true } }, campaign: { select: { id: true, name: true } } } },
@@ -59,11 +74,20 @@ function filtersWhere(f: TaskFilters): Prisma.TaskWhereInput {
   return where;
 }
 
-export type TaskListResult = { rows: TaskRow[]; counts: Record<TaskTab, number>; today: LocalDate };
+export type TaskListResult = {
+  rows: TaskRow[];
+  counts: Record<TaskTab, number>;
+  /** Pending tasks in the current tab per channel (before the channel filter). */
+  channelCounts: Record<TaskChannel, number>;
+  today: LocalDate;
+};
 
 export async function listTasks(user: SessionUser, filters: TaskFilters, now = new Date(), limit = 500): Promise<TaskListResult> {
   const today = todayIn(user.timezone, now);
-  const base: Prisma.TaskWhereInput = { AND: [taskScopeWhere(user), filtersWhere(filters)] };
+  const scoped: Prisma.TaskWhereInput = { AND: [taskScopeWhere(user), filtersWhere(filters)] };
+  const base: Prisma.TaskWhereInput = { AND: [scoped, channelWhere(filters.channel)] };
+  const channelCountRows = await Promise.all(TASK_CHANNELS.map((c) => prisma.task.count({ where: { AND: [scoped, channelWhere(c), tabWhere(filters.tab, today)] } })));
+  const channelCounts = Object.fromEntries(TASK_CHANNELS.map((c, i) => [c, channelCountRows[i]])) as Record<TaskChannel, number>;
   const [rows, ...countValues] = await Promise.all([
     prisma.task.findMany({
       where: { AND: [base, tabWhere(filters.tab, today)] },
@@ -81,7 +105,7 @@ export async function listTasks(user: SessionUser, filters: TaskFilters, now = n
     rows.sort((a, b) => effectiveDate(a).localeCompare(effectiveDate(b)) || a.dueAt.getTime() - b.dueAt.getTime());
   }
   const counts = Object.fromEntries(TASK_TABS.map((tab, i) => [tab, countValues[i]])) as Record<TaskTab, number>;
-  return { rows, counts, today };
+  return { rows, counts, channelCounts, today };
 }
 
 /** Pods and FOs the user may filter by. */

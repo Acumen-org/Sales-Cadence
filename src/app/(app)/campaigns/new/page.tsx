@@ -9,9 +9,11 @@ import { getMockTwentyClient } from '@/lib/twenty/mock-client';
 import { CampaignForm } from '@/components/campaigns/campaign-form';
 import { PageHeader } from '@/components/ui';
 
-export default async function NewCampaignPage() {
+export default async function NewCampaignPage({ searchParams }: { searchParams: Promise<{ ids?: string }> }) {
   const user = await requireUser();
   if (!canEnroll(toActor(user))) redirect('/campaigns');
+  const { ids } = await searchParams;
+  const initialIds = ids ? ids.split(',').map((s) => s.trim()).filter(Boolean).join('\n') : '';
   const podIds = visiblePodIds(user);
   const [sequences, pods, settings] = await Promise.all([
     prisma.sequence.findMany({ where: { archived: false }, include: { activeVersion: { select: { version: true } } }, orderBy: { name: 'asc' } }),
@@ -29,6 +31,7 @@ export default async function NewCampaignPage() {
           defaultStartDate={todayIn(user.timezone)}
           defaultRamp={settings.rules.defaultDailyRampPerFo}
           mockViews={mockViews}
+          initialIds={initialIds}
         />
       </div>
     </>

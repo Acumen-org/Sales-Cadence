@@ -12,6 +12,8 @@ type Props = {
   defaultStartDate: string;
   defaultRamp: number;
   mockViews?: { id: string; name: string }[];
+  /** Pre-filled person ids (from a bulk selection on People), one per line. */
+  initialIds?: string;
 };
 
 const CONFLICT_LABEL: Record<string, string> = {
@@ -25,7 +27,7 @@ const CONFLICT_LABEL: Record<string, string> = {
 };
 
 /** Create a campaign: choose people (ids, CSV or Twenty view), preview conflicts, confirm. */
-export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, mockViews }: Props) {
+export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, mockViews, initialIds }: Props) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const [pending, start] = useTransition();
@@ -122,7 +124,7 @@ export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, m
           </div>
           {sourceType === 'IDS' ? (
             <Field label="Twenty person ids" hint="One per line, or comma separated. Copy them from Twenty's URL bar or an export.">
-              <textarea name="personIdsText" rows={8} className="w-full font-mono text-xs" placeholder={'3f6c1c5e-...\n8a1b2c3d-...'} />
+              <textarea name="personIdsText" rows={8} className="w-full font-mono text-xs" placeholder={'3f6c1c5e-...\n8a1b2c3d-...'} defaultValue={initialIds ?? ''} />
             </Field>
           ) : null}
           {sourceType === 'CSV' ? (

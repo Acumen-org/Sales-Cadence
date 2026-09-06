@@ -6,7 +6,7 @@ import { env } from '@/lib/env';
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
   const user = await getCurrentUser();
-  if (user) redirect('/tasks');
+  if (user) redirect('/home');
   const { next } = await searchParams;
   const demo = env().TWENTY_MODE === 'mock';
   return (

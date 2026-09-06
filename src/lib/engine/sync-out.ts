@@ -36,9 +36,10 @@ function verbFor(action: ActionType): string {
   return 'done';
 }
 
-export function completionNoteTitle(task: Pick<SyncTask, 'label' | 'chosenAction' | 'action'> & { fo: { name: string } }, prefix: string): string {
+export function completionNoteTitle(task: Pick<SyncTask, 'label' | 'chosenAction' | 'action'> & { fo: { name: string }; disposition?: string | null }, prefix: string, dispositionLabel?: string | null): string {
   const action = (task.chosenAction ?? task.action) as ActionType;
-  return `${prefix} ${task.label} ${verbFor(action)} by ${firstNameOf(task.fo.name)}`;
+  const outcome = dispositionLabel ?? task.disposition;
+  return `${prefix} ${task.label} ${verbFor(action)} by ${firstNameOf(task.fo.name)}${outcome ? ` - ${outcome}` : ''}`;
 }
 
 export function mirroredTaskTitle(task: SyncTask): string {
@@ -105,11 +106,15 @@ export async function syncTaskCompleted(task: SyncTask): Promise<void> {
   }
   if (settings.sync.writeCompletionNotes && !task.twentyNoteId) {
     const action = (task.chosenAction ?? task.action) as ActionType;
+    const dispositionLabel = settings.rules.callDispositions.find((d) => d.key === task.disposition)?.label ?? task.disposition ?? null;
     const input = {
-      title: completionNoteTitle(task, settings.matching.cadencePrefix),
+      title: completionNoteTitle(task, settings.matching.cadencePrefix, dispositionLabel),
       bodyMarkdown: [
         `${task.label} (${action.toLowerCase().replace('_', ' ')}) completed by ${task.fo.name} in Cadence.`,
         `Sequence "${task.enrollment.sequence.name}", step ${task.stepIndex + 1} (day ${task.stepDay}).`,
+        ...(dispositionLabel ? [`Outcome: ${dispositionLabel}.`] : []),
+        ...(task.variantId ? [`Template variant: ${task.variantId}.`] : []),
+        ...(task.note ? ['', task.note] : []),
         `Source: ${task.completionSource ?? 'MANUAL'}${task.evidenceId ? ` (${task.evidenceId})` : ''}.`,
       ].join('\n'),
       personId: task.enrollment.personId,

@@ -124,8 +124,41 @@ export async function buildReports(user: SessionUser, today: LocalDate, stalledD
     .sort((a, b) => (a.lastTouch?.getTime() ?? 0) - (b.lastTouch?.getTime() ?? 0))
     .slice(0, 200);
 
+  // Activity leaderboard: what each FO actually did in the last 7 and 28 days.
+  const d7 = new Date(Date.now() - 7 * 86_400_000);
+  const d28 = new Date(Date.now() - 28 * 86_400_000);
+  const doneTasks = await prisma.task.findMany({
+    where: { enrollmentId: { in: enrollmentIds }, state: 'DONE', completedAt: { gte: d28 } },
+    select: { foUserId: true, action: true, chosenAction: true, disposition: true, completedAt: true, completionSource: true },
+  });
+  const repliedRows = await prisma.enrollment.findMany({ where: { ...scope, repliedAt: { gte: d28 } }, select: { foUserId: true, repliedAt: true } });
+  const meetingRows = await prisma.enrollment.findMany({ where: { ...scope, meetingAt: { gte: d28 } }, select: { foUserId: true, meetingAt: true } });
+  const answeredKeys = new Set((await import('./settings').then((m) => m.getSettings())).rules.callDispositions.filter((d) => d.answered).map((d) => d.key));
+  const activity = users
+    .filter((u) => enrollments.some((e) => e.foUserId === u.id) || doneTasks.some((t) => t.foUserId === u.id))
+    .map((u) => {
+      const mine = doneTasks.filter((t) => t.foUserId === u.id);
+      const window = (since: Date) => {
+        const ts = mine.filter((t) => t.completedAt && t.completedAt >= since);
+        const chosen = (t: (typeof ts)[number]) => t.chosenAction ?? t.action;
+        return {
+          emails: ts.filter((t) => chosen(t) === 'EMAIL').length,
+          calls: ts.filter((t) => chosen(t) === 'CALL').length,
+          answered: ts.filter((t) => chosen(t) === 'CALL' && t.disposition && answeredKeys.has(t.disposition)).length,
+          linkedin: ts.filter((t) => chosen(t).startsWith('LINKEDIN')).length,
+          observed: ts.filter((t) => t.completionSource?.startsWith('OBSERVED')).length,
+          total: ts.length,
+          replies: repliedRows.filter((r) => r.foUserId === u.id && r.repliedAt! >= since).length,
+          meetings: meetingRows.filter((r) => r.foUserId === u.id && r.meetingAt! >= since).length,
+        };
+      };
+      return { id: u.id, name: u.name, last7: window(d7), last28: window(d28) };
+    })
+    .sort((a, b) => b.last7.total - a.last7.total || a.name.localeCompare(b.name));
+
   return {
     today,
+    activity,
     totals: {
       enrollments: enrollments.length,
       active: enrollments.filter((e) => e.status === 'ACTIVE' || e.status === 'PAUSED').length,
