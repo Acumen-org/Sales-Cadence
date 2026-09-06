@@ -48,3 +48,23 @@ Every assumption made while building Cadence, grouped by area. Each entry says w
 
 - **Tests use a real Postgres, not mocks of Prisma.** When `TEST_DATABASE_URL` is unset, `tests/setup/global-setup.ts` boots an embedded Postgres (`embedded-postgres`, no Docker needed) on port 54329 and applies the migrations with `prisma migrate deploy`, so the migration files themselves are exercised.
 - **Test files run sequentially** (`fileParallelism: false`) because they share one database; each file truncates tables in `beforeAll`.
+
+## Enrollment engine (phase 2)
+
+- **Steps are generated incrementally, one step ahead.** An enrollment gets its first step immediately. In `shift` mode the next step is generated when every task in the current step is resolved (done or skipped); in `hold` mode also when its planned date arrives, even if the current step is still open. This is what makes "already-generated tasks are untouched, later steps use the new version" well defined.
+- **Shift is measured against the step's planned date**, using the local date the last task in the step was resolved. `Enrollment.shiftDays` accumulates; not-yet-generated steps are planned as `start + (day - 1) + shiftDays`, rolled to the next working day. Skipped tasks count as resolved.
+- **Caps apply to future dates only.** When a step's planned date is today or later, the whole step (all its actions) moves to the first working day with room under the FO's cap. Overdue plans are left overdue and shown prominently, never rolled or dropped. Snoozed tasks count against their snoozed day.
+- **If caps move the first step, the enrollment's start date moves with it**, so day offsets stay relative to the first real touch.
+- **Working days and non-working start dates**: a start date on a weekend rolls to the next working day and the preview says so.
+- **Version mapping is by stable step id, position as fallback.** After an edit, the next generated step is the one following the current step's id in the active version; `Enrollment.sequenceVersionId` moves to the active version at that moment. Tasks record the version they were generated from.
+- **Either/or actions are one task** with `action` (primary) and `altAction`. Completion records `chosenAction`; observed evidence picks the matching side, manual completion lets the FO choose.
+- **Evidence is single-use.** `Task.evidenceId` (note:<id>, message:<id>) may complete at most one task and a resolved task is never resolved again, so one event can never advance a step twice.
+- **Manual completions create a `Touch`** (`task:<id>`) so the timeline is complete; observed completions get their touch from the ingest pipeline keyed by the Twenty record id.
+- **Skips require a reason; snoozes land on the next working day at or after the chosen date and must be in the future.** Junior FOs may only snooze to the next working day (enforced in the actions layer with `nextWorkingDaySnooze`).
+- **Pause/resume**: resuming in shift mode adds the paused days to the clock and moves pending tasks to today or later; in hold mode dates stand.
+- **Reassign** is allowed only to an active member of the enrollment's pod. Pending tasks move with the enrollment; mirrored Twenty tasks are deleted and recreated because Twenty's assignee is set at creation.
+- **FO assignment**: `OWNER` maps the person's Twenty owner to the pod member with that workspace member id, else falls back to the least-loaded pod FO (the "round robin"); `ROUND_ROBIN` always uses least-loaded; `FIXED` is an explicit FO (used by row actions).
+- **Daily ramp** (`dailyRampPerFo`) counts enrollments per FO per start date within the campaign and pushes extra people to later working days.
+- **People outside the pod** (Twenty `podOwner` differs) are a warning in the preview, not a block: the Senior FO or Admin decided to include them. Enrollments carry the campaign's pod for reporting.
+- **Sync out runs after the database transaction**, never inside it, and every failure is logged to `AuditLog` (`sync_failed`) instead of failing the user's action. `TwentyWrite` records each real write; the dry-run wrapper records its own with `dryRun = true`.
+- **Completion note titles**: `[Cadence] Email 2 sent by Alisa`, `[Cadence] Call 1 made by Alisa`, `[Cadence] LinkedIn message 2 done by Alisa`. The prefix is configurable (`matching.cadencePrefix`) and is also what stops Cadence's own notes being read as evidence.
