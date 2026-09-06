@@ -1,11 +1,14 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth/current-user';
 import { LoginForm } from '@/components/login-form';
+import { DemoLogin } from '@/components/demo-login';
+import { env } from '@/lib/env';
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
   const user = await getCurrentUser();
   if (user) redirect('/tasks');
   const { next } = await searchParams;
+  const demo = env().TWENTY_MODE === 'mock';
   return (
     <main className="flex min-h-full items-center justify-center p-6">
       <div className="card w-full max-w-sm p-8">
@@ -17,6 +20,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           </div>
         </div>
         <LoginForm next={next} />
+        {demo ? <DemoLogin /> : null}
       </div>
     </main>
   );
