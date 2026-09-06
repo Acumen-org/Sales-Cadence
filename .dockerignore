@@ -1,0 +1,9 @@
+node_modules
+.next
+.git
+.env
+.env.local
+.pgdata-test
+.test-db-url
+coverage
+*.log

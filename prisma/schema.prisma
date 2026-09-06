@@ -1,0 +1,439 @@
+// Cadence data model. Twenty CRM stays the system of record; Cadence stores
+// sequencing state, a read cache of people, and an audit trail of every change.
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  SENIOR_FO
+  JUNIOR_FO
+}
+
+enum ActionType {
+  EMAIL
+  CALL
+  LINKEDIN_CONNECT
+  LINKEDIN_MESSAGE
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  PAUSED
+  REPLIED
+  MEETING
+  COMPLETED
+  EXITED
+}
+
+enum TaskState {
+  PENDING
+  DONE
+  SKIPPED
+  CANCELLED
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  STOPPED
+  COMPLETED
+}
+
+enum CampaignSource {
+  IDS
+  CSV
+  TWENTY_VIEW
+}
+
+enum AssignmentMode {
+  OWNER
+  ROUND_ROBIN
+}
+
+enum CompletionSource {
+  OBSERVED_MESSAGE
+  OBSERVED_NOTE
+  OBSERVED_TWENTY_TASK
+  MANUAL
+  SYSTEM
+}
+
+enum EventSource {
+  WEBHOOK
+  RECONCILE
+  MANUAL
+}
+
+enum ActorType {
+  USER
+  WEBHOOK
+  SYSTEM
+  RECONCILE
+}
+
+enum TouchDirection {
+  OUTBOUND
+  INBOUND
+}
+
+enum Channel {
+  EMAIL
+  CALL
+  LINKEDIN
+}
+
+// ---------------------------------------------------------------------------
+// Users, sessions, pods
+// ---------------------------------------------------------------------------
+
+model User {
+  id             String    @id @default(uuid())
+  email          String    @unique
+  passwordHash   String
+  name           String
+  role           Role
+  /// Twenty workspaceMember id this user maps to (outbound activity is matched on it).
+  twentyMemberId String?   @unique
+  /// Extra handles that identify this user in note titles, e.g. "tw_alisa".
+  aliases        String[]  @default([])
+  timezone       String    @default("Europe/London")
+  /// Per-user override of the daily action cap. Null = use the global setting.
+  dailyCap       Int?
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  pods           UserPod[]
+  sessions       Session[]
+  enrollments    Enrollment[] @relation("EnrollmentFo")
+  tasks          Task[]       @relation("TaskFo")
+  completedTasks Task[]       @relation("TaskCompletedBy")
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+/// A pod is the set of people whose Twenty `podOwner` equals `podOwnerValue`,
+/// worked by one or more FOs (UserPod).
+model Pod {
+  id            String   @id @default(uuid())
+  name          String   @unique
+  podOwnerValue String   @unique
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  users       UserPod[]
+  campaigns   Campaign[]
+  enrollments Enrollment[]
+}
+
+model UserPod {
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  podId  String
+  pod    Pod    @relation(fields: [podId], references: [id], onDelete: Cascade)
+
+  @@id([userId, podId])
+}
+
+// ---------------------------------------------------------------------------
+// Sequences (versioned)
+// ---------------------------------------------------------------------------
+
+model Sequence {
+  id              String   @id @default(uuid())
+  name            String   @unique
+  description     String?
+  archived        Boolean  @default(false)
+  activeVersionId String?  @unique
+  activeVersion   SequenceVersion? @relation("ActiveVersion", fields: [activeVersionId], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  versions    SequenceVersion[] @relation("SequenceVersions")
+  campaigns   Campaign[]
+  enrollments Enrollment[]
+}
+
+model SequenceVersion {
+  id          String   @id @default(uuid())
+  sequenceId  String
+  sequence    Sequence @relation("SequenceVersions", fields: [sequenceId], references: [id], onDelete: Cascade)
+  version     Int
+  /// SequenceStep[] - see src/lib/sequences/steps.ts for the schema.
+  steps       Json
+  changeNote  String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  activeFor   Sequence?    @relation("ActiveVersion")
+  enrollments Enrollment[]
+  tasks       Task[]
+
+  @@unique([sequenceId, version])
+}
+
+// ---------------------------------------------------------------------------
+// Campaigns and enrollments
+// ---------------------------------------------------------------------------
+
+model Campaign {
+  id             String         @id @default(uuid())
+  name           String
+  sequenceId     String
+  sequence       Sequence       @relation(fields: [sequenceId], references: [id])
+  podId          String
+  pod            Pod            @relation(fields: [podId], references: [id])
+  sourceType     CampaignSource @default(IDS)
+  /// Twenty view id (TWENTY_VIEW) or a free-text description of the source.
+  sourceRef      String?
+  /// Person ids the campaign was created from (kept for re-enroll and audit).
+  personIds      String[]       @default([])
+  assignmentMode AssignmentMode @default(OWNER)
+  /// YYYY-MM-DD, first start date for enrollments.
+  startDate      String
+  /// Max new enrollments started per FO per working day. Null = unlimited.
+  dailyRampPerFo Int?
+  status         CampaignStatus @default(DRAFT)
+  notes          String?
+  createdById    String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  enrollments Enrollment[]
+}
+
+model Enrollment {
+  id                String           @id @default(uuid())
+  personId          String
+  person            PersonCache      @relation(fields: [personId], references: [id])
+  companyId         String?
+  foUserId          String
+  fo                User             @relation("EnrollmentFo", fields: [foUserId], references: [id])
+  podId             String?
+  pod               Pod?             @relation(fields: [podId], references: [id])
+  campaignId        String?
+  campaign          Campaign?        @relation(fields: [campaignId], references: [id])
+  sequenceId        String
+  sequence          Sequence         @relation(fields: [sequenceId], references: [id])
+  /// Version used for the most recently generated step ("which version the enrollment is on").
+  sequenceVersionId String
+  sequenceVersion   SequenceVersion  @relation(fields: [sequenceVersionId], references: [id])
+  /// YYYY-MM-DD in the FO's timezone. Day 1 of the sequence.
+  startDate         String
+  /// Index of the latest step whose tasks have been generated. -1 = none yet.
+  currentStep       Int              @default(-1)
+  /// Accumulated delay (calendar days) applied to not-yet-generated steps (clock mode = shift).
+  shiftDays         Int              @default(0)
+  status            EnrollmentStatus @default(ACTIVE)
+  exitReason        String?
+  pausedAt          DateTime?
+  pauseReason       String?
+  repliedAt         DateTime?
+  meetingAt         DateTime?
+  completedAt       DateTime?
+  exitedAt          DateTime?
+  createdById       String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  tasks Task[]
+
+  @@index([personId, status])
+  @@index([foUserId, status])
+  @@index([campaignId])
+  @@index([companyId])
+  @@index([status])
+}
+
+model Task {
+  id                String            @id @default(uuid())
+  enrollmentId      String
+  enrollment        Enrollment        @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  foUserId          String
+  fo                User              @relation("TaskFo", fields: [foUserId], references: [id])
+  sequenceVersionId String
+  sequenceVersion   SequenceVersion   @relation(fields: [sequenceVersionId], references: [id])
+  stepIndex         Int
+  stepId            String
+  stepDay           Int
+  actionIndex       Int
+  actionId          String
+  action            ActionType
+  /// Either/or secondary action the FO may pick instead of `action`.
+  altAction         ActionType?
+  /// Which of action/altAction was actually performed (set on completion).
+  chosenAction      ActionType?
+  label             String
+  /// YYYY-MM-DD in the FO's timezone (after caps/rollover).
+  dueDate           String
+  /// The same instant as 09:00 local on dueDate, for ordering and display.
+  dueAt             DateTime
+  /// The date the sequence plan asked for, before caps/rollover.
+  plannedDate       String
+  /// YYYY-MM-DD the FO snoozed the task to (shown under that date instead of dueDate).
+  snoozedTo         String?
+  state             TaskState         @default(PENDING)
+  completedAt       DateTime?
+  completedById     String?
+  completedBy       User?             @relation("TaskCompletedBy", fields: [completedById], references: [id])
+  completionSource  CompletionSource?
+  /// External evidence id (note:<id>, message:<id>, twentyTask:<id>).
+  evidenceId        String?
+  skipReason        String?
+  cancelReason      String?
+  /// Twenty Task mirrored while open (setting `mirrorOpenTasks`).
+  twentyTaskId      String?
+  /// Twenty Note written on completion.
+  twentyNoteId      String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@unique([enrollmentId, stepIndex, actionIndex])
+  @@index([foUserId, state, dueDate])
+  @@index([state, dueDate])
+  @@index([evidenceId])
+  @@index([twentyTaskId])
+}
+
+// ---------------------------------------------------------------------------
+// Twenty read cache and observed activity
+// ---------------------------------------------------------------------------
+
+model PersonCache {
+  id              String    @id
+  firstName       String    @default("")
+  lastName        String    @default("")
+  email           String?
+  phone           String?
+  linkedinUrl     String?
+  jobTitle        String?
+  companyId       String?
+  companyName     String?
+  dnd             Boolean   @default(false)
+  podOwner        String?
+  ownerMemberId   String?
+  tags            String[]  @default([])
+  eventSource     String?
+  statusOfMeeting String?
+  city            String?
+  raw             Json?
+  twentyUpdatedAt DateTime?
+  deletedAt       DateTime?
+  syncedAt        DateTime  @default(now())
+
+  enrollments Enrollment[]
+  touches     Touch[]
+
+  @@index([companyId])
+  @@index([podOwner])
+  @@index([email])
+  @@index([lastName, firstName])
+  @@index([ownerMemberId])
+}
+
+model CompanyCache {
+  id       String   @id
+  name     String
+  domain   String?
+  syncedAt DateTime @default(now())
+}
+
+/// Every observed or performed touch on a person, across channels.
+model Touch {
+  id          String         @id @default(uuid())
+  personId    String
+  person      PersonCache    @relation(fields: [personId], references: [id], onDelete: Cascade)
+  channel     Channel
+  direction   TouchDirection
+  occurredAt  DateTime
+  summary     String
+  /// Unique source reference, e.g. note:<id>, message:<id>, task:<cadenceTaskId>.
+  externalId  String         @unique
+  actorUserId String?
+  actorLabel  String?
+  createdAt   DateTime       @default(now())
+
+  @@index([personId, occurredAt])
+  @@index([occurredAt])
+}
+
+/// Raw inbound events (webhooks, reconcile scans) with dedupe and processing result.
+model ActivityEvent {
+  id                String      @id @default(uuid())
+  source            EventSource
+  objectType        String
+  eventName         String
+  externalId        String
+  externalUpdatedAt DateTime?
+  /// `${objectType}:${externalId}:${externalUpdatedAt ?? eventName}` - unique so a record
+  /// version is processed once.
+  dedupeKey         String      @unique
+  payload           Json
+  receivedAt        DateTime    @default(now())
+  processedAt       DateTime?
+  result            String?
+  needsReview       Boolean     @default(false)
+  reviewNote        String?
+
+  @@index([objectType, externalId])
+  @@index([needsReview])
+  @@index([receivedAt])
+}
+
+/// Every write Cadence makes (or would make, in dry run) to Twenty.
+model TwentyWrite {
+  id         String   @id @default(uuid())
+  operation  String
+  objectType String
+  twentyId   String?
+  taskId     String?
+  payload    Json
+  dryRun     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([taskId])
+  @@index([twentyId])
+}
+
+model AuditLog {
+  id         String    @id @default(uuid())
+  entityType String
+  entityId   String
+  action     String
+  actorType  ActorType
+  actorId    String?
+  actorLabel String?
+  details    Json?
+  createdAt  DateTime  @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}

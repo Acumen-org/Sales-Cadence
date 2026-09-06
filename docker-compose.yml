@@ -1,0 +1,54 @@
+# Cadence beside Twenty. Twenty stays the system of record.
+# Windows (Docker Desktop) and Linux: `docker compose up -d --build`.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cadence
+      POSTGRES_PASSWORD: cadence
+      POSTGRES_DB: cadence
+    volumes:
+      - cadence-db:/var/lib/postgresql/data
+    ports:
+      # Published on 5433 so it never collides with Twenty's own Postgres.
+      - "${CADENCE_DB_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cadence -d cadence"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  web:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://cadence:cadence@db:5432/cadence
+      NODE_ENV: production
+    ports:
+      - "${CADENCE_PORT:-3100}:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["sh", "docker/entrypoint.sh", "web"]
+
+  worker:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://cadence:cadence@db:5432/cadence
+      NODE_ENV: production
+      SEED_ON_START: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_started
+    command: ["sh", "docker/entrypoint.sh", "worker"]
+
+volumes:
+  cadence-db:
