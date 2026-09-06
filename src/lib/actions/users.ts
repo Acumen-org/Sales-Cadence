@@ -7,7 +7,7 @@ import { requireAdmin } from '../auth/current-user';
 import { hashPassword, validatePasswordStrength } from '../auth/password';
 import { logAudit, userActor } from '../audit';
 
-export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
+export type ActionResult = { ok: true; message?: string; redirectTo?: string; data?: unknown } | { ok: false; error: string };
 
 const RoleSchema = z.enum(['ADMIN', 'SENIOR_FO', 'JUNIOR_FO']);
 

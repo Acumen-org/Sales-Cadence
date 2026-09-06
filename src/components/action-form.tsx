@@ -11,7 +11,7 @@ type Props = {
   /** Reset the form fields after a successful submit. */
   resetOnSuccess?: boolean;
   confirm?: string;
-  onSuccess?: (r: { ok: true; message?: string }) => void;
+  onSuccess?: (r: Extract<ActionResult, { ok: true }>) => void;
 };
 
 /**
