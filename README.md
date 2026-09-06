@@ -6,11 +6,12 @@ Cadence never sends email or automates LinkedIn. Humans do every touch.
 
 ## What it does
 
-- **Tasks**: today / overdue / upcoming, filter by pod and FO, Outreach-style task flow (one task at a time, brief on the right, Done / Skip / Snooze / Next).
-- **Sequences**: versioned step plans (day offsets, email / call / LinkedIn actions, either/or steps, templates with `{{firstName}} {{company}} {{jobTitle}} {{eventSource}} {{foFirstName}}`). Editing creates a new version; running enrollments pick it up at their next step.
-- **Campaigns**: enrol from pasted ids, a CSV export or a saved Twenty view; conflict preview (dnd, already enrolled, unknown); FO assignment by Twenty owner or round robin; daily ramp; funnel by step and FO; pause / stop / re-enrol non-repliers.
-- **People**: fast searchable list from a local cache of Twenty people with enrollment status, last touch, pod and FO; row actions enrol / exit.
-- **Reports**: by pod, FO, campaign, sequence and channel; overdue and stalled lists.
+- **Home**: today's calls, emails and LinkedIn touches with one-click task flow per type, replies and meetings this week, team view for managers.
+- **Tasks**: today / overdue / upcoming by type, filter by pod and FO, Outreach-style task flow (one task at a time, brief on the right). Done / Skip with a reason / Snooze / Next, call outcomes (dispositions) with notes, Finish (Replied) / Finish (No reply) / Move to step / Remove, bulk actions, keyboard shortcuts.
+- **Sequences**: versioned step plans (day offsets, email / call / LinkedIn actions, either/or steps, A/B template variants, templates with `{{firstName}} {{company}} {{jobTitle}} {{eventSource}} {{foFirstName}}`). Editing creates a new version; running enrollments pick it up at their next step. Per-step funnel and per-variant reply stats.
+- **Campaigns**: enrol from pasted ids, a CSV export, a saved Twenty view or a bulk selection on People; conflict preview (dnd, opted out, already enrolled, unknown); FO assignment by Twenty owner or round robin; daily ramp; funnel by step and FO; pause / stop / re-enrol non-repliers.
+- **People**: fast searchable list from a local cache of Twenty people with Outreach-style stages (Cold, Approaching, Replied, Unresponsive, Bad data, Do not contact), last touch, pod and FO; a person page with the activity timeline, sequence history and controls.
+- **Reports**: activity leaderboard per FO, and roll-ups by pod, FO, campaign, sequence and channel; overdue and stalled lists.
 - **Twenty integration**: webhooks + nightly reconcile complete email and call steps from Twenty activity, replies close open tasks, meetings and dnd flips are honoured, every completed action is written back as a `[Cadence] ...` note and open tasks are mirrored as Twenty Tasks. `CADENCE_DRY_RUN=true` logs writes without making them.
 
 Full list of assumptions: [DECISIONS.md](DECISIONS.md). Connecting a real workspace: [INTEGRATION.md](INTEGRATION.md).
@@ -94,10 +95,14 @@ pnpm worker              # scheduler + nightly jobs, in a second terminal
 Tests need neither Docker nor a running Postgres: `pnpm test` starts an embedded Postgres, applies the migrations, and runs everything against the mock Twenty client. Set `TEST_DATABASE_URL` to use an existing database instead.
 
 ```bash
-pnpm typecheck
-pnpm test
+pnpm typecheck     # TypeScript
+pnpm lint          # ESLint (Next core-web-vitals + TypeScript rules)
+pnpm test          # Vitest on an embedded Postgres (engine, ingestion, queries, GraphQL client)
+pnpm test:e2e      # Playwright: builds, starts the app on a fresh database, drives real browser flows
 pnpm build
 ```
+
+The end-to-end suite covers demo sign-in, campaign creation with the conflict preview, the task flow (done, log a call with an outcome, skip with a bounce, answered call finishing as replied), sequence editing, settings, role restrictions, reports and the people pages.
 
 ## Roles
 

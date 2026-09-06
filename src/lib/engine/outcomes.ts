@@ -1,5 +1,5 @@
 import { prisma } from '../db';
-import { logAudit, type AuditActor } from '../audit';
+import { logAudit } from '../audit';
 import { getSettings, type RulesSettings } from '../settings';
 import { exitEnrollment, finishEnrollment, markReplied, setPersonFlags } from './enrollment';
 import { advanceEnrollment, cancelOpenTasks, completeTask, skipTask, syncCancelled, type EngineContext, type ResolveResult } from './tasks';

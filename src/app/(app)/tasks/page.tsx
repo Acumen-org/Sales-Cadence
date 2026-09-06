@@ -15,7 +15,7 @@ import { TaskFilters } from '@/components/tasks/task-filters';
 import { TaskList } from '@/components/tasks/task-list';
 import { Badge, EmptyState, Notice, PageHeader, Tabs } from '@/components/ui';
 
-type Search = { tab?: string; mode?: string; task?: string; pod?: string; fo?: string; type?: string };
+type Search = { tab?: string; mode?: string; task?: string; pod?: string; fo?: string; type?: string; flash?: string };
 
 const TAB_LABELS: Record<TaskTab, string> = { today: 'Today', overdue: 'Overdue', upcoming: 'Upcoming', done: 'Done' };
 const CHANNEL_LABELS: Record<TaskChannel, string> = { CALL: 'Calls', EMAIL: 'Emails', LINKEDIN: 'LinkedIn' };
@@ -108,6 +108,16 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
           </Link>
         ) : null}
       </div>
+      {sp.flash ? (
+        <div className="px-6 pt-4">
+          <Notice tone="success">
+            <span role="status">{sp.flash.slice(0, 300)}</span>{' '}
+            <Link href={withParams({ task: selectedId ?? null })} className="ml-2 text-xs underline">
+              dismiss
+            </Link>
+          </Notice>
+        </div>
+      ) : null}
       {tab !== 'overdue' && counts.overdue > 0 ? (
         <div className="px-6 pt-4">
           <Notice tone="error">
@@ -126,16 +136,16 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
           hint={tab === 'today' ? 'Nothing due today for this view. Check Upcoming, or enrol more people from Campaigns.' : undefined}
         />
       ) : (
-        <div className="grid gap-4 p-6 xl:grid-cols-[minmax(0,1fr)_400px]">
-          <div className={mode === 'list' ? 'grid gap-4 lg:grid-cols-[380px_minmax(0,1fr)]' : ''}>
+        <div className="grid gap-4 p-6 2xl:grid-cols-[minmax(0,1fr)_400px]">
+          <div className={mode === 'list' ? 'grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]' : ''}>
             {mode === 'list' ? (
-              <div className="card max-h-[calc(100vh-16rem)] overflow-y-auto">
+              <div className="card max-h-[50vh] overflow-y-auto xl:max-h-[calc(100vh-16rem)]">
                 <TaskList
                   rows={listRows}
                   selectedId={selectedId}
                   today={today}
                   showFo={manager}
-                  hrefFor={hrefFor}
+                  hrefTemplate={withParams({ task: '__ID__' })}
                   dispositions={dispositions}
                   skipReasons={skipReasons}
                   fos={reassignFos.map((f) => ({ id: f.id, name: f.name }))}
@@ -230,7 +240,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
               )}
             </div>
           </div>
-          <aside className="xl:sticky xl:top-6 xl:self-start">{brief ? <TaskBriefPanel brief={brief} timezone={user.timezone} /> : null}</aside>
+          <aside className="2xl:sticky 2xl:top-6 2xl:self-start">{brief ? <TaskBriefPanel brief={brief} timezone={user.timezone} /> : null}</aside>
         </div>
       )}
     </>

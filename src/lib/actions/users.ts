@@ -27,7 +27,9 @@ function formToObject(formData: FormData) {
   const obj: Record<string, unknown> = {};
   for (const [k, v] of formData.entries()) {
     if (k === 'podIds') {
-      (obj.podIds as string[] | undefined) ? (obj.podIds as string[]).push(String(v)) : (obj.podIds = [String(v)]);
+      const list = (obj.podIds as string[] | undefined) ?? [];
+      list.push(String(v));
+      obj.podIds = list;
     } else {
       obj[k] = typeof v === 'string' ? v : undefined;
     }

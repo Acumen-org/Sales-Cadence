@@ -138,7 +138,7 @@ describe('TwentyGraphqlClient', () => {
   });
 
   it('introspects via the metadata API and extracts select options', async () => {
-    const { client, calls } = fakeClient((call) => {
+    const { client } = fakeClient((call) => {
       if (call.url.endsWith('/metadata')) {
         return {
           data: {

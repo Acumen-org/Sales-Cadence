@@ -33,7 +33,8 @@ type Props = {
   selectedId: string | null;
   today: LocalDate;
   showFo: boolean;
-  hrefFor: (taskId: string) => string;
+  /** URL of a task row with `__ID__` in place of the task id (functions cannot cross to the client). */
+  hrefTemplate: string;
   dispositions: DispositionOption[];
   skipReasons: SkipReasonOption[];
   fos: { id: string; name: string }[];
@@ -42,8 +43,9 @@ type Props = {
   bulkEnabled: boolean;
 };
 
-export function TaskList({ rows, selectedId, today, showFo, hrefFor, dispositions, skipReasons, fos, nextWorkingDay, canPickSnoozeDate, bulkEnabled }: Props) {
+export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispositions, skipReasons, fos, nextWorkingDay, canPickSnoozeDate, bulkEnabled }: Props) {
   const router = useRouter();
+  const hrefFor = (id: string) => hrefTemplate.replace('__ID__', encodeURIComponent(id));
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [op, setOp] = useState<'complete' | 'skip' | 'snooze' | 'reassign'>('complete');
   const [reasonKey, setReasonKey] = useState(skipReasons[0]?.key ?? 'other');

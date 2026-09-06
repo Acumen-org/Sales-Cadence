@@ -106,7 +106,7 @@ async function main() {
   if (!env.TWENTY_MODE) env.TWENTY_MODE = 'mock';
 
   // 1. database
-  const databaseDir = path.join(root, '.pgdata-dev');
+  const databaseDir = path.resolve(root, process.env.DEV_DB_DIR ?? '.pgdata-dev');
   const fresh = !fs.existsSync(path.join(databaseDir, 'PG_VERSION'));
   if (!fresh) fs.rmSync(path.join(databaseDir, 'postmaster.pid'), { force: true }); // stale lock from a hard exit
   const mod = await import('embedded-postgres');

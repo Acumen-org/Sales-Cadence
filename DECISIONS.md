@@ -124,3 +124,30 @@ Every assumption made while building Cadence, grouped by area. Each entry says w
 - **Transport**: `fetch` with a 20 s timeout, one retry on network errors and 5xx, readable `TwentyApiError`s carrying HTTP status and GraphQL errors. The `fetch` implementation is injectable so the client is unit-tested against a fake Twenty without a server.
 - **Dry run** is implemented once, as a wrapper around any client (`DryRunTwentyClient`): reads pass through, writes are logged to the console and to `TwentyWrite` with `dryRun = true`, fake ids (`dry-note-...`, `dry-task-...`) flow back so the engine behaves exactly as in production.
 - **Ping** lists workspace members, which needs nothing but a valid API key and confirms both the URL and the key.
+
+## Outreach parity (round 2)
+
+Sources checked: Outreach support articles on sequence states, manual prospect actions, task management, call dispositions and A/B testing (see the commit message for links). What was adopted, and how it maps onto "humans do every touch":
+
+- **Task types as buckets.** Tasks filter by Calls / Emails / LinkedIn (Outreach's task categories) with counts per bucket; Home shows today's work per bucket with a "Start" that opens the task flow for that type.
+- **Calls need a disposition.** Outreach does not count a call as complete without one. `settings.rules.callDispositions` (editable) map to Answered / Not answered; an answered disposition counts as a reply and finishes the sequence when `answeredCallIsReply` is on (Outreach: "replies apply to ... a call logged with a disposition mapped to Answered"). "Wrong number" flags the phone as bad data. Call notes are stored on the task and written into the Twenty note (`[Cadence] Call 1 made by Alisa - Left voicemail`).
+- **Skip reasons with consequences.** Outreach has Bounced / Opted Out states and Finish actions. Cadence offers configurable skip reasons; some end the enrollment (bounced, not interested, opted out, bad data) and flag the person (`badEmail`, `badPhone`, `optedOut`). `exitOnBounce` is a rule. Opted-out people can never be enrolled again from Cadence; Twenty's `dnd` is still the record and is never written by Cadence.
+- **Finish (Replied) / Finish (No Reply) / Pause / Move to step / Remove** are available from the task flow overflow and the person page, matching Outreach's manual sequence actions. Move to step cancels the current step's pending tasks and generates the target step due now (never retroactively overdue).
+- **Bulk actions** (mark done, skip, snooze, reassign) on the task list, Outreach style. Bulk-completing calls requires one outcome for all selected calls.
+- **A/B templates** on email actions: variants get balanced random assignment at task creation (Outreach randomises then evens out); a disabled variant stops receiving new tasks but existing tasks keep theirs; per-variant stats attribute a reply to the last email variant sent before it. No automatic winner, as in Outreach.
+- **Status wording** follows Outreach: Active, Paused, Finished (Replied), Finished (No reply), Bounced, Opted out, Do not contact, Removed. Prospect **stages** are derived, not stored: Cold, Approaching, Replied, Meeting booked, Unresponsive, Bad data, Do not contact.
+- **Keyboard shortcuts** in the task flow (D, S, Z, N/P, C, O, M, 1-9 for outcomes, Enter, Esc). Digits are ignored while typing in the notes box on purpose. Outreach's own shortcuts are mostly global (search, compose); the task-flow keys are ours.
+- **Not adopted**: automatic email sending, mailbox assignment, snippets library, task priorities, triggers, out-of-office auto-pause, sequential dialing. Either they need sending, or they add little for a human-executed cadence.
+
+## QA round: what the tests found
+
+- **ESLint** (`pnpm lint`, Next core-web-vitals + TypeScript) added; the codebase is clean.
+- **Playwright end-to-end** (`pnpm test:e2e`) drives the production build through the launcher on a fresh embedded database: demo sign-in, campaign creation with conflict preview, the whole task flow (done, log a call with an outcome, skip with a bounce), answered call finishing as replied, sequence editing to a new version, settings save, role restrictions, reports and people pages.
+- Bugs found by the browser tests and fixed:
+  - `Field` rendered labels with no association to their controls (accessibility defect); now `htmlFor` + `useId`.
+  - The Tasks page passed a function to a client component, which Next.js rejects at runtime; the task list crashed. Replaced with a URL template.
+  - At 1280px the three-column task layout squeezed the task card to a sliver and the outcome buttons overlapped. The brief now drops below the card until 1536px and the outcome grid sizes by container.
+  - Confirmation messages disappeared when the completed task left the list (page re-rendered to the empty state). Confirmations now travel in the URL (`?flash=`) and render as a notice.
+  - **Stale settings after save**: the in-process settings cache lived in module scope; Next.js instantiates page and server-action bundles separately, so invalidation from the action never reached the page. The cache now lives on `globalThis`, the same fix Prisma clients use. The Twenty client cache was moved for the same reason.
+  - Keyboard `D` on an either/or task opened the overflow menu instead of completing the primary action.
+- Process hygiene: the launcher now spawns Node directly (no shell wrapper) so stopping it reliably kills the web, worker and database; `DEV_DB_DIR` lets tests use an isolated database directory.

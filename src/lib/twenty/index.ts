@@ -62,7 +62,8 @@ export class DryRunTwentyClient implements TwentyClient {
   }
 }
 
-let cachedReal: { key: string; client: TwentyClient } | undefined;
+// globalThis so every Next.js bundle in the process shares one client instance (and its field cache).
+const g = globalThis as unknown as { __cadenceTwentyClient?: { key: string; client: TwentyClient } };
 
 /**
  * The client the app should use right now: mock or GraphQL (per settings/env),
@@ -79,10 +80,10 @@ export async function getTwentyClient(): Promise<TwentyClient> {
     }
     const schema = await getTwentySchema();
     const key = `${conn.baseUrl}|${conn.apiKey}|${JSON.stringify(schema)}`;
-    if (!cachedReal || cachedReal.key !== key) {
-      cachedReal = { key, client: new TwentyGraphqlClient({ baseUrl: conn.baseUrl, apiKey: conn.apiKey, schema }) };
+    if (!g.__cadenceTwentyClient || g.__cadenceTwentyClient.key !== key) {
+      g.__cadenceTwentyClient = { key, client: new TwentyGraphqlClient({ baseUrl: conn.baseUrl, apiKey: conn.apiKey, schema }) };
     }
-    base = cachedReal.client;
+    base = g.__cadenceTwentyClient.client;
   }
   return conn.dryRun ? new DryRunTwentyClient(base) : base;
 }
