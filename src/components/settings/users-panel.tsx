@@ -4,6 +4,7 @@ import { Fragment, useState } from 'react';
 import type { Role } from '@prisma/client';
 import { ROLE_LABELS } from '@/lib/auth/rbac';
 import { createPodAction, createUserAction, deletePodAction, updateUserAction } from '@/lib/actions/users';
+import { syncPodsAction } from '@/lib/actions/admin';
 import { ActionButton, ActionForm } from '@/components/action-form';
 import { Badge, Card, Field } from '@/components/ui';
 
@@ -20,7 +21,7 @@ export type UserRow = {
   podIds: string[];
 };
 
-export type PodRow = { id: string; name: string; podOwnerValue: string; userCount: number };
+export type PodRow = { id: string; name: string; podOwnerValue: string; userCount: number; peopleCount: number; discovered: boolean };
 export type MemberOption = { id: string; label: string };
 
 const ROLES: Role[] = ['ADMIN', 'SENIOR_FO', 'JUNIOR_FO'];
@@ -179,7 +180,17 @@ export function UsersPanel({ users, pods, members }: { users: UserRow[]; pods: P
         </table>
       </Card>
 
-      <Card title="Pods">
+      <Card
+        title="Pods"
+        actions={
+          <ActionButton action={() => syncPodsAction()} payload={{}} className="btn-secondary btn-sm" title="Create or rename pods from the podOwner options in Twenty">
+            Sync pods from Twenty
+          </ActionButton>
+        }
+      >
+        <div className="border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
+          Which pod a person belongs to comes from Twenty (the podOwner field). New values create pods automatically; option labels renamed in Twenty rename the pod here. Which FOs work a pod is set on each user above.
+        </div>
         <div className="grid gap-4 p-4 md:grid-cols-2">
           <div>
             <table className="table">
@@ -187,6 +198,7 @@ export function UsersPanel({ users, pods, members }: { users: UserRow[]; pods: P
                 <tr>
                   <th>Pod</th>
                   <th>Twenty podOwner value</th>
+                  <th>People</th>
                   <th>FOs</th>
                   <th></th>
                 </tr>
@@ -194,10 +206,15 @@ export function UsersPanel({ users, pods, members }: { users: UserRow[]; pods: P
               <tbody>
                 {pods.map((p) => (
                   <tr key={p.id}>
-                    <td className="font-medium">{p.name}</td>
+                    <td className="font-medium">
+                      {p.name}
+                      {p.discovered ? <Badge tone="amber" className="ml-2">discovered from Twenty</Badge> : null}
+                      {p.userCount === 0 ? <Badge tone="red" className="ml-2">no FOs</Badge> : null}
+                    </td>
                     <td>
                       <code className="text-xs">{p.podOwnerValue}</code>
                     </td>
+                    <td>{p.peopleCount}</td>
                     <td>{p.userCount}</td>
                     <td className="text-right">
                       <ActionButton action={deletePodAction} payload={{ podId: p.id }} className="btn-ghost btn-sm text-red-600" confirm={`Delete pod ${p.name}?`}>
@@ -208,8 +225,8 @@ export function UsersPanel({ users, pods, members }: { users: UserRow[]; pods: P
                 ))}
                 {pods.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="text-slate-500">
-                      No pods. Add one per podOwner value used in Twenty.
+                    <td colSpan={5} className="text-slate-500">
+                      No pods yet. Click &quot;Sync pods from Twenty&quot;, or add one per podOwner value used in Twenty.
                     </td>
                   </tr>
                 ) : null}

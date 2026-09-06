@@ -99,6 +99,14 @@ async function main() {
   process.on('SIGINT', () => void shutdown(0));
   process.on('SIGTERM', () => void shutdown(0));
   process.on('SIGHUP', () => void shutdown(0));
+  // Last resort: if the parent is torn down without a signal handler running, take the children with it.
+  process.on('exit', () => {
+    for (const c of children) {
+      if (!c.pid) continue;
+      if (isWin) spawnSync('taskkill', ['/PID', String(c.pid), '/T', '/F'], { stdio: 'ignore' });
+      else c.kill('SIGKILL');
+    }
+  });
 
   ensureEnv();
   const fileEnv = readEnvFile();

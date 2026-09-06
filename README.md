@@ -18,9 +18,13 @@ Full list of assumptions: [DECISIONS.md](DECISIONS.md). Connecting a real worksp
 
 ## Quickest start (Windows, no Docker)
 
-Double-click **start-cadence.cmd**. It installs dependencies on the first run, starts an embedded Postgres, applies migrations, seeds the demo workspace, starts the app and worker, and opens http://localhost:3100/login in your browser. The login page has one-click "sign in as" buttons for the demo users (mock mode only). Close the window to stop; data is kept in `.pgdata-dev`.
+Double-click **start-cadence.cmd**. It installs dependencies on the first run, starts an embedded Postgres, applies migrations, seeds the dummy workspace, starts the app and worker, and opens http://localhost:3100/login in your browser. The login page has one-click "sign in as" buttons for the demo users (mock mode only). Close the window to stop; data is kept in `.pgdata-dev`.
 
 The same thing from a terminal: `pnpm start:local`.
+
+**The dummy data** (everything is named "Dummy ..." so it cannot be mistaken for real data): two pods (Alisa's pod, Andrew's pod) plus one discovered from a person's `podOwner` value; one user per role (Admin, Alisa and Andrew as Senior FOs, Karson and Daniel as Junior FOs); three Dummy Companies and twelve Dummy people; a campaign per pod with enrollments in every state: active, overdue, replied, bounced, finished, meeting booked, and one dnd person who could not be enrolled. To start over, delete `.pgdata-dev` and launch again.
+
+**Pods follow Twenty.** Which pod a person is in comes from Twenty's `podOwner` field: unknown values create pods automatically, option labels renamed in Twenty rename the pod here. Admins decide which FOs work each pod and who can log in (Settings > Users and pods). What Cadence writes back to Twenty is spelled out in [INTEGRATION.md](INTEGRATION.md#what-cadence-writes-to-twenty-and-what-it-never-touches): only `[Cadence]` activity notes and mirrored tasks, never person fields.
 
 ## Status
 

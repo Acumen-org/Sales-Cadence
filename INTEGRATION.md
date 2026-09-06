@@ -123,6 +123,30 @@ Turn dry run off (`CADENCE_DRY_RUN=false`), remove `demo` from `SEED_PROFILE`, r
 
 When the pilot pod is happy, add the other pods.
 
+## What Cadence writes to Twenty (and what it never touches)
+
+Writes, and only these:
+
+| When | What Cadence creates or edits in Twenty |
+|---|---|
+| An FO completes an action (or Twenty activity completes it) | One **Note** on the person: `[Cadence] Email 2 sent by Alisa`, `[Cadence] Call 1 made by Alisa - Left voicemail`. Body: sequence, step, outcome, the FO's notes, source. |
+| A Cadence task is generated (setting *Mirror open tasks*, on by default) | One **Task**: `Cadence: Email 1 - Dummy One`, assigned to the FO, due on the task day, linked to the person. |
+| That Cadence task is done / skipped / cancelled | The mirrored Task is marked done, or deleted (setting *Delete mirrored task on skip*). |
+
+Never: person, company or opportunity fields (`dnd`, `podOwner`, emails, stages...), notes or tasks Cadence did not create, messages. Opt-out and bad-data flags set in Cadence stay in Cadence; set `dnd` in Twenty yourself if it should apply everywhere. Every write appears in **Settings > Activity log > Writes to Twenty**; `CADENCE_DRY_RUN=true` logs them without writing.
+
+Sync is immediate in both directions: webhooks are processed as Twenty sends them, every Cadence write happens right after the action that caused it, and opening a person in Cadence re-reads that person from Twenty. The nightly reconcile only catches anything a webhook missed.
+
+## Pods follow Twenty
+
+A pod is a `podOwner` value. Cadence keeps its pod list aligned with Twenty automatically:
+
+- a person arriving with a value Cadence has never seen creates the pod at once, marked "discovered from Twenty" in Settings > Users and pods;
+- **Sync pods from Twenty** (also run on every cache refresh and nightly) reads the select's options and creates or renames pods: the option *label* becomes the pod name, the *value* stays the key. Rename a label in Twenty and the pod renames here;
+- Cadence never deletes a pod by itself; retire an emptied pod in Settings.
+
+Which FOs work a pod, and who can log in, is Cadence configuration (Settings > Users and pods, Admin only).
+
 ## Reference
 
 | Setting | Where | Default |

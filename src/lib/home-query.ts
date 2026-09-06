@@ -29,15 +29,17 @@ export async function buildHome(user: SessionUser, now = new Date()) {
   ]);
 
   const weekStart = new Date(now.getTime() - 7 * 86_400_000);
+  // Replies and meetings: own for juniors, the whole pod for seniors, everything for admins.
+  const pods = visiblePodIds(user);
+  const outcomeScope: Prisma.EnrollmentWhereInput = isAdmin(user) ? {} : isSeniorFo(user) ? { OR: [{ foUserId: user.id }, { podId: { in: pods ?? [] } }] } : { foUserId: user.id };
   const [replies, meetings] = await Promise.all([
-    prisma.enrollment.findMany({ where: { foUserId: user.id, repliedAt: { gte: weekStart } }, include: { person: true }, orderBy: { repliedAt: 'desc' }, take: 10 }),
-    prisma.enrollment.findMany({ where: { foUserId: user.id, meetingAt: { gte: weekStart } }, include: { person: true }, orderBy: { meetingAt: 'desc' }, take: 10 }),
+    prisma.enrollment.findMany({ where: { ...outcomeScope, repliedAt: { gte: weekStart } }, include: { person: true, fo: { select: { name: true } } }, orderBy: { repliedAt: 'desc' }, take: 10 }),
+    prisma.enrollment.findMany({ where: { ...outcomeScope, meetingAt: { gte: weekStart } }, include: { person: true, fo: { select: { name: true } } }, orderBy: { meetingAt: 'desc' }, take: 10 }),
   ]);
 
   // Team view (managers): today / overdue / done-this-week per FO in visible pods
   let team: Array<{ id: string; name: string; today: number; overdue: number; doneWeek: number; replies: number; meetings: number; active: number }> = [];
   if (isAdmin(user) || isSeniorFo(user)) {
-    const pods = visiblePodIds(user);
     const users = await prisma.user.findMany({
       where: { active: true, ...(pods === null ? {} : { pods: { some: { podId: { in: pods } } } }) },
       select: { id: true, name: true },
@@ -66,8 +68,8 @@ export async function buildHome(user: SessionUser, now = new Date()) {
     today,
     weekAgo: weekAgo as LocalDate,
     my: { today: myToday, overdue: myOverdue, upcoming: myUpcoming, todayTotal: total(myToday), overdueTotal: total(myOverdue), doneThisWeek, active: myActive },
-    replies: replies.map((e) => ({ id: e.id, personId: e.personId, name: `${e.person.firstName} ${e.person.lastName}`.trim(), company: e.person.companyName, at: e.repliedAt! })),
-    meetings: meetings.map((e) => ({ id: e.id, personId: e.personId, name: `${e.person.firstName} ${e.person.lastName}`.trim(), company: e.person.companyName, at: e.meetingAt! })),
+    replies: replies.map((e) => ({ id: e.id, personId: e.personId, name: `${e.person.firstName} ${e.person.lastName}`.trim(), company: e.person.companyName, at: e.repliedAt!, fo: e.fo.name })),
+    meetings: meetings.map((e) => ({ id: e.id, personId: e.personId, name: `${e.person.firstName} ${e.person.lastName}`.trim(), company: e.person.companyName, at: e.meetingAt!, fo: e.fo.name })),
     team,
     needsReview,
   };

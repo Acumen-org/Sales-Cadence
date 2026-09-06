@@ -32,7 +32,53 @@ export function personToCacheData(p: TwentyPerson): Prisma.PersonCacheUncheckedC
 export async function upsertPersonCache(p: TwentyPerson, tx: Tx | typeof prisma = prisma) {
   const data = personToCacheData(p);
   const { id, ...rest } = data;
-  return tx.personCache.upsert({ where: { id }, create: data, update: rest });
+  const row = await tx.personCache.upsert({ where: { id }, create: data, update: rest });
+  if (p.podOwner) await ensurePod(p.podOwner, null, tx);
+  return row;
+}
+
+/**
+ * Pods follow Twenty: a person arriving with a podOwner value Cadence has never seen creates the
+ * pod on the spot (marked as discovered) so nothing is lost. Admins then assign FOs to it.
+ */
+export async function ensurePod(podOwnerValue: string, label: string | null, tx: Tx | typeof prisma = prisma) {
+  const value = podOwnerValue.trim();
+  if (!value) return null;
+  const existing = await tx.pod.findUnique({ where: { podOwnerValue: value } });
+  if (existing) {
+    // Follow a renamed option label from Twenty (labels only; the stored value is the key).
+    if (label && label !== existing.name && !(await tx.pod.findFirst({ where: { name: label, NOT: { id: existing.id } } }))) {
+      return tx.pod.update({ where: { id: existing.id }, data: { name: label } });
+    }
+    return existing;
+  }
+  let name = label ?? value;
+  if (await tx.pod.findUnique({ where: { name } })) name = `${name} (${value})`;
+  const pod = await tx.pod.create({ data: { name, podOwnerValue: value, discoveredAt: label ? null : new Date() } });
+  await tx.auditLog.create({ data: { entityType: 'pod', entityId: pod.id, action: label ? 'created_from_twenty_options' : 'discovered', actorType: 'SYSTEM', actorLabel: 'twenty-sync', details: { podOwnerValue: value, label } } });
+  return pod;
+}
+
+/**
+ * Create or rename pods from the podOwner select options in Twenty (labels become pod names,
+ * values stay the key). Returns what changed. Never deletes: an option removed in Twenty leaves
+ * its pod in place for the admin to retire.
+ */
+export async function syncPodsFromTwenty(client: TwentyClient, podOwnerField = 'podOwner'): Promise<{ created: string[]; renamed: string[]; options: number }> {
+  const intro = await client.introspect();
+  const person = intro.objects.find((o) => o.nameSingular === 'person' || o.namePlural === 'people');
+  const field = person?.fields.find((f) => f.name === podOwnerField);
+  const created: string[] = [];
+  const renamed: string[] = [];
+  if (!field?.options?.length) return { created, renamed, options: 0 };
+  for (const value of field.options) {
+    const label = field.optionLabels?.[value] ?? null;
+    const before = await prisma.pod.findUnique({ where: { podOwnerValue: value } });
+    const after = await ensurePod(value, label);
+    if (!before && after) created.push(after.name);
+    else if (before && after && before.name !== after.name) renamed.push(`${before.name} -> ${after.name}`);
+  }
+  return { created, renamed, options: field.options.length };
 }
 
 export async function upsertCompanyCache(c: TwentyCompany, tx: Tx | typeof prisma = prisma) {
@@ -54,6 +100,11 @@ export async function markPersonDeleted(personId: string, tx: Tx | typeof prisma
 export async function refreshPersonCache(client: TwentyClient, opts: { since?: string } = {}) {
   let people = 0;
   let companies = 0;
+  try {
+    await syncPodsFromTwenty(client);
+  } catch (err) {
+    console.warn('[cache] pod sync skipped:', err instanceof Error ? err.message : String(err));
+  }
   for await (const person of paginate((after) => client.listPeople({ updatedSince: opts.since, after, limit: 100, includeDeleted: true }))) {
     await upsertPersonCache(person);
     people += 1;

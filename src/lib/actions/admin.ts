@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { requireAdmin } from '../auth/current-user';
 import { userActor } from '../audit';
-import { refreshPersonCache } from '../person-cache';
+import { refreshPersonCache, syncPodsFromTwenty } from '../person-cache';
 import { runSchedulerTick } from '../engine/tasks';
 import { reconcile } from '../engine/reconcile';
 import { resolveReview } from '../engine/ingest';
@@ -40,6 +40,21 @@ export async function refreshCacheAction(formData: FormData): Promise<ActionResu
     return { ok: true, message: `Cache refreshed: ${stats.people} people, ${stats.companies} companies${full ? ' (full)' : ' (changed in the last 36h)'}.` };
   } catch (err) {
     return { ok: false, error: `Refresh failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+
+/** Create or rename pods from the podOwner options in Twenty. */
+export async function syncPodsAction(): Promise<ActionResult> {
+  await requireAdmin();
+  try {
+    const client = await getTwentyClient();
+    const r = await syncPodsFromTwenty(client);
+    revalidatePath('/settings');
+    revalidatePath('/people');
+    if (!r.options) return { ok: false, error: 'Twenty did not report any podOwner options (check the field name in Settings > Twenty).' };
+    return { ok: true, message: `${r.options} pod options in Twenty. ${r.created.length ? `Created: ${r.created.join(', ')}. ` : ''}${r.renamed.length ? `Renamed: ${r.renamed.join(', ')}. ` : ''}${!r.created.length && !r.renamed.length ? 'Pods already match.' : ''}` };
+  } catch (err) {
+    return { ok: false, error: `Pod sync failed: ${err instanceof Error ? err.message : String(err)}` };
   }
 }
 

@@ -4,7 +4,7 @@ import { requireUser } from '@/lib/auth/current-user';
 import { canEnroll, canManageEnrollment, toActor, visiblePodIds } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
 import { formatInstant, formatLocalDate } from '@/lib/dates';
-import { cachedPersonName } from '@/lib/person-cache';
+import { cachedPersonName, upsertPersonCache } from '@/lib/person-cache';
 import { describeStep, parseSteps } from '@/lib/sequences/steps';
 import { getTwentyConnection } from '@/lib/settings';
 import { getTwentyClient } from '@/lib/twenty';
@@ -20,7 +20,20 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
   const user = await requireUser();
   const { id } = await params;
   const { tab = 'activity' } = await searchParams;
-  const person = await prisma.personCache.findUnique({ where: { id } });
+  let person = await prisma.personCache.findUnique({ where: { id } });
+  // Instant sync: re-read this person from Twenty on every visit so CRM edits show immediately,
+  // even between webhooks. Failures fall back to the cache.
+  let liveWarning: string | null = null;
+  try {
+    const client = await getTwentyClient();
+    const fresh = await client.getPerson(id);
+    if (fresh) {
+      await upsertPersonCache(fresh);
+      person = await prisma.personCache.findUnique({ where: { id } });
+    }
+  } catch (err) {
+    liveWarning = `Showing cached data; Twenty unavailable (${err instanceof Error ? err.message : String(err)}).`;
+  }
   if (!person) notFound();
   const actor = toActor(user);
 
@@ -129,7 +142,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
           <div className="pt-4">
             {tab === 'activity' ? (
               <Card title="Activity">
-                {twentyWarning ? <div className="px-4 pt-3 text-xs text-amber-700">{twentyWarning}</div> : null}
+                {twentyWarning ?? liveWarning ? <div className="px-4 pt-3 text-xs text-amber-700">{twentyWarning ?? liveWarning}</div> : null}
                 {items.length === 0 ? (
                   <div className="p-4 text-sm text-slate-500">No activity yet.</div>
                 ) : (
