@@ -72,7 +72,7 @@ export function SequenceEditor({ sequenceId, initialSteps, action, submitLabel, 
         {steps.map((step, i) => (
           <li key={step.id} className="card p-4">
             <div className="mb-3 flex flex-wrap items-end gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-800 text-sm font-semibold text-white">{i + 1}</div>
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink-900 text-sm font-semibold text-white">{i + 1}</div>
               <Field label="Day" className="w-24">
                 <input type="number" min={1} value={step.day} onChange={(e) => update(i, { day: Number(e.target.value) })} className="w-full" />
               </Field>
@@ -94,7 +94,7 @@ export function SequenceEditor({ sequenceId, initialSteps, action, submitLabel, 
 
             <div className="space-y-3">
               {step.actions.map((a, j) => (
-                <div key={a.id} className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                <div key={a.id} className="rounded-md border border-line bg-canvas p-3">
                   <div className="grid gap-3 md:grid-cols-[160px_1fr_auto]">
                     <Field label={j === 0 ? 'Action' : `Then`}>
                       <select value={a.type} onChange={(e) => updateAction(i, j, { type: e.target.value as ActionType, label: a.label === ACTION_LABELS[a.type] ? ACTION_LABELS[e.target.value as ActionType] : a.label })} className="w-full">
@@ -135,16 +135,16 @@ export function SequenceEditor({ sequenceId, initialSteps, action, submitLabel, 
                   </Field>
                   {a.type === 'EMAIL' ? (
                     <div className="mt-2 space-y-2">
-                      <label className="inline-flex items-center gap-1.5 text-sm font-normal text-slate-700">
+                      <label className="inline-flex items-center gap-1.5 text-sm font-normal text-ink-700">
                         <input type="checkbox" checked={Boolean(a.replyInThread)} onChange={(e) => updateAction(i, j, { replyInThread: e.target.checked || undefined })} className="h-4 w-4 rounded" />
                         Send as a reply in the existing thread
                       </label>
                       {(a.variants ?? []).map((v, k) => (
-                        <div key={v.id} className={`rounded-md border p-3 ${v.enabled === false ? 'border-slate-200 bg-slate-100 opacity-70' : 'border-violet-200 bg-violet-50/40'}`}>
+                        <div key={v.id} className={`rounded-md border p-3 ${v.enabled === false ? 'border-line bg-canvas opacity-70' : 'border-violet-200 bg-violet-50/40'}`}>
                           <div className="mb-2 flex flex-wrap items-center gap-2">
                             <span className="text-xs font-semibold uppercase tracking-wide text-violet-700">A/B variant</span>
                             <input value={v.label} onChange={(e) => updateAction(i, j, { variants: a.variants!.map((x, idx) => (idx === k ? { ...x, label: e.target.value } : x)) })} className="w-32 py-1 text-xs" />
-                            <label className="inline-flex items-center gap-1 text-xs font-normal text-slate-700">
+                            <label className="inline-flex items-center gap-1 text-xs font-normal text-ink-700">
                               <input type="checkbox" checked={v.enabled !== false} onChange={(e) => updateAction(i, j, { variants: a.variants!.map((x, idx) => (idx === k ? { ...x, enabled: e.target.checked } : x)) })} className="h-3.5 w-3.5 rounded" /> enabled
                             </label>
                             <button type="button" className="btn-ghost btn-sm text-red-600" onClick={() => updateAction(i, j, { variants: a.variants!.filter((_, idx) => idx !== k).length ? a.variants!.filter((_, idx) => idx !== k) : undefined })}>
@@ -176,8 +176,8 @@ export function SequenceEditor({ sequenceId, initialSteps, action, submitLabel, 
                     </div>
                   ) : null}
                   {a.alternative ? (
-                    <div className="mt-3 rounded-md border border-dashed border-slate-300 bg-white p-3">
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Or instead</div>
+                    <div className="mt-3 rounded-md border border-dashed border-line bg-white p-3">
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-500">Or instead</div>
                       <div className="grid gap-3 md:grid-cols-[160px_1fr]">
                         <Field label="Action">
                           <select value={a.alternative.type} onChange={(e) => updateAction(i, j, { alternative: { ...a.alternative!, type: e.target.value as ActionType } })} className="w-full">
@@ -216,7 +216,7 @@ export function SequenceEditor({ sequenceId, initialSteps, action, submitLabel, 
         <button type="button" className="btn-secondary" onClick={addStep}>
           <IconPlus size={16} /> Add step
         </button>
-        <span className="text-xs text-slate-500">Variables: {TEMPLATE_VARIABLES.map((v) => `{{${v}}}`).join(' ')}</span>
+        <span className="text-xs text-ink-500">Variables: {TEMPLATE_VARIABLES.map((v) => `{{${v}}}`).join(' ')}</span>
       </div>
 
       {askChangeNote ? (

@@ -76,16 +76,16 @@ function UserFields({ user, pods, members }: { user?: UserRow; pods: PodRow[]; m
         <label className="mb-1 block">Pods</label>
         <div className="flex flex-wrap gap-3">
           {pods.map((p) => (
-            <label key={p.id} className="inline-flex items-center gap-1.5 text-sm font-normal text-slate-700">
+            <label key={p.id} className="inline-flex items-center gap-1.5 text-sm font-normal text-ink-700">
               <input type="checkbox" name="podIds" value={p.id} defaultChecked={user?.podIds.includes(p.id)} className="h-4 w-4 rounded" />
               {p.name}
             </label>
           ))}
-          {pods.length === 0 ? <span className="text-xs text-slate-500">No pods yet.</span> : null}
+          {pods.length === 0 ? <span className="text-xs text-ink-500">No pods yet.</span> : null}
         </div>
       </div>
       {user ? (
-        <label className="inline-flex items-center gap-1.5 text-sm font-normal text-slate-700">
+        <label className="inline-flex items-center gap-1.5 text-sm font-normal text-ink-700">
           <input type="checkbox" name="active" defaultChecked={user.active} className="h-4 w-4 rounded" /> Active
         </label>
       ) : null}
@@ -109,7 +109,7 @@ export function UsersPanel({ users, pods, members }: { users: UserRow[]; pods: P
         }
       >
         {creating ? (
-          <div className="border-b border-slate-100 bg-slate-50 p-4">
+          <div className="border-b border-line bg-canvas p-4">
             <ActionForm action={createUserAction} resetOnSuccess onSuccess={() => setCreating(false)}>
               <UserFields pods={pods} members={members} />
               <div className="mt-3">
@@ -137,18 +137,18 @@ export function UsersPanel({ users, pods, members }: { users: UserRow[]; pods: P
               <Fragment key={u.id}>
                 <tr>
                   <td>
-                    <div className="font-medium text-slate-900">{u.name}</div>
-                    <div className="text-xs text-slate-500">{u.email}</div>
+                    <div className="font-medium text-ink-900">{u.name}</div>
+                    <div className="text-xs text-ink-500">{u.email}</div>
                   </td>
                   <td>
                     <Badge tone={u.role === 'ADMIN' ? 'purple' : u.role === 'SENIOR_FO' ? 'blue' : 'gray'}>{ROLE_LABELS[u.role]}</Badge>
                   </td>
-                  <td>{u.podIds.map(podName).join(', ') || <span className="text-slate-400">-</span>}</td>
+                  <td>{u.podIds.map(podName).join(', ') || <span className="text-ink-400">-</span>}</td>
                   <td className="text-xs">
-                    {u.twentyMemberId ? members.find((m) => m.id === u.twentyMemberId)?.label ?? u.twentyMemberId : <span className="text-slate-400">not mapped</span>}
-                    {u.aliases.length ? <div className="text-slate-400">{u.aliases.join(', ')}</div> : null}
+                    {u.twentyMemberId ? members.find((m) => m.id === u.twentyMemberId)?.label ?? u.twentyMemberId : <span className="text-ink-400">not mapped</span>}
+                    {u.aliases.length ? <div className="text-ink-400">{u.aliases.join(', ')}</div> : null}
                   </td>
-                  <td>{u.dailyCap ?? <span className="text-slate-400">global</span>}</td>
+                  <td>{u.dailyCap ?? <span className="text-ink-400">global</span>}</td>
                   <td>{u.active ? <Badge tone="green">Active</Badge> : <Badge tone="red">Inactive</Badge>}</td>
                   <td className="text-right">
                     <button type="button" className="btn-ghost btn-sm" onClick={() => setEditing(editing === u.id ? null : u.id)}>
@@ -158,7 +158,7 @@ export function UsersPanel({ users, pods, members }: { users: UserRow[]; pods: P
                 </tr>
                 {editing === u.id ? (
                   <tr>
-                    <td colSpan={7} className="bg-slate-50">
+                    <td colSpan={7} className="bg-canvas">
                       <ActionForm action={updateUserAction} onSuccess={() => setEditing(null)}>
                         <input type="hidden" name="userId" value={u.id} />
                         <UserFields user={u} pods={pods} members={members} />
@@ -188,7 +188,7 @@ export function UsersPanel({ users, pods, members }: { users: UserRow[]; pods: P
           </ActionButton>
         }
       >
-        <div className="border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
+        <div className="border-b border-line px-4 py-2 text-xs text-ink-500">
           Which pod a person belongs to comes from Twenty (the podOwner field). New values create pods automatically; option labels renamed in Twenty rename the pod here. Which FOs work a pod is set on each user above.
         </div>
         <div className="grid gap-4 p-4 md:grid-cols-2">
@@ -225,7 +225,7 @@ export function UsersPanel({ users, pods, members }: { users: UserRow[]; pods: P
                 ))}
                 {pods.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="text-slate-500">
+                    <td colSpan={5} className="text-ink-500">
                       No pods yet. Click &quot;Sync pods from Twenty&quot;, or add one per podOwner value used in Twenty.
                     </td>
                   </tr>

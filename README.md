@@ -22,7 +22,7 @@ Double-click **start-cadence.cmd**. It installs dependencies on the first run, s
 
 The same thing from a terminal: `pnpm start:local`.
 
-**The dummy data** (everything is named "Dummy ..." so it cannot be mistaken for real data): two pods (Alisa's pod, Andrew's pod) plus one discovered from a person's `podOwner` value; one user per role (Admin, Alisa and Andrew as Senior FOs, Karson and Daniel as Junior FOs); three Dummy Companies and twelve Dummy people; a campaign per pod with enrollments in every state: active, overdue, replied, bounced, finished, meeting booked, and one dnd person who could not be enrolled. To start over, delete `.pgdata-dev` and launch again.
+**The dummy data** (everything is named "Dummy ..." so it cannot be mistaken for real data): two pods (Alisa's pod, Andrew's pod) plus one discovered from a person's `podOwner` value; one user per role (Admin, Alisa and Andrew as Senior FOs, Karson and Daniel as Junior FOs); three Dummy Companies and sixteen Dummy people; two campaigns per pod (one a week old, one starting today) with enrollments in every state: due today, overdue, replied, bounced, finished, meeting booked, and one dnd person who could not be enrolled. To start over, delete `.pgdata-dev` and launch again.
 
 **Pods follow Twenty.** Which pod a person is in comes from Twenty's `podOwner` field: unknown values create pods automatically, option labels renamed in Twenty rename the pod here. Admins decide which FOs work each pod and who can log in (Settings > Users and pods). What Cadence writes back to Twenty is spelled out in [INTEGRATION.md](INTEGRATION.md#what-cadence-writes-to-twenty-and-what-it-never-touches): only `[Cadence]` activity notes and mirrored tasks, never person fields.
 
@@ -44,15 +44,15 @@ TypeScript, Node 20, Next.js 15 (App Router, server actions), Postgres 16, Prism
 ## Run on Windows with Docker Desktop
 
 1. Install Docker Desktop and make sure it is running.
-2. Copy `.env.example` to `.env`. The defaults run against the built-in mock Twenty workspace (3 pods, 6 users, 40 people), so nothing else is required for a first look.
+2. Copy `.env.example` to `.env`. The defaults run against the built-in dummy Twenty workspace, so nothing else is required for a first look.
 3. In PowerShell, from this folder:
 
    ```powershell
    docker compose up -d --build
    ```
 
-4. Open http://localhost:3100 and sign in with `admin@cadence.local` / `admin12345` (from `.env`), or one of the demo users (`alisa@cadence.local`, `leigh@cadence.local`, `andrew@cadence.local` are Senior FOs, `karson@cadence.local`, `daniel@cadence.local` Junior FOs, `ria@cadence.local` an Admin; all `password123`).
-5. Create a campaign (Campaigns > New campaign, pick the Twenty view "Pod Alisa - all people"), then open Tasks.
+4. Open http://localhost:3100 and sign in with `admin@cadence.local` / `admin12345` (from `.env`), or use the one-click demo buttons (Alisa and Andrew are Senior FOs, Karson and Daniel Junior FOs, Ria a second Admin; all `password123`).
+5. Open Tasks: the dummy workspace already has work due today, overdue work, and replies to look at.
 
 The `web` container applies migrations and runs the seed on start (`SEED_ON_START=true`, idempotent). The `worker` container runs the scheduler every `WORKER_TICK_SECONDS`, the nightly reconcile at `RECONCILE_HOUR` and the cache refresh at `CACHE_REFRESH_HOUR`. Postgres is published on `localhost:5433` so it never collides with Twenty's own database.
 
@@ -103,6 +103,7 @@ pnpm typecheck     # TypeScript
 pnpm lint          # ESLint (Next core-web-vitals + TypeScript rules)
 pnpm test          # Vitest on an embedded Postgres (engine, ingestion, queries, GraphQL client)
 pnpm test:e2e      # Playwright: builds, starts the app on a fresh database, drives real browser flows
+pnpm screens       # captures every screen to .screens/ for design review
 pnpm build
 ```
 

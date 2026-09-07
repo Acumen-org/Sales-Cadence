@@ -56,7 +56,7 @@ describe('pods follow Twenty', () => {
     const client = new MockTwentyClient();
     client.reset('demo');
     const stats = await refreshPersonCache(client);
-    expect(stats.people).toBe(12);
+    expect(stats.people).toBe(DEMO_PEOPLE.length);
     const pods = await prisma.pod.findMany({ orderBy: { podOwnerValue: 'asc' } });
     expect(pods.map((p) => [p.podOwnerValue, p.name, Boolean(p.discoveredAt)])).toEqual([
       ['Alisa', "Alisa's pod", false],

@@ -6,7 +6,7 @@ import { env } from '@/lib/env';
 import { getSettings, getTwentySchema } from '@/lib/settings';
 import { getTwentyClient } from '@/lib/twenty';
 import { recentEvents } from '@/lib/engine/ingest';
-import { PageHeader, Tabs, Notice, Card, KeyValue } from '@/components/ui';
+import { Card, KeyValue, Notice, Surface, Tabs, ViewHeader } from '@/components/ui';
 import { UsersPanel, type MemberOption } from '@/components/settings/users-panel';
 import { AdminTools } from '@/components/settings/admin-tools';
 import { ReviewButton } from '@/components/settings/review-button';
@@ -29,22 +29,26 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const reviewCount = await prisma.activityEvent.count({ where: { needsReview: true } });
 
   return (
-    <>
-      <PageHeader title="Settings" subtitle="Twenty connection and schema mapping, matching rules, caps and working days, sync toggles, users and roles." />
-      <Tabs current={tab} tabs={TABS.map((t) => ({ ...t, href: `/settings?tab=${t.key}`, count: t.key === 'activity' && reviewCount ? reviewCount : undefined }))} />
-      <div className="p-6">
-        {tab === 'twenty' ? <TwentyTab mode={e.TWENTY_MODE} dryRun={e.CADENCE_DRY_RUN} hasEnvKey={Boolean(e.TWENTY_API_KEY)} /> : null}
-        {tab === 'rules' ? (
-          <div className="space-y-6">
-            <RulesForm rules={settings.rules} />
-            <MatchingForm matching={settings.matching} />
-          </div>
-        ) : null}
-        {tab === 'sync' ? <SyncForm sync={settings.sync} /> : null}
-        {tab === 'users' ? <UsersTab /> : null}
-        {tab === 'activity' ? <ActivityTab /> : null}
-      </div>
-    </>
+    <div className="space-y-3 px-6 pb-8 pt-2">
+      <Surface flush>
+        <ViewHeader title="Workspace settings" meta="Admin only" />
+        <Tabs inset={false} current={tab} tabs={TABS.map((t) => ({ ...t, href: `/settings?tab=${t.key}`, count: t.key === 'activity' && reviewCount ? reviewCount : undefined }))} />
+        <p className="px-4 py-3 text-[12.5px] text-ink-500">
+          Twenty stays the system of record. Cadence only writes <span className="font-medium text-ink-700">[Cadence]</span> activity notes and mirrored tasks back to it.
+        </p>
+      </Surface>
+
+      {tab === 'twenty' ? <TwentyTab mode={e.TWENTY_MODE} dryRun={e.CADENCE_DRY_RUN} hasEnvKey={Boolean(e.TWENTY_API_KEY)} /> : null}
+      {tab === 'rules' ? (
+        <div className="space-y-3">
+          <RulesForm rules={settings.rules} />
+          <MatchingForm matching={settings.matching} />
+        </div>
+      ) : null}
+      {tab === 'sync' ? <SyncForm sync={settings.sync} /> : null}
+      {tab === 'users' ? <UsersTab /> : null}
+      {tab === 'activity' ? <ActivityTab /> : null}
+    </div>
   );
 }
 
@@ -76,7 +80,14 @@ async function UsersTab() {
         active: u.active,
         podIds: u.pods.map((p) => p.podId),
       }))}
-      pods={pods.map((p) => ({ id: p.id, name: p.name, podOwnerValue: p.podOwnerValue, userCount: p._count.users, peopleCount: peopleCount.get(p.podOwnerValue) ?? 0, discovered: Boolean(p.discoveredAt) }))}
+      pods={pods.map((p) => ({
+        id: p.id,
+        name: p.name,
+        podOwnerValue: p.podOwnerValue,
+        userCount: p._count.users,
+        peopleCount: peopleCount.get(p.podOwnerValue) ?? 0,
+        discovered: Boolean(p.discoveredAt),
+      }))}
       members={members}
     />
   );
@@ -84,20 +95,20 @@ async function UsersTab() {
 
 async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: boolean; hasEnvKey: boolean }) {
   let ping: string;
+  let ok = true;
   try {
     const client = await getTwentyClient();
     ping = (await client.ping()).detail;
   } catch (err) {
+    ok = false;
     ping = `Not connected: ${err instanceof Error ? err.message : String(err)}`;
   }
   const [settings, schema, lastReconcile] = await Promise.all([getSettings(), getTwentySchema(), prisma.setting.findUnique({ where: { key: 'lastReconcile' } })]);
   const last = lastReconcile?.value as { at?: string } | null;
   const baseUrl = settings.twenty.baseUrl || env().TWENTY_API_URL || '';
   return (
-    <div className="space-y-4">
-      {mode === 'mock' ? (
-        <Notice tone="warn">Running against the built-in mock workspace. Set TWENTY_MODE=graphql and an API key (env or below) to connect to your Twenty.</Notice>
-      ) : null}
+    <div className="space-y-3">
+      {mode === 'mock' ? <Notice tone="warn">Running against the built-in dummy workspace. Set TWENTY_MODE=graphql and an API key to connect to your Twenty.</Notice> : null}
       {dryRun ? <Notice tone="info">Dry run is on: Cadence logs what it would write to Twenty and writes nothing.</Notice> : null}
       <Card title="Status">
         <div className="p-4">
@@ -105,9 +116,12 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
             items={[
               { k: 'Mode', v: mode },
               { k: 'Base URL', v: baseUrl || '-' },
-              { k: 'Status', v: ping },
-              { k: 'Webhook URL', v: `${env().APP_URL.replace(/\/+$/, '')}/api/webhooks/twenty${env().CADENCE_WEBHOOK_TOKEN ? '?token=...' : ''}` },
-              { k: 'Webhook auth', v: env().TWENTY_WEBHOOK_SECRET ? 'HMAC signature' : env().CADENCE_WEBHOOK_TOKEN ? 'shared token' : 'open (set TWENTY_WEBHOOK_SECRET or CADENCE_WEBHOOK_TOKEN)' },
+              { k: 'Status', v: <span className={ok ? 'text-emerald-700' : 'text-red-700'}>{ping}</span> },
+              { k: 'Webhook URL', v: <code className="text-[12px]">{`${env().APP_URL.replace(/\/+$/, '')}/api/webhooks/twenty${env().CADENCE_WEBHOOK_TOKEN ? '?token=...' : ''}`}</code> },
+              {
+                k: 'Webhook auth',
+                v: env().TWENTY_WEBHOOK_SECRET ? 'HMAC signature' : env().CADENCE_WEBHOOK_TOKEN ? 'shared token' : 'open (set TWENTY_WEBHOOK_SECRET or CADENCE_WEBHOOK_TOKEN)',
+              },
               { k: 'Last reconcile', v: last?.at ? new Date(last.at).toLocaleString('en-GB') : 'never' },
             ]}
           />
@@ -122,69 +136,73 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
 async function ActivityTab() {
   const [events, writes] = await Promise.all([recentEvents(100), prisma.twentyWrite.findMany({ orderBy: { createdAt: 'desc' }, take: 50 })]);
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       <Card title="Inbound events (webhooks and reconcile)">
         {events.length === 0 ? (
-          <div className="p-4 text-sm text-slate-500">No events yet. Webhooks and reconcile runs appear here.</div>
+          <div className="p-4 text-[13px] text-ink-500">No events yet. Webhooks and reconcile runs appear here.</div>
         ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Received</th>
-                <th>Source</th>
-                <th>Event</th>
-                <th>Record</th>
-                <th>Result</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {events.map((ev) => (
-                <tr key={ev.id} className={ev.needsReview ? 'bg-amber-50/60' : undefined}>
-                  <td className="whitespace-nowrap text-xs">{ev.receivedAt.toLocaleString('en-GB')}</td>
-                  <td className="text-xs">{ev.source.toLowerCase()}</td>
-                  <td className="text-xs">{ev.eventName}</td>
-                  <td className="font-mono text-[11px]">{ev.externalId}</td>
-                  <td className="text-xs">
-                    {ev.result ?? <span className="text-slate-400">pending</span>}
-                    {ev.reviewNote ? <div className="text-amber-700">{ev.reviewNote}</div> : null}
-                  </td>
-                  <td className="text-right">{ev.needsReview ? <ReviewButton eventId={ev.id} /> : null}</td>
+          <div className="max-h-[26rem] overflow-auto scroll-thin">
+            <table className="table table-tight">
+              <thead>
+                <tr>
+                  <th>Received</th>
+                  <th>Source</th>
+                  <th>Event</th>
+                  <th>Record</th>
+                  <th>Result</th>
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {events.map((ev) => (
+                  <tr key={ev.id} className={ev.needsReview ? 'bg-amber-50/60' : undefined}>
+                    <td className="whitespace-nowrap text-[12px]">{ev.receivedAt.toLocaleString('en-GB')}</td>
+                    <td className="text-[12px]">{ev.source.toLowerCase()}</td>
+                    <td className="text-[12px]">{ev.eventName}</td>
+                    <td className="font-mono text-[11px]">{ev.externalId}</td>
+                    <td className="text-[12px]">
+                      {ev.result ?? <span className="text-ink-300">pending</span>}
+                      {ev.reviewNote ? <div className="text-amber-700">{ev.reviewNote}</div> : null}
+                    </td>
+                    <td className="text-right">{ev.needsReview ? <ReviewButton eventId={ev.id} /> : null}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Card>
       <Card title="Writes to Twenty (notes, mirrored tasks)">
         {writes.length === 0 ? (
-          <div className="p-4 text-sm text-slate-500">Nothing written yet.</div>
+          <div className="p-4 text-[13px] text-ink-500">Nothing written yet.</div>
         ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>When</th>
-                <th>Operation</th>
-                <th>Object</th>
-                <th>Twenty id</th>
-                <th>Payload</th>
-              </tr>
-            </thead>
-            <tbody>
-              {writes.map((w) => (
-                <tr key={w.id}>
-                  <td className="whitespace-nowrap text-xs">{w.createdAt.toLocaleString('en-GB')}</td>
-                  <td className="text-xs">
-                    {w.operation}
-                    {w.dryRun ? <span className="ml-1 rounded bg-sky-50 px-1 text-[10px] text-sky-700">dry run</span> : null}
-                  </td>
-                  <td className="text-xs">{w.objectType}</td>
-                  <td className="font-mono text-[11px]">{w.twentyId}</td>
-                  <td className="max-w-md truncate font-mono text-[11px] text-slate-500">{JSON.stringify(w.payload)}</td>
+          <div className="max-h-[26rem] overflow-auto scroll-thin">
+            <table className="table table-tight">
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Operation</th>
+                  <th>Object</th>
+                  <th>Twenty id</th>
+                  <th>Payload</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {writes.map((w) => (
+                  <tr key={w.id}>
+                    <td className="whitespace-nowrap text-[12px]">{w.createdAt.toLocaleString('en-GB')}</td>
+                    <td className="text-[12px]">
+                      {w.operation}
+                      {w.dryRun ? <span className="ml-1 rounded bg-sky-50 px-1 text-[10px] text-sky-700">dry run</span> : null}
+                    </td>
+                    <td className="text-[12px]">{w.objectType}</td>
+                    <td className="font-mono text-[11px]">{w.twentyId}</td>
+                    <td className="max-w-md truncate font-mono text-[11px] text-ink-400">{JSON.stringify(w.payload)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Card>
     </div>

@@ -45,6 +45,11 @@ const rows: Row[] = [
   ['Ten', 'dummy-co-a', 'Procurement Lead', 'Andrew', 'wm-daniel', 'Webinar'],
   ['Eleven', 'dummy-co-b', 'VP Product', 'Andrew', null, 'Referral'],
   ['Twelve', 'dummy-co-c', 'Head of Data', 'Karson', 'wm-karson', 'LinkedIn'],
+  // Used by the "starting today" campaigns so every pod has work due today.
+  ['Thirteen', 'dummy-co-a', 'Head of Finance', 'Alisa', 'wm-alisa', 'Dummy Conference 2026'],
+  ['Fourteen', 'dummy-co-b', 'Head of People', 'Alisa', 'wm-karson', 'Webinar'],
+  ['Fifteen', 'dummy-co-c', 'VP Engineering', 'Andrew', 'wm-andrew', 'Referral'],
+  ['Sixteen', 'dummy-co-a', 'Head of Support', 'Andrew', 'wm-daniel', 'LinkedIn'],
 ];
 
 export const DEMO_PEOPLE: TwentyPerson[] = rows.map((r, i) => {

@@ -138,7 +138,7 @@ export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, m
                   setPreview(null);
                 }}
               />
-              {csvText ? <p className="mt-1 text-xs text-slate-500">{csvText.split(/\r?\n/).filter(Boolean).length} lines loaded.</p> : null}
+              {csvText ? <p className="mt-1 text-xs text-ink-500">{csvText.split(/\r?\n/).filter(Boolean).length} lines loaded.</p> : null}
             </Field>
           ) : null}
           {sourceType === 'TWENTY_VIEW' ? (
@@ -160,7 +160,7 @@ export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, m
             <button type="button" className="btn-secondary" onClick={runPreview} disabled={pending}>
               {pending ? 'Checking...' : 'Preview conflicts'}
             </button>
-            <span className="text-xs text-slate-500">Nothing is created until you confirm.</span>
+            <span className="text-xs text-ink-500">Nothing is created until you confirm.</span>
           </div>
         </div>
       </Card>
@@ -176,7 +176,7 @@ export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, m
             ))}
             {preview.conflicts.length ? (
               <div>
-                <h4 className="mb-1 text-sm font-semibold text-slate-800">Skipped</h4>
+                <h4 className="mb-1 text-sm font-semibold text-ink-800">Skipped</h4>
                 <table className="table">
                   <thead>
                     <tr>
@@ -190,7 +190,7 @@ export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, m
                       <tr key={`${c.personId}-${c.reason}`}>
                         <td>
                           {c.name}
-                          <div className="font-mono text-[11px] text-slate-400">{c.personId}</div>
+                          <div className="font-mono text-[11px] text-ink-400">{c.personId}</div>
                         </td>
                         <td>
                           <Badge tone={c.reason === 'dnd' ? 'red' : 'amber'}>{CONFLICT_LABEL[c.reason] ?? c.reason}</Badge>
@@ -222,7 +222,7 @@ export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, m
                         </td>
                         <td>{c.companyName}</td>
                         <td>
-                          {c.foName} <span className="text-xs text-slate-400">({c.assignedBy.replace('_', ' ')})</span>
+                          {c.foName} <span className="text-xs text-ink-400">({c.assignedBy.replace('_', ' ')})</span>
                         </td>
                         <td>{c.startDate}</td>
                       </tr>

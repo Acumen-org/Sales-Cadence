@@ -26,10 +26,10 @@ export function PersonRowActions({ personId, activeEnrollmentId, dnd, canEnroll,
         Exit
       </ActionButton>
     ) : (
-      <span className="text-xs text-slate-400">-</span>
+      <span className="text-xs text-ink-400">-</span>
     );
   }
-  if (dnd || !canEnroll || !sequences.length || !pods.length) return <span className="text-xs text-slate-400">-</span>;
+  if (dnd || !canEnroll || !sequences.length || !pods.length) return <span className="text-xs text-ink-400">-</span>;
 
   return (
     <div className="flex flex-col items-end gap-1">
@@ -37,7 +37,7 @@ export function PersonRowActions({ personId, activeEnrollmentId, dnd, canEnroll,
         {open ? 'Cancel' : 'Enrol'}
       </button>
       {open ? (
-        <ActionForm action={enrollOneAction} className="w-72 space-y-2 rounded-md border border-slate-200 bg-white p-3 text-left shadow-md" onSuccess={() => setOpen(false)}>
+        <ActionForm action={enrollOneAction} className="w-72 space-y-2 rounded-md border border-line bg-white p-3 text-left shadow-md" onSuccess={() => setOpen(false)}>
           <input type="hidden" name="personId" value={personId} />
           <label className="block">Sequence</label>
           <select name="sequenceId" className="w-full text-xs">

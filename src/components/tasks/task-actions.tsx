@@ -260,12 +260,12 @@ export function TaskActions(p: Props) {
                   key={d.key}
                   className={clsx(
                     'flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm',
-                    disposition === d.key ? 'border-brand-500 bg-white ring-2 ring-brand-100' : 'border-slate-200 bg-white hover:border-slate-300',
+                    disposition === d.key ? 'border-brand-500 bg-white ring-2 ring-brand-100' : 'border-line bg-white hover:border-line',
                   )}
                 >
                   <input type="radio" name="disposition" value={d.key} checked={disposition === d.key} onChange={() => setDisposition(d.key)} className="h-3.5 w-3.5" />
-                  <span className="flex-1 font-normal text-slate-800">{d.label}</span>
-                  <span className="text-[10px] text-slate-400">{i + 1}</span>
+                  <span className="flex-1 font-normal text-ink-800">{d.label}</span>
+                  <span className="text-[10px] text-ink-400">{i + 1}</span>
                   {d.answered ? <span className="rounded bg-emerald-50 px-1 text-[10px] text-emerald-700">answered</span> : null}
                 </label>
               ))}
@@ -282,7 +282,7 @@ export function TaskActions(p: Props) {
             <button type="button" className="btn-ghost" onClick={() => setPanel('none')}>
               Cancel
             </button>
-            <span className="text-xs text-slate-500">Press 1-{Math.min(9, p.dispositions.length)} to pick, Enter to log.</span>
+            <span className="text-xs text-ink-500">Press 1-{Math.min(9, p.dispositions.length)} to pick, Enter to log.</span>
           </div>
         </form>
       ) : null}
@@ -339,7 +339,7 @@ export function TaskActions(p: Props) {
       ) : null}
 
       {panel === 'more' ? (
-        <div className="flex flex-wrap items-end gap-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+        <div className="flex flex-wrap items-end gap-2 rounded-md border border-line bg-canvas p-3">
           <button type="button" disabled={pending} className="btn-secondary btn-sm" onClick={() => enrollmentOp(finishFromTaskAction, { kind: 'replied' }, 'Mark this person as replied and finish the sequence?')}>
             Finish (Replied)
           </button>
@@ -380,7 +380,7 @@ export function TaskActions(p: Props) {
           {feedback.ok ? feedback.message : feedback.error}
         </p>
       ) : null}
-      <p className="text-[11px] text-slate-400">
+      <p className="text-[11px] text-ink-400">
         Shortcuts: <kbd>D</kbd> done · <kbd>S</kbd> skip · <kbd>Z</kbd> snooze · <kbd>N</kbd>/<kbd>P</kbd> next/previous · <kbd>C</kbd> copy · <kbd>O</kbd> open in Twenty · <kbd>M</kbd> more · <kbd>Esc</kbd> close
       </p>
     </div>

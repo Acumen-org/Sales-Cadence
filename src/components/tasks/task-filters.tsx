@@ -1,6 +1,7 @@
 'use client';
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import clsx from 'clsx';
 
 type Props = {
   pods: { id: string; name: string }[];
@@ -10,7 +11,7 @@ type Props = {
   mode: 'list' | 'flow';
 };
 
-/** Pod / FO filters and list-vs-flow toggle. All state lives in the URL. */
+/** Pod / FO filters and the list-vs-flow toggle. All state lives in the URL. */
 export function TaskFilters({ pods, fos, podId, foUserId, mode }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -23,6 +24,7 @@ export function TaskFilters({ pods, fos, podId, foUserId, mode }: Props) {
       else next.delete(k);
     }
     next.delete('task');
+    next.delete('flash');
     router.push(`${pathname}?${next.toString()}`);
   };
 
@@ -31,7 +33,7 @@ export function TaskFilters({ pods, fos, podId, foUserId, mode }: Props) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       {pods.length ? (
-        <select value={podId ?? ''} onChange={(e) => update({ pod: e.target.value || null, fo: null })} className="text-sm">
+        <select value={podId ?? ''} onChange={(e) => update({ pod: e.target.value || null, fo: null })} aria-label="Filter by pod" className="!w-auto !py-1.5 !text-[12.5px]">
           <option value="">All pods</option>
           {pods.map((p) => (
             <option key={p.id} value={p.id}>
@@ -41,7 +43,7 @@ export function TaskFilters({ pods, fos, podId, foUserId, mode }: Props) {
         </select>
       ) : null}
       {fos.length ? (
-        <select value={foUserId ?? ''} onChange={(e) => update({ fo: e.target.value || null })} className="text-sm">
+        <select value={foUserId ?? ''} onChange={(e) => update({ fo: e.target.value || null })} aria-label="Filter by FO" className="!w-auto !py-1.5 !text-[12.5px]">
           <option value="">All FOs</option>
           {visibleFos.map((f) => (
             <option key={f.id} value={f.id}>
@@ -50,21 +52,17 @@ export function TaskFilters({ pods, fos, podId, foUserId, mode }: Props) {
           ))}
         </select>
       ) : null}
-      <div className="inline-flex overflow-hidden rounded-md border border-slate-300 text-sm shadow-sm">
-        <button
-          type="button"
-          onClick={() => update({ mode: null })}
-          className={mode === 'list' ? 'bg-slate-800 px-3 py-1.5 text-white' : 'bg-white px-3 py-1.5 text-slate-700 hover:bg-slate-50'}
-        >
-          List
-        </button>
-        <button
-          type="button"
-          onClick={() => update({ mode: 'flow' })}
-          className={mode === 'flow' ? 'bg-slate-800 px-3 py-1.5 text-white' : 'bg-white px-3 py-1.5 text-slate-700 hover:bg-slate-50'}
-        >
-          Task flow
-        </button>
+      <div className="inline-flex overflow-hidden rounded-[10px] border border-line bg-white p-0.5 text-[12.5px]">
+        {(['list', 'flow'] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => update({ mode: m === 'flow' ? 'flow' : null })}
+            className={clsx('rounded-lg px-2.5 py-1 font-medium transition', mode === m ? 'bg-brand-600 text-white' : 'text-ink-500 hover:text-ink-700')}
+          >
+            {m === 'list' ? 'List' : 'Task flow'}
+          </button>
+        ))}
       </div>
     </div>
   );

@@ -107,13 +107,38 @@ async function seedDemo(sequenceId: string, withCampaigns: boolean) {
   console.log(`  + ${a.enrolled.length} enrolled in "${campaignA.name}" (${a.conflicts.length} skipped: ${a.conflicts.map((c) => `${c.name} ${c.reason}`).join(', ')})`);
 
   const campaignB = await prisma.campaign.create({
-    data: { name: 'Dummy campaign - Andrew\'s pod', sequenceId, podId: await pod('Andrew'), sourceType: 'IDS', sourceRef: 'pasted ids', personIds: ['dummy-07', 'dummy-08', 'dummy-09', 'dummy-10'], startDate: today, status: 'ACTIVE', notes: 'Seeded dummy data' },
+    data: { name: "Dummy campaign - Andrew's pod", sequenceId, podId: await pod('Andrew'), sourceType: 'IDS', sourceRef: 'pasted ids', personIds: ['dummy-07', 'dummy-08', 'dummy-09', 'dummy-10'], startDate, status: 'ACTIVE', notes: 'Seeded dummy data' },
   });
   const b = await enrollPeople(
-    { personIds: ['dummy-07', 'dummy-08', 'dummy-09', 'dummy-10'], sequenceId, podId: campaignB.podId, campaignId: campaignB.id, startDate: today, assignment: { mode: 'OWNER' }, actor: SYSTEM_ACTOR },
-    { now: new Date() },
+    { personIds: ['dummy-07', 'dummy-08', 'dummy-09', 'dummy-10'], sequenceId, podId: campaignB.podId, campaignId: campaignB.id, startDate, assignment: { mode: 'OWNER' }, actor: SYSTEM_ACTOR },
+    { now: at(0) },
   );
   console.log(`  + ${b.enrolled.length} enrolled in "${campaignB.name}"`);
+
+  // A fresh campaign per pod starting today, so every FO has work due today.
+  for (const [podValue, ids] of [
+    ['Alisa', ['dummy-13', 'dummy-14']],
+    ['Andrew', ['dummy-15', 'dummy-16']],
+  ] as const) {
+    const c = await prisma.campaign.create({
+      data: {
+        name: `Dummy campaign - starting today (${podValue})`,
+        sequenceId,
+        podId: await pod(podValue),
+        sourceType: 'TWENTY_VIEW',
+        sourceRef: 'All dummy people (view-all-dummies)',
+        personIds: [...ids],
+        startDate: today,
+        status: 'ACTIVE',
+        notes: 'Seeded dummy data',
+      },
+    });
+    const r = await enrollPeople(
+      { personIds: [...ids], sequenceId, podId: c.podId, campaignId: c.id, startDate: today, assignment: { mode: 'OWNER' }, actor: SYSTEM_ACTOR },
+      { now: new Date() },
+    );
+    console.log(`  + ${r.enrolled.length} enrolled in "${c.name}" (due today)`);
+  }
 
   // Replay the dummy Twenty activity: Dummy One's email note completes Email 1, Dummy Two's reply
   // finishes as replied, the opportunity on Dummy Eight books a meeting. The fixture timestamps are

@@ -26,7 +26,7 @@ export function AdminTools({ defaultDays }: { defaultDays: number }) {
               Full refresh
             </ActionButton>
           </div>
-          <p className="text-xs text-slate-500">Also runs nightly and on every person webhook.</p>
+          <p className="text-xs text-ink-500">Also runs nightly and on every person webhook.</p>
         </div>
         <div className="space-y-2">
           <label className="block">Scheduler and connection</label>
@@ -38,7 +38,7 @@ export function AdminTools({ defaultDays }: { defaultDays: number }) {
               Test Twenty connection
             </ActionButton>
           </div>
-          <p className="text-xs text-slate-500">The worker container does this automatically every few minutes.</p>
+          <p className="text-xs text-ink-500">The worker container does this automatically every few minutes.</p>
         </div>
       </div>
     </Card>

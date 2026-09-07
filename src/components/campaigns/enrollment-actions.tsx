@@ -16,7 +16,7 @@ type Props = {
 export function EnrollmentActions({ enrollmentId, status, foUserId, fos, compact }: Props) {
   const [reassigning, setReassigning] = useState(false);
   const open = status === 'ACTIVE' || status === 'PAUSED';
-  if (!open) return <span className="text-xs text-slate-400">-</span>;
+  if (!open) return <span className="text-xs text-ink-400">-</span>;
   return (
     <div className="flex flex-wrap items-center justify-end gap-1">
       {status === 'ACTIVE' ? (

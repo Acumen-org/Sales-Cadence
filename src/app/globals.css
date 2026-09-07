@@ -2,64 +2,187 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Cadence design system, modelled on Outreach: lavender canvas, pale sidebar with soft-indigo
+ * active pills, a slim top bar, and content on a white rounded surface with dense tables.
+ */
+
 @layer base {
   :root {
     color-scheme: light;
   }
+  html,
   body {
-    font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    @apply bg-canvas text-ink-900;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   }
-  input,
+  body {
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection {
+    @apply bg-brand-100 text-brand-900;
+  }
+
+  /* Form controls */
+  input:not([type='checkbox']):not([type='radio']):not([type='file']),
   select,
   textarea {
-    @apply rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-normal text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100 disabled:bg-slate-100 disabled:text-slate-500;
+    @apply w-full rounded-[10px] border border-line bg-white px-3 py-2 text-[13.5px] font-normal text-ink-900 shadow-none outline-none transition placeholder:text-ink-300;
+  }
+  input:not([type='checkbox']):not([type='radio']):not([type='file']):focus,
+  select:focus,
+  textarea:focus {
+    @apply border-brand-400 ring-4 ring-brand-100/70;
+  }
+  input:disabled,
+  select:disabled,
+  textarea:disabled {
+    @apply bg-canvas text-ink-400;
+  }
+  select {
+    @apply cursor-pointer appearance-none bg-no-repeat pr-8;
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7186' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-position: right 0.6rem center;
+  }
+  input[type='checkbox'],
+  input[type='radio'] {
+    @apply h-4 w-4 shrink-0 cursor-pointer border-ink-300 text-brand-600 accent-brand-600 focus:ring-2 focus:ring-brand-100;
+  }
+  input[type='checkbox'] {
+    @apply rounded-[4px];
   }
   label {
-    @apply text-xs font-medium text-slate-600;
+    @apply text-[12px] font-medium text-ink-500;
+  }
+  kbd {
+    @apply rounded border border-line bg-canvas px-1 py-px font-sans text-[10px] font-medium text-ink-500;
+  }
+  a {
+    @apply transition-colors;
   }
 }
 
 @layer components {
+  /* ---------- buttons ---------- */
   .btn {
-    @apply inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border px-3 py-1.5 text-sm font-medium shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-brand-100 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-[10px] border px-3.5 text-[13.5px] font-medium leading-none transition disabled:cursor-not-allowed disabled:opacity-50;
+    min-height: 2.25rem;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
   }
   .btn-primary {
-    @apply btn border-brand-600 bg-brand-600 text-white hover:bg-brand-700;
+    @apply btn border-brand-600 bg-brand-600 text-white hover:border-brand-700 hover:bg-brand-700 focus-visible:ring-4 focus-visible:ring-brand-100;
   }
   .btn-secondary {
-    @apply btn border-slate-300 bg-white text-slate-700 hover:bg-slate-50;
+    @apply btn border-line bg-white text-ink-700 hover:border-ink-300 hover:bg-canvas focus-visible:ring-4 focus-visible:ring-brand-100;
+  }
+  .btn-soft {
+    @apply btn border-transparent bg-brand-50 text-brand-700 hover:bg-brand-100;
   }
   .btn-danger {
-    @apply btn border-red-600 bg-red-600 text-white hover:bg-red-700;
+    @apply btn border-transparent bg-red-600 text-white hover:bg-red-700;
   }
   .btn-ghost {
-    @apply btn border-transparent bg-transparent text-slate-600 shadow-none hover:bg-slate-100;
+    @apply btn border-transparent bg-transparent text-ink-500 hover:bg-brand-50 hover:text-brand-700;
   }
   .btn-sm {
-    @apply px-2 py-1 text-xs;
+    @apply gap-1 rounded-lg px-2.5 text-[12.5px];
+    min-height: 1.85rem;
+    padding-top: 0.35rem;
+    padding-bottom: 0.35rem;
+  }
+  .btn-lg {
+    @apply gap-2 rounded-xl px-4 text-[14.5px];
+    min-height: 2.6rem;
+  }
+  /* Square icon button, as in the top bar and table toolbars. */
+  .btn-icon {
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-line bg-white text-ink-500 transition hover:border-ink-300 hover:text-ink-700;
+  }
+  .btn-icon-ghost {
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-transparent text-ink-500 transition hover:bg-brand-50 hover:text-brand-700;
+  }
+  .btn-icon-primary {
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-600 text-white transition hover:bg-brand-700;
+  }
+
+  /* ---------- surfaces ---------- */
+  .surface {
+    @apply rounded-2xl border border-line bg-white shadow-surface;
   }
   .card {
-    @apply rounded-lg border border-slate-200 bg-white shadow-sm;
+    @apply surface;
+  }
+  .card-head {
+    @apply flex items-center justify-between gap-3 border-b border-line px-4 py-3;
+  }
+  .card-title {
+    @apply text-[14px] font-semibold text-ink-900;
+  }
+
+  /* ---------- chips, badges, dots ---------- */
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-brand-50 py-1.5 pl-3 pr-2.5 text-[12.5px] font-medium text-brand-700;
+  }
+  .chip-muted {
+    @apply inline-flex items-center gap-1.5 rounded-[10px] bg-canvas py-2 px-3 text-[12.5px] font-medium text-ink-500 transition hover:bg-brand-50 hover:text-brand-700;
   }
   .badge {
-    @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
+    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11.5px] font-medium leading-5;
   }
+  .dot {
+    @apply inline-block h-[7px] w-[7px] shrink-0 rounded-full;
+  }
+
+  /* ---------- tables ---------- */
   .table {
-    @apply w-full text-left text-sm;
+    @apply w-full border-collapse text-left text-[13.5px];
   }
   .table th {
-    @apply border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500;
+    @apply whitespace-nowrap border-b border-line px-4 py-2.5 text-[12px] font-medium text-ink-500;
   }
   .table td {
-    @apply border-b border-slate-100 px-3 py-2 align-top text-slate-700;
+    @apply border-b border-line px-4 py-3 align-middle text-ink-700;
   }
-  .table tr:last-child td {
+  .table tbody tr {
+    @apply transition-colors hover:bg-brand-50/40;
+  }
+  .table tbody tr:last-child td {
     @apply border-b-0;
   }
+  /* Denser variant for wide analytics tables. */
+  .table-tight td {
+    @apply py-2;
+  }
+
+  /* ---------- sidebar ---------- */
+  .nav-item {
+    @apply flex items-center gap-3 rounded-[10px] px-3 py-2 text-[13.5px] font-medium text-ink-700 transition hover:bg-brand-50;
+  }
+  .nav-item-active {
+    @apply bg-brand-100/80 text-brand-800;
+  }
+
+  /* ---------- misc ---------- */
   .kv dt {
-    @apply text-xs uppercase tracking-wide text-slate-400;
+    @apply text-[11px] font-medium uppercase tracking-wide text-ink-400;
   }
   .kv dd {
-    @apply text-sm text-slate-800;
+    @apply text-[13.5px] text-ink-900;
+  }
+  .hairline {
+    @apply border-line;
+  }
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #cdcdf2 transparent;
+  }
+  .scroll-thin::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  .scroll-thin::-webkit-scrollbar-thumb {
+    @apply rounded-full border-[3px] border-solid border-transparent bg-brand-200 bg-clip-content;
   }
 }

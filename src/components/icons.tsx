@@ -155,6 +155,67 @@ export const IconTrash = (p: IconProps) => (
   </svg>
 );
 
+export const IconBell = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
+    <path d="M13.7 21a2 2 0 01-3.4 0" />
+  </svg>
+);
+export const IconHelp = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="10" />
+    <path d="M9.1 9a3 3 0 015.8 1c0 2-3 3-3 3" />
+    <path d="M12 17h.01" />
+  </svg>
+);
+export const IconCalendar = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4" width="18" height="18" rx="2" />
+    <path d="M16 2v4M8 2v4M3 10h18" />
+  </svg>
+);
+export const IconBolt = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M13 2L4.5 13.5H11l-1 8.5 8.5-11.5H12l1-8.5z" />
+  </svg>
+);
+export const IconDots = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="5" cy="12" r="1.4" fill="currentColor" />
+    <circle cx="12" cy="12" r="1.4" fill="currentColor" />
+    <circle cx="19" cy="12" r="1.4" fill="currentColor" />
+  </svg>
+);
+export const IconFilter = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M3 5h18M6 12h12M10 19h4" />
+  </svg>
+);
+export const IconColumns = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M9 4v16M15 4v16" />
+  </svg>
+);
+export const IconRefresh = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M21 12a9 9 0 01-9 9 9 9 0 01-8.5-6" />
+    <path d="M3 12a9 9 0 019-9 9 9 0 018.5 6" />
+    <path d="M21 3v6h-6M3 21v-6h6" />
+  </svg>
+);
+export const IconInfo = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="10" />
+    <path d="M12 16v-4M12 8h.01" />
+  </svg>
+);
+export const IconSort = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M12 5v14M6 13l6 6 6-6" />
+  </svg>
+);
+
 export function ActionIcon({ action, size = 16, className }: { action: string; size?: number; className?: string }) {
   if (action === 'EMAIL') return <IconMail size={size} className={className} />;
   if (action === 'CALL') return <IconPhone size={size} className={className} />;

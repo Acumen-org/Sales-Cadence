@@ -18,3 +18,4 @@ tsconfig.tsbuildinfo
 .pgdata-e2e
 playwright-report
 test-results
+.screens
