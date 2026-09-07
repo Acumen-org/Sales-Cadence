@@ -14,7 +14,7 @@ Cadence never sends email or automates LinkedIn. Humans do every touch.
 - **Reports**: activity leaderboard per FO, and roll-ups by pod, FO, campaign, sequence and channel; overdue and stalled lists.
 - **Twenty integration**: webhooks + nightly reconcile complete email and call steps from Twenty activity, replies close open tasks, meetings and dnd flips are honoured, every completed action is written back as a `[Cadence] ...` note and open tasks are mirrored as Twenty Tasks. `CADENCE_DRY_RUN=true` logs writes without making them.
 
-Full list of assumptions: [DECISIONS.md](DECISIONS.md). Connecting a real workspace: [INTEGRATION.md](INTEGRATION.md).
+Server sizing and deploy: [DEPLOY.md](DEPLOY.md). Full list of assumptions: [DECISIONS.md](DECISIONS.md). Connecting a real workspace: [INTEGRATION.md](INTEGRATION.md).
 
 ## Quickest start (Windows, no Docker)
 
