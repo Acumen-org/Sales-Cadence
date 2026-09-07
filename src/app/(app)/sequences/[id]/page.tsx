@@ -10,7 +10,7 @@ import { sequenceFunnel, sequenceVersions, variantStats } from '@/lib/sequences-
 import { ActionForm } from '@/components/action-form';
 import { ActionIcon } from '@/components/icons';
 import { SequenceEditor } from '@/components/sequences/sequence-editor';
-import { Badge, Card, Field, PageHeader, Tabs } from '@/components/ui';
+import { Badge, Card, Field, RecordHeader, Surface, Tabs } from '@/components/ui';
 
 export default async function SequenceDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string }> }) {
   const user = await requireUser();
@@ -36,25 +36,32 @@ export default async function SequenceDetailPage({ params, searchParams }: { par
 
   return (
     <>
-      <PageHeader
-        title={sequence.name}
-        subtitle={
-          <>
-            v{sequence.activeVersion?.version ?? '-'} · {steps.length} steps over {steps.length ? steps[steps.length - 1].day : 0} days
-            {sequence.description ? ` · ${sequence.description}` : ''}
-            {sequence.archived ? <Badge tone="gray" className="ml-2">archived</Badge> : null}
-          </>
-        }
-        actions={
-          <Link href="/sequences" className="btn-secondary">
-            All sequences
-          </Link>
-        }
-      />
-      <Tabs current={tab} tabs={tabs} />
-      <div className="p-6">
+      <div className="px-6 pt-2">
+        <RecordHeader
+          name={sequence.name}
+          shape="square"
+          sub={
+            <>
+              v{sequence.activeVersion?.version ?? '-'} · {steps.length} steps over {steps.length ? steps[steps.length - 1].day : 0} days
+              {sequence.description ? ` · ${sequence.description}` : ''}
+            </>
+          }
+          badges={sequence.archived ? <Badge tone="gray">archived</Badge> : null}
+          actions={
+            <Link href="/sequences" className="btn-secondary btn-sm">
+              All sequences
+            </Link>
+          }
+        />
+      </div>
+      <div className="px-6 pt-3">
+        <Surface flush>
+          <Tabs inset={false} current={tab} tabs={tabs} />
+        </Surface>
+      </div>
+      <div className="px-6 pb-8 pt-3">
         {tab === 'steps' && variants.length ? (
-          <Card title="A/B tests" className="mb-4">
+          <Card title="A/B tests" className="mb-3">
             <table className="table">
               <thead>
                 <tr>
@@ -83,7 +90,7 @@ export default async function SequenceDetailPage({ params, searchParams }: { par
                 ))}
               </tbody>
             </table>
-            <p className="px-4 py-2 text-xs text-slate-500">Variants are assigned evenly at task creation. Disable the weaker one in the editor; existing tasks keep their variant.</p>
+            <p className="px-4 py-2 text-xs text-ink-500">Variants are assigned evenly at task creation. Disable the weaker one in the editor; existing tasks keep their variant.</p>
           </Card>
         ) : null}
         {tab === 'steps' ? (
@@ -106,18 +113,18 @@ export default async function SequenceDetailPage({ params, searchParams }: { par
                   const f = funnel[i];
                   return (
                     <tr key={step.id}>
-                      <td className="whitespace-nowrap font-semibold text-slate-700">Day {step.day}</td>
+                      <td className="whitespace-nowrap font-semibold text-ink-700">Day {step.day}</td>
                       <td>
-                        <div className="text-xs uppercase tracking-wide text-slate-400">
+                        <div className="text-xs uppercase tracking-wide text-ink-400">
                           Step {i + 1}
                           {step.title ? ` · ${step.title}` : ''}
                         </div>
                         <ul className="mt-1 space-y-0.5">
                           {step.actions.map((a) => (
-                            <li key={a.id} className="flex items-center gap-2 text-sm text-slate-800">
-                              <ActionIcon action={a.type} size={14} className="text-slate-500" />
+                            <li key={a.id} className="flex items-center gap-2 text-sm text-ink-800">
+                              <ActionIcon action={a.type} size={14} className="text-ink-500" />
                               {describeAction(a)}
-                              {a.subject ? <span className="text-xs text-slate-500">· {a.subject}</span> : null}
+                              {a.subject ? <span className="text-xs text-ink-500">· {a.subject}</span> : null}
                             </li>
                           ))}
                         </ul>
@@ -140,7 +147,7 @@ export default async function SequenceDetailPage({ params, searchParams }: { par
         ) : null}
 
         {tab === 'edit' && admin ? (
-          <div className="max-w-4xl space-y-6">
+          <div className="max-w-4xl space-y-3">
             <Card title="Name and description">
               <ActionForm action={updateSequenceMetaAction} className="grid gap-4 p-4 md:grid-cols-[1fr_1fr_auto]">
                 <input type="hidden" name="sequenceId" value={sequence.id} />
@@ -151,7 +158,7 @@ export default async function SequenceDetailPage({ params, searchParams }: { par
                   <input name="description" defaultValue={sequence.description ?? ''} className="w-full" />
                 </Field>
                 <div className="flex items-end gap-3">
-                  <label className="inline-flex items-center gap-1.5 text-sm font-normal text-slate-700">
+                  <label className="inline-flex items-center gap-1.5 text-sm font-normal text-ink-700">
                     <input type="checkbox" name="archived" defaultChecked={sequence.archived} className="h-4 w-4 rounded" /> Archived
                   </label>
                   <button type="submit" className="btn-secondary">
@@ -161,8 +168,8 @@ export default async function SequenceDetailPage({ params, searchParams }: { par
               </ActionForm>
             </Card>
             <div>
-              <h2 className="mb-2 text-sm font-semibold text-slate-800">Steps (saving creates version {(sequence.activeVersion?.version ?? 0) + 1})</h2>
-              <p className="mb-3 text-sm text-slate-600">
+              <h2 className="mb-2 text-sm font-semibold text-ink-800">Steps (saving creates version {(sequence.activeVersion?.version ?? 0) + 1})</h2>
+              <p className="mb-3 text-sm text-ink-600">
                 Tasks already generated keep their version. Every active enrollment uses the new version from its next step onward.
               </p>
               <SequenceEditor sequenceId={sequence.id} initialSteps={steps} action={saveSequenceVersionAction} submitLabel="Save as new version" askChangeNote />
@@ -171,7 +178,7 @@ export default async function SequenceDetailPage({ params, searchParams }: { par
         ) : null}
 
         {tab === 'versions' ? (
-          <div className="space-y-4">
+          <div className="space-y-3">
             {versions.map((v) => (
               <Card
                 key={v.id}
@@ -179,19 +186,19 @@ export default async function SequenceDetailPage({ params, searchParams }: { par
                   <>
                     Version {v.version}
                     {v.id === sequence.activeVersionId ? <Badge tone="green" className="ml-2">active</Badge> : null}
-                    <span className="ml-2 text-xs font-normal text-slate-500">
+                    <span className="ml-2 text-xs font-normal text-ink-500">
                       {v.createdAt.toLocaleString('en-GB')} by {v.createdBy}
                       {v.changeNote ? ` · ${v.changeNote}` : ''} · {activeOnVersion.get(v.id) ?? 0} active enrollments on it · {v.tasks} tasks generated
                     </span>
                   </>
                 }
               >
-                <ol className="divide-y divide-slate-100">
+                <ol className="divide-y divide-line">
                   {v.steps.map((step, i) => (
                     <li key={step.id} className="flex gap-4 px-4 py-2 text-sm">
-                      <span className="w-14 shrink-0 text-xs font-semibold uppercase text-slate-500">Day {step.day}</span>
-                      <span className="text-slate-800">
-                        <span className="mr-2 text-slate-400">{i + 1}.</span>
+                      <span className="w-14 shrink-0 text-xs font-semibold uppercase text-ink-500">Day {step.day}</span>
+                      <span className="text-ink-800">
+                        <span className="mr-2 text-ink-400">{i + 1}.</span>
                         {step.actions.map(describeAction).join(', then ')}
                       </span>
                     </li>

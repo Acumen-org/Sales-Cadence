@@ -112,7 +112,8 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
   const replyInThread = Boolean(actionDef?.replyInThread);
 
   const [touches, colleagues, notesResult, oppsResult] = await Promise.all([
-    prisma.touch.findMany({ where: { personId: person.id }, orderBy: { occurredAt: 'desc' }, take: 5 }),
+    // 12 for the dot timeline; the brief lists the most recent five.
+    prisma.touch.findMany({ where: { personId: person.id }, orderBy: { occurredAt: 'desc' }, take: 12 }),
     loadColleagues(person.companyId, person.id),
     fetchNotes(person.id),
     fetchOpportunities(person.id),

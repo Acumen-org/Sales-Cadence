@@ -8,7 +8,7 @@ import { bulkTasksAction } from '@/lib/actions/tasks';
 import type { ActionResult } from '@/lib/actions/users';
 import { relativeDays, formatLocalDate, type LocalDate } from '@/lib/dates';
 import { ActionIcon } from '@/components/icons';
-import { Badge } from '@/components/ui';
+import { Avatar, Badge } from '@/components/ui';
 import type { DispositionOption, SkipReasonOption } from './task-actions';
 
 /** Serialisable row for the client list. */
@@ -87,20 +87,21 @@ export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispos
   return (
     <div>
       {bulkEnabled ? (
-        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs">
-          <label className="inline-flex items-center gap-1.5 font-normal text-slate-600">
-            <input type="checkbox" className="h-3.5 w-3.5 rounded" checked={allSelected} onChange={toggleAll} disabled={!pendingRows.length} /> {selected.size ? `${selected.size} selected` : 'Select all'}
+        <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border-line bg-white/95 px-3 py-2 text-[12px] backdrop-blur">
+          <label className="inline-flex items-center gap-2 font-normal text-ink-500">
+            <input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={!pendingRows.length} />
+            {selected.size ? `${selected.size} selected` : 'Select all'}
           </label>
           {selected.size ? (
             <>
-              <select value={op} onChange={(e) => setOp(e.target.value as typeof op)} className="py-1 text-xs">
+              <select value={op} onChange={(e) => setOp(e.target.value as typeof op)} className="!w-auto !py-1 !text-[12px]">
                 <option value="complete">Mark done</option>
                 <option value="skip">Skip</option>
                 <option value="snooze">Snooze</option>
                 {fos.length > 1 ? <option value="reassign">Reassign</option> : null}
               </select>
               {op === 'complete' && selectedHasCalls ? (
-                <select value={disposition} onChange={(e) => setDisposition(e.target.value)} className="py-1 text-xs" title="Call outcome for the selected calls">
+                <select value={disposition} onChange={(e) => setDisposition(e.target.value)} className="!w-auto !py-1 !text-[12px]" title="Call outcome for the selected calls">
                   {dispositions.map((d) => (
                     <option key={d.key} value={d.key}>
                       Calls: {d.label}
@@ -109,7 +110,7 @@ export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispos
                 </select>
               ) : null}
               {op === 'skip' ? (
-                <select value={reasonKey} onChange={(e) => setReasonKey(e.target.value)} className="py-1 text-xs">
+                <select value={reasonKey} onChange={(e) => setReasonKey(e.target.value)} className="!w-auto !py-1 !text-[12px]">
                   {skipReasons.map((r) => (
                     <option key={r.key} value={r.key}>
                       {r.label}
@@ -117,9 +118,9 @@ export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispos
                   ))}
                 </select>
               ) : null}
-              {op === 'snooze' && canPickSnoozeDate ? <input type="date" value={toDate} min={nextWorkingDay} onChange={(e) => setToDate(e.target.value)} className="py-1 text-xs" /> : null}
+              {op === 'snooze' && canPickSnoozeDate ? <input type="date" value={toDate} min={nextWorkingDay} onChange={(e) => setToDate(e.target.value)} className="!w-auto !py-1 !text-[12px]" /> : null}
               {op === 'reassign' ? (
-                <select value={foUserId} onChange={(e) => setFoUserId(e.target.value)} className="py-1 text-xs">
+                <select value={foUserId} onChange={(e) => setFoUserId(e.target.value)} className="!w-auto !py-1 !text-[12px]">
                   {fos.map((f) => (
                     <option key={f.id} value={f.id}>
                       {f.name}
@@ -135,39 +136,40 @@ export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispos
           {result ? <span className={result.ok ? 'text-emerald-700' : 'text-red-700'}>{result.ok ? result.message : result.error}</span> : null}
         </div>
       ) : null}
-      <ul className="divide-y divide-slate-100">
+
+      <ul className="divide-y divide-line">
         {rows.map((t) => {
           const overdue = t.state === 'PENDING' && t.due < today;
           const isSelected = t.id === selectedId;
           return (
-            <li key={t.id} className={clsx('flex items-stretch', isSelected && 'bg-brand-50/60')}>
+            <li key={t.id} className={clsx('relative flex items-stretch', isSelected ? 'bg-brand-50/70' : 'hover:bg-canvas/70')}>
+              {isSelected ? <span className="absolute inset-y-0 left-0 w-[3px] bg-brand-600" /> : null}
               {bulkEnabled ? (
                 <label className="flex items-center pl-3">
-                  <input type="checkbox" className="h-3.5 w-3.5 rounded" checked={selected.has(t.id)} onChange={() => toggleOne(t.id)} disabled={t.state !== 'PENDING'} aria-label={`Select ${t.personName}`} />
+                  <input type="checkbox" checked={selected.has(t.id)} onChange={() => toggleOne(t.id)} disabled={t.state !== 'PENDING'} aria-label={`Select ${t.personName}`} />
                 </label>
               ) : null}
-              <Link href={hrefFor(t.id)} className="flex flex-1 items-start gap-3 px-3 py-3 text-sm transition-colors hover:bg-slate-50">
-                <span className={clsx('mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full', overdue ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-600')}>
-                  <ActionIcon action={t.action} size={15} />
-                </span>
+              <Link href={hrefFor(t.id)} className="flex min-w-0 flex-1 items-start gap-2.5 px-3 py-2.5">
+                <Avatar name={t.personName} shape="circle" size={30} />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline justify-between gap-2">
-                    <span className="truncate font-medium text-slate-900">{t.personName}</span>
-                    <span className={clsx('shrink-0 text-xs', overdue ? 'font-medium text-red-600' : 'text-slate-500')} title={formatLocalDate(t.due, 'long')}>
+                    <span className="truncate text-[13.5px] font-medium text-ink-900">{t.personName}</span>
+                    <span className={clsx('shrink-0 text-[11.5px]', overdue ? 'font-medium text-red-600' : 'text-ink-400')} title={formatLocalDate(t.due, 'long')}>
                       {t.state === 'PENDING' ? relativeDays(t.due, today) : t.state.toLowerCase()}
                     </span>
                   </span>
-                  <span className="block truncate text-slate-600">
-                    {t.label}
-                    {t.altAction ? ' (either/or)' : ''} · {t.companyName ?? 'no company'}
-                  </span>
-                  <span className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
-                    <span>
-                      Step {t.stepIndex + 1} · Day {t.stepDay}
+                  <span className="mt-0.5 flex items-center gap-1.5 text-[12.5px] text-ink-600">
+                    <ActionIcon action={t.action} size={12} className="text-ink-400" />
+                    <span className="truncate">
+                      {t.label}
+                      {t.altAction ? ' (either/or)' : ''}
                     </span>
+                  </span>
+                  <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[11.5px] text-ink-400">
+                    <span className="truncate">{t.companyName ?? 'no company'}</span>
+                    <span>· Day {t.stepDay}</span>
                     {t.snoozed ? <Badge tone="sky">snoozed</Badge> : null}
                     {showFo ? <span>· {t.foName}</span> : null}
-                    {t.campaignName ? <span className="truncate">· {t.campaignName}</span> : null}
                   </span>
                 </span>
               </Link>

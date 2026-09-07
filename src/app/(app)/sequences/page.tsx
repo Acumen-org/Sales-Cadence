@@ -2,30 +2,32 @@ import Link from 'next/link';
 import { requireUser } from '@/lib/auth/current-user';
 import { isAdmin } from '@/lib/auth/rbac';
 import { listSequences } from '@/lib/sequences-query';
-import { Badge, Card, EmptyState, PageHeader } from '@/components/ui';
+import { IconPlus, IconSequences } from '@/components/icons';
+import { Badge, EmptyState, IdentityCell, StatusDot, Surface, ViewHeader } from '@/components/ui';
 
 export default async function SequencesPage() {
   const user = await requireUser();
   const sequences = await listSequences();
   const admin = isAdmin(user);
   return (
-    <>
-      <PageHeader
-        title="Sequences"
-        subtitle="Step plans with day offsets and actions. Editing creates a new version; running enrollments pick it up at their next step."
-        actions={
-          admin ? (
-            <Link href="/sequences/new" className="btn-primary">
-              New sequence
-            </Link>
-          ) : null
-        }
-      />
-      <div className="p-6">
-        <Card>
-          {sequences.length === 0 ? (
-            <EmptyState title="No sequences" hint="Run the seed to create the default sequence, or create one." />
-          ) : (
+    <div className="px-6 pb-8 pt-2">
+      <Surface flush>
+        <ViewHeader
+          title="All sequences"
+          caret
+          meta={`${sequences.length} sequence${sequences.length === 1 ? '' : 's'}`}
+          actions={
+            admin ? (
+              <Link href="/sequences/new" className="btn-secondary btn-sm">
+                <IconPlus size={13} /> New sequence
+              </Link>
+            ) : null
+          }
+        />
+        {sequences.length === 0 ? (
+          <EmptyState icon={<IconSequences size={20} />} title="No sequences" hint="Run the seed to create the default sequence, or create one." />
+        ) : (
+          <div className="overflow-x-auto scroll-thin">
             <table className="table">
               <thead>
                 <tr>
@@ -35,7 +37,7 @@ export default async function SequencesPage() {
                   <th>Active</th>
                   <th>Replied</th>
                   <th>Meetings</th>
-                  <th>Completed</th>
+                  <th>Finished</th>
                   <th>Campaigns</th>
                 </tr>
               </thead>
@@ -43,17 +45,18 @@ export default async function SequencesPage() {
                 {sequences.map((s) => (
                   <tr key={s.id} className={s.archived ? 'opacity-60' : undefined}>
                     <td>
-                      <Link href={`/sequences/${s.id}`} className="font-medium text-brand-700 hover:underline">
-                        {s.name}
-                      </Link>
-                      {s.archived ? <Badge tone="gray" className="ml-2">archived</Badge> : null}
-                      {s.description ? <div className="text-xs text-slate-500">{s.description}</div> : null}
+                      <div className="flex items-center gap-2">
+                        <IdentityCell name={s.name} href={`/sequences/${s.id}`} sub={s.description ?? `${s.stepCount} steps over ${s.lastDay} days`} />
+                        {s.archived ? <Badge tone="gray">archived</Badge> : null}
+                      </div>
                     </td>
-                    <td>v{s.version ?? '-'}</td>
+                    <td className="whitespace-nowrap">v{s.version ?? '-'}</td>
+                    <td className="whitespace-nowrap text-[12.5px]">
+                      {s.stepCount} steps · {s.lastDay} days
+                    </td>
                     <td>
-                      {s.stepCount} over {s.lastDay} days
+                      <StatusDot tone={s.enrollments.active + s.enrollments.paused ? 'green' : 'gray'}>{s.enrollments.active + s.enrollments.paused} Active</StatusDot>
                     </td>
-                    <td>{s.enrollments.active + s.enrollments.paused}</td>
                     <td>{s.enrollments.replied}</td>
                     <td>{s.enrollments.meeting}</td>
                     <td>{s.enrollments.completed}</td>
@@ -62,9 +65,9 @@ export default async function SequencesPage() {
                 ))}
               </tbody>
             </table>
-          )}
-        </Card>
-      </div>
-    </>
+          </div>
+        )}
+      </Surface>
+    </div>
   );
 }

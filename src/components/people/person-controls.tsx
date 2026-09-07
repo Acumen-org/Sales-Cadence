@@ -27,7 +27,7 @@ export function PersonControls(p: Props) {
   return (
     <div className="space-y-4">
       <div className="card p-4">
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Sequence</h3>
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-500">Sequence</h3>
         {p.active ? (
           <div className="flex flex-wrap items-center gap-2">
             {p.active.status === 'ACTIVE' ? (
@@ -85,7 +85,7 @@ export function PersonControls(p: Props) {
           </div>
         ) : (
           <div className="flex items-center gap-3">
-            <span className="text-sm text-slate-600">Not in a sequence.</span>
+            <span className="text-sm text-ink-600">Not in a sequence.</span>
             <PersonRowActions personId={p.personId} activeEnrollmentId={null} dnd={p.dnd || p.optedOut} canEnroll={p.canManagePerson} canExit={false} sequences={p.sequences} pods={p.pods} defaultPodId={p.defaultPodId} />
           </div>
         )}
@@ -93,7 +93,7 @@ export function PersonControls(p: Props) {
 
       {p.canManagePerson ? (
         <div className="card p-4">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Contact preferences (Cadence only)</h3>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-500">Contact preferences (Cadence only)</h3>
           <div className="flex flex-wrap items-center gap-2">
             {p.optedOut ? (
               <ActionButton action={setOptOutAction} payload={{ personId: p.personId, optedOut: 'false' }} className="btn-secondary btn-sm">
@@ -109,7 +109,7 @@ export function PersonControls(p: Props) {
                 Clear bad-data flags
               </ActionButton>
             ) : null}
-            <span className="text-xs text-slate-500">Twenty stays the record: set dnd there too if it should apply everywhere.</span>
+            <span className="text-xs text-ink-500">Twenty stays the record: set dnd there too if it should apply everywhere.</span>
           </div>
         </div>
       ) : null}

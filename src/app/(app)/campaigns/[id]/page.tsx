@@ -8,7 +8,7 @@ import { formatLocalDate, todayIn } from '@/lib/dates';
 import { cachedPersonName } from '@/lib/person-cache';
 import { CampaignControls } from '@/components/campaigns/campaign-controls';
 import { EnrollmentActions } from '@/components/campaigns/enrollment-actions';
-import { Badge, CAMPAIGN_TONE, Card, ENROLLMENT_TONE, PageHeader, Stat } from '@/components/ui';
+import { Badge, CAMPAIGN_TONE, Card, ENROLLMENT_TONE, enrollmentStatusLabel, IdentityCell, RecordHeader, Stat } from '@/components/ui';
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 
@@ -24,26 +24,34 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
 
   return (
     <>
-      <PageHeader
-        title={campaign.name}
-        subtitle={
-          <>
-            <Badge tone={CAMPAIGN_TONE[campaign.status] ?? 'gray'}>{campaign.status.toLowerCase()}</Badge> · {campaign.pod.name} ·{' '}
-            <Link href={`/sequences/${campaign.sequenceId}`} className="text-brand-700 hover:underline">
-              {campaign.sequence.name}
-            </Link>{' '}
-            v{campaign.sequence.activeVersion?.version ?? '-'} · starts {formatLocalDate(campaign.startDate, 'long')} · {campaign.assignmentMode === 'OWNER' ? 'assigned by owner' : 'round robin'}
-            {campaign.dailyRampPerFo ? ` · ramp ${campaign.dailyRampPerFo}/FO/day` : ''}
-            {campaign.sourceRef ? ` · source: ${campaign.sourceRef}` : ''}
-          </>
-        }
-        actions={
-          <Link href="/campaigns" className="btn-secondary">
-            All campaigns
-          </Link>
-        }
-      />
-      <div className="space-y-6 p-6">
+      <div className="px-6 pt-2">
+        <RecordHeader
+          name={campaign.name}
+          shape="square"
+          sub={
+            <>
+              {campaign.pod.name} ·{' '}
+              <Link href={`/sequences/${campaign.sequenceId}`} className="text-brand-700 hover:underline">
+                {campaign.sequence.name}
+              </Link>{' '}
+              v{campaign.sequence.activeVersion?.version ?? '-'} · starts {formatLocalDate(campaign.startDate, 'long')} · {campaign.assignmentMode === 'OWNER' ? 'assigned by owner' : 'round robin'}
+              {campaign.dailyRampPerFo ? ` · ramp ${campaign.dailyRampPerFo}/FO/day` : ''}
+              {campaign.sourceRef ? ` · source: ${campaign.sourceRef}` : ''}
+            </>
+          }
+          badges={
+            <Badge tone={CAMPAIGN_TONE[campaign.status] ?? 'gray'} dot>
+              {campaign.status.toLowerCase()}
+            </Badge>
+          }
+          actions={
+            <Link href="/campaigns" className="btn-secondary btn-sm">
+              All campaigns
+            </Link>
+          }
+        />
+      </div>
+      <div className="space-y-3 px-6 pb-8 pt-3">
         <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <Stat label="People" value={summary.counts.total} />
           <Stat label="Active" value={summary.counts.active + summary.counts.paused} hint={summary.counts.paused ? `${summary.counts.paused} paused` : undefined} />
@@ -53,7 +61,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
           <Stat label="Meeting rate" value={pct(summary.meetingRate)} />
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="grid gap-3 lg:grid-cols-2">
           <Card title="Funnel by step">
             <table className="table">
               <thead>
@@ -71,7 +79,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
                 {byStep.map((s) => (
                   <tr key={s.index}>
                     <td>
-                      <span className="text-xs text-slate-400">Day {s.day} · </span>
+                      <span className="text-xs text-ink-400">Day {s.day} · </span>
                       {s.label}
                     </td>
                     <td>{s.reached}</td>
@@ -146,31 +154,35 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
                 return (
                   <tr key={e.id}>
                     <td>
-                      <div className="font-medium text-slate-900">{cachedPersonName(e.person)}</div>
-                      <div className="text-xs text-slate-500">
-                        {e.person.jobTitle}
-                        {e.person.companyName ? ` · ${e.person.companyName}` : ''}
-                      </div>
+                      <IdentityCell
+                        name={cachedPersonName(e.person)}
+                        href={`/people/${e.personId}`}
+                        shape="circle"
+                        size={28}
+                        sub={[e.person.jobTitle, e.person.companyName].filter(Boolean).join(' · ') || null}
+                      />
                     </td>
-                    <td>{e.fo.name}</td>
+                    <td className="whitespace-nowrap">{e.fo.name}</td>
                     <td>
-                      <Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'}>{e.status.toLowerCase()}</Badge>
-                      {e.exitReason ? <div className="text-xs text-slate-500">{e.exitReason}</div> : null}
-                      {e.pauseReason ? <div className="text-xs text-slate-500">{e.pauseReason}</div> : null}
+                      <Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'} dot>
+                        {enrollmentStatusLabel(e)}
+                      </Badge>
+                      {e.exitReason ? <div className="text-xs text-ink-500">{e.exitReason}</div> : null}
+                      {e.pauseReason ? <div className="text-xs text-ink-500">{e.pauseReason}</div> : null}
                     </td>
                     <td>{e.startDate}</td>
                     <td>
                       {e.currentStep + 1} / {detail.steps.length}
-                      {e.shiftDays ? <div className="text-xs text-slate-500">shifted {e.shiftDays}d</div> : null}
+                      {e.shiftDays ? <div className="text-xs text-ink-500">shifted {e.shiftDays}d</div> : null}
                     </td>
                     <td>v{e.sequenceVersion.version}</td>
                     <td className="text-xs">
                       {next ? (
-                        <span className={(next.snoozedTo ?? next.dueDate) < today ? 'text-red-600' : 'text-slate-700'}>
+                        <span className={(next.snoozedTo ?? next.dueDate) < today ? 'text-red-600' : 'text-ink-700'}>
                           {next.label} · {next.snoozedTo ?? next.dueDate}
                         </span>
                       ) : last ? (
-                        <span className="text-slate-500">
+                        <span className="text-ink-500">
                           {last.label} · {last.state.toLowerCase()}
                         </span>
                       ) : (

@@ -10,11 +10,11 @@ const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 function Check({ name, label, checked, hint }: { name: string; label: string; checked: boolean; hint?: string }) {
   return (
-    <label className="flex items-start gap-2 text-sm font-normal text-slate-700">
+    <label className="flex items-start gap-2 text-sm font-normal text-ink-700">
       <input type="checkbox" name={name} defaultChecked={checked} className="mt-0.5 h-4 w-4 rounded" />
       <span>
         {label}
-        {hint ? <span className="block text-xs text-slate-500">{hint}</span> : null}
+        {hint ? <span className="block text-xs text-ink-500">{hint}</span> : null}
       </span>
     </label>
   );
@@ -37,8 +37,8 @@ export function TwentyConnectionForm({ twenty, hasEnvKey, defaultSchemaJson }: {
           <textarea name="schema" rows={6} defaultValue={twenty.schema ? JSON.stringify(twenty.schema, null, 2) : ''} className="w-full font-mono text-xs" />
         </Field>
         <details>
-          <summary className="cursor-pointer text-xs text-slate-500">Default mapping (twenty-schema.ts)</summary>
-          <pre className="mt-2 max-h-64 overflow-auto rounded bg-slate-50 p-3 text-[11px] text-slate-700">{defaultSchemaJson}</pre>
+          <summary className="cursor-pointer text-xs text-ink-500">Default mapping (twenty-schema.ts)</summary>
+          <pre className="mt-2 max-h-64 overflow-auto rounded bg-canvas p-3 text-[11px] text-ink-700">{defaultSchemaJson}</pre>
         </details>
         <button type="submit" className="btn-primary">
           Save Twenty settings
@@ -100,7 +100,7 @@ export function RulesForm({ rules }: { rules: Settings['rules'] }) {
           <label className="mb-1 block">Working days</label>
           <div className="flex flex-wrap gap-3">
             {DAYS.map((d, i) => (
-              <label key={d} className="inline-flex items-center gap-1.5 text-sm font-normal text-slate-700">
+              <label key={d} className="inline-flex items-center gap-1.5 text-sm font-normal text-ink-700">
                 <input type="checkbox" name="workingDays" value={i} defaultChecked={rules.workingDays.includes(i)} className="h-4 w-4 rounded" /> {d}
               </label>
             ))}
@@ -150,7 +150,7 @@ function DispositionsEditor({ initial }: { initial: Disposition[] }) {
     <div>
       <input type="hidden" name="callDispositionsJson" value={JSON.stringify(rows)} />
       <label className="mb-1 block">Call outcomes (dispositions)</label>
-      <p className="mb-2 text-xs text-slate-500">An FO must pick one to log a call. "Answered" outcomes count as a reply when the rule above is on.</p>
+      <p className="mb-2 text-xs text-ink-500">An FO must pick one to log a call. "Answered" outcomes count as a reply when the rule above is on.</p>
       <table className="table">
         <thead>
           <tr>
@@ -208,7 +208,7 @@ function SkipReasonsEditor({ initial }: { initial: SkipReason[] }) {
     <div>
       <input type="hidden" name="skipReasonsJson" value={JSON.stringify(rows)} />
       <label className="mb-1 block">Skip reasons</label>
-      <p className="mb-2 text-xs text-slate-500">Offered when an FO skips a step. Reasons that end the sequence remove the person from it immediately.</p>
+      <p className="mb-2 text-xs text-ink-500">Offered when an FO skips a step. Reasons that end the sequence remove the person from it immediately.</p>
       <table className="table">
         <thead>
           <tr>

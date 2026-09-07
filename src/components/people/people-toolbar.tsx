@@ -6,6 +6,16 @@ import { IconSearch } from '@/components/icons';
 
 type Props = { pods: { podOwnerValue: string; name: string }[]; q: string; pod: string; status: string };
 
+const STAGES = [
+  { value: '', label: 'Any stage' },
+  { value: 'cold', label: 'Cold (never enrolled)' },
+  { value: 'approaching', label: 'Approaching (in a sequence)' },
+  { value: 'replied', label: 'Replied or meeting' },
+  { value: 'unresponsive', label: 'Unresponsive (finished, no reply)' },
+  { value: 'bad_data', label: 'Bad data' },
+  { value: 'dnd', label: 'Do not contact / opted out' },
+];
+
 export function PeopleToolbar({ pods, q, pod, status }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -30,13 +40,28 @@ export function PeopleToolbar({ pods, q, pod, status }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text]);
 
+  const activeChips = [
+    pod ? { key: 'pod', label: `Pod is ${pods.find((p) => p.podOwnerValue === pod)?.name ?? pod}` } : null,
+    status ? { key: 'status', label: STAGES.find((s) => s.value === status)?.label ?? status } : null,
+  ].filter((x): x is { key: string; label: string } => Boolean(x));
+
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <div className="relative">
-        <IconSearch size={14} className="pointer-events-none absolute left-2.5 top-2.5 text-slate-400" />
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search name, company, email" className="w-64 pl-8 text-sm" />
+    <div className="flex flex-1 flex-wrap items-center gap-2">
+      <div className="relative w-full max-w-xs">
+        <IconSearch size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search name, company, email" aria-label="Search people" className="!pl-9" />
       </div>
-      <select value={pod} onChange={(e) => update({ pod: e.target.value || null })} className="text-sm">
+
+      {activeChips.map((c) => (
+        <button key={c.key} type="button" className="chip" onClick={() => update({ [c.key]: null })} title="Remove this filter">
+          {c.label}
+          <span aria-hidden className="text-brand-500">
+            ✕
+          </span>
+        </button>
+      ))}
+
+      <select value={pod} onChange={(e) => update({ pod: e.target.value || null })} aria-label="Filter by pod" className="!w-auto !py-2 !text-[12.5px]">
         <option value="">All pods</option>
         {pods.map((p) => (
           <option key={p.podOwnerValue} value={p.podOwnerValue}>
@@ -44,14 +69,12 @@ export function PeopleToolbar({ pods, q, pod, status }: Props) {
           </option>
         ))}
       </select>
-      <select value={status} onChange={(e) => update({ status: e.target.value || null })} className="text-sm">
-        <option value="">Any stage</option>
-        <option value="cold">Cold (never enrolled)</option>
-        <option value="approaching">Approaching (in a sequence)</option>
-        <option value="replied">Replied or meeting</option>
-        <option value="unresponsive">Unresponsive (finished, no reply)</option>
-        <option value="bad_data">Bad data</option>
-        <option value="dnd">Do not contact / opted out</option>
+      <select value={status} onChange={(e) => update({ status: e.target.value || null })} aria-label="Filter by stage" className="!w-auto !py-2 !text-[12.5px]">
+        {STAGES.map((s) => (
+          <option key={s.value} value={s.value}>
+            {s.label}
+          </option>
+        ))}
       </select>
     </div>
   );

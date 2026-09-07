@@ -2,51 +2,209 @@ import Link from 'next/link';
 import clsx from 'clsx';
 import { cloneElement, isValidElement, useId, type ReactElement, type ReactNode } from 'react';
 
-export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: ReactNode; actions?: ReactNode }) {
+/* -------------------------------------------------------------------------- */
+/* Page chrome                                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Sub-page heading. The section name lives in the top bar, so this is the smaller
+ * second-level title used by creation and detail screens.
+ */
+export function PageHeader({ title, subtitle, actions }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 bg-white px-6 py-4">
-      <div>
-        <h1 className="text-xl font-semibold text-slate-900">{title}</h1>
-        {subtitle ? <div className="mt-0.5 text-sm text-slate-500">{subtitle}</div> : null}
+    <div className="flex flex-wrap items-start justify-between gap-3 px-6 pb-1 pt-2">
+      <div className="min-w-0">
+        <h2 className="truncate text-[17px] font-semibold tracking-[-0.01em] text-ink-900">{title}</h2>
+        {subtitle ? <div className="mt-0.5 text-[13px] text-ink-500">{subtitle}</div> : null}
       </div>
       {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
   );
 }
 
-export function Page({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={clsx('p-6', className)}>{children}</div>;
+/**
+ * The white rounded surface the page content sits on (the canvas shows through around it).
+ * `flush` removes the inner padding for tables that draw their own rows.
+ */
+export function Surface({ children, className, flush }: { children: ReactNode; className?: string; flush?: boolean }) {
+  return <section className={clsx('surface overflow-hidden', !flush && 'p-4', className)}>{children}</section>;
 }
 
-export function Card({ children, className, title, actions }: { children: ReactNode; className?: string; title?: ReactNode; actions?: ReactNode }) {
+/** Header inside a surface: bold view name (optionally with a caret) and a right-hand meta slot. */
+export function ViewHeader({ title, meta, actions, caret }: { title: ReactNode; meta?: ReactNode; actions?: ReactNode; caret?: boolean }) {
   return (
-    <section className={clsx('card', className)}>
+    <div className="flex flex-wrap items-center justify-between gap-3 px-4 pb-3 pt-4">
+      <div className="flex items-center gap-1.5 text-[16px] font-semibold text-ink-900">
+        {title}
+        {caret ? <IconCaret /> : null}
+      </div>
+      <div className="flex items-center gap-2">
+        {actions}
+        {meta ? <span className="text-[13px] text-ink-500">{meta}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+/** Filter/toolbar strip under a view header. */
+export function Toolbar({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={clsx('flex flex-wrap items-center gap-2 px-4 pb-3', className)}>{children}</div>;
+}
+
+function IconCaret() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" aria-hidden className="text-ink-400">
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
+
+export function Card({ children, className, title, actions, flush }: { children: ReactNode; className?: string; title?: ReactNode; actions?: ReactNode; flush?: boolean }) {
+  return (
+    <section className={clsx('surface overflow-hidden', className)}>
       {title || actions ? (
-        <header className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-2.5">
-          <h2 className="text-sm font-semibold text-slate-800">{title}</h2>
-          {actions}
+        <header className="card-head">
+          <h2 className="card-title">{title}</h2>
+          {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
         </header>
       ) : null}
-      {children}
+      {flush ? children : children}
     </section>
   );
 }
 
-const BADGE_TONES: Record<string, string> = {
-  gray: 'bg-slate-100 text-slate-700',
+/* -------------------------------------------------------------------------- */
+/* Badges, dots, avatars                                                      */
+/* -------------------------------------------------------------------------- */
+
+const BADGE_TONES = {
+  gray: 'bg-canvas text-ink-500',
   blue: 'bg-brand-50 text-brand-700',
   green: 'bg-emerald-50 text-emerald-700',
   amber: 'bg-amber-50 text-amber-700',
   red: 'bg-red-50 text-red-700',
   purple: 'bg-violet-50 text-violet-700',
   sky: 'bg-sky-50 text-sky-700',
-};
+} as const;
 
 export type BadgeTone = keyof typeof BADGE_TONES;
 
-export function Badge({ children, tone = 'gray', className }: { children: ReactNode; tone?: BadgeTone; className?: string }) {
-  return <span className={clsx('badge', BADGE_TONES[tone], className)}>{children}</span>;
+export function Badge({ children, tone = 'gray', className, dot }: { children: ReactNode; tone?: BadgeTone; className?: string; dot?: boolean }) {
+  return (
+    <span className={clsx('badge', BADGE_TONES[tone], className)}>
+      {dot ? <span className={clsx('dot', DOT_TONES[tone])} /> : null}
+      {children}
+    </span>
+  );
 }
+
+const DOT_TONES: Record<BadgeTone, string> = {
+  gray: 'bg-ink-300',
+  blue: 'bg-brand-500',
+  green: 'bg-emerald-500',
+  amber: 'bg-amber-500',
+  red: 'bg-red-500',
+  purple: 'bg-violet-500',
+  sky: 'bg-sky-500',
+};
+
+/** Coloured dot + label, the way Outreach shows "17 Active". */
+export function StatusDot({ tone = 'green', children }: { tone?: BadgeTone; children: ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-2 text-[13.5px] text-ink-700">
+      <span className={clsx('dot', DOT_TONES[tone])} />
+      {children}
+    </span>
+  );
+}
+
+const AVATAR_TONES = [
+  'bg-brand-100 text-brand-800',
+  'bg-emerald-100 text-emerald-800',
+  'bg-amber-100 text-amber-800',
+  'bg-sky-100 text-sky-800',
+  'bg-violet-100 text-violet-800',
+  'bg-rose-100 text-rose-800',
+  'bg-teal-100 text-teal-800',
+];
+
+function toneFor(seed: string) {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 1000;
+  return AVATAR_TONES[h % AVATAR_TONES.length];
+}
+
+export function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+/** Initials avatar: rounded square for companies (like a logo tile), circle for people. */
+export function Avatar({ name, size = 32, shape = 'square', className }: { name: string; size?: number; shape?: 'square' | 'circle'; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={clsx('inline-flex shrink-0 items-center justify-center font-semibold', shape === 'circle' ? 'rounded-full' : 'rounded-[8px]', toneFor(name), className)}
+      style={{ width: size, height: size, fontSize: Math.max(10, Math.round(size * 0.36)) }}
+    >
+      {initialsOf(name)}
+    </span>
+  );
+}
+
+/** Two-line cell: avatar, primary name (optionally a link), and a muted second line. */
+export function IdentityCell({ name, sub, href, shape = 'square', size = 32 }: { name: string; sub?: ReactNode; href?: string; shape?: 'square' | 'circle'; size?: number }) {
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      <Avatar name={name} shape={shape} size={size} />
+      <div className="min-w-0">
+        {href ? (
+          <Link href={href} className="block truncate text-[13.5px] font-medium text-ink-900 hover:text-brand-700">
+            {name}
+          </Link>
+        ) : (
+          <div className="truncate text-[13.5px] font-medium text-ink-900">{name}</div>
+        )}
+        {sub ? <div className="truncate text-[12px] text-ink-500">{sub}</div> : null}
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Activity dot timeline                                                      */
+/* -------------------------------------------------------------------------- */
+
+export type TimelinePoint = { at: number; lane: 'out' | 'in' };
+
+/**
+ * The dot timeline Outreach shows in list views: a hairline with outbound touches above it and
+ * inbound replies below, positioned by time across the window.
+ */
+export function DotTimeline({ points, width = 210, days = 30, now = Date.now() }: { points: TimelinePoint[]; width?: number; days?: number; now?: number }) {
+  const span = days * 86_400_000;
+  const from = now - span;
+  const visible = points.filter((p) => p.at >= from);
+  const x = (at: number) => Math.max(2, Math.min(width - 2, ((at - from) / span) * width));
+  return (
+    <div className="relative" style={{ width, height: 26 }} aria-hidden>
+      <div className="absolute left-0 right-0 top-1/2 h-px -translate-y-1/2 bg-line" />
+      {visible.map((p, i) => (
+        <span
+          key={i}
+          className={clsx('absolute h-[7px] w-[7px] rounded-full', p.lane === 'out' ? 'bg-brand-500' : 'bg-emerald-500')}
+          style={{ left: x(p.at) - 3.5, top: p.lane === 'out' ? 4 : 15 }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Status tones shared across pages                                           */
+/* -------------------------------------------------------------------------- */
 
 export const ENROLLMENT_TONE: Record<string, BadgeTone> = {
   ACTIVE: 'blue',
@@ -55,6 +213,21 @@ export const ENROLLMENT_TONE: Record<string, BadgeTone> = {
   MEETING: 'purple',
   COMPLETED: 'gray',
   EXITED: 'red',
+};
+
+export const TASK_TONE: Record<string, BadgeTone> = {
+  PENDING: 'blue',
+  DONE: 'green',
+  SKIPPED: 'amber',
+  CANCELLED: 'gray',
+};
+
+export const CAMPAIGN_TONE: Record<string, BadgeTone> = {
+  DRAFT: 'gray',
+  ACTIVE: 'blue',
+  PAUSED: 'amber',
+  STOPPED: 'red',
+  COMPLETED: 'green',
 };
 
 /** Outreach-style wording for an enrollment's state. */
@@ -87,7 +260,10 @@ export function enrollmentStatusLabel(e: { status: string; exitReason?: string |
 }
 
 /** Outreach-style prospect stage derived from flags and the latest enrollment. */
-export function personStage(p: { dnd: boolean; optedOut: boolean; badEmail: boolean; badPhone: boolean }, latest: { status: string; exitReason?: string | null } | null): { label: string; tone: BadgeTone } {
+export function personStage(
+  p: { dnd: boolean; optedOut: boolean; badEmail: boolean; badPhone: boolean },
+  latest: { status: string; exitReason?: string | null } | null,
+): { label: string; tone: BadgeTone } {
   if (p.dnd || p.optedOut) return { label: 'Do not contact', tone: 'red' };
   if (latest?.status === 'MEETING') return { label: 'Meeting booked', tone: 'purple' };
   if (latest?.status === 'REPLIED') return { label: 'Replied', tone: 'green' };
@@ -99,34 +275,25 @@ export function personStage(p: { dnd: boolean; optedOut: boolean; badEmail: bool
   return { label: 'Cold', tone: 'gray' };
 }
 
-export const TASK_TONE: Record<string, BadgeTone> = {
-  PENDING: 'blue',
-  DONE: 'green',
-  SKIPPED: 'amber',
-  CANCELLED: 'gray',
-};
+/* -------------------------------------------------------------------------- */
+/* States, tabs, stats, forms                                                 */
+/* -------------------------------------------------------------------------- */
 
-export const CAMPAIGN_TONE: Record<string, BadgeTone> = {
-  DRAFT: 'gray',
-  ACTIVE: 'blue',
-  PAUSED: 'amber',
-  STOPPED: 'red',
-  COMPLETED: 'green',
-};
-
-export function EmptyState({ title, hint, action }: { title: string; hint?: ReactNode; action?: ReactNode }) {
+export function EmptyState({ title, hint, action, icon }: { title: string; hint?: ReactNode; action?: ReactNode; icon?: ReactNode }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 px-6 py-12 text-center">
-      <div className="text-sm font-medium text-slate-700">{title}</div>
-      {hint ? <div className="max-w-md text-sm text-slate-500">{hint}</div> : null}
+    <div className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">
+      {icon ? <div className="mb-1 flex h-11 w-11 items-center justify-center rounded-full bg-brand-50 text-brand-500">{icon}</div> : null}
+      <div className="text-[14px] font-semibold text-ink-900">{title}</div>
+      {hint ? <div className="max-w-md text-[13px] text-ink-500">{hint}</div> : null}
       {action ? <div className="mt-2">{action}</div> : null}
     </div>
   );
 }
 
-export function Tabs({ tabs, current }: { tabs: { key: string; label: ReactNode; href: string; count?: number }[]; current: string }) {
+/** Underline tabs. `inset` adds the page gutter; inside a surface pass inset={false}. */
+export function Tabs({ tabs, current, inset = true }: { tabs: { key: string; label: ReactNode; href: string; count?: number }[]; current: string; inset?: boolean }) {
   return (
-    <div className="flex gap-1 border-b border-slate-200 px-6">
+    <div className={clsx('flex gap-5 border-b border-line', inset ? 'px-6' : 'px-4')}>
       {tabs.map((t) => {
         const active = t.key === current;
         return (
@@ -134,13 +301,13 @@ export function Tabs({ tabs, current }: { tabs: { key: string; label: ReactNode;
             key={t.key}
             href={t.href}
             className={clsx(
-              '-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-medium',
-              active ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700',
+              '-mb-px flex items-center gap-1.5 border-b-2 py-2.5 text-[13.5px] font-medium transition-colors',
+              active ? 'border-brand-600 text-ink-900' : 'border-transparent text-ink-500 hover:text-ink-700',
             )}
           >
             {t.label}
             {typeof t.count === 'number' ? (
-              <span className={clsx('rounded-full px-1.5 text-xs', active ? 'bg-brand-50 text-brand-700' : 'bg-slate-100 text-slate-600')}>{t.count}</span>
+              <span className={clsx('rounded-full px-1.5 text-[11.5px] font-medium leading-5', active ? 'bg-brand-100 text-brand-800' : 'bg-canvas text-ink-500')}>{t.count}</span>
             ) : null}
           </Link>
         );
@@ -149,24 +316,27 @@ export function Tabs({ tabs, current }: { tabs: { key: string; label: ReactNode;
   );
 }
 
-export function Stat({ label, value, hint, tone }: { label: string; value: ReactNode; hint?: ReactNode; tone?: 'default' | 'warn' | 'good' }) {
+export function Stat({ label, value, hint, tone, icon }: { label: string; value: ReactNode; hint?: ReactNode; tone?: 'default' | 'warn' | 'good'; icon?: ReactNode }) {
   return (
-    <div className="card px-4 py-3">
-      <div className="text-xs uppercase tracking-wide text-slate-500">{label}</div>
-      <div className={clsx('mt-1 text-2xl font-semibold', tone === 'warn' ? 'text-amber-600' : tone === 'good' ? 'text-emerald-600' : 'text-slate-900')}>{value}</div>
-      {hint ? <div className="text-xs text-slate-500">{hint}</div> : null}
+    <div className="surface flex items-start gap-3 px-4 py-3.5">
+      {icon ? <span className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-[10px] bg-brand-50 text-brand-600">{icon}</span> : null}
+      <div className="min-w-0">
+        <div className="text-[11.5px] font-medium uppercase tracking-wide text-ink-400">{label}</div>
+        <div className={clsx('mt-0.5 text-[24px] font-semibold leading-tight', tone === 'warn' ? 'text-amber-600' : tone === 'good' ? 'text-emerald-600' : 'text-ink-900')}>{value}</div>
+        {hint ? <div className="text-[12px] text-ink-500">{hint}</div> : null}
+      </div>
     </div>
   );
 }
 
 export function Notice({ tone = 'info', children }: { tone?: 'info' | 'warn' | 'error' | 'success'; children: ReactNode }) {
   const cls = {
-    info: 'bg-sky-50 text-sky-800 border-sky-200',
+    info: 'bg-brand-50 text-brand-800 border-brand-100',
     warn: 'bg-amber-50 text-amber-800 border-amber-200',
     error: 'bg-red-50 text-red-800 border-red-200',
     success: 'bg-emerald-50 text-emerald-800 border-emerald-200',
   }[tone];
-  return <div className={clsx('rounded-md border px-3 py-2 text-sm', cls)}>{children}</div>;
+  return <div className={clsx('rounded-xl border px-3.5 py-2.5 text-[13px]', cls)}>{children}</div>;
 }
 
 const FORM_CONTROLS = new Set(['input', 'select', 'textarea']);
@@ -182,23 +352,23 @@ export function Field({ label, children, hint, className }: { label: ReactNode; 
   const controlId = single ? existingId ?? autoId : undefined;
   const control = single && !existingId ? cloneElement(children as ReactElement<{ id?: string }>, { id: controlId }) : children;
   return (
-    <div className={clsx('space-y-1', className)}>
+    <div className={clsx('space-y-1.5', className)}>
       <label htmlFor={controlId} className="block">
         {label}
       </label>
       {control}
-      {hint ? <p className="text-xs text-slate-500">{hint}</p> : null}
+      {hint ? <p className="text-[11.5px] leading-snug text-ink-400">{hint}</p> : null}
     </div>
   );
 }
 
 export function KeyValue({ items }: { items: { k: string; v: ReactNode }[] }) {
   return (
-    <dl className="kv grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
+    <dl className="kv grid grid-cols-[minmax(0,7rem)_1fr] gap-x-4 gap-y-2">
       {items.map((it) => (
         <div key={it.k} className="contents">
           <dt className="pt-0.5">{it.k}</dt>
-          <dd className="min-w-0 break-words">{it.v ?? <span className="text-slate-400">-</span>}</dd>
+          <dd className="min-w-0 break-words">{it.v ?? <span className="text-ink-300">-</span>}</dd>
         </div>
       ))}
     </dl>
@@ -206,5 +376,42 @@ export function KeyValue({ items }: { items: { k: string; v: ReactNode }[] }) {
 }
 
 export function Pill({ children }: { children: ReactNode }) {
-  return <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-600">{children}</span>;
+  return <span className="rounded bg-canvas px-1.5 py-0.5 font-mono text-[11px] text-ink-500">{children}</span>;
+}
+
+/**
+ * Detail-page header: avatar, record name, badges and actions on a white band.
+ * Used where the top bar shows the section and the record needs its own identity.
+ */
+export function RecordHeader({
+  name,
+  sub,
+  badges,
+  actions,
+  shape = 'circle',
+}: {
+  name: string;
+  sub?: ReactNode;
+  badges?: ReactNode;
+  actions?: ReactNode;
+  shape?: 'square' | 'circle';
+}) {
+  return (
+    <div className="surface flex flex-wrap items-start justify-between gap-4 px-5 py-4">
+      <div className="flex min-w-0 items-start gap-3.5">
+        <Avatar name={name} shape={shape} size={44} />
+        <div className="min-w-0">
+          <h2 className="truncate text-[20px] font-semibold tracking-[-0.01em] text-ink-900">{name}</h2>
+          {sub ? <div className="mt-0.5 text-[13px] text-ink-500">{sub}</div> : null}
+          {badges ? <div className="mt-2 flex flex-wrap items-center gap-1.5">{badges}</div> : null}
+        </div>
+      </div>
+      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+    </div>
+  );
+}
+
+/** Page body wrapper with the standard gutter. */
+export function Page({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={clsx('px-6 pb-8 pt-4', className)}>{children}</div>;
 }
