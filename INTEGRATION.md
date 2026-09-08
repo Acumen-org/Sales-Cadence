@@ -30,7 +30,7 @@ In Twenty: **Settings > Developers > Webhooks > Create webhook**.
   - `note` (activity notes: `[Email] Outbound email: ...`, `[CALL] Outbound Call by tw_...`, `Call Notes [31-Aug-2026]`)
   - `task` (mirrored Cadence tasks marked done in Twenty)
   - `opportunity` (meeting booked)
-  - `person` (dnd flips, deletions, `statusOfMeeting`, cache updates)
+  - `person` (dnd flips, deletions, `meetingTime`, `assignedTo` and `podOwner` changes, cache updates)
   - `company` (account renames, owner changes, industry / size / city / LinkedIn, deletions - keeps the Accounts section current without waiting for the nightly refresh)
 
   If your Twenty only offers "all objects", that is fine: Cadence ignores objects it does not track.
@@ -47,24 +47,109 @@ Without the field Cadence still matches mirrored tasks by the Twenty id it store
 
 ## 4. Confirm field names
 
-The defaults in `src/lib/twenty/twenty-schema.ts` assume a stock workspace plus these custom Person fields:
+The defaults in `src/lib/twenty/twenty-schema.ts` are **the real Acumen workspace**, verified
+against a full export of Alisa's pod (934 people, 59 columns). Twenty derives a field's GraphQL
+name from the label an admin typed, so "Next Action Due Date" is `nextActionDueDate`. Nothing
+below is invented: if your workspace uses a different name, override it (see the end of this
+section) rather than renaming the field in Twenty.
 
-| Cadence expects | Type | Used for |
+### Identity and contact, stock Twenty
+
+| Twenty field | Type | Where it appears in Cadence |
 |---|---|---|
-| `dnd` | Boolean | never enrol; auto-exit when it flips to true |
-| `podOwner` | Select (Alisa, Leigh, Andrew, Karson, Daniel, Ria ...) | pods |
-| `owner` / `ownerId` | Relation to Workspace member | "assign by owner" |
-| `tags` | Multi-select | shown in the brief |
-| `eventSource` | Text or Select | "where we met", `{{eventSource}}` |
-| `statusOfMeeting` | Select (optional) | meeting detection |
+| `name` | Full name | everywhere |
+| `emails` | Emails | Reach them; reply matching |
+| `phones` | Phones | Reach them; the calling code's zero-width joiner is stripped |
+| `additionalNumber` | Phones (custom) | Contact details |
+| `linkedinLink`, `xLink` | Links | Reach them |
+| `jobTitle`, `city` | Text | person header, `{{jobTitle}}`, `{{city}}` |
+| `company` / `companyId` | Relation to Company | Accounts, colleagues, `{{company}}` |
+| `createdBy` | Actor | "Added by" on the record |
 
-Open **Cadence > Settings > Twenty**. The default mapping is shown; enter only the names that differ as JSON overrides, for example:
+### Ownership
+
+| Twenty field | Type | Where it appears in Cadence |
+|---|---|---|
+| `assignedTo` / `assignedToId` | Relation to Workspace member | **the owner of the relationship**: "My relationships", the Home tile, and `assignment: OWNER` when enrolling |
+| `podOwner` | Select (`ALISA`, `ANDREW`, `LEIGH`, `KARSON`, `DANIEL`, `RIA` ...) | pods; a new value creates a pod on the spot |
+| `rotationTracking` | Select (`ROTATED_OUT_LEIGH` ...) | a flag on the person: rotated out to another pod |
+| `rotationChangedAt` | Date time | Ownership card |
+
+Twenty has no standard owner on Person; this workspace calls it **Assigned To**. Nothing is
+assigned without it, so if it is missing or renamed, "my relationships" and owner-based
+assignment both come up empty.
+
+### Consent and data quality
+
+| Twenty field | Type | Where it appears in Cadence |
+|---|---|---|
+| `dnd` | **Select**, value `DO_NOT_DISTURB` | never enrol; auto-exit when it is set. It is a select in this workspace, not a boolean |
+| `tags` | Multi-select, free-growing | its own row on the person panel |
+
+Three tags carry a consequence and are read rather than duplicated as Cadence flags:
+`DNC` (do not contact), `MISSING_EMAIL`, `MISSING_PHONE`. They are listed under
+`personValues.doNotContactTags` / `missingEmailTags` / `missingPhoneTags`.
+
+### Classification
+
+| Twenty field | Type | Where it appears in Cadence |
+|---|---|---|
+| `leadSource` | Multi-select (`FPA_WISCONSIN_JULY_2026`, `LEADGEN`, `NIL` ...) | "Lead source"; `{{leadSource}}`, humanised |
+| `leadSourceNotes` | Text | beside the lead source |
+| `tier` | Select `LEVEL_1`..`LEVEL_4` | tier badge and the People filter; `LEVEL_1` is best |
+| `contactType` | Multi-select (`PROSPECT`, `CLIENTS`, `CLIENT_S_CLIENT`, `PARTNER`, `ORGANIZATION`) | "In Twenty" column, People filter |
+| `listCategory` | Select (`COLD_BD`, `BI_WEEKLY`, `MONTHLY`, `QUARTERLY`, `UNASSIGNED`) | how often the person should be touched; People filter |
+| `previousCadence` | Select | shown as "(was Monthly)" beside the cadence |
+| `pipelineStageField` | Select (`PROSPECT`, `QUALIFY`, `RETAIN`) | the standing badge, ahead of contact type |
+| `productInterest` | Multi-select (`PHH`, `TOLLBOOTH`, `ACUBOOTH`, `GLYNAC`) | person panel; `{{product}}` |
+| `primaryProduct` | Text | `{{product}}` when set |
+| `onGoingCampaigns` | Multi-select (`AY_PHH_POST_WEBINAR`, `SPONSORSHIP`, `AUBURN_HILL_ACQUISITION`, `CE_PRESENTATION`) | "Campaigns in Twenty" - distinct from Cadence campaigns |
+| `alisaCallingList` | Boolean | "on the pod owner's calling list" |
+| `dealSignalStrength` | Select or text | Classification card |
+
+### What happens next, as the CRM records it
+
+| Twenty field | Type | Where it appears in Cadence |
+|---|---|---|
+| `nextAction` | Text ("FU-2", "Follow up 2") | **"What Twenty says next"**, top of the person panel |
+| `nextActionDueDate` | Date | beside it, red once past |
+| `nextStep` | Select (`EMAIL`, `LINKEDIN_MESSAGE`) | beside it |
+| `nextActionDueDatePoc` | Date | beside it |
+| `lastNote` | Text | quoted under the next action |
+
+Cadence **reads** these and never writes them. They are shown above Cadence's own step so an FO
+who is about to contradict the CRM's plan can see it first.
+
+### Last touch and meetings
+
+| Twenty field | Type | Where it appears in Cadence |
+|---|---|---|
+| `latestCallActivity` | Date time | the person's history, when no Cadence touch covers that moment |
+| `lastEmailActivity` | Date time | same |
+| `meetingTime` | Date time | counts as a booked meeting (Settings > Rules), and "Booked in Twenty" on Meetings |
+| `meetingLink` | Links | join link |
+| `salesCallRecordingLink` | Links | "Add with transcript" pre-fills the Meetings form with it |
+| `bookingId` | Text | Meetings card |
+
+### Overrides
+
+Open **Cadence > Settings > Twenty**. The default mapping is shown; enter only the names that
+differ as JSON, for example:
 
 ```json
-{ "person": { "owner": "accountOwner", "ownerId": "accountOwnerId", "statusOfMeeting": "meetingStatus" } }
+{ "person": { "assignedToId": "relationshipOwnerId", "callingList": "podCallingList" } }
 ```
 
-Select values: Twenty stores the option *value* (often upper snake case such as `ALISA`), not the label. Pods must use the stored value; `verify:schema` prints the options so you can copy them.
+Select **values** live under `personValues`, and an override replaces that list outright:
+
+```json
+{ "personValues": { "tier": ["A", "B", "C"], "dnd": ["DO_NOT_CONTACT"] } }
+```
+
+Twenty stores the option *value* (usually upper snake case such as `ALISA`), not the label.
+Pods must use the stored value; `verify:schema` prints the options so you can copy them.
+Cadence renders values as readable labels (`LEVEL_2` reads "Tier 2") and never shows a raw
+constant on screen.
 
 ## 5. Run `pnpm verify:schema`
 
@@ -75,9 +160,13 @@ Twenty mode: graphql (https://twenty.example.com)
 Introspecting...
 Source: metadata, 31 objects
 
-✓ person (people): 19/19 fields ok
+✓ person (people): 47/47 fields ok
   podOwner options in Twenty: ALISA, LEIGH, ANDREW, KARSON, DANIEL, RIA
   i options without a Cadence pod yet: KARSON, DANIEL, RIA (create them in Settings > Users and pods)
+  dnd: DO_NOT_DISTURB
+  tier: LEVEL_1, LEVEL_2, LEVEL_3, LEVEL_4
+  listCategory: COLD_BD, BI_WEEKLY, MONTHLY, QUARTERLY, UNASSIGNED
+  contactType: PROSPECT, CLIENTS, CLIENT_S_CLIENT, PARTNER, ORGANIZATION
 ✓ company (companies): 3/3 fields ok
 ! task (tasks): 9/10 fields ok
   ! task.cadenceTaskId -> "cadenceTaskId" missing [optional]
@@ -88,7 +177,11 @@ Smoke test: reading one person...
 0 required problem(s), 1 optional field(s) missing.
 ```
 
-Exit code 1 means a required object or field is missing or renamed; fix the mapping (step 4) and run again. Optional fields (`statusOfMeeting`, `cadenceTaskId`, `tags`, `eventSource`, `owner`) only warn; Cadence treats them as empty.
+Exit code 1 means a required object or field is missing or renamed; fix the mapping (step 4) and
+run again. Every custom Person field is optional and only warns; Cadence treats a missing one as
+empty and trims it out of its GraphQL queries, so a partial workspace still runs. `verify:schema`
+also prints each select's option values against the ones the mapping expects, which is how a
+renamed option is caught before an FO sees an empty filter.
 
 ## 6. Create pods and map users
 
@@ -134,7 +227,10 @@ Writes, and only these:
 | A Cadence task is generated (setting *Mirror open tasks*, on by default) | One **Task**: `Cadence: Email 1 - Dummy One`, assigned to the FO, due on the task day, linked to the person. |
 | That Cadence task is done / skipped / cancelled | The mirrored Task is marked done, or deleted (setting *Delete mirrored task on skip*). |
 
-Never: person, company or opportunity fields (`dnd`, `podOwner`, emails, stages...), notes or tasks Cadence did not create, messages. Opt-out and bad-data flags set in Cadence stay in Cadence; set `dnd` in Twenty yourself if it should apply everywhere. Every write appears in **Settings > Activity log > Writes to Twenty**; `CADENCE_DRY_RUN=true` logs them without writing.
+Never: person, company or opportunity fields - not `dnd`, `podOwner`, `assignedTo`, `tier`,
+`listCategory`, `nextAction`, `nextActionDueDate`, `tags`, emails or stages - nor notes or tasks
+Cadence did not create, nor messages. In particular the CRM's own next action is read and
+displayed, never rewritten: the pod plans in Twenty and Cadence shows that plan beside its own. Opt-out and bad-data flags set in Cadence stay in Cadence; set `dnd` in Twenty yourself if it should apply everywhere. Every write appears in **Settings > Activity log > Writes to Twenty**; `CADENCE_DRY_RUN=true` logs them without writing.
 
 The relationship layer is Cadence's own and is never written back, because Twenty has no field for it: who reports to whom, each contact's stance on the account, the relationship note, and everything about meetings (the recording link, the transcript and any analysis). Meetings link to a Twenty company so they show on that account's timeline; they are not created in Twenty.
 
@@ -161,7 +257,7 @@ Which FOs work a pod, and who can log in, is Cadence configuration (Settings > U
 | Clock mode | Settings > Rules | shift (late steps push later steps) |
 | Note title regexes | Settings > Rules and matching | `^\[Email\]\s*Outbound email`, `^\[CALL\]\s*Outbound Call`, `^Call Notes\s*\[...\]` |
 | Reply from colleague pauses company | Settings > Rules | off |
-| Meeting detection | Settings > Rules | opportunity created, or `statusOfMeeting` in booked values |
+| Meeting detection | Settings > Rules | opportunity created, or `meetingTime` set on the person |
 | Our own email domains | Settings > Rules | `acumen-strategy.com`, `prairie-hill.com`, `glynac.ai`, `acubooth.com` (a meeting counts as booked only when someone outside these attends) |
 | Completion notes / mirrored tasks | Settings > Sync out | on / on |
 | Reconcile lookback | Settings > Rules | 3 days, nightly at `RECONCILE_HOUR` |

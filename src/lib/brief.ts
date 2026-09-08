@@ -1,7 +1,7 @@
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
 import { canActOnTask, toActor } from './auth/rbac';
-import { formatLocalDate, type LocalDate } from './dates';
+import { formatLocalDate, todayIn, type LocalDate } from './dates';
 import { plannedDateForStep } from './engine/clock';
 import { previewNextStep } from './engine/versioning';
 import { colleagueEnrollments } from './engine/enrollment';
@@ -11,6 +11,7 @@ import { describeStep, parseSteps, resolveCopy, type SequenceStep, type StepActi
 import { getSettings, getTwentyConnection } from './settings';
 import { renderTemplate, type TemplateVars } from './templates';
 import { getTwentyClient } from './twenty';
+import { optionLabel, optionLabels } from './twenty/labels';
 import type { TwentyMessage, TwentyNote, TwentyOpportunity } from './twenty/types';
 import { twentyPersonUrl } from './twenty/urls';
 import { taskRowInclude, type TaskRow } from './tasks-query';
@@ -47,6 +48,12 @@ export type TaskBrief = {
   task: TaskRow;
   person: TaskRow['enrollment']['person'];
   personName: string;
+  /** Today in the reader's timezone, so "due" dates from Twenty can be coloured. */
+  today: LocalDate;
+  /** The pod's name in Cadence, which is the label of the podOwner option in Twenty. */
+  podName: string | null;
+  /** Who owns the relationship in Twenty (assignedTo), resolved to a Cadence user's name. */
+  ownerName: string | null;
   twentyUrl: string | null;
   stepIndex: number;
   stepCount: number;
@@ -120,7 +127,10 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
     lastName: person.lastName,
     company: person.companyName,
     jobTitle: person.jobTitle,
-    eventSource: person.eventSource,
+    city: person.city,
+    // Humanised here, not in the template: a prospect must never read FPA_WISCONSIN_JULY_2026.
+    leadSource: optionLabels(person.leadSource, ' and '),
+    product: optionLabel(person.primaryProduct ?? person.productInterest[0] ?? null),
     foName: task.fo.name,
   };
   const copy = actionDef ? resolveCopy(actionDef, task.variantId) : null;
@@ -131,7 +141,7 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
   const variantLabel = copy?.variantLabel ?? null;
   const replyInThread = Boolean(actionDef?.replyInThread);
 
-  const [touches, colleagues, notesResult, oppsResult, emailsResult, stateEvents] = await Promise.all([
+  const [touches, colleagues, notesResult, oppsResult, emailsResult, stateEvents, pod, owner] = await Promise.all([
     // 20 feeds both the dot timeline and the merged timeline below it.
     prisma.touch.findMany({ where: { personId: person.id }, orderBy: { occurredAt: 'desc' }, take: 20 }),
     loadColleagues(person.companyId, person.id),
@@ -143,6 +153,8 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
       orderBy: { createdAt: 'desc' },
       take: 10,
     }),
+    person.podOwner ? prisma.pod.findUnique({ where: { podOwnerValue: person.podOwner }, select: { name: true } }) : Promise.resolve(null),
+    person.ownerMemberId ? prisma.user.findFirst({ where: { twentyMemberId: person.ownerMemberId }, select: { name: true } }) : Promise.resolve(null),
   ]);
   if (notesResult.error) warnings.push(notesResult.error);
   if (oppsResult.error && oppsResult.error !== notesResult.error) warnings.push(oppsResult.error);
@@ -161,6 +173,9 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
     task,
     person,
     personName: cachedPersonName(person),
+    today: todayIn(user.timezone),
+    podName: pod?.name ?? null,
+    ownerName: owner?.name ?? null,
     twentyUrl: twentyPersonUrl(conn.baseUrl, person.id),
     stepIndex: task.stepIndex,
     stepCount: taskSteps.length,
@@ -172,7 +187,13 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
     touches: touches.map((t) => ({ id: t.id, channel: t.channel, direction: t.direction, occurredAt: t.occurredAt, summary: t.summary, actorLabel: t.actorLabel })),
     notes: notesResult.notes,
     emails: emailsResult.emails,
-    timeline: buildTimeline({ touches, notes: notesResult.notes, emails: emailsResult.emails, stateEvents }),
+    timeline: buildTimeline({
+      touches,
+      notes: notesResult.notes,
+      emails: emailsResult.emails,
+      stateEvents,
+      crm: { lastCallAt: person.lastCallAt, lastEmailAt: person.lastEmailAt },
+    }),
     colleagues,
     opportunities: oppsResult.opportunities,
     nextStep,
@@ -258,6 +279,8 @@ function buildTimeline(input: {
   notes: TwentyNote[];
   emails: TaskBrief['emails'];
   stateEvents: Array<{ id: string; action: string; createdAt: Date; actorLabel: string | null; details: unknown }>;
+  /** Twenty's own last-touch stamps, which exist for people Cadence never worked. */
+  crm: { lastCallAt: Date | null; lastEmailAt: Date | null };
 }): BriefTimelineItem[] {
   const kindOfChannel = (channel: string): BriefTimelineItem['kind'] => (channel === 'EMAIL' ? 'email' : channel === 'CALL' ? 'call' : 'linkedin');
   // An email listed in full from Twenty would otherwise show again as its touch record.
@@ -310,6 +333,21 @@ function buildTimeline(input: {
       };
     }),
   ];
+
+  // Twenty keeps a "last call" and "last email" stamp per person, maintained by its own
+  // automations. For anyone the pod worked before Cadence existed that is the only history
+  // there is, so it belongs on the clock - but only when nothing already covers that moment.
+  const covered = (at: Date, kind: BriefTimelineItem['kind']) =>
+    items.some((x) => x.kind === kind && Math.abs(x.at.getTime() - at.getTime()) < 5 * 60_000);
+  for (const [at, kind, title] of [
+    [input.crm.lastCallAt, 'call' as const, 'Called, according to Twenty'],
+    [input.crm.lastEmailAt, 'email' as const, 'Emailed, according to Twenty'],
+  ] as const) {
+    if (at && !covered(at, kind)) {
+      items.push({ id: `crm:${kind}`, at, kind, direction: 'out', title, detail: null, actor: null });
+    }
+  }
+
   return items.sort((a, b) => b.at.getTime() - a.at.getTime()).slice(0, 24);
 }
 

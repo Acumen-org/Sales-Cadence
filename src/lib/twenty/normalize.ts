@@ -40,36 +40,123 @@ function composePhone(p: Raw): string | null {
   const number = str(p.primaryPhoneNumber);
   if (!number) return null;
   const calling = str(p.primaryPhoneCallingCode);
-  if (calling && !number.startsWith('+')) return `${calling.startsWith('+') ? calling : `+${calling}`} ${number}`;
+  // The export carries a zero-width joiner inside the calling code ("‍+1"); strip it, or
+  // every phone number in the app grows an invisible character that breaks tel: links.
+  const code = calling?.replace(/[^\d+]/g, '') ?? '';
+  if (code && !number.startsWith('+')) return `${code.startsWith('+') ? code : `+${code}`} ${number}`;
   return number;
 }
 
+/** A date-only field. Twenty returns either "2026-09-14" or a full timestamp at midnight. */
+function localDate(v: unknown): string | null {
+  const s = str(v);
+  if (!s) return null;
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(s);
+  return m ? m[1] : null;
+}
+
+/** A LINKS composite, or a plain URL for workspaces that use a text field. */
+function linkUrl(v: unknown): string | null {
+  if (typeof v === 'string') return v.trim() || null;
+  return str(obj(v).primaryLinkUrl);
+}
+
+/** Twenty stores a bare `false` for unset booleans, so `=== true` is not enough. */
+const bool = (v: unknown): boolean => v === true || v === 'true';
+
+/** A select or multi-select value, normalised to the array form. Twenty sends both shapes. */
+function options(v: unknown): string[] {
+  if (Array.isArray(v)) return arr(v);
+  const s = str(v);
+  if (!s) return [];
+  // A multi-select can arrive as a JSON array in a string, which is how the CSV export writes it.
+  if (s.startsWith('[')) {
+    try {
+      const parsed: unknown = JSON.parse(s);
+      if (Array.isArray(parsed)) return arr(parsed);
+    } catch {
+      /* fall through to the single value */
+    }
+  }
+  return [s];
+}
+
 export function normalizePerson(raw: Raw, s: TwentySchema): TwentyPerson {
-  const name = obj(raw[s.person.name]);
-  const emails = obj(raw[s.person.emails]);
-  const linkedin = obj(raw[s.person.linkedinLink]);
-  const company = obj(raw[s.person.company]);
-  const owner = obj(raw[s.person.owner]);
+  const f = s.person;
+  const v = s.personValues;
+  const name = obj(raw[f.name]);
+  const emails = obj(raw[f.emails]);
+  const company = obj(raw[f.company]);
+  const owner = obj(raw[f.assignedTo]);
+  const createdBy = obj(raw[f.createdBy]);
+  const tags = options(raw[f.tags]);
+  const has = (list: readonly string[]) => tags.find((t) => list.includes(t)) ?? null;
+
+  // dnd is a select here, not a boolean: any set value means do not contact. A workspace that
+  // made it a boolean still works, and so does a DNC tag, which is how some of the pod records it.
+  const dndValue = options(raw[f.dnd]).find((x) => x !== 'false') ?? null;
+  const dndTag = has(v.doNotContactTags);
+  const dndSelect = dndValue && (v.dnd.length === 0 || v.dnd.includes(dndValue)) ? dndValue : null;
+
   return {
     id: String(raw.id),
     firstName: str(name.firstName) ?? '',
     lastName: str(name.lastName) ?? '',
     email: str(emails.primaryEmail),
-    phone: composePhone(obj(raw[s.person.phones])),
-    linkedinUrl: str(linkedin.primaryLinkUrl),
-    jobTitle: str(raw[s.person.jobTitle]),
-    city: str(raw[s.person.city]),
-    companyId: str(raw[s.person.companyId]) ?? str(company.id),
+    additionalEmails: options(emails.additionalEmails),
+    phone: composePhone(obj(raw[f.phones])),
+    additionalPhone: composePhone(obj(raw[f.additionalNumber])),
+    linkedinUrl: linkUrl(raw[f.linkedinLink]),
+    xUrl: linkUrl(raw[f.xLink]),
+    jobTitle: str(raw[f.jobTitle]),
+    city: str(raw[f.city]),
+    companyId: str(raw[f.companyId]) ?? str(company.id),
     companyName: str(company.name),
-    dnd: raw[s.person.dnd] === true || raw[s.person.dnd] === 'true',
-    podOwner: str(raw[s.person.podOwner]),
-    ownerMemberId: str(raw[s.person.ownerId]) ?? str(owner.id),
-    tags: arr(raw[s.person.tags]),
-    eventSource: str(raw[s.person.eventSource]),
-    statusOfMeeting: str(raw[s.person.statusOfMeeting]),
-    createdAt: iso(raw[s.person.createdAt] ?? raw.createdAt),
-    updatedAt: iso(raw[s.person.updatedAt] ?? raw.updatedAt),
-    deletedAt: str(raw[s.person.deletedAt] ?? raw.deletedAt),
+
+    ownerMemberId: str(raw[f.assignedToId]) ?? str(owner.id),
+    podOwner: str(raw[f.podOwner]),
+    rotatedTo: str(raw[f.rotationTracking]),
+    rotationChangedAt: str(raw[f.rotationChangedAt]),
+
+    dnd: Boolean(dndSelect ?? dndTag) || bool(raw[f.dnd]),
+    dndReason: dndSelect ?? dndTag,
+    emailMissing: Boolean(has(v.missingEmailTags)),
+    phoneMissing: Boolean(has(v.missingPhoneTags)),
+
+    tags,
+    leadSource: options(raw[f.leadSource]),
+    leadSourceNotes: str(raw[f.leadSourceNotes]),
+    tier: str(raw[f.tier]),
+    contactType: options(raw[f.contactType]),
+    listCategory: str(raw[f.listCategory]),
+    previousCadence: str(raw[f.previousCadence]),
+    pipelineStage: str(raw[f.pipelineStageField]),
+    productInterest: options(raw[f.productInterest]),
+    primaryProduct: str(raw[f.primaryProduct]),
+    campaigns: options(raw[f.onGoingCampaigns]),
+    onCallingList: bool(raw[f.callingList]),
+    dealSignalStrength: str(raw[f.dealSignalStrength]),
+
+    nextAction: str(raw[f.nextAction]),
+    nextActionDueDate: localDate(raw[f.nextActionDueDate]),
+    nextStep: str(raw[f.nextStep]),
+    nextActionDueDatePoc: localDate(raw[f.nextActionDueDatePoc]),
+    lastNote: str(raw[f.lastNote]),
+
+    lastCallAt: str(raw[f.latestCallActivity]),
+    lastEmailAt: str(raw[f.lastEmailActivity]),
+
+    meetingAt: str(raw[f.meetingTime]),
+    meetingUrl: linkUrl(raw[f.meetingLink]),
+    recordingUrl: linkUrl(raw[f.salesCallRecordingLink]),
+    bookingId: str(raw[f.bookingId]),
+
+    createdBySource: str(createdBy.source),
+    createdByName: str(createdBy.name),
+    createdByMemberId: str(createdBy.workspaceMemberId),
+    createdAt: iso(raw[f.createdAt] ?? raw.createdAt),
+    updatedAt: iso(raw[f.updatedAt] ?? raw.updatedAt),
+    deletedAt: str(raw[f.deletedAt] ?? raw.deletedAt),
     raw,
   };
 }

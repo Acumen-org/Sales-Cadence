@@ -10,10 +10,26 @@ function nowLocalValue(timezone: string): string {
   return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
 }
 
-export default async function NewMeetingPage({ searchParams }: { searchParams: Promise<{ account?: string }> }) {
+/** Twenty gives an instant; the form wants "YYYY-MM-DDTHH:mm" in the viewer's clock. */
+function instantToLocalValue(at: Date, timezone: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(at);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '00';
+  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
+}
+
+/**
+ * `personId` pre-fills this form from a meeting Twenty already knows about: the recording link,
+ * the time, the account and the attendee all come from the person record, so adding one is a
+ * single click from the Meetings list or the person's panel.
+ */
+export default async function NewMeetingPage({ searchParams }: { searchParams: Promise<{ account?: string; personId?: string; url?: string }> }) {
   const user = await requireUser();
-  const { account } = await searchParams;
-  const companies = await prisma.companyCache.findMany({ where: { deletedAt: null }, select: { id: true, name: true }, orderBy: { name: 'asc' }, take: 500 });
+  const { account, personId, url } = await searchParams;
+  const [companies, person] = await Promise.all([
+    prisma.companyCache.findMany({ where: { deletedAt: null }, select: { id: true, name: true }, orderBy: { name: 'asc' }, take: 500 }),
+    personId ? prisma.personCache.findUnique({ where: { id: personId } }) : Promise.resolve(null),
+  ]);
+  const personName = person ? [person.firstName, person.lastName].filter(Boolean).join(' ').trim() : '';
 
   return (
     <>
@@ -24,13 +40,13 @@ export default async function NewMeetingPage({ searchParams }: { searchParams: P
             mode="create"
             companies={companies}
             initial={{
-              title: '',
-              sourceUrl: '',
-              occurredAt: nowLocalValue(user.timezone),
+              title: person ? `Meeting - ${personName}${person.companyName ? ` (${person.companyName})` : ''}` : '',
+              sourceUrl: url ?? person?.recordingUrl ?? person?.meetingUrl ?? '',
+              occurredAt: person?.meetingAt ? instantToLocalValue(person.meetingAt, user.timezone) : nowLocalValue(user.timezone),
               durationMin: '',
-              companyId: account ?? '',
-              attendees: '',
-              notes: '',
+              companyId: account ?? person?.companyId ?? '',
+              attendees: person?.email ? `${personName} <${person.email}>` : personName,
+              notes: person?.lastNote ?? '',
               transcript: '',
             }}
           />

@@ -38,7 +38,7 @@ test('a Senior FO creates a campaign with a conflict preview', async ({ page }) 
   await loginAs(page, 'Alisa');
   await page.goto('/campaigns/new');
   await page.getByLabel('Name', { exact: true }).fill('E2E SaaStr follow-up');
-  await page.getByLabel('Pod', { exact: true }).selectOption({ label: "Alisa's pod (Alisa)" });
+  await page.getByLabel('Pod', { exact: true }).selectOption({ label: "Alisa's pod (ALISA)" });
   // Dummy Six is dnd in the demo workspace: it must be listed as skipped, not enrolled
   await page.getByLabel('Twenty person ids').fill('dummy-01\ndummy-02\ndummy-03\ndummy-04\ndummy-06');
   await page.getByRole('button', { name: 'Preview conflicts' }).click();
@@ -200,8 +200,13 @@ test('reports and people pages render with data', async ({ page }) => {
   await expect(page.getByText('Last 7 days')).toBeVisible();
   await page.goto('/reports?tab=pods');
   await expect(page.getByText("Alisa's pod")).toBeVisible();
-  await page.goto('/people?status=approaching');
-  await expect(page.locator('table').getByText('Approaching', { exact: true }).first()).toBeVisible();
+  // The people list is filtered on what Twenty holds, and shows it as Twenty's own labels.
+  await page.goto('/people?tier=LEVEL_1');
+  await expect(page.locator('table').getByText('Tier 1', { exact: true }).first()).toBeVisible();
+  await page.goto('/people?list=COLD_BD');
+  await expect(page.locator('table').getByText('Cold BD', { exact: true }).first()).toBeVisible();
+  // No option constant ever reaches the screen.
+  await expect(page.locator('table').getByText(/^[A-Z][A-Z0-9]+_[A-Z0-9_]+$/)).toHaveCount(0);
   await page.goto('/people?q=One');
   await page.getByRole('link', { name: 'Dummy One' }).click();
   await expect(page.getByRole('heading', { name: 'Dummy One' })).toBeVisible();

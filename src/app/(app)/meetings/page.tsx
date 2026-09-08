@@ -3,7 +3,7 @@ import { requireUser } from '@/lib/auth/current-user';
 import { prisma } from '@/lib/db';
 import { formatInstant, todayIn, weekRange } from '@/lib/dates';
 import { PROVIDER_LABELS } from '@/lib/meetings/providers';
-import { IconCalendar, IconPlus } from '@/components/icons';
+import { IconCalendar, IconExternal, IconPlus } from '@/components/icons';
 import { Badge, EmptyState, IdentityCell, Surface, Toolbar, ViewHeader } from '@/components/ui';
 
 const PAGE_SIZE = 50;
@@ -23,7 +23,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
         ? { occurredAt: { gte: week.fromInstant, lt: week.toInstant } }
         : {};
 
-  const [meetings, total, mine, thisWeek] = await Promise.all([
+  const [meetings, total, mine, thisWeek, booked] = await Promise.all([
     prisma.meeting.findMany({
       where,
       orderBy: { occurredAt: 'desc' },
@@ -47,7 +47,20 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
     prisma.meeting.count({ where }),
     prisma.meeting.count({ where: { createdById: user.id } }),
     prisma.meeting.count({ where: { occurredAt: { gte: week.fromInstant, lt: week.toInstant } } }),
+    // Meetings Twenty already knows about: the scheduler writes a time, a join link and
+    // sometimes a recording onto the person. Cadence does not invent a Meeting row from that,
+    // because a meeting here carries a transcript and attendees that only a human can supply -
+    // so these are listed for one-click adding instead.
+    prisma.personCache.findMany({
+      where: { deletedAt: null, OR: [{ meetingAt: { not: null } }, { recordingUrl: { not: null } }] },
+      orderBy: { meetingAt: 'desc' },
+      take: 12,
+      select: { id: true, firstName: true, lastName: true, companyId: true, companyName: true, meetingAt: true, meetingUrl: true, recordingUrl: true },
+    }),
   ]);
+  const addedUrls = new Set(
+    (await prisma.meeting.findMany({ where: { sourceUrl: { in: booked.map((b) => b.recordingUrl ?? b.meetingUrl ?? '').filter(Boolean) } }, select: { sourceUrl: true } })).map((m) => m.sourceUrl),
+  );
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const href = (s: string) => `/meetings?scope=${s}`;
 
@@ -143,6 +156,67 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
           </div>
         )}
       </Surface>
+
+      {booked.length ? (
+        <Surface flush>
+          <ViewHeader title="Booked in Twenty" caret meta={`${booked.length} on the person record`} />
+          <div className="overflow-x-auto scroll-thin">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Person</th>
+                  <th>Account</th>
+                  <th>When</th>
+                  <th>Links</th>
+                  <th className="w-40"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {booked.map((b) => {
+                  const url = b.recordingUrl ?? b.meetingUrl ?? '';
+                  const already = url ? addedUrls.has(url) : false;
+                  return (
+                    <tr key={b.id}>
+                      <td>
+                        <IdentityCell name={[b.firstName, b.lastName].filter(Boolean).join(' ') || '(no name)'} href={`/people/${b.id}`} shape="circle" />
+                      </td>
+                      <td className="text-[12.5px]">
+                        {b.companyId ? (
+                          <Link href={`/accounts/${b.companyId}`} className="text-brand-700 hover:underline">
+                            {b.companyName}
+                          </Link>
+                        ) : (
+                          b.companyName ?? <span className="text-ink-300">-</span>
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap text-[12.5px]">{b.meetingAt ? formatInstant(b.meetingAt, user.timezone) : <span className="text-ink-300">-</span>}</td>
+                      <td>
+                        <div className="flex flex-wrap gap-1.5">
+                          {b.meetingUrl ? (
+                            <a href={b.meetingUrl} target="_blank" rel="noreferrer" className="chip-muted">
+                              <IconExternal size={12} /> Join
+                            </a>
+                          ) : null}
+                          {b.recordingUrl ? <Badge tone="blue">recording</Badge> : null}
+                        </div>
+                      </td>
+                      <td className="text-right">
+                        {already ? (
+                          <span className="text-[12px] text-ink-400">Already added</span>
+                        ) : (
+                          <Link href={`/meetings/new?personId=${b.id}`} className="btn-secondary btn-sm">
+                            <IconPlus size={12} /> Add with transcript
+                          </Link>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Surface>
+      ) : null}
 
       {pages > 1 ? (
         <div className="flex items-center justify-between text-[13px] text-ink-500">

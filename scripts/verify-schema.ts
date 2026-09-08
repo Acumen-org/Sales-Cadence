@@ -14,13 +14,41 @@ import type { TwentyIntrospection, TwentyObjectInfo } from '../src/lib/twenty/ty
 type Check = { section: string; key: string; field: string; required: boolean };
 
 const OPTIONAL = new Set([
-  'person.dnd',
+  // Custom person fields. All of them are optional: a workspace missing one degrades to null
+  // rather than failing, and verify:schema only warns, so a partial workspace still runs.
+  'person.additionalNumber',
+  'person.xLink',
+  'person.createdBy',
+  'person.assignedTo',
+  'person.assignedToId',
   'person.podOwner',
-  'person.owner',
-  'person.ownerId',
+  'person.rotationTracking',
+  'person.rotationChangedAt',
+  'person.dnd',
   'person.tags',
-  'person.eventSource',
-  'person.statusOfMeeting',
+  'person.leadSource',
+  'person.leadSourceNotes',
+  'person.tier',
+  'person.contactType',
+  'person.listCategory',
+  'person.previousCadence',
+  'person.pipelineStageField',
+  'person.productInterest',
+  'person.primaryProduct',
+  'person.onGoingCampaigns',
+  'person.callingList',
+  'person.dealSignalStrength',
+  'person.nextAction',
+  'person.nextActionDueDate',
+  'person.nextStep',
+  'person.nextActionDueDatePoc',
+  'person.lastNote',
+  'person.latestCallActivity',
+  'person.lastEmailActivity',
+  'person.meetingTime',
+  'person.meetingLink',
+  'person.salesCallRecordingLink',
+  'person.bookingId',
   'person.city',
   'task.cadenceTaskId',
   'workspaceMember.timeZone',
@@ -109,8 +137,24 @@ async function main() {
         const unpodded = podOwner.options.filter((o) => !pods.some((p) => p.podOwnerValue === o));
         if (unpodded.length) console.log(`  i options without a Cadence pod yet: ${unpodded.join(', ')} (create them in Settings > Users and pods)`);
       }
-      const status = found.fields.find((f) => f.name === schema.task.status);
-      void status;
+      // Every select we map: report the workspace's values against the ones we expect, because
+      // a renamed option shows up as an empty filter rather than as an error.
+      const selects: Array<[label: string, field: string, expected: readonly string[]]> = [
+        ['dnd', schema.person.dnd, schema.personValues.dnd],
+        ['tier', schema.person.tier, schema.personValues.tier],
+        ['listCategory', schema.person.listCategory, schema.personValues.listCategory],
+        ['contactType', schema.person.contactType, schema.personValues.contactType],
+        ['pipelineStageField', schema.person.pipelineStageField, schema.personValues.pipelineStage],
+        ['productInterest', schema.person.productInterest, schema.personValues.productInterest],
+        ['nextStep', schema.person.nextStep, schema.personValues.nextStep],
+        ['onGoingCampaigns', schema.person.onGoingCampaigns, schema.personValues.onGoingCampaigns],
+      ];
+      for (const [label, field, expected] of selects) {
+        const f = found.fields.find((x) => x.name === field);
+        if (!f?.options?.length) continue;
+        const unknown = expected.filter((v) => !f.options!.includes(v));
+        console.log(`  ${label}: ${f.options.join(', ')}${unknown.length ? `  ! mapping expects ${unknown.join(', ')}, which the workspace does not have` : ''}`);
+      }
     }
     if (object === 'task') {
       const status = found.fields.find((f) => f.name === schema.task.status);

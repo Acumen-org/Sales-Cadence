@@ -375,13 +375,62 @@ model PersonCache {
   jobTitle        String?
   companyId       String?
   companyName     String?
-  dnd             Boolean   @default(false)
-  podOwner        String?
-  ownerMemberId   String?
-  tags            String[]  @default([])
-  eventSource     String?
-  statusOfMeeting String?
   city            String?
+  /// Twenty's assignedTo relation: the workspace member who owns this relationship.
+  ownerMemberId   String?
+  podOwner        String?
+
+  /// Twenty's dnd select. `dnd` is true when it is set or a do-not-contact tag is present.
+  dnd             Boolean   @default(false)
+  dndReason       String?
+  tags            String[]  @default([])
+
+  /// Contact details beyond the primary ones.
+  additionalEmails String[] @default([])
+  additionalPhone  String?
+  xUrl             String?
+
+  /// How the team classifies the person in Twenty.
+  leadSource      String[]  @default([])
+  leadSourceNotes String?
+  tier            String?
+  contactType     String[]  @default([])
+  listCategory    String?
+  previousCadence String?
+  pipelineStage   String?
+  productInterest String[]  @default([])
+  primaryProduct  String?
+  /// Campaigns in Twenty (not Cadence campaigns, which live in the Campaign table).
+  campaigns       String[]  @default([])
+  onCallingList   Boolean   @default(false)
+  dealSignalStrength String?
+  /// Twenty says the contact detail is missing or wrong (MISSING_EMAIL / MISSING_PHONE tags).
+  emailMissing    Boolean   @default(false)
+  phoneMissing    Boolean   @default(false)
+  /// Set when the person was rotated out to another pod.
+  rotatedTo       String?
+  rotationChangedAt DateTime?
+
+  /// What the CRM itself says happens next. Cadence never overwrites these.
+  nextAction      String?
+  nextActionDueDate String?
+  nextStep        String?
+  nextActionDueDatePoc String?
+  lastNote        String?
+
+  /// Last touch as Twenty's own automations record it, independent of Cadence's touches.
+  lastCallAt      DateTime?
+  lastEmailAt     DateTime?
+
+  /// The booked meeting and its links, from Twenty.
+  meetingAt       DateTime?
+  meetingUrl      String?
+  recordingUrl    String?
+  bookingId       String?
+
+  createdBySource String?
+  createdByName   String?
+
   /// Cadence-local flags (Twenty is never written): opted out of outreach, bad contact data.
   optedOut        Boolean   @default(false)
   badEmail        Boolean   @default(false)
@@ -408,6 +457,10 @@ model PersonCache {
   @@index([ownerMemberId])
   @@index([reportsToId])
   @@index([companyId, lastName])
+  @@index([tier])
+  @@index([listCategory])
+  @@index([nextActionDueDate])
+  @@index([meetingAt])
 }
 
 model CompanyCache {

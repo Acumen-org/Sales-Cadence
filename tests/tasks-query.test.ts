@@ -77,8 +77,16 @@ describe('tasks query and brief', () => {
     expect(brief!.personName).toBe('Nina Halvorsen');
     expect(brief!.action.subject).toBe('Acme Logistics <> a quick idea');
     expect(brief!.action.body).toContain('Hi Nina,');
-    expect(brief!.action.body).toContain('SaaStr 2026');
     expect(brief!.action.body).toContain('VP Operations at Acme Logistics');
+    // The lead source reaches a template humanised, never as the raw option value.
+    const connect = await getTaskBrief(e.tasks.find((t) => t.label === 'LinkedIn connect')!.id, senior);
+    expect(connect!.action.body).toContain('FPA Wisconsin July 2026');
+    expect(connect!.action.body).not.toContain('FPA_WISCONSIN_JULY_2026');
+    // What Twenty itself says about the person, carried onto the panel.
+    expect(brief!.podName).toBe('Pod Alisa');
+    expect(brief!.ownerName).toBe('Alisa Marsh');
+    expect(brief!.person.tier).toBe('LEVEL_1');
+    expect(brief!.person.leadSource).toEqual(['FPA_WISCONSIN_JULY_2026']);
     expect(brief!.action.body.trim().endsWith('Alisa')).toBe(true);
     // Tomas Berg is a colleague at Acme Logistics (not enrolled); Mateo Silva too
     expect(brief!.colleagues.map((c) => c.name)).toEqual(expect.arrayContaining(['Tomas Berg', 'Mateo Silva']));

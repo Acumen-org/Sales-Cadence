@@ -43,8 +43,10 @@ export type Basics = Awaited<ReturnType<typeof seedBasics>>;
 export async function seedBasics() {
   const hash = await hashPassword('password123');
   const pods: Record<string, { id: string; name: string }> = {};
-  for (const name of MOCK_PODS) {
-    pods[name] = await prisma.pod.create({ data: { name: `Pod ${name}`, podOwnerValue: name } });
+  // Keyed by the readable name (Alisa), stored with Twenty's own value (ALISA).
+  for (const value of MOCK_PODS) {
+    const name = value.charAt(0) + value.slice(1).toLowerCase();
+    pods[name] = await prisma.pod.create({ data: { name: `Pod ${name}`, podOwnerValue: value } });
   }
   const mk = async (memberId: string, role: 'ADMIN' | 'SENIOR_FO' | 'JUNIOR_FO', podNames: string[]) => {
     const m = MOCK_MEMBERS.find((x) => x.id === memberId)!;

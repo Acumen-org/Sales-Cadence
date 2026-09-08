@@ -33,7 +33,11 @@ export function TwentyConnectionForm({ twenty, hasEnvKey, defaultSchemaJson }: {
             {twenty.apiKey ? <Check name="clearApiKey" label="Remove the stored key (fall back to the environment)" checked={false} /> : null}
           </Field>
         </div>
-        <Field label="Field mapping overrides (JSON)" hint={'Only the names that differ from the defaults, e.g. {"person": {"owner": "accountOwner", "ownerId": "accountOwnerId"}}. Defaults are shown below for reference.'}>
+        <Field label="Field mapping overrides (JSON)" hint={
+            'Only the names that differ from the defaults, e.g. {"person": {"assignedToId": "relationshipOwnerId"}}. ' +
+            'Select option values live under "personValues" and an override replaces that whole list, e.g. {"personValues": {"tier": ["A", "B"]}}. ' +
+            'Defaults are shown below for reference.'
+          }>
           <textarea name="schema" rows={6} defaultValue={twenty.schema ? JSON.stringify(twenty.schema, null, 2) : ''} className="w-full font-mono text-xs" />
         </Field>
         <details>
@@ -106,15 +110,12 @@ export function RulesForm({ rules }: { rules: Settings['rules'] }) {
             ))}
           </div>
         </div>
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2">
           <Field label="Stalled after (days without a touch)">
             <input name="stalledDays" type="number" min={1} defaultValue={rules.stalledDays} className="w-32" />
           </Field>
           <Field label="Reconcile lookback (days)">
             <input name="reconcileLookbackDays" type="number" min={1} max={90} defaultValue={rules.reconcileLookbackDays} className="w-32" />
-          </Field>
-          <Field label="statusOfMeeting values that mean booked" hint="Comma separated, case-insensitive.">
-            <input name="meetingStatusValues" defaultValue={rules.meetingStatusValues.join(', ')} className="w-full" />
           </Field>
         </div>
         <Field
@@ -126,7 +127,7 @@ export function RulesForm({ rules }: { rules: Settings['rules'] }) {
         <div className="space-y-2">
           <Check name="companyReplyPausesColleagues" label="A reply from anyone at a company pauses colleagues at that company" checked={rules.companyReplyPausesColleagues} />
           <Check name="meetingOnOpportunityCreated" label="An Opportunity created for a person marks a meeting" checked={rules.meetingOnOpportunityCreated} />
-          <Check name="meetingOnStatusOfMeeting" label="person.statusOfMeeting set to a booked value marks a meeting" checked={rules.meetingOnStatusOfMeeting} />
+          <Check name="meetingOnMeetingTime" label="A meeting time set on the person in Twenty marks a meeting" checked={rules.meetingOnMeetingTime} />
           <Check name="exitOnBounce" label="A skip reason flagged as bounce ends the sequence (Bounced)" checked={rules.exitOnBounce} />
           <Check name="answeredCallIsReply" label="A call logged with an answered outcome counts as a reply and finishes the sequence" checked={rules.answeredCallIsReply} />
         </div>

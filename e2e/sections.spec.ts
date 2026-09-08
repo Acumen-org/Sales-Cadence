@@ -116,7 +116,8 @@ test('a meeting plays in the app with its transcript and an empty analysis panel
   // One external attendee, so it counts as booked this week.
   await page.goto('/meetings?scope=week');
   await expect(page.getByRole('link', { name: /E2E discovery call/ })).toBeVisible();
-  await expect(page.locator('table')).toContainText('external');
+  // The first table is the list of meetings in Cadence; "Booked in Twenty" is a second one.
+  await expect(page.locator('table').first()).toContainText('external');
   await logout(page);
 });
 
@@ -214,5 +215,49 @@ test('per-user views: my accounts and my relationships', async ({ page }) => {
   await page.getByRole('link', { name: /My relationships/ }).click();
   await expect(page).toHaveURL(/\/people\?owner=mine/);
   await expect(page.locator('table tbody tr').first()).toBeVisible();
+  await logout(page);
+});
+
+test('the person record shows the real Twenty fields, grouped as Twenty groups them', async ({ page }) => {
+  await loginAs(page, 'Alisa');
+  await page.goto('/people/dummy-01?tab=details');
+  const main = page.locator('main');
+
+  // The four groups the CRM record has, in that order.
+  for (const card of ['Contact details', 'Ownership', 'Classification', 'Next action and meetings, as Twenty holds them']) {
+    await expect(main.getByText(card, { exact: true })).toBeVisible();
+  }
+
+  // Ownership comes from assignedTo and podOwner, not from an invented owner field.
+  await expect(main.getByText('Alisa Senior').first()).toBeVisible();
+  await expect(main.getByText("Alisa's pod").first()).toBeVisible();
+
+  // Classification, with every option rendered as a label rather than a constant.
+  await expect(main.getByText('Tier 1').first()).toBeVisible();
+  await expect(main.getByText('Prospect').first()).toBeVisible();
+  await expect(main.getByText(/Bi-weekly \(was Monthly\)/)).toBeVisible();
+  await expect(main.getByText('FPA Wisconsin July 2026')).toBeVisible();
+  await expect(main.getByText('AY PHH post-webinar')).toBeVisible();
+  await expect(main.getByText(/^[A-Z][A-Z0-9]+_[A-Z0-9_]+$/)).toHaveCount(0);
+
+  // Twenty's own next action, which Cadence reads and never overwrites.
+  await expect(main.getByText('FU-2', { exact: true })).toBeVisible();
+  await expect(main.getByText('FU 1 done, asked for the PHH one-pager.')).toBeVisible();
+  await logout(page);
+});
+
+test('meetings Twenty already booked are offered for adding, pre-filled', async ({ page }) => {
+  await loginAs(page, 'Alisa');
+  await page.goto('/meetings');
+  await expect(page.getByText('Booked in Twenty')).toBeVisible();
+  const row = page.locator('table').filter({ hasText: 'Dummy Four' }).first();
+  await expect(row).toContainText('recording');
+
+  // Adding one starts from the person record: link, time, account and attendee are filled in.
+  await page.goto('/meetings/new?personId=dummy-04');
+  await expect(page.getByLabel('Title')).toHaveValue(/Dummy Four/);
+  await expect(page.getByLabel('Recording or meeting link')).toHaveValue(/ForBiggerMeetings\.mp4/);
+  await expect(page.getByLabel('Attendees')).toHaveValue(/dummy\.four@dummy-b\.example/);
+  await expect(page.getByText(/Media file/)).toBeVisible();
   await logout(page);
 });

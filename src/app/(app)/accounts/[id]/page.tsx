@@ -21,8 +21,10 @@ import {
   Stat,
   Surface,
   Tabs,
+  TierBadge,
   type BadgeTone,
 } from '@/components/ui';
+import { optionLabels } from '@/lib/twenty/labels';
 
 const TABS = [
   { key: 'overview', label: 'Overview' },
@@ -195,6 +197,9 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                     <tr>
                       <th>Person</th>
                       <th>Stance</th>
+                      <th>Tier</th>
+                      <th>Type</th>
+                      <th>Next in Twenty</th>
                       <th>Reports to</th>
                       <th>Sequence</th>
                       <th>FO</th>
@@ -212,6 +217,20 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                           <Badge tone={p.accountRole === 'CHAMPION' ? 'green' : p.accountRole === 'SUPPORTER' ? 'blue' : p.accountRole === 'DETRACTOR' ? 'red' : 'gray'} dot>
                             {p.accountRole.toLowerCase()}
                           </Badge>
+                        </td>
+                        <td>
+                          <TierBadge tier={p.tier} />
+                        </td>
+                        <td className="text-[12.5px]">{optionLabels(p.contactType, ' / ') || <span className="text-ink-300">-</span>}</td>
+                        <td className="text-[12px]">
+                          {p.nextAction || p.nextActionDueDate ? (
+                            <>
+                              <div className="max-w-[10rem] truncate text-ink-700">{p.nextAction ?? '-'}</div>
+                              {p.nextActionDueDate ? <div className="text-ink-400">{formatLocalDate(p.nextActionDueDate)}</div> : null}
+                            </>
+                          ) : (
+                            <span className="text-ink-300">-</span>
+                          )}
                         </td>
                         <td className="text-[12.5px]">{p.reportsToId ? people.find((o) => o.id === p.reportsToId)?.name ?? '-' : <span className="text-ink-300">-</span>}</td>
                         <td>

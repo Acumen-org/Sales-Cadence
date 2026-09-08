@@ -54,6 +54,9 @@ test('capture screens', async ({ page }) => {
     await page.waitForURL(/\/people\//);
     await shot(page, '07-person');
   }
+  // The Twenty record itself, grouped the way Twenty groups it.
+  await page.goto('/people/dummy-01?tab=details');
+  await shot(page, '07b-person-details');
 
   await page.goto('/sequences');
   await shot(page, '08-sequences');
@@ -113,6 +116,8 @@ test('capture screens', async ({ page }) => {
     const url = page.url().replace(/\?.*$/, '');
     await page.goto(`${url}?tab=relationships`);
     await shot(page, '21-account-relationships');
+    await page.goto(`${page.url().split('?')[0]}?tab=people`);
+    await shot(page, '21b-account-people');
     await page.goto(`${url}?tab=timeline`);
     await shot(page, '22-account-timeline');
   }
