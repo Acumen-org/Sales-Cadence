@@ -1,10 +1,15 @@
 /**
  * Every Twenty object and field name Cadence relies on, in one place.
  *
- * Defaults below match a stock Twenty workspace plus the custom person fields
- * this team added (dnd, podOwner, owner, tags, eventSource, statusOfMeeting).
- * Admins can override any value in Settings > Twenty; `pnpm verify:schema`
- * checks the effective mapping against a live workspace.
+ * The person block matches the real Acumen workspace (verified against a full export of
+ * Alisa's pod: 934 people, 59 columns). The names below are Twenty's GraphQL field names,
+ * which Twenty derives from the label an admin typed - "Next Action Due Date" becomes
+ * `nextActionDueDate`. Admins can override any value in Settings > Twenty, and
+ * `pnpm verify:schema` checks the effective mapping against a live workspace.
+ *
+ * Fields marked "custom" do not exist in a stock Twenty workspace. The GraphQL client trims
+ * any field the workspace does not have out of its selection sets, so a workspace missing one
+ * of them returns null for it rather than failing every query.
  */
 
 export const defaultTwentySchema = {
@@ -23,31 +28,99 @@ export const defaultTwentySchema = {
   },
 
   person: {
+    // --- identity, stock Twenty ------------------------------------------------
     /** Composite: { firstName, lastName } */
     name: 'name',
     /** Composite: { primaryEmail, additionalEmails } */
     emails: 'emails',
     /** Composite: { primaryPhoneNumber, primaryPhoneCallingCode, primaryPhoneCountryCode } */
     phones: 'phones',
+    /** Custom phones composite: a second number the team keeps separately. */
+    additionalNumber: 'additionalNumber',
     /** Composite link: { primaryLinkUrl, primaryLinkLabel } */
     linkedinLink: 'linkedinLink',
+    /** Composite link: X / Twitter. */
+    xLink: 'xLink',
     jobTitle: 'jobTitle',
+    /** Free text in this workspace, e.g. "Chicago, Illinois". */
     city: 'city',
     company: 'company',
     companyId: 'companyId',
-    /** Custom boolean: do not contact. */
-    dnd: 'dnd',
-    /** Custom select: Alisa, Leigh, Andrew, Karson, Daniel, Ria ... */
+    /** Composite actor: { source, workspaceMemberId, name } - who put this person in Twenty. */
+    createdBy: 'createdBy',
+
+    // --- ownership -------------------------------------------------------------
+    /**
+     * Custom relation to workspaceMember: the person who owns this relationship.
+     * This is the field "my relationships" and OWNER assignment read; Twenty has no
+     * standard person owner, and this workspace calls it "Assigned To".
+     */
+    assignedTo: 'assignedTo',
+    assignedToId: 'assignedToId',
+    /** Custom select: which pod the person belongs to (ALISA, ANDREW, ...). */
     podOwner: 'podOwner',
-    /** Custom relation to workspaceMember (the person's owner). */
-    owner: 'owner',
-    ownerId: 'ownerId',
-    /** Custom multi-select. */
+    /** Custom select: who the person was rotated out to, when they were. */
+    rotationTracking: 'rotationTracking',
+    rotationChangedAt: 'rotationChangedAt',
+
+    // --- how the team labels people -------------------------------------------
+    /** Custom multi-select, free-growing: how the team labels people. */
     tags: 'tags',
-    /** Custom text or select: where we met. */
-    eventSource: 'eventSource',
-    /** Optional custom select used for meeting detection. */
-    statusOfMeeting: 'statusOfMeeting',
+    /** Custom select: do not disturb. Set means "do not contact" - see personValues.dnd. */
+    dnd: 'dnd',
+    /** Custom multi-select: where the lead came from (event, campaign, list). */
+    leadSource: 'leadSource',
+    /** Custom text: free-form detail behind leadSource. */
+    leadSourceNotes: 'leadSourceNotes',
+    /** Custom select: LEVEL_1 (best) .. LEVEL_4. */
+    tier: 'tier',
+    /** Custom multi-select: PROSPECT, CLIENTS, PARTNER, ORGANIZATION, CLIENT_S_CLIENT. */
+    contactType: 'contactType',
+    /** Custom select: how often this person should be touched (COLD_BD, BI_WEEKLY, ...). */
+    listCategory: 'listCategory',
+    /** Custom select: the cadence they were on before listCategory changed. */
+    previousCadence: 'previousCadence',
+    /** Custom select: PROSPECT, QUALIFY, RETAIN. The CRM's own funnel stage. */
+    pipelineStageField: 'pipelineStageField',
+    /** Custom multi-select: which products they are interested in. */
+    productInterest: 'productInterest',
+    /** Custom text: the single product this person is really about. */
+    primaryProduct: 'primaryProduct',
+    /** Custom multi-select: campaigns this person is currently in, in Twenty. */
+    onGoingCampaigns: 'onGoingCampaigns',
+    /** Custom boolean: on the pod owner's own calling list. */
+    callingList: 'alisaCallingList',
+    /** Custom select or text: how strong the deal signal is. */
+    dealSignalStrength: 'dealSignalStrength',
+
+    // --- what happens next, as the CRM records it ------------------------------
+    /** Custom text: the next action a human wrote down, e.g. "FU-2". */
+    nextAction: 'nextAction',
+    /** Custom date: when that action is due. */
+    nextActionDueDate: 'nextActionDueDate',
+    /** Custom select: EMAIL or LINKEDIN_MESSAGE. */
+    nextStep: 'nextStep',
+    /** Custom date: the point-of-contact's own due date, tracked separately. */
+    nextActionDueDatePoc: 'nextActionDueDatePoc',
+    /** Custom text: the last thing anybody wrote about this person. */
+    lastNote: 'lastNote',
+
+    // --- last touch, maintained by Twenty's own automations --------------------
+    /** Custom datetime: when we last called them. */
+    latestCallActivity: 'latestCallActivity',
+    /** Custom datetime: when we last emailed them. */
+    lastEmailActivity: 'lastEmailActivity',
+
+    // --- meetings --------------------------------------------------------------
+    /** Custom datetime: the booked meeting. Set means a meeting exists. */
+    meetingTime: 'meetingTime',
+    /** Custom link: the join link for that meeting. */
+    meetingLink: 'meetingLink',
+    /** Custom link: the recording of a sales call, playable in the Meetings section. */
+    salesCallRecordingLink: 'salesCallRecordingLink',
+    /** Custom text: the booking reference from the scheduler. */
+    bookingId: 'bookingId',
+
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
     deletedAt: 'deletedAt',
@@ -137,8 +210,40 @@ export const defaultTwentySchema = {
     timeZone: 'timeZone',
   },
 
-  /** Known podOwner select values. Pods are created from these in Settings. */
-  podOwnerOptions: ['Alisa', 'Leigh', 'Andrew', 'Karson', 'Daniel', 'Ria'],
+  /**
+   * Select and multi-select option values, exactly as Twenty stores them. Cadence never
+   * invents a value: anything arriving that is not listed here is still kept and shown, these
+   * lists only drive filters, ordering and the few rules that must know a value's meaning.
+   */
+  personValues: {
+    /** dnd is a select in this workspace, not a boolean: a set value means do not contact. */
+    dnd: ['DO_NOT_DISTURB'],
+    /** Best first. Ordering matters: the UI sorts and colours by position. */
+    tier: ['LEVEL_1', 'LEVEL_2', 'LEVEL_3', 'LEVEL_4'],
+    /** How often the person should be touched. COLD_BD is the untouched cold list. */
+    listCategory: ['COLD_BD', 'BI_WEEKLY', 'MONTHLY', 'QUARTERLY', 'UNASSIGNED'],
+    contactType: ['PROSPECT', 'CLIENTS', 'CLIENT_S_CLIENT', 'PARTNER', 'ORGANIZATION'],
+    pipelineStage: ['PROSPECT', 'QUALIFY', 'RETAIN'],
+    productInterest: ['PHH', 'TOLLBOOTH', 'ACUBOOTH', 'GLYNAC'],
+    nextStep: ['EMAIL', 'LINKEDIN_MESSAGE'],
+    onGoingCampaigns: ['AY_PHH_POST_WEBINAR', 'SPONSORSHIP', 'AUBURN_HILL_ACQUISITION', 'CE_PRESENTATION'],
+    /**
+     * Tags that carry a consequence. The team encodes data quality and consent in tags, so
+     * Cadence reads them rather than asking anyone to keep a second set of flags in step.
+     */
+    doNotContactTags: ['DNC', 'DO_NOT_CONTACT', 'DO_NOT_CALL'],
+    missingEmailTags: ['MISSING_EMAIL'],
+    missingPhoneTags: ['MISSING_PHONE'],
+    /** Tags that mean the record itself is not ready to work. */
+    needsEnrichmentTags: ['ENRICHMENT_REQUIRED', 'FOR_REVIEW', 'MISSING_ADDRESS'],
+  },
+
+  /**
+   * Known podOwner select values. Pods are created from these in Settings, and from any new
+   * value that arrives on a person. Twenty stores them upper-case; the pod's display name comes
+   * from the option's label in Twenty, not from this list.
+   */
+  podOwnerOptions: ['ALISA', 'ANDREW', 'LEIGH', 'KARSON', 'DANIEL', 'RIA'],
 } as const;
 
 export type TwentySchema = {
@@ -155,8 +260,12 @@ export type TwentySchema = {
   participantRoles: { [K in keyof typeof defaultTwentySchema.participantRoles]: string };
   opportunity: { [K in keyof typeof defaultTwentySchema.opportunity]: string };
   workspaceMember: { [K in keyof typeof defaultTwentySchema.workspaceMember]: string };
+  personValues: { [K in keyof typeof defaultTwentySchema.personValues]: string[] };
   podOwnerOptions: string[];
 };
+
+/** Sections that hold lists of option values rather than field names. */
+const VALUE_SECTIONS = new Set(['personValues']);
 
 /**
  * Default note title patterns. Twenty writes activity as notes in two shapes we
@@ -189,6 +298,17 @@ export function mergeTwentySchema(override?: TwentySchemaOverride | null): Twent
       for (const [objKey, objVal] of Object.entries(sectionVal as Record<string, unknown>)) {
         const target = (base.objects as Record<string, { singular: string; plural: string; typeName: string }>)[objKey];
         if (target && objVal && typeof objVal === 'object') Object.assign(target, objVal);
+      }
+      continue;
+    }
+    if (VALUE_SECTIONS.has(key)) {
+      // Option lists: an override replaces a list outright, so a workspace that renamed its
+      // options is not left with both sets. An empty list is ignored, as with field names.
+      const target = base[key] as unknown as Record<string, string[]>;
+      for (const [listKey, listVal] of Object.entries(sectionVal as Record<string, unknown>)) {
+        if (!Array.isArray(listVal)) continue;
+        const values = listVal.filter((s): s is string => typeof s === 'string' && s.trim() !== '').map((s) => s.trim());
+        if (values.length) target[listKey] = values;
       }
       continue;
     }

@@ -2,7 +2,7 @@ import type { TwentyCompany, TwentyMessage, TwentyNote, TwentyOpportunity, Twent
 
 /**
  * The demo workspace used by the app in mock mode: one dummy record of everything.
- * Two real pods (Alisa, Andrew), one person whose podOwner ("Karson") has no pod yet so the
+ * Two real pods (ALISA, ANDREW), one person whose podOwner ("KARSON") has no pod yet so the
  * pod-discovery path can be seen working, one dnd person, one company with three colleagues.
  * Everything is named "Dummy ..." so nobody mistakes it for real data.
  */
@@ -16,12 +16,13 @@ export const DEMO_MEMBERS: TwentyWorkspaceMember[] = [
 ];
 
 /**
- * podOwner select options as Twenty would report them (value + label). "Karson" is deliberately
- * absent even though Dummy Twelve carries it, so the pod-discovery path is visible in the demo.
+ * podOwner select options as Twenty reports them: an upper-case value and a human label, which
+ * is what becomes the pod's name in Cadence. "KARSON" is deliberately absent even though Dummy
+ * Twelve carries it, so the pod-discovery path is visible in the demo.
  */
 export const DEMO_POD_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: 'Alisa', label: "Alisa's pod" },
-  { value: 'Andrew', label: "Andrew's pod" },
+  { value: 'ALISA', label: "Alisa's pod" },
+  { value: 'ANDREW', label: "Andrew's pod" },
 ];
 
 /** Account owner is a Twenty workspace member, so "accounts I own" works per signed-in user. */
@@ -61,49 +62,177 @@ export const DEMO_COMPANIES: TwentyCompany[] = [
   },
 ];
 
-// [lastName, companyId, jobTitle, podOwner, ownerMemberId, eventSource, dnd]
-type Row = [string, string, string, string, string | null, string, boolean?];
+/**
+ * One dummy person per shape the real workspace produces, so every field of the person panel
+ * has something in it in the demo: each tier, each contact type, each list category, a booked
+ * meeting with a recording, a rotated-out record, a do-not-contact select, tags that mean the
+ * contact details are missing, and one person whose pod does not exist in Cadence yet.
+ */
+type Row = {
+  last: string;
+  co: string;
+  title: string;
+  pod: string;
+  owner: string | null;
+  lead: string[];
+  tier?: string;
+  type?: string[];
+  list?: string;
+  stage?: string;
+  product?: string[];
+  campaigns?: string[];
+  tags?: string[];
+  next?: [action: string, due: string, step: string];
+  note?: string;
+  lastCall?: string;
+  lastEmail?: string;
+  meeting?: [at: string, join: string, recording: string];
+  dnd?: boolean;
+  calling?: boolean;
+  rotatedTo?: string;
+};
+
 const rows: Row[] = [
-  ['One', 'dummy-co-a', 'VP Operations', 'Alisa', 'wm-alisa', 'Dummy Conference 2026'],
-  ['Two', 'dummy-co-a', 'Head of Sales', 'Alisa', 'wm-alisa', 'Dummy Conference 2026'],
-  ['Three', 'dummy-co-a', 'CTO', 'Alisa', 'wm-karson', 'Referral'],
-  ['Four', 'dummy-co-b', 'CEO', 'Alisa', 'wm-karson', 'Webinar'],
-  ['Five', 'dummy-co-b', 'CFO', 'Alisa', null, 'LinkedIn'],
-  ['Six', 'dummy-co-b', 'COO', 'Alisa', 'wm-alisa', 'Webinar', true],
-  ['Seven', 'dummy-co-c', 'Head of Growth', 'Andrew', 'wm-andrew', 'Dummy Conference 2026'],
-  ['Eight', 'dummy-co-c', 'Director of Marketing', 'Andrew', 'wm-andrew', 'Referral'],
-  ['Nine', 'dummy-co-c', 'Head of Partnerships', 'Andrew', 'wm-daniel', 'LinkedIn'],
-  ['Ten', 'dummy-co-a', 'Procurement Lead', 'Andrew', 'wm-daniel', 'Webinar'],
-  ['Eleven', 'dummy-co-b', 'VP Product', 'Andrew', null, 'Referral'],
-  ['Twelve', 'dummy-co-c', 'Head of Data', 'Karson', 'wm-karson', 'LinkedIn'],
+  {
+    last: 'One', co: 'dummy-co-a', title: 'VP Operations', pod: 'ALISA', owner: 'wm-alisa',
+    lead: ['FPA_WISCONSIN_JULY_2026'], tier: 'LEVEL_1', type: ['PROSPECT'], list: 'BI_WEEKLY', stage: 'QUALIFY',
+    product: ['PHH', 'TOLLBOOTH'], campaigns: ['AY_PHH_POST_WEBINAR'], tags: ['KANBAN_OPPORTUNITY', 'HIGH_PRIORITY_HOT_LEAD'],
+    next: ['FU-2', '2026-09-10', 'EMAIL'], note: 'FU 1 done, asked for the PHH one-pager.',
+    lastCall: '2026-09-04T14:10:00.000Z', lastEmail: '2026-09-05T08:30:00.000Z', calling: true,
+  },
+  {
+    last: 'Two', co: 'dummy-co-a', title: 'Head of Sales', pod: 'ALISA', owner: 'wm-alisa',
+    lead: ['FPA_WISCONSIN_JULY_2026'], tier: 'LEVEL_2', type: ['PROSPECT'], list: 'MONTHLY',
+    campaigns: ['AY_PHH_POST_WEBINAR'], tags: ['KANBAN_AWARENESS'], next: ['FU-1', '2026-09-11', 'LINKEDIN_MESSAGE'],
+    lastEmail: '2026-09-03T11:00:00.000Z',
+  },
+  {
+    last: 'Three', co: 'dummy-co-a', title: 'CTO', pod: 'ALISA', owner: 'wm-karson',
+    lead: ['LEADGEN'], tier: 'LEVEL_3', type: ['PROSPECT'], list: 'QUARTERLY', tags: ['ENRICHMENT_REQUIRED'],
+  },
+  {
+    last: 'Four', co: 'dummy-co-b', title: 'CEO', pod: 'ALISA', owner: 'wm-karson',
+    lead: ['TRUST_ALTA_LUNCHEON_JUNE_2026'], tier: 'LEVEL_1', type: ['CLIENTS'], list: 'MONTHLY', stage: 'RETAIN',
+    product: ['PHH'], campaigns: ['SPONSORSHIP'], tags: ['CLIENT', 'MISSING_PHONE'],
+    note: 'Renewal conversation booked.', lastCall: '2026-09-02T09:00:00.000Z',
+    meeting: ['2026-09-11T13:00:00.000Z', 'https://teams.microsoft.com/l/meetup-join/dummy-four', 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeetings.mp4'],
+  },
+  {
+    last: 'Five', co: 'dummy-co-b', title: 'CFO', pod: 'ALISA', owner: null,
+    lead: ['LEADGEN', 'NIL'], tier: 'LEVEL_4', type: ['ORGANIZATION'], list: 'COLD_BD', tags: ['MISSING_EMAIL'],
+  },
+  {
+    last: 'Six', co: 'dummy-co-b', title: 'COO', pod: 'ALISA', owner: 'wm-alisa',
+    lead: ['WM_EDGE_JUNE_2026'], tier: 'LEVEL_3', type: ['PROSPECT'], list: 'UNASSIGNED', dnd: true,
+    note: 'Asked not to be contacted again.',
+  },
+  {
+    last: 'Seven', co: 'dummy-co-c', title: 'Head of Growth', pod: 'ANDREW', owner: 'wm-andrew',
+    lead: ['FUTUREPROOF_MAR2026'], tier: 'LEVEL_2', type: ['PROSPECT', 'PARTNER'], list: 'BI_WEEKLY', stage: 'PROSPECT',
+    product: ['GLYNAC'], campaigns: ['CE_PRESENTATION'], next: ['Confirm next steps', '2026-09-09', 'EMAIL'],
+  },
+  {
+    last: 'Eight', co: 'dummy-co-c', title: 'Director of Marketing', pod: 'ANDREW', owner: 'wm-andrew',
+    lead: ['LEADGEN'], tier: 'LEVEL_3', type: ['PARTNER'], list: 'QUARTERLY', tags: ['PARTNER'],
+    note: 'Sent the partner deck.',
+  },
+  {
+    last: 'Nine', co: 'dummy-co-c', title: 'Head of Partnerships', pod: 'ANDREW', owner: 'wm-daniel',
+    lead: ['NIL'], tier: 'LEVEL_4', type: ['PROSPECT'], list: 'COLD_BD', tags: ['DNC'],
+  },
+  {
+    last: 'Ten', co: 'dummy-co-a', title: 'Procurement Lead', pod: 'ANDREW', owner: 'wm-daniel',
+    lead: ['FDL_EDGE_WEBINAR_JUNE_2026'], tier: 'LEVEL_3', type: ['PROSPECT'], list: 'MONTHLY',
+  },
+  {
+    last: 'Eleven', co: 'dummy-co-b', title: 'VP Product', pod: 'ANDREW', owner: null,
+    lead: ['LEADGEN'], tier: 'LEVEL_3', type: ['PROSPECT'], list: 'QUARTERLY', rotatedTo: 'ROTATED_OUT_LEIGH',
+  },
+  {
+    // podOwner KARSON has no pod in Cadence: this is the pod-discovery path.
+    last: 'Twelve', co: 'dummy-co-c', title: 'Head of Data', pod: 'KARSON', owner: 'wm-karson',
+    lead: ['ORIONASCENTFEB2026'], tier: 'LEVEL_2', type: ['CLIENT_S_CLIENT'], list: 'MONTHLY',
+  },
   // Used by the "starting today" campaigns so every pod has work due today.
-  ['Thirteen', 'dummy-co-a', 'Head of Finance', 'Alisa', 'wm-alisa', 'Dummy Conference 2026'],
-  ['Fourteen', 'dummy-co-b', 'Head of People', 'Alisa', 'wm-karson', 'Webinar'],
-  ['Fifteen', 'dummy-co-c', 'VP Engineering', 'Andrew', 'wm-andrew', 'Referral'],
-  ['Sixteen', 'dummy-co-a', 'Head of Support', 'Andrew', 'wm-daniel', 'LinkedIn'],
+  {
+    last: 'Thirteen', co: 'dummy-co-a', title: 'Head of Finance', pod: 'ALISA', owner: 'wm-alisa',
+    lead: ['FPA_WISCONSIN_JULY_2026'], tier: 'LEVEL_2', type: ['PROSPECT'], list: 'BI_WEEKLY',
+    campaigns: ['AY_PHH_POST_WEBINAR'], calling: true,
+  },
+  {
+    last: 'Fourteen', co: 'dummy-co-b', title: 'Head of People', pod: 'ALISA', owner: 'wm-karson',
+    lead: ['WM_EDGE_JUNE_2026'], tier: 'LEVEL_3', type: ['PROSPECT'], list: 'MONTHLY',
+  },
+  {
+    last: 'Fifteen', co: 'dummy-co-c', title: 'VP Engineering', pod: 'ANDREW', owner: 'wm-andrew',
+    lead: ['LEADGEN'], tier: 'LEVEL_3', type: ['PROSPECT'], list: 'QUARTERLY',
+  },
+  {
+    last: 'Sixteen', co: 'dummy-co-a', title: 'Head of Support', pod: 'ANDREW', owner: 'wm-daniel',
+    lead: ['NIL'], tier: 'LEVEL_4', type: ['PROSPECT'], list: 'COLD_BD',
+  },
 ];
 
 export const DEMO_PEOPLE: TwentyPerson[] = rows.map((r, i) => {
-  const [lastName, companyId, jobTitle, podOwner, ownerMemberId, eventSource, dnd] = r;
-  const company = DEMO_COMPANIES.find((c) => c.id === companyId)!;
+  const company = DEMO_COMPANIES.find((c) => c.id === r.co)!;
   const n = i + 1;
+  const tags = r.tags ?? [];
   return {
     id: `dummy-${String(n).padStart(2, '0')}`,
     firstName: 'Dummy',
-    lastName,
-    email: `dummy.${lastName.toLowerCase()}@${company.domain}`,
+    lastName: r.last,
+    email: `dummy.${r.last.toLowerCase()}@${company.domain}`,
+    additionalEmails: [],
     phone: `+44 20 7000 ${String(1000 + n).padStart(4, '0')}`,
-    linkedinUrl: `https://www.linkedin.com/in/dummy-${lastName.toLowerCase()}`,
-    jobTitle,
+    additionalPhone: null,
+    linkedinUrl: `https://www.linkedin.com/in/dummy-${r.last.toLowerCase()}`,
+    xUrl: null,
+    jobTitle: r.title,
     city: ['London', 'Manchester', 'Berlin'][i % 3],
     companyId: company.id,
     companyName: company.name,
-    dnd: Boolean(dnd),
-    podOwner,
-    ownerMemberId,
-    tags: i % 2 ? ['dummy', 'warm'] : ['dummy'],
-    eventSource,
-    statusOfMeeting: null,
+
+    ownerMemberId: r.owner,
+    podOwner: r.pod,
+    rotatedTo: r.rotatedTo ?? null,
+    rotationChangedAt: r.rotatedTo ? '2026-08-18T10:00:00.000Z' : null,
+
+    dnd: Boolean(r.dnd) || tags.includes('DNC'),
+    dndReason: r.dnd ? 'DO_NOT_DISTURB' : tags.includes('DNC') ? 'DNC' : null,
+    emailMissing: tags.includes('MISSING_EMAIL'),
+    phoneMissing: tags.includes('MISSING_PHONE'),
+
+    tags,
+    leadSource: r.lead,
+    leadSourceNotes: null,
+    tier: r.tier ?? null,
+    contactType: r.type ?? [],
+    listCategory: r.list ?? null,
+    previousCadence: r.list === 'BI_WEEKLY' ? 'MONTHLY' : null,
+    pipelineStage: r.stage ?? null,
+    productInterest: r.product ?? [],
+    primaryProduct: r.product?.[0] ?? null,
+    campaigns: r.campaigns ?? [],
+    onCallingList: Boolean(r.calling),
+    dealSignalStrength: null,
+
+    nextAction: r.next?.[0] ?? null,
+    nextActionDueDate: r.next?.[1] ?? null,
+    nextStep: r.next?.[2] ?? null,
+    nextActionDueDatePoc: null,
+    lastNote: r.note ?? null,
+
+    lastCallAt: r.lastCall ?? null,
+    lastEmailAt: r.lastEmail ?? null,
+
+    meetingAt: r.meeting?.[0] ?? null,
+    meetingUrl: r.meeting?.[1] ?? null,
+    recordingUrl: r.meeting?.[2] ?? null,
+    bookingId: r.meeting ? `dummy-booking-${n}` : null,
+
+    createdBySource: 'MANUAL',
+    createdByName: 'Admin Acumen',
+    createdByMemberId: 'wm-ria',
     createdAt: '2026-08-10T08:00:00.000Z',
     updatedAt: '2026-08-20T10:00:00.000Z',
     deletedAt: null,
@@ -207,7 +336,7 @@ export const DEMO_OPPORTUNITIES: TwentyOpportunity[] = [
 export const DEMO_TASKS: TwentyTask[] = [];
 
 export const DEMO_VIEWS: TwentyView[] = [
-  { id: 'view-alisa-pod', name: "Alisa's pod - all people", objectSingular: 'person', personIds: DEMO_PEOPLE.filter((x) => x.podOwner === 'Alisa').map((x) => x.id) },
-  { id: 'view-andrew-pod', name: "Andrew's pod - all people", objectSingular: 'person', personIds: DEMO_PEOPLE.filter((x) => x.podOwner === 'Andrew').map((x) => x.id) },
+  { id: 'view-alisa-pod', name: "Alisa's pod - all people", objectSingular: 'person', personIds: DEMO_PEOPLE.filter((x) => x.podOwner === 'ALISA').map((x) => x.id) },
+  { id: 'view-andrew-pod', name: "Andrew's pod - all people", objectSingular: 'person', personIds: DEMO_PEOPLE.filter((x) => x.podOwner === 'ANDREW').map((x) => x.id) },
   { id: 'view-all-dummies', name: 'All dummy people', objectSingular: 'person', personIds: DEMO_PEOPLE.map((x) => x.id) },
 ];

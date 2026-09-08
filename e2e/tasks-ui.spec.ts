@@ -108,9 +108,12 @@ test('the person panel carries the CRM record, not a made-up stage', async ({ pa
 
   // "Approaching" was a label Cadence invented; it is gone.
   await expect(panel.getByText('Approaching')).toHaveCount(0);
-  // Tags from Twenty are shown as themselves.
+  // What the CRM holds, in the CRM's own terms: classification, tags, and its own next action.
+  await expect(panel.getByText('How Twenty classifies them')).toBeVisible();
   await expect(panel.getByText('Tags in Twenty')).toBeVisible();
-  await expect(panel.getByText('dummy', { exact: true }).first()).toBeVisible();
+  await expect(panel.getByText('Tier', { exact: true }).first()).toBeVisible();
+  // Option constants are never shown raw: LEVEL_2 reads "Tier 2", not "LEVEL_2".
+  await expect(panel.getByText(/^[A-Z][A-Z0-9]+_[A-Z0-9_]+$/)).toHaveCount(0);
   // One history, and the space kept for the analyzer.
   await expect(panel.getByText('Everything so far')).toBeVisible();
   await expect(panel.getByText('Suggested approach')).toBeVisible();

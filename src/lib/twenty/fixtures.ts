@@ -11,8 +11,11 @@ import type {
 
 /**
  * Deterministic fixtures for the mock Twenty workspace:
- * 3 pods (Alisa, Leigh, Andrew), 6 workspace members, 14 companies, 40 people,
+ * 3 pods (ALISA, LEIGH, ANDREW), 6 workspace members, 14 companies, 40 people,
  * and activity in the exact note title formats Twenty produces.
+ *
+ * Person values are the real workspace's: leadSource, tier, contactType and listCategory are
+ * option constants, not prose, so the tests exercise what production actually receives.
  */
 
 export const MOCK_MEMBERS: TwentyWorkspaceMember[] = [
@@ -24,7 +27,8 @@ export const MOCK_MEMBERS: TwentyWorkspaceMember[] = [
   { id: 'wm-ria', firstName: 'Ria', lastName: 'Patel', email: 'ria@acumen.example', timeZone: 'Europe/London' },
 ];
 
-export const MOCK_PODS = ['Alisa', 'Leigh', 'Andrew'] as const;
+/** podOwner values exactly as Twenty stores them (upper-case). */
+export const MOCK_PODS = ['ALISA', 'LEIGH', 'ANDREW'] as const;
 
 const companyNames = [
   'Acme Logistics',
@@ -55,59 +59,63 @@ export const MOCK_COMPANIES: TwentyCompany[] = companyNames.map((name, i) => ({
   updatedAt: '2026-08-15T09:00:00.000Z',
 }));
 
-// [first, last, companyIndex(1-based), jobTitle, podOwner, ownerMemberId, eventSource, dnd]
+// [first, last, companyIndex(1-based), jobTitle, podOwner, assignedToId, leadSource, dnd]
 type PersonRow = [string, string, number, string, string, string | null, string, boolean?];
 
 const rows: PersonRow[] = [
-  // Pod Alisa (14)
-  ['Nina', 'Halvorsen', 1, 'VP Operations', 'Alisa', 'wm-alisa', 'SaaStr 2026'],
-  ['Tomas', 'Berg', 1, 'Head of Logistics', 'Alisa', 'wm-alisa', 'SaaStr 2026'],
-  ['Priya', 'Nair', 2, 'Partner', 'Alisa', 'wm-alisa', 'Referral'],
-  ['Marcus', 'Whitfield', 2, 'Investment Director', 'Alisa', 'wm-karson', 'Referral'],
-  ['Elena', 'Rossi', 3, 'Chief Data Officer', 'Alisa', 'wm-alisa', 'Web Summit'],
-  ['Jonah', 'Adeyemi', 3, 'Head of Growth', 'Alisa', 'wm-karson', 'Web Summit'],
-  ['Sofia', 'Lindqvist', 4, 'COO', 'Alisa', 'wm-alisa', 'Inbound webinar', true],
-  ['Ravi', 'Menon', 4, 'Director of Sales', 'Alisa', 'wm-karson', 'Inbound webinar'],
-  ['Hannah', 'Obi', 5, 'VP Marketing', 'Alisa', 'wm-alisa', 'LinkedIn'],
-  ['Lukas', 'Meyer', 5, 'Head of Partnerships', 'Alisa', null, 'LinkedIn'],
-  ['Grace', 'Kimura', 6, 'CEO', 'Alisa', 'wm-alisa', 'SaaStr 2026'],
-  ['Oscar', 'Delgado', 6, 'CTO', 'Alisa', 'wm-karson', 'SaaStr 2026'],
-  ['Maya', 'Fischer', 7, 'Head of Claims', 'Alisa', 'wm-alisa', 'Referral'],
-  ['Ethan', 'Brooks', 7, 'Chief Revenue Officer', 'Alisa', 'wm-alisa', 'Referral'],
-  // Pod Leigh (13)
-  ['Isabel', 'Moreau', 8, 'Managing Director', 'Leigh', 'wm-leigh', 'Web Summit'],
-  ['Kwame', 'Mensah', 8, 'Head of Sales', 'Leigh', 'wm-leigh', 'Web Summit'],
-  ['Freya', 'Jensen', 9, 'VP Commercial', 'Leigh', 'wm-daniel', 'Inbound webinar'],
-  ['Diego', 'Alvarez', 9, 'Director of Operations', 'Leigh', 'wm-leigh', 'Inbound webinar'],
-  ['Chloe', 'Bennett', 10, 'Chief Marketing Officer', 'Leigh', 'wm-leigh', 'LinkedIn', true],
-  ['Samir', 'Haddad', 10, 'Head of Digital', 'Leigh', 'wm-daniel', 'LinkedIn'],
-  ['Anika', 'Sharma', 11, 'VP Engineering', 'Leigh', 'wm-leigh', 'SaaStr 2026'],
-  ['Felix', 'Wagner', 11, 'Head of Procurement', 'Leigh', 'wm-daniel', 'SaaStr 2026'],
-  ['Zara', 'Ahmed', 12, 'Chief Scientific Officer', 'Leigh', 'wm-leigh', 'Referral'],
-  ['Noah', 'Carter', 12, 'Head of Business Development', 'Leigh', null, 'Referral'],
-  ['Lena', 'Novak', 13, 'Head of Retail Banking', 'Leigh', 'wm-leigh', 'Web Summit'],
-  ['Adam', 'Kowalski', 13, 'Director of Innovation', 'Leigh', 'wm-daniel', 'Web Summit'],
-  ['Yuki', 'Tanaka', 14, 'VP Sales', 'Leigh', 'wm-leigh', 'Inbound webinar'],
-  // Pod Andrew (13)
-  ['Olivia', 'Grant', 14, 'Head of Trading', 'Andrew', 'wm-andrew', 'Inbound webinar'],
-  ['Mateo', 'Silva', 1, 'Regional Manager', 'Andrew', 'wm-andrew', 'LinkedIn'],
-  ['Amara', 'Nwosu', 2, 'Associate Partner', 'Andrew', 'wm-andrew', 'SaaStr 2026'],
-  ['Henrik', 'Sørensen', 3, 'Head of Analytics', 'Andrew', 'wm-andrew', 'Referral'],
-  ['Layla', 'Hussein', 4, 'Director of Fleet', 'Andrew', 'wm-andrew', 'Web Summit'],
-  ['Ben', 'Thompson', 5, 'Head of Patient Services', 'Andrew', 'wm-andrew', 'Inbound webinar', true],
-  ['Ingrid', 'Olsen', 6, 'VP Product', 'Andrew', 'wm-andrew', 'LinkedIn'],
-  ['Carlos', 'Ramírez', 7, 'Head of Underwriting', 'Andrew', 'wm-andrew', 'SaaStr 2026'],
-  ['Aisha', 'Bello', 8, 'Head of Content', 'Andrew', 'wm-andrew', 'Referral'],
-  ['Viktor', 'Petrov', 9, 'Chief Operating Officer', 'Andrew', 'wm-andrew', 'Web Summit'],
-  ['Emma', 'Walsh', 10, 'Head of E-commerce', 'Andrew', null, 'Inbound webinar'],
-  ['Kenji', 'Sato', 11, 'Programme Director', 'Andrew', 'wm-andrew', 'LinkedIn'],
-  ['Sara', 'Lund', 12, 'VP Research', 'Andrew', 'wm-andrew', 'SaaStr 2026'],
+  // Pod ALISA (14)
+  ['Nina', 'Halvorsen', 1, 'VP Operations', 'ALISA', 'wm-alisa', 'FPA_WISCONSIN_JULY_2026'],
+  ['Tomas', 'Berg', 1, 'Head of Logistics', 'ALISA', 'wm-alisa', 'FPA_WISCONSIN_JULY_2026'],
+  ['Priya', 'Nair', 2, 'Partner', 'ALISA', 'wm-alisa', 'TRUST_ALTA_LUNCHEON_JUNE_2026'],
+  ['Marcus', 'Whitfield', 2, 'Investment Director', 'ALISA', 'wm-karson', 'TRUST_ALTA_LUNCHEON_JUNE_2026'],
+  ['Elena', 'Rossi', 3, 'Chief Data Officer', 'ALISA', 'wm-alisa', 'WM_EDGE_JUNE_2026'],
+  ['Jonah', 'Adeyemi', 3, 'Head of Growth', 'ALISA', 'wm-karson', 'WM_EDGE_JUNE_2026'],
+  ['Sofia', 'Lindqvist', 4, 'COO', 'ALISA', 'wm-alisa', 'FDL_EDGE_WEBINAR_JUNE_2026', true],
+  ['Ravi', 'Menon', 4, 'Director of Sales', 'ALISA', 'wm-karson', 'FDL_EDGE_WEBINAR_JUNE_2026'],
+  ['Hannah', 'Obi', 5, 'VP Marketing', 'ALISA', 'wm-alisa', 'LEADGEN'],
+  ['Lukas', 'Meyer', 5, 'Head of Partnerships', 'ALISA', null, 'LEADGEN'],
+  ['Grace', 'Kimura', 6, 'CEO', 'ALISA', 'wm-alisa', 'FPA_WISCONSIN_JULY_2026'],
+  ['Oscar', 'Delgado', 6, 'CTO', 'ALISA', 'wm-karson', 'FPA_WISCONSIN_JULY_2026'],
+  ['Maya', 'Fischer', 7, 'Head of Claims', 'ALISA', 'wm-alisa', 'TRUST_ALTA_LUNCHEON_JUNE_2026'],
+  ['Ethan', 'Brooks', 7, 'Chief Revenue Officer', 'ALISA', 'wm-alisa', 'TRUST_ALTA_LUNCHEON_JUNE_2026'],
+  // Pod LEIGH (13)
+  ['Isabel', 'Moreau', 8, 'Managing Director', 'LEIGH', 'wm-leigh', 'WM_EDGE_JUNE_2026'],
+  ['Kwame', 'Mensah', 8, 'Head of Sales', 'LEIGH', 'wm-leigh', 'WM_EDGE_JUNE_2026'],
+  ['Freya', 'Jensen', 9, 'VP Commercial', 'LEIGH', 'wm-daniel', 'FDL_EDGE_WEBINAR_JUNE_2026'],
+  ['Diego', 'Alvarez', 9, 'Director of Operations', 'LEIGH', 'wm-leigh', 'FDL_EDGE_WEBINAR_JUNE_2026'],
+  ['Chloe', 'Bennett', 10, 'Chief Marketing Officer', 'LEIGH', 'wm-leigh', 'LEADGEN', true],
+  ['Samir', 'Haddad', 10, 'Head of Digital', 'LEIGH', 'wm-daniel', 'LEADGEN'],
+  ['Anika', 'Sharma', 11, 'VP Engineering', 'LEIGH', 'wm-leigh', 'FPA_WISCONSIN_JULY_2026'],
+  ['Felix', 'Wagner', 11, 'Head of Procurement', 'LEIGH', 'wm-daniel', 'FPA_WISCONSIN_JULY_2026'],
+  ['Zara', 'Ahmed', 12, 'Chief Scientific Officer', 'LEIGH', 'wm-leigh', 'TRUST_ALTA_LUNCHEON_JUNE_2026'],
+  ['Noah', 'Carter', 12, 'Head of Business Development', 'LEIGH', null, 'TRUST_ALTA_LUNCHEON_JUNE_2026'],
+  ['Lena', 'Novak', 13, 'Head of Retail Banking', 'LEIGH', 'wm-leigh', 'WM_EDGE_JUNE_2026'],
+  ['Adam', 'Kowalski', 13, 'Director of Innovation', 'LEIGH', 'wm-daniel', 'WM_EDGE_JUNE_2026'],
+  ['Yuki', 'Tanaka', 14, 'VP Sales', 'LEIGH', 'wm-leigh', 'FDL_EDGE_WEBINAR_JUNE_2026'],
+  // Pod ANDREW (13)
+  ['Olivia', 'Grant', 14, 'Head of Trading', 'ANDREW', 'wm-andrew', 'FDL_EDGE_WEBINAR_JUNE_2026'],
+  ['Mateo', 'Silva', 1, 'Regional Manager', 'ANDREW', 'wm-andrew', 'LEADGEN'],
+  ['Amara', 'Nwosu', 2, 'Associate Partner', 'ANDREW', 'wm-andrew', 'FPA_WISCONSIN_JULY_2026'],
+  ['Henrik', 'Sørensen', 3, 'Head of Analytics', 'ANDREW', 'wm-andrew', 'TRUST_ALTA_LUNCHEON_JUNE_2026'],
+  ['Layla', 'Hussein', 4, 'Director of Fleet', 'ANDREW', 'wm-andrew', 'WM_EDGE_JUNE_2026'],
+  ['Ben', 'Thompson', 5, 'Head of Patient Services', 'ANDREW', 'wm-andrew', 'FDL_EDGE_WEBINAR_JUNE_2026', true],
+  ['Ingrid', 'Olsen', 6, 'VP Product', 'ANDREW', 'wm-andrew', 'LEADGEN'],
+  ['Carlos', 'Ramírez', 7, 'Head of Underwriting', 'ANDREW', 'wm-andrew', 'FPA_WISCONSIN_JULY_2026'],
+  ['Aisha', 'Bello', 8, 'Head of Content', 'ANDREW', 'wm-andrew', 'TRUST_ALTA_LUNCHEON_JUNE_2026'],
+  ['Viktor', 'Petrov', 9, 'Chief Operating Officer', 'ANDREW', 'wm-andrew', 'WM_EDGE_JUNE_2026'],
+  ['Emma', 'Walsh', 10, 'Head of E-commerce', 'ANDREW', null, 'FDL_EDGE_WEBINAR_JUNE_2026'],
+  ['Kenji', 'Sato', 11, 'Programme Director', 'ANDREW', 'wm-andrew', 'LEADGEN'],
+  ['Sara', 'Lund', 12, 'VP Research', 'ANDREW', 'wm-andrew', 'FPA_WISCONSIN_JULY_2026'],
 ];
 
-const TAG_POOL = ['enterprise', 'mid-market', 'warm', 'event-lead', 'referral'];
+// Tags as the workspace really uses them: kanban state, data quality and pod initials.
+const TAG_POOL = ['KANBAN_OPPORTUNITY', 'KANBAN_AWARENESS', 'MIP', 'TO_CALL_LIST', 'PARTNER'];
+const TIERS = ['LEVEL_1', 'LEVEL_2', 'LEVEL_3', 'LEVEL_3', 'LEVEL_4'];
+const LISTS = ['BI_WEEKLY', 'MONTHLY', 'QUARTERLY', 'COLD_BD'];
+const TYPES = [['PROSPECT'], ['PROSPECT'], ['CLIENTS'], ['PARTNER'], ['ORGANIZATION']];
 
 export const MOCK_PEOPLE: TwentyPerson[] = rows.map((r, i) => {
-  const [firstName, lastName, companyIdx, jobTitle, podOwner, ownerMemberId, eventSource, dnd] = r;
+  const [firstName, lastName, companyIdx, jobTitle, podOwner, ownerMemberId, leadSource, dnd] = r;
   const company = MOCK_COMPANIES[companyIdx - 1];
   const n = i + 1;
   const id = `person-${String(n).padStart(2, '0')}`;
@@ -117,18 +125,57 @@ export const MOCK_PEOPLE: TwentyPerson[] = rows.map((r, i) => {
     firstName,
     lastName,
     email: `${slug}@${company.domain}`,
+    additionalEmails: [],
     phone: `+44 20 7946 ${String(1000 + n).padStart(4, '0')}`,
+    additionalPhone: null,
     linkedinUrl: `https://www.linkedin.com/in/${slug.replace('.', '-')}`,
+    xUrl: null,
     jobTitle,
     city: ['London', 'Manchester', 'Berlin', 'Amsterdam', 'Dublin'][i % 5],
     companyId: company.id,
     companyName: company.name,
-    dnd: Boolean(dnd),
-    podOwner,
+
     ownerMemberId,
-    tags: [TAG_POOL[i % TAG_POOL.length], ...(i % 7 === 0 ? ['warm'] : [])].filter((t, idx, arr) => arr.indexOf(t) === idx),
-    eventSource,
-    statusOfMeeting: null,
+    podOwner,
+    rotatedTo: null,
+    rotationChangedAt: null,
+
+    dnd: Boolean(dnd),
+    dndReason: dnd ? 'DO_NOT_DISTURB' : null,
+    emailMissing: false,
+    phoneMissing: false,
+
+    tags: [TAG_POOL[i % TAG_POOL.length], ...(i % 7 === 0 ? ['MIP'] : [])].filter((t, idx, arr) => arr.indexOf(t) === idx),
+    leadSource: [leadSource],
+    leadSourceNotes: null,
+    tier: TIERS[i % TIERS.length],
+    contactType: TYPES[i % TYPES.length],
+    listCategory: LISTS[i % LISTS.length],
+    previousCadence: null,
+    pipelineStage: i % 9 === 0 ? 'QUALIFY' : null,
+    productInterest: i % 5 === 0 ? ['PHH'] : [],
+    primaryProduct: null,
+    campaigns: i % 4 === 0 ? ['AY_PHH_POST_WEBINAR'] : [],
+    onCallingList: i % 11 === 0,
+    dealSignalStrength: null,
+
+    nextAction: i % 3 === 0 ? 'FU-1' : null,
+    nextActionDueDate: i % 3 === 0 ? '2026-09-12' : null,
+    nextStep: i % 3 === 0 ? 'EMAIL' : null,
+    nextActionDueDatePoc: null,
+    lastNote: i % 6 === 0 ? 'FU 1 done' : null,
+
+    lastCallAt: null,
+    lastEmailAt: null,
+
+    meetingAt: null,
+    meetingUrl: null,
+    recordingUrl: null,
+    bookingId: null,
+
+    createdBySource: 'MANUAL',
+    createdByName: 'Admin Acumen',
+    createdByMemberId: 'wm-ria',
     createdAt: '2026-08-10T08:00:00.000Z',
     updatedAt: `2026-08-${String(11 + (i % 15)).padStart(2, '0')}T10:00:00.000Z`,
     deletedAt: null,
@@ -293,18 +340,18 @@ export const MOCK_VIEWS: TwentyView[] = [
     id: 'view-pod-alisa',
     name: 'Pod Alisa - all people',
     objectSingular: 'person',
-    personIds: MOCK_PEOPLE.filter((p) => p.podOwner === 'Alisa').map((p) => p.id),
+    personIds: MOCK_PEOPLE.filter((p) => p.podOwner === 'ALISA').map((p) => p.id),
   },
   {
-    id: 'view-saastr-2026',
-    name: 'SaaStr 2026 leads',
+    id: 'view-fpa-wisconsin',
+    name: 'FPA Wisconsin July 2026 leads',
     objectSingular: 'person',
-    personIds: MOCK_PEOPLE.filter((p) => p.eventSource === 'SaaStr 2026').map((p) => p.id),
+    personIds: MOCK_PEOPLE.filter((p) => p.leadSource.includes('FPA_WISCONSIN_JULY_2026')).map((p) => p.id),
   },
   {
     id: 'view-pod-leigh',
     name: 'Pod Leigh - all people',
     objectSingular: 'person',
-    personIds: MOCK_PEOPLE.filter((p) => p.podOwner === 'Leigh').map((p) => p.id),
+    personIds: MOCK_PEOPLE.filter((p) => p.podOwner === 'LEIGH').map((p) => p.id),
   },
 ];

@@ -188,10 +188,10 @@ describe('webhook ingestion', () => {
     expect(await pendingTasks('person-11')).toHaveLength(0);
   });
 
-  it('statusOfMeeting on the person marks a meeting too', async () => {
-    const person = mock.updatePerson('person-32', { statusOfMeeting: 'Booked', updatedAt: iso('2026-09-08', '12:00:00') });
+  it('a meeting time set on the person marks a meeting too', async () => {
+    const person = mock.updatePerson('person-32', { meetingAt: iso('2026-09-11', '13:00:00'), updatedAt: iso('2026-09-08', '12:00:00') });
     const r = await ingestEvent({ source: 'WEBHOOK', objectType: 'person', eventName: 'person.updated', record: rawFromPerson(person), now: at('2026-09-08') });
-    expect(r.result).toBe('meeting_from_status');
+    expect(r.result).toBe('meeting_from_meeting_time');
     expect((await prisma.enrollment.findFirstOrThrow({ where: { personId: 'person-32' } })).status).toBe('MEETING');
   });
 

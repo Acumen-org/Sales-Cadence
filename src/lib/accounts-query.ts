@@ -140,6 +140,12 @@ export type AccountPerson = {
   optedOut: boolean;
   podOwner: string | null;
   ownerName: string | null;
+  /** What Twenty says about them, so the account page and the CRM agree. */
+  tier: string | null;
+  contactType: string[];
+  listCategory: string | null;
+  nextAction: string | null;
+  nextActionDueDate: string | null;
   enrollment: { status: string; exitReason: string | null; campaignName: string | null; foName: string; stepIndex: number; steps: number } | null;
   lastTouchAt: Date | null;
   touches: number;
@@ -247,6 +253,11 @@ export async function accountDetail(companyId: string, user: SessionUser) {
       optedOut: p.optedOut,
       podOwner: p.podOwner,
       ownerName: p.ownerMemberId ? memberName.get(p.ownerMemberId) ?? null : null,
+      tier: p.tier,
+      contactType: p.contactType,
+      listCategory: p.listCategory,
+      nextAction: p.nextAction,
+      nextActionDueDate: p.nextActionDueDate,
       enrollment: e
         ? { status: e.status, exitReason: e.exitReason, campaignName: e.campaign?.name ?? null, foName: e.fo.name, stepIndex: e.currentStep, steps }
         : null,

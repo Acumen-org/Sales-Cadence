@@ -3,14 +3,14 @@ import { renderTemplate, unknownVariables } from '@/lib/templates';
 
 describe('renderTemplate', () => {
   it('fills the documented variables', () => {
-    const out = renderTemplate('Hi {{firstName}} at {{company}} ({{jobTitle}}), met at {{eventSource}}. - {{foFirstName}}', {
+    const out = renderTemplate('Hi {{firstName}} at {{company}} ({{jobTitle}}), met at {{leadSource}}. - {{foFirstName}}', {
       firstName: 'Nina',
       company: 'Acme Logistics',
       jobTitle: 'VP Operations',
-      eventSource: 'SaaStr 2026',
+      leadSource: 'FPA Wisconsin July 2026',
       foFirstName: 'Alisa',
     });
-    expect(out).toBe('Hi Nina at Acme Logistics (VP Operations), met at SaaStr 2026. - Alisa');
+    expect(out).toBe('Hi Nina at Acme Logistics (VP Operations), met at FPA Wisconsin July 2026. - Alisa');
   });
 
   it('derives foFirstName from foName and blanks unknowns', () => {

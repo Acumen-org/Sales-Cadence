@@ -5,7 +5,8 @@ import { defaultTwentySchema, mergeTwentySchema } from '@/lib/twenty/twenty-sche
 type Call = { url: string; query: string; variables: Record<string, unknown> };
 
 const ALL_FIELDS = [
-  'id', 'name', 'emails', 'phones', 'linkedinLink', 'jobTitle', 'city', 'companyId', 'company', 'dnd', 'podOwner', 'ownerId', 'tags', 'eventSource',
+  'id', 'name', 'emails', 'phones', 'linkedinLink', 'jobTitle', 'city', 'companyId', 'company', 'dnd', 'podOwner', 'assignedToId', 'tags', 'leadSource',
+  'tier', 'contactType', 'listCategory', 'pipelineStageField', 'nextAction', 'nextActionDueDate', 'nextStep', 'lastNote', 'meetingTime',
   'createdAt', 'updatedAt', 'deletedAt', 'title', 'bodyV2', 'createdBy', 'noteTargets', 'subject', 'receivedAt', 'messageThreadId', 'messageParticipants',
   'status', 'dueAt', 'assigneeId', 'taskTargets', 'stage', 'pointOfContactId', 'userEmail', 'timeZone', 'domainName', 'cadenceTaskId',
 ];
@@ -38,11 +39,17 @@ const rawPerson = {
   jobTitle: 'VP Operations',
   companyId: 'c-1',
   company: { id: 'c-1', name: 'Acme Logistics' },
-  dnd: false,
+  dnd: null,
   podOwner: 'ALISA',
-  ownerId: 'wm-1',
-  tags: ['warm'],
-  eventSource: 'SaaStr 2026',
+  assignedToId: 'wm-1',
+  tags: ['KANBAN_OPPORTUNITY'],
+  leadSource: ['FPA_WISCONSIN_JULY_2026'],
+  tier: 'LEVEL_2',
+  contactType: ['PROSPECT'],
+  listCategory: 'MONTHLY',
+  nextAction: 'FU-2',
+  nextActionDueDate: '2026-09-12',
+  nextStep: 'EMAIL',
   createdAt: '2026-08-01T00:00:00.000Z',
   updatedAt: '2026-09-01T00:00:00.000Z',
   deletedAt: null,
@@ -60,21 +67,42 @@ describe('TwentyGraphqlClient', () => {
     expect(page.hasNextPage).toBe(true);
     expect(page.endCursor).toBe('c1');
     const p = page.items[0];
-    expect(p).toMatchObject({ id: 'p-1', firstName: 'Nina', email: 'nina@acme.example', phone: '+44 7946 1001', companyName: 'Acme Logistics', podOwner: 'ALISA', ownerMemberId: 'wm-1', dnd: false, tags: ['warm'] });
-    expect(p.statusOfMeeting).toBeNull(); // field trimmed from the selection: not in the workspace
+    expect(p).toMatchObject({
+      id: 'p-1',
+      firstName: 'Nina',
+      email: 'nina@acme.example',
+      phone: '+44 7946 1001',
+      companyName: 'Acme Logistics',
+      podOwner: 'ALISA',
+      ownerMemberId: 'wm-1',
+      dnd: false,
+      tags: ['KANBAN_OPPORTUNITY'],
+      leadSource: ['FPA_WISCONSIN_JULY_2026'],
+      tier: 'LEVEL_2',
+      contactType: ['PROSPECT'],
+      listCategory: 'MONTHLY',
+      nextAction: 'FU-2',
+      nextActionDueDate: '2026-09-12',
+      nextStep: 'EMAIL',
+    });
+    // Fields the workspace does not have are trimmed from the selection and read as null.
+    expect(p.recordingUrl).toBeNull();
+    expect(p.bookingId).toBeNull();
     const listCall = calls.find((c) => c.query.includes('people('))!;
     expect(listCall.url).toBe('https://twenty.example.com/graphql');
     expect(listCall.variables.filter).toEqual({ updatedAt: { gte: '2026-08-31T00:00:00.000Z' } });
     expect(listCall.variables.first).toBe(10);
-    expect(listCall.query).not.toContain('statusOfMeeting');
+    expect(listCall.query).not.toContain('salesCallRecordingLink');
     expect(listCall.query).toContain('podOwner');
+    expect(listCall.query).toContain('assignedToId');
+    expect(listCall.query).toContain('nextActionDueDate');
   });
 
   it('honours renamed fields from the mapping', async () => {
-    const schema = mergeTwentySchema({ person: { dnd: 'doNotContact', ownerId: 'accountOwnerId' } });
+    const schema = mergeTwentySchema({ person: { dnd: 'doNotContact', assignedToId: 'accountOwnerId' } });
     const { client, calls } = fakeClient(
       () => ({ data: { people: { edges: [{ node: { ...rawPerson, doNotContact: true, accountOwnerId: 'wm-9' } }], pageInfo: { hasNextPage: false, endCursor: null } } } }),
-      { schema, fieldsWithout: ['dnd', 'ownerId'] },
+      { schema, fieldsWithout: ['dnd', 'assignedToId'] },
     );
     // pretend the workspace has the renamed fields
     const origFetch = client as unknown as { fetchImpl: typeof fetch };
@@ -169,7 +197,7 @@ describe('TwentyGraphqlClient', () => {
     expect(translateViewFilter({ name: 'jobTitle', type: 'TEXT' }, 'contains', 'VP')).toEqual({ jobTitle: { ilike: '%VP%' } });
     expect(translateViewFilter({ name: 'dnd', type: 'BOOLEAN' }, 'is', 'false')).toEqual({ dnd: { eq: false } });
     expect(translateViewFilter({ name: 'company', type: 'RELATION' }, 'is', '["c-1"]')).toEqual({ companyId: { in: ['c-1'] } });
-    expect(translateViewFilter({ name: 'eventSource', type: 'TEXT' }, 'isNotEmpty', '')).toEqual({ eventSource: { is: 'NOT_NULL' } });
+    expect(translateViewFilter({ name: 'leadSource', type: 'MULTI_SELECT' }, 'isNotEmpty', '')).toEqual({ leadSource: { is: 'NOT_NULL' } });
     expect(() => translateViewFilter({ name: 'x', type: 'TEXT' }, 'weird', '')).toThrow(/not supported/);
   });
 

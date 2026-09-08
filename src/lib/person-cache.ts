@@ -2,7 +2,15 @@ import type { Prisma } from '@prisma/client';
 import { prisma, type Tx } from './db';
 import type { TwentyClient } from './twenty/client';
 import { paginate } from './twenty/client';
+import { optionLabel } from './twenty/labels';
 import type { TwentyCompany, TwentyPerson } from './twenty/types';
+
+/** An ISO string from Twenty, or null. Invalid dates are dropped rather than stored as 1970. */
+function date(v: string | null | undefined): Date | null {
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
 
 export function personToCacheData(p: TwentyPerson): Prisma.PersonCacheUncheckedCreateInput {
   return {
@@ -16,12 +24,51 @@ export function personToCacheData(p: TwentyPerson): Prisma.PersonCacheUncheckedC
     city: p.city,
     companyId: p.companyId,
     companyName: p.companyName,
-    dnd: Boolean(p.dnd),
-    podOwner: p.podOwner,
     ownerMemberId: p.ownerMemberId,
+    podOwner: p.podOwner,
+
+    dnd: Boolean(p.dnd),
+    dndReason: p.dndReason,
     tags: p.tags ?? [],
-    eventSource: p.eventSource,
-    statusOfMeeting: p.statusOfMeeting,
+
+    additionalEmails: p.additionalEmails ?? [],
+    additionalPhone: p.additionalPhone,
+    xUrl: p.xUrl,
+
+    leadSource: p.leadSource ?? [],
+    leadSourceNotes: p.leadSourceNotes,
+    tier: p.tier,
+    contactType: p.contactType ?? [],
+    listCategory: p.listCategory,
+    previousCadence: p.previousCadence,
+    pipelineStage: p.pipelineStage,
+    productInterest: p.productInterest ?? [],
+    primaryProduct: p.primaryProduct,
+    campaigns: p.campaigns ?? [],
+    onCallingList: Boolean(p.onCallingList),
+    dealSignalStrength: p.dealSignalStrength,
+    emailMissing: Boolean(p.emailMissing),
+    phoneMissing: Boolean(p.phoneMissing),
+    rotatedTo: p.rotatedTo,
+    rotationChangedAt: date(p.rotationChangedAt),
+
+    nextAction: p.nextAction,
+    nextActionDueDate: p.nextActionDueDate,
+    nextStep: p.nextStep,
+    nextActionDueDatePoc: p.nextActionDueDatePoc,
+    lastNote: p.lastNote,
+
+    lastCallAt: date(p.lastCallAt),
+    lastEmailAt: date(p.lastEmailAt),
+
+    meetingAt: date(p.meetingAt),
+    meetingUrl: p.meetingUrl,
+    recordingUrl: p.recordingUrl,
+    bookingId: p.bookingId,
+
+    createdBySource: p.createdBySource,
+    createdByName: p.createdByName,
+
     raw: (p.raw ?? undefined) as Prisma.InputJsonValue | undefined,
     twentyUpdatedAt: p.updatedAt ? new Date(p.updatedAt) : null,
     deletedAt: p.deletedAt ? new Date(p.deletedAt) : null,
@@ -52,7 +99,9 @@ export async function ensurePod(podOwnerValue: string, label: string | null, tx:
     }
     return existing;
   }
-  let name = label ?? value;
+  // Twenty stores podOwner values upper-case (ALISA). Without a label from the field's
+  // metadata, a readable form of the value is a better pod name than the constant itself.
+  let name = label ?? optionLabel(value);
   if (await tx.pod.findUnique({ where: { name } })) name = `${name} (${value})`;
   const pod = await tx.pod.create({ data: { name, podOwnerValue: value, discoveredAt: label ? null : new Date() } });
   await tx.auditLog.create({ data: { entityType: 'pod', entityId: pod.id, action: label ? 'created_from_twenty_options' : 'discovered', actorType: 'SYSTEM', actorLabel: 'twenty-sync', details: { podOwnerValue: value, label } } });

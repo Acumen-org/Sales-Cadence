@@ -10,7 +10,7 @@ describe('MockTwentyClient fixtures', () => {
     const people = await collectAll((after) => client.listPeople({ after, limit: 15 }));
     expect(people).toHaveLength(40);
     const pods = new Set(people.map((p) => p.podOwner));
-    expect([...pods].sort()).toEqual(['Alisa', 'Andrew', 'Leigh']);
+    expect([...pods].sort()).toEqual(['ALISA', 'ANDREW', 'LEIGH']);
     expect(await client.listWorkspaceMembers()).toHaveLength(6);
     expect(people.filter((p) => p.dnd)).toHaveLength(3);
     expect(new Set(people.map((p) => p.id)).size).toBe(40);
@@ -40,7 +40,7 @@ describe('MockTwentyClient fixtures', () => {
     expect(msgs.items.map((m) => m.id)).toEqual(['msg-03']);
     const { view, people } = await client.getViewPeople('view-pod-alisa');
     expect(view.name).toMatch(/Alisa/);
-    expect(people.every((p) => p.podOwner === 'Alisa')).toBe(true);
+    expect(people.every((p) => p.podOwner === 'ALISA')).toBe(true);
     expect(people).toHaveLength(14);
   });
 

@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { Badge, DotTimeline, IdentityCell, type BadgeTone, type TimelinePoint } from '@/components/ui';
+import { Badge, DotTimeline, IdentityCell, TierBadge, type BadgeTone, type TimelinePoint } from '@/components/ui';
+import { optionLabel, optionLabels } from '@/lib/twenty/labels';
 import { IconPlus } from '@/components/icons';
 import { PersonRowActions } from './person-row-actions';
 
@@ -11,13 +12,19 @@ export type PeopleTableRow = {
   name: string;
   jobTitle: string | null;
   companyName: string | null;
-  podOwner: string | null;
-  eventSource: string | null;
-  stage: { label: string; tone: BadgeTone };
+  podName: string | null;
+  /** The Cadence pod this person's podOwner maps to, for the row's "add to sequence". */
+  podId: string | null;
+  /** What Twenty says the person is, and the tags that carry a consequence. */
+  standing: { label: string; tone: BadgeTone };
+  tier: string | null;
+  listCategory: string | null;
+  leadSource: string[];
+  warnings: { label: string; tone: BadgeTone }[];
+  /** Twenty's own plan for this person, which Cadence never overwrites. */
+  next: { action: string | null; due: string | null; step: string | null; overdue: boolean } | null;
   dnd: boolean;
   optedOut: boolean;
-  badEmail: boolean;
-  badPhone: boolean;
   enrollment: { status: string; label: string; tone: BadgeTone; campaignName: string | null; foName: string } | null;
   activeEnrollmentId: string | null;
   activeCanExit: boolean;
@@ -32,11 +39,10 @@ type Props = {
   canEnroll: boolean;
   sequences: { id: string; name: string }[];
   pods: { id: string; name: string; podOwnerValue: string; fos: { id: string; name: string }[] }[];
-  podIdByOwner: Record<string, string>;
 };
 
 /** People list with stages, an activity timeline, row actions and bulk "add to sequence". */
-export function PeopleTable({ rows, showActions, canEnroll, sequences, pods, podIdByOwner }: Props) {
+export function PeopleTable({ rows, showActions, canEnroll, sequences, pods }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const selectable = rows.filter((r) => !r.activeEnrollmentId && !r.dnd && !r.optedOut);
   const allSelected = selectable.length > 0 && selectable.every((r) => selected.has(r.id));
@@ -73,11 +79,11 @@ export function PeopleTable({ rows, showActions, canEnroll, sequences, pods, pod
                 </th>
               ) : null}
               <th>Name</th>
-              <th>Stage</th>
+              <th>In Twenty</th>
+              <th>Next in Twenty</th>
               <th>Sequence</th>
               <th>Activity</th>
-              <th>Pod</th>
-              <th>FO</th>
+              <th>Owner</th>
               <th>Last touch</th>
               {showActions ? <th className="sticky right-0 w-24 bg-white"></th> : null}
             </tr>
@@ -99,13 +105,34 @@ export function PeopleTable({ rows, showActions, canEnroll, sequences, pods, pod
                 <td>
                   <IdentityCell name={p.name} href={`/people/${p.id}`} shape="circle" sub={[p.jobTitle, p.companyName].filter(Boolean).join(' · ') || null} />
                 </td>
-                <td>
-                  <Badge tone={p.stage.tone} dot>
-                    {p.stage.label}
-                  </Badge>
-                  {p.badEmail || p.badPhone ? (
-                    <div className="mt-1 text-[11px] text-amber-700">{[p.badEmail ? 'bad email' : null, p.badPhone ? 'bad phone' : null].filter(Boolean).join(', ')}</div>
-                  ) : null}
+                {/* Everything Twenty says about the person in one cell: standing, tier, how
+                    often they should be touched, and anything wrong with their details. */}
+                <td title={p.leadSource.length ? `Lead source: ${optionLabels(p.leadSource)}` : undefined}>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <Badge tone={p.standing.tone} dot>
+                      {p.standing.label}
+                    </Badge>
+                    <TierBadge tier={p.tier} />
+                  </div>
+                  <div className="mt-0.5 whitespace-nowrap text-[11px] text-ink-400">
+                    {p.listCategory ? optionLabel(p.listCategory) : null}
+                    {p.warnings.length ? <span className="text-amber-700">{p.listCategory ? ' · ' : ''}{p.warnings.map((w) => w.label).join(' · ')}</span> : null}
+                  </div>
+                </td>
+                <td className="text-[12px]">
+                  {p.next?.action || p.next?.due ? (
+                    <>
+                      <div className="max-w-[11rem] truncate text-ink-700">{p.next.action ?? '-'}</div>
+                      {p.next.due ? (
+                        <div className={p.next.overdue ? 'font-medium text-red-600' : 'text-ink-400'}>
+                          {p.next.due}
+                          {p.next.step ? ` · ${optionLabel(p.next.step)}` : ''}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <span className="text-ink-300">-</span>
+                  )}
                 </td>
                 <td>
                   {p.enrollment ? (
@@ -118,8 +145,10 @@ export function PeopleTable({ rows, showActions, canEnroll, sequences, pods, pod
                   )}
                 </td>
                 <td>{p.activity.length ? <DotTimeline points={p.activity} width={130} /> : <span className="text-[12px] text-ink-300">no touches</span>}</td>
-                <td className="whitespace-nowrap text-[12.5px]">{p.podOwner ?? <span className="text-ink-300">-</span>}</td>
-                <td className="whitespace-nowrap text-[12.5px]">{p.enrollment?.foName ?? <span className="text-ink-300">-</span>}</td>
+                <td className="whitespace-nowrap text-[12.5px]">
+                  {p.podName ?? <span className="text-ink-300">-</span>}
+                  {p.enrollment?.foName ? <div className="text-[11px] text-ink-400">{p.enrollment.foName}</div> : null}
+                </td>
                 <td className="text-[12px]">
                   {p.lastTouch ? (
                     <>
@@ -140,7 +169,7 @@ export function PeopleTable({ rows, showActions, canEnroll, sequences, pods, pod
                       canExit={p.activeCanExit}
                       sequences={sequences}
                       pods={pods}
-                      defaultPodId={p.podOwner ? podIdByOwner[p.podOwner] ?? null : null}
+                      defaultPodId={p.podId}
                     />
                   </td>
                 ) : null}

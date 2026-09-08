@@ -13,7 +13,8 @@ import type { TwentyNote, TwentyOpportunity } from '@/lib/twenty/types';
 import { twentyPersonUrl } from '@/lib/twenty/urls';
 import { ActionIcon, IconExternal } from '@/components/icons';
 import { PersonControls } from '@/components/people/person-controls';
-import { Avatar, Badge, Card, ENROLLMENT_TONE, enrollmentStatusLabel, KeyValue, personStage, RecordHeader, Surface, Tabs } from '@/components/ui';
+import { optionLabel, optionLabels } from '@/lib/twenty/labels';
+import { Avatar, Badge, Card, contactWarnings, crmStanding, ENROLLMENT_TONE, enrollmentStatusLabel, KeyValue, RecordHeader, Surface, Tabs, TierBadge } from '@/components/ui';
 
 type TimelineItem = { at: Date; kind: 'touch' | 'note' | 'task' | 'state'; icon: string; title: string; detail?: string | null; tone?: 'in' | 'out' | 'neutral' };
 
@@ -63,9 +64,11 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
     twentyWarning = `Twenty unavailable: ${err instanceof Error ? err.message : String(err)}`;
   }
 
-  const latest = enrollments[0] ?? null;
   const active = enrollments.find((e) => e.status === 'ACTIVE' || e.status === 'PAUSED') ?? null;
-  const stage = personStage(person, latest);
+  const standing = crmStanding(person);
+  const warnings = contactWarnings(person);
+  const podName = person.podOwner ? pods.find((x) => x.podOwnerValue === person.podOwner)?.name ?? optionLabel(person.podOwner) : null;
+  const ownerName = person.ownerMemberId ? (await prisma.user.findFirst({ where: { twentyMemberId: person.ownerMemberId }, select: { name: true } }))?.name ?? null : null;
   const twentyUrl = twentyPersonUrl(conn.baseUrl, id);
   const visible = visiblePodIds(user);
   const enrolPods = pods.filter((p) => visible === null || visible.includes(p.id)).map((p) => ({ id: p.id, name: p.name, podOwnerValue: p.podOwnerValue, fos: p.users.filter((u) => u.user.active).map((u) => ({ id: u.user.id, name: u.user.name })) }));
@@ -103,18 +106,21 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
             <>
               {person.jobTitle ?? 'Unknown title'}
               {person.companyName ? ` · ${person.companyName}` : ''}
-              {person.podOwner ? ` · Pod ${person.podOwner}` : ''}
+              {podName ? ` · ${podName}` : ''}
+              {ownerName ? ` · owned by ${ownerName}` : ''}
             </>
           }
           badges={
             <>
-              <Badge tone={stage.tone} dot>
-                {stage.label}
+              <Badge tone={standing.tone} dot>
+                {standing.label}
               </Badge>
-              {person.dnd ? <Badge tone="red">DND in Twenty</Badge> : null}
-              {person.optedOut ? <Badge tone="red">Opted out</Badge> : null}
-              {person.badEmail ? <Badge tone="amber">bad email</Badge> : null}
-              {person.badPhone ? <Badge tone="amber">bad phone</Badge> : null}
+              <TierBadge tier={person.tier} />
+              {warnings.map((w) => (
+                <Badge key={w.label} tone={w.tone}>
+                  {w.label}
+                </Badge>
+              ))}
             </>
           }
           actions={
@@ -227,26 +233,128 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
             ) : null}
 
             {tab === 'details' ? (
-              <Card title="Details from Twenty">
-                <div className="p-4">
-                  <KeyValue
-                    items={[
-                      { k: 'Email', v: person.email },
-                      { k: 'Phone', v: person.phone },
-                      { k: 'LinkedIn', v: person.linkedinUrl },
-                      { k: 'Title', v: person.jobTitle },
-                      { k: 'Company', v: person.companyName },
-                      { k: 'City', v: person.city },
-                      { k: 'Where we met', v: person.eventSource },
-                      { k: 'Pod owner', v: person.podOwner },
-                      { k: 'Tags', v: person.tags.join(', ') || null },
-                      { k: 'Meeting status', v: person.statusOfMeeting },
-                      { k: 'Twenty id', v: <span className="font-mono text-xs">{person.id}</span> },
-                      { k: 'Last synced', v: formatInstant(person.syncedAt, user.timezone) },
-                    ]}
-                  />
-                </div>
-              </Card>
+              // Grouped the way the record is grouped in Twenty, so the two read the same.
+              <div className="space-y-3">
+                <Card title="Contact details">
+                  <div className="p-4">
+                    {/* Consent only appears when there is a restriction: its absence is normal. */}
+                    {person.dnd ? (
+                      <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-[12.5px] font-medium text-red-700">
+                        {optionLabel(person.dndReason ?? 'DO_NOT_CONTACT')} - set in Twenty.
+                      </p>
+                    ) : null}
+                    <KeyValue
+                      items={[
+                        { k: 'Email', v: person.email },
+                        { k: 'Other emails', v: person.additionalEmails.join(', ') || null },
+                        { k: 'Phone', v: person.phone },
+                        { k: 'Other phone', v: person.additionalPhone },
+                        { k: 'LinkedIn', v: person.linkedinUrl },
+                        { k: 'X', v: person.xUrl },
+                        { k: 'Title', v: person.jobTitle },
+                        { k: 'Company', v: person.companyName },
+                        { k: 'City', v: person.city },
+                      ]}
+                    />
+                  </div>
+                </Card>
+
+                <Card title="Ownership">
+                  <div className="p-4">
+                    <KeyValue
+                      items={[
+                        { k: 'Assigned to', v: ownerName },
+                        { k: 'Pod', v: podName },
+                        { k: 'Rotated', v: person.rotatedTo ? `${optionLabel(person.rotatedTo)}${person.rotationChangedAt ? ` on ${formatInstant(person.rotationChangedAt, user.timezone)}` : ''}` : null },
+                        { k: 'Added by', v: person.createdByName ? `${person.createdByName}${person.createdBySource ? ` (${optionLabel(person.createdBySource)})` : ''}` : null },
+                      ]}
+                    />
+                  </div>
+                </Card>
+
+                <Card title="Classification">
+                  <div className="p-4">
+                    <KeyValue
+                      items={[
+                        { k: 'Tier', v: person.tier ? optionLabel(person.tier) : null },
+                        { k: 'Contact type', v: optionLabels(person.contactType, ' / ') || null },
+                        { k: 'Pipeline stage', v: person.pipelineStage ? optionLabel(person.pipelineStage) : null },
+                        {
+                          k: 'Cadence',
+                          v: person.listCategory
+                            ? `${optionLabel(person.listCategory)}${person.previousCadence ? ` (was ${optionLabel(person.previousCadence)})` : ''}`
+                            : null,
+                        },
+                        { k: 'Lead source', v: optionLabels(person.leadSource) || null },
+                        { k: 'Lead source notes', v: person.leadSourceNotes },
+                        { k: 'Product interest', v: optionLabels(person.productInterest) || null },
+                        { k: 'Primary product', v: person.primaryProduct ? optionLabel(person.primaryProduct) : null },
+                        { k: 'Campaigns in Twenty', v: optionLabels(person.campaigns) || null },
+                        { k: 'Deal signal', v: person.dealSignalStrength ? optionLabel(person.dealSignalStrength) : null },
+                        { k: 'Calling list', v: person.onCallingList ? 'Yes' : null },
+                        {
+                          k: 'Tags',
+                          v: person.tags.length ? (
+                            <span className="flex flex-wrap gap-1">
+                              {person.tags.map((t) => (
+                                <span key={t} className="rounded border border-line bg-canvas px-1.5 py-0.5 text-[11.5px] text-ink-700" title={t}>
+                                  {optionLabel(t)}
+                                </span>
+                              ))}
+                            </span>
+                          ) : null,
+                        },
+                      ]}
+                    />
+                  </div>
+                </Card>
+
+                <Card title="Next action and meetings, as Twenty holds them">
+                  <div className="p-4">
+                    <KeyValue
+                      items={[
+                        { k: 'Next action', v: person.nextAction },
+                        { k: 'Due', v: person.nextActionDueDate ? formatLocalDate(person.nextActionDueDate, 'long') : null },
+                        { k: 'By', v: person.nextStep ? optionLabel(person.nextStep) : null },
+                        { k: 'POC due', v: person.nextActionDueDatePoc ? formatLocalDate(person.nextActionDueDatePoc, 'long') : null },
+                        { k: 'Last note', v: person.lastNote },
+                        { k: 'Last call', v: person.lastCallAt ? formatInstant(person.lastCallAt, user.timezone) : null },
+                        { k: 'Last email', v: person.lastEmailAt ? formatInstant(person.lastEmailAt, user.timezone) : null },
+                        { k: 'Meeting', v: person.meetingAt ? formatInstant(person.meetingAt, user.timezone) : null },
+                        {
+                          k: 'Meeting link',
+                          v: person.meetingUrl ? (
+                            <a href={person.meetingUrl} target="_blank" rel="noreferrer" className="text-brand-700 hover:underline">
+                              Join
+                            </a>
+                          ) : null,
+                        },
+                        {
+                          k: 'Recording',
+                          v: person.recordingUrl ? (
+                            <Link href={`/meetings/new?personId=${person.id}&url=${encodeURIComponent(person.recordingUrl)}`} className="text-brand-700 hover:underline">
+                              Add to Cadence
+                            </Link>
+                          ) : null,
+                        },
+                        { k: 'Booking', v: person.bookingId },
+                      ]}
+                    />
+                  </div>
+                </Card>
+
+                <Card title="Record">
+                  <div className="p-4">
+                    <KeyValue
+                      items={[
+                        { k: 'Twenty id', v: <span className="font-mono text-xs">{person.id}</span> },
+                        { k: 'Changed in Twenty', v: formatInstant(person.twentyUpdatedAt, user.timezone) },
+                        { k: 'Last synced', v: formatInstant(person.syncedAt, user.timezone) },
+                      ]}
+                    />
+                  </div>
+                </Card>
+              </div>
             ) : null}
           </div>
         </div>
@@ -286,7 +394,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
             ) : (
               <ul className="divide-y divide-line">
                 {colleagues.map((c) => {
-                  const st = personStage(c, c.enrollments[0] ?? null);
+                  const st = crmStanding(c);
                   return (
                     <li key={c.id} className="flex items-center justify-between gap-2 px-4 py-2 text-[13px]">
                       <Link href={`/people/${c.id}`} className="flex min-w-0 items-center gap-2 hover:text-brand-700">

@@ -181,14 +181,15 @@ async function handlePerson(person: TwentyPerson, deleted: boolean, ctx: EngineC
   const { exited } = await applyPersonFlags(person, ctx);
   if (exited.length) return { result: 'dnd_exited', details: { exited } };
 
-  if (settings.rules.meetingOnStatusOfMeeting && person.statusOfMeeting) {
-    const values = settings.rules.meetingStatusValues.map((v) => v.toLowerCase());
-    if (values.includes(person.statusOfMeeting.toLowerCase())) {
-      const e = await prisma.enrollment.findFirst({ where: { personId: person.id, status: { in: [...OCCUPYING_STATUSES, 'REPLIED'] } } });
-      if (e) {
-        const r = await markMeeting(e.id, { at: ctx.now ?? new Date(), evidenceId: `person:${person.id}:statusOfMeeting`, actor: ctx.actor, skipSync: ctx.skipSync });
-        if (r.changed) return { result: 'meeting_from_status', details: { enrollmentId: e.id } };
-      }
+  // A meeting time on the person is the workspace's own record that a meeting exists: the
+  // scheduler writes it, so it is evidence in its own right and does not wait for an
+  // opportunity to be created. The evidence id carries the timestamp, so a rebooking counts
+  // again while the same booking never counts twice.
+  if (settings.rules.meetingOnMeetingTime && person.meetingAt) {
+    const e = await prisma.enrollment.findFirst({ where: { personId: person.id, status: { in: [...OCCUPYING_STATUSES, 'REPLIED'] } } });
+    if (e) {
+      const r = await markMeeting(e.id, { at: ctx.now ?? new Date(), evidenceId: `person:${person.id}:meetingTime:${person.meetingAt}`, actor: ctx.actor, skipSync: ctx.skipSync });
+      if (r.changed) return { result: 'meeting_from_meeting_time', details: { enrollmentId: e.id, meetingAt: person.meetingAt } };
     }
   }
   return { result: 'person_cached' };

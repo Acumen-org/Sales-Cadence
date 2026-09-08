@@ -90,7 +90,7 @@ describe('query budget per page', () => {
     for (const [label, n] of Object.entries(before)) expect(n, `${label} issued ${n} queries`).toBeLessThan(30);
 
     // Now make the data big: everyone in a sequence, plenty of touches, meetings and audit rows.
-    const people = await prisma.personCache.findMany({ where: { podOwner: 'Alisa' }, select: { id: true } });
+    const people = await prisma.personCache.findMany({ where: { podOwner: 'ALISA' }, select: { id: true } });
     const toEnrol = people.map((p) => p.id).filter((id) => !['person-01', 'person-02', 'person-03'].includes(id));
     await enrollPeople({ personIds: toEnrol, sequenceId: b.sequence.id, podId: b.pods.Alisa.id, startDate: '2026-09-07', assignment: { mode: 'OWNER' }, actor: SYSTEM_ACTOR }, { now: NOW });
     await prisma.touch.createMany({

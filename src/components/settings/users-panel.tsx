@@ -237,8 +237,8 @@ export function UsersPanel({ users, pods, members }: { users: UserRow[]; pods: P
             <Field label="Pod name">
               <input name="name" required className="w-full" placeholder="Pod Alisa" />
             </Field>
-            <Field label="Twenty podOwner value" hint="Exactly as the select option is stored in Twenty (e.g. Alisa).">
-              <input name="podOwnerValue" required className="w-full" placeholder="Alisa" />
+            <Field label="Twenty podOwner value" hint="Exactly as the select option is stored in Twenty, which is usually upper-case (e.g. ALISA).">
+              <input name="podOwnerValue" required className="w-full" placeholder="ALISA" />
             </Field>
             <button type="submit" className="btn-secondary">
               Add pod

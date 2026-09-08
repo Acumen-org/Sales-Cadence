@@ -45,13 +45,13 @@ export const DEFAULT_SEQUENCE_STEPS: SequenceStep[] = [
         label: 'Email 1',
         subject: '{{company}} <> a quick idea',
         template:
-          'Hi {{firstName}},\n\nWe met through {{eventSource}}. As {{jobTitle}} at {{company}} you are probably close to this problem, so I will keep it short.\n\nWe help teams like yours turn outreach into booked conversations without adding headcount. Would it be worth 15 minutes next week to see if it applies to {{company}}?\n\nBest,\n{{foFirstName}}',
+          'Hi {{firstName}},\n\nAs {{jobTitle}} at {{company}} you are probably close to this, so I will keep it short.\n\nWe help teams like yours turn outreach into booked conversations without adding headcount. Would it be worth 15 minutes next week to see if it applies to {{company}}?\n\nBest,\n{{foFirstName}}',
       },
       {
         id: 'act-li-connect-1',
         type: 'LINKEDIN_CONNECT',
         label: 'LinkedIn connect',
-        template: 'Hi {{firstName}}, we crossed paths via {{eventSource}}. Would be good to stay connected. {{foFirstName}}',
+        template: 'Hi {{firstName}}, our paths crossed via {{leadSource}}. Would be good to stay connected. {{foFirstName}}',
       },
     ],
   },
@@ -65,7 +65,7 @@ export const DEFAULT_SEQUENCE_STEPS: SequenceStep[] = [
         type: 'CALL',
         label: 'Call 1',
         template:
-          'Hi {{firstName}}, it is {{foFirstName}}. I sent you a note a couple of days ago after {{eventSource}}. Do you have two minutes?\n\n- Confirm role: {{jobTitle}} at {{company}}\n- One question about how outreach is run today\n- Ask for a 15 minute slot next week',
+          'Hi {{firstName}}, it is {{foFirstName}}. I sent you a note a couple of days ago. Do you have two minutes?\n\n- Confirm role: {{jobTitle}} at {{company}}\n- One question about how outreach is run today\n- Ask for a 15 minute slot next week',
       },
       { id: 'act-followup-1', ...followUpEmail, alternative: followUpLinkedIn },
     ],

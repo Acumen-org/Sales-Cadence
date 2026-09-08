@@ -33,7 +33,7 @@ Every assumption made while building Cadence, grouped by area. Each entry says w
 
 ## Twenty facts and mapping
 
-- **All names in `src/lib/twenty/twenty-schema.ts`.** Defaults assume a stock workspace plus custom person fields `dnd`, `podOwner`, `owner` (relation to workspaceMember, FK `ownerId`), `tags`, `eventSource`, `statusOfMeeting`. `owner`/`ownerId` and `statusOfMeeting` are the most likely to differ; `pnpm verify:schema` reports mismatches.
+- **All names in `src/lib/twenty/twenty-schema.ts`.** The defaults are the real Acumen workspace, taken from a full export of Alisa's pod (see "The real Twenty mapping" below). `pnpm verify:schema` reports mismatches; every custom field is optional and degrades to null.
 - **Note bodies use `bodyV2` `{ markdown }`.** Older Twenty versions used `body`; change `note.body` / `task.body` in the mapping if introspection shows that.
 - **Pods = `podOwner` select values.** A pod is created per value (Settings > Users and pods). Which FOs work a pod is Cadence configuration, not Twenty data.
 - **Mock fixtures** (`src/lib/twenty/fixtures.ts`): 3 pods, 6 workspace members, 14 companies, 40 people (3 with `dnd = true`), notes in the exact formats `[Email] Outbound email: ...`, `[CALL] Outbound Call by tw_...`, `Call Notes [31-Aug-2026]`, four messages (two outbound, two inbound), one opportunity, three saved views.
@@ -93,7 +93,7 @@ Every assumption made while building Cadence, grouped by area. Each entry says w
 - **Stale evidence** older than `enrollment.createdAt - evidenceGraceDays` (default 1 day) is a touch, not a completion, so a 30-day reconcile cannot complete steps with pre-enrollment emails.
 - **Cadence's own notes** (title starts with `matching.cadencePrefix`, default `[Cadence]`) are ignored on the way back in.
 - **Mirrored Twenty tasks**: a Twenty `task.updated` whose id is a mirrored task and whose status is the configured "done" value completes the Cadence task with source `OBSERVED_TWENTY_TASK`; deleting a mirrored task in Twenty just unlinks it. Tasks Cadence did not create are ignored.
-- **Meetings** come from `opportunity.created` (point of contact enrolled, including already-replied enrollments) and from `person.statusOfMeeting` matching `meetingStatusValues` (case-insensitive). Both are settings.
+- **Meetings** come from `opportunity.created` (point of contact enrolled, including already-replied enrollments) and from `person.meetingTime` being set, which is what the scheduler writes. Both are settings. The evidence id carries the meeting timestamp, so a rebooking counts again while the same booking never counts twice.
 - **Company reply rule** (`companyReplyPausesColleagues`, default off): a reply pauses other ACTIVE enrollments at the same company with `pauseReason colleague_replied:<personId>`; a Senior FO resumes them by hand.
 - **Webhook security**: HMAC-SHA256 signature over `timestamp:body` (`X-Twenty-Webhook-Signature` / `X-Twenty-Webhook-Timestamp`, plain body HMAC accepted as fallback) when `TWENTY_WEBHOOK_SECRET` is set; otherwise a shared `?token=` when `CADENCE_WEBHOOK_TOKEN` is set; otherwise open (private network only). Payload parsing accepts `eventName`/`eventType`, `record`/`data`, and `objectMetadata.nameSingular`.
 - **Reconcile** refreshes the person cache first (so dnd flips and new people are known), then replays notes, messages, opportunities and tasks updated in the window through the same pipeline with `source = RECONCILE`. It runs nightly in the worker at `RECONCILE_HOUR`, on demand from Settings > Twenty, and from `pnpm reconcile [days]`.
@@ -113,14 +113,14 @@ Every assumption made while building Cadence, grouped by area. Each entry says w
 ## Real Twenty client, verify:schema, dry run (phase 6)
 
 - **GraphQL only, one file.** `src/lib/twenty/graphql-client.ts` holds every query and mutation. Twenty's REST API is not used: GraphQL lets the selection set follow the field mapping and one code path serves list, get-by-id and relation lifts.
-- **Selections are trimmed to fields that exist.** On first use the client introspects each type (`__type { fields { name } }`) and drops optional custom fields that the workspace does not have, so a missing `statusOfMeeting` or `cadenceTaskId` becomes `null` instead of breaking every query. If introspection is disabled the full mapping is used and `verify:schema` is the only safety net. Results are cached per client instance; the client is rebuilt when the mapping or connection changes.
+- **Selections are trimmed to fields that exist.** On first use the client introspects each type (`__type { fields { name } }`) and drops optional custom fields that the workspace does not have, so a missing `salesCallRecordingLink` or `cadenceTaskId` becomes `null` instead of breaking every query. If introspection is disabled the full mapping is used and `verify:schema` is the only safety net. Results are cached per client instance; the client is rebuilt when the mapping or connection changes.
 - **Relation lifts instead of relation filters.** Notes and messages for one person are fetched through `noteTargets(filter: { personId })` and `messageParticipants(filter: { personId })` and lifted to their parent record (messages deduplicated), because filtering a parent by a one-to-many child is not reliable across Twenty versions. Tasks use `taskTargets: { some: ... }`.
 - **Reconcile windows** use `updatedAt >= since` for people, notes, opportunities and tasks, and `receivedAt >= since OR createdAt >= since` for messages, because mailbox sync can import old messages late.
 - **Deleted people** are only returned when asked (`includeDeleted`), via an `or` on `deletedAt is NULL / NOT_NULL`, matching Twenty's soft-delete default.
 - **Mutations**: `createNote` + `createNoteTarget`, `createTask` + `createTaskTarget`, `updateTask`, `deleteTask`. Rich text is sent as `{ markdown }` when the mapped body field ends in `V2`, else as a plain string (legacy `body`). Ids are `UUID` typed variables.
 - **Saved Twenty views** are read from the core `views` query with their `viewFilters`, field ids are resolved through the metadata API, and simple operands (is, isNot, contains, doesNotContain, isEmpty, isNotEmpty, greater/less than, before/after) are translated to GraphQL filters. Anything else fails with a clear message suggesting to paste ids instead; the view feature is best-effort and depends on the Twenty version.
 - **Introspection prefers the metadata API** (`/metadata` `objects { fields { name type options } }`) because it exposes select option values (needed for `podOwner` and `task.status`), with GraphQL `__type` introspection as the fallback.
-- **`pnpm verify:schema`** compares every mapped object and field with the live workspace, distinguishes required from optional fields (`dnd`, `podOwner`, `owner`, `tags`, `eventSource`, `statusOfMeeting`, `cadenceTaskId`, `city`, `timeZone`, message `text` and `messageThreadId` are optional), prints `podOwner` options against configured pods and `task.status` options against the mapping, runs a one-person smoke query, and exits 1 only when something required is missing.
+- **`pnpm verify:schema`** compares every mapped object and field with the live workspace, distinguishes required from optional fields (every custom person field, `cadenceTaskId`, `city`, `timeZone`, message `text` and `messageThreadId` are optional), prints `podOwner` options against configured pods, every mapped select's options against the values the mapping expects, and `task.status` options against the mapping, runs a one-person smoke query, and exits 1 only when something required is missing.
 - **Transport**: `fetch` with a 20 s timeout, one retry on network errors and 5xx, readable `TwentyApiError`s carrying HTTP status and GraphQL errors. The `fetch` implementation is injectable so the client is unit-tested against a fake Twenty without a server.
 - **Dry run** is implemented once, as a wrapper around any client (`DryRunTwentyClient`): reads pass through, writes are logged to the console and to `TwentyWrite` with `dryRun = true`, fake ids (`dry-note-...`, `dry-task-...`) flow back so the engine behaves exactly as in production.
 - **Ping** lists workspace members, which needs nothing but a valid API key and confirms both the URL and the key.
@@ -204,7 +204,7 @@ Reworked from an Outreach list-view screenshot supplied by the team, as a design
 - **The greeting uses the signed-in user's first name**, and the date-plus-counts line is gone: the counts are in the tiles below it, and repeating them in prose was noise.
 - **Weeks run Sunday to Saturday in the user's own timezone**, everywhere. `weekRange` is the single implementation, so the two week boxes and the team table cannot disagree.
 - **"Replies this week" means inbound email that Twenty synced** for people the signed-in user is responsible for - which is what "someone assigned to a BD replied" looks like once it reaches the CRM. It is not the same as the team table's Replies column, which counts enrollments the FO finished as replied (an answered call counts there, and it is their number to hit).
-- **"Meetings booked this week" is decided by attendee domains.** A meeting counts when somebody outside our own domains attended; the domain list (`acumen-strategy.com`, `prairie-hill.com`, `glynac.ai`, `acubooth.com`) is an admin setting, and it is re-applied on read, so editing it is retroactive in both directions. The stored per-attendee flag is only a cache, used when an attendee was recorded by name with no address. Sequence-detected meetings (an opportunity or `statusOfMeeting` in Twenty) are included alongside recorded ones.
+- **"Meetings booked this week" is decided by attendee domains.** A meeting counts when somebody outside our own domains attended; the domain list (`acumen-strategy.com`, `prairie-hill.com`, `glynac.ai`, `acubooth.com`) is an admin setting, and it is re-applied on read, so editing it is retroactive in both directions. The stored per-attendee flag is only a cache, used when an attendee was recorded by name with no address. Sequence-detected meetings (an opportunity or `meetingTime` in Twenty) are included alongside recorded ones.
 - **Each week box shows only the latest row**, with the count on an arrow into the full list, because the point of the box is "is there something waiting", not a second inbox.
 - **The utility icon cluster now appears only on Tasks.** Search, notifications and the channel shortcuts exist for working through the day; on every other section they were decoration. The help button stays everywhere (Ctrl+K still opens search from any page). Both primary buttons were removed from the chrome: the section's own action lives inside its view header, where the Outreach reference puts it.
 
@@ -261,3 +261,128 @@ Every item here was a real defect caught by a new test or by reading the capture
 - The ingest suite began failing in the evening and passing in the morning. `Enrollment.createdAt` took the database's clock while the engine took the simulated `now`, and the evidence window is measured from that timestamp: with a fixture note dated the 7th and a real clock late on the 8th, the same note was a completion before about 10:00 and a plain touch after it. Enrollments now stamp the engine's clock, which is the real clock in production, and a test asserts it.
 - Two Home assertions were passing for the wrong reason: `getByText('Done this week')` matched the new team-board column header, so it would have kept passing even if the old tile had come back. The check now enumerates the tiles exactly.
 - The help popover could not be closed with Escape, unlike every other overlay, which is also what stopped a test from reaching the sign-out button.
+
+## The real Twenty mapping (round 7)
+
+Until this round the person mapping was a guess, written before anyone had seen the workspace.
+A full export of Alisa's pod - 934 people, 59 columns - settled it. Three of the guesses were
+wrong in ways that would have failed silently in production, and about thirty real fields were
+simply absent.
+
+### The three that were wrong
+
+- **The owner of a relationship is `assignedTo` / `assignedToId`, not `owner` / `ownerId`.**
+  Twenty has no standard owner on Person; this workspace calls it "Assigned To", and 710 of the
+  934 records have one. Reading a field that does not exist returns null, so "My relationships"
+  would have been empty for everybody and `assignment: OWNER` would have fallen through to the
+  pod's default FO on every enrollment - with no error anywhere.
+- **`dnd` is a select, not a boolean.** Its one value is `DO_NOT_DISTURB`, set on three people.
+  `raw.dnd === true` is never true for a select, so do-not-contact would never have been
+  honoured: those three would have been enrolled and called. The normaliser now treats any set
+  value as consent withdrawn, still accepts a boolean for a workspace that has one, and keeps
+  the value itself so the record can say *which* restriction applies.
+- **"Where we met" is `leadSource`, a multi-select**, not an `eventSource` text field:
+  `FPA_WISCONSIN_JULY_2026`, `TRUST_ALTA_LUNCHEON_JUNE_2026`, `LEADGEN`, `NIL`, 27 values in all,
+  and a person can carry two. The template variable is now `{{leadSource}}` and it renders the
+  humanised label, because `{{eventSource}}` would have put `FPA_WISCONSIN_JULY_2026` in front of
+  a prospect. The opening email no longer claims "we met through ..." at all: for the 250 people
+  whose source is `LEADGEN` that was simply untrue, and the FO can add the real context in the
+  editable message.
+
+### What the record actually holds, and where each part now goes
+
+The workspace tracks far more than contact details, and each group answers a different question,
+so each got its own place rather than being flattened into one list:
+
+- **Ownership** - `assignedTo`, `podOwner` (upper-case values: `ALISA`, `ANDREW`, ...),
+  `rotationTracking` / `rotationChangedAt` - drives "my relationships", pods, and a flag on the
+  person when they have been rotated out to another pod.
+- **What the CRM says to do next** - `nextAction` ("FU-2", "Follow up 2"), `nextActionDueDate`,
+  `nextStep` (`EMAIL` / `LINKEDIN_MESSAGE`), `nextActionDueDatePoc`, `lastNote` - is now the
+  **first** section of the person panel, above Cadence's own step. 535 of the 934 people have a
+  next action written by hand in Twenty. Cadence never writes these: the pod plans in the CRM,
+  and an FO about to contradict that plan should see it before they type. The due date turns red
+  once it is past.
+- **Classification** - `tier` (`LEVEL_1`..`LEVEL_4`), `contactType`, `listCategory`
+  (`COLD_BD`, `BI_WEEKLY`, `MONTHLY`, `QUARTERLY`), `previousCadence`, `pipelineStageField`,
+  `productInterest`, `primaryProduct`, `onGoingCampaigns`, `alisaCallingList`,
+  `leadSource` + `leadSourceNotes` - is on the panel, on the person's Details tab, on the
+  account's people table, and as filters on the People list.
+- **Last touch** - `latestCallActivity`, `lastEmailActivity`, maintained by Twenty's own
+  automations for 246 and 226 people respectively - joins the person's history, but only where no
+  Cadence touch or synced email already covers that moment, so nothing is shown twice.
+- **Meetings** - `meetingTime`, `meetingLink`, `salesCallRecordingLink`, `bookingId` - do two
+  things. A meeting time set on the person is now what marks a booked meeting in the engine, and
+  the Meetings section grew a **"Booked in Twenty"** list: the people whose record carries a
+  meeting, each with its join link and a one-click "Add with transcript" that pre-fills the form
+  from the person. Cadence does not create a Meeting row by itself, because a meeting here
+  carries attendees and a transcript that only a human can supply.
+- **Contact details** also gained `additionalNumber`, `additionalEmails` and `xLink`, and
+  `createdBy` so the record can say who added the person and how (`MANUAL`, `EMAIL`, `API`,
+  `CALENDAR`).
+
+### The invented stage is gone
+
+The People list used to show a stage Cadence guessed from its own state - Cold, Approaching,
+Unresponsive - next to the CRM record it was guessing from. The panel lost it last round; the
+list has lost it now. What replaced it is `crmStanding`: the CRM's own pipeline stage if it has
+one, otherwise the contact type, otherwise the list category, with do-not-contact first. Beside
+it sits the tier, the expected touch frequency, and anything wrong with the contact details.
+What Cadence has *done* with the person - which sequence, which step, replied or not - is a
+separate column, because it answers a separate question. The sequence filters stayed, relabelled
+as sequence state rather than "stage", and the list gained real filters on tier, contact type and
+cadence.
+
+### Values are values; labels are labels
+
+Twenty stores options as constants and keeps the human label in field metadata that Cadence only
+sees when it introspects. Printing `AY_PHH_POST_WEBINAR` on screen makes the whole app read like
+a database dump, so `twenty/labels.ts` turns a value into something readable: acronyms the team
+uses stay upper-case (PHH, FPA, WM, CE, NIL), a run-together trailing year is split off
+(`FUTUREPROOF_MAR2026` -> "Futureproof Mar 2026"), and the handful the general rule mangles are
+listed outright (`CLIENT_S_CLIENT` -> "Client's client", `LEVEL_2` -> "Tier 2", `COLD_BD` ->
+"Cold BD"). Free text passes through untouched. Two tests hold the line: every option the mapping
+knows produces a non-empty label, and no text node matching `/^[A-Z][A-Z0-9]+_[A-Z0-9_]+$/`
+appears on the People list, the person panel or the person record.
+
+Pod names follow the same rule. A pod discovered from a value Twenty has no label for used to be
+called `KARSON`; it is now called "Karson", and the label still wins when the metadata has one.
+
+### Tags carry meaning, so they are read rather than duplicated
+
+The team encodes consent and data quality in tags: `DNC`, `MISSING_EMAIL`, `MISSING_PHONE`,
+`ENRICHMENT_REQUIRED`. Cadence already had its own `badEmail` / `badPhone` flags, set by a bounce
+or a wrong-number call. Rather than asking anyone to keep two sets in step, the person's tags are
+read for the same meaning and the two are merged on display, with Cadence's flags still local and
+never written back. Consent is shown once - the standing badge already leads with "Do not
+contact", so repeating it in the warnings line was noise.
+
+### What this cost
+
+- `PersonCache` gained 30 columns and four indexes (`tier`, `listCategory`, `nextActionDueDate`,
+  `meetingAt`), and the migration stamps every cached person as stale so the next sync refills
+  them. `eventSource` and `statusOfMeeting` are dropped.
+- The task panel went from 18 queries to 20: one for the pod's name, one for the owner's. Both
+  are single lookups, and the query-budget test still holds every page under 30 whatever the row
+  count.
+- The GraphQL person selection went from 17 fields to 47. All of the new ones are optional, and
+  the client already trims a field the workspace does not have out of its selection set, so a
+  workspace with only some of them works and `verify:schema` says which are missing. It now also
+  prints each select's option values against the ones the mapping expects, which is how a renamed
+  option gets caught before an FO sees an empty filter.
+
+### What the tests found this round
+
+- `rawFromPerson` re-expressed a normalised person in Twenty's field shapes, and once `dnd` became
+  a select it emitted `null` for a person whose `dnd` was true but whose `dndReason` was unset -
+  which is exactly what a fixture or a test that writes `{ dnd: true }` produces. The record then
+  read back as *not* do-not-contact, and the dnd-exit test failed. It now emits the default select
+  value in that case, so the round trip is faithful either way.
+- The phone numbers in the export carry a zero-width joiner inside the calling code (`"‍+1"`).
+  Passed through, every phone in the app grows an invisible character and `tel:` links break. The
+  calling code is now stripped to digits and `+`.
+- A date field can arrive as `2026-08-31` or as `2026-08-31T00:00:00.000Z` depending on how it was
+  written; both now yield the same local date, so due dates never shift by a timezone.
+- The new "Booked in Twenty" table made `page.locator('table')` ambiguous in an older Meetings
+  test, which is the kind of failure worth having: the assertion was too loose to say which table
+  it meant.

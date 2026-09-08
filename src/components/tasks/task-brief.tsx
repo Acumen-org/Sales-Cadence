@@ -1,9 +1,23 @@
 import Link from 'next/link';
 import type { BriefTimelineItem, TaskBrief } from '@/lib/brief';
-import { formatInstant, formatLocalDate } from '@/lib/dates';
+import { compareLocalDates, formatInstant, formatLocalDate, toLocalDate, type LocalDate } from '@/lib/dates';
 import { ACTION_LABELS } from '@/lib/sequences/steps';
 import { ActionIcon, IconBolt, IconExternal, IconInfo, IconNote } from '@/components/icons';
-import { Avatar, Badge, DotTimeline, ENROLLMENT_TONE, enrollmentStatusLabel, KeyValue, Notice, Surface } from '@/components/ui';
+import { optionLabel, optionLabels } from '@/lib/twenty/labels';
+import {
+  Avatar,
+  Badge,
+  contactWarnings,
+  crmStanding,
+  DotTimeline,
+  ENROLLMENT_TONE,
+  enrollmentStatusLabel,
+  KeyValue,
+  Notice,
+  Surface,
+  TierBadge,
+  type BadgeTone,
+} from '@/components/ui';
 import { CopyButton } from '@/components/copy-button';
 
 function Section({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
@@ -16,6 +30,15 @@ function Section({ title, children, right }: { title: string; children: React.Re
       {children}
     </section>
   );
+}
+
+/** Drop the rows Twenty holds nothing for. */
+const filled = (items: { k: string; v: React.ReactNode }[]) => items.filter((i) => i.v !== null && i.v !== undefined && i.v !== '');
+
+/** Twenty's own due date: red once it is past, amber on the day. */
+function dueTone(due: LocalDate, today: LocalDate): BadgeTone {
+  const c = compareLocalDates(due, today);
+  return c < 0 ? 'red' : c === 0 ? 'amber' : 'gray';
 }
 
 const KIND_ICON: Record<BriefTimelineItem['kind'], string> = {
@@ -60,6 +83,11 @@ function TimelineRow({ item, timezone }: { item: BriefTimelineItem; timezone: st
 export function TaskBriefPanel({ brief, timezone }: { brief: TaskBrief; timezone: string }) {
   const p = brief.person;
   const points = brief.touches.map((t) => ({ at: t.occurredAt.getTime(), lane: t.direction === 'INBOUND' ? ('in' as const) : ('out' as const) }));
+  const standing = crmStanding(p);
+  const warnings = contactWarnings(p);
+  // The CRM's own plan for this person. It is written by hand in Twenty and Cadence never
+  // changes it, so it is shown as-is: an FO who contradicts it should do so knowingly.
+  const hasCrmPlan = Boolean(p.nextAction || p.nextActionDueDate || p.nextStep || p.lastNote);
 
   return (
     <div className="space-y-3">
@@ -77,14 +105,17 @@ export function TaskBriefPanel({ brief, timezone }: { brief: TaskBrief; timezone
                   {p.companyName}
                 </Link>
               ) : null}
-              {p.dnd || p.optedOut || p.badEmail || p.badPhone ? (
-                <div className="mt-1.5 flex flex-wrap gap-1">
-                  {p.dnd ? <Badge tone="red">do not contact</Badge> : null}
-                  {p.optedOut ? <Badge tone="red">opted out</Badge> : null}
-                  {p.badEmail ? <Badge tone="amber">bad email</Badge> : null}
-                  {p.badPhone ? <Badge tone="amber">bad phone</Badge> : null}
-                </div>
-              ) : null}
+              <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                <Badge tone={standing.tone} dot>
+                  {standing.label}
+                </Badge>
+                {p.tier ? <TierBadge tier={p.tier} /> : null}
+                {warnings.map((w) => (
+                  <Badge key={w.label} tone={w.tone}>
+                    {w.label}
+                  </Badge>
+                ))}
+              </div>
             </div>
           </div>
           {brief.twentyUrl ? (
@@ -120,31 +151,116 @@ export function TaskBriefPanel({ brief, timezone }: { brief: TaskBrief; timezone
           </div>
         </Section>
 
-        {/* Tags come from Twenty and are how the team labels people, so they get their own row. */}
+        {/*
+          What the CRM says to do next, above everything else. The pod plans in Twenty by hand
+          ("FU-2", due Thursday, by email) and Cadence's own step is a separate thing; showing
+          both, in this order, is how an FO avoids sending a second first-touch.
+        */}
+        {hasCrmPlan ? (
+          <Section title="What Twenty says next">
+            {p.nextAction ? (
+              <p className="text-[13px] font-medium leading-snug text-ink-900">{p.nextAction}</p>
+            ) : (
+              <p className="text-[12.5px] text-ink-400">No next action written in Twenty.</p>
+            )}
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              {p.nextActionDueDate ? (
+                <Badge tone={dueTone(p.nextActionDueDate, brief.today)}>Due {formatLocalDate(p.nextActionDueDate, 'long')}</Badge>
+              ) : null}
+              {p.nextStep ? (
+                <span className="chip-muted">
+                  <ActionIcon action={p.nextStep === 'LINKEDIN_MESSAGE' ? 'LINKEDIN_MESSAGE' : 'EMAIL'} size={13} /> {optionLabel(p.nextStep)}
+                </span>
+              ) : null}
+              {p.nextActionDueDatePoc ? <span className="text-[11.5px] text-ink-400">POC due {formatLocalDate(p.nextActionDueDatePoc)}</span> : null}
+            </div>
+            {p.lastNote ? (
+              <p className="mt-2.5 border-l-2 border-line pl-2.5 text-[12.5px] leading-snug text-ink-600">
+                <span className="text-ink-400">Last note: </span>
+                {p.lastNote}
+              </p>
+            ) : null}
+          </Section>
+        ) : null}
+
+        {/* A meeting the scheduler wrote onto the person. The recording plays in Meetings. */}
+        {p.meetingAt || p.meetingUrl || p.recordingUrl ? (
+          <Section title="Meeting in Twenty">
+            {p.meetingAt ? <p className="text-[13px] font-medium text-ink-900">{formatInstant(p.meetingAt, timezone)}</p> : null}
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {p.meetingUrl ? (
+                <a href={p.meetingUrl} target="_blank" rel="noreferrer" className="chip-muted">
+                  <IconExternal size={13} /> Join link
+                </a>
+              ) : null}
+              {p.recordingUrl ? (
+                <Link href={`/meetings/new?personId=${p.id}&url=${encodeURIComponent(p.recordingUrl)}`} className="chip-muted">
+                  <ActionIcon action="MEETING" size={13} /> Add the recording
+                </Link>
+              ) : null}
+              {p.bookingId ? <span className="text-[11.5px] text-ink-400">Booking {p.bookingId}</span> : null}
+            </div>
+          </Section>
+        ) : null}
+
+        {/*
+          How Twenty classifies them. Values are Twenty's own; only the wording is softened.
+          Rows the CRM has nothing for are left out rather than filled with dashes: on a panel
+          this narrow a column of empty rows buries the two or three that matter.
+        */}
+        <Section title="How Twenty classifies them">
+          <KeyValue
+            items={filled([
+              { k: 'Tier', v: p.tier ? optionLabel(p.tier) : null },
+              { k: 'Type', v: optionLabels(p.contactType, ' / ') || null },
+              {
+                k: 'Cadence',
+                v: p.listCategory ? `${optionLabel(p.listCategory)}${p.previousCadence ? ` (was ${optionLabel(p.previousCadence)})` : ''}` : null,
+              },
+              { k: 'Pipeline', v: p.pipelineStage ? optionLabel(p.pipelineStage) : null },
+              { k: 'Interested in', v: optionLabels(p.productInterest) || null },
+              { k: 'Campaigns', v: optionLabels(p.campaigns) || null },
+              {
+                k: 'Lead source',
+                v: p.leadSource.length ? `${optionLabels(p.leadSource)}${p.leadSourceNotes ? ` - ${p.leadSourceNotes}` : ''}` : p.leadSourceNotes,
+              },
+              { k: 'City', v: p.city },
+              { k: 'Pod', v: brief.podName ?? (p.podOwner ? optionLabel(p.podOwner) : null) },
+              { k: 'Owner', v: brief.ownerName },
+            ])}
+          />
+          {p.onCallingList ? <p className="mt-2 text-[11.5px] font-medium text-brand-700">On the pod owner&apos;s calling list.</p> : null}
+        </Section>
+
+        {/* Tags are how the team labels people, and they mean things, so they get their own row. */}
         <Section title="Tags in Twenty">
           {p.tags.length ? (
             <div className="flex flex-wrap gap-1.5">
               {p.tags.map((t) => (
-                <span key={t} className="rounded-md border border-line bg-canvas px-2 py-0.5 text-[11.5px] font-medium text-ink-700">
-                  {t}
+                <span key={t} className="rounded-md border border-line bg-canvas px-2 py-0.5 text-[11.5px] font-medium text-ink-700" title={t}>
+                  {optionLabel(t)}
                 </span>
               ))}
             </div>
           ) : (
             <p className="text-[12.5px] text-ink-400">No tags on this person in Twenty.</p>
           )}
-          <div className="mt-3">
-            <KeyValue
-              items={[
-                { k: 'Where we met', v: p.eventSource },
-                { k: 'City', v: p.city },
-                { k: 'Pod', v: p.podOwner },
-              ]}
-            />
-          </div>
         </Section>
 
-        <Section title="Everything so far" right={points.length ? <span className="text-[11px] text-ink-400">30 days</span> : null}>
+        <Section
+          title="Everything so far"
+          right={
+            p.lastCallAt || p.lastEmailAt ? (
+              <span className="text-[11px] text-ink-400">
+                {[p.lastCallAt ? `called ${formatLocalDate(toLocalDate(p.lastCallAt, timezone))}` : null, p.lastEmailAt ? `emailed ${formatLocalDate(toLocalDate(p.lastEmailAt, timezone))}` : null]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </span>
+            ) : points.length ? (
+              <span className="text-[11px] text-ink-400">30 days</span>
+            ) : null
+          }
+        >
           {points.length ? <DotTimeline points={points} width={330} /> : null}
           {brief.timeline.length === 0 ? (
             <p className="text-[12.5px] text-ink-400">Nothing recorded yet. This is the first touch.</p>

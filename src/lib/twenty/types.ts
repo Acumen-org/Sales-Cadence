@@ -4,23 +4,90 @@
  * Twenty field names (those live in twenty-schema.ts).
  */
 
+/**
+ * A person as Cadence understands one. Field names here are Cadence's, not Twenty's: the
+ * mapping between the two is twenty-schema.ts and nothing outside normalize.ts should know it.
+ * Every group below corresponds to a section of the person panel.
+ */
 export type TwentyPerson = {
   id: string;
   firstName: string;
   lastName: string;
   email: string | null;
+  additionalEmails: string[];
   phone: string | null;
+  /** A second number the team tracks apart from the primary one. */
+  additionalPhone: string | null;
   linkedinUrl: string | null;
+  xUrl: string | null;
   jobTitle: string | null;
   city: string | null;
   companyId: string | null;
   companyName: string | null;
-  dnd: boolean;
-  podOwner: string | null;
+
+  // --- ownership -------------------------------------------------------------
+  /** Twenty's `assignedTo` relation: who owns this relationship. */
   ownerMemberId: string | null;
+  podOwner: string | null;
+  /** Set when the person was rotated out to another pod, e.g. ROTATED_OUT_LEIGH. */
+  rotatedTo: string | null;
+  rotationChangedAt: string | null;
+
+  // --- consent and data quality ---------------------------------------------
+  /** True when the do-not-disturb select is set, or a do-not-contact tag is on the record. */
+  dnd: boolean;
+  /** What made `dnd` true, for display: the select value or the tag. */
+  dndReason: string | null;
+  /** Twenty says the email is missing or wrong (MISSING_EMAIL tag). */
+  emailMissing: boolean;
+  /** Twenty says the phone is missing or wrong (MISSING_PHONE tag). */
+  phoneMissing: boolean;
+
+  // --- how the team classifies them -----------------------------------------
   tags: string[];
-  eventSource: string | null;
-  statusOfMeeting: string | null;
+  /** Where the lead came from: events, campaigns and lists, newest not implied by order. */
+  leadSource: string[];
+  leadSourceNotes: string | null;
+  /** LEVEL_1 (best) .. LEVEL_4. */
+  tier: string | null;
+  contactType: string[];
+  /** Touch frequency the CRM expects: COLD_BD, BI_WEEKLY, MONTHLY, QUARTERLY, UNASSIGNED. */
+  listCategory: string | null;
+  previousCadence: string | null;
+  /** The CRM's own funnel stage: PROSPECT, QUALIFY, RETAIN. */
+  pipelineStage: string | null;
+  productInterest: string[];
+  primaryProduct: string | null;
+  /** Campaigns the person is in according to Twenty (not Cadence campaigns). */
+  campaigns: string[];
+  /** On the pod owner's hand-kept calling list. */
+  onCallingList: boolean;
+  dealSignalStrength: string | null;
+
+  // --- what the CRM says happens next ---------------------------------------
+  nextAction: string | null;
+  /** LocalDate (YYYY-MM-DD). */
+  nextActionDueDate: string | null;
+  /** EMAIL or LINKEDIN_MESSAGE. */
+  nextStep: string | null;
+  nextActionDueDatePoc: string | null;
+  lastNote: string | null;
+
+  // --- last touch, as Twenty's automations record it -------------------------
+  lastCallAt: string | null;
+  lastEmailAt: string | null;
+
+  // --- meetings --------------------------------------------------------------
+  meetingAt: string | null;
+  meetingUrl: string | null;
+  /** Recording of a sales call; the Meetings section can play this. */
+  recordingUrl: string | null;
+  bookingId: string | null;
+
+  // --- provenance ------------------------------------------------------------
+  createdBySource: string | null;
+  createdByName: string | null;
+  createdByMemberId: string | null;
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;

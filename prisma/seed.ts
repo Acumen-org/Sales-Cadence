@@ -51,24 +51,24 @@ async function seedCore() {
 /**
  * Demo (mock mode only): one dummy record of everything.
  * Pods come from the mock workspace's podOwner options (Alisa's pod, Andrew's pod); the person
- * whose podOwner is "Karson" shows pod discovery. One user per role. A campaign per pod with
+ * whose podOwner is "KARSON" shows pod discovery. One user per role. A campaign per pod with
  * enrollments in every state: active, overdue, replied, bounced, finished, meeting.
  */
 async function seedDemo(sequenceId: string, withCampaigns: boolean) {
   const client = getMockTwentyClient();
 
   // Pods and people from the (mock) CRM, exactly as a real refresh would do it.
-  for (const opt of DEMO_POD_OPTIONS.filter((o) => o.value !== 'Karson')) await ensurePod(opt.value, opt.label);
+  for (const opt of DEMO_POD_OPTIONS.filter((o) => o.value !== 'KARSON')) await ensurePod(opt.value, opt.label);
   const cache = await refreshPersonCache(client);
   console.log(`  + pods synced from Twenty options; ${cache.people} dummy people, ${cache.companies} dummy companies cached`);
 
   const pod = async (value: string) => (await prisma.pod.findUniqueOrThrow({ where: { podOwnerValue: value } })).id;
   const users: Array<{ memberId: string; email: string; name: string; role: 'ADMIN' | 'SENIOR_FO' | 'JUNIOR_FO'; pods: string[] }> = [
     { memberId: 'wm-ria', email: 'ria@cadence.local', name: 'Ria Admin', role: 'ADMIN', pods: [] },
-    { memberId: 'wm-alisa', email: 'alisa@cadence.local', name: 'Alisa Senior', role: 'SENIOR_FO', pods: ['Alisa'] },
-    { memberId: 'wm-andrew', email: 'andrew@cadence.local', name: 'Andrew Senior', role: 'SENIOR_FO', pods: ['Andrew'] },
-    { memberId: 'wm-karson', email: 'karson@cadence.local', name: 'Karson Junior', role: 'JUNIOR_FO', pods: ['Alisa'] },
-    { memberId: 'wm-daniel', email: 'daniel@cadence.local', name: 'Daniel Junior', role: 'JUNIOR_FO', pods: ['Andrew'] },
+    { memberId: 'wm-alisa', email: 'alisa@cadence.local', name: 'Alisa Senior', role: 'SENIOR_FO', pods: ['ALISA'] },
+    { memberId: 'wm-andrew', email: 'andrew@cadence.local', name: 'Andrew Senior', role: 'SENIOR_FO', pods: ['ANDREW'] },
+    { memberId: 'wm-karson', email: 'karson@cadence.local', name: 'Karson Junior', role: 'JUNIOR_FO', pods: ['ALISA'] },
+    { memberId: 'wm-daniel', email: 'daniel@cadence.local', name: 'Daniel Junior', role: 'JUNIOR_FO', pods: ['ANDREW'] },
   ];
   const hash = await hashPassword(DEMO_PASSWORD);
   const byEmail = new Map<string, string>();
@@ -108,7 +108,7 @@ async function seedDemo(sequenceId: string, withCampaigns: boolean) {
   const at = (offsetDays: number) => new Date(`${addDays(startDate, offsetDays)}T10:00:00Z`);
 
   const campaignA = await prisma.campaign.create({
-    data: { name: 'Dummy campaign - Alisa\'s pod', sequenceId, podId: await pod('Alisa'), sourceType: 'TWENTY_VIEW', sourceRef: "Alisa's pod - all people (view-alisa-pod)", personIds: ['dummy-01', 'dummy-02', 'dummy-03', 'dummy-04', 'dummy-05'], startDate, status: 'ACTIVE', notes: 'Seeded dummy data' },
+    data: { name: 'Dummy campaign - Alisa\'s pod', sequenceId, podId: await pod('ALISA'), sourceType: 'TWENTY_VIEW', sourceRef: "Alisa's pod - all people (view-alisa-pod)", personIds: ['dummy-01', 'dummy-02', 'dummy-03', 'dummy-04', 'dummy-05'], startDate, status: 'ACTIVE', notes: 'Seeded dummy data' },
   });
   const a = await enrollPeople(
     { personIds: ['dummy-01', 'dummy-02', 'dummy-03', 'dummy-04', 'dummy-05', 'dummy-06'], sequenceId, podId: campaignA.podId, campaignId: campaignA.id, startDate, assignment: { mode: 'OWNER' }, actor: SYSTEM_ACTOR },
@@ -117,7 +117,7 @@ async function seedDemo(sequenceId: string, withCampaigns: boolean) {
   console.log(`  + ${a.enrolled.length} enrolled in "${campaignA.name}" (${a.conflicts.length} skipped: ${a.conflicts.map((c) => `${c.name} ${c.reason}`).join(', ')})`);
 
   const campaignB = await prisma.campaign.create({
-    data: { name: "Dummy campaign - Andrew's pod", sequenceId, podId: await pod('Andrew'), sourceType: 'IDS', sourceRef: 'pasted ids', personIds: ['dummy-07', 'dummy-08', 'dummy-09', 'dummy-10'], startDate, status: 'ACTIVE', notes: 'Seeded dummy data' },
+    data: { name: "Dummy campaign - Andrew's pod", sequenceId, podId: await pod('ANDREW'), sourceType: 'IDS', sourceRef: 'pasted ids', personIds: ['dummy-07', 'dummy-08', 'dummy-09', 'dummy-10'], startDate, status: 'ACTIVE', notes: 'Seeded dummy data' },
   });
   const b = await enrollPeople(
     { personIds: ['dummy-07', 'dummy-08', 'dummy-09', 'dummy-10'], sequenceId, podId: campaignB.podId, campaignId: campaignB.id, startDate, assignment: { mode: 'OWNER' }, actor: SYSTEM_ACTOR },
@@ -127,8 +127,8 @@ async function seedDemo(sequenceId: string, withCampaigns: boolean) {
 
   // A fresh campaign per pod starting today, so every FO has work due today.
   for (const [podValue, ids] of [
-    ['Alisa', ['dummy-13', 'dummy-14']],
-    ['Andrew', ['dummy-15', 'dummy-16']],
+    ['ALISA', ['dummy-13', 'dummy-14']],
+    ['ANDREW', ['dummy-15', 'dummy-16']],
   ] as const) {
     const c = await prisma.campaign.create({
       data: {

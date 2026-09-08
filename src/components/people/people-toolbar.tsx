@@ -3,20 +3,38 @@
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { IconSearch } from '@/components/icons';
+import { optionLabel } from '@/lib/twenty/labels';
 
-type Props = { pods: { podOwnerValue: string; name: string }[]; q: string; pod: string; status: string };
+type Props = {
+  pods: { podOwnerValue: string; name: string }[];
+  /** Option values from the Twenty mapping, so the filters offer exactly what the CRM holds. */
+  tiers: string[];
+  types: string[];
+  lists: string[];
+  q: string;
+  pod: string;
+  status: string;
+  tier: string;
+  type: string;
+  list: string;
+};
 
-const STAGES = [
-  { value: '', label: 'Any stage' },
-  { value: 'cold', label: 'Cold (never enrolled)' },
-  { value: 'approaching', label: 'Approaching (in a sequence)' },
+/**
+ * Two kinds of filter, kept apart on purpose: what Twenty says about the person (tier, type,
+ * cadence) and what Cadence has done with them (in a sequence, replied, finished). Mixing them
+ * into one "stage" dropdown was what made the old list read like a guess.
+ */
+const SEQUENCE_STATES = [
+  { value: '', label: 'Any sequence state' },
+  { value: 'cold', label: 'Never enrolled' },
+  { value: 'enrolled', label: 'In a sequence' },
   { value: 'replied', label: 'Replied or meeting' },
-  { value: 'unresponsive', label: 'Unresponsive (finished, no reply)' },
-  { value: 'bad_data', label: 'Bad data' },
-  { value: 'dnd', label: 'Do not contact / opted out' },
+  { value: 'unresponsive', label: 'Finished, no reply' },
+  { value: 'bad_data', label: 'Contact details wrong' },
+  { value: 'dnd', label: 'Do not contact' },
 ];
 
-export function PeopleToolbar({ pods, q, pod, status }: Props) {
+export function PeopleToolbar({ pods, tiers, types, lists, q, pod, status, tier, type, list }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -41,9 +59,23 @@ export function PeopleToolbar({ pods, q, pod, status }: Props) {
   }, [text]);
 
   const activeChips = [
-    pod ? { key: 'pod', label: `Pod is ${pods.find((p) => p.podOwnerValue === pod)?.name ?? pod}` } : null,
-    status ? { key: 'status', label: STAGES.find((s) => s.value === status)?.label ?? status } : null,
+    pod ? { key: 'pod', label: `Pod is ${pods.find((p) => p.podOwnerValue === pod)?.name ?? optionLabel(pod)}` } : null,
+    tier ? { key: 'tier', label: optionLabel(tier) } : null,
+    type ? { key: 'type', label: optionLabel(type) } : null,
+    list ? { key: 'list', label: `Cadence is ${optionLabel(list)}` } : null,
+    status ? { key: 'status', label: SEQUENCE_STATES.find((s) => s.value === status)?.label ?? status } : null,
   ].filter((x): x is { key: string; label: string } => Boolean(x));
+
+  const Select = ({ name, value, label, options, all }: { name: string; value: string; label: string; options: string[]; all: string }) => (
+    <select value={value} onChange={(e) => update({ [name]: e.target.value || null })} aria-label={label} className="!w-auto !py-2 !text-[12.5px]">
+      <option value="">{all}</option>
+      {options.map((o) => (
+        <option key={o} value={o}>
+          {optionLabel(o)}
+        </option>
+      ))}
+    </select>
+  );
 
   return (
     <div className="flex flex-1 flex-wrap items-center gap-2">
@@ -69,8 +101,11 @@ export function PeopleToolbar({ pods, q, pod, status }: Props) {
           </option>
         ))}
       </select>
-      <select value={status} onChange={(e) => update({ status: e.target.value || null })} aria-label="Filter by stage" className="!w-auto !py-2 !text-[12.5px]">
-        {STAGES.map((s) => (
+      <Select name="tier" value={tier} label="Filter by tier" options={tiers} all="Any tier" />
+      <Select name="type" value={type} label="Filter by contact type" options={types} all="Any type" />
+      <Select name="list" value={list} label="Filter by cadence in Twenty" options={lists} all="Any cadence" />
+      <select value={status} onChange={(e) => update({ status: e.target.value || null })} aria-label="Filter by sequence state" className="!w-auto !py-2 !text-[12.5px]">
+        {SEQUENCE_STATES.map((s) => (
           <option key={s.value} value={s.value}>
             {s.label}
           </option>

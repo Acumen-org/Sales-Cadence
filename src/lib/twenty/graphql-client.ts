@@ -52,7 +52,7 @@ const PAGE_SIZE = 60;
  *
  * The selection sets are built from the field mapping (twenty-schema.ts) and, when the
  * workspace allows introspection, trimmed to fields that actually exist, so a missing optional
- * custom field (say `statusOfMeeting`) degrades to null instead of failing every query.
+ * custom field (say `salesCallRecordingLink`) degrades to null instead of failing every query.
  */
 export class TwentyGraphqlClient implements TwentyClient {
   readonly kind = 'graphql' as const;
@@ -165,19 +165,49 @@ export class TwentyGraphqlClient implements TwentyClient {
     return this.selection(this.s.objects.person.typeName, [
       'id',
       { field: p.name, sub: '{ firstName lastName }' },
-      { field: p.emails, sub: '{ primaryEmail }' },
+      { field: p.emails, sub: '{ primaryEmail additionalEmails }' },
       { field: p.phones, sub: '{ primaryPhoneNumber primaryPhoneCallingCode primaryPhoneCountryCode }' },
+      { field: p.additionalNumber, sub: '{ primaryPhoneNumber primaryPhoneCallingCode primaryPhoneCountryCode }' },
       { field: p.linkedinLink, sub: '{ primaryLinkUrl }' },
+      { field: p.xLink, sub: '{ primaryLinkUrl }' },
       p.jobTitle,
       p.city,
       p.companyId,
       { field: p.company, sub: `{ id ${this.s.company.name} }` },
-      p.dnd,
+      { field: p.createdBy, sub: '{ source workspaceMemberId name }' },
+      // ownership
+      p.assignedToId,
       p.podOwner,
-      p.ownerId,
+      p.rotationTracking,
+      p.rotationChangedAt,
+      // classification
+      p.dnd,
       p.tags,
-      p.eventSource,
-      p.statusOfMeeting,
+      p.leadSource,
+      p.leadSourceNotes,
+      p.tier,
+      p.contactType,
+      p.listCategory,
+      p.previousCadence,
+      p.pipelineStageField,
+      p.productInterest,
+      p.primaryProduct,
+      p.onGoingCampaigns,
+      p.callingList,
+      p.dealSignalStrength,
+      // what happens next
+      p.nextAction,
+      p.nextActionDueDate,
+      p.nextStep,
+      p.nextActionDueDatePoc,
+      p.lastNote,
+      // last touch and meetings
+      p.latestCallActivity,
+      p.lastEmailActivity,
+      p.meetingTime,
+      { field: p.meetingLink, sub: '{ primaryLinkUrl }' },
+      { field: p.salesCallRecordingLink, sub: '{ primaryLinkUrl }' },
+      p.bookingId,
       p.createdAt,
       p.updatedAt,
       p.deletedAt,

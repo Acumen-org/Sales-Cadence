@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import clsx from 'clsx';
 import { cloneElement, isValidElement, useId, type ReactElement, type ReactNode } from 'react';
+import { optionLabel, optionLabels } from '@/lib/twenty/labels';
 
 /* -------------------------------------------------------------------------- */
 /* Page chrome                                                                */
@@ -264,20 +265,54 @@ export function enrollmentStatusLabel(e: { status: string; exitReason?: string |
   }
 }
 
-/** Outreach-style prospect stage derived from flags and the latest enrollment. */
-export function personStage(
-  p: { dnd: boolean; optedOut: boolean; badEmail: boolean; badPhone: boolean },
-  latest: { status: string; exitReason?: string | null } | null,
-): { label: string; tone: BadgeTone } {
+/** How Twenty classifies the person: its own funnel stage, then contact type, then the list. */
+const STAGE_TONE: Record<string, BadgeTone> = { PROSPECT: 'blue', QUALIFY: 'sky', RETAIN: 'green' };
+const TYPE_TONE: Record<string, BadgeTone> = { PROSPECT: 'blue', CLIENTS: 'green', CLIENT_S_CLIENT: 'green', PARTNER: 'purple', ORGANIZATION: 'gray' };
+
+/**
+ * What the CRM says this person is. Every value here comes from Twenty, so the label an FO
+ * reads in Cadence is the label they would read in the CRM. Cadence's own view of the person
+ * (which step of which sequence) is a separate column, because it answers a different question.
+ */
+export function crmStanding(p: {
+  dnd: boolean;
+  optedOut: boolean;
+  pipelineStage: string | null;
+  contactType: string[];
+  listCategory: string | null;
+}): { label: string; tone: BadgeTone } {
   if (p.dnd || p.optedOut) return { label: 'Do not contact', tone: 'red' };
-  if (latest?.status === 'MEETING') return { label: 'Meeting booked', tone: 'purple' };
-  if (latest?.status === 'REPLIED') return { label: 'Replied', tone: 'green' };
-  if (latest?.status === 'EXITED' && (latest.exitReason === 'bounced' || latest.exitReason === 'bad_data')) return { label: 'Bad data', tone: 'red' };
-  if ((p.badEmail && p.badPhone) || (latest?.status !== 'ACTIVE' && latest?.status !== 'PAUSED' && (p.badEmail || p.badPhone))) return { label: 'Bad data', tone: 'red' };
-  if (latest?.status === 'ACTIVE' || latest?.status === 'PAUSED') return { label: 'Approaching', tone: 'blue' };
-  if (latest?.status === 'COMPLETED') return { label: 'Unresponsive', tone: 'amber' };
-  if (latest?.status === 'EXITED' && latest.exitReason === 'not_interested') return { label: 'Not interested', tone: 'gray' };
-  return { label: 'Cold', tone: 'gray' };
+  if (p.pipelineStage) return { label: optionLabel(p.pipelineStage), tone: STAGE_TONE[p.pipelineStage] ?? 'blue' };
+  if (p.contactType.length) return { label: optionLabels(p.contactType, ' / '), tone: TYPE_TONE[p.contactType[0]] ?? 'gray' };
+  if (p.listCategory) return { label: optionLabel(p.listCategory), tone: 'gray' };
+  return { label: 'Unclassified', tone: 'gray' };
+}
+
+/** LEVEL_1 is the best tier, so it gets the strongest colour. */
+const TIER_TONE: Record<string, BadgeTone> = { LEVEL_1: 'purple', LEVEL_2: 'sky', LEVEL_3: 'gray', LEVEL_4: 'gray' };
+
+export function TierBadge({ tier }: { tier: string | null }) {
+  if (!tier) return <span className="text-[12px] text-ink-300">-</span>;
+  return <Badge tone={TIER_TONE[tier] ?? 'gray'}>{optionLabel(tier)}</Badge>;
+}
+
+/**
+ * Data-quality problems worth flagging next to a person, from both sides: the tags Twenty
+ * carries and Cadence's own flags from a bounce or a wrong-number call. Consent is deliberately
+ * absent - `crmStanding` already leads with "Do not contact", and saying it twice reads as noise.
+ */
+export function contactWarnings(p: {
+  badEmail: boolean;
+  badPhone: boolean;
+  emailMissing: boolean;
+  phoneMissing: boolean;
+  rotatedTo: string | null;
+}): { label: string; tone: BadgeTone }[] {
+  const out: { label: string; tone: BadgeTone }[] = [];
+  if (p.badEmail || p.emailMissing) out.push({ label: 'Email missing', tone: 'amber' });
+  if (p.badPhone || p.phoneMissing) out.push({ label: 'Phone missing', tone: 'amber' });
+  if (p.rotatedTo) out.push({ label: optionLabel(p.rotatedTo), tone: 'gray' });
+  return out;
 }
 
 /* -------------------------------------------------------------------------- */

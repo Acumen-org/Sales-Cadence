@@ -1,14 +1,20 @@
 /**
  * Template rendering for step actions.
  * Supported variables: {{firstName}} {{lastName}} {{fullName}} {{company}} {{jobTitle}}
- * {{eventSource}} {{foFirstName}} {{foName}}. Unknown variables render as empty strings.
+ * {{city}} {{leadSource}} {{product}} {{foFirstName}} {{foName}}.
+ * Unknown variables render as empty strings.
+ *
+ * {{leadSource}} and {{product}} come from Twenty and are already humanised by the caller
+ * (twenty/labels.ts), so a template never prints FPA_WISCONSIN_JULY_2026 at a prospect.
  */
 export type TemplateVars = {
   firstName?: string | null;
   lastName?: string | null;
   company?: string | null;
   jobTitle?: string | null;
-  eventSource?: string | null;
+  city?: string | null;
+  leadSource?: string | null;
+  product?: string | null;
   foFirstName?: string | null;
   foName?: string | null;
 };
@@ -19,7 +25,9 @@ export const TEMPLATE_VARIABLES = [
   'fullName',
   'company',
   'jobTitle',
-  'eventSource',
+  'city',
+  'leadSource',
+  'product',
   'foFirstName',
   'foName',
 ] as const;
@@ -35,7 +43,9 @@ export function renderTemplate(template: string | null | undefined, vars: Templa
     fullName,
     company: vars.company ?? '',
     jobTitle: vars.jobTitle ?? '',
-    eventSource: vars.eventSource ?? '',
+    city: vars.city ?? '',
+    leadSource: vars.leadSource ?? '',
+    product: vars.product ?? '',
     foFirstName: vars.foFirstName ?? firstNameOf(vars.foName),
     foName: vars.foName ?? '',
   };
