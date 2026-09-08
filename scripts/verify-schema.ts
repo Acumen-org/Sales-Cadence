@@ -45,7 +45,6 @@ const OPTIONAL = new Set([
   'person.lastNote',
   'person.latestCallActivity',
   'person.lastEmailActivity',
-  'person.meetingTime',
   'person.meetingLink',
   'person.salesCallRecordingLink',
   'person.bookingId',

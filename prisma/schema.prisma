@@ -422,10 +422,9 @@ model PersonCache {
   lastCallAt      DateTime?
   lastEmailAt     DateTime?
 
-  /// The booked meeting and its links, from Twenty.
-  meetingAt       DateTime?
-  meetingUrl      String?
+  /// Links Twenty keeps on the person: a call recording, a join link, a booking reference.
   recordingUrl    String?
+  meetingUrl      String?
   bookingId       String?
 
   createdBySource String?
@@ -460,7 +459,6 @@ model PersonCache {
   @@index([tier])
   @@index([listCategory])
   @@index([nextActionDueDate])
-  @@index([meetingAt])
 }
 
 model CompanyCache {

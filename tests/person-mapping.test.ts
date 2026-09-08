@@ -55,7 +55,6 @@ const raw = {
   latestCallActivity: '2026-08-14T20:17:33.000Z',
   lastEmailActivity: '2026-08-08T13:26:19.000Z',
 
-  meetingTime: '2026-09-11T13:00:00.000Z',
   meetingLink: { primaryLinkUrl: 'https://teams.microsoft.com/l/meetup-join/x' },
   salesCallRecordingLink: { primaryLinkUrl: 'https://contoso.sharepoint.com/x/Recording.mp4' },
   bookingId: 'BK-1029',
@@ -117,12 +116,11 @@ describe('normalizePerson against the real workspace', () => {
     expect(p.lastNote).toBe('Send the material for PHH+TOLLBOOTH');
   });
 
-  it('reads the last-touch stamps and the booked meeting', () => {
+  it('reads the last-touch stamps and the links Twenty keeps', () => {
     expect(p.lastCallAt).toBe('2026-08-14T20:17:33.000Z');
     expect(p.lastEmailAt).toBe('2026-08-08T13:26:19.000Z');
-    expect(p.meetingAt).toBe('2026-09-11T13:00:00.000Z');
-    expect(p.meetingUrl).toBe('https://teams.microsoft.com/l/meetup-join/x');
     expect(p.recordingUrl).toBe('https://contoso.sharepoint.com/x/Recording.mp4');
+    expect(p.meetingUrl).toBe('https://teams.microsoft.com/l/meetup-join/x');
     expect(p.bookingId).toBe('BK-1029');
   });
 
@@ -140,7 +138,7 @@ describe('normalizePerson against the real workspace', () => {
     expect(empty.contactType).toEqual([]);
     expect(empty.tier).toBeNull();
     expect(empty.onCallingList).toBe(false);
-    expect(empty.meetingAt).toBeNull();
+    expect(empty.recordingUrl).toBeNull();
   });
 
   it('reads a multi-select that arrives as a JSON string, which is how exports write it', () => {
@@ -180,8 +178,8 @@ describe('normalizePerson against the real workspace', () => {
     });
     // Timestamps become Dates; an unparseable one is dropped rather than stored as 1970.
     expect(data.lastCallAt).toEqual(new Date('2026-08-14T20:17:33.000Z'));
-    expect(data.meetingAt).toEqual(new Date('2026-09-11T13:00:00.000Z'));
-    expect(personToCacheData({ ...p, meetingAt: 'not a date' }).meetingAt).toBeNull();
+    expect(data.lastEmailAt).toEqual(new Date('2026-08-08T13:26:19.000Z'));
+    expect(personToCacheData({ ...p, lastCallAt: 'not a date' }).lastCallAt).toBeNull();
   });
 
   it('follows a renamed field without touching anything else', () => {

@@ -146,9 +146,8 @@ export function normalizePerson(raw: Raw, s: TwentySchema): TwentyPerson {
     lastCallAt: str(raw[f.latestCallActivity]),
     lastEmailAt: str(raw[f.lastEmailActivity]),
 
-    meetingAt: str(raw[f.meetingTime]),
-    meetingUrl: linkUrl(raw[f.meetingLink]),
     recordingUrl: linkUrl(raw[f.salesCallRecordingLink]),
+    meetingUrl: linkUrl(raw[f.meetingLink]),
     bookingId: str(raw[f.bookingId]),
 
     createdBySource: str(createdBy.source),

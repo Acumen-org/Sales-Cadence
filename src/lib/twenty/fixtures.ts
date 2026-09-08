@@ -168,9 +168,8 @@ export const MOCK_PEOPLE: TwentyPerson[] = rows.map((r, i) => {
     lastCallAt: null,
     lastEmailAt: null,
 
-    meetingAt: null,
-    meetingUrl: null,
     recordingUrl: null,
+    meetingUrl: null,
     bookingId: null,
 
     createdBySource: 'MANUAL',

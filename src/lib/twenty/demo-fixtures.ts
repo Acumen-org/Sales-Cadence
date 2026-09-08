@@ -64,9 +64,9 @@ export const DEMO_COMPANIES: TwentyCompany[] = [
 
 /**
  * One dummy person per shape the real workspace produces, so every field of the person panel
- * has something in it in the demo: each tier, each contact type, each list category, a booked
- * meeting with a recording, a rotated-out record, a do-not-contact select, tags that mean the
- * contact details are missing, and one person whose pod does not exist in Cadence yet.
+ * has something in it in the demo: each tier, each contact type, each list category, a call
+ * recording, a rotated-out record, a do-not-contact select, tags that mean the contact details
+ * are missing, and one person whose pod does not exist in Cadence yet.
  */
 type Row = {
   last: string;
@@ -86,7 +86,7 @@ type Row = {
   note?: string;
   lastCall?: string;
   lastEmail?: string;
-  meeting?: [at: string, join: string, recording: string];
+  recording?: [recording: string, join: string];
   dnd?: boolean;
   calling?: boolean;
   rotatedTo?: string;
@@ -115,7 +115,7 @@ const rows: Row[] = [
     lead: ['TRUST_ALTA_LUNCHEON_JUNE_2026'], tier: 'LEVEL_1', type: ['CLIENTS'], list: 'MONTHLY', stage: 'RETAIN',
     product: ['PHH'], campaigns: ['SPONSORSHIP'], tags: ['CLIENT', 'MISSING_PHONE'],
     note: 'Renewal conversation booked.', lastCall: '2026-09-02T09:00:00.000Z',
-    meeting: ['2026-09-11T13:00:00.000Z', 'https://teams.microsoft.com/l/meetup-join/dummy-four', 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeetings.mp4'],
+    recording: ['https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeetings.mp4', 'https://teams.microsoft.com/l/meetup-join/dummy-four'],
   },
   {
     last: 'Five', co: 'dummy-co-b', title: 'CFO', pod: 'ALISA', owner: null,
@@ -225,10 +225,9 @@ export const DEMO_PEOPLE: TwentyPerson[] = rows.map((r, i) => {
     lastCallAt: r.lastCall ?? null,
     lastEmailAt: r.lastEmail ?? null,
 
-    meetingAt: r.meeting?.[0] ?? null,
-    meetingUrl: r.meeting?.[1] ?? null,
-    recordingUrl: r.meeting?.[2] ?? null,
-    bookingId: r.meeting ? `dummy-booking-${n}` : null,
+    recordingUrl: r.recording?.[0] ?? null,
+    meetingUrl: r.recording?.[1] ?? null,
+    bookingId: r.recording ? `dummy-booking-${n}` : null,
 
     createdBySource: 'MANUAL',
     createdByName: 'Admin Acumen',

@@ -30,7 +30,7 @@ In Twenty: **Settings > Developers > Webhooks > Create webhook**.
   - `note` (activity notes: `[Email] Outbound email: ...`, `[CALL] Outbound Call by tw_...`, `Call Notes [31-Aug-2026]`)
   - `task` (mirrored Cadence tasks marked done in Twenty)
   - `opportunity` (meeting booked)
-  - `person` (dnd flips, deletions, `meetingTime`, `assignedTo` and `podOwner` changes, cache updates)
+  - `person` (dnd flips, deletions, `assignedTo` and `podOwner` changes, cache updates)
   - `company` (account renames, owner changes, industry / size / city / LinkedIn, deletions - keeps the Accounts section current without waiting for the nightly refresh)
 
   If your Twenty only offers "all objects", that is fine: Cadence ignores objects it does not track.
@@ -120,16 +120,19 @@ Three tags carry a consequence and are read rather than duplicated as Cadence fl
 Cadence **reads** these and never writes them. They are shown above Cadence's own step so an FO
 who is about to contradict the CRM's plan can see it first.
 
-### Last touch and meetings
+### Last touch and recordings
 
 | Twenty field | Type | Where it appears in Cadence |
 |---|---|---|
 | `latestCallActivity` | Date time | the person's history, when no Cadence touch covers that moment |
 | `lastEmailActivity` | Date time | same |
-| `meetingTime` | Date time | counts as a booked meeting (Settings > Rules), and "Booked in Twenty" on Meetings |
-| `meetingLink` | Links | join link |
-| `salesCallRecordingLink` | Links | "Add with transcript" pre-fills the Meetings form with it |
-| `bookingId` | Text | Meetings card |
+| `salesCallRecordingLink` | Links | "Recordings in Twenty" on the Meetings page; "Add with transcript" pre-fills the form with it |
+| `meetingLink` | Links | join link on the person |
+| `bookingId` | Text | shown beside them |
+
+Twenty's `meetingTime` field is deliberately **not** read. The team does not use it, so nothing
+in Cadence depends on it and a meeting is recorded the way every other meeting is: an FO adds it,
+or an opportunity appears.
 
 ### Overrides
 
@@ -160,7 +163,7 @@ Twenty mode: graphql (https://twenty.example.com)
 Introspecting...
 Source: metadata, 31 objects
 
-✓ person (people): 44/44 fields ok
+✓ person (people): 43/43 fields ok
   podOwner options in Twenty: ALISA, LEIGH, ANDREW, KARSON, DANIEL, RIA
   i options without a Cadence pod yet: KARSON, DANIEL, RIA (create them in Settings > Users and pods)
   dnd: DO_NOT_DISTURB
@@ -257,7 +260,7 @@ Which FOs work a pod, and who can log in, is Cadence configuration (Settings > U
 | Clock mode | Settings > Rules | shift (late steps push later steps) |
 | Note title regexes | Settings > Rules and matching | `^\[Email\]\s*Outbound email`, `^\[CALL\]\s*Outbound Call`, `^Call Notes\s*\[...\]` |
 | Reply from colleague pauses company | Settings > Rules | off |
-| Meeting detection | Settings > Rules | opportunity created, or `meetingTime` set on the person |
+| Meeting detection | Settings > Rules | an opportunity created for the person |
 | Our own email domains | Settings > Rules | `acumen-strategy.com`, `prairie-hill.com`, `glynac.ai`, `acubooth.com` (a meeting counts as booked only when someone outside these attends) |
 | Completion notes / mirrored tasks | Settings > Sync out | on / on |
 | Reconcile lookback | Settings > Rules | 3 days, nightly at `RECONCILE_HOUR` |

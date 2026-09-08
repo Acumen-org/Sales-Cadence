@@ -47,8 +47,6 @@ export const RulesSettingsSchema = z.object({
   clockMode: z.enum(['shift', 'hold']).default('shift'),
   companyReplyPausesColleagues: z.boolean().default(false),
   meetingOnOpportunityCreated: z.boolean().default(true),
-  /** A meeting time set on the person in Twenty counts as a booked meeting. */
-  meetingOnMeetingTime: z.boolean().default(true),
   /** Enrollments with no touch in this many days are reported as stalled. */
   stalledDays: z.number().int().min(1).default(7),
   reconcileLookbackDays: z.number().int().min(1).max(90).default(3),

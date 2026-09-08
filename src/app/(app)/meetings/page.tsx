@@ -23,7 +23,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
         ? { occurredAt: { gte: week.fromInstant, lt: week.toInstant } }
         : {};
 
-  const [meetings, total, mine, thisWeek, booked] = await Promise.all([
+  const [meetings, total, mine, thisWeek, recordings] = await Promise.all([
     prisma.meeting.findMany({
       where,
       orderBy: { occurredAt: 'desc' },
@@ -47,19 +47,18 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
     prisma.meeting.count({ where }),
     prisma.meeting.count({ where: { createdById: user.id } }),
     prisma.meeting.count({ where: { occurredAt: { gte: week.fromInstant, lt: week.toInstant } } }),
-    // Meetings Twenty already knows about: the scheduler writes a time, a join link and
-    // sometimes a recording onto the person. Cadence does not invent a Meeting row from that,
-    // because a meeting here carries a transcript and attendees that only a human can supply -
-    // so these are listed for one-click adding instead.
+    // Recordings Twenty holds on a person record. Cadence does not invent a Meeting row from
+    // one, because a meeting here carries attendees and a transcript that only a human can
+    // supply - so these are listed for one-click adding instead.
     prisma.personCache.findMany({
-      where: { deletedAt: null, OR: [{ meetingAt: { not: null } }, { recordingUrl: { not: null } }] },
-      orderBy: { meetingAt: 'desc' },
+      where: { deletedAt: null, recordingUrl: { not: null } },
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
       take: 12,
-      select: { id: true, firstName: true, lastName: true, companyId: true, companyName: true, meetingAt: true, meetingUrl: true, recordingUrl: true },
+      select: { id: true, firstName: true, lastName: true, companyId: true, companyName: true, meetingUrl: true, recordingUrl: true },
     }),
   ]);
   const addedUrls = new Set(
-    (await prisma.meeting.findMany({ where: { sourceUrl: { in: booked.map((b) => b.recordingUrl ?? b.meetingUrl ?? '').filter(Boolean) } }, select: { sourceUrl: true } })).map((m) => m.sourceUrl),
+    (await prisma.meeting.findMany({ where: { sourceUrl: { in: recordings.map((r) => r.recordingUrl ?? '').filter(Boolean) } }, select: { sourceUrl: true } })).map((m) => m.sourceUrl),
   );
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const href = (s: string) => `/meetings?scope=${s}`;
@@ -157,23 +156,22 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
         )}
       </Surface>
 
-      {booked.length ? (
+      {recordings.length ? (
         <Surface flush>
-          <ViewHeader title="Booked in Twenty" caret meta={`${booked.length} on the person record`} />
+          <ViewHeader title="Recordings in Twenty" caret meta={`${recordings.length} on a person record`} />
           <div className="overflow-x-auto scroll-thin">
             <table className="table">
               <thead>
                 <tr>
                   <th>Person</th>
                   <th>Account</th>
-                  <th>When</th>
                   <th>Links</th>
                   <th className="w-40"></th>
                 </tr>
               </thead>
               <tbody>
-                {booked.map((b) => {
-                  const url = b.recordingUrl ?? b.meetingUrl ?? '';
+                {recordings.map((b) => {
+                  const url = b.recordingUrl ?? '';
                   const already = url ? addedUrls.has(url) : false;
                   return (
                     <tr key={b.id}>
@@ -189,7 +187,6 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                           b.companyName ?? <span className="text-ink-300">-</span>
                         )}
                       </td>
-                      <td className="whitespace-nowrap text-[12.5px]">{b.meetingAt ? formatInstant(b.meetingAt, user.timezone) : <span className="text-ink-300">-</span>}</td>
                       <td>
                         <div className="flex flex-wrap gap-1.5">
                           {b.meetingUrl ? (
