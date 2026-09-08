@@ -7,7 +7,7 @@ import { requireUser, toActor, type SessionUser } from '../auth/current-user';
 import { canActOnTask, canManageEnrollment, canSnoozeFreely } from '../auth/rbac';
 import { userActor } from '../audit';
 import { isLocalDate, todayIn } from '../dates';
-import { exitEnrollment, finishEnrollment, pauseEnrollment, reassignEnrollment } from '../engine/enrollment';
+import { exitEnrollment, finishEnrollment, reassignEnrollment } from '../engine/enrollment';
 import { completeCall, moveToStep, skipWithReason } from '../engine/outcomes';
 import { completeTask, nextWorkingDaySnooze, skipTask, snoozeTask } from '../engine/tasks';
 import { ACTION_TYPES } from '../sequences/steps';
@@ -103,7 +103,7 @@ export async function snoozeTaskAction(formData: FormData): Promise<ActionResult
 }
 
 // ---------------------------------------------------------------------------
-// Task-flow overflow: finish / remove / move to step / pause (enrollment-level)
+// Ending a sequence early, and moving someone to a different step (enrollment-level)
 // ---------------------------------------------------------------------------
 
 async function loadEnrollmentForTask(taskId: string) {
@@ -123,7 +123,7 @@ export async function finishFromTaskAction(formData: FormData): Promise<ActionRe
   if (!enrollment) return { ok: false, error: error ?? 'Not found.' };
   await finishEnrollment(enrollment.id, kind, { actor: userActor(user) });
   revalidate();
-  return { ok: true, message: kind === 'replied' ? 'Finished as replied.' : 'Finished (no reply).' };
+  return { ok: true, message: kind === 'replied' ? 'Sequence ended: they replied.' : 'Sequence ended with no reply.' };
 }
 
 export async function removeFromSequenceAction(formData: FormData): Promise<ActionResult> {
@@ -131,15 +131,7 @@ export async function removeFromSequenceAction(formData: FormData): Promise<Acti
   if (!enrollment) return { ok: false, error: error ?? 'Not found.' };
   await exitEnrollment(enrollment.id, { reason: String(formData.get('reason') ?? 'removed').trim() || 'removed', actor: userActor(user) });
   revalidate();
-  return { ok: true, message: 'Removed from the sequence.' };
-}
-
-export async function pauseFromTaskAction(formData: FormData): Promise<ActionResult> {
-  const { user, enrollment, error } = await loadEnrollmentForTask(String(formData.get('taskId') ?? ''));
-  if (!enrollment) return { ok: false, error: error ?? 'Not found.' };
-  await pauseEnrollment(enrollment.id, { reason: 'manual', actor: userActor(user) });
-  revalidate();
-  return { ok: true, message: 'Paused. Resume from the person or campaign page.' };
+  return { ok: true, message: 'Sequence ended. No more tasks for this person.' };
 }
 
 export async function moveToStepAction(formData: FormData): Promise<ActionResult> {
@@ -150,7 +142,7 @@ export async function moveToStepAction(formData: FormData): Promise<ActionResult
   const r = await moveToStep(enrollment.id, target, { actor: userActor(user) });
   revalidate();
   if (!r.ok) return { ok: false, error: r.error };
-  return { ok: true, message: `Moved to step ${target + 1}. ${r.generated.length} task${r.generated.length === 1 ? '' : 's'} due now.` };
+  return { ok: true, message: `Moved to step ${target + 1}.` };
 }
 
 // ---------------------------------------------------------------------------

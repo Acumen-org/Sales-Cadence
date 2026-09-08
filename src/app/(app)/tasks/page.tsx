@@ -2,16 +2,17 @@ import Link from 'next/link';
 import { requireUser } from '@/lib/auth/current-user';
 import { canManageEnrollment, canSnoozeFreely, isAdmin, isSeniorFo, toActor } from '@/lib/auth/rbac';
 import { getTaskBrief, describeDue } from '@/lib/brief';
-import { formatLocalDate } from '@/lib/dates';
 import { nextWorkingDaySnooze } from '@/lib/engine/tasks';
 import { cachedPersonName } from '@/lib/person-cache';
 import { getSettings } from '@/lib/settings';
 import { ACTION_LABELS } from '@/lib/sequences/steps';
 import { filterOptions, listTasks, parseChannel, parseTab, TASK_CHANNELS, type TaskChannel, type TaskTab } from '@/lib/tasks-query';
-import { ActionIcon } from '@/components/icons';
+import { ActionIcon, IconBolt, IconChevronLeft, IconChevronRight } from '@/components/icons';
 import { TaskActions } from '@/components/tasks/task-actions';
 import { TaskBriefPanel } from '@/components/tasks/task-brief';
+import { TaskComposer } from '@/components/tasks/task-composer';
 import { TaskFilters } from '@/components/tasks/task-filters';
+import { TaskFlash } from '@/components/tasks/task-flash';
 import { TaskList } from '@/components/tasks/task-list';
 import { Avatar, Badge, EmptyState, Notice, Surface, Tabs, Toolbar, ViewHeader } from '@/components/ui';
 
@@ -19,6 +20,7 @@ type Search = { tab?: string; mode?: string; task?: string; pod?: string; fo?: s
 
 const TAB_LABELS: Record<TaskTab, string> = { today: 'Today', overdue: 'Overdue', upcoming: 'Upcoming', done: 'Done' };
 const CHANNEL_LABELS: Record<TaskChannel, string> = { CALL: 'Calls', EMAIL: 'Emails', LINKEDIN: 'LinkedIn' };
+const CHANNEL_OF: Record<string, 'EMAIL' | 'CALL' | 'LINKEDIN'> = { EMAIL: 'EMAIL', CALL: 'CALL' };
 
 export default async function TasksPage({ searchParams }: { searchParams: Promise<Search> }) {
   const user = await requireUser();
@@ -81,18 +83,12 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   }));
   const reassignFos = podId ? options.fos.filter((f) => f.podIds.includes(podId)) : options.fos;
   const overdueSelected = brief?.task.state === 'PENDING' && (brief.task.snoozedTo ?? brief.task.dueDate) < today;
+  const flow = mode === 'flow';
 
   return (
     <div className="px-6 pb-8 pt-2">
       <Surface flush>
-        <ViewHeader
-          title={`${TAB_LABELS[tab]}${channel ? ` · ${CHANNEL_LABELS[channel]}` : ''}`}
-          meta={
-            <>
-              {rows.length} result{rows.length === 1 ? '' : 's'} · {formatLocalDate(today, 'long')}
-            </>
-          }
-        />
+        <ViewHeader title={`${TAB_LABELS[tab]}${channel ? ` · ${CHANNEL_LABELS[channel]}` : ''}`} />
         <Tabs
           inset={false}
           current={tab}
@@ -115,30 +111,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
         </Toolbar>
       </Surface>
 
-      {sp.flash ? (
-        <div className="pt-3">
-          <Notice tone="success">
-            <span role="status">{sp.flash.slice(0, 300)}</span>{' '}
-            <Link href={withParams({ task: selectedId ?? null })} className="ml-1 underline">
-              dismiss
-            </Link>
-          </Notice>
-        </div>
-      ) : null}
-      {tab !== 'overdue' && counts.overdue > 0 ? (
-        <div className="pt-3">
-          <Notice tone="error">
-            <span className="font-medium">
-              {counts.overdue} overdue task{counts.overdue === 1 ? '' : 's'}.
-            </span>{' '}
-            Overdue work is never dropped: it stays until it is done or skipped.{' '}
-            <Link href={withParams({ tab: 'overdue', task: null })} className="underline">
-              Work the overdue list
-            </Link>
-            .
-          </Notice>
-        </div>
-      ) : null}
+      {sp.flash ? <TaskFlash message={sp.flash.slice(0, 300)} /> : null}
 
       {rows.length === 0 ? (
         <Surface className="mt-3" flush>
@@ -149,9 +122,16 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
           />
         </Surface>
       ) : (
-        <div className="mt-3 grid gap-3 2xl:grid-cols-[minmax(0,1fr)_390px]">
-          <div className={mode === 'list' ? 'grid min-w-0 gap-3 xl:grid-cols-[336px_minmax(0,1fr)]' : 'min-w-0'}>
-            {mode === 'list' ? (
+        <div className={flow ? 'mt-3 space-y-3' : 'mt-3 grid gap-3 2xl:grid-cols-[minmax(0,1fr)_390px]'}>
+          {/*
+            Two genuinely different ways to work, not one layout with a list hidden.
+            List: pick from a table, act on the right, scan and jump around.
+            Flow: one person at a time, a progress rail across the top, keyboard first.
+          */}
+          {flow ? <FlowRail index={index} total={rows.length} prevUrl={prevUrl} nextUrl={nextRow ? nextUrl : null} listHref={withParams({ mode: null, task: selectedId })} /> : null}
+
+          <div className={flow ? 'grid gap-3 xl:grid-cols-[minmax(0,1fr)_390px]' : 'grid min-w-0 gap-3 xl:grid-cols-[336px_minmax(0,1fr)]'}>
+            {flow ? null : (
               <Surface flush className="max-h-[52vh] overflow-y-auto scroll-thin xl:max-h-[calc(100vh-19rem)]">
                 <TaskList
                   rows={listRows}
@@ -167,15 +147,15 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
                   bulkEnabled={tab !== 'done'}
                 />
               </Surface>
-            ) : null}
+            )}
 
             <div className="min-w-0">
               {brief ? (
                 <Surface flush>
-                  {/* Task header band, the way the task flow presents the current step. */}
+                  {/* Who and what, once. The panel on the right carries the detail. */}
                   <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line bg-gradient-to-r from-brand-50/70 to-white px-5 py-4">
                     <div className="flex min-w-0 items-start gap-3">
-                      <Avatar name={brief.personName} shape="circle" size={40} />
+                      <Avatar name={brief.personName} shape="circle" size={flow ? 46 : 40} />
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-400">
                           <span className="inline-flex items-center gap-1.5 text-brand-700">
@@ -187,33 +167,21 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
                           <span>
                             Step {brief.stepIndex + 1} of {brief.stepCount} · Day {brief.task.stepDay}
                           </span>
-                          {brief.variantLabel ? (
-                            <>
-                              <span className="text-ink-300">·</span>
-                              <Badge tone="purple">Variant {brief.variantLabel}</Badge>
-                            </>
-                          ) : null}
                         </div>
-                        <h2 className="mt-1 truncate text-[19px] font-semibold tracking-[-0.01em] text-ink-900">
-                          {brief.action.label}:{' '}
+                        <h2 className={`mt-1 truncate font-semibold tracking-[-0.015em] text-ink-900 ${flow ? 'text-[23px]' : 'text-[19px]'}`}>
                           <Link href={`/people/${brief.person.id}`} className="hover:text-brand-700">
                             {brief.personName}
                           </Link>
                         </h2>
+                        {/* Job title and company only: the panel on the right carries the rest. */}
                         <div className="truncate text-[13px] text-ink-500">
                           {brief.person.jobTitle ?? 'Unknown title'}
                           {brief.person.companyName ? ` at ${brief.person.companyName}` : ''}
-                          {brief.person.eventSource ? ` · met via ${brief.person.eventSource}` : ''}
                         </div>
                       </div>
                     </div>
                     <div className="text-right">
                       <div className={overdueSelected ? 'text-[13px] font-medium text-red-600' : 'text-[13px] text-ink-600'}>{describeDue(brief.task)}</div>
-                      {mode === 'flow' ? (
-                        <div className="text-[12px] text-ink-400">
-                          {index + 1} of {rows.length}
-                        </div>
-                      ) : null}
                       {brief.task.state !== 'PENDING' ? <Badge tone="gray">{brief.task.state.toLowerCase()}</Badge> : null}
                     </div>
                   </div>
@@ -224,10 +192,14 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
                     {brief.replyInThread ? <Notice tone="info">Send this as a reply in the existing email thread, not a new email.</Notice> : null}
 
                     {brief.action.body || brief.action.subject ? (
-                      <div className="rounded-xl border border-line bg-canvas/60 p-4">
-                        {brief.action.subject ? <div className="mb-2 text-[13.5px] font-semibold text-ink-900">Subject: {brief.action.subject}</div> : null}
-                        <pre className="whitespace-pre-wrap font-sans text-[13.5px] leading-relaxed text-ink-700">{brief.action.body}</pre>
-                      </div>
+                      <TaskComposer
+                        taskId={brief.task.id}
+                        label={brief.action.label}
+                        subject={brief.action.subject}
+                        body={brief.action.body}
+                        variantLabel={brief.variantLabel}
+                        channel={CHANNEL_OF[brief.task.action] ?? 'LINKEDIN'}
+                      />
                     ) : null}
 
                     {brief.task.state === 'PENDING' ? (
@@ -235,10 +207,9 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
                         taskId={brief.task.id}
                         action={brief.task.action}
                         altAction={brief.task.altAction}
-                        nextUrl={rows.length > 1 || mode === 'flow' ? nextUrl : null}
+                        nextUrl={rows.length > 1 || flow ? nextUrl : null}
                         prevUrl={prevUrl}
                         twentyUrl={brief.twentyUrl}
-                        copyText={[brief.action.subject ? `Subject: ${brief.action.subject}` : null, brief.action.body].filter(Boolean).join('\n\n')}
                         nextWorkingDay={nextWorkingDay}
                         canPickSnoozeDate={canPickSnoozeDate}
                         dispositions={dispositions}
@@ -246,7 +217,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
                         steps={brief.steps.map((s) => ({ index: s.index, label: `Day ${s.day} · ${s.label}` }))}
                         currentStep={brief.currentStep}
                         canManageEnrollment={canManageEnrollment(actor, { foUserId: brief.task.foUserId, podId: brief.task.enrollment.podId }) || brief.task.foUserId === user.id}
-                        size={mode === 'flow' ? 'lg' : 'md'}
+                        size={flow ? 'lg' : 'md'}
                       />
                     ) : (
                       <p className="text-[13px] text-ink-500">
@@ -266,10 +237,49 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
                 </Surface>
               )}
             </div>
+
+            {flow ? <aside className="min-w-0 xl:sticky xl:top-4 xl:self-start">{brief ? <TaskBriefPanel brief={brief} timezone={user.timezone} /> : null}</aside> : null}
           </div>
-          <aside className="min-w-0 2xl:sticky 2xl:top-4 2xl:self-start">{brief ? <TaskBriefPanel brief={brief} timezone={user.timezone} /> : null}</aside>
+
+          {flow ? null : <aside className="min-w-0 2xl:sticky 2xl:top-4 2xl:self-start">{brief ? <TaskBriefPanel brief={brief} timezone={user.timezone} /> : null}</aside>}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Flow mode's own chrome: where you are in the run, and how to leave it. */
+function FlowRail({ index, total, prevUrl, nextUrl, listHref }: { index: number; total: number; prevUrl: string | null; nextUrl: string | null; listHref: string }) {
+  const position = index >= 0 ? index + 1 : 1;
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-brand-200 bg-brand-50/60 px-4 py-2.5">
+      <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wide text-brand-700">
+        <IconBolt size={14} /> Task flow
+      </span>
+      <span className="text-[13px] font-medium tabular-nums text-ink-700">
+        {position} of {total}
+      </span>
+      {/* One segment per task, so the run has a visible end. */}
+      <span className="flex min-w-[120px] flex-1 gap-[3px]" aria-hidden>
+        {Array.from({ length: Math.min(total, 40) }).map((_, i) => (
+          <span key={i} className={`h-1.5 flex-1 rounded-full ${i < position - 1 ? 'bg-brand-500' : i === position - 1 ? 'bg-brand-700' : 'bg-brand-200'}`} />
+        ))}
+      </span>
+      <span className="flex items-center gap-1">
+        {prevUrl ? (
+          <Link href={prevUrl} className="btn-icon-ghost h-8 w-8" title="Previous task (P)" aria-label="Previous task">
+            <IconChevronLeft size={15} />
+          </Link>
+        ) : null}
+        {nextUrl ? (
+          <Link href={nextUrl} className="btn-ghost btn-sm" title="Next task (N)">
+            Next <IconChevronRight size={14} />
+          </Link>
+        ) : null}
+        <Link href={listHref} className="btn-secondary btn-sm">
+          Back to the list
+        </Link>
+      </span>
     </div>
   );
 }

@@ -222,6 +222,10 @@ export async function enrollPeople(req: EnrollRequest, ctx: Omit<EngineContext, 
             startDate: c.startDate,
             status: 'ACTIVE',
             createdById: req.actor.type === 'USER' ? req.actor.id ?? null : null,
+            // The engine's clock, not the database's. In production they are the same instant;
+            // in a replay or a test they must agree, because the evidence window is measured
+            // from this timestamp and a mismatch silently turns completions into plain touches.
+            ...(ctx.now ? { createdAt: ctx.now } : {}),
           },
         });
         await logAudit(

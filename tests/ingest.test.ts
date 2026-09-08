@@ -61,6 +61,29 @@ describe('webhook ingestion', () => {
     expect(touch?.direction).toBe('OUTBOUND');
   });
 
+  it('measures the evidence window from the engine clock, not the wall clock', async () => {
+    // The enrollment above was created with now = 2026-09-06, and the notes are dated the 7th.
+    // If the row carried the real clock instead, the same note would count as a completion in
+    // the morning and a plain touch in the evening. Assert the stored instant follows the clock.
+    const e = await prisma.enrollment.findFirstOrThrow({ where: { personId: 'person-01' } });
+    expect(e.createdAt.toISOString()).toBe(at('2026-09-06').toISOString());
+
+    // Evidence from long before the enrollment existed is still refused.
+    const old = mock.addNote({
+      id: 'note-stale',
+      title: '[Email] Outbound email: hello again',
+      personIds: ['person-05'],
+      createdByMemberId: 'wm-alisa',
+      createdAt: iso('2026-08-01'),
+      updatedAt: iso('2026-08-01'),
+    });
+    await ingestEvent({ source: 'WEBHOOK', objectType: 'note', eventName: 'note.created', record: rawFromNote(old), now: at('2026-09-07') });
+    // Recorded as a touch, but it did not complete the step.
+    const email1 = await prisma.task.findFirstOrThrow({ where: { enrollment: { personId: 'person-05' }, label: 'Email 1' } });
+    expect(email1.state).toBe('PENDING');
+    expect(await prisma.touch.count({ where: { personId: 'person-05', externalId: 'note:note-stale:person:person-05' } })).toBe(1);
+  });
+
   it('a call note by the FO completes the call step; Call Notes count as calls', async () => {
     // Move person-15 (Leigh) to step 1 by completing step 0 through observed evidence + manual LinkedIn
     const email = mock.addNote({ title: '[Email] Outbound email: Harbor Media intro', personIds: ['person-15'], createdByMemberId: 'wm-leigh', createdAt: iso('2026-09-07'), updatedAt: iso('2026-09-07') });

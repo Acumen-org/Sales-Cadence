@@ -34,6 +34,15 @@ test('capture screens', async ({ page }) => {
   if (await call.isVisible().catch(() => false)) {
     await call.click();
     await shot(page, '05-call-outcome');
+    await page.keyboard.press('Escape');
+  }
+
+  // The overflow panel: ending a sequence and jumping to a step, in one place.
+  await page.goto('/tasks?tab=today');
+  const more = page.getByRole('button', { name: 'More' }).first();
+  if (await more.isVisible().catch(() => false)) {
+    await more.click();
+    await shot(page, '05b-task-more');
   }
 
   await page.goto('/people');
@@ -110,8 +119,6 @@ test('capture screens', async ({ page }) => {
 
   await page.goto('/activity');
   await shot(page, '23-activity');
-  await page.goto('/replies');
-  await shot(page, '24-replies');
   await page.goto('/settings?tab=rules');
   await shot(page, '25-settings-rules');
 });

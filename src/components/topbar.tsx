@@ -24,7 +24,6 @@ const SECTIONS: Array<{ match: RegExp; title: string }> = [
   { match: /^\/sequences/, title: 'Sequences' },
   { match: /^\/campaigns/, title: 'Campaigns' },
   { match: /^\/activity/, title: 'Activity' },
-  { match: /^\/replies/, title: 'Replies' },
   { match: /^\/reports/, title: 'Reports' },
   { match: /^\/settings/, title: 'Settings' },
 ];
@@ -182,6 +181,15 @@ function SearchDialog({ onClose }: { onClose: () => void }) {
 }
 
 function HelpPopover({ onClose, needsReview, isAdmin }: { onClose: () => void; needsReview: number; isAdmin: boolean }) {
+  // Escape closes it, like every other overlay in the app.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   return (
     <div className="fixed inset-0 z-40" onClick={onClose}>
       <div className="absolute right-6 top-16 w-80 rounded-2xl border border-line bg-white p-4 shadow-pop" onClick={(e) => e.stopPropagation()}>
