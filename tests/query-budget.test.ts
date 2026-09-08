@@ -5,6 +5,7 @@ import { buildHome } from '@/lib/home-query';
 import { accountDetail, listAccounts, myOwnershipCounts } from '@/lib/accounts-query';
 import { listActivity } from '@/lib/activity-query';
 import { listTasks } from '@/lib/tasks-query';
+import { getTaskBrief } from '@/lib/brief';
 import { SYSTEM_ACTOR } from '@/lib/audit';
 import { enrollPeople } from '@/lib/engine';
 import { upsertCompanyCache } from '@/lib/person-cache';
@@ -51,6 +52,7 @@ describe('query budget per page', () => {
   let b: Basics;
   let admin: SessionUser;
   let alisa: SessionUser;
+  let taskId: string;
 
   beforeAll(async () => {
     await resetDb();
@@ -62,6 +64,7 @@ describe('query budget per page', () => {
       { personIds: ['person-01', 'person-02', 'person-03'], sequenceId: b.sequence.id, podId: b.pods.Alisa.id, startDate: '2026-09-07', assignment: { mode: 'OWNER' }, actor: SYSTEM_ACTOR },
       { now: NOW },
     );
+    taskId = (await prisma.task.findFirstOrThrow({ where: { enrollment: { personId: 'person-01' } } })).id;
   });
 
   /** Every page, measured the same way twice: with a little data and with a lot. */
@@ -69,6 +72,9 @@ describe('query budget per page', () => {
     'home (senior)': () => buildHome(alisa, NOW),
     'home (admin)': () => buildHome(admin, NOW),
     tasks: () => listTasks(alisa, { tab: 'today' }, NOW),
+    // The task screen's right-hand panel: the heaviest read in the app, because it merges the
+    // person, their history, the emails and notes Twenty holds, and the sequence's own events.
+    'task brief': () => getTaskBrief(taskId, alisa),
     'accounts list': () => listAccounts(admin),
     'account detail': () => accountDetail('co-01', admin),
     'activity feed': () => listActivity({ limit: 60 }),

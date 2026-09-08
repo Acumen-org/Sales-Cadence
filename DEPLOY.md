@@ -25,9 +25,9 @@ Integration with Twenty is **read-mostly**: it reads people, notes, messages, ta
 
 ## Specs
 
-Three containers: `web`, `worker`, `db`. Measured with the demo dataset: **~370 MB total** at idle (web ~200 MB, worker ~120 MB, Postgres ~85 MB of private memory plus its shared buffers). Under real load budget ~1 GB.
+Three containers: `web`, `worker`, `db`. Measured with the demo dataset after serving 200 page renders: **~720 MB** across all three (Node ~450 MB for the web app and worker together, Postgres ~85 MB of private memory plus its shared buffers). Idle is lower; a working set does not shrink on its own after load. Budget ~1 GB.
 
-CPU is not the constraint. 200 page renders cost **2.3 seconds of CPU in total** — about 11 ms per page — and warm pages render in 8–75 ms. One vCPU has roughly 90 renders a second of headroom, which is far more than a team of FOs can generate. Every page issues a fixed handful of queries no matter how much data there is; a test enforces it (`tests/query-budget.test.ts`).
+CPU is not the constraint. 200 page renders cost **3.8 seconds of CPU in total**, about 19 ms per page, and warm pages render in 20–95 ms. One vCPU therefore has roughly 50 renders a second of headroom, far more than a team of FOs can generate. Every page issues a fixed number of queries no matter how much data there is, and a test enforces it (`tests/query-budget.test.ts`): the heaviest is the task screen's person panel at 18, unchanged when the row count triples.
 
 The peak is the **build**, not the running app. Compose builds with one worker and a 1536 MB heap ceiling, and skips type checking (run `pnpm typecheck` in CI instead), which keeps the build inside a 2 GB box. Left unconstrained, `next build` scales to CPU count and peaked at 3.5 GB on an 8-core machine.
 
