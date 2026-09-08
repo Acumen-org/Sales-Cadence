@@ -188,11 +188,12 @@ describe('webhook ingestion', () => {
     expect(await pendingTasks('person-11')).toHaveLength(0);
   });
 
-  it('a meeting time set on the person marks a meeting too', async () => {
-    const person = mock.updatePerson('person-32', { meetingAt: iso('2026-09-11', '13:00:00'), updatedAt: iso('2026-09-08', '12:00:00') });
+  it('a person update on its own is only a cache refresh: an opportunity is the meeting signal', async () => {
+    const person = mock.updatePerson('person-32', { tier: 'LEVEL_1', updatedAt: iso('2026-09-08', '12:00:00') });
     const r = await ingestEvent({ source: 'WEBHOOK', objectType: 'person', eventName: 'person.updated', record: rawFromPerson(person), now: at('2026-09-08') });
-    expect(r.result).toBe('meeting_from_meeting_time');
-    expect((await prisma.enrollment.findFirstOrThrow({ where: { personId: 'person-32' } })).status).toBe('MEETING');
+    expect(r.result).toBe('person_cached');
+    expect((await prisma.personCache.findUniqueOrThrow({ where: { id: 'person-32' } })).tier).toBe('LEVEL_1');
+    expect((await prisma.enrollment.findFirstOrThrow({ where: { personId: 'person-32' } })).status).not.toBe('MEETING');
   });
 
   it('Cadence notes and unknown actors are handled safely', async () => {

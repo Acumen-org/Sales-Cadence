@@ -10,17 +10,10 @@ function nowLocalValue(timezone: string): string {
   return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
 }
 
-/** Twenty gives an instant; the form wants "YYYY-MM-DDTHH:mm" in the viewer's clock. */
-function instantToLocalValue(at: Date, timezone: string): string {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(at);
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '00';
-  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
-}
-
 /**
- * `personId` pre-fills this form from a meeting Twenty already knows about: the recording link,
- * the time, the account and the attendee all come from the person record, so adding one is a
- * single click from the Meetings list or the person's panel.
+ * `personId` pre-fills this form from a recording Twenty already holds: the link, the account and
+ * the attendee come from the person record, so adding one is a single click from the Meetings
+ * list or the person's panel. The FO still says when it happened and pastes the transcript.
  */
 export default async function NewMeetingPage({ searchParams }: { searchParams: Promise<{ account?: string; personId?: string; url?: string }> }) {
   const user = await requireUser();
@@ -42,7 +35,7 @@ export default async function NewMeetingPage({ searchParams }: { searchParams: P
             initial={{
               title: person ? `Meeting - ${personName}${person.companyName ? ` (${person.companyName})` : ''}` : '',
               sourceUrl: url ?? person?.recordingUrl ?? person?.meetingUrl ?? '',
-              occurredAt: person?.meetingAt ? instantToLocalValue(person.meetingAt, user.timezone) : nowLocalValue(user.timezone),
+              occurredAt: nowLocalValue(user.timezone),
               durationMin: '',
               companyId: account ?? person?.companyId ?? '',
               attendees: person?.email ? `${personName} <${person.email}>` : personName,

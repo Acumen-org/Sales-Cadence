@@ -127,7 +127,6 @@ export function RulesForm({ rules }: { rules: Settings['rules'] }) {
         <div className="space-y-2">
           <Check name="companyReplyPausesColleagues" label="A reply from anyone at a company pauses colleagues at that company" checked={rules.companyReplyPausesColleagues} />
           <Check name="meetingOnOpportunityCreated" label="An Opportunity created for a person marks a meeting" checked={rules.meetingOnOpportunityCreated} />
-          <Check name="meetingOnMeetingTime" label="A meeting time set on the person in Twenty marks a meeting" checked={rules.meetingOnMeetingTime} />
           <Check name="exitOnBounce" label="A skip reason flagged as bounce ends the sequence (Bounced)" checked={rules.exitOnBounce} />
           <Check name="answeredCallIsReply" label="A call logged with an answered outcome counts as a reply and finishes the sequence" checked={rules.answeredCallIsReply} />
         </div>

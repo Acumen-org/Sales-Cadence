@@ -378,7 +378,7 @@ export async function markReplied(
   return { enrollment: result.enrollment, pausedColleagues: result.pausedColleagues, changed: result.changed };
 }
 
-/** Rule 3: meeting booked (an opportunity was created, or a meeting time was set in Twenty). */
+/** Rule 3: meeting booked (an opportunity was created for the person in Twenty). */
 export async function markMeeting(
   enrollmentId: string,
   opts: { at: Date; evidenceId?: string | null; actor: AuditActor; skipSync?: boolean },

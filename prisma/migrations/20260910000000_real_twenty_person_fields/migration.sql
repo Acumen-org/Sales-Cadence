@@ -1,6 +1,7 @@
 -- The person cache now mirrors the real Twenty person object rather than the fields we
 -- assumed. `eventSource` and `statusOfMeeting` do not exist in the workspace; `leadSource`
--- (multi-select) and `meetingAt` replace them, and `ownerMemberId` now holds `assignedToId`.
+-- (multi-select) replaces the first, nothing replaces the second, and `ownerMemberId` now holds
+-- `assignedToId`.
 
 -- DropIndex is not needed: no index referenced the dropped columns.
 ALTER TABLE "PersonCache" DROP COLUMN "eventSource";
@@ -33,7 +34,6 @@ ALTER TABLE "PersonCache" ADD COLUMN "nextActionDueDatePoc" TEXT;
 ALTER TABLE "PersonCache" ADD COLUMN "lastNote" TEXT;
 ALTER TABLE "PersonCache" ADD COLUMN "lastCallAt" TIMESTAMP(3);
 ALTER TABLE "PersonCache" ADD COLUMN "lastEmailAt" TIMESTAMP(3);
-ALTER TABLE "PersonCache" ADD COLUMN "meetingAt" TIMESTAMP(3);
 ALTER TABLE "PersonCache" ADD COLUMN "meetingUrl" TEXT;
 ALTER TABLE "PersonCache" ADD COLUMN "recordingUrl" TEXT;
 ALTER TABLE "PersonCache" ADD COLUMN "bookingId" TEXT;
@@ -43,7 +43,6 @@ ALTER TABLE "PersonCache" ADD COLUMN "createdByName" TEXT;
 CREATE INDEX "PersonCache_tier_idx" ON "PersonCache"("tier");
 CREATE INDEX "PersonCache_listCategory_idx" ON "PersonCache"("listCategory");
 CREATE INDEX "PersonCache_nextActionDueDate_idx" ON "PersonCache"("nextActionDueDate");
-CREATE INDEX "PersonCache_meetingAt_idx" ON "PersonCache"("meetingAt");
 
 -- Every cached person is stale now: the next sync refills the new columns.
 UPDATE "PersonCache" SET "syncedAt" = TIMESTAMP '1970-01-01 00:00:00';

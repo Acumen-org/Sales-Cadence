@@ -111,13 +111,11 @@ export const defaultTwentySchema = {
     /** Custom datetime: when we last emailed them. */
     lastEmailActivity: 'lastEmailActivity',
 
-    // --- meetings --------------------------------------------------------------
-    /** Custom datetime: the booked meeting. Set means a meeting exists. */
-    meetingTime: 'meetingTime',
-    /** Custom link: the join link for that meeting. */
-    meetingLink: 'meetingLink',
+    // --- recordings ------------------------------------------------------------
     /** Custom link: the recording of a sales call, playable in the Meetings section. */
     salesCallRecordingLink: 'salesCallRecordingLink',
+    /** Custom link: a meeting join link kept on the person. */
+    meetingLink: 'meetingLink',
     /** Custom text: the booking reference from the scheduler. */
     bookingId: 'bookingId',
 

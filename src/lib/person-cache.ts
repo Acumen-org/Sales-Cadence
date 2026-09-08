@@ -61,9 +61,8 @@ export function personToCacheData(p: TwentyPerson): Prisma.PersonCacheUncheckedC
     lastCallAt: date(p.lastCallAt),
     lastEmailAt: date(p.lastEmailAt),
 
-    meetingAt: date(p.meetingAt),
-    meetingUrl: p.meetingUrl,
     recordingUrl: p.recordingUrl,
+    meetingUrl: p.meetingUrl,
     bookingId: p.bookingId,
 
     createdBySource: p.createdBySource,

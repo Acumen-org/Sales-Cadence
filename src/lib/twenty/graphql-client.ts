@@ -204,9 +204,8 @@ export class TwentyGraphqlClient implements TwentyClient {
       // last touch and meetings
       p.latestCallActivity,
       p.lastEmailActivity,
-      p.meetingTime,
-      { field: p.meetingLink, sub: '{ primaryLinkUrl }' },
       { field: p.salesCallRecordingLink, sub: '{ primaryLinkUrl }' },
+      { field: p.meetingLink, sub: '{ primaryLinkUrl }' },
       p.bookingId,
       p.createdAt,
       p.updatedAt,

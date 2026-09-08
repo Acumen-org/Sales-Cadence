@@ -309,7 +309,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                   </div>
                 </Card>
 
-                <Card title="Next action and meetings, as Twenty holds them">
+                <Card title="Next action, as Twenty holds it">
                   <div className="p-4">
                     <KeyValue
                       items={[
@@ -320,7 +320,6 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                         { k: 'Last note', v: person.lastNote },
                         { k: 'Last call', v: person.lastCallAt ? formatInstant(person.lastCallAt, user.timezone) : null },
                         { k: 'Last email', v: person.lastEmailAt ? formatInstant(person.lastEmailAt, user.timezone) : null },
-                        { k: 'Meeting', v: person.meetingAt ? formatInstant(person.meetingAt, user.timezone) : null },
                         {
                           k: 'Meeting link',
                           v: person.meetingUrl ? (

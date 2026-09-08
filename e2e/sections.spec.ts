@@ -116,7 +116,7 @@ test('a meeting plays in the app with its transcript and an empty analysis panel
   // One external attendee, so it counts as booked this week.
   await page.goto('/meetings?scope=week');
   await expect(page.getByRole('link', { name: /E2E discovery call/ })).toBeVisible();
-  // The first table is the list of meetings in Cadence; "Booked in Twenty" is a second one.
+  // The first table is the list of meetings in Cadence; "Recordings in Twenty" is a second one.
   await expect(page.locator('table').first()).toContainText('external');
   await logout(page);
 });
@@ -224,7 +224,7 @@ test('the person record shows the real Twenty fields, grouped as Twenty groups t
   const main = page.locator('main');
 
   // The four groups the CRM record has, in that order.
-  for (const card of ['Contact details', 'Ownership', 'Classification', 'Next action and meetings, as Twenty holds them']) {
+  for (const card of ['Contact details', 'Ownership', 'Classification', 'Next action, as Twenty holds it']) {
     await expect(main.getByText(card, { exact: true })).toBeVisible();
   }
 
@@ -246,14 +246,15 @@ test('the person record shows the real Twenty fields, grouped as Twenty groups t
   await logout(page);
 });
 
-test('meetings Twenty already booked are offered for adding, pre-filled', async ({ page }) => {
+test('recordings Twenty holds are offered for adding, pre-filled', async ({ page }) => {
   await loginAs(page, 'Alisa');
   await page.goto('/meetings');
-  await expect(page.getByText('Booked in Twenty')).toBeVisible();
+  await expect(page.getByText('Recordings in Twenty')).toBeVisible();
   const row = page.locator('table').filter({ hasText: 'Dummy Four' }).first();
   await expect(row).toContainText('recording');
 
-  // Adding one starts from the person record: link, time, account and attendee are filled in.
+  // Adding one starts from the person record: link, account and attendee are filled in. The FO
+  // still says when it happened - Twenty has no meeting time and Cadence does not invent one.
   await page.goto('/meetings/new?personId=dummy-04');
   await expect(page.getByLabel('Title')).toHaveValue(/Dummy Four/);
   await expect(page.getByLabel('Recording or meeting link')).toHaveValue(/ForBiggerMeetings\.mp4/);

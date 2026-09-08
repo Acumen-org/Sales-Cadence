@@ -106,7 +106,7 @@ async function process(type: CanonicalObject, input: IngestInput, ctx: EngineCon
   const deleted = input.eventName.endsWith('.deleted') || input.eventName.endsWith('.destroyed');
   switch (type) {
     case 'person':
-      return handlePerson(normalizePerson(input.record, schema), deleted, ctx, settings);
+      return handlePerson(normalizePerson(input.record, schema), deleted, ctx);
     case 'company':
       return handleCompany(normalizeCompany(input.record, schema), deleted);
     case 'note':
@@ -171,7 +171,12 @@ async function handleCompany(company: TwentyCompany, deleted: boolean): Promise<
   };
 }
 
-async function handlePerson(person: TwentyPerson, deleted: boolean, ctx: EngineContext, settings: Settings): Promise<ProcessOutcome> {
+/**
+ * A person changed in Twenty: refresh the cache and honour consent. Nothing on the person is
+ * treated as evidence that a step happened or that a meeting was booked - that comes from
+ * notes, messages, mirrored tasks and opportunities.
+ */
+async function handlePerson(person: TwentyPerson, deleted: boolean, ctx: EngineContext): Promise<ProcessOutcome> {
   if (deleted) {
     await markPersonDeleted(person.id);
     const { exited } = await applyPersonFlags({ id: person.id, dnd: false, deletedAt: new Date().toISOString() }, ctx);
@@ -180,18 +185,6 @@ async function handlePerson(person: TwentyPerson, deleted: boolean, ctx: EngineC
   await upsertPersonCache(person);
   const { exited } = await applyPersonFlags(person, ctx);
   if (exited.length) return { result: 'dnd_exited', details: { exited } };
-
-  // A meeting time on the person is the workspace's own record that a meeting exists: the
-  // scheduler writes it, so it is evidence in its own right and does not wait for an
-  // opportunity to be created. The evidence id carries the timestamp, so a rebooking counts
-  // again while the same booking never counts twice.
-  if (settings.rules.meetingOnMeetingTime && person.meetingAt) {
-    const e = await prisma.enrollment.findFirst({ where: { personId: person.id, status: { in: [...OCCUPYING_STATUSES, 'REPLIED'] } } });
-    if (e) {
-      const r = await markMeeting(e.id, { at: ctx.now ?? new Date(), evidenceId: `person:${person.id}:meetingTime:${person.meetingAt}`, actor: ctx.actor, skipSync: ctx.skipSync });
-      if (r.changed) return { result: 'meeting_from_meeting_time', details: { enrollmentId: e.id, meetingAt: person.meetingAt } };
-    }
-  }
   return { result: 'person_cached' };
 }
 

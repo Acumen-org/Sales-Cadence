@@ -93,7 +93,7 @@ Every assumption made while building Cadence, grouped by area. Each entry says w
 - **Stale evidence** older than `enrollment.createdAt - evidenceGraceDays` (default 1 day) is a touch, not a completion, so a 30-day reconcile cannot complete steps with pre-enrollment emails.
 - **Cadence's own notes** (title starts with `matching.cadencePrefix`, default `[Cadence]`) are ignored on the way back in.
 - **Mirrored Twenty tasks**: a Twenty `task.updated` whose id is a mirrored task and whose status is the configured "done" value completes the Cadence task with source `OBSERVED_TWENTY_TASK`; deleting a mirrored task in Twenty just unlinks it. Tasks Cadence did not create are ignored.
-- **Meetings** come from `opportunity.created` (point of contact enrolled, including already-replied enrollments) and from `person.meetingTime` being set, which is what the scheduler writes. Both are settings. The evidence id carries the meeting timestamp, so a rebooking counts again while the same booking never counts twice.
+- **Meetings** come from `opportunity.created` (point of contact enrolled, including already-replied enrollments), which is a setting. Nothing on the person record is treated as meeting evidence: Twenty has a `meetingTime` field and the team does not use it, so Cadence does not read it.
 - **Company reply rule** (`companyReplyPausesColleagues`, default off): a reply pauses other ACTIVE enrollments at the same company with `pauseReason colleague_replied:<personId>`; a Senior FO resumes them by hand.
 - **Webhook security**: HMAC-SHA256 signature over `timestamp:body` (`X-Twenty-Webhook-Signature` / `X-Twenty-Webhook-Timestamp`, plain body HMAC accepted as fallback) when `TWENTY_WEBHOOK_SECRET` is set; otherwise a shared `?token=` when `CADENCE_WEBHOOK_TOKEN` is set; otherwise open (private network only). Payload parsing accepts `eventName`/`eventType`, `record`/`data`, and `objectMetadata.nameSingular`.
 - **Reconcile** refreshes the person cache first (so dnd flips and new people are known), then replays notes, messages, opportunities and tasks updated in the window through the same pipeline with `source = RECONCILE`. It runs nightly in the worker at `RECONCILE_HOUR`, on demand from Settings > Twenty, and from `pnpm reconcile [days]`.
@@ -204,7 +204,7 @@ Reworked from an Outreach list-view screenshot supplied by the team, as a design
 - **The greeting uses the signed-in user's first name**, and the date-plus-counts line is gone: the counts are in the tiles below it, and repeating them in prose was noise.
 - **Weeks run Sunday to Saturday in the user's own timezone**, everywhere. `weekRange` is the single implementation, so the two week boxes and the team table cannot disagree.
 - **"Replies this week" means inbound email that Twenty synced** for people the signed-in user is responsible for - which is what "someone assigned to a BD replied" looks like once it reaches the CRM. It is not the same as the team table's Replies column, which counts enrollments the FO finished as replied (an answered call counts there, and it is their number to hit).
-- **"Meetings booked this week" is decided by attendee domains.** A meeting counts when somebody outside our own domains attended; the domain list (`acumen-strategy.com`, `prairie-hill.com`, `glynac.ai`, `acubooth.com`) is an admin setting, and it is re-applied on read, so editing it is retroactive in both directions. The stored per-attendee flag is only a cache, used when an attendee was recorded by name with no address. Sequence-detected meetings (an opportunity or `meetingTime` in Twenty) are included alongside recorded ones.
+- **"Meetings booked this week" is decided by attendee domains.** A meeting counts when somebody outside our own domains attended; the domain list (`acumen-strategy.com`, `prairie-hill.com`, `glynac.ai`, `acubooth.com`) is an admin setting, and it is re-applied on read, so editing it is retroactive in both directions. The stored per-attendee flag is only a cache, used when an attendee was recorded by name with no address. Sequence-detected meetings (an opportunity in Twenty) are included alongside recorded ones.
 - **Each week box shows only the latest row**, with the count on an arrow into the full list, because the point of the box is "is there something waiting", not a second inbox.
 - **The utility icon cluster now appears only on Tasks.** Search, notifications and the channel shortcuts exist for working through the day; on every other section they were decoration. The help button stays everywhere (Ctrl+K still opens search from any page). Both primary buttons were removed from the chrome: the section's own action lives inside its view header, where the Outreach reference puts it.
 
@@ -311,12 +311,13 @@ so each got its own place rather than being flattened into one list:
 - **Last touch** - `latestCallActivity`, `lastEmailActivity`, maintained by Twenty's own
   automations for 246 and 226 people respectively - joins the person's history, but only where no
   Cadence touch or synced email already covers that moment, so nothing is shown twice.
-- **Meetings** - `meetingTime`, `meetingLink`, `salesCallRecordingLink`, `bookingId` - do two
-  things. A meeting time set on the person is now what marks a booked meeting in the engine, and
-  the Meetings section grew a **"Booked in Twenty"** list: the people whose record carries a
-  meeting, each with its join link and a one-click "Add with transcript" that pre-fills the form
-  from the person. Cadence does not create a Meeting row by itself, because a meeting here
-  carries attendees and a transcript that only a human can supply.
+- **Recordings** - `salesCallRecordingLink`, `meetingLink`, `bookingId` - give the Meetings
+  section a **"Recordings in Twenty"** list: the people whose record carries a recording link,
+  each with a one-click "Add with transcript" that pre-fills the form from the person. Cadence
+  does not create a Meeting row by itself, because a meeting here carries attendees and a
+  transcript that only a human can supply. Twenty's `meetingTime` is not read at all: the team
+  does not use it, so nothing depends on it and a meeting is recorded the way every other one
+  is - an FO adds it, or an opportunity appears.
 - **Contact details** also gained `additionalNumber`, `additionalEmails` and `xLink`, and
   `createdBy` so the record can say who added the person and how (`MANUAL`, `EMAIL`, `API`,
   `CALENDAR`).
@@ -364,13 +365,13 @@ contact", so repeating it in the warnings line was noise.
 
 ### What this cost
 
-- `PersonCache` gained 30 columns and four indexes (`tier`, `listCategory`, `nextActionDueDate`,
-  `meetingAt`), and the migration stamps every cached person as stale so the next sync refills
+- `PersonCache` gained 29 columns and three indexes (`tier`, `listCategory`,
+  `nextActionDueDate`), and the migration stamps every cached person as stale so the next sync refills
   them. `eventSource` and `statusOfMeeting` are dropped.
 - The task panel went from 18 queries to 20: one for the pod's name, one for the owner's. Both
   are single lookups, and the query-budget test still holds every page under 30 whatever the row
   count.
-- The GraphQL person selection went from 17 fields to 44. All of the new ones are optional, and
+- The GraphQL person selection went from 17 fields to 43. All of the new ones are optional, and
   the client already trims a field the workspace does not have out of its selection set, so a
   workspace with only some of them works and `verify:schema` says which are missing. It now also
   prints each select's option values against the ones the mapping expects, which is how a renamed

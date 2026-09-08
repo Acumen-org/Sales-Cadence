@@ -79,7 +79,6 @@ export async function saveRulesSettingsAction(formData: FormData): Promise<Actio
     clockMode: String(formData.get('clockMode') ?? 'shift'),
     companyReplyPausesColleagues: bool(formData.get('companyReplyPausesColleagues')),
     meetingOnOpportunityCreated: bool(formData.get('meetingOnOpportunityCreated')),
-    meetingOnMeetingTime: bool(formData.get('meetingOnMeetingTime')),
     internalDomains: list(formData.get('internalDomains')).map((d) => d.replace(/^.*@/, '').replace(/^\/+|\/+$/g, '')),
     stalledDays: Number(formData.get('stalledDays')),
     reconcileLookbackDays: Number(formData.get('reconcileLookbackDays')),

@@ -77,11 +77,10 @@ export type TwentyPerson = {
   lastCallAt: string | null;
   lastEmailAt: string | null;
 
-  // --- meetings --------------------------------------------------------------
-  meetingAt: string | null;
-  meetingUrl: string | null;
+  // --- recordings ------------------------------------------------------------
   /** Recording of a sales call; the Meetings section can play this. */
   recordingUrl: string | null;
+  meetingUrl: string | null;
   bookingId: string | null;
 
   // --- provenance ------------------------------------------------------------

@@ -183,11 +183,10 @@ export function TaskBriefPanel({ brief, timezone }: { brief: TaskBrief; timezone
           </Section>
         ) : null}
 
-        {/* A meeting the scheduler wrote onto the person. The recording plays in Meetings. */}
-        {p.meetingAt || p.meetingUrl || p.recordingUrl ? (
-          <Section title="Meeting in Twenty">
-            {p.meetingAt ? <p className="text-[13px] font-medium text-ink-900">{formatInstant(p.meetingAt, timezone)}</p> : null}
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {/* Links Twenty keeps on the person. The recording plays in the Meetings section. */}
+        {p.recordingUrl || p.meetingUrl ? (
+          <Section title="Links in Twenty">
+            <div className="flex flex-wrap gap-1.5">
               {p.meetingUrl ? (
                 <a href={p.meetingUrl} target="_blank" rel="noreferrer" className="chip-muted">
                   <IconExternal size={13} /> Join link
