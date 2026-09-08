@@ -89,7 +89,7 @@ test('task flow: complete an email, log a call with an outcome, skip with a boun
   await page.goto(`/tasks?tab=${tab}&type=LINKEDIN`);
   await page.getByRole('link', { name: new RegExp(firstPerson) }).first().click();
   await page.getByRole('button', { name: 'Done', exact: true }).click();
-  await expect(page.getByText(/Done\./)).toBeVisible();
+  await expect(page.getByText(/Done\./).first()).toBeVisible();
 
   // The call is now upcoming (day 3). Log it with an outcome.
   await page.goto('/tasks?tab=upcoming&type=CALL');
@@ -131,11 +131,11 @@ test('answered call finishes the sequence as replied and shows on Home', async (
   const person = (await link.locator('span.font-medium').first().textContent())!.trim();
   await link.click();
   await page.getByRole('button', { name: 'Done', exact: true }).click();
-  await expect(page.getByText(/Done\./)).toBeVisible();
+  await expect(page.getByText(/Done\./).first()).toBeVisible();
   await page.goto(`/tasks?tab=${tab}&type=LINKEDIN`);
   await page.getByRole('link', { name: new RegExp(person) }).first().click();
   await page.getByRole('button', { name: 'Done', exact: true }).click();
-  await expect(page.getByText(/Done\./)).toBeVisible();
+  await expect(page.getByText(/Done\./).first()).toBeVisible();
   await page.goto('/tasks?tab=upcoming&type=CALL');
   await page.getByRole('link', { name: new RegExp(person) }).first().click();
   await page.getByRole('button', { name: 'Log call' }).click();

@@ -48,8 +48,26 @@ export function parseMeetingLink(raw: string): ParsedMeetingLink {
   const host = url.hostname.toLowerCase();
   const path = url.pathname;
 
+  /**
+   * A known provider always wins over the file extension. SharePoint and Drive links often end
+   * in `.mp4`, but they are not fetchable media: they need the provider's own player and the
+   * viewer's session. Feeding one to a <video> element gives a broken player, not a recording.
+   */
+  const knownHost =
+    host.endsWith('.sharepoint.com') ||
+    host === 'web.microsoftstream.com' ||
+    host.endsWith('.svc.ms') ||
+    host === 'drive.google.com' ||
+    host === 'docs.google.com' ||
+    host === 'meet.google.com' ||
+    host.endsWith('teams.microsoft.com') ||
+    host.endsWith('teams.live.com') ||
+    host.endsWith('zoom.us') ||
+    host.endsWith('zoom.com') ||
+    host.endsWith('zoomgov.com');
+
   // Direct media file: play it ourselves.
-  if (MEDIA_EXT.test(path)) {
+  if (!knownHost && MEDIA_EXT.test(path)) {
     return { provider: 'FILE', embedUrl: null, mediaUrl: url.toString(), isJoinLink: false, label: 'Media file', note: null };
   }
 

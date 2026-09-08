@@ -18,6 +18,20 @@ describe('parseMeetingLink', () => {
     expect(r.isJoinLink).toBe(false);
   });
 
+  it('uses the provider player for a SharePoint or Drive link that ends in .mp4', () => {
+    // These need the viewer's Microsoft or Google session; a <video> element would just break.
+    const sp = parseMeetingLink('https://acme.sharepoint.com/sites/rec/Shared%20Documents/call.mp4');
+    expect(sp.provider).toBe('SHAREPOINT');
+    expect(sp.mediaUrl).toBeNull();
+    expect(sp.embedUrl).toContain('embed=true');
+    const drive = parseMeetingLink('https://drive.google.com/file/d/abc/view/recording.mp4');
+    expect(drive.provider).toBe('DRIVE');
+    expect(drive.mediaUrl).toBeNull();
+    const zoom = parseMeetingLink('https://acme.zoom.us/rec/download/thing.mp4');
+    expect(zoom.provider).toBe('ZOOM');
+    expect(zoom.mediaUrl).toBeNull();
+  });
+
   it('does not add embed=true twice', () => {
     const r = parseMeetingLink('https://acme.sharepoint.com/x/y?embed=true');
     expect(r.embedUrl!.match(/embed=true/g)).toHaveLength(1);
