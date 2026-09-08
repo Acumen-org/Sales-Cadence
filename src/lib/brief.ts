@@ -106,8 +106,12 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
 
   const currentSteps = parseSteps(enrollmentFull.sequenceVersion.steps);
   const activeSteps = enrollmentFull.sequence.activeVersion ? parseSteps(enrollmentFull.sequence.activeVersion.steps) : currentSteps;
-  const taskVersion = await prisma.sequenceVersion.findUnique({ where: { id: task.sequenceVersionId } });
-  const taskSteps = taskVersion ? parseSteps(taskVersion.steps) : currentSteps;
+  // Usually the task was generated from the version the enrollment is on, and it is already
+  // loaded. Only fetch when they differ, which happens after the sequence is edited mid-run.
+  const taskSteps =
+    task.sequenceVersionId === enrollmentFull.sequenceVersionId
+      ? currentSteps
+      : parseSteps((await prisma.sequenceVersion.findUnique({ where: { id: task.sequenceVersionId } }))?.steps ?? enrollmentFull.sequenceVersion.steps);
   const step = taskSteps.find((s) => s.id === task.stepId) ?? taskSteps[task.stepIndex] ?? null;
   const actionDef = step?.actions.find((a) => a.id === task.actionId) ?? step?.actions[task.actionIndex];
 
