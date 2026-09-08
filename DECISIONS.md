@@ -321,6 +321,11 @@ so each got its own place rather than being flattened into one list:
   `createdBy` so the record can say who added the person and how (`MANUAL`, `EMAIL`, `API`,
   `CALENDAR`).
 
+Two columns of the export are deliberately not carried: `Phones / Additional Phones` (one record
+in 934, and the separate `additionalNumber` field is what the team actually uses) and
+`Created by / Context`, which holds only the mailbox provider. Everything else in the export has
+a home.
+
 ### The invented stage is gone
 
 The People list used to show a stage Cadence guessed from its own state - Cold, Approaching,
@@ -365,7 +370,7 @@ contact", so repeating it in the warnings line was noise.
 - The task panel went from 18 queries to 20: one for the pod's name, one for the owner's. Both
   are single lookups, and the query-budget test still holds every page under 30 whatever the row
   count.
-- The GraphQL person selection went from 17 fields to 47. All of the new ones are optional, and
+- The GraphQL person selection went from 17 fields to 44. All of the new ones are optional, and
   the client already trims a field the workspace does not have out of its selection set, so a
   workspace with only some of them works and `verify:schema` says which are missing. It now also
   prints each select's option values against the ones the mapping expects, which is how a renamed

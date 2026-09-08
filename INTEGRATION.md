@@ -160,7 +160,7 @@ Twenty mode: graphql (https://twenty.example.com)
 Introspecting...
 Source: metadata, 31 objects
 
-✓ person (people): 47/47 fields ok
+✓ person (people): 44/44 fields ok
   podOwner options in Twenty: ALISA, LEIGH, ANDREW, KARSON, DANIEL, RIA
   i options without a Cadence pod yet: KARSON, DANIEL, RIA (create them in Settings > Users and pods)
   dnd: DO_NOT_DISTURB
