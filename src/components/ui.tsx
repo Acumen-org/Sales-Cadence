@@ -135,7 +135,12 @@ function toneFor(seed: string) {
 }
 
 export function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
+  // Only word characters count, so "Company B - discovery (scheduled)" reads CD, not "C(".
+  const parts = name
+    .trim()
+    .split(/[\s.,/\\|_-]+/)
+    .map((w) => w.replace(/[^\p{L}\p{N}]/gu, ''))
+    .filter(Boolean);
   if (!parts.length) return '?';
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();

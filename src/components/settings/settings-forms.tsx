@@ -117,6 +117,12 @@ export function RulesForm({ rules }: { rules: Settings['rules'] }) {
             <input name="meetingStatusValues" defaultValue={rules.meetingStatusValues.join(', ')} className="w-full" />
           </Field>
         </div>
+        <Field
+          label="Our own email domains"
+          hint="Comma separated. A meeting counts as booked only when someone outside these domains attends. Subdomains are covered."
+        >
+          <input name="internalDomains" defaultValue={rules.internalDomains.join(', ')} className="w-full" />
+        </Field>
         <div className="space-y-2">
           <Check name="companyReplyPausesColleagues" label="A reply from anyone at a company pauses colleagues at that company" checked={rules.companyReplyPausesColleagues} />
           <Check name="meetingOnOpportunityCreated" label="An Opportunity created for a person marks a meeting" checked={rules.meetingOnOpportunityCreated} />

@@ -173,3 +173,64 @@ Reworked from an Outreach list-view screenshot supplied by the team, as a design
 - **Fonts** stay on the system stack (Inter first if installed). No webfont download, so the app still works offline and on an air-gapped server.
 - **Verification is visual, not assumed.** `pnpm screens` builds the app, seeds the dummy workspace and captures every screen to `.screens/` with Playwright; the layout problems fixed this round were all found by looking at those captures: a three-pane task layout that crushed the middle pane at 1280px, badges wrapping onto two lines, a clipped row-action column, a duplicated "start task flow" button, the template shown twice (task pane and brief), and raw audit JSON leaking into the person timeline (now formatted in plain language by `audit-format.ts`).
 - **Demo data**: each pod now has an established campaign (a week old, so Overdue and mid-sequence states exist) *and* one starting today, so the Tasks screen every FO opens is never empty. Four more dummy people were added for the fresh campaigns.
+
+## Meetings, accounts, activity, and a 1-CPU budget (round 5)
+
+### Meetings and the analysis seam
+
+- **What can actually be played inside the app** decided the design, rather than a promise of "plays everything". `src/lib/meetings/providers.ts` classifies a pasted link: a direct media file (`.mp4`, `.webm`, ...) plays in a `<video>` element that Cadence controls; SharePoint / OneDrive / Microsoft Stream (where Teams recordings land) and Google Drive (where Meet recordings land) allow framing, so they are embedded, with `embed=true&nav=false` added for the SharePoint player; Zoom's recording pages send `X-Frame-Options`, so they open in a new tab; Teams and Meet *join* links are not recordings at all. Each case renders with the reason on screen, so nobody is left staring at a blank frame wondering what broke.
+- **Transcripts are parsed, not just displayed.** One parser handles WebVTT, SRT and plain text, including the `<v Speaker>` voice spans Teams writes, the numbered blocks SRT uses, and the `[00:01:02] Name:` lines people paste from Zoom or Otter. Consecutive cues from the same speaker are merged so the panel reads as a conversation. When Cadence owns the player, clicking a line seeks to it and the current line highlights as it plays.
+- **Analysis is an interface with nothing behind it yet, on purpose.** `MeetingAnalysis` is a defined shape (outcome, key points with timestamps, next steps, open questions, risks, competitors mentioned, sentiment, talk-time share, free-form sections, model name, confidence) and `MeetingAnalyzer` is a two-method interface. The only implementation today is `LocalStatsAnalyzer`, which computes talk-time share from the transcript and nothing else. The panel says so and lists what will appear when a model is connected. Wiring an open model later means writing one class and calling `setMeetingAnalyzer`; no page, action or table changes.
+- **Analysis is never triggered by a page load.** It runs from a button and stores its result, because a model call is slow and may cost money. A changed transcript clears the stored analysis rather than leaving a stale one attached.
+- **A meeting is Cadence's own record, not a Twenty object.** Twenty has no recording object to sync, and inventing one would put Cadence in charge of data the CRM cannot see. Meetings link to a cached company so they appear on the account timeline, and attendees link to cached people and to Cadence users where the address matches.
+
+### Accounts and the relationship map
+
+- **An account is a Twenty company; the relationship layer is Cadence's.** Who reports to whom (`reportsToId`), each contact's stance (`accountRole`: champion / supporter / neutral / detractor / unknown) and a free note are stored on the cached person and never written back, because Twenty has no field for them and guessing one would corrupt the CRM. A refresh from Twenty leaves them alone.
+- **The chart is always a forest, so nobody vanishes.** A manager who is not in this account, is the person themselves, or would close a loop is treated as "no manager", and only the edge that closes a loop is cut - the branch under it keeps its shape. Roots with nobody under them are listed separately as "unplaced" so a chart of twenty singletons does not look like an org structure. The save action refuses a loop up front with a plain message.
+- **One timeline per account, merged from four sources**: touches (emails, calls, LinkedIn), meetings, completed tasks and sequence state changes, all rendered in the same plain language as the person timeline and the activity feed.
+
+### Activity
+
+- **Two sources, one feed**: the audit log (who changed what) and touches (what was actually sent or received). Administration is excluded by design - settings changes, user and pod management, and logins - because the section answers "what is the team doing", and a settings edit is not outreach.
+- **The cursor carries the last row's id, not just a timestamp.** Seeded and imported rows routinely share a timestamp; a timestamp-only cursor with `<` silently drops every other row on that second. The cursor is `<instant>|<id>`, the query is inclusive, and the page resumes after that exact row.
+
+### Per-user views
+
+- **Ownership means two things and both count.** An account is "mine" if I own it in Twenty *or* I work anyone in it; a relationship is "mine" if I own the person in Twenty *or* I am the FO on their enrollment. Owning an account with nobody in it still counts as an account. Home tiles, the Accounts "Mine" filter and People `owner=mine` all use the same definition.
+
+### Home
+
+- **The greeting uses the signed-in user's first name**, and the date-plus-counts line is gone: the counts are in the tiles below it, and repeating them in prose was noise.
+- **Weeks run Sunday to Saturday in the user's own timezone**, everywhere. `weekRange` is the single implementation, so the two week boxes and the team table cannot disagree.
+- **"Replies this week" means inbound email that Twenty synced** for people the signed-in user is responsible for - which is what "someone assigned to a BD replied" looks like once it reaches the CRM. It is not the same as the team table's Replies column, which counts enrollments the FO finished as replied (an answered call counts there, and it is their number to hit).
+- **"Meetings booked this week" is decided by attendee domains.** A meeting counts when somebody outside our own domains attended; the domain list (`acumen-strategy.com`, `prairie-hill.com`, `glynac.ai`, `acubooth.com`) is an admin setting, and it is re-applied on read, so editing it is retroactive in both directions. The stored per-attendee flag is only a cache, used when an attendee was recorded by name with no address. Sequence-detected meetings (an opportunity or `statusOfMeeting` in Twenty) are included alongside recorded ones.
+- **Each week box shows only the latest row**, with the count on an arrow into the full list, because the point of the box is "is there something waiting", not a second inbox.
+- **The utility icon cluster now appears only on Tasks.** Search, notifications and the channel shortcuts exist for working through the day; on every other section they were decoration. The help button stays everywhere (Ctrl+K still opens search from any page). Both primary buttons were removed from the chrome: the section's own action lives inside its view header, where the Outreach reference puts it.
+
+### Running on one CPU and under 2 GB
+
+- **Measured, not asserted.** Idle with the demo workspace: ~370 MB across web, worker and Postgres. After 200 page renders: 2.3 s of CPU in total, about 11 ms per render, and warm renders of 8-75 ms. On a 1 vCPU box that is roughly 90 renders a second of headroom.
+- **A query budget is enforced by a test.** `tests/query-budget.test.ts` counts the statements each page issues, then triples the data and requires the count not to move: home 19, account detail 17, accounts list 7, tasks 6, activity 6, ownership tiles 3, unchanged at 3x the rows. That is what stops a per-row lookup creeping back in.
+- **The optimisations that mattered** were structural, not micro: Home's nine per-channel counts became one indexed read bucketed in memory; the team table went from five queries per FO to four grouped queries for the whole team; the accounts list aggregates in four `groupBy`s plus one raw query for last touch; the activity feed resolves audit subjects in six batched lookups instead of one per row.
+- **Prisma's default pool is the biggest footprint trap.** It is `cores * 2 + 1`, so on a developer machine a single-user app opened 22 Postgres backends (176 MB of private memory). The launcher and Compose now set `connection_limit` explicitly - 6 for the web app, 3-4 for the worker - which cut it to 8 backends and 84 MB.
+- **Postgres is tuned small** in Compose (`shared_buffers=192MB`, `work_mem=8MB`, `effective_cache_size=512MB`, `jit=off`, `max_connections=40`), and both Node processes get hard heap ceilings (512 MB web, 320 MB worker). JIT off matters: on a 1-vCPU box it costs more to compile a plan than to run it.
+- **The build is the memory peak, not the app.** `next build` is capped to one worker thread with a 1536 MB heap, and type checking is done by `pnpm typecheck` / CI rather than inside the build, where it roughly doubles peak memory. The Dockerfile prunes to production dependencies afterwards and then asserts that what the entrypoint needs (Next, Prisma, tsx, the build id) actually survived the prune.
+
+### Postgres 18 and Twenty 1.23
+
+- **Postgres 18 is verified, not assumed**: the whole suite runs against an embedded PostgreSQL 18.4, and Compose pins `postgres:18-alpine`. Nothing in the schema or queries uses anything newer than PG 14 features, so 16 and 17 also work.
+- **Twenty 1.23** is what the GraphQL client and the metadata introspection were written against. `pnpm verify:schema` reads the live workspace and reports any field in `twenty-schema.ts` that does not exist, before anything is written.
+- **Company changes now sync instantly too.** A `company.*` webhook updates the account cache immediately (name, owner, industry, size, city, LinkedIn), so renaming a firm in Twenty is reflected here at once rather than at the nightly refresh; deletion tombstones the account instead of dropping its history.
+
+### What the tests found this round
+
+Every item here was a real defect caught by a new test or by reading the captured screens, not a hypothetical:
+
+- The generated migration for this round had Prisma's `package.json#prisma is deprecated` warning captured at the top of the SQL file, because it was produced by redirecting `migrate diff` to a file. Every fresh deploy would have failed on `syntax error at or near "warn"`.
+- The transcript parser dropped the speaker for every WebVTT cue: the pattern required a `Name:` prefix even when a `<v Name>` span was present, so nothing merged and talk-time was all "Unknown". Single-letter speaker labels were also rejected.
+- `buildOrgTree` detached whole branches on any cycle (walking up from the node itself, so anyone below a loop lost their parent), and left a person with a dangling manager as a lone root instead of listing them as unplaced.
+- `display: contents` on the fieldset inside `ActionForm` silently cancelled every `space-y-*` on the form, because the fieldset was the form's only child. Every settings form was rendering with no gaps between fields.
+- Re-checking attendee externality with `stored || computed` made the domain setting retroactive in one direction only: adding a domain could never *remove* a meeting from the count.
+- Initials for a name like "Company B - discovery (scheduled)" came out as "D(" because punctuation counted as a word.
+- The relationship editor's labels were not associated with their controls.

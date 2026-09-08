@@ -15,7 +15,10 @@ import path from 'node:path';
 const root = process.cwd();
 const port = Number.parseInt(process.env.PORT ?? '3100', 10);
 const dbPort = Number.parseInt(process.env.DEV_DB_PORT ?? '5434', 10);
-const databaseUrl = `postgresql://postgres:postgres@localhost:${dbPort}/cadence`;
+// connection_limit matters: Prisma's default pool is (cores * 2 + 1), which on a big desktop
+// opens dozens of Postgres backends for a single-user app. Six is plenty for the web app.
+const databaseUrl = `postgresql://postgres:postgres@localhost:${dbPort}/cadence?connection_limit=6&pool_timeout=20`;
+const workerDatabaseUrl = `postgresql://postgres:postgres@localhost:${dbPort}/cadence?connection_limit=3&pool_timeout=20`;
 const isWin = process.platform === 'win32';
 const bin = (name: string) => path.join(root, 'node_modules', '.bin', isWin ? `${name}.cmd` : name);
 const log = (msg: string) => console.log(`[cadence] ${msg}`);
@@ -150,7 +153,7 @@ async function main() {
       void shutdown(code ?? 1);
     }
   });
-  const worker = spawn(process.execPath, [tsxBin, 'src/worker/index.ts'], { stdio: 'inherit', env });
+  const worker = spawn(process.execPath, [tsxBin, 'src/worker/index.ts'], { stdio: 'inherit', env: { ...env, DATABASE_URL: workerDatabaseUrl } });
   children.push(worker);
 
   await waitForHttp(`http://localhost:${port}/api/health`, 120_000);

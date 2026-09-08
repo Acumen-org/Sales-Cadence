@@ -98,10 +98,10 @@
   }
   /* Square icon button, as in the top bar and table toolbars. */
   .btn-icon {
-    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-line bg-white text-ink-500 transition hover:border-ink-300 hover:text-ink-700;
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-line bg-white text-ink-600 transition hover:border-ink-300 hover:text-ink-900;
   }
   .btn-icon-ghost {
-    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-transparent text-ink-500 transition hover:bg-brand-50 hover:text-brand-700;
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-transparent text-ink-600 transition hover:bg-brand-50 hover:text-brand-700;
   }
   .btn-icon-primary {
     @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-600 text-white transition hover:bg-brand-700;

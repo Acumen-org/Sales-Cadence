@@ -76,7 +76,22 @@ export function normalizePerson(raw: Raw, s: TwentySchema): TwentyPerson {
 
 export function normalizeCompany(raw: Raw, s: TwentySchema): TwentyCompany {
   const domain = obj(raw[s.company.domainName]);
-  return { id: String(raw.id), name: str(raw[s.company.name]) ?? '', domain: str(domain.primaryLinkUrl), updatedAt: iso(raw[s.company.updatedAt] ?? raw.updatedAt) };
+  const address = obj(raw[s.company.address]);
+  const linkedin = obj(raw[s.company.linkedinLink]);
+  const employees = raw[s.company.employees];
+  return {
+    id: String(raw.id),
+    name: str(raw[s.company.name]) ?? '',
+    domain: str(domain.primaryLinkUrl),
+    ownerMemberId: str(raw[s.company.accountOwnerId]) ?? str(obj(raw[s.company.accountOwner]).id),
+    industry: str(raw[s.company.industry]),
+    employees: typeof employees === 'number' ? employees : Number.isFinite(Number(employees)) && employees !== null && employees !== '' ? Number(employees) : null,
+    city: str(address.addressCity) ?? str(raw.city),
+    linkedinUrl: str(linkedin.primaryLinkUrl),
+    updatedAt: iso(raw[s.company.updatedAt] ?? raw.updatedAt),
+    deletedAt: str(raw[s.company.deletedAt] ?? raw.deletedAt),
+    raw,
+  };
 }
 
 export function normalizeWorkspaceMember(raw: Raw, s: TwentySchema): TwentyWorkspaceMember {

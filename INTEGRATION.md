@@ -31,6 +31,7 @@ In Twenty: **Settings > Developers > Webhooks > Create webhook**.
   - `task` (mirrored Cadence tasks marked done in Twenty)
   - `opportunity` (meeting booked)
   - `person` (dnd flips, deletions, `statusOfMeeting`, cache updates)
+  - `company` (account renames, owner changes, industry / size / city / LinkedIn, deletions - keeps the Accounts section current without waiting for the nightly refresh)
 
   If your Twenty only offers "all objects", that is fine: Cadence ignores objects it does not track.
 
@@ -135,7 +136,11 @@ Writes, and only these:
 
 Never: person, company or opportunity fields (`dnd`, `podOwner`, emails, stages...), notes or tasks Cadence did not create, messages. Opt-out and bad-data flags set in Cadence stay in Cadence; set `dnd` in Twenty yourself if it should apply everywhere. Every write appears in **Settings > Activity log > Writes to Twenty**; `CADENCE_DRY_RUN=true` logs them without writing.
 
-Sync is immediate in both directions: webhooks are processed as Twenty sends them, every Cadence write happens right after the action that caused it, and opening a person in Cadence re-reads that person from Twenty. The nightly reconcile only catches anything a webhook missed.
+The relationship layer is Cadence's own and is never written back, because Twenty has no field for it: who reports to whom, each contact's stance on the account, the relationship note, and everything about meetings (the recording link, the transcript and any analysis). Meetings link to a Twenty company so they show on that account's timeline; they are not created in Twenty.
+
+Sync is immediate in both directions: webhooks are processed as Twenty sends them (people, companies, notes, messages, tasks and opportunities), every Cadence write happens right after the action that caused it, and opening a person in Cadence re-reads that person from Twenty. An account page has a **Sync from Twenty** button that pulls the company and its people on demand. The nightly reconcile only catches anything a webhook missed.
+
+Tested against **Twenty 1.23** and **Postgres 18**.
 
 ## Pods follow Twenty
 
@@ -157,5 +162,6 @@ Which FOs work a pod, and who can log in, is Cadence configuration (Settings > U
 | Note title regexes | Settings > Rules and matching | `^\[Email\]\s*Outbound email`, `^\[CALL\]\s*Outbound Call`, `^Call Notes\s*\[...\]` |
 | Reply from colleague pauses company | Settings > Rules | off |
 | Meeting detection | Settings > Rules | opportunity created, or `statusOfMeeting` in booked values |
+| Our own email domains | Settings > Rules | `acumen-strategy.com`, `prairie-hill.com`, `glynac.ai`, `acubooth.com` (a meeting counts as booked only when someone outside these attends) |
 | Completion notes / mirrored tasks | Settings > Sync out | on / on |
 | Reconcile lookback | Settings > Rules | 3 days, nightly at `RECONCILE_HOUR` |

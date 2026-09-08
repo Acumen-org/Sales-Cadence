@@ -32,7 +32,14 @@ export type TwentyCompany = {
   id: string;
   name: string;
   domain: string | null;
+  ownerMemberId: string | null;
+  industry: string | null;
+  employees: number | null;
+  city: string | null;
+  linkedinUrl: string | null;
   updatedAt: string;
+  deletedAt?: string | null;
+  raw?: Record<string, unknown>;
 };
 
 export type TwentyWorkspaceMember = {

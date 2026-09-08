@@ -106,6 +106,25 @@ export function formatInstant(instant: Date | string | null | undefined, timezon
   }).format(d);
 }
 
+/** The Sunday that starts the week containing `date`. Weeks run Sunday to Saturday. */
+export function startOfWeekSunday(date: LocalDate): LocalDate {
+  return addDays(date, -dayOfWeek(date));
+}
+
+export function endOfWeekSaturday(date: LocalDate): LocalDate {
+  return addDays(startOfWeekSunday(date), 6);
+}
+
+/**
+ * This week as instants in the given timezone: [Sunday 00:00, next Sunday 00:00).
+ * Used by every "this week" figure so they all agree.
+ */
+export function weekRange(today: LocalDate, timezone: string): { from: LocalDate; to: LocalDate; fromInstant: Date; toInstant: Date } {
+  const from = startOfWeekSunday(today);
+  const to = endOfWeekSaturday(today);
+  return { from, to, fromInstant: startOfLocalDay(from, timezone), toInstant: startOfLocalDay(addDays(to, 1), timezone) };
+}
+
 export function relativeDays(date: LocalDate, today: LocalDate): string {
   const n = diffDays(today, date);
   if (n === 0) return 'Today';

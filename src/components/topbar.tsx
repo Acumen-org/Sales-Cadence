@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import clsx from 'clsx';
 import { globalSearchAction, type SearchHit } from '@/lib/actions/search';
-import { IconBell, IconBolt, IconCalendar, IconHelp, IconMail, IconPhone, IconPlus, IconSearch } from './icons';
+import { IconBell, IconCalendar, IconHelp, IconMail, IconPhone, IconSearch } from './icons';
 import { Avatar } from './ui';
 
 type Props = {
@@ -18,31 +18,29 @@ type Props = {
 const SECTIONS: Array<{ match: RegExp; title: string }> = [
   { match: /^\/home/, title: 'Home' },
   { match: /^\/tasks/, title: 'Tasks' },
+  { match: /^\/accounts/, title: 'Accounts' },
   { match: /^\/people/, title: 'People' },
+  { match: /^\/meetings/, title: 'Meetings' },
   { match: /^\/sequences/, title: 'Sequences' },
   { match: /^\/campaigns/, title: 'Campaigns' },
+  { match: /^\/activity/, title: 'Activity' },
+  { match: /^\/replies/, title: 'Replies' },
   { match: /^\/reports/, title: 'Reports' },
   { match: /^\/settings/, title: 'Settings' },
 ];
 
-function primaryFor(pathname: string, role: Props['role']): { label: string; href: string } | null {
-  const canEnrol = role === 'ADMIN' || role === 'SENIOR_FO';
-  if (/^\/sequences/.test(pathname) && role === 'ADMIN') return { label: 'Sequence', href: '/sequences/new' };
-  if (/^\/(campaigns|people|home)/.test(pathname) && canEnrol) return { label: 'Campaign', href: '/campaigns/new' };
-  if (/^\/settings/.test(pathname) && role === 'ADMIN') return { label: 'User', href: '/settings?tab=users' };
-  return null;
-}
-
 /**
- * The application top bar: section title on the left, then the utility cluster, the section's
- * primary action and the "start working" bolt, as in Outreach.
+ * The application top bar: section title, and a help button. The wider utility cluster
+ * (search, notifications, channel shortcuts) only appears on Tasks, where working through the
+ * day actually needs it; everywhere else the bar stays quiet.
  */
 export function TopBar({ role, overdue, needsReview, todayCount }: Props) {
   const pathname = usePathname();
   const section = SECTIONS.find((s) => s.match.test(pathname))?.title ?? 'Cadence';
-  const primary = primaryFor(pathname, role);
+  const showUtilities = /^\/tasks/.test(pathname);
   const [searchOpen, setSearchOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  void todayCount;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -60,36 +58,31 @@ export function TopBar({ role, overdue, needsReview, todayCount }: Props) {
       <h1 className="mr-auto truncate text-[26px] font-semibold tracking-[-0.01em] text-ink-900">{section}</h1>
 
       <div className="flex items-center gap-0.5">
-        <button type="button" className="btn-icon-ghost" title="Search (Ctrl+K)" aria-label="Search" onClick={() => setSearchOpen(true)}>
-          <IconSearch size={18} />
-        </button>
-        <Link href="/tasks?tab=overdue" className="btn-icon-ghost relative" title={overdue ? `${overdue} overdue tasks` : 'Nothing overdue'} aria-label="Overdue tasks">
-          <IconBell size={18} />
-          {overdue > 0 ? <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-canvas" /> : null}
-        </Link>
-        <Link href="/tasks?type=CALL" className="btn-icon-ghost" title="Call tasks" aria-label="Call tasks">
-          <IconPhone size={18} />
-        </Link>
-        <Link href="/tasks?type=EMAIL" className="btn-icon-ghost" title="Email tasks" aria-label="Email tasks">
-          <IconMail size={18} />
-        </Link>
-        <Link href="/tasks?tab=upcoming" className="btn-icon-ghost" title="Upcoming" aria-label="Upcoming tasks">
-          <IconCalendar size={18} />
-        </Link>
+        {showUtilities ? (
+          <>
+            <button type="button" className="btn-icon-ghost" title="Search (Ctrl+K)" aria-label="Search" onClick={() => setSearchOpen(true)}>
+              <IconSearch size={18} />
+            </button>
+            <Link href="/tasks?tab=overdue" className="btn-icon-ghost relative" title={overdue ? `${overdue} overdue tasks` : 'Nothing overdue'} aria-label="Overdue tasks">
+              <IconBell size={18} />
+              {overdue > 0 ? <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-canvas" /> : null}
+            </Link>
+            <Link href="/tasks?type=CALL" className="btn-icon-ghost" title="Call tasks" aria-label="Call tasks">
+              <IconPhone size={18} />
+            </Link>
+            <Link href="/tasks?type=EMAIL" className="btn-icon-ghost" title="Email tasks" aria-label="Email tasks">
+              <IconMail size={18} />
+            </Link>
+            <Link href="/tasks?tab=upcoming" className="btn-icon-ghost" title="Upcoming" aria-label="Upcoming tasks">
+              <IconCalendar size={18} />
+            </Link>
+          </>
+        ) : null}
         <button type="button" className="btn-icon-ghost relative" title="Shortcuts and help" aria-label="Help" onClick={() => setHelpOpen((v) => !v)}>
           <IconHelp size={18} />
           {needsReview > 0 ? <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-canvas" /> : null}
         </button>
       </div>
-
-      {primary ? (
-        <Link href={primary.href} className="btn-primary">
-          <IconPlus size={16} /> {primary.label}
-        </Link>
-      ) : null}
-      <Link href={`/tasks?tab=${todayCount ? 'today' : 'overdue'}&mode=flow`} className="btn-icon-primary" title="Start working through tasks" aria-label="Start task flow">
-        <IconBolt size={17} />
-      </Link>
 
       {searchOpen ? <SearchDialog onClose={() => setSearchOpen(false)} /> : null}
       {helpOpen ? <HelpPopover onClose={() => setHelpOpen(false)} needsReview={needsReview} isAdmin={role === 'ADMIN'} /> : null}

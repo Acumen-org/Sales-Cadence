@@ -47,6 +47,11 @@ export const MOCK_COMPANIES: TwentyCompany[] = companyNames.map((name, i) => ({
   id: `co-${String(i + 1).padStart(2, '0')}`,
   name,
   domain: `${name.toLowerCase().replace(/[^a-z]/g, '')}.example`,
+  ownerMemberId: null,
+  industry: null,
+  employees: null,
+  city: null,
+  linkedinUrl: null,
   updatedAt: '2026-08-15T09:00:00.000Z',
 }));
 

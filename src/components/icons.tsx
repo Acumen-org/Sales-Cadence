@@ -2,6 +2,10 @@ import type { SVGProps } from 'react';
 
 type IconProps = SVGProps<SVGSVGElement> & { size?: number };
 
+/**
+ * Slightly heavier strokes than the usual 1.5-2: at 14-18px a 2.1 stroke reads clearly on the
+ * light canvas without looking chunky. Colour comes from the caller (ink-600/700 by default).
+ */
 function base({ size = 18, ...props }: IconProps) {
   return {
     width: size,
@@ -9,7 +13,7 @@ function base({ size = 18, ...props }: IconProps) {
     viewBox: '0 0 24 24',
     fill: 'none',
     stroke: 'currentColor',
-    strokeWidth: 2,
+    strokeWidth: 2.1,
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
     'aria-hidden': true,
@@ -155,6 +159,19 @@ export const IconTrash = (p: IconProps) => (
   </svg>
 );
 
+export const IconCompany = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M3 21h18" />
+    <path d="M5 21V7l7-4 7 4v14" />
+    <path d="M9 21v-5h6v5" />
+    <path d="M9 11h.01M15 11h.01" />
+  </svg>
+);
+export const IconActivity = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M3 12h4l3 8 4-16 3 8h4" />
+  </svg>
+);
 export const IconBell = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />

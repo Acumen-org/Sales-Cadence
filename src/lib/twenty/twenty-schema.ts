@@ -57,7 +57,16 @@ export const defaultTwentySchema = {
     name: 'name',
     /** Composite link: { primaryLinkUrl } */
     domainName: 'domainName',
+    /** Optional relation to workspaceMember: who owns the account. */
+    accountOwner: 'accountOwner',
+    accountOwnerId: 'accountOwnerId',
+    /** Optional extras, shown on the account page when present. */
+    address: 'address',
+    employees: 'employees',
+    linkedinLink: 'linkedinLink',
+    industry: 'industry',
     updatedAt: 'updatedAt',
+    deletedAt: 'deletedAt',
   },
 
   note: {

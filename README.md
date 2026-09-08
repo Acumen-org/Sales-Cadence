@@ -6,10 +6,13 @@ Cadence never sends email or automates LinkedIn. Humans do every touch.
 
 ## What it does
 
-- **Home**: today's calls, emails and LinkedIn touches with one-click task flow per type, replies and meetings this week, team view for managers.
+- **Home**: one row of tiles for the signed-in user - people to reach today, calls / emails / LinkedIn due today, accounts owned, relationships owned - then this week's replies and booked meetings (Sunday to Saturday, latest one shown with a link to the rest), then a team table for managers.
 - **Tasks**: today / overdue / upcoming by type, filter by pod and FO, Outreach-style task flow (one task at a time, brief on the right). Done / Skip with a reason / Snooze / Next, call outcomes (dispositions) with notes, Finish (Replied) / Finish (No reply) / Move to step / Remove, bulk actions, keyboard shortcuts.
 - **Sequences**: versioned step plans (day offsets, email / call / LinkedIn actions, either/or steps, A/B template variants, templates with `{{firstName}} {{company}} {{jobTitle}} {{eventSource}} {{foFirstName}}`). Editing creates a new version; running enrollments pick it up at their next step. Per-step funnel and per-variant reply stats.
 - **Campaigns**: enrol from pasted ids, a CSV export, a saved Twenty view or a bulk selection on People; conflict preview (dnd, opted out, already enrolled, unknown); FO assignment by Twenty owner or round robin; daily ramp; funnel by step and FO; pause / stop / re-enrol non-repliers.
+- **Accounts**: one page per firm - a reporting chart built from who reports to whom, each contact's stance on the account (champion, supporter, neutral, detractor), every call, email, meeting, task and campaign anyone there has been part of, and one timeline of the whole relationship. Filter to the accounts you own.
+- **Meetings**: paste a recording link and it plays inside Cadence, with the transcript underneath (click a line to seek) and an analysis panel on the right. Media files and SharePoint / OneDrive / Google Drive recordings play in place; Zoom pages and Teams or Meet join links cannot be framed, so those open in a new tab and say so. Analysis is deliberately empty until a model is connected - see [DECISIONS.md](DECISIONS.md).
+- **Activity**: everything the team did, newest first, grouped by day, with actor / kind / text filters. Administration (settings, users, pods, logins) is excluded by design.
 - **People**: fast searchable list from a local cache of Twenty people with Outreach-style stages (Cold, Approaching, Replied, Unresponsive, Bad data, Do not contact), last touch, pod and FO; a person page with the activity timeline, sequence history and controls.
 - **Reports**: activity leaderboard per FO, and roll-ups by pod, FO, campaign, sequence and channel; overdue and stalled lists.
 - **Twenty integration**: webhooks + nightly reconcile complete email and call steps from Twenty activity, replies close open tasks, meetings and dnd flips are honoured, every completed action is written back as a `[Cadence] ...` note and open tasks are mirrored as Twenty Tasks. `CADENCE_DRY_RUN=true` logs writes without making them.
@@ -22,7 +25,7 @@ Double-click **start-cadence.cmd**. It installs dependencies on the first run, s
 
 The same thing from a terminal: `pnpm start:local`.
 
-**The dummy data** (everything is named "Dummy ..." so it cannot be mistaken for real data): two pods (Alisa's pod, Andrew's pod) plus one discovered from a person's `podOwner` value; one user per role (Admin, Alisa and Andrew as Senior FOs, Karson and Daniel as Junior FOs); three Dummy Companies and sixteen Dummy people; two campaigns per pod (one a week old, one starting today) with enrollments in every state: due today, overdue, replied, bounced, finished, meeting booked, and one dnd person who could not be enrolled. To start over, delete `.pgdata-dev` and launch again.
+**The dummy data** (everything is named "Dummy ..." so it cannot be mistaken for real data): two pods (Alisa's pod, Andrew's pod) plus one discovered from a person's `podOwner` value; one user per role (Admin, Alisa and Andrew as Senior FOs, Karson and Daniel as Junior FOs); three Dummy Companies and sixteen Dummy people; two campaigns per pod (one a week old, one starting today) with enrollments in every state: due today, overdue, replied, bounced, finished, meeting booked, and one dnd person who could not be enrolled; a reporting chart and a stance for every dummy person, so the Accounts relationship map has something to show; and four dummy meetings, one of each kind - a media file that really plays, a SharePoint recording, a Zoom page that has to open in a new tab, and a Google Meet join link - two of them with transcripts. To start over, delete `.pgdata-dev` and launch again.
 
 **Pods follow Twenty.** Which pod a person is in comes from Twenty's `podOwner` field: unknown values create pods automatically, option labels renamed in Twenty rename the pod here. Admins decide which FOs work each pod and who can log in (Settings > Users and pods). What Cadence writes back to Twenty is spelled out in [INTEGRATION.md](INTEGRATION.md#what-cadence-writes-to-twenty-and-what-it-never-touches): only `[Cadence]` activity notes and mirrored tasks, never person fields.
 
@@ -39,7 +42,7 @@ The same thing from a terminal: `pnpm start:local`.
 
 ## Stack
 
-TypeScript, Node 20, Next.js 15 (App Router, server actions), Postgres 16, Prisma 6, Tailwind 3, Vitest 3, Docker Compose. Tests run on an embedded Postgres, so no Docker is needed to run them.
+TypeScript, Node 20, Next.js 15 (App Router, server actions), Postgres 18, Prisma 6, Tailwind 3, Vitest 3, Playwright, Docker Compose. Tests run on an embedded Postgres 18, so no Docker is needed to run them. Verified against Twenty 1.23.
 
 ## Run on Windows with Docker Desktop
 
@@ -120,21 +123,27 @@ The end-to-end suite covers demo sign-in, campaign creation with the conflict pr
 | Reports | all | own pods | no |
 | Sequences (edit, versions) | yes | view | view |
 | Settings, users, pods | yes | no | no |
+| Accounts, Meetings, Activity | all | own pods' accounts | own work |
+
+Settings is the only admin-only section: it is hidden from the sidebar and refuses direct URLs for anyone else.
 
 ## Layout
 
 ```
 prisma/                 schema, migrations (hand-added partial unique index), seed
 scripts/                verify-schema.ts, reconcile.ts
-src/app/                Next.js routes: tasks, sequences, campaigns, people, reports, settings, api/webhooks/twenty
+src/app/                Next.js routes: home, tasks, accounts, people, meetings, sequences, campaigns,
+                        activity, replies, reports, settings, api/webhooks/twenty
 src/components/         UI (no component library; inline SVG icons)
 src/lib/auth/           sessions, passwords, RBAC
 src/lib/engine/         clock, caps, versioning, tasks, enrollment, matching, ingest, reconcile, sync-out
+src/lib/meetings/       recording-link parsing, transcript parsing, the analyzer seam
 src/lib/sequences/      step schema and the default 23-day sequence
 src/lib/twenty/         twenty-schema.ts (all field names), types, client interface, mock + fixtures,
                         graphql-client.ts (all queries), normalize, webhook-auth, urls
 src/worker/             scheduler process
-tests/                  vitest on embedded Postgres
+e2e/                    Playwright: behaviour suite and the screenshot capture
+tests/                  vitest on embedded Postgres 18, including a per-page query budget
 ```
 
 ## The default sequence

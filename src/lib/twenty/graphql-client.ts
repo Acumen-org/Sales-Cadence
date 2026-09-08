@@ -288,7 +288,18 @@ export class TwentyGraphqlClient implements TwentyClient {
 
   async listCompanies(opts: ListOptions & { ids?: string[] } = {}): Promise<Page<TwentyCompany>> {
     const c = this.s.company;
-    const sel = await this.selection(this.s.objects.company.typeName, ['id', c.name, { field: c.domainName, sub: '{ primaryLinkUrl }' }, c.updatedAt]);
+    const sel = await this.selection(this.s.objects.company.typeName, [
+      'id',
+      c.name,
+      { field: c.domainName, sub: '{ primaryLinkUrl }' },
+      c.accountOwnerId,
+      c.industry,
+      c.employees,
+      { field: c.address, sub: '{ addressCity }' },
+      { field: c.linkedinLink, sub: '{ primaryLinkUrl }' },
+      c.updatedAt,
+      c.deletedAt,
+    ]);
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.company.plural, this.s.objects.company.typeName, sel), {
       filter: this.and(this.sinceFilter(c.updatedAt, opts.updatedSince), opts.ids ? { id: { in: opts.ids } } : null),
       first: Math.min(opts.limit ?? PAGE_SIZE, 200),

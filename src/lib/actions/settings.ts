@@ -81,6 +81,7 @@ export async function saveRulesSettingsAction(formData: FormData): Promise<Actio
     meetingOnOpportunityCreated: bool(formData.get('meetingOnOpportunityCreated')),
     meetingOnStatusOfMeeting: bool(formData.get('meetingOnStatusOfMeeting')),
     meetingStatusValues: list(formData.get('meetingStatusValues')),
+    internalDomains: list(formData.get('internalDomains')).map((d) => d.replace(/^.*@/, '').replace(/^\/+|\/+$/g, '')),
     stalledDays: Number(formData.get('stalledDays')),
     reconcileLookbackDays: Number(formData.get('reconcileLookbackDays')),
     defaultDailyRampPerFo: Number(formData.get('defaultDailyRampPerFo')),
@@ -97,6 +98,9 @@ export async function saveRulesSettingsAction(formData: FormData): Promise<Actio
   await logAudit({ entityType: 'settings', entityId: 'rules', action: 'updated', actor: userActor(admin), details: parsed.data });
   revalidatePath('/settings');
   revalidatePath('/tasks');
+  // Internal domains change what counts as an external meeting, so the weekly boxes must refresh.
+  revalidatePath('/home');
+  revalidatePath('/meetings');
   return { ok: true, message: 'Rules saved.' };
 }
 

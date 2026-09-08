@@ -142,9 +142,17 @@ test('answered call finishes the sequence as replied and shows on Home', async (
   await page.getByText('Connected', { exact: true }).click();
   await page.getByRole('button', { name: 'Log call' }).last().click();
   await expect(page.getByText(/answered, so the sequence is finished as replied/)).toBeVisible();
+  // Home counts this as a reply for the FO who owns the enrollment. The "Replies this week" box
+  // is about inbound emails Twenty synced, so a logged call belongs in the team column, not there.
   await page.goto('/home');
-  await expect(page.getByText('Replies this week').first()).toBeVisible();
-  await expect(page.getByRole('link', { name: new RegExp(person) }).first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Replies this week' })).toBeVisible();
+  // The enrollment's own FO gets the credit, so somebody in the pod table has a reply this week.
+  const replyCells = await page.locator('table tbody tr td:nth-child(5)').allTextContents();
+  expect(replyCells.some((v) => Number(v.trim()) > 0)).toBe(true);
+  // And the person is finished as replied.
+  await page.goto('/people?q=' + encodeURIComponent(person.split(' ')[1] ?? person));
+  await page.getByRole('link', { name: person }).click();
+  await expect(page.getByText('Replied').first()).toBeVisible();
   await logout(page);
 });
 
@@ -197,7 +205,8 @@ test('reports and people pages render with data', async ({ page }) => {
   await page.goto('/people?q=One');
   await page.getByRole('link', { name: 'Dummy One' }).click();
   await expect(page.getByRole('heading', { name: 'Dummy One' })).toBeVisible();
-  await expect(page.getByText('Activity', { exact: true })).toBeVisible();
+  // Scoped to the record: "Activity" is also a nav item now.
+  await expect(page.locator('main').getByText('Activity', { exact: true }).first()).toBeVisible();
   // pods discovered from Twenty show up in Settings for the admin to staff
   await page.goto('/settings?tab=users');
   await expect(page.getByText('discovered from Twenty')).toBeVisible();

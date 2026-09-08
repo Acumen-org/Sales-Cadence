@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { SYSTEM_ACTOR } from '@/lib/audit';
 import { enrollPeople } from '@/lib/engine/enrollment';
 import { ingestEvent } from '@/lib/engine/ingest';
-import { rawFromMessage, rawFromNote, rawFromOpportunity, rawFromPerson, reconcile } from '@/lib/engine/reconcile';
+import { rawFromCompany, rawFromMessage, rawFromNote, rawFromOpportunity, rawFromPerson, reconcile } from '@/lib/engine/reconcile';
 import { getSettings, saveSettingsSection } from '@/lib/settings';
 import { getMockTwentyClient } from '@/lib/twenty/mock-client';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
@@ -212,5 +212,28 @@ describe('webhook ingestion', () => {
     expect(again.completions).toBe(0);
     expect(again.replies).toBe(0);
     expect(await prisma.activityEvent.count()).toBeGreaterThan(before);
+  });
+
+  it('a company renamed in Twenty updates the account cache at once', async () => {
+    const company = { id: 'co-live-01', name: 'Live Co', domain: 'live.example', ownerMemberId: 'wm-alisa', industry: 'Insurance', employees: 120, city: 'Leeds', linkedinUrl: null, updatedAt: iso('2026-09-08'), deletedAt: null };
+    const first = await ingestEvent({ source: 'WEBHOOK', objectType: 'company', eventName: 'company.created', record: rawFromCompany(company), recordId: company.id, updatedAt: company.updatedAt, now: at('2026-09-08') });
+    expect(first.status).toBe('processed');
+    expect(first.result).toBe('company_cached');
+    const cached = await prisma.companyCache.findUniqueOrThrow({ where: { id: 'co-live-01' } });
+    expect(cached).toMatchObject({ name: 'Live Co', ownerMemberId: 'wm-alisa', industry: 'Insurance', employees: 120, city: 'Leeds', domain: 'live.example' });
+
+    // A rename arrives as company.updated with a new updatedAt, so it is not a duplicate.
+    const renamed = { ...company, name: 'Live Co (renamed)', ownerMemberId: 'wm-andrew', updatedAt: iso('2026-09-08', '11:00:00') };
+    const second = await ingestEvent({ source: 'WEBHOOK', objectType: 'company', eventName: 'company.updated', record: rawFromCompany(renamed), recordId: renamed.id, updatedAt: renamed.updatedAt, now: at('2026-09-08', '11:00:00') });
+    expect(second.status).toBe('processed');
+    expect(second.result).toBe('company_updated');
+    const after = await prisma.companyCache.findUniqueOrThrow({ where: { id: 'co-live-01' } });
+    expect(after.name).toBe('Live Co (renamed)');
+    expect(after.ownerMemberId).toBe('wm-andrew');
+
+    // Deleting it in Twenty tombstones the account rather than dropping the history.
+    const third = await ingestEvent({ source: 'WEBHOOK', objectType: 'company', eventName: 'company.deleted', record: rawFromCompany({ ...renamed, updatedAt: iso('2026-09-08', '12:00:00') }), recordId: renamed.id, updatedAt: iso('2026-09-08', '12:00:00'), now: at('2026-09-08', '12:00:00') });
+    expect(third.result).toBe('company_deleted');
+    expect((await prisma.companyCache.findUniqueOrThrow({ where: { id: 'co-live-01' } })).deletedAt).not.toBeNull();
   });
 });

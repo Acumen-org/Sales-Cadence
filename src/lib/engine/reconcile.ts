@@ -80,7 +80,7 @@ export async function reconcile(opts: { days?: number; actor?: AuditActor; now?:
 
 // The ingest pipeline normalises raw records; normalised fixtures are re-expressed in the default
 // field shapes so the same code path is exercised for webhooks, reconcile and the mock.
-import type { TwentyMessage, TwentyNote, TwentyOpportunity, TwentyPerson, TwentyTask } from '../twenty/types';
+import type { TwentyCompany, TwentyMessage, TwentyNote, TwentyOpportunity, TwentyPerson, TwentyTask } from '../twenty/types';
 
 export function rawFromPerson(p: TwentyPerson): Record<string, unknown> {
   return {
@@ -102,6 +102,22 @@ export function rawFromPerson(p: TwentyPerson): Record<string, unknown> {
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
     deletedAt: p.deletedAt,
+  };
+}
+
+/** Shape a cached company the way Twenty's GraphQL returns one, for the ingest path. */
+export function rawFromCompany(c: TwentyCompany): Record<string, unknown> {
+  return {
+    id: c.id,
+    name: c.name,
+    domainName: { primaryLinkUrl: c.domain },
+    accountOwnerId: c.ownerMemberId,
+    industry: c.industry,
+    employees: c.employees,
+    address: { addressCity: c.city },
+    linkedinLink: { primaryLinkUrl: c.linkedinUrl },
+    updatedAt: c.updatedAt,
+    deletedAt: c.deletedAt,
   };
 }
 

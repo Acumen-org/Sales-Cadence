@@ -86,8 +86,13 @@ export async function listTasks(user: SessionUser, filters: TaskFilters, now = n
   const today = todayIn(user.timezone, now);
   const scoped: Prisma.TaskWhereInput = { AND: [taskScopeWhere(user), filtersWhere(filters)] };
   const base: Prisma.TaskWhereInput = { AND: [scoped, channelWhere(filters.channel)] };
-  const channelCountRows = await Promise.all(TASK_CHANNELS.map((c) => prisma.task.count({ where: { AND: [scoped, channelWhere(c), tabWhere(filters.tab, today)] } })));
-  const channelCounts = Object.fromEntries(TASK_CHANNELS.map((c, i) => [c, channelCountRows[i]])) as Record<TaskChannel, number>;
+  // One grouped query covers all three channel buckets for the current tab.
+  const channelGroups = await prisma.task.groupBy({ by: ['action'], where: { AND: [scoped, tabWhere(filters.tab, today)] }, _count: { _all: true } });
+  const channelCounts: Record<TaskChannel, number> = { CALL: 0, EMAIL: 0, LINKEDIN: 0 };
+  for (const g of channelGroups) {
+    const key: TaskChannel = g.action === 'CALL' ? 'CALL' : g.action === 'EMAIL' ? 'EMAIL' : 'LINKEDIN';
+    channelCounts[key] += g._count._all;
+  }
   const [rows, ...countValues] = await Promise.all([
     prisma.task.findMany({
       where: { AND: [base, tabWhere(filters.tab, today)] },
