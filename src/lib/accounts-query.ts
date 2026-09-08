@@ -331,13 +331,15 @@ export async function accountDetail(companyId: string, user: SessionUser) {
       .filter((a) => ['enrolled', 'replied', 'meeting', 'exited', 'completed', 'paused', 'resumed', 'finished'].includes(a.action))
       .map<AccountTimelineItem>((a) => {
         const p = enrollmentPerson.get(a.entityId);
-        // Same plain-language rendering as the person timeline and the activity feed.
-        const said = describeAudit(a.action, a.details as Record<string, unknown> | null, a.actorLabel);
+        // Same plain-language rendering as the person timeline and the activity feed. The actor
+        // goes in the detail line, not the title: "Replied" is about the prospect, and saying
+        // "Replied by reconcile" would credit the observer with the reply.
+        const said = describeAudit(a.action, a.details as Record<string, unknown> | null, null);
         return {
           at: a.createdAt,
           kind: 'state',
           title: said.title,
-          detail: said.detail ?? a.actorLabel,
+          detail: [said.detail, a.actorLabel].filter(Boolean).join(' · ') || null,
           personId: p?.id ?? null,
           personName: p?.name ?? null,
           href: p ? `/people/${p.id}` : null,
