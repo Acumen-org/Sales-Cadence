@@ -10,7 +10,7 @@ Standard boring stack, nothing exotic:
 
 - **Next.js 15** (React, App Router, server actions) — the web app and the webhook endpoint, one Node process.
 - **A worker** — a second Node process: generates due tasks every 5 min, nightly reconcile with Twenty, cache refresh.
-- **Postgres 16** — Cadence's own database (sequencing state, a read cache of Twenty people, an audit log). Separate from Twenty's database.
+- **Postgres 18** — Cadence's own database (sequencing state, a read cache of Twenty people and companies, meetings and transcripts, an audit log). Separate from Twenty's database. 16 and 17 also work.
 - **Prisma** for the schema and migrations. TypeScript throughout.
 
 ```
@@ -25,14 +25,16 @@ Integration with Twenty is **read-mostly**: it reads people, notes, messages, ta
 
 ## Specs
 
-Three containers: `web`, `worker`, `db`. Measured at idle with the demo dataset: web 103 MB, worker 133 MB, Postgres 99 MB — about **340 MB total**. Under real load budget ~1 GB.
+Three containers: `web`, `worker`, `db`. Measured with the demo dataset: **~370 MB total** at idle (web ~200 MB, worker ~120 MB, Postgres ~85 MB of private memory plus its shared buffers). Under real load budget ~1 GB.
 
-The peak is the **build**, not the running app. `next build` scales workers to CPU count; it peaked at 3.5 GB on an 8-core dev machine, so expect roughly 1.5–2 GB on a 2-core VPS.
+CPU is not the constraint. 200 page renders cost **2.3 seconds of CPU in total** — about 11 ms per page — and warm pages render in 8–75 ms. One vCPU has roughly 90 renders a second of headroom, which is far more than a team of FOs can generate. Every page issues a fixed handful of queries no matter how much data there is; a test enforces it (`tests/query-budget.test.ts`).
+
+The peak is the **build**, not the running app. Compose builds with one worker and a 1536 MB heap ceiling, and skips type checking (run `pnpm typecheck` in CI instead), which keeps the build inside a 2 GB box. Left unconstrained, `next build` scales to CPU count and peaked at 3.5 GB on an 8-core machine.
 
 | | Spec | Notes |
 |---|---|---|
-| **Recommended** | 2 vCPU, 8 GB RAM, 50 GB SSD | Hostinger **KVM 2**. Builds on the server without tuning. |
-| **Minimum** | 2 vCPU, 4 GB RAM, 40 GB SSD | Hostinger **KVM 1** is 1 vCPU/4 GB: fine to *run*, tight to *build*. Add 2 GB swap, or build elsewhere (below). |
+| **Recommended** | 2 vCPU, 8 GB RAM, 50 GB SSD | Hostinger **KVM 2**. Builds on the server with room to spare. |
+| **Works** | 1 vCPU, 2 GB RAM, 40 GB SSD | Runs comfortably at ~370 MB. The build fits because it is capped, but it is slow (5–10 min); add 2 GB swap or build elsewhere (below). |
 | **Won't work** | Shared / web hosting | Needs root and Docker. Not a PHP app. |
 
 Sizing barely moves with team size: 10 FOs and 100 FOs are the same order of work. Disk: the app image is ~2 GB, the database grows slowly (tens of MB per year for a few thousand people). 50 GB is plenty.
@@ -79,3 +81,5 @@ docker compose up -d --build                # deploy an update
 - The webhook endpoint is public. Set `TWENTY_WEBHOOK_SECRET` (HMAC) or at least `CADENCE_WEBHOOK_TOKEN`, otherwise anything can POST to it.
 - `SEED_PROFILE=core` in production. Leaving `demo` in creates sixteen "Dummy" people.
 - Node 20 in the image; the host's Node version is irrelevant since everything runs in Docker.
+- Meeting recordings are **not** stored by Cadence: it keeps the link, the transcript text and any analysis. Playback streams from wherever the recording lives (SharePoint, Drive, your own file host), so viewers must be able to reach it and be signed in to Microsoft 365 or Google where that applies. Disk use stays tiny.
+- Postgres is deliberately tuned small in `docker-compose.yml` (`shared_buffers=192MB`, `work_mem=8MB`, `jit=off`) and Prisma's pool is capped (`connection_limit=6` web, `4` worker). If you move to a bigger box, raise those rather than leaving the defaults: Prisma's default pool is `cores * 2 + 1`, which opens far more Postgres backends than this workload needs.

@@ -24,10 +24,41 @@ export const DEMO_POD_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'Andrew', label: "Andrew's pod" },
 ];
 
+/** Account owner is a Twenty workspace member, so "accounts I own" works per signed-in user. */
 export const DEMO_COMPANIES: TwentyCompany[] = [
-  { id: 'dummy-co-a', name: 'Dummy Company A', domain: 'dummy-a.example', updatedAt: '2026-08-15T09:00:00.000Z' },
-  { id: 'dummy-co-b', name: 'Dummy Company B', domain: 'dummy-b.example', updatedAt: '2026-08-15T09:00:00.000Z' },
-  { id: 'dummy-co-c', name: 'Dummy Company C', domain: 'dummy-c.example', updatedAt: '2026-08-15T09:00:00.000Z' },
+  {
+    id: 'dummy-co-a',
+    name: 'Dummy Company A',
+    domain: 'dummy-a.example',
+    ownerMemberId: 'wm-alisa',
+    industry: 'Asset management',
+    employees: 420,
+    city: 'London',
+    linkedinUrl: 'https://www.linkedin.com/company/dummy-company-a',
+    updatedAt: '2026-08-15T09:00:00.000Z',
+  },
+  {
+    id: 'dummy-co-b',
+    name: 'Dummy Company B',
+    domain: 'dummy-b.example',
+    ownerMemberId: 'wm-karson',
+    industry: 'Insurance',
+    employees: 1800,
+    city: 'Manchester',
+    linkedinUrl: 'https://www.linkedin.com/company/dummy-company-b',
+    updatedAt: '2026-08-15T09:00:00.000Z',
+  },
+  {
+    id: 'dummy-co-c',
+    name: 'Dummy Company C',
+    domain: 'dummy-c.example',
+    ownerMemberId: 'wm-andrew',
+    industry: 'Private equity',
+    employees: 95,
+    city: 'Berlin',
+    linkedinUrl: 'https://www.linkedin.com/company/dummy-company-c',
+    updatedAt: '2026-08-15T09:00:00.000Z',
+  },
 ];
 
 // [lastName, companyId, jobTitle, podOwner, ownerMemberId, eventSource, dnd]

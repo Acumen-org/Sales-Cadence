@@ -4,10 +4,24 @@ import { isAdmin } from '@/lib/auth/rbac';
 import { formatInstant, formatLocalDate } from '@/lib/dates';
 import { buildHome } from '@/lib/home-query';
 import { TASK_CHANNELS, type TaskChannel } from '@/lib/tasks-query';
-import { ActionIcon, IconBolt, IconCheck, IconClock } from '@/components/icons';
-import { Avatar, Card, EmptyState, Notice, Stat, Surface } from '@/components/ui';
+import { ActionIcon, IconCampaigns, IconChevronRight, IconPeople } from '@/components/icons';
+import { Avatar, Card, EmptyState, Notice, Surface } from '@/components/ui';
 
 const CHANNEL_LABELS: Record<TaskChannel, string> = { CALL: 'Calls', EMAIL: 'Emails', LINKEDIN: 'LinkedIn' };
+
+/** One bordered tile. The whole row is a single line of tiles by design. */
+function Tile({ label, value, hint, href, icon, tone }: { label: string; value: number | string; hint?: string; href: string; icon: React.ReactNode; tone?: 'warn' }) {
+  return (
+    <Link href={href} className="surface flex items-center gap-3 px-3.5 py-3 transition hover:border-brand-300">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-brand-50 text-brand-600">{icon}</span>
+      <span className="min-w-0">
+        <span className="block text-[11px] font-medium uppercase tracking-wide text-ink-400">{label}</span>
+        <span className={`block text-[22px] font-semibold leading-tight ${tone === 'warn' ? 'text-amber-600' : 'text-ink-900'}`}>{value}</span>
+        {hint ? <span className="block truncate text-[11px] text-ink-400">{hint}</span> : null}
+      </span>
+    </Link>
+  );
+}
 
 export default async function HomePage() {
   const user = await requireUser();
@@ -16,12 +30,7 @@ export default async function HomePage() {
 
   return (
     <div className="space-y-4 px-6 pb-8 pt-2">
-      <div>
-        <h2 className="text-[17px] font-semibold text-ink-900">Good day, {first}</h2>
-        <p className="text-[13px] text-ink-500">
-          {formatLocalDate(h.today, 'long')} · {h.my.todayTotal} due today, {h.my.overdueTotal} overdue, {h.my.active} people in your sequences
-        </p>
-      </div>
+      <h2 className="text-[17px] font-semibold text-ink-900">Good day, {first}</h2>
 
       {h.needsReview ? (
         <Notice tone="warn">
@@ -33,80 +42,82 @@ export default async function HomePage() {
         </Notice>
       ) : null}
 
-      {/* Today's work, by channel */}
-      <div className="grid gap-3 lg:grid-cols-3">
-        {TASK_CHANNELS.map((c) => {
-          const due = h.my.today[c];
-          const over = h.my.overdue[c];
-          return (
-            <Surface key={c} flush className="transition hover:border-brand-200">
-              <Link href={`/tasks?tab=${due ? 'today' : over ? 'overdue' : 'upcoming'}&type=${c}&mode=flow`} className="flex items-center gap-3.5 p-4">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
-                  <ActionIcon action={c} size={20} />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[11.5px] font-medium uppercase tracking-wide text-ink-400">{CHANNEL_LABELS[c]} today</span>
-                  <span className="block text-[26px] font-semibold leading-tight text-ink-900">{due}</span>
-                  <span className="block text-[12px] text-ink-500">
-                    {over ? <span className="font-medium text-red-600">{over} overdue</span> : 'nothing overdue'} · {h.my.upcoming[c]} upcoming
-                  </span>
-                </span>
-                <span className="btn-soft btn-sm shrink-0">Start</span>
-              </Link>
-            </Surface>
-          );
-        })}
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Done this week" value={h.my.doneThisWeek} tone="good" icon={<IconCheck size={17} />} />
-        <Stat label="Replies this week" value={h.replies.length} tone="good" icon={<ActionIcon action="EMAIL" size={17} />} />
-        <Stat label="Meetings this week" value={h.meetings.length} tone="good" icon={<IconBolt size={17} />} />
-        <Stat label="Overdue" value={h.my.overdueTotal} tone={h.my.overdueTotal ? 'warn' : 'default'} hint={h.my.overdueTotal ? 'Work these first' : undefined} icon={<IconClock size={17} />} />
-      </div>
-
-      <div className="grid gap-3 lg:grid-cols-2">
-        {[
-          { title: 'Replies this week', rows: h.replies },
-          { title: 'Meetings booked this week', rows: h.meetings },
-        ].map((block) => (
-          <Card key={block.title} title={block.title}>
-            {block.rows.length === 0 ? (
-              <EmptyState title={`No ${block.title.split(' ')[0].toLowerCase()} yet this week`} />
-            ) : (
-              <ul className="divide-y divide-line">
-                {block.rows.map((r) => (
-                  <li key={r.id}>
-                    <Link href={`/people/${r.personId}`} className="flex items-center gap-3 px-4 py-2.5 transition hover:bg-canvas/70">
-                      <Avatar name={r.name} shape="circle" size={28} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13.5px] font-medium text-ink-900">{r.name}</span>
-                        <span className="block truncate text-[12px] text-ink-500">
-                          {r.company} · {r.fo}
-                        </span>
-                      </span>
-                      <span className="shrink-0 text-[11.5px] text-ink-400">{formatInstant(r.at, user.timezone)}</span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
+      {/* One row: today's work by channel, then what this user owns. */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <Tile
+          label="To reach today"
+          value={h.my.peopleToReachToday}
+          hint={h.my.overdueTotal ? `${h.my.overdueTotal} overdue` : 'people, not tasks'}
+          href="/tasks?tab=today&mode=flow"
+          icon={<IconPeople size={17} />}
+          tone={h.my.overdueTotal ? 'warn' : undefined}
+        />
+        {TASK_CHANNELS.map((c) => (
+          <Tile
+            key={c}
+            label={`${CHANNEL_LABELS[c]} today`}
+            value={h.my.today[c]}
+            hint={h.my.overdue[c] ? `${h.my.overdue[c]} overdue` : `${h.my.upcoming[c]} upcoming`}
+            href={`/tasks?tab=${h.my.today[c] ? 'today' : h.my.overdue[c] ? 'overdue' : 'upcoming'}&type=${c}&mode=flow`}
+            icon={<ActionIcon action={c} size={17} />}
+            tone={h.my.overdue[c] ? 'warn' : undefined}
+          />
         ))}
+        <Tile label="My accounts" value={h.my.accounts} hint="firms I own or work" href="/accounts?scope=mine" icon={<IconCampaigns size={17} />} />
+        <Tile label="My relationships" value={h.my.relationships} hint="people assigned to me" href="/people?owner=mine" icon={<IconPeople size={17} />} />
+      </div>
+
+      {/* This week, Sunday to Saturday: the latest one, with a way into the full list. */}
+      <div className="grid gap-3 lg:grid-cols-2">
+        <LatestCard
+          title="Replies this week"
+          count={h.replies.total}
+          href="/replies"
+          emptyTitle="No replies yet this week"
+          emptyHint="Inbound emails Twenty syncs for the people you are responsible for land here."
+          weekLabel={`${formatLocalDate(h.week.from)} - ${formatLocalDate(h.week.to)}`}
+          row={
+            h.replies.rows[0]
+              ? {
+                  name: h.replies.rows[0].name,
+                  sub: [h.replies.rows[0].company, h.replies.rows[0].summary].filter(Boolean).join(' · '),
+                  at: formatInstant(h.replies.rows[0].at, user.timezone),
+                  href: `/people/${h.replies.rows[0].personId}`,
+                }
+              : null
+          }
+        />
+        <LatestCard
+          title="Meetings booked this week"
+          count={h.meetings.total}
+          href="/meetings?scope=week"
+          emptyTitle="No meetings yet this week"
+          emptyHint="A meeting counts when someone outside your own domains is on it."
+          weekLabel={`${formatLocalDate(h.week.from)} - ${formatLocalDate(h.week.to)}`}
+          row={
+            h.meetings.rows[0]
+              ? {
+                  name: h.meetings.rows[0].title,
+                  sub: [h.meetings.rows[0].company, `${h.meetings.rows[0].externals} external`].filter(Boolean).join(' · '),
+                  at: formatInstant(h.meetings.rows[0].at, user.timezone),
+                  href: h.meetings.rows[0].href,
+                }
+              : null
+          }
+        />
       </div>
 
       {h.team.length ? (
-        <Card title={isAdmin(user) ? 'Team today' : 'Your pods today'}>
+        <Card title={isAdmin(user) ? 'Team this week' : 'Your pods this week'}>
           <table className="table">
             <thead>
               <tr>
                 <th>FO</th>
                 <th>Due today</th>
                 <th>Overdue</th>
-                <th>Done (7d)</th>
-                <th>Replies (7d)</th>
-                <th>Meetings (7d)</th>
-                <th>In sequences</th>
+                <th>Done</th>
+                <th>Replies</th>
+                <th>Meetings</th>
                 <th></th>
               </tr>
             </thead>
@@ -124,7 +135,6 @@ export default async function HomePage() {
                   <td>{t.doneWeek}</td>
                   <td>{t.replies}</td>
                   <td>{t.meetings}</td>
-                  <td>{t.active}</td>
                   <td className="text-right">
                     <Link href={`/tasks?tab=today&fo=${t.id}`} className="btn-ghost btn-sm">
                       View tasks
@@ -137,5 +147,51 @@ export default async function HomePage() {
         </Card>
       ) : null}
     </div>
+  );
+}
+
+/** A card showing only the latest item, with an arrow that carries the full count. */
+function LatestCard({
+  title,
+  count,
+  href,
+  row,
+  emptyTitle,
+  emptyHint,
+  weekLabel,
+}: {
+  title: string;
+  count: number;
+  href: string;
+  row: { name: string; sub: string; at: string; href: string } | null;
+  emptyTitle: string;
+  emptyHint: string;
+  weekLabel: string;
+}) {
+  return (
+    <Surface flush>
+      <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+        <div>
+          <h2 className="text-[14px] font-semibold text-ink-900">{title}</h2>
+          <p className="text-[11px] text-ink-400">{weekLabel}</p>
+        </div>
+        <Link href={href} className="inline-flex items-center gap-1.5 rounded-[10px] border border-line px-2.5 py-1.5 text-[12.5px] font-medium text-ink-700 transition hover:border-brand-300 hover:text-brand-700" title={`Open all ${count}`}>
+          {count}
+          <IconChevronRight size={15} />
+        </Link>
+      </div>
+      {row ? (
+        <Link href={row.href} className="flex items-center gap-3 px-4 py-3 transition hover:bg-canvas/70">
+          <Avatar name={row.name} shape="circle" size={30} />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[13.5px] font-medium text-ink-900">{row.name}</span>
+            <span className="block truncate text-[12px] text-ink-500">{row.sub}</span>
+          </span>
+          <span className="shrink-0 text-[11.5px] text-ink-400">{row.at}</span>
+        </Link>
+      ) : (
+        <EmptyState title={emptyTitle} hint={emptyHint} />
+      )}
+    </Surface>
   );
 }

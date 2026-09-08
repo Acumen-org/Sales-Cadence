@@ -11,3 +11,5 @@ process.env.TWENTY_MODE = 'mock';
 process.env.MOCK_DATASET = 'test'; // the larger fixture set the tests were written against
 process.env.TWENTY_API_URL = process.env.TWENTY_API_URL ?? 'http://twenty.local:3000';
 process.env.CADENCE_DRY_RUN = process.env.CADENCE_DRY_RUN ?? 'false';
+// Emit query events (nothing is printed) so the query-budget test can count statements.
+process.env.PRISMA_LOG = process.env.PRISMA_LOG ?? 'events';

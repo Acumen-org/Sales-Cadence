@@ -5,6 +5,11 @@ import { hashPassword } from '../src/lib/auth/password';
 import { DEFAULT_SEQUENCE_DESCRIPTION, DEFAULT_SEQUENCE_NAME, DEFAULT_SEQUENCE_STEPS } from '../src/lib/sequences/default-sequence';
 import { StepsSchema } from '../src/lib/sequences/steps';
 import { DEMO_MEMBERS, DEMO_POD_OPTIONS } from '../src/lib/twenty/demo-fixtures';
+import { DEMO_MEETINGS, DEMO_RELATIONSHIPS, DEMO_USER_MAILBOXES } from '../src/lib/meetings/demo-meetings';
+import { parseMeetingLink } from '../src/lib/meetings/providers';
+import { detectTranscriptFormat } from '../src/lib/meetings/transcript';
+import { isExternalEmail } from '../src/lib/settings';
+import { startOfWeekSunday } from '../src/lib/dates';
 import { getMockTwentyClient } from '../src/lib/twenty/mock-client';
 import { ensurePod, refreshPersonCache } from '../src/lib/person-cache';
 import { logAudit, SYSTEM_ACTOR } from '../src/lib/audit';
@@ -69,10 +74,12 @@ async function seedDemo(sequenceId: string, withCampaigns: boolean) {
   const byEmail = new Map<string, string>();
   for (const u of users) {
     const member = DEMO_MEMBERS.find((m) => m.id === u.memberId)!;
+    // The mailbox alias is how a meeting attendee row is recognised as this colleague.
+    const aliases = [`tw_${member.firstName.toLowerCase()}`, DEMO_USER_MAILBOXES[u.email]].filter(Boolean) as string[];
     const user = await prisma.user.upsert({
       where: { email: u.email },
-      create: { email: u.email, name: u.name, role: u.role, passwordHash: hash, twentyMemberId: member.id, aliases: [`tw_${member.firstName.toLowerCase()}`], timezone: 'Europe/London' },
-      update: { twentyMemberId: member.id, aliases: [`tw_${member.firstName.toLowerCase()}`] },
+      create: { email: u.email, name: u.name, role: u.role, passwordHash: hash, twentyMemberId: member.id, aliases, timezone: 'Europe/London' },
+      update: { twentyMemberId: member.id, aliases },
     });
     byEmail.set(u.email, user.id);
     for (const p of u.pods) {
@@ -81,6 +88,9 @@ async function seedDemo(sequenceId: string, withCampaigns: boolean) {
     }
   }
   console.log(`  + ${users.length} demo users (password: ${DEMO_PASSWORD})`);
+
+  await seedRelationships();
+  await seedMeetings();
 
   if (!withCampaigns) {
     console.log('  = demo-basic: no campaigns seeded');
@@ -175,6 +185,85 @@ async function seedDemo(sequenceId: string, withCampaigns: boolean) {
   for (const t of await pendingFor('dummy-04')) await completeTask({ taskId: t.id, source: 'MANUAL' }, ctx);
   // Dummy Five: untouched -> overdue. Dummy Six: dnd -> never enrolled. Andrew's pod: due today.
   console.log('  + states: Dummy One (call logged), Two (replied), Three (bounced), Four (call due), Five (overdue), Six (dnd), Eight (meeting)');
+}
+
+/**
+ * The dummy relationship map: who reports to whom and how each contact leans. These three fields
+ * are Cadence-local (a refresh from Twenty never touches them), so writing them here is safe.
+ */
+async function seedRelationships() {
+  let written = 0;
+  for (const r of DEMO_RELATIONSHIPS) {
+    const exists = await prisma.personCache.findUnique({ where: { id: r.personId }, select: { id: true } });
+    if (!exists) continue;
+    await prisma.personCache.update({
+      where: { id: r.personId },
+      data: { reportsToId: r.reportsToId, accountRole: r.accountRole, relationshipNote: r.relationshipNote ?? null },
+    });
+    written += 1;
+  }
+  console.log(`  + relationship map on ${written} dummy people (hierarchy + stance)`);
+}
+
+/**
+ * Dummy meetings, placed inside the current Sunday-to-Saturday week so the Home boxes and the
+ * account timeline have something to show. One of each provider shape - see demo-meetings.ts.
+ */
+async function seedMeetings() {
+  if (await prisma.meeting.count()) {
+    console.log('  = dummy meetings exist, leaving them alone');
+    return;
+  }
+  const settings = await getSettings();
+  const today = todayIn('Europe/London');
+  const weekStart = startOfWeekSunday(today);
+  const users = await prisma.user.findMany({ select: { id: true, email: true, name: true, aliases: true } });
+  const mailbox = new Map<string, { id: string; name: string }>();
+  for (const u of users) for (const key of [u.email, ...u.aliases]) if (key.includes('@')) mailbox.set(key.toLowerCase(), { id: u.id, name: u.name });
+
+  for (const m of DEMO_MEETINGS) {
+    // Keep past meetings inside this week; a scheduled one may sit in the next.
+    const wanted = addDays(today, -m.daysAgo);
+    const day = m.daysAgo >= 0 && wanted < weekStart ? weekStart : wanted;
+    const occurredAt = new Date(`${day}T${String(m.hour).padStart(2, '0')}:00:00Z`);
+    const link = parseMeetingLink(m.sourceUrl);
+    const company = await prisma.companyCache.findUnique({ where: { id: m.companyId }, select: { id: true, name: true } });
+    const emails = m.attendees.map((a) => a.email.toLowerCase());
+    const people = await prisma.personCache.findMany({ where: { email: { in: emails, mode: 'insensitive' } }, select: { id: true, email: true } });
+    const personByEmail = new Map(people.map((p) => [p.email?.toLowerCase(), p.id]));
+    const host = m.attendees.find((a) => a.host);
+    const createdById = host ? mailbox.get(host.email.toLowerCase())?.id ?? null : null;
+
+    const meeting = await prisma.meeting.create({
+      data: {
+        title: m.title,
+        provider: link.provider,
+        sourceUrl: m.sourceUrl,
+        embedUrl: link.embedUrl,
+        mediaUrl: link.mediaUrl,
+        occurredAt,
+        durationSec: m.durationMin * 60,
+        companyId: company?.id ?? null,
+        companyName: company?.name ?? null,
+        notes: m.notes ?? null,
+        transcript: m.transcript ?? null,
+        transcriptFormat: m.transcript ? detectTranscriptFormat(m.transcript) : null,
+        createdById,
+        attendees: {
+          create: m.attendees.map((a) => ({
+            name: a.name,
+            email: a.email.toLowerCase(),
+            personId: personByEmail.get(a.email.toLowerCase()) ?? null,
+            userId: mailbox.get(a.email.toLowerCase())?.id ?? null,
+            external: isExternalEmail(a.email, settings.rules.internalDomains),
+            host: Boolean(a.host),
+          })),
+        },
+      },
+    });
+    await logAudit({ entityType: 'meeting', entityId: meeting.id, action: 'created', actor: SYSTEM_ACTOR, details: { title: meeting.title, provider: meeting.provider } });
+  }
+  console.log(`  + ${DEMO_MEETINGS.length} dummy meetings (${DEMO_MEETINGS.filter((m) => m.transcript).length} with transcripts, no analysis - no model connected)`);
 }
 
 async function main() {

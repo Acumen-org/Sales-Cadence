@@ -1,13 +1,37 @@
 # Cadence beside Twenty. Twenty stays the system of record.
 # Windows (Docker Desktop) and Linux: `docker compose up -d --build`.
+#
+# Sized for a 1 vCPU / 2 GB server: Postgres is tuned small, the Node processes are given a
+# hard heap ceiling, and the build is single-threaded. Measured idle footprint is ~340 MB.
 services:
   db:
-    image: postgres:16-alpine
+    # Postgres 18. Pin the minor in production if you want reproducible upgrades.
+    image: postgres:18-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: cadence
       POSTGRES_PASSWORD: cadence
       POSTGRES_DB: cadence
+      # Checksums catch silent corruption; cheap on modern CPUs.
+      POSTGRES_INITDB_ARGS: '--data-checksums'
+    command:
+      - postgres
+      - -c
+      - max_connections=40
+      - -c
+      - shared_buffers=192MB
+      - -c
+      - effective_cache_size=512MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - wal_compression=on
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - jit=off
     volumes:
       - cadence-db:/var/lib/postgresql/data
     ports:
@@ -15,40 +39,64 @@ services:
       - "${CADENCE_DB_PORT:-5433}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cadence -d cadence"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
       retries: 20
+    deploy:
+      resources:
+        limits:
+          memory: 640M
 
   web:
-    build: .
+    build:
+      context: .
+      args:
+        # Type checking runs in CI / `pnpm typecheck`; skipping it here halves build memory.
+        SKIP_TYPE_CHECK: "true"
+        NEXT_BUILD_CPUS: "1"
     restart: unless-stopped
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://cadence:cadence@db:5432/cadence
+      # connection_limit keeps Prisma's pool small enough for a 1-vCPU box.
+      DATABASE_URL: postgresql://cadence:cadence@db:5432/cadence?connection_limit=6&pool_timeout=20
       NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=512
     ports:
       - "${CADENCE_PORT:-3100}:3000"
     depends_on:
       db:
         condition: service_healthy
     command: ["sh", "docker/entrypoint.sh", "web"]
+    deploy:
+      resources:
+        limits:
+          memory: 768M
 
   worker:
-    build: .
+    build:
+      context: .
+      args:
+        SKIP_TYPE_CHECK: "true"
+        NEXT_BUILD_CPUS: "1"
     restart: unless-stopped
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://cadence:cadence@db:5432/cadence
+      DATABASE_URL: postgresql://cadence:cadence@db:5432/cadence?connection_limit=4&pool_timeout=20
       NODE_ENV: production
       SEED_ON_START: "false"
+      NODE_OPTIONS: --max-old-space-size=320
     depends_on:
       db:
         condition: service_healthy
       web:
         condition: service_started
     command: ["sh", "docker/entrypoint.sh", "worker"]
+    deploy:
+      resources:
+        limits:
+          memory: 384M
 
 volumes:
   cadence-db:

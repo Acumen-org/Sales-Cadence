@@ -23,7 +23,7 @@ export function ActionForm({ action, children, className, resetOnSuccess, confir
   const [result, setResult] = useState<ActionResult | null>(null);
   return (
     <form
-      className={clsx(className, pending && 'opacity-70')}
+      className={clsx(pending && 'opacity-70')}
       onSubmit={(e) => {
         e.preventDefault();
         if (confirm && !window.confirm(confirm)) return;
@@ -43,14 +43,21 @@ export function ActionForm({ action, children, className, resetOnSuccess, confir
         });
       }}
     >
+      {/*
+        The fieldset only exists to disable the controls while pending, so it is display:contents.
+        The caller's classes go on a real element inside it: a `space-y-*` on the <form> would have
+        no effect, because the fieldset is the form's only child.
+      */}
       <fieldset disabled={pending} className="contents">
-        {children}
+        <div className={className}>
+          {children}
+          {result ? (
+            <p className={clsx('text-xs', result.ok ? 'text-emerald-700' : 'text-red-700')} role="status">
+              {result.ok ? result.message ?? 'Done.' : result.error}
+            </p>
+          ) : null}
+        </div>
       </fieldset>
-      {result ? (
-        <p className={clsx('mt-2 text-xs', result.ok ? 'text-emerald-700' : 'text-red-700')} role="status">
-          {result.ok ? result.message ?? 'Done.' : result.error}
-        </p>
-      ) : null}
     </form>
   );
 }

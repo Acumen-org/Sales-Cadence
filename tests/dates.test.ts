@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addDays, dayOfWeek, diffDays, isLocalDate, localDateToInstant, toLocalDate, todayIn } from '@/lib/dates';
+import { addDays, dayOfWeek, diffDays, endOfWeekSaturday, isLocalDate, localDateToInstant, startOfWeekSunday, toLocalDate, todayIn, weekRange } from '@/lib/dates';
 
 describe('dates', () => {
   it('adds and diffs calendar days across month ends', () => {
@@ -28,6 +28,32 @@ describe('dates', () => {
     expect(todayIn('Europe/London', lateEveningUtc)).toBe('2026-09-07'); // BST = UTC+1
     expect(todayIn('America/Los_Angeles', lateEveningUtc)).toBe('2026-09-06');
     expect(todayIn('Not/AZone', lateEveningUtc)).toBe('2026-09-06'); // falls back to UTC
+  });
+
+  it('runs weeks from Sunday to Saturday', () => {
+    // 2026-09-06 is a Sunday, 2026-09-12 the Saturday after it.
+    expect(dayOfWeek('2026-09-06')).toBe(0);
+    expect(startOfWeekSunday('2026-09-06')).toBe('2026-09-06');
+    expect(startOfWeekSunday('2026-09-08')).toBe('2026-09-06');
+    expect(startOfWeekSunday('2026-09-12')).toBe('2026-09-06');
+    expect(startOfWeekSunday('2026-09-13')).toBe('2026-09-13');
+    expect(endOfWeekSaturday('2026-09-08')).toBe('2026-09-12');
+  });
+
+  it('gives this week as a half-open instant range in the user timezone', () => {
+    const w = weekRange('2026-09-08', 'Europe/London');
+    expect([w.from, w.to]).toEqual(['2026-09-06', '2026-09-12']);
+    // Midnight London on the Sunday, to midnight London on the following Sunday (BST = UTC+1).
+    expect(w.fromInstant.toISOString()).toBe('2026-09-05T23:00:00.000Z');
+    expect(w.toInstant.toISOString()).toBe('2026-09-12T23:00:00.000Z');
+    // A Saturday 23:59 local instant is inside the week; the next minute is not.
+    expect(new Date('2026-09-12T22:59:00Z') < w.toInstant).toBe(true);
+    expect(new Date('2026-09-12T23:00:00Z') < w.toInstant).toBe(false);
+  });
+
+  it('shifts the week boundary with the timezone', () => {
+    expect(weekRange('2026-09-08', 'America/Los_Angeles').fromInstant.toISOString()).toBe('2026-09-06T07:00:00.000Z');
+    expect(weekRange('2026-09-08', 'UTC').fromInstant.toISOString()).toBe('2026-09-06T00:00:00.000Z');
   });
 
   it('converts a local date to a 09:00 local instant and back', () => {

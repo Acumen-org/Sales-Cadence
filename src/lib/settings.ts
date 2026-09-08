@@ -55,6 +55,13 @@ export const RulesSettingsSchema = z.object({
   reconcileLookbackDays: z.number().int().min(1).max(90).default(3),
   /** Default daily ramp (new enrollments per FO per day) for new campaigns. */
   defaultDailyRampPerFo: z.number().int().min(1).default(20),
+  /**
+   * Our own email domains. An attendee or participant outside these is "external", which is how
+   * Cadence tells a real prospect meeting from an internal one.
+   */
+  internalDomains: z
+    .array(z.string().trim().toLowerCase())
+    .default(['acumen-strategy.com', 'prairie-hill.com', 'glynac.ai', 'acubooth.com']),
   /** A skip reason flagged as bounce ends the sequence (Outreach: Bounced state). */
   exitOnBounce: z.boolean().default(true),
   /** A call logged with an "answered" disposition counts as a reply and finishes the sequence. */
@@ -190,4 +197,17 @@ export async function getTwentyConnection(): Promise<TwentyConnection> {
 /** Effective daily cap for a user: personal override, else global. */
 export function effectiveDailyCap(user: { dailyCap: number | null }, rules: RulesSettings): number {
   return user.dailyCap ?? rules.dailyCap;
+}
+
+/** Domain part of an email address, lower-cased. */
+export function domainOf(email: string | null | undefined): string | null {
+  const at = (email ?? '').lastIndexOf('@');
+  return at > 0 ? email!.slice(at + 1).trim().toLowerCase() : null;
+}
+
+/** True when the address is outside our own domains (i.e. a prospect, not a colleague). */
+export function isExternalEmail(email: string | null | undefined, internalDomains: string[]): boolean {
+  const d = domainOf(email);
+  if (!d) return false;
+  return !internalDomains.some((i) => d === i || d.endsWith(`.${i}`));
 }

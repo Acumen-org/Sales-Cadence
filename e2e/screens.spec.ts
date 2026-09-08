@@ -73,10 +73,45 @@ test('capture screens', async ({ page }) => {
   await page.goto('/settings?tab=twenty');
   await shot(page, '14-settings-twenty');
 
-  // Global search dialog
-  await page.goto('/people');
+  // Global search dialog: the utility cluster lives on Tasks only.
+  await page.goto('/tasks');
   await page.getByTitle('Search (Ctrl+K)').click();
   await page.getByPlaceholder('Search people, campaigns and sequences').fill('Dummy');
   await page.waitForTimeout(600);
   await shot(page, '15-search');
+  await page.keyboard.press('Escape');
+
+  // Sections added later: meetings, accounts and the activity feed.
+  await page.goto('/meetings');
+  await shot(page, '16-meetings');
+  const meeting = page.getByRole('link', { name: /intro call/ }).first();
+  if (await meeting.isVisible().catch(() => false)) {
+    await meeting.click();
+    await page.waitForURL(/\/meetings\//);
+    await page.waitForTimeout(400);
+    await shot(page, '17-meeting-detail');
+  }
+  await page.goto('/meetings/new');
+  await shot(page, '18-meeting-new');
+
+  await page.goto('/accounts');
+  await shot(page, '19-accounts');
+  const account = page.getByRole('link', { name: 'Dummy Company A' }).first();
+  if (await account.isVisible().catch(() => false)) {
+    await account.click();
+    await page.waitForURL(/\/accounts\//);
+    await shot(page, '20-account-overview');
+    const url = page.url().replace(/\?.*$/, '');
+    await page.goto(`${url}?tab=relationships`);
+    await shot(page, '21-account-relationships');
+    await page.goto(`${url}?tab=timeline`);
+    await shot(page, '22-account-timeline');
+  }
+
+  await page.goto('/activity');
+  await shot(page, '23-activity');
+  await page.goto('/replies');
+  await shot(page, '24-replies');
+  await page.goto('/settings?tab=rules');
+  await shot(page, '25-settings-rules');
 });

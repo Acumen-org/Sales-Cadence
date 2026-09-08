@@ -82,11 +82,20 @@ export async function syncPodsFromTwenty(client: TwentyClient, podOwnerField = '
 }
 
 export async function upsertCompanyCache(c: TwentyCompany, tx: Tx | typeof prisma = prisma) {
-  return tx.companyCache.upsert({
-    where: { id: c.id },
-    create: { id: c.id, name: c.name, domain: c.domain, syncedAt: new Date() },
-    update: { name: c.name, domain: c.domain, syncedAt: new Date() },
-  });
+  const data = {
+    name: c.name,
+    domain: c.domain,
+    ownerMemberId: c.ownerMemberId ?? null,
+    industry: c.industry ?? null,
+    employees: c.employees ?? null,
+    city: c.city ?? null,
+    linkedinUrl: c.linkedinUrl ?? null,
+    raw: (c.raw ?? undefined) as Prisma.InputJsonValue | undefined,
+    twentyUpdatedAt: c.updatedAt ? new Date(c.updatedAt) : null,
+    deletedAt: c.deletedAt ? new Date(c.deletedAt) : null,
+    syncedAt: new Date(),
+  };
+  return tx.companyCache.upsert({ where: { id: c.id }, create: { id: c.id, ...data }, update: data });
 }
 
 export async function markPersonDeleted(personId: string, tx: Tx | typeof prisma = prisma) {

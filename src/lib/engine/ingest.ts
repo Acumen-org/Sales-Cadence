@@ -1,11 +1,12 @@
 import type { ActivityEvent, EventSource, Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { logAudit, webhookActor, RECONCILE_ACTOR, type AuditActor } from '../audit';
-import { markPersonDeleted, upsertPersonCache } from '../person-cache';
+import { markPersonDeleted, upsertCompanyCache, upsertPersonCache } from '../person-cache';
 import { getSettings, getTwentySchema, type MatchingSettings, type Settings } from '../settings';
 import { getTwentyClient, type TwentyClient } from '../twenty';
 import {
   canonicalObjectType,
+  normalizeCompany,
   normalizeMessage,
   normalizeNote,
   normalizeOpportunity,
@@ -14,7 +15,7 @@ import {
   normalizeTask,
   type CanonicalObject,
 } from '../twenty/normalize';
-import type { TwentyMessage, TwentyNote, TwentyOpportunity, TwentyPerson, TwentyTask } from '../twenty/types';
+import type { TwentyCompany, TwentyMessage, TwentyNote, TwentyOpportunity, TwentyPerson, TwentyTask } from '../twenty/types';
 import { OCCUPYING_STATUSES, applyPersonFlags, markMeeting, markReplied } from './enrollment';
 import { actionTypesFor, classifyMessage, classifyNoteTitle, resolveNoteActor, type UserLike } from './matching';
 import { completeTask, type EngineContext } from './tasks';
@@ -106,6 +107,8 @@ async function process(type: CanonicalObject, input: IngestInput, ctx: EngineCon
   switch (type) {
     case 'person':
       return handlePerson(normalizePerson(input.record, schema), deleted, ctx, settings);
+    case 'company':
+      return handleCompany(normalizeCompany(input.record, schema), deleted);
     case 'note':
       if (deleted) return { result: 'ignored_deleted' };
       return handleNote(normalizeNote(input.record, schema), ctx, settings);
@@ -147,6 +150,26 @@ async function loadUsers(): Promise<UserLike[]> {
 // ---------------------------------------------------------------------------
 // person
 // ---------------------------------------------------------------------------
+
+/**
+ * A company changed in Twenty. Cadence keeps a cache of accounts (name, owner, firmographics)
+ * so the Accounts section, the account timeline and "accounts I own" are right the moment Twenty
+ * fires the webhook, rather than at the next nightly refresh.
+ */
+async function handleCompany(company: TwentyCompany, deleted: boolean): Promise<ProcessOutcome> {
+  if (deleted) {
+    await prisma.companyCache.updateMany({ where: { id: company.id }, data: { deletedAt: new Date(), syncedAt: new Date() } });
+    return { result: 'company_deleted' };
+  }
+  const before = await prisma.companyCache.findUnique({ where: { id: company.id }, select: { name: true, ownerMemberId: true } });
+  await upsertCompanyCache(company);
+  const renamed = before && before.name !== company.name;
+  const reowned = before && before.ownerMemberId !== (company.ownerMemberId ?? null);
+  return {
+    result: before ? (renamed || reowned ? 'company_updated' : 'company_unchanged') : 'company_cached',
+    details: { name: company.name, ...(renamed ? { renamedFrom: before!.name } : {}), ...(reowned ? { ownerMemberId: company.ownerMemberId ?? null } : {}) },
+  };
+}
 
 async function handlePerson(person: TwentyPerson, deleted: boolean, ctx: EngineContext, settings: Settings): Promise<ProcessOutcome> {
   if (deleted) {

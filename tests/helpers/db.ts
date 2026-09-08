@@ -10,6 +10,8 @@ const TABLES = [
   'AuditLog',
   'TwentyWrite',
   'ActivityEvent',
+  'MeetingAttendee',
+  'Meeting',
   'Touch',
   'Task',
   'Enrollment',

@@ -15,7 +15,7 @@ import { EmptyState, ENROLLMENT_TONE, enrollmentStatusLabel, personStage, Surfac
 
 const PAGE_SIZE = 100;
 
-type Search = { q?: string; pod?: string; status?: string; page?: string };
+type Search = { q?: string; pod?: string; status?: string; page?: string; owner?: string };
 
 export default async function PeoplePage({ searchParams }: { searchParams: Promise<Search> }) {
   const user = await requireUser();
@@ -23,10 +23,15 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   const q = (sp.q ?? '').trim();
   const pod = sp.pod ?? '';
   const status = sp.status ?? '';
+  const owner = sp.owner === 'mine' ? 'mine' : '';
   const page = Math.max(1, Number.parseInt(sp.page ?? '1', 10) || 1);
   const actor = toActor(user);
 
   const where: Prisma.PersonCacheWhereInput = { deletedAt: null };
+  // "My relationships": owned by me in Twenty, or enrolled with me as the FO.
+  if (owner === 'mine') {
+    where.AND = [{ OR: [{ ownerMemberId: user.twentyMemberId ?? '__none__' }, { enrollments: { some: { foUserId: user.id } } }] }];
+  }
   if (q) {
     where.OR = [
       { firstName: { contains: q, mode: 'insensitive' } },
@@ -44,7 +49,8 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     where.optedOut = false;
   }
   if (status === 'replied') where.enrollments = { some: { status: { in: ['REPLIED', 'MEETING'] } } };
-  if (status === 'unresponsive') where.AND = [{ enrollments: { some: { status: 'COMPLETED' } } }, { enrollments: { none: { status: { in: ['ACTIVE', 'PAUSED', 'REPLIED', 'MEETING'] } } } }];
+  if (status === 'unresponsive')
+    where.AND = [...((where.AND as Prisma.PersonCacheWhereInput[]) ?? []), { enrollments: { some: { status: 'COMPLETED' } } }, { enrollments: { none: { status: { in: ['ACTIVE', 'PAUSED', 'REPLIED', 'MEETING'] } } } }];
   if (status === 'dnd') where.OR = [{ dnd: true }, { optedOut: true }];
   if (status === 'bad_data') where.OR = [{ badEmail: true }, { badPhone: true }, { enrollments: { some: { status: 'EXITED', exitReason: { in: ['bounced', 'bad_data'] } } } }];
 
@@ -75,6 +81,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     if (q) p.set('q', q);
     if (pod) p.set('pod', pod);
     if (status) p.set('status', status);
+    if (owner) p.set('owner', owner);
     p.set('page', String(n));
     return `/people?${p.toString()}`;
   };
@@ -111,7 +118,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     <div className="space-y-3 px-6 pb-8 pt-2">
       <Surface flush>
         <ViewHeader
-          title={q || pod || status ? 'Filtered people' : 'All people'}
+          title={owner === 'mine' ? 'My relationships' : q || pod || status ? 'Filtered people' : 'All people'}
           caret
           meta={`${total} result${total === 1 ? '' : 's'}`}
           actions={isAdmin(user) ? <SyncNow /> : null}

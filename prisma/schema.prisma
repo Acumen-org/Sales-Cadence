@@ -95,6 +95,33 @@ enum Channel {
   LINKEDIN
 }
 
+/// Where a recording lives. Only some providers allow embedding in an iframe.
+enum MeetingProvider {
+  TEAMS
+  ZOOM
+  GOOGLE_MEET
+  SHAREPOINT
+  DRIVE
+  FILE
+  OTHER
+}
+
+enum AnalysisStatus {
+  NONE
+  PENDING
+  READY
+  FAILED
+}
+
+/// Cadence-local stance of a person on their account (for the relationship map).
+enum AccountRole {
+  CHAMPION
+  SUPPORTER
+  NEUTRAL
+  DETRACTOR
+  UNKNOWN
+}
+
 // ---------------------------------------------------------------------------
 // Users, sessions, pods
 // ---------------------------------------------------------------------------
@@ -121,6 +148,7 @@ model User {
   enrollments    Enrollment[] @relation("EnrollmentFo")
   tasks          Task[]       @relation("TaskFo")
   completedTasks Task[]       @relation("TaskCompletedBy")
+  meetings       Meeting[]    @relation("MeetingCreatedBy")
 }
 
 model Session {
@@ -267,6 +295,9 @@ model Enrollment {
   @@index([campaignId])
   @@index([companyId])
   @@index([status])
+  /// Weekly reply/meeting counts per FO (Home, Reports).
+  @@index([foUserId, repliedAt])
+  @@index([foUserId, meetingAt])
 }
 
 model Task {
@@ -323,6 +354,11 @@ model Task {
   @@index([state, dueDate])
   @@index([evidenceId])
   @@index([twentyTaskId])
+  /// Weekly "done" counts per FO (Home, Reports).
+  @@index([foUserId, state, completedAt])
+  @@index([state, completedAt])
+  /// Task-list ordering inside a scope.
+  @@index([foUserId, snoozedTo])
 }
 
 // ---------------------------------------------------------------------------
@@ -350,26 +386,113 @@ model PersonCache {
   optedOut        Boolean   @default(false)
   badEmail        Boolean   @default(false)
   badPhone        Boolean   @default(false)
+  /// Cadence-local org chart: who this person reports to (normally at the same company).
+  reportsToId     String?
+  /// Cadence-local stance on the account, shown on the relationship map.
+  accountRole     AccountRole @default(UNKNOWN)
+  /// Free-text note the FO keeps about the relationship.
+  relationshipNote String?
   raw             Json?
   twentyUpdatedAt DateTime?
   deletedAt       DateTime?
   syncedAt        DateTime  @default(now())
 
-  enrollments Enrollment[]
-  touches     Touch[]
+  enrollments      Enrollment[]
+  touches          Touch[]
+  meetingAttendees MeetingAttendee[]
 
   @@index([companyId])
   @@index([podOwner])
   @@index([email])
   @@index([lastName, firstName])
   @@index([ownerMemberId])
+  @@index([reportsToId])
+  @@index([companyId, lastName])
 }
 
 model CompanyCache {
-  id       String   @id
-  name     String
-  domain   String?
-  syncedAt DateTime @default(now())
+  id            String    @id
+  name          String
+  domain        String?
+  /// Twenty workspace member that owns the account.
+  ownerMemberId String?
+  industry      String?
+  employees     Int?
+  city          String?
+  linkedinUrl   String?
+  raw           Json?
+  twentyUpdatedAt DateTime?
+  deletedAt     DateTime?
+  syncedAt      DateTime  @default(now())
+
+  meetings Meeting[]
+
+  @@index([ownerMemberId])
+  @@index([name])
+}
+
+// ---------------------------------------------------------------------------
+// Meetings: a recording link, its transcript, and (later) its analysis
+// ---------------------------------------------------------------------------
+
+model Meeting {
+  id               String          @id @default(uuid())
+  title            String
+  provider         MeetingProvider @default(OTHER)
+  /// The link the user pasted.
+  sourceUrl        String
+  /// Embeddable URL when the provider allows framing; null means "open in a new tab".
+  embedUrl         String?
+  /// Direct media file (mp4/webm) when known, played with a <video> element.
+  mediaUrl         String?
+  occurredAt       DateTime
+  durationSec      Int?
+  companyId        String?
+  company          CompanyCache?   @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  /// Kept even when the company is not cached, so the label always renders.
+  companyName      String?
+  notes            String?
+  /// Raw transcript as pasted or uploaded (WebVTT, SRT or plain text).
+  transcript       String?
+  transcriptFormat String?
+  /// MeetingAnalysis - see src/lib/meetings/analysis.ts. Written by an analyzer, never by hand.
+  analysis         Json?
+  analysisStatus   AnalysisStatus  @default(NONE)
+  analysisModel    String?
+  analysisError    String?
+  analysedAt       DateTime?
+  createdById      String?
+  createdBy        User?           @relation("MeetingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  attendees MeetingAttendee[]
+
+  @@index([occurredAt])
+  @@index([companyId, occurredAt])
+  @@index([createdById])
+  @@index([analysisStatus])
+}
+
+model MeetingAttendee {
+  id        String       @id @default(uuid())
+  meetingId String
+  meeting   Meeting      @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  name      String?
+  email     String?
+  /// Matched Twenty person, when the address is known.
+  personId  String?
+  person    PersonCache? @relation(fields: [personId], references: [id], onDelete: SetNull)
+  /// Matched Cadence user, when the address is one of ours.
+  userId    String?
+  /// True when the address is outside settings.rules.internalDomains.
+  external  Boolean      @default(false)
+  host      Boolean      @default(false)
+
+  @@unique([meetingId, email])
+  @@index([meetingId])
+  @@index([personId])
+  @@index([email])
 }
 
 /// Every observed or performed touch on a person, across channels.
@@ -442,6 +565,9 @@ model AuditLog {
 
   @@index([entityType, entityId])
   @@index([createdAt])
+  /// The Activity feed: newest first, optionally filtered by person or type.
+  @@index([actorId, createdAt])
+  @@index([entityType, createdAt])
 }
 
 model Setting {
