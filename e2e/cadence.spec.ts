@@ -70,13 +70,13 @@ test('task flow: complete an email, log a call with an outcome, skip with a boun
   await page.goto(`/tasks?tab=${tab}&fo=`);
   await expect(page.getByText(/Email 1/).first()).toBeVisible();
 
-  // Task flow, emails only
+  // Task flow, emails only. The heading is the person; the step is in the line above it.
   await page.goto(`/tasks?tab=${tab}&type=EMAIL&mode=flow`);
-  await expect(page.getByRole('heading', { name: /Email 1:/ })).toBeVisible();
-  const firstPerson = (await page.getByRole('heading', { name: /Email 1:/ }).textContent())!.replace('Email 1:', '').trim();
-  await expect(page.getByText('Subject:').first()).toBeVisible(); // template rendered
+  await expect(page.getByText(/Step \d+ of \d+/)).toBeVisible();
+  const firstPerson = (await page.locator('main h2').first().textContent())!.trim();
+  await expect(page.locator('input[id^="subject-"]').first()).toBeVisible(); // template rendered
   await page.getByRole('button', { name: 'Done', exact: true }).click();
-  await expect(page.getByText(/^Done\.?$/).or(page.getByRole('heading', { name: /Email 1:/ }))).toBeVisible();
+  await expect(page.getByRole('status').or(page.getByText(/Step \d+ of \d+/))).toBeVisible();
   // the completed task no longer appears in the pending email list
   await page.goto(`/tasks?tab=${tab}&type=EMAIL`);
   await expect(page.getByRole('link', { name: new RegExp(firstPerson) }).first()).toHaveCount(0);
@@ -89,14 +89,14 @@ test('task flow: complete an email, log a call with an outcome, skip with a boun
   await page.goto(`/tasks?tab=${tab}&type=LINKEDIN`);
   await page.getByRole('link', { name: new RegExp(firstPerson) }).first().click();
   await page.getByRole('button', { name: 'Done', exact: true }).click();
-  await expect(page.getByText(/Done\./).first()).toBeVisible();
+  await expect(page.getByRole('status')).toContainText(/Done\./);
 
   // The call is now upcoming (day 3). Log it with an outcome.
   await page.goto('/tasks?tab=upcoming&type=CALL');
   await page.getByRole('link', { name: new RegExp(firstPerson) }).first().click();
-  await expect(page.getByRole('heading', { name: /Call 1:/ })).toBeVisible();
+  await expect(page.getByText(/Call 1/).first()).toBeVisible();
   await page.getByRole('button', { name: 'Log call' }).click();
-  await expect(page.getByText('Call outcome (required)')).toBeVisible();
+  await expect(page.getByText('How did the call go?')).toBeVisible();
   // submit without an outcome must be blocked
   await expect(page.getByRole('button', { name: 'Log call' }).last()).toBeDisabled();
   await page.getByText('Left voicemail').click();
@@ -109,9 +109,9 @@ test('task flow: complete an email, log a call with an outcome, skip with a boun
   const secondLink = page.getByRole('link', { name: /Email 1/ }).first();
   const secondPerson = (await secondLink.locator('span.font-medium').first().textContent())!.trim();
   await secondLink.click();
-  await page.getByRole('button', { name: 'Skip' }).click();
-  await page.getByLabel(/Why are you skipping/).selectOption('bounced');
-  await page.getByRole('button', { name: 'Confirm skip' }).click();
+  await page.getByRole('button', { name: 'Skip', exact: true }).click();
+  await page.getByLabel('Why?', { exact: true }).selectOption('bounced');
+  await page.getByRole('button', { name: 'Skip step' }).click();
   await expect(page.getByText(/Skipped and removed from the sequence \(bounced\)/)).toBeVisible();
 
   // Person page reflects it
@@ -145,7 +145,7 @@ test('answered call finishes the sequence as replied and shows on Home', async (
   // Home counts this as a reply for the FO who owns the enrollment. The "Replies this week" box
   // is about inbound emails Twenty synced, so a logged call belongs in the team column, not there.
   await page.goto('/home');
-  await expect(page.getByRole('heading', { name: 'Replies this week' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /this week/ })).toBeVisible();
   // The enrollment's own FO gets the credit, so somebody in the pod table has a reply this week.
   const replyCells = await page.locator('table tbody tr td:nth-child(5)').allTextContents();
   expect(replyCells.some((v) => Number(v.trim()) > 0)).toBe(true);

@@ -1,11 +1,11 @@
 import Link from 'next/link';
 import { requireUser } from '@/lib/auth/current-user';
 import { isAdmin } from '@/lib/auth/rbac';
-import { formatInstant, formatLocalDate } from '@/lib/dates';
+import { formatLocalDate } from '@/lib/dates';
 import { buildHome } from '@/lib/home-query';
 import { TASK_CHANNELS, type TaskChannel } from '@/lib/tasks-query';
 import { ActionIcon, IconCampaigns, IconChevronRight, IconPeople } from '@/components/icons';
-import { Avatar, Card, EmptyState, Notice, Surface } from '@/components/ui';
+import { Avatar, EmptyState, Notice, Surface } from '@/components/ui';
 
 const CHANNEL_LABELS: Record<TaskChannel, string> = { CALL: 'Calls', EMAIL: 'Emails', LINKEDIN: 'LinkedIn' };
 
@@ -67,130 +67,111 @@ export default async function HomePage() {
         <Tile label="My relationships" value={h.my.relationships} hint="people assigned to me" href="/people?owner=mine" icon={<IconPeople size={17} />} />
       </div>
 
-      {/* This week, Sunday to Saturday: the latest one, with a way into the full list. */}
-      <div className="grid gap-3 lg:grid-cols-2">
-        <LatestCard
-          title="Replies this week"
-          count={h.replies.total}
-          href="/replies"
-          emptyTitle="No replies yet this week"
-          emptyHint="Inbound emails Twenty syncs for the people you are responsible for land here."
-          weekLabel={`${formatLocalDate(h.week.from)} - ${formatLocalDate(h.week.to)}`}
-          row={
-            h.replies.rows[0]
-              ? {
-                  name: h.replies.rows[0].name,
-                  sub: [h.replies.rows[0].company, h.replies.rows[0].summary].filter(Boolean).join(' · '),
-                  at: formatInstant(h.replies.rows[0].at, user.timezone),
-                  href: `/people/${h.replies.rows[0].personId}`,
-                }
-              : null
-          }
-        />
-        <LatestCard
-          title="Meetings booked this week"
-          count={h.meetings.total}
-          href="/meetings?scope=week"
-          emptyTitle="No meetings yet this week"
-          emptyHint="A meeting counts when someone outside your own domains is on it."
-          weekLabel={`${formatLocalDate(h.week.from)} - ${formatLocalDate(h.week.to)}`}
-          row={
-            h.meetings.rows[0]
-              ? {
-                  name: h.meetings.rows[0].title,
-                  sub: [h.meetings.rows[0].company, `${h.meetings.rows[0].externals} external`].filter(Boolean).join(' · '),
-                  at: formatInstant(h.meetings.rows[0].at, user.timezone),
-                  href: h.meetings.rows[0].href,
-                }
-              : null
-          }
-        />
+      {h.team.length ? <TeamBoard rows={h.team} week={{ from: h.week.from, to: h.week.to }} isAdmin={isAdmin(user)} /> : null}
+    </div>
+  );
+}
+
+type TeamRow = { id: string; name: string; today: number; overdue: number; doneWeek: number; replies: number; meetings: number };
+
+/**
+ * The week's board. A plain grid of numbers was unreadable, so each FO gets a row with the
+ * work they owe on the left, a bar for what they have actually finished, and outcomes on the
+ * right. The bar is scaled to the busiest person, which is the only comparison that matters
+ * when you are scanning for who needs help.
+ */
+function TeamBoard({ rows, week, isAdmin: admin }: { rows: TeamRow[]; week: { from: string; to: string }; isAdmin: boolean }) {
+  const total = rows.reduce(
+    (a, r) => ({
+      today: a.today + r.today,
+      overdue: a.overdue + r.overdue,
+      doneWeek: a.doneWeek + r.doneWeek,
+      replies: a.replies + r.replies,
+      meetings: a.meetings + r.meetings,
+    }),
+    { today: 0, overdue: 0, doneWeek: 0, replies: 0, meetings: 0 },
+  );
+  const peak = Math.max(1, ...rows.map((r) => r.doneWeek));
+
+  return (
+    <Surface flush>
+      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line px-4 py-3">
+        <h2 className="text-[14px] font-semibold text-ink-900">{admin ? 'The team this week' : 'Your pods this week'}</h2>
+        <p className="text-[11.5px] text-ink-400">
+          {formatLocalDate(week.from)} - {formatLocalDate(week.to)} · {rows.length} {rows.length === 1 ? 'person' : 'people'}
+        </p>
       </div>
 
-      {h.team.length ? (
-        <Card title={isAdmin(user) ? 'Team this week' : 'Your pods this week'}>
-          <table className="table">
+      {rows.length === 0 ? (
+        <EmptyState title="Nobody in your pods yet" />
+      ) : (
+        <div className="overflow-x-auto scroll-thin">
+          <table className="w-full border-collapse text-[13px]">
             <thead>
-              <tr>
-                <th>FO</th>
-                <th>Due today</th>
-                <th>Overdue</th>
-                <th>Done</th>
-                <th>Replies</th>
-                <th>Meetings</th>
-                <th></th>
+              <tr className="border-b border-line text-[11px] font-medium uppercase tracking-wide text-ink-400">
+                {/* Explicit widths: the name column absorbs the slack so the figures stay together. */}
+                <th className="px-4 py-2 text-left font-medium">Person</th>
+                <th className="w-[92px] px-3 py-2 text-right font-medium">Due today</th>
+                <th className="w-[84px] px-3 py-2 text-right font-medium">Overdue</th>
+                <th className="w-[172px] px-3 py-2 text-left font-medium">Done this week</th>
+                <th className="w-[78px] px-3 py-2 text-right font-medium">Replies</th>
+                <th className="w-[88px] px-3 py-2 text-right font-medium">Meetings</th>
+                <th className="w-[92px] px-4 py-2" />
               </tr>
             </thead>
             <tbody>
-              {h.team.map((t) => (
-                <tr key={t.id}>
-                  <td>
+              {rows.map((t) => (
+                <tr key={t.id} className="group border-b border-line/70 transition last:border-b-0 hover:bg-canvas/60">
+                  <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2.5">
-                      <Avatar name={t.name} shape="circle" size={26} />
-                      <span className="font-medium text-ink-900">{t.name}</span>
+                      <Avatar name={t.name} shape="circle" size={28} />
+                      <span className="truncate font-medium text-ink-900">{t.name}</span>
                     </div>
                   </td>
-                  <td>{t.today}</td>
-                  <td className={t.overdue ? 'font-medium text-red-600' : undefined}>{t.overdue}</td>
-                  <td>{t.doneWeek}</td>
-                  <td>{t.replies}</td>
-                  <td>{t.meetings}</td>
-                  <td className="text-right">
-                    <Link href={`/tasks?tab=today&fo=${t.id}`} className="btn-ghost btn-sm">
-                      View tasks
+                  <td className="px-3 py-2.5 text-right tabular-nums text-ink-800">{t.today || <span className="text-ink-300">-</span>}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">
+                    {t.overdue ? <span className="font-medium text-red-600">{t.overdue}</span> : <span className="text-ink-300">-</span>}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <span className="h-1.5 w-full max-w-[104px] overflow-hidden rounded-full bg-canvas">
+                        <span className="block h-full rounded-full bg-brand-500 transition-[width]" style={{ width: `${Math.round((t.doneWeek / peak) * 100)}%` }} />
+                      </span>
+                      <span className="w-6 shrink-0 text-right tabular-nums text-ink-700">{t.doneWeek}</span>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">
+                    {t.replies ? <span className="font-medium text-emerald-700">{t.replies}</span> : <span className="text-ink-300">-</span>}
+                  </td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">
+                    {t.meetings ? <span className="font-medium text-brand-700">{t.meetings}</span> : <span className="text-ink-300">-</span>}
+                  </td>
+                  <td className="px-4 py-2.5 text-right">
+                    <Link
+                      href={`/tasks?tab=today&fo=${t.id}`}
+                      className="inline-flex items-center gap-0.5 whitespace-nowrap text-[12.5px] font-medium text-ink-400 transition group-hover:text-brand-700"
+                    >
+                      Tasks <IconChevronRight size={14} />
                     </Link>
                   </td>
                 </tr>
               ))}
             </tbody>
+            {rows.length > 1 ? (
+              <tfoot>
+                <tr className="border-t border-line bg-canvas/50 text-[12.5px] font-medium text-ink-600">
+                  <td className="px-4 py-2">Everyone</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{total.today}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{total.overdue}</td>
+                  <td className="px-3 py-2 tabular-nums">{total.doneWeek} done</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{total.replies}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{total.meetings}</td>
+                  <td />
+                </tr>
+              </tfoot>
+            ) : null}
           </table>
-        </Card>
-      ) : null}
-    </div>
-  );
-}
-
-/** A card showing only the latest item, with an arrow that carries the full count. */
-function LatestCard({
-  title,
-  count,
-  href,
-  row,
-  emptyTitle,
-  emptyHint,
-  weekLabel,
-}: {
-  title: string;
-  count: number;
-  href: string;
-  row: { name: string; sub: string; at: string; href: string } | null;
-  emptyTitle: string;
-  emptyHint: string;
-  weekLabel: string;
-}) {
-  return (
-    <Surface flush>
-      <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
-        <div>
-          <h2 className="text-[14px] font-semibold text-ink-900">{title}</h2>
-          <p className="text-[11px] text-ink-400">{weekLabel}</p>
         </div>
-        <Link href={href} className="inline-flex items-center gap-1.5 rounded-[10px] border border-line px-2.5 py-1.5 text-[12.5px] font-medium text-ink-700 transition hover:border-brand-300 hover:text-brand-700" title={`Open all ${count}`}>
-          {count}
-          <IconChevronRight size={15} />
-        </Link>
-      </div>
-      {row ? (
-        <Link href={row.href} className="flex items-center gap-3 px-4 py-3 transition hover:bg-canvas/70">
-          <Avatar name={row.name} shape="circle" size={30} />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13.5px] font-medium text-ink-900">{row.name}</span>
-            <span className="block truncate text-[12px] text-ink-500">{row.sub}</span>
-          </span>
-          <span className="shrink-0 text-[11.5px] text-ink-400">{row.at}</span>
-        </Link>
-      ) : (
-        <EmptyState title={emptyTitle} hint={emptyHint} />
       )}
     </Surface>
   );

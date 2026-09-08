@@ -6,11 +6,12 @@ import { plannedDateForStep } from './engine/clock';
 import { previewNextStep } from './engine/versioning';
 import { colleagueEnrollments } from './engine/enrollment';
 import { cachedPersonName } from './person-cache';
+import { describeAudit } from './audit-format';
 import { describeStep, parseSteps, resolveCopy, type SequenceStep, type StepAction } from './sequences/steps';
 import { getSettings, getTwentyConnection } from './settings';
 import { renderTemplate, type TemplateVars } from './templates';
 import { getTwentyClient } from './twenty';
-import type { TwentyNote, TwentyOpportunity } from './twenty/types';
+import type { TwentyMessage, TwentyNote, TwentyOpportunity } from './twenty/types';
 import { twentyPersonUrl } from './twenty/urls';
 import { taskRowInclude, type TaskRow } from './tasks-query';
 
@@ -20,6 +21,17 @@ export type RenderedAction = {
   subject: string | null;
   body: string;
   rawTemplate: string | null;
+};
+
+export type BriefTimelineItem = {
+  id: string;
+  at: Date;
+  kind: 'email' | 'call' | 'linkedin' | 'note' | 'meeting' | 'state';
+  /** 'in' for something they did, 'out' for something we did. */
+  direction: 'in' | 'out' | 'neutral';
+  title: string;
+  detail: string | null;
+  actor: string | null;
 };
 
 export type ColleagueRow = {
@@ -47,6 +59,10 @@ export type TaskBrief = {
   replyInThread: boolean;
   touches: Array<{ id: string; channel: string; direction: string; occurredAt: Date; summary: string; actorLabel: string | null }>;
   notes: TwentyNote[];
+  /** Emails Twenty has synced for this person, newest first. */
+  emails: Array<{ id: string; subject: string | null; preview: string | null; at: Date; inbound: boolean; from: string | null }>;
+  /** Touches, emails, notes and sequence events on one clock, newest first. */
+  timeline: BriefTimelineItem[];
   colleagues: ColleagueRow[];
   opportunities: TwentyOpportunity[];
   nextStep: { step: SequenceStep; plannedDate: LocalDate; description: string } | null;
@@ -111,15 +127,22 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
   const variantLabel = copy?.variantLabel ?? null;
   const replyInThread = Boolean(actionDef?.replyInThread);
 
-  const [touches, colleagues, notesResult, oppsResult] = await Promise.all([
-    // 12 for the dot timeline; the brief lists the most recent five.
-    prisma.touch.findMany({ where: { personId: person.id }, orderBy: { occurredAt: 'desc' }, take: 12 }),
+  const [touches, colleagues, notesResult, oppsResult, emailsResult, stateEvents] = await Promise.all([
+    // 20 feeds both the dot timeline and the merged timeline below it.
+    prisma.touch.findMany({ where: { personId: person.id }, orderBy: { occurredAt: 'desc' }, take: 20 }),
     loadColleagues(person.companyId, person.id),
     fetchNotes(person.id),
     fetchOpportunities(person.id),
+    fetchEmails(person.id),
+    prisma.auditLog.findMany({
+      where: { entityType: 'enrollment', entityId: task.enrollmentId, action: { in: ['enrolled', 'replied', 'meeting', 'exited', 'paused', 'resumed', 'moved_to_step'] } },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    }),
   ]);
   if (notesResult.error) warnings.push(notesResult.error);
   if (oppsResult.error && oppsResult.error !== notesResult.error) warnings.push(oppsResult.error);
+  if (emailsResult.error && emailsResult.error !== notesResult.error) warnings.push(emailsResult.error);
 
   const next = previewNextStep({ currentStep: enrollmentFull.currentStep, currentSteps, activeSteps });
   const nextStep = next
@@ -144,6 +167,8 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
     replyInThread,
     touches: touches.map((t) => ({ id: t.id, channel: t.channel, direction: t.direction, occurredAt: t.occurredAt, summary: t.summary, actorLabel: t.actorLabel })),
     notes: notesResult.notes,
+    emails: emailsResult.emails,
+    timeline: buildTimeline({ touches, notes: notesResult.notes, emails: emailsResult.emails, stateEvents }),
     colleagues,
     opportunities: oppsResult.opportunities,
     nextStep,
@@ -193,6 +218,95 @@ async function fetchNotes(personId: string): Promise<{ notes: TwentyNote[]; erro
   } catch (err) {
     return { notes: [], error: `Twenty unavailable: ${err instanceof Error ? err.message : String(err)}` };
   }
+}
+
+/**
+ * Emails Twenty synced for this person. Direction comes from the participant list: if the person
+ * is the sender it came in, otherwise it went out from one of our mailboxes.
+ */
+async function fetchEmails(personId: string): Promise<{ emails: TaskBrief['emails']; error?: string }> {
+  try {
+    const client = await getTwentyClient();
+    const page = await client.listMessages({ personId, limit: 8 });
+    const emails = page.items
+      .map((m: TwentyMessage) => {
+        const from = m.participants.find((x) => x.role === 'from');
+        const text = (m.text ?? '').replace(/\s+/g, ' ').trim();
+        return {
+          id: m.id,
+          subject: m.subject,
+          preview: text ? text.slice(0, 180) : null,
+          at: new Date(m.receivedAt ?? m.updatedAt ?? Date.now()),
+          inbound: from?.personId === personId,
+          from: from?.displayName ?? from?.handle ?? null,
+        };
+      })
+      .sort((a, b) => b.at.getTime() - a.at.getTime());
+    return { emails };
+  } catch (err) {
+    return { emails: [], error: `Twenty unavailable: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
+
+/** One clock for everything known about this person, newest first. */
+function buildTimeline(input: {
+  touches: Array<{ id: string; channel: string; direction: string; occurredAt: Date; summary: string; actorLabel: string | null }>;
+  notes: TwentyNote[];
+  emails: TaskBrief['emails'];
+  stateEvents: Array<{ id: string; action: string; createdAt: Date; actorLabel: string | null; details: unknown }>;
+}): BriefTimelineItem[] {
+  const kindOfChannel = (channel: string): BriefTimelineItem['kind'] => (channel === 'EMAIL' ? 'email' : channel === 'CALL' ? 'call' : 'linkedin');
+  // An email listed in full from Twenty would otherwise show again as its touch record.
+  const emailSubjects = new Set(input.emails.map((e) => (e.subject ?? '').toLowerCase()).filter(Boolean));
+  const looksLikeListedEmail = (summary: string) => {
+    const stripped = summary.replace(/^(reply|email)\s*[:-]?\s*/i, '').toLowerCase();
+    return emailSubjects.has(stripped) || [...emailSubjects].some((s) => stripped.includes(s));
+  };
+
+  const items: BriefTimelineItem[] = [
+    ...input.touches
+      .filter((t) => !(t.channel === 'EMAIL' && looksLikeListedEmail(t.summary)))
+      .map<BriefTimelineItem>((t) => ({
+        id: `t:${t.id}`,
+        at: t.occurredAt,
+        kind: kindOfChannel(t.channel),
+        direction: t.direction === 'INBOUND' ? 'in' : 'out',
+        title: t.summary,
+        detail: null,
+        actor: t.actorLabel,
+      })),
+    ...input.emails.map<BriefTimelineItem>((e) => ({
+      id: `m:${e.id}`,
+      at: e.at,
+      kind: 'email',
+      direction: e.inbound ? 'in' : 'out',
+      title: e.subject ?? (e.inbound ? 'Email received' : 'Email sent'),
+      detail: e.preview,
+      actor: e.from,
+    })),
+    ...input.notes.map<BriefTimelineItem>((n) => ({
+      id: `n:${n.id}`,
+      at: new Date(n.createdAt ?? Date.now()),
+      kind: 'note',
+      direction: 'neutral',
+      title: n.title || 'Note',
+      detail: (n.bodyMarkdown ?? '').replace(/\s+/g, ' ').trim().slice(0, 180) || null,
+      actor: n.createdByName,
+    })),
+    ...input.stateEvents.map<BriefTimelineItem>((a) => {
+      const said = describeAudit(a.action, a.details as Record<string, unknown> | null, null);
+      return {
+        id: `a:${a.id}`,
+        at: a.createdAt,
+        kind: a.action === 'meeting' ? 'meeting' : 'state',
+        direction: a.action === 'replied' || a.action === 'meeting' ? 'in' : 'neutral',
+        title: said.title,
+        detail: said.detail,
+        actor: a.actorLabel,
+      };
+    }),
+  ];
+  return items.sort((a, b) => b.at.getTime() - a.at.getTime()).slice(0, 24);
 }
 
 async function fetchOpportunities(personId: string): Promise<{ opportunities: TwentyOpportunity[]; error?: string }> {

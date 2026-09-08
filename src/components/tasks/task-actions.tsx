@@ -3,19 +3,10 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import clsx from 'clsx';
-import {
-  completeTaskAction,
-  finishFromTaskAction,
-  moveToStepAction,
-  pauseFromTaskAction,
-  removeFromSequenceAction,
-  skipTaskAction,
-  snoozeTaskAction,
-} from '@/lib/actions/tasks';
+import { completeTaskAction, finishFromTaskAction, moveToStepAction, removeFromSequenceAction, skipTaskAction, snoozeTaskAction } from '@/lib/actions/tasks';
 import type { ActionResult } from '@/lib/actions/users';
 import { ACTION_LABELS, type ActionType } from '@/lib/sequences/steps';
 import { IconCheck, IconChevronLeft, IconChevronRight, IconClock, IconExternal, IconPhone, IconSkip } from '@/components/icons';
-import { CopyButton } from '@/components/copy-button';
 
 export type DispositionOption = { key: string; label: string; answered: boolean };
 export type SkipReasonOption = { key: string; label: string; exit: string };
@@ -27,7 +18,6 @@ type Props = {
   nextUrl: string | null;
   prevUrl: string | null;
   twentyUrl: string | null;
-  copyText: string;
   nextWorkingDay: string;
   canPickSnoozeDate: boolean;
   dispositions: DispositionOption[];
@@ -41,11 +31,25 @@ type Props = {
 type Panel = 'none' | 'call' | 'skip' | 'snooze' | 'more';
 
 /**
- * Task flow controls, Outreach style:
- *  Done (calls need a disposition), Skip (reason), Snooze, Open in Twenty, Copy, Next/Previous,
- *  and an overflow with Finish (Replied) / Finish (No Reply) / Pause / Move to step / Remove.
- *  Keyboard: D done, S skip, Z snooze, N or -> next, P or <- previous, C copy, O open, M more,
- *  1-9 pick a call outcome, Enter confirm, Esc close.
+ * Ending a sequence used to be four separate buttons whose names did not say what they did.
+ * It is one question now: why are you stopping? The answer decides whether the enrollment is
+ * finished as replied, finished unanswered, or exited with a reason.
+ */
+const END_REASONS = [
+  { key: 'replied', label: 'They replied', detail: 'Counts as a reply for this person and the FO.' },
+  { key: 'no_reply', label: 'Ran its course, no reply', detail: 'Every step was worked and nobody answered.' },
+  { key: 'not_interested', label: 'Not interested', detail: 'They said no.' },
+  { key: 'opted_out', label: 'Asked not to be contacted', detail: 'Stops all outreach to this person.' },
+  { key: 'bad_data', label: 'Wrong or missing details', detail: 'The email or phone number is not usable.' },
+  { key: 'removed', label: 'Another reason', detail: 'Ends the sequence without one of the labels above.' },
+] as const;
+
+/**
+ * The controls under a task. Every control sits in one row, and every panel opens in the one
+ * slot beneath it, so nothing moves when a panel opens or closes:
+ *   Done / Log call · Skip · Snooze · Open in Twenty · More (becomes Less) · Previous / Next
+ * Keyboard: D done, S skip, Z snooze, N or -> next, P or <- previous, O open, M more,
+ * 1-9 pick a call outcome, Enter confirm, Esc close.
  */
 export function TaskActions(p: Props) {
   const router = useRouter();
@@ -57,7 +61,8 @@ export function TaskActions(p: Props) {
   const [reasonKey, setReasonKey] = useState(p.skipReasons[0]?.key ?? 'other');
   const [snoozeDate, setSnoozeDate] = useState(p.nextWorkingDay);
   const [moveTo, setMoveTo] = useState<number>(p.steps.find((s) => s.index > p.currentStep)?.index ?? p.currentStep + 1);
-  const [feedback, setFeedback] = useState<ActionResult | null>(null);
+  const [endReason, setEndReason] = useState<string>('replied');
+  const [error, setError] = useState<string | null>(null);
   const noteRef = useRef<HTMLTextAreaElement>(null);
 
   const run = useCallback(
@@ -65,19 +70,21 @@ export function TaskActions(p: Props) {
       start(async () => {
         try {
           const r = await fn();
-          setFeedback(r);
-          if (r.ok) {
-            setPanel('none');
-            setNote('');
-            setDisposition('');
-            // Carry the confirmation in the URL so it survives the navigation / re-render.
-            const target = new URL(advance && p.nextUrl ? p.nextUrl : window.location.pathname + window.location.search, window.location.origin);
-            if (r.message) target.searchParams.set('flash', r.message);
-            router.push(target.pathname + target.search);
-            router.refresh();
+          if (!r.ok) {
+            setError(r.error);
+            return;
           }
+          setError(null);
+          setPanel('none');
+          setNote('');
+          setDisposition('');
+          // The confirmation travels in the URL so it survives the navigation to the next task.
+          const target = new URL(advance && p.nextUrl ? p.nextUrl : window.location.pathname + window.location.search, window.location.origin);
+          if (r.message) target.searchParams.set('flash', r.message);
+          router.push(target.pathname + target.search);
+          router.refresh();
         } catch (err) {
-          setFeedback({ ok: false, error: err instanceof Error ? err.message : String(err) });
+          setError(err instanceof Error ? err.message : String(err));
         }
       });
     },
@@ -114,19 +121,32 @@ export function TaskActions(p: Props) {
     if (note.trim()) fd.set('note', note.trim());
     run(() => skipTaskAction(fd));
   }, [note, p.taskId, reasonKey, run]);
+
   const submitSnooze = useCallback(() => {
     const fd = new FormData();
     fd.set('taskId', p.taskId);
     fd.set('toDate', p.canPickSnoozeDate ? snoozeDate : 'next');
     run(() => snoozeTaskAction(fd));
   }, [p.canPickSnoozeDate, p.taskId, run, snoozeDate]);
-  const enrollmentOp = (fn: (fd: FormData) => Promise<ActionResult>, extra: Record<string, string> = {}, confirmText?: string) => {
-    if (confirmText && !window.confirm(confirmText)) return;
+
+  const submitEnd = useCallback(() => {
     const fd = new FormData();
     fd.set('taskId', p.taskId);
-    for (const [k, v] of Object.entries(extra)) fd.set(k, v);
-    run(() => fn(fd));
-  };
+    if (endReason === 'replied' || endReason === 'no_reply') {
+      fd.set('kind', endReason);
+      run(() => finishFromTaskAction(fd));
+    } else {
+      fd.set('reason', endReason);
+      run(() => removeFromSequenceAction(fd));
+    }
+  }, [endReason, p.taskId, run]);
+
+  const submitMove = useCallback(() => {
+    const fd = new FormData();
+    fd.set('taskId', p.taskId);
+    fd.set('stepIndex', String(moveTo));
+    run(() => moveToStepAction(fd), false);
+  }, [moveTo, p.taskId, run]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -159,7 +179,7 @@ export function TaskActions(p: Props) {
       switch (e.key.toLowerCase()) {
         case 'd':
           e.preventDefault();
-          startDone(p.action); // either/or: D = the primary action, click the second button for the alternative
+          startDone(p.action); // either/or: D takes the primary action, the second button the other
           break;
         case 's':
           e.preventDefault();
@@ -184,9 +204,6 @@ export function TaskActions(p: Props) {
         case 'o':
           if (p.twentyUrl) window.open(p.twentyUrl, '_blank', 'noreferrer');
           break;
-        case 'c':
-          void navigator.clipboard?.writeText(p.copyText);
-          break;
       }
     };
     window.addEventListener('keydown', onKey);
@@ -194,20 +211,22 @@ export function TaskActions(p: Props) {
   }, [panel, disposition, pendingAction, p, router, startDone, submitComplete, submitSkip, submitSnooze]);
 
   const big = p.size === 'lg';
-  const primary = clsx('btn-primary', big && 'px-4 py-2 text-base');
-  const secondary = clsx('btn-secondary', big && 'px-4 py-2 text-base');
+  const primary = clsx('btn-primary', big && 'px-4 py-2 text-[14.5px]');
+  const secondary = clsx('btn-secondary', big && 'px-4 py-2 text-[14.5px]');
   const toggle = (x: Panel) => setPanel((v) => (v === x ? 'none' : x));
+  const laterSteps = p.steps.filter((s) => s.index > p.currentStep);
 
   return (
-    <div className="space-y-3">
+    <div>
+      {/* One row of controls. Its height never changes, so nothing below it jumps. */}
       <div className="flex flex-wrap items-center gap-2">
         {p.altAction ? (
           <>
             <button type="button" disabled={pending} className={primary} onClick={() => startDone(p.action)}>
-              <IconCheck size={16} /> Done: {ACTION_LABELS[p.action]}
+              <IconCheck size={16} /> {ACTION_LABELS[p.action]} done
             </button>
-            <button type="button" disabled={pending} className={primary} onClick={() => startDone(p.altAction!)}>
-              <IconCheck size={16} /> Done: {ACTION_LABELS[p.altAction]}
+            <button type="button" disabled={pending} className={secondary} onClick={() => startDone(p.altAction!)}>
+              <IconCheck size={16} /> {ACTION_LABELS[p.altAction]} instead
             </button>
           </>
         ) : (
@@ -215,174 +234,206 @@ export function TaskActions(p: Props) {
             {p.action === 'CALL' ? <IconPhone size={16} /> : <IconCheck size={16} />} {p.action === 'CALL' ? 'Log call' : 'Done'}
           </button>
         )}
-        <button type="button" disabled={pending} className={secondary} onClick={() => toggle('skip')}>
+        <button type="button" disabled={pending} className={clsx(secondary, panel === 'skip' && 'border-ink-300 bg-canvas')} onClick={() => toggle('skip')}>
           <IconSkip size={16} /> Skip
         </button>
-        <button type="button" disabled={pending} className={secondary} onClick={() => toggle('snooze')}>
+        <button type="button" disabled={pending} className={clsx(secondary, panel === 'snooze' && 'border-ink-300 bg-canvas')} onClick={() => toggle('snooze')}>
           <IconClock size={16} /> Snooze
         </button>
         {p.twentyUrl ? (
-          <a href={p.twentyUrl} target="_blank" rel="noreferrer" className={secondary}>
-            <IconExternal size={16} /> Open in Twenty
+          <a href={p.twentyUrl} target="_blank" rel="noreferrer" className={secondary} title="Open this person in Twenty (O)">
+            <IconExternal size={16} /> Twenty
           </a>
         ) : null}
-        <CopyButton text={p.copyText} label="Copy template" className={secondary} />
-        <button type="button" disabled={pending} className={clsx('btn-ghost', big && 'text-base')} onClick={() => toggle('more')} title="Finish, pause, move to step, remove">
-          More
+        <button
+          type="button"
+          disabled={pending}
+          aria-expanded={panel === 'more'}
+          className={clsx('btn-ghost w-[74px] justify-center', big && 'text-[14.5px]', panel === 'more' && 'bg-canvas text-ink-900')}
+          onClick={() => toggle('more')}
+          title="End the sequence, or move to another step (M)"
+        >
+          {panel === 'more' ? 'Less' : 'More'}
         </button>
+
         <span className="ml-auto flex items-center gap-1">
           {p.prevUrl ? (
-            <button type="button" className="btn-ghost" onClick={() => router.push(p.prevUrl!)} title="Previous task (P)">
+            <button type="button" className="btn-icon-ghost" onClick={() => router.push(p.prevUrl!)} title="Previous task (P)" aria-label="Previous task">
               <IconChevronLeft size={16} />
             </button>
           ) : null}
           {p.nextUrl ? (
-            <button type="button" className={clsx('btn-ghost', big && 'text-base')} onClick={() => router.push(p.nextUrl!)} title="Next task without changing this one (N)">
+            <button type="button" className={clsx('btn-ghost', big && 'text-[14.5px]')} onClick={() => router.push(p.nextUrl!)} title="Next task, leaving this one alone (N)">
               Next <IconChevronRight size={16} />
             </button>
           ) : null}
         </span>
       </div>
 
-      {panel === 'call' ? (
-        <form
-          className="space-y-3 rounded-md border border-brand-200 bg-brand-50/60 p-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (disposition) submitComplete(pendingAction, disposition);
-          }}
-        >
-          <div>
-            <label className="mb-1 block">Call outcome (required)</label>
-            <div className="grid gap-1.5 [grid-template-columns:repeat(auto-fill,minmax(190px,1fr))]">
-              {p.dispositions.map((d, i) => (
-                <label
-                  key={d.key}
-                  className={clsx(
-                    'flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm',
-                    disposition === d.key ? 'border-brand-500 bg-white ring-2 ring-brand-100' : 'border-line bg-white hover:border-line',
-                  )}
+      {/* The one panel slot. Everything opens here, in this order, and nowhere else. */}
+      {panel !== 'none' || error ? (
+        <div className="mt-3">
+          {error ? (
+            <p className="mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12.5px] text-red-700" role="alert">
+              {error}
+            </p>
+          ) : null}
+
+          {panel === 'call' ? (
+            <form
+              className="rounded-xl border border-brand-200 bg-brand-50/50 p-3.5"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (disposition) submitComplete(pendingAction, disposition);
+              }}
+            >
+              <p className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-brand-700">How did the call go?</p>
+              <div className="grid gap-1.5 [grid-template-columns:repeat(auto-fill,minmax(190px,1fr))]">
+                {p.dispositions.map((d, i) => (
+                  <label
+                    key={d.key}
+                    className={clsx(
+                      'flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[13px] transition',
+                      disposition === d.key ? 'border-brand-500 bg-white ring-2 ring-brand-100' : 'border-line bg-white hover:border-brand-300',
+                    )}
+                  >
+                    <input type="radio" name="disposition" value={d.key} checked={disposition === d.key} onChange={() => setDisposition(d.key)} className="h-3.5 w-3.5" />
+                    <span className="flex-1 font-normal text-ink-800">{d.label}</span>
+                    {d.answered ? <span className="rounded bg-emerald-50 px-1 text-[10px] text-emerald-700">answered</span> : null}
+                    <span className="text-[10px] text-ink-300">{i + 1}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="mt-3 space-y-1">
+                <label htmlFor={`note-${p.taskId}`}>Call notes, saved to Twenty</label>
+                <textarea id={`note-${p.taskId}`} ref={noteRef} rows={3} value={note} onChange={(e) => setNote(e.target.value)} className="w-full" placeholder="What was said, the next step, the best time to call back..." />
+              </div>
+              <div className="mt-3 flex items-center gap-2">
+                <button type="submit" disabled={pending || !disposition} className="btn-primary">
+                  Log call
+                </button>
+                <button type="button" className="btn-ghost" onClick={() => setPanel('none')}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : null}
+
+          {panel === 'skip' ? (
+            <form
+              className="rounded-xl border border-amber-200 bg-amber-50/70 p-3.5"
+              onSubmit={(e) => {
+                e.preventDefault();
+                submitSkip();
+              }}
+            >
+              <p className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-amber-800">Skip this one step</p>
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-[220px] space-y-1">
+                  <label htmlFor={`reason-${p.taskId}`}>Why?</label>
+                  <select id={`reason-${p.taskId}`} value={reasonKey} onChange={(e) => setReasonKey(e.target.value)} className="w-full">
+                    {p.skipReasons.map((r) => (
+                      <option key={r.key} value={r.key}>
+                        {r.label}
+                        {r.exit !== 'none' ? ' - ends the sequence' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="min-w-[240px] flex-1 space-y-1">
+                  <label htmlFor={`skipnote-${p.taskId}`}>Detail, optional</label>
+                  <input id={`skipnote-${p.taskId}`} value={note} onChange={(e) => setNote(e.target.value)} className="w-full" placeholder="e.g. mailbox full, referred to a colleague" />
+                </div>
+                <button type="submit" disabled={pending} className="btn-secondary">
+                  Skip step
+                </button>
+              </div>
+            </form>
+          ) : null}
+
+          {panel === 'snooze' ? (
+            <form
+              className="rounded-xl border border-sky-200 bg-sky-50/70 p-3.5"
+              onSubmit={(e) => {
+                e.preventDefault();
+                submitSnooze();
+              }}
+            >
+              <p className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-sky-800">Come back to this task later</p>
+              <div className="flex flex-wrap items-end gap-2">
+                {p.canPickSnoozeDate ? (
+                  <div className="space-y-1">
+                    <label htmlFor={`snooze-${p.taskId}`}>Snooze until</label>
+                    <input id={`snooze-${p.taskId}`} type="date" value={snoozeDate} min={p.nextWorkingDay} onChange={(e) => setSnoozeDate(e.target.value)} />
+                  </div>
+                ) : (
+                  <p className="text-[13px] text-sky-900">Moves to the next working day, {p.nextWorkingDay}.</p>
+                )}
+                <button type="submit" disabled={pending} className="btn-secondary">
+                  Snooze
+                </button>
+              </div>
+            </form>
+          ) : null}
+
+          {panel === 'more' ? (
+            <div className="grid gap-3 rounded-xl border border-line bg-canvas/70 p-3.5 md:grid-cols-2">
+              <form
+                className="space-y-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  submitEnd();
+                }}
+              >
+                <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-500">End the sequence</p>
+                <p className="text-[12px] leading-snug text-ink-500">No more tasks are created for this person. Their history stays.</p>
+                <select value={endReason} onChange={(e) => setEndReason(e.target.value)} aria-label="Why are you ending the sequence?" className="w-full">
+                  {END_REASONS.map((r) => (
+                    <option key={r.key} value={r.key}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="min-h-[32px] text-[12px] leading-snug text-ink-400">{END_REASONS.find((r) => r.key === endReason)?.detail}</p>
+                <button type="submit" disabled={pending} className="btn-secondary btn-sm">
+                  End sequence
+                </button>
+              </form>
+
+              {p.canManageEnrollment && laterSteps.length ? (
+                <form
+                  className="space-y-2 md:border-l md:border-line md:pl-3.5"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    submitMove();
+                  }}
                 >
-                  <input type="radio" name="disposition" value={d.key} checked={disposition === d.key} onChange={() => setDisposition(d.key)} className="h-3.5 w-3.5" />
-                  <span className="flex-1 font-normal text-ink-800">{d.label}</span>
-                  <span className="text-[10px] text-ink-400">{i + 1}</span>
-                  {d.answered ? <span className="rounded bg-emerald-50 px-1 text-[10px] text-emerald-700">answered</span> : null}
-                </label>
-              ))}
-            </div>
-          </div>
-          <div className="space-y-1">
-            <label htmlFor={`note-${p.taskId}`}>Call notes (optional, saved to Twenty)</label>
-            <textarea id={`note-${p.taskId}`} ref={noteRef} rows={3} value={note} onChange={(e) => setNote(e.target.value)} className="w-full" placeholder="What was said, next step, best time to call back..." />
-          </div>
-          <div className="flex items-center gap-2">
-            <button type="submit" disabled={pending || !disposition} className="btn-primary">
-              Log call
-            </button>
-            <button type="button" className="btn-ghost" onClick={() => setPanel('none')}>
-              Cancel
-            </button>
-            <span className="text-xs text-ink-500">Press 1-{Math.min(9, p.dispositions.length)} to pick, Enter to log.</span>
-          </div>
-        </form>
-      ) : null}
-
-      {panel === 'skip' ? (
-        <form
-          className="flex flex-wrap items-end gap-2 rounded-md border border-amber-200 bg-amber-50 p-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            submitSkip();
-          }}
-        >
-          <div className="min-w-[220px] space-y-1">
-            <label htmlFor={`reason-${p.taskId}`}>Why are you skipping this step?</label>
-            <select id={`reason-${p.taskId}`} value={reasonKey} onChange={(e) => setReasonKey(e.target.value)} className="w-full">
-              {p.skipReasons.map((r) => (
-                <option key={r.key} value={r.key}>
-                  {r.label}
-                  {r.exit !== 'none' ? ' (ends the sequence)' : ''}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="min-w-[240px] flex-1 space-y-1">
-            <label htmlFor={`skipnote-${p.taskId}`}>Detail (optional)</label>
-            <input id={`skipnote-${p.taskId}`} value={note} onChange={(e) => setNote(e.target.value)} className="w-full" placeholder="e.g. mailbox full, referred to colleague" />
-          </div>
-          <button type="submit" disabled={pending} className="btn-secondary">
-            Confirm skip
-          </button>
-        </form>
-      ) : null}
-
-      {panel === 'snooze' ? (
-        <form
-          className="flex flex-wrap items-end gap-2 rounded-md border border-sky-200 bg-sky-50 p-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            submitSnooze();
-          }}
-        >
-          {p.canPickSnoozeDate ? (
-            <div className="space-y-1">
-              <label htmlFor={`snooze-${p.taskId}`}>Snooze until</label>
-              <input id={`snooze-${p.taskId}`} type="date" value={snoozeDate} min={p.nextWorkingDay} onChange={(e) => setSnoozeDate(e.target.value)} />
-            </div>
-          ) : (
-            <p className="text-sm text-sky-900">Snooze to the next working day ({p.nextWorkingDay}).</p>
-          )}
-          <button type="submit" disabled={pending} className="btn-secondary">
-            Confirm snooze
-          </button>
-        </form>
-      ) : null}
-
-      {panel === 'more' ? (
-        <div className="flex flex-wrap items-end gap-2 rounded-md border border-line bg-canvas p-3">
-          <button type="button" disabled={pending} className="btn-secondary btn-sm" onClick={() => enrollmentOp(finishFromTaskAction, { kind: 'replied' }, 'Mark this person as replied and finish the sequence?')}>
-            Finish (Replied)
-          </button>
-          <button type="button" disabled={pending} className="btn-secondary btn-sm" onClick={() => enrollmentOp(finishFromTaskAction, { kind: 'no_reply' }, 'Finish the sequence for this person with no reply?')}>
-            Finish (No reply)
-          </button>
-          {p.canManageEnrollment ? (
-            <>
-              <button type="button" disabled={pending} className="btn-secondary btn-sm" onClick={() => enrollmentOp(pauseFromTaskAction)}>
-                Pause
-              </button>
-              {p.steps.some((s) => s.index > p.currentStep) ? (
-                <span className="inline-flex items-end gap-1">
-                  <select value={moveTo} onChange={(e) => setMoveTo(Number(e.target.value))} className="text-xs">
-                    {p.steps
-                      .filter((s) => s.index > p.currentStep)
-                      .map((s) => (
+                  <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-500">Jump to another step</p>
+                  <p className="text-[12px] leading-snug text-ink-500">Cancels the open tasks and starts from the step you pick.</p>
+                  {/* One control, not a select sitting next to an unrelated button. */}
+                  <div className="flex overflow-hidden rounded-[10px] border border-line bg-white focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100">
+                    <select
+                      value={moveTo}
+                      onChange={(e) => setMoveTo(Number(e.target.value))}
+                      aria-label="Step to jump to"
+                      className="min-w-0 flex-1 !rounded-none !border-0 !bg-transparent !ring-0"
+                    >
+                      {laterSteps.map((s) => (
                         <option key={s.index} value={s.index}>
                           Step {s.index + 1}: {s.label}
                         </option>
                       ))}
-                  </select>
-                  <button type="button" disabled={pending} className="btn-secondary btn-sm" onClick={() => enrollmentOp(moveToStepAction, { stepIndex: String(moveTo) })}>
-                    Move to step
-                  </button>
-                </span>
+                    </select>
+                    <button type="submit" disabled={pending} className="shrink-0 border-l border-line px-3 text-[12.5px] font-medium text-ink-700 transition hover:bg-canvas hover:text-brand-700">
+                      Jump
+                    </button>
+                  </div>
+                </form>
               ) : null}
-              <button type="button" disabled={pending} className="btn-ghost btn-sm text-red-600" onClick={() => enrollmentOp(removeFromSequenceAction, { reason: 'removed' }, 'Remove this person from the sequence? Open tasks will be cancelled.')}>
-                Remove from sequence
-              </button>
-            </>
+            </div>
           ) : null}
         </div>
       ) : null}
-
-      {feedback ? (
-        <p className={clsx('text-sm', feedback.ok ? 'text-emerald-700' : 'text-red-700')} role="status">
-          {feedback.ok ? feedback.message : feedback.error}
-        </p>
-      ) : null}
-      <p className="text-[11px] text-ink-400">
-        Shortcuts: <kbd>D</kbd> done · <kbd>S</kbd> skip · <kbd>Z</kbd> snooze · <kbd>N</kbd>/<kbd>P</kbd> next/previous · <kbd>C</kbd> copy · <kbd>O</kbd> open in Twenty · <kbd>M</kbd> more · <kbd>Esc</kbd> close
-      </p>
     </div>
   );
 }

@@ -227,6 +227,18 @@ export const IconInfo = (p: IconProps) => (
     <path d="M12 16v-4M12 8h.01" />
   </svg>
 );
+export const IconClose = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M18 6L6 18M6 6l12 12" />
+  </svg>
+);
+export const IconNote = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M6 3h9l5 5v13H6z" />
+    <path d="M14 3v6h6" />
+    <path d="M9.5 13h6M9.5 17h4" />
+  </svg>
+);
 export const IconSort = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M12 5v14M6 13l6 6 6-6" />

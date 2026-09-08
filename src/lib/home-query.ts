@@ -3,8 +3,6 @@ import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
 import { isAdmin, isSeniorFo, visiblePodIds } from './auth/rbac';
 import { todayIn, weekRange, type LocalDate } from './dates';
-import { cachedPersonName } from './person-cache';
-import { getSettings, isExternalEmail } from './settings';
 import { taskScopeWhere, type TaskChannel } from './tasks-query';
 import { myOwnershipCounts } from './accounts-query';
 
@@ -35,14 +33,11 @@ export async function assignedPersonWhere(user: SessionUser): Promise<Prisma.Per
 export async function buildHome(user: SessionUser, now = new Date()) {
   const today = todayIn(user.timezone, now);
   const week = weekRange(today, user.timezone);
-  const settings = await getSettings();
   const mineTasks: Prisma.TaskWhereInput = { AND: [taskScopeWhere(user), { foUserId: user.id }] };
 
-  const [mine, ownership, replies, meetings, team, needsReview] = await Promise.all([
+  const [mine, ownership, team, needsReview] = await Promise.all([
     myOpenTasks(mineTasks, today),
     myOwnershipCounts(user),
-    repliesThisWeek(user, week, 25),
-    meetingsThisWeek(user, week, settings.rules.internalDomains, 25),
     teamThisWeek(user, today, week),
     isAdmin(user) ? prisma.activityEvent.count({ where: { needsReview: true } }) : Promise.resolve(0),
   ]);
@@ -64,8 +59,6 @@ export async function buildHome(user: SessionUser, now = new Date()) {
       accounts: ownership.accounts,
       relationships: ownership.relationships,
     },
-    replies,
-    meetings,
     team,
     needsReview,
   };
@@ -102,98 +95,6 @@ async function myOpenTasks(base: Prisma.TaskWhereInput, today: LocalDate) {
     else upcomingC[ch] += 1;
   }
   return { today: todayC, overdue: overdueC, upcoming: upcomingC, peopleToday: peopleToday.size };
-}
-
-export type ReplyRow = { id: string; personId: string; name: string; company: string | null; at: Date; summary: string; foName: string | null };
-
-/**
- * Replies to deal with this week: inbound emails Twenty synced for people this user is
- * responsible for. This is what "someone assigned to a BD replied" looks like once the reply has
- * reached the CRM contact and Cadence has ingested it.
- */
-export async function repliesThisWeek(user: SessionUser, week: { fromInstant: Date; toInstant: Date }, take: number): Promise<{ rows: ReplyRow[]; total: number }> {
-  const personWhere = await assignedPersonWhere(user);
-  const where: Prisma.TouchWhereInput = {
-    direction: 'INBOUND',
-    channel: 'EMAIL',
-    occurredAt: { gte: week.fromInstant, lt: week.toInstant },
-    person: personWhere,
-  };
-  const [rows, total] = await Promise.all([
-    prisma.touch.findMany({
-      where,
-      orderBy: { occurredAt: 'desc' },
-      take,
-      include: { person: { select: { id: true, firstName: true, lastName: true, companyName: true, enrollments: { orderBy: { createdAt: 'desc' }, take: 1, select: { fo: { select: { name: true } } } } } } },
-    }),
-    prisma.touch.count({ where }),
-  ]);
-  return {
-    total,
-    rows: rows.map((t) => ({
-      id: t.id,
-      personId: t.person.id,
-      name: cachedPersonName(t.person),
-      company: t.person.companyName,
-      at: t.occurredAt,
-      summary: t.summary,
-      foName: t.person.enrollments[0]?.fo.name ?? null,
-    })),
-  };
-}
-
-export type MeetingRow = { id: string; title: string; at: Date; company: string | null; href: string; externals: number; source: 'meeting' | 'sequence' };
-
-/**
- * Meetings booked this week. A meeting counts when someone outside our own domains is on it:
- * that is how a real prospect meeting is told apart from an internal one. Recorded meetings
- * (with their attendees) and sequence-detected meetings are both included.
- */
-export async function meetingsThisWeek(
-  user: SessionUser,
-  week: { fromInstant: Date; toInstant: Date },
-  internalDomains: string[],
-  take: number,
-): Promise<{ rows: MeetingRow[]; total: number }> {
-  const mineOnly = !isAdmin(user);
-  const [meetingRows, enrollmentRows] = await Promise.all([
-    prisma.meeting.findMany({
-      where: {
-        occurredAt: { gte: week.fromInstant, lt: week.toInstant },
-        ...(mineOnly ? { OR: [{ createdById: user.id }, { attendees: { some: { userId: user.id } } }] } : {}),
-      },
-      orderBy: { occurredAt: 'desc' },
-      include: { attendees: { select: { email: true, external: true } } },
-    }),
-    prisma.enrollment.findMany({
-      where: { meetingAt: { gte: week.fromInstant, lt: week.toInstant }, ...(mineOnly ? { foUserId: user.id } : {}) },
-      orderBy: { meetingAt: 'desc' },
-      select: { id: true, personId: true, meetingAt: true, person: { select: { firstName: true, lastName: true, companyName: true, email: true } } },
-    }),
-  ]);
-
-  const rows: MeetingRow[] = [
-    ...meetingRows
-      // The domain setting is the authority, so it is re-applied here and editing it is
-      // retroactive in both directions. The stored flag is only a cache, used when an attendee
-      // was recorded by name with no address.
-      .map((m) => ({ m, externals: m.attendees.filter((a) => (a.email ? isExternalEmail(a.email, internalDomains) : a.external)).length }))
-      .filter((x) => x.externals > 0)
-      .map(({ m, externals }) => ({ id: m.id, title: m.title, at: m.occurredAt, company: m.companyName, href: `/meetings/${m.id}`, externals, source: 'meeting' as const })),
-    ...enrollmentRows
-      .filter((e) => isExternalEmail(e.person.email, internalDomains) || !e.person.email)
-      .map((e) => ({
-        id: e.id,
-        title: `Meeting booked with ${cachedPersonName(e.person)}`,
-        at: e.meetingAt!,
-        company: e.person.companyName,
-        href: `/people/${e.personId}`,
-        externals: 1,
-        source: 'sequence' as const,
-      })),
-  ].sort((a, b) => b.at.getTime() - a.at.getTime());
-
-  return { total: rows.length, rows: rows.slice(0, take) };
 }
 
 /**

@@ -21,35 +21,42 @@ test('Home greets the signed-in user and drops the old boxes', async ({ page }) 
   await loginAs(page, 'Alisa');
   await expect(page.getByRole('heading', { name: 'Good day, Alisa' })).toBeVisible();
 
-  // Removed outright.
+  // The date-and-counts line under the greeting is gone.
   await expect(page.getByText(/people in your sequences/)).toHaveCount(0);
-  await expect(page.getByText('Done this week', { exact: true })).toHaveCount(0);
-  await expect(page.getByText('OVERDUE', { exact: true })).toHaveCount(0);
 
-  // One row of six bordered tiles.
+  // One row of six bordered tiles, and these are all of them: the old "Done this week",
+  // "Replies this week" and "OVERDUE" tiles are not among them.
+  const tileLabels = await page.locator('a.surface span.uppercase').allTextContents();
+  expect(tileLabels.map((t) => t.trim())).toEqual(['To reach today', 'Calls today', 'Emails today', 'LinkedIn today', 'My accounts', 'My relationships']);
+
   for (const label of ['To reach today', 'Calls today', 'Emails today', 'LinkedIn today', 'My accounts', 'My relationships']) {
     await expect(page.getByText(label, { exact: true })).toBeVisible();
   }
   const tiles = page.locator('a.surface');
   await expect(tiles).toHaveCount(6);
 
-  // Both week boxes, each with an arrow carrying the count.
-  await expect(page.getByRole('heading', { name: 'Replies this week' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Meetings booked this week' })).toBeVisible();
-  await expect(page.getByTitle(/^Open all \d+$/)).toHaveCount(2);
+  // The two week boxes were removed: the tiles and the team board are the whole page.
+  await expect(page.getByText('Replies this week')).toHaveCount(0);
+  await expect(page.getByText('Meetings booked this week')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Your pods this week' })).toBeVisible();
   await logout(page);
 });
 
-test('Home team table reports this week and no longer mentions sequences', async ({ page }) => {
+test('the team board reports this week, with a total row', async ({ page }) => {
   await loginAs(page, 'Admin');
-  await expect(page.getByRole('heading', { name: 'Team this week' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'The team this week' })).toBeVisible();
   const headers = page.locator('table thead th');
+  await expect(headers.nth(0)).toHaveText('Person');
   await expect(headers.nth(1)).toHaveText('Due today');
-  await expect(headers.nth(3)).toHaveText('Done');
+  await expect(headers.nth(2)).toHaveText('Overdue');
+  await expect(headers.nth(3)).toHaveText('Done this week');
   await expect(headers.nth(4)).toHaveText('Replies');
   await expect(headers.nth(5)).toHaveText('Meetings');
   await expect(page.getByText('In sequence')).toHaveCount(0);
   await expect(page.getByText(/\(7d\)/)).toHaveCount(0);
+  // Everyone's totals, and a link into each person's tasks.
+  await expect(page.locator('table tfoot')).toContainText('Everyone');
+  await expect(page.getByRole('link', { name: /^Tasks$/ }).first()).toBeVisible();
   await logout(page);
 });
 
@@ -106,9 +113,10 @@ test('a meeting plays in the app with its transcript and an empty analysis panel
   // Analysis panel: deliberately empty until a model is connected.
   await expect(page.getByText('No analysis yet')).toBeVisible();
 
-  // One external attendee, so it counts on Home this week.
-  await page.goto('/home');
+  // One external attendee, so it counts as booked this week.
+  await page.goto('/meetings?scope=week');
   await expect(page.getByRole('link', { name: /E2E discovery call/ })).toBeVisible();
+  await expect(page.locator('table')).toContainText('external');
   await logout(page);
 });
 
