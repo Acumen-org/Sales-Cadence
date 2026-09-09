@@ -2,8 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
 import { isJuniorFo, visiblePodIds } from './auth/rbac';
-import { cachedPersonName } from './person-cache';
-import { addDays, diffDays, isLocalDate, parseLocalDate, startOfLocalDay, type LocalDate } from './dates';
+import { addDays, isLocalDate, startOfLocalDay, type LocalDate } from './dates';
 import { ACTION_LABELS, type ActionType } from './sequences/steps';
 
 export type GroupRow = {
@@ -89,7 +88,7 @@ function rollup(label: (e: EnrollmentLite) => { key: string; label: string } | n
 
 export type Reports = Awaited<ReturnType<typeof buildReports>>;
 
-export async function buildReports(user: SessionUser, today: LocalDate, stalledDays: number, filters?: ReportFilters) {
+export async function buildReports(user: SessionUser, today: LocalDate, filters?: ReportFilters) {
   const range = filters?.range;
   const scope: Prisma.EnrollmentWhereInput = { AND: [enrollmentScope(user), ...(filters?.podId ? [{ podId: filters.podId }] : []), ...(filters?.foUserId ? [{ foUserId: filters.foUserId }] : [])] };
   const [enrollments, pods, users, campaigns, sequences] = await Promise.all([
@@ -126,27 +125,6 @@ export async function buildReports(user: SessionUser, today: LocalDate, stalledD
     };
   });
 
-  const overdue = range ? [] : await prisma.task.findMany({
-    where: { enrollmentId: { in: enrollmentIds }, state: 'PENDING', OR: [{ snoozedTo: null, dueDate: { lt: today } }, { snoozedTo: { lt: today } }] },
-    include: { enrollment: { include: { person: true, pod: { select: { name: true } } } }, fo: { select: { name: true } } },
-    orderBy: { dueAt: 'asc' },
-    take: 200,
-  });
-
-  // Stalled: active enrollments with no touch for N days (or none at all and enrolled > N days ago)
-  const active = range ? [] : await prisma.enrollment.findMany({
-    where: { ...scope, status: 'ACTIVE' },
-    include: { person: true, fo: { select: { name: true } }, pod: { select: { name: true } } },
-  });
-  const lastTouches = active.length ? await prisma.touch.groupBy({ by: ['personId'], where: { personId: { in: active.map((e) => e.personId) } }, _max: { occurredAt: true } }) : [];
-  const lastByPerson = new Map(lastTouches.map((t) => [t.personId, t._max.occurredAt]));
-  // Measured from the report date so "stalled" means "no touch for N days as of today".
-  const cutoff = parseLocalDate(addDays(today, -stalledDays));
-  const stalled = active
-    .map((e) => ({ enrollment: e, lastTouch: lastByPerson.get(e.personId) ?? null }))
-    .filter(({ enrollment, lastTouch }) => (lastTouch ? lastTouch < cutoff : enrollment.createdAt < cutoff))
-    .sort((a, b) => (a.lastTouch?.getTime() ?? 0) - (b.lastTouch?.getTime() ?? 0))
-    .slice(0, 200);
 
   const d7 = range?.fromInstant ?? startOfLocalDay(addDays(today, -6), REPORTING_TIMEZONE);
   const d28 = range?.fromInstant ?? startOfLocalDay(addDays(today, -27), REPORTING_TIMEZONE);
@@ -190,33 +168,11 @@ export async function buildReports(user: SessionUser, today: LocalDate, stalledD
       replied: range ? repliedRows.length : enrollments.filter((e) => e.status === 'REPLIED').length,
       meeting: range ? meetingRows.length : enrollments.filter((e) => e.status === 'MEETING').length,
       tasksDone: tasks.filter((t) => t.state === 'DONE').length,
-      overdue: overdue.length,
-      stalled: stalled.length,
     },
     byPod,
     byFo,
     byCampaign,
     bySequence,
     channels,
-    overdue: overdue.map((t) => ({
-      id: t.id,
-      person: cachedPersonName(t.enrollment.person),
-      company: t.enrollment.person.companyName,
-      label: t.label,
-      fo: t.fo.name,
-      pod: t.enrollment.pod?.name ?? '-',
-      due: t.snoozedTo ?? t.dueDate,
-      daysOverdue: diffDays(t.snoozedTo ?? t.dueDate, today),
-    })),
-    stalled: stalled.map(({ enrollment, lastTouch }) => ({
-      id: enrollment.id,
-      person: cachedPersonName(enrollment.person),
-      company: enrollment.person.companyName,
-      fo: enrollment.fo.name,
-      pod: enrollment.pod?.name ?? '-',
-      lastTouch,
-      startDate: enrollment.startDate,
-      currentStep: enrollment.currentStep,
-    })),
   };
 }

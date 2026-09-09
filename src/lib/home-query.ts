@@ -59,6 +59,8 @@ export async function buildHome(user: SessionUser, now = new Date()) {
       peopleToReachToday,
       accounts: ownership.accounts,
       relationships: ownership.relationships,
+      activeAccounts: ownership.activeAccounts,
+      inSequence: ownership.inSequence,
       completedToday,
       nextTasks: mine.nextTasks,
     },

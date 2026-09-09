@@ -194,6 +194,14 @@ export const IconCalendar = (p: IconProps) => (
     <path d="M16 2v4M8 2v4M3 10h18" />
   </svg>
 );
+/** The assistant's mark: a four-point spark with two smaller ones. Used only for Cadence AI. */
+export const IconAssistant = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M11 3l1.6 4.2L16.8 8.8 12.6 10.4 11 14.6 9.4 10.4 5.2 8.8 9.4 7.2 11 3z" />
+    <path d="M17.5 14.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8z" />
+    <path d="M6 16l.5 1.3 1.3.5-1.3.5L6 19.6l-.5-1.3-1.3-.5 1.3-.5L6 16z" />
+  </svg>
+);
 export const IconBolt = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M13 2L4.5 13.5H11l-1 8.5 8.5-11.5H12l1-8.5z" />

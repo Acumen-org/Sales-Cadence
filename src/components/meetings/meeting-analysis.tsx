@@ -1,15 +1,13 @@
-import Link from 'next/link';
 import type { AnalysisStatus } from '@prisma/client';
 import { formatCueTime } from '@/lib/meetings/transcript';
 import { getMeetingAnalyzer, isAnalysisEmpty, type MeetingAnalysis } from '@/lib/meetings/analysis';
-import { IconBolt } from '@/components/icons';
 import { ActionButton } from '@/components/action-form';
 import { analyseMeetingAction } from '@/lib/actions/meetings';
 import { Badge, Notice, RecordFields, Surface } from '@/components/ui';
 import { requireUser } from '@/lib/auth/current-user';
 import { isAdmin } from '@/lib/auth/rbac';
 import { formatInstant } from '@/lib/dates';
-import { ASSISTANT_NAME } from '@/lib/workspace';
+import { AssistantHeader, AssistantNotConnected } from '@/components/assistant';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -52,17 +50,18 @@ export async function MeetingAnalysisPanel({
 
   return (
     <Surface flush>
-      <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
-            <IconBolt size={15} />
-          </span>
-          <h2 className="text-[14px] font-semibold text-ink-900">{ASSISTANT_NAME}</h2>
-          <Badge tone={configured ? 'green' : 'gray'}>{configured ? 'Connected' : 'Not configured'}</Badge>
+      <AssistantHeader
+        connected={configured}
+        right={canRun && hasTranscript && status !== 'PENDING' ? <ActionButton action={analyseMeetingAction} payload={{ meetingId }} className="btn-secondary btn-sm">{configured ? 'Analyse meeting' : 'Measure talk time'}</ActionButton> : null}
+      />
+      {!configured ? (
+        <div className="border-b border-line">
+          <AssistantNotConnected
+            canConfigure={isAdmin(user)}
+            does={['Summarises the outcome and the points that mattered', 'Pulls out next steps, owners and open questions', 'Flags risks and competitors named in the call']}
+          />
         </div>
-        {canRun && hasTranscript && status !== 'PENDING' ? <ActionButton action={analyseMeetingAction} payload={{ meetingId }} className="btn-secondary btn-sm">{configured ? 'Analyze meeting' : 'Talk time'}</ActionButton> : null}
-      </div>
-      {!configured ? <div className="space-y-3 border-b border-line p-4"><div className="text-sm font-semibold text-ink-900">AI provider not configured</div><button type="button" disabled className="btn-secondary btn-sm">Analyze with {ASSISTANT_NAME}</button>{isAdmin(user) ? <Link href="/settings?tab=scout" className="ml-2 text-sm font-semibold text-brand-700 hover:underline">Scout settings</Link> : null}</div> : null}
+      ) : null}
       {status === 'PENDING' ? <div role="status" className="border-b border-line p-4"><Badge tone="amber">Analysis in progress</Badge></div> : null}
 
       {error ? (

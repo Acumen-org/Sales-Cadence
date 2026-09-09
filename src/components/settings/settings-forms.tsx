@@ -111,13 +111,13 @@ export function RulesForm({ rules }: { rules: Settings['rules'] }) {
           </div>
         </div>
         <div className="grid gap-4 md:grid-cols-2">
-          <Field label="Stalled after (days without a touch)">
-            <input name="stalledDays" type="number" min={1} defaultValue={rules.stalledDays} className="w-32" />
-          </Field>
           <Field label="Reconcile lookback (days)">
             <input name="reconcileLookbackDays" type="number" min={1} max={90} defaultValue={rules.reconcileLookbackDays} className="w-32" />
           </Field>
         </div>
+        <Field label="Click-to-call endpoint" hint="Posts { to, personId, taskId, userId } when an FO presses Call. Blank uses the machine's dialler instead.">
+          <input name="clickToCallUrl" type="url" inputMode="url" defaultValue={rules.clickToCallUrl} placeholder="https://example.com/call" className="w-full" />
+        </Field>
         <Field
           label="Our own email domains"
           hint="Comma separated. A meeting counts as booked only when someone outside these domains attends. Subdomains are covered."
