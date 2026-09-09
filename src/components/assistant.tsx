@@ -27,24 +27,18 @@ export function AssistantHeader({ connected, right }: { connected: boolean; righ
 }
 
 /**
- * What this panel will do once a provider is connected. `does` is written in the present tense
- * because it describes the feature, not a promise: each line is something the panel already has
- * the data for and only needs a model to phrase.
+ * What this panel will do once a provider is connected: one line, then the action. `does` still
+ * takes the full list because Settings shows it in full, but a panel an FO looks past every day
+ * says the state and offers the fix rather than selling the feature.
  */
 export function AssistantNotConnected({ does, canConfigure }: { does: string[]; canConfigure: boolean }) {
   return (
-    <div className="space-y-3 p-4">
-      <p className="text-sm text-ink-600">No model provider is connected to this workspace, so {ASSISTANT_NAME} is not writing anything yet.</p>
-      <ul className="space-y-1.5">
-        {does.map((line) => (
-          <li key={line} className="flex gap-2 text-sm text-ink-700">
-            <span aria-hidden className="mt-2 h-1 w-1 shrink-0 rounded-full bg-brand-400" />
-            {line}
-          </li>
-        ))}
-      </ul>
+    <div className="flex flex-wrap items-center gap-3 p-4">
+      <p className="min-w-0 flex-1 text-sm text-ink-600">
+        {does[0] ?? `${ASSISTANT_NAME} is ready`}. Connect a model provider to turn it on.
+      </p>
       {canConfigure ? (
-        <Link href={`/settings?tab=${ASSISTANT_SETTINGS_TAB}`} className="btn-secondary btn-sm">
+        <Link href={`/settings?tab=${ASSISTANT_SETTINGS_TAB}`} className="btn-secondary btn-sm shrink-0">
           Connect a provider
         </Link>
       ) : null}

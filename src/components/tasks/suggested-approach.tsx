@@ -17,11 +17,7 @@ export function SuggestedApproach({ canConfigure }: { canConfigure: boolean }) {
       ) : (
         <AssistantNotConnected
           canConfigure={canConfigure}
-          does={[
-            'Reads what has and has not worked with this person',
-            'Suggests an angle from their replies, notes and meetings',
-            'Drafts a message you can accept into the composer',
-          ]}
+          does={['Suggests an angle from this person’s replies, notes and meetings']}
         />
       )}
     </Surface>

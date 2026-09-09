@@ -58,7 +58,7 @@ export async function MeetingAnalysisPanel({
         <div className="border-b border-line">
           <AssistantNotConnected
             canConfigure={isAdmin(user)}
-            does={['Summarises the outcome and the points that mattered', 'Pulls out next steps, owners and open questions', 'Flags risks and competitors named in the call']}
+            does={['Summarises the call, its next steps and the risks named in it']}
           />
         </div>
       ) : null}
