@@ -1,4 +1,6 @@
 import { redirect } from 'next/navigation';
+import { formatInstant } from '@/lib/dates';
+import { WORKSPACE_TIMEZONE } from '@/lib/workspace';
 import { requireUser } from '@/lib/auth/current-user';
 import { isAdmin } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
@@ -6,7 +8,7 @@ import { env } from '@/lib/env';
 import { getSettings, getTwentySchema } from '@/lib/settings';
 import { getTwentyClient } from '@/lib/twenty';
 import { recentEvents } from '@/lib/engine/ingest';
-import { Card, KeyValue, Notice, Surface, Tabs, ViewHeader } from '@/components/ui';
+import { Badge, Card, KeyValue, Notice, Surface, Tabs, ViewHeader } from '@/components/ui';
 import { UsersPanel } from '@/components/settings/users-panel';
 import { AdminTools } from '@/components/settings/admin-tools';
 import { ReviewButton } from '@/components/settings/review-button';
@@ -101,12 +103,15 @@ async function UsersTab() {
 async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: boolean; hasEnvKey: boolean }) {
   let ping: string;
   let ok = true;
+  let counts: { people?: number; members?: number } = {};
   try {
     const client = await getTwentyClient();
-    ping = (await client.ping()).detail;
+    const result = await client.ping();
+    ping = result.detail;
+    counts = { people: result.people, members: result.members };
   } catch (err) {
     ok = false;
-    ping = `Not connected: ${err instanceof Error ? err.message : String(err)}`;
+    ping = err instanceof Error ? err.message : String(err);
   }
   const [settings, schema, lastReconcile] = await Promise.all([getSettings(), getTwentySchema(), prisma.setting.findUnique({ where: { key: 'lastReconcile' } })]);
   const last = lastReconcile?.value as { at?: string } | null;
@@ -119,15 +124,22 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
         <div className="p-4">
           <KeyValue
             items={[
-              { k: 'Mode', v: mode },
-              { k: 'Base URL', v: baseUrl || '-' },
-              { k: 'Status', v: <span className={ok ? 'text-emerald-700' : 'text-red-700'}>{ping}</span> },
+              { k: 'Mode', v: mode === 'mock' ? 'Demo workspace' : 'Twenty (GraphQL)' },
+              { k: 'Connection', v: <Badge tone={ok ? 'green' : 'red'}>{ok ? 'Reachable' : 'Not connected'}</Badge> },
+              { k: 'Base URL', v: baseUrl || null },
+              { k: 'People', v: counts.people ?? null },
+              { k: 'Workspace members', v: counts.members ?? null },
+              ...(ok ? [] : [{ k: 'Last error', v: <span className="text-red-700">{ping}</span> }]),
               { k: 'Webhook URL', v: <code className="text-[12px]">{`${env().APP_URL.replace(/\/+$/, '')}/api/webhooks/twenty${env().CADENCE_WEBHOOK_TOKEN ? '?token=...' : ''}`}</code> },
               {
                 k: 'Webhook auth',
-                v: env().TWENTY_WEBHOOK_SECRET ? 'HMAC signature' : env().CADENCE_WEBHOOK_TOKEN ? 'shared token' : 'open (set TWENTY_WEBHOOK_SECRET or CADENCE_WEBHOOK_TOKEN)',
+                v: env().TWENTY_WEBHOOK_SECRET
+                  ? <Badge tone="green">HMAC signature</Badge>
+                  : env().CADENCE_WEBHOOK_TOKEN
+                    ? <Badge tone="green">Shared token</Badge>
+                    : <Badge tone="amber">Not configured</Badge>,
               },
-              { k: 'Last reconcile', v: last?.at ? new Date(last.at).toLocaleString('en-GB') : 'never' },
+              { k: 'Last reconcile', v: last?.at ? formatInstant(new Date(last.at), WORKSPACE_TIMEZONE) : null },
             ]}
           />
         </div>

@@ -1,4 +1,4 @@
-﻿import Link from 'next/link';
+import Link from 'next/link';
 import { requireUser } from '@/lib/auth/current-user';
 import { isJuniorFo, visiblePodIds } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';

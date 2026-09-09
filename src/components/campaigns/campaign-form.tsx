@@ -139,7 +139,7 @@ export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, m
                   setPreview(null);
                 }}
               />
-              {csvText ? <p className="mt-1 text-xs text-ink-500">{csvText.split(/\r?\n/).filter(Boolean).length} lines loaded.</p> : null}
+              {csvText ? <p className="mt-1 text-xs text-ink-600"><strong className="font-bold text-ink-900">{csvText.split(/\r?\n/).filter(Boolean).length}</strong> lines loaded</p> : null}
             </Field>
           ) : null}
           {sourceType === 'TWENTY_VIEW' ? (

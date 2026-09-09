@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { formatLocalDate, type LocalDate } from '@/lib/dates';
 import clsx from 'clsx';
 import { cloneElement, isValidElement, useId, type ReactElement, type ReactNode } from 'react';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
@@ -338,7 +339,7 @@ export function EmptyState({ title, hint, action, icon }: { title: string; hint?
 /** Underline tabs. `inset` adds the page gutter; inside a surface pass inset={false}. */
 export function Tabs({ tabs, current, inset = true }: { tabs: { key: string; label: ReactNode; href: string; count?: number }[]; current: string; inset?: boolean }) {
   return (
-    <div className={clsx('flex gap-5 overflow-x-auto border-b border-line scroll-thin', inset ? 'px-6' : 'px-5')}>
+    <div className={clsx('flex gap-3 overflow-x-auto border-b border-line scroll-thin sm:gap-5', inset ? 'px-4 sm:px-6' : 'px-3 sm:px-5')}>
       {tabs.map((t) => {
         const active = t.key === current;
         return (
@@ -353,7 +354,7 @@ export function Tabs({ tabs, current, inset = true }: { tabs: { key: string; lab
           >
             {t.label}
             {typeof t.count === 'number' ? (
-              <span className={clsx('rounded-full px-2 text-[12px] font-bold tabular-nums leading-5', active ? 'bg-brand-100 text-brand-800' : 'bg-canvas text-ink-900')}>{t.count}</span>
+              <span className={clsx('rounded-full px-1.5 text-[12px] font-bold tabular-nums leading-5 sm:px-2', active ? 'bg-brand-100 text-brand-800' : 'bg-canvas text-ink-900')}>{t.count}</span>
             ) : null}
           </Link>
         );
@@ -368,7 +369,8 @@ export function Stat({ label, value, hint, tone, icon }: { label: string; value:
       {icon ? <span className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-[10px] bg-brand-50 text-brand-600">{icon}</span> : null}
       <div className="min-w-0">
         <div className="text-[11px] font-medium text-ink-500">{label}</div>
-        <div className={clsx('mt-3 text-[30px] font-bold leading-tight tracking-[-0.04em] tabular-nums', tone === 'warn' ? 'text-amber-700' : tone === 'good' ? 'text-brand-700' : 'text-ink-900')}>{value}</div>
+        {/* A colour is a signal, so zero never gets one: a green 0 replies reads as a good result. */}
+        <div className={clsx('mt-3 text-[30px] font-bold leading-tight tracking-[-0.04em] tabular-nums', value === 0 || value === '0' || value === '0%' ? 'text-ink-900' : tone === 'warn' ? 'text-amber-700' : tone === 'good' ? 'text-brand-700' : 'text-ink-900')}>{value}</div>
         {hint ? <div className="text-[12px] text-ink-500">{hint}</div> : null}
       </div>
     </div>
@@ -415,7 +417,7 @@ export function KeyValue({ items }: { items: { k: string; v: ReactNode }[] }) {
       {items.map((it) => (
         <div key={it.k} className="contents">
           <dt className="pt-0.5">{it.k}</dt>
-          <dd className="min-w-0 break-words">{it.v ?? <span className="text-ink-300">-</span>}</dd>
+          <dd className="min-w-0 break-words">{it.v == null || it.v === '' ? <span className="text-ink-300">-</span> : displayValue(it.v)}</dd>
         </div>
       ))}
     </dl>
@@ -428,13 +430,24 @@ export function DataValue({ children, className }: { children: ReactNode; classN
 }
 
 /** Compact labelled fields for live record metadata, without sentence-like subtitles. */
+/**
+ * One display format for dates, applied where records are rendered rather than at every call site.
+ *
+ * A `YYYY-MM-DD` string is Cadence's stored calendar date (`LocalDate`) and never anything else, so
+ * a field whose value is exactly that shape is shown the way every other date in the app is shown.
+ * The stored form still goes into date inputs and URLs, which is where it belongs.
+ */
+export function displayValue(value: ReactNode): ReactNode {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? formatLocalDate(value as LocalDate, 'long') : value;
+}
+
 export function RecordFields({ items, className }: { items: { label: string; value: ReactNode }[]; className?: string }) {
   return (
     <dl className={clsx('grid grid-cols-2 gap-x-6 gap-y-5 md:grid-cols-3', className)}>
       {items.map((item) => (
         <div key={item.label} className="min-w-0 space-y-1.5">
           <dt className="text-[12px] text-ink-500">{item.label}</dt>
-          <dd className="break-words text-[14px] font-bold text-ink-900">{item.value ?? <span className="font-normal text-ink-400">Not recorded</span>}</dd>
+          <dd className="break-words text-[14px] font-bold text-ink-900">{item.value == null || item.value === '' ? <span className="font-normal text-ink-400">Not recorded</span> : displayValue(item.value)}</dd>
         </div>
       ))}
     </dl>
@@ -455,17 +468,20 @@ export function RecordHeader({
   badges,
   actions,
   shape = 'circle',
+  icon,
 }: {
   name: string;
   sub?: ReactNode;
   badges?: ReactNode;
   actions?: ReactNode;
   shape?: 'square' | 'circle';
+  /** For records that are not people: an icon rather than their initials. */
+  icon?: ReactNode;
 }) {
   return (
     <div className="surface flex flex-wrap items-start justify-between gap-4 px-5 py-4">
       <div className="flex min-w-0 items-start gap-3.5">
-        <Avatar name={name} shape={shape} size={44} />
+        {icon ? <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700">{icon}</span> : <Avatar name={name} shape={shape} size={44} />}
         <div className="min-w-0">
           <h2 className="truncate text-[20px] font-semibold tracking-[-0.01em] text-ink-900">{name}</h2>
           {sub ? <div className="mt-1 text-[14px] font-semibold text-ink-800">{sub}</div> : null}

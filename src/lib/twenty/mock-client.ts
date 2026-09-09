@@ -414,7 +414,7 @@ export class MockTwentyClient implements TwentyClient {
 
   async ping() {
     this.maybeFail();
-    return { ok: true as const, detail: `mock workspace: ${this.people.length} people, ${this.members.length} members` };
+    return { ok: true as const, detail: 'Built-in dummy workspace', people: this.people.length, members: this.members.length };
   }
 }
 

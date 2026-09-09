@@ -188,6 +188,12 @@ export const IconHelp = (p: IconProps) => (
     <path d="M12 17h.01" />
   </svg>
 );
+export const IconLock = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="4" y="11" width="16" height="10" rx="2" />
+    <path d="M8 11V7a4 4 0 018 0v4" />
+  </svg>
+);
 export const IconCalendar = (p: IconProps) => (
   <svg {...base(p)}>
     <rect x="3" y="4" width="18" height="18" rx="2" />

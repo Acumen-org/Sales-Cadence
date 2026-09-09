@@ -6,6 +6,7 @@ import { prisma } from '@/lib/db';
 import { saveSequenceAction } from '@/lib/actions/sequences';
 import { parseSteps } from '@/lib/sequences/steps';
 import { SequenceEditor } from '@/components/sequences/sequence-editor';
+import { IconSequences } from '@/components/icons';
 import { Badge, Field, RecordHeader } from '@/components/ui';
 
 export default async function SequenceDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -22,7 +23,7 @@ export default async function SequenceDetailPage({ params }: { params: Promise<{
     <div className="space-y-5 px-6 pb-8 pt-2">
       <RecordHeader
         name={sequence.name}
-        shape="square"
+        icon={<IconSequences size={20} />}
         badges={
           <Badge tone="green">
             <strong>{sequence._count.campaigns}</strong> {sequence._count.campaigns === 1 ? 'campaign' : 'campaigns'}
