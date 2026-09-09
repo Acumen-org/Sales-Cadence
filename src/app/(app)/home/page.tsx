@@ -207,7 +207,7 @@ function TeamBoard({ rows, week, isAdmin: admin }: { rows: TeamRow[]; week: { fr
                   <td className="px-4 py-2 font-medium">Everyone</td>
                   <td className="px-3 py-2 text-right tabular-nums"><Figure value={total.today} /></td>
                   <td className="px-3 py-2 text-right tabular-nums"><Figure value={total.overdue} tone="warn" /></td>
-                  <td className="px-3 py-2 tabular-nums"><Figure value={total.doneWeek} /></td>
+                  <td className="px-3 py-2 tabular-nums"><span className="flex items-center gap-2.5"><span className="w-full max-w-[104px]" /><span className="w-6 shrink-0 text-right"><Figure value={total.doneWeek} /></span></span></td>
                   <td className="px-3 py-2 text-right tabular-nums"><Figure value={total.replies} tone="good" /></td>
                   <td className="px-3 py-2 text-right tabular-nums"><Figure value={total.meetings} tone="brand" /></td>
                   <td />

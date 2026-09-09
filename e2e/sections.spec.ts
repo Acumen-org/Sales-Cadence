@@ -117,8 +117,13 @@ test('a meeting plays in the app with its transcript and an empty analysis panel
   await page.getByRole('button', { name: /Add meeting|Save/ }).click();
   await expect(page).toHaveURL(/\/meetings\/[0-9a-f-]+$/);
 
-  // Plays inline: a real <video> element, not a link-out.
-  await expect(page.locator('video')).toHaveCount(1);
+  // Plays inline: a real <video> element, not a link-out. If the file itself cannot be fetched -
+  // the demo recording is a public URL, and the browser running this may have no route to it -
+  // the page has to say so and offer the source, never a black rectangle or a bare link.
+  const player = page.locator('video');
+  const unavailable = page.getByText('Recording unavailable');
+  await expect(player.or(unavailable).first()).toBeVisible();
+  if (await unavailable.count()) await expect(page.getByRole('link', { name: /Open the source/ })).toBeVisible();
   // Transcript underneath, with speakers.
   await expect(page.getByText('Thanks for making the time today.')).toBeVisible();
   await expect(page.getByText('Dummy One').first()).toBeVisible();

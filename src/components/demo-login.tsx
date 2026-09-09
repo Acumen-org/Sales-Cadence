@@ -3,7 +3,7 @@ import { demoLoginAction } from '@/lib/actions/auth';
 const DEMO_USERS = [
   { email: 'admin@cadence.local', label: 'Admin Acumen', hint: 'Admin' },
   { email: 'ria@cadence.local', label: 'Ria Admin', hint: 'Admin' },
-  { email: 'leigh@cadence.local', label: 'Leigh Leader', hint: "Sales Leader, Alisa's and Andrew's pods" },
+  { email: 'leigh@cadence.local', label: 'Leigh Leader', hint: 'Sales Leader, 2 pods' },
   { email: 'alisa@cadence.local', label: 'Alisa Senior', hint: "Senior FO, Alisa's pod" },
   { email: 'andrew@cadence.local', label: 'Andrew Senior', hint: "Senior FO, Andrew's pod" },
   { email: 'karson@cadence.local', label: 'Karson Junior', hint: "Junior FO, Alisa's pod" },
@@ -21,7 +21,7 @@ export function DemoLogin() {
             <input type="hidden" name="email" value={u.email} />
             <button type="submit" className="btn-secondary w-full flex-col items-start gap-0 py-1.5 text-left">
               <span className="text-sm font-medium">{u.label}</span>
-              <span className="text-[11px] font-normal text-ink-500">{u.hint}</span>
+              <span className="w-full truncate text-left text-[11px] font-normal text-ink-500">{u.hint}</span>
             </button>
           </form>
         ))}

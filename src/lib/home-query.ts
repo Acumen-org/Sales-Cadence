@@ -3,7 +3,7 @@ import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
 import { isAdmin, isPodLeader, visiblePodIds } from './auth/rbac';
 import { addDays, startOfLocalDay, todayIn, weekRange, type LocalDate } from './dates';
-import { taskScopeWhere, type TaskChannel } from './tasks-query';
+import { taskScopeWhere, WORKABLE, type TaskChannel } from './tasks-query';
 import { myOwnershipCounts } from './accounts-query';
 
 export type HomeData = Awaited<ReturnType<typeof buildHome>>;
@@ -83,7 +83,7 @@ function channelOfAction(action: string): TaskChannel {
  */
 async function myOpenTasks(base: Prisma.TaskWhereInput, today: LocalDate) {
   const rows = await prisma.task.findMany({
-    where: { AND: [base, { state: 'PENDING' }] },
+    where: { AND: [base, WORKABLE, { state: 'PENDING' }] },
     select: { id: true, action: true, label: true, dueDate: true, snoozedTo: true, enrollment: { select: { personId: true, person: { select: { firstName: true, lastName: true, companyName: true } } } } },
   });
   const todayC = emptyChannels();
@@ -121,7 +121,7 @@ async function teamThisWeek(user: SessionUser, today: LocalDate, week: { fromIns
   const enrollmentScope: Prisma.EnrollmentWhereInput = pods === null ? {} : { OR: [{ podId: { in: pods } }, { foUserId: user.id }] };
 
   const [pending, doneRows, replyRows, meetingRows] = await Promise.all([
-    prisma.task.findMany({ where: { AND: [taskScope, { foUserId: { in: ids }, state: 'PENDING' }] }, select: { foUserId: true, dueDate: true, snoozedTo: true } }),
+    prisma.task.findMany({ where: { AND: [taskScope, WORKABLE, { foUserId: { in: ids }, state: 'PENDING' }] }, select: { foUserId: true, dueDate: true, snoozedTo: true } }),
     prisma.task.groupBy({ by: ['foUserId'], where: { AND: [taskScope, { foUserId: { in: ids }, state: 'DONE', completedAt: { gte: week.fromInstant, lt: week.toInstant } }] }, _count: { _all: true } }),
     prisma.enrollment.groupBy({ by: ['foUserId'], where: { AND: [enrollmentScope, { foUserId: { in: ids }, repliedAt: { gte: week.fromInstant, lt: week.toInstant } }] }, _count: { _all: true } }),
     prisma.enrollment.groupBy({ by: ['foUserId'], where: { AND: [enrollmentScope, { foUserId: { in: ids }, meetingAt: { gte: week.fromInstant, lt: week.toInstant } }] }, _count: { _all: true } }),

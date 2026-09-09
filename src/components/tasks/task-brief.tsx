@@ -36,7 +36,9 @@ export function TaskBriefPanel({ brief, timezone }: { brief: TaskBrief; timezone
 
     <Section title="Contact details">
       <KeyValue items={filled([
-        { k: 'Email', v: person.email ? <a href={`mailto:${person.email}`} className="break-all text-brand-700 hover:underline">{person.email}</a> : null },
+        // break-all split the address mid-word in a narrow rail; it truncates with the full
+        // value on hover instead, and the link still carries all of it.
+        { k: 'Email', v: person.email ? <a href={`mailto:${person.email}`} title={person.email} className="block truncate text-brand-700 hover:underline">{person.email}</a> : null },
         { k: 'Other emails', v: person.additionalEmails.length ? <span className="space-y-1">{person.additionalEmails.map((email) => <a key={email} href={`mailto:${email}`} className="block break-all text-brand-700 hover:underline">{email}</a>)}</span> : null },
         { k: 'Phone', v: person.phone ? <a href={`tel:${person.phone}`} className="text-brand-700 hover:underline">{person.phone}</a> : null },
         { k: 'Other phone', v: person.additionalPhone ? <a href={`tel:${person.additionalPhone}`} className="text-brand-700 hover:underline">{person.additionalPhone}</a> : null },

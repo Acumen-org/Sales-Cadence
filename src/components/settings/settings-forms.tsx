@@ -25,7 +25,7 @@ export function TwentyConnectionForm({ twenty, hasEnvKey, defaultSchemaJson }: {
     <Card title="Connection and schema mapping">
       <ActionForm action={saveTwentySettingsAction} className="space-y-4 p-4">
         <div className="grid gap-4 md:grid-cols-2">
-          <Field label="Twenty base URL" hint="Overrides TWENTY_API_URL. No trailing slash. Also used for Open in Twenty links.">
+          <Field label="Twenty base URL" hint="No trailing slash. Also used for the Open in Twenty links.">
             <input name="baseUrl" defaultValue={twenty.baseUrl ?? ''} className="w-full" placeholder="https://twenty.example.com" />
           </Field>
           <Field label="API key" hint={twenty.apiKey ? 'A key is stored in settings. Leave blank to keep it.' : hasEnvKey ? 'Using TWENTY_API_KEY from the environment. Enter a key here to override.' : 'No key configured.'}>
@@ -115,7 +115,7 @@ export function RulesForm({ rules }: { rules: Settings['rules'] }) {
             <input name="reconcileLookbackDays" type="number" min={1} max={90} defaultValue={rules.reconcileLookbackDays} className="w-32" />
           </Field>
         </div>
-        <Field label="Click-to-call endpoint" hint="Posts { to, personId, taskId, userId } when an FO presses Call. Blank uses the machine's dialler instead.">
+        <Field label="Click-to-call endpoint" hint="Blank uses the machine's own dialler.">
           <input name="clickToCallUrl" type="url" inputMode="url" defaultValue={rules.clickToCallUrl} placeholder="https://example.com/call" className="w-full" />
         </Field>
         <Field

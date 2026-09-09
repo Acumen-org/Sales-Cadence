@@ -57,6 +57,13 @@ export function MeetingStage(p: Props) {
 
   return (
     <div className="space-y-3">
+      {mediaFailed ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <span className="text-[13px] font-semibold text-amber-900">Recording unavailable</span>
+          <span className="text-[12.5px] text-amber-800">The link may have expired or need a sign-in.</span>
+          <a href={p.sourceUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm ml-auto"><IconExternal size={13} />Open the source</a>
+        </div>
+      ) : (
       <div className="overflow-hidden rounded-xl border border-line bg-ink-900">
         {p.mediaUrl ? (
           <video
@@ -92,13 +99,7 @@ export function MeetingStage(p: Props) {
           </div>
         )}
       </div>
-
-      {mediaFailed ? (
-        <p role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12.5px] font-medium text-amber-900">
-          This recording did not load. The link may have expired or need a sign-in.
-          <a href={p.sourceUrl} target="_blank" rel="noreferrer" className="font-semibold underline">Open the source</a>
-        </p>
-      ) : null}
+      )}
       {(p.embedUrl || p.mediaUrl) && p.providerNote ? <p className="text-[11.5px] text-ink-600">{p.providerNote}</p> : null}
 
       <div className="surface overflow-hidden">

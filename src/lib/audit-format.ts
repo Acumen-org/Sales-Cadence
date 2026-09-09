@@ -24,7 +24,7 @@ export function describeAudit(action: string, details: Details, actorLabel: stri
 
   switch (action) {
     case 'enrolled': {
-      const bits = [str(d.startDate) ? `starts ${str(d.startDate)}` : null, str(d.assignedBy) ? `assigned ${words(str(d.assignedBy)!)}` : null].filter(Boolean);
+      const bits = [str(d.startDate) ? `starts ${dateText(str(d.startDate))}` : null, str(d.assignedBy) ? `assigned ${words(str(d.assignedBy)!)}` : null].filter(Boolean);
       return { title: `Enrolled in a sequence${by}`, detail: bits.length ? bits.join(' · ') : null };
     }
     case 'step_generated': {

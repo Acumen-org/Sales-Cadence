@@ -220,6 +220,25 @@ Turn dry run off (`CADENCE_DRY_RUN=false`), remove `demo` from `SEED_PROFILE`, r
 
 When the pilot pod is happy, add the other pods.
 
+## Click to call
+
+Calls are placed by a person, not by Cadence. A call task shows the number from Twenty and a
+**Call** button; with no endpoint configured that button is a `tel:` link and hands the number to
+whatever the machine dials with.
+
+To put the call through your own telephony instead, paste its URL into **Settings > Rules and
+matching > Click-to-call endpoint** (for example the Twilio host at
+`https://h00ks.acm.acumen-strategy.com/...`). Cadence then `POST`s JSON to it when an FO presses
+Call, and shows whatever the endpoint answers:
+
+```json
+{ "to": "+44 20 7000 1014", "personId": "...", "taskId": "...", "userId": "...", "userEmail": "..." }
+```
+
+The request is abandoned after 10 seconds and the failure is shown to the FO rather than swallowed;
+every attempt is recorded in the audit log as `call_placed`. Cadence never dials on its own - the
+button is only ever pressed by a person, and the endpoint is what decides how the call is made.
+
 ## What Cadence writes to Twenty (and what it never touches)
 
 Writes, and only these:

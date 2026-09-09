@@ -146,7 +146,8 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                           ) : (
                             <span className="text-ink-800">{it.title}</span>
                           )}
-                          <span className="block truncate text-[11.5px] font-semibold text-ink-700">{[it.personName, it.detail].filter(Boolean).join(' · ')}</span>
+                          {it.personName ? <span className="block truncate text-[12px] font-semibold text-ink-900">{it.personName}</span> : null}
+                          {it.detail ? <span className="block truncate text-[11.5px] text-ink-600">{it.detail}</span> : null}
                         </span>
                         <span className="shrink-0 text-[11px] font-semibold text-ink-700">{formatInstant(it.at, user.timezone)}</span>
                       </li>
@@ -245,12 +246,13 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                       ) : (
                         <span className="font-medium text-ink-800">{it.title}</span>
                       )}
-                      <span className="block text-[11.5px] font-semibold text-ink-700">
-                        {[it.personName, it.detail].filter(Boolean).join(' · ')}
-                        <span className="ml-1.5 rounded bg-canvas px-1 text-[10px] uppercase tracking-wide">{it.kind}</span>
-                      </span>
+                      {it.personName ? <span className="mt-0.5 block text-[12px] font-semibold text-ink-900">{it.personName}</span> : null}
+                      {it.detail ? <span className="mt-0.5 block text-[11.5px] text-ink-600">{it.detail}</span> : null}
                     </span>
-                    <span className="shrink-0 text-[11px] font-semibold text-ink-700">{formatInstant(it.at, user.timezone)}</span>
+                    <span className="flex shrink-0 flex-col items-end gap-1.5">
+                      <span className="text-[11px] font-semibold text-ink-700">{formatInstant(it.at, user.timezone)}</span>
+                      <Badge tone="gray">{it.kind}</Badge>
+                    </span>
                   </li>
                 ))}
               </ol>
