@@ -2,10 +2,11 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { createMeetingAction, updateMeetingAction } from '@/lib/actions/meetings';
+import { createMeetingAction, updateMeetingAction, type AttendeeSelection } from '@/lib/actions/meetings';
 import { parseMeetingLink } from '@/lib/meetings/providers';
 import { ActionForm } from '@/components/action-form';
-import { Field, Notice } from '@/components/ui';
+import { Field, Badge } from '@/components/ui';
+import { AttendeePicker } from './attendee-picker';
 
 export type MeetingFormValues = {
   id?: string;
@@ -14,13 +15,12 @@ export type MeetingFormValues = {
   occurredAt: string; // datetime-local value
   durationMin: number | '';
   companyId: string;
-  attendees: string;
-  notes: string;
+  attendees: AttendeeSelection[];
   transcript: string;
 };
 
 /** Add or edit a meeting. Shows what Cadence can do with the pasted link as you type. */
-export function MeetingForm({ companies, initial, mode }: { companies: { id: string; name: string }[]; initial: MeetingFormValues; mode: 'create' | 'edit' }) {
+export function MeetingForm({ companies, initial, mode, timezone }: { companies: { id: string; name: string }[]; initial: MeetingFormValues; mode: 'create' | 'edit'; timezone: string }) {
   const router = useRouter();
   const [url, setUrl] = useState(initial.sourceUrl);
   const parsed = url.trim() ? parseMeetingLink(url) : null;
@@ -38,35 +38,26 @@ export function MeetingForm({ companies, initial, mode }: { companies: { id: str
 
       <div className="grid gap-4 md:grid-cols-2">
         <Field label="Title" className="md:col-span-2">
-          <input name="title" required defaultValue={initial.title} placeholder="Discovery call - Dummy Company A" />
+          <input name="title" required defaultValue={initial.title} placeholder="Meeting title" />
         </Field>
 
         <Field
           label="Recording or meeting link"
           className="md:col-span-2"
-          hint="Teams recordings live in SharePoint or OneDrive; Meet recordings live in Google Drive. Paste that link (or a direct .mp4) to play it inside Cadence."
         >
-          <input name="sourceUrl" required value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://contoso.sharepoint.com/.../Recording.mp4?web=1" />
+          <input name="sourceUrl" required value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://" />
         </Field>
 
-        {parsed ? (
-          <div className="md:col-span-2">
-            <Notice tone={parsed.embedUrl || parsed.mediaUrl ? 'success' : 'warn'}>
-              <span className="font-medium">{parsed.label}.</span>{' '}
-              {parsed.mediaUrl ? 'Plays inline with a native player, so transcript timestamps can seek.' : parsed.embedUrl ? 'Plays inline in an embedded player.' : 'Cannot be embedded; Cadence will link out.'}
-              {parsed.note ? ` ${parsed.note}` : ''}
-            </Notice>
-          </div>
-        ) : null}
+        {parsed ? <div className="flex flex-wrap gap-2 md:col-span-2"><Badge tone="blue">{parsed.label}</Badge><Badge tone={parsed.mediaUrl || parsed.embedUrl ? 'green' : 'gray'}>{parsed.mediaUrl || parsed.embedUrl ? 'Inline playback' : 'Opens externally'}</Badge></div> : null}
 
-        <Field label="When">
+        <Field label="Date and time" hint={timezone === 'America/Chicago' ? 'Central Time (USA)' : timezone}>
           <input name="occurredAt" type="datetime-local" required defaultValue={initial.occurredAt} />
         </Field>
         <Field label="Duration (minutes)">
           <input name="durationMin" type="number" min={0} max={1440} defaultValue={initial.durationMin} />
         </Field>
 
-        <Field label="Account" className="md:col-span-2" hint="Links the meeting to the account timeline.">
+        <Field label="Account" className="md:col-span-2">
           <select name="companyId" defaultValue={initial.companyId}>
             <option value="">No account</option>
             {companies.map((c) => (
@@ -77,20 +68,10 @@ export function MeetingForm({ companies, initial, mode }: { companies: { id: str
           </select>
         </Field>
 
-        <Field
-          label="Attendees"
-          className="md:col-span-2"
-          hint="One per line: “Dummy One <dummy.one@dummy-a.example>” or just the address. Addresses outside your own domains count as external, which is how a prospect meeting is recognised."
-        >
-          <textarea name="attendees" rows={3} defaultValue={initial.attendees} placeholder={'Dummy One <dummy.one@dummy-a.example>\nalisa@acumen-strategy.com'} />
-        </Field>
-
-        <Field label="Notes" className="md:col-span-2">
-          <textarea name="notes" rows={3} defaultValue={initial.notes} />
-        </Field>
+        <div className="space-y-2 md:col-span-2"><div className="text-sm font-medium text-ink-700">Attendees</div><AttendeePicker initial={initial.attendees} /></div>
 
         <Field label="Transcript (optional)" className="md:col-span-2" hint="Paste the WebVTT or SRT export, or plain text. Format is detected automatically.">
-          <textarea name="transcript" rows={6} defaultValue={initial.transcript} className="font-mono !text-[12px]" placeholder={'WEBVTT\n\n00:00:03.000 --> 00:00:07.500\n<v Alisa>Thanks for making the time today.'} />
+          <textarea name="transcript" rows={6} defaultValue={initial.transcript} className="font-mono !text-[12px]" placeholder="Paste the transcript" />
         </Field>
       </div>
 

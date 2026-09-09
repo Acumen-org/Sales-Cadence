@@ -5,7 +5,6 @@ import { useState } from 'react';
 import { Badge, DotTimeline, IdentityCell, TierBadge, type BadgeTone, type TimelinePoint } from '@/components/ui';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
 import { IconPlus } from '@/components/icons';
-import { PersonRowActions } from './person-row-actions';
 
 export type PeopleTableRow = {
   id: string;
@@ -20,14 +19,14 @@ export type PeopleTableRow = {
   tier: string | null;
   listCategory: string | null;
   leadSource: string[];
+  tags: string[];
   warnings: { label: string; tone: BadgeTone }[];
   /** Twenty's own plan for this person, which Cadence never overwrites. */
   next: { action: string | null; due: string | null; step: string | null; overdue: boolean } | null;
   dnd: boolean;
   optedOut: boolean;
-  enrollment: { status: string; label: string; tone: BadgeTone; campaignName: string | null; foName: string } | null;
+  enrollment: { status: string; label: string; tone: BadgeTone; campaignName: string | null; campaignId: string | null; sequenceName: string; foName: string } | null;
   activeEnrollmentId: string | null;
-  activeCanExit: boolean;
   lastTouch: { summary: string; at: string } | null;
   activity: TimelinePoint[];
   twentyUrl: string | null;
@@ -35,14 +34,11 @@ export type PeopleTableRow = {
 
 type Props = {
   rows: PeopleTableRow[];
-  showActions: boolean;
   canEnroll: boolean;
-  sequences: { id: string; name: string }[];
-  pods: { id: string; name: string; podOwnerValue: string; fos: { id: string; name: string }[] }[];
 };
 
 /** People list with stages, an activity timeline, row actions and bulk "add to sequence". */
-export function PeopleTable({ rows, showActions, canEnroll, sequences, pods }: Props) {
+export function PeopleTable({ rows, canEnroll }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const selectable = rows.filter((r) => !r.activeEnrollmentId && !r.dnd && !r.optedOut);
   const allSelected = selectable.length > 0 && selectable.every((r) => selected.has(r.id));
@@ -60,9 +56,9 @@ export function PeopleTable({ rows, showActions, canEnroll, sequences, pods }: P
     <div>
       {canEnroll && selected.size ? (
         <div className="flex flex-wrap items-center gap-3 border-y border-brand-100 bg-brand-50/70 px-4 py-2 text-[12.5px] text-brand-800">
-          <span className="font-medium">{selected.size} selected</span>
+          <span className="font-bold">{selected.size} selected</span>
           <Link href={bulkHref} className="btn-primary btn-sm">
-            <IconPlus size={13} /> Add to a sequence
+            <IconPlus size={13} /> Create campaign
           </Link>
           <button type="button" className="btn-ghost btn-sm" onClick={() => setSelected(new Set())}>
             Clear
@@ -81,11 +77,10 @@ export function PeopleTable({ rows, showActions, canEnroll, sequences, pods }: P
               <th>Name</th>
               <th>In Twenty</th>
               <th>Next in Twenty</th>
-              <th>Sequence</th>
+              <th>Campaign / sequence</th>
               <th>Activity</th>
               <th>Owner</th>
               <th>Last touch</th>
-              {showActions ? <th className="sticky right-0 w-24 bg-white"></th> : null}
             </tr>
           </thead>
           <tbody>
@@ -114,17 +109,18 @@ export function PeopleTable({ rows, showActions, canEnroll, sequences, pods }: P
                     </Badge>
                     <TierBadge tier={p.tier} />
                   </div>
-                  <div className="mt-0.5 whitespace-nowrap text-[11px] text-ink-400">
+                  <div className="mt-0.5 whitespace-nowrap text-[11px] font-semibold text-ink-700">
                     {p.listCategory ? optionLabel(p.listCategory) : null}
                     {p.warnings.length ? <span className="text-amber-700">{p.listCategory ? ' · ' : ''}{p.warnings.map((w) => w.label).join(' · ')}</span> : null}
                   </div>
+                  {p.tags.length ? <div className="mt-1 flex flex-wrap gap-1">{p.tags.map((tag) => <Badge key={tag} tone="gray">{optionLabel(tag)}</Badge>)}</div> : null}
                 </td>
                 <td className="text-[12px]">
                   {p.next?.action || p.next?.due ? (
                     <>
                       <div className="max-w-[11rem] truncate text-ink-700">{p.next.action ?? '-'}</div>
                       {p.next.due ? (
-                        <div className={p.next.overdue ? 'font-medium text-red-600' : 'text-ink-400'}>
+                        <div className={p.next.overdue ? 'font-medium text-red-600' : 'font-semibold text-ink-700'}>
                           {p.next.due}
                           {p.next.step ? ` · ${optionLabel(p.next.step)}` : ''}
                         </div>
@@ -138,7 +134,7 @@ export function PeopleTable({ rows, showActions, canEnroll, sequences, pods }: P
                   {p.enrollment ? (
                     <>
                       <Badge tone={p.enrollment.tone}>{p.enrollment.label}</Badge>
-                      {p.enrollment.campaignName ? <div className="mt-0.5 truncate text-[11.5px] text-ink-400">{p.enrollment.campaignName}</div> : null}
+                      <div className="mt-1 font-semibold text-ink-900">{p.enrollment.campaignId ? <Link href={`/campaigns/${p.enrollment.campaignId}`} className="hover:text-brand-700 hover:underline">{p.enrollment.campaignName}</Link> : 'Direct enrollment'}</div><div className="mt-0.5 text-xs font-semibold text-ink-700">{p.enrollment.sequenceName}</div>
                     </>
                   ) : (
                     <span className="text-[12px] text-ink-300">-</span>
@@ -147,32 +143,19 @@ export function PeopleTable({ rows, showActions, canEnroll, sequences, pods }: P
                 <td>{p.activity.length ? <DotTimeline points={p.activity} width={130} /> : <span className="text-[12px] text-ink-300">no touches</span>}</td>
                 <td className="whitespace-nowrap text-[12.5px]">
                   {p.podName ?? <span className="text-ink-300">-</span>}
-                  {p.enrollment?.foName ? <div className="text-[11px] text-ink-400">{p.enrollment.foName}</div> : null}
+                  {p.enrollment?.foName ? <div className="text-[11px] font-semibold text-ink-700">{p.enrollment.foName}</div> : null}
                 </td>
                 <td className="text-[12px]">
                   {p.lastTouch ? (
                     <>
-                      <div className="max-w-[13rem] truncate text-ink-600">{p.lastTouch.summary}</div>
-                      <div className="text-ink-400">{p.lastTouch.at}</div>
+                      <div className="max-w-[13rem] truncate font-semibold text-ink-800">{p.lastTouch.summary}</div>
+                      <div className="font-semibold text-ink-700">{p.lastTouch.at}</div>
                     </>
                   ) : (
                     <span className="text-ink-300">-</span>
                   )}
                 </td>
-                {showActions ? (
-                  <td className="sticky right-0 bg-white text-right shadow-[-8px_0_8px_-8px_rgba(31,35,51,0.12)]">
-                    <PersonRowActions
-                      personId={p.id}
-                      activeEnrollmentId={p.activeEnrollmentId}
-                      dnd={p.dnd || p.optedOut}
-                      canEnroll={canEnroll}
-                      canExit={p.activeCanExit}
-                      sequences={sequences}
-                      pods={pods}
-                      defaultPodId={p.podId}
-                    />
-                  </td>
-                ) : null}
+
               </tr>
             ))}
           </tbody>

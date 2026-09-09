@@ -73,7 +73,7 @@ test('task flow: complete an email, log a call with an outcome, skip with a boun
   // Task flow, emails only. The heading is the person; the step is in the line above it.
   await page.goto(`/tasks?tab=${tab}&type=EMAIL&mode=flow`);
   await expect(page.getByText(/Step \d+ of \d+/)).toBeVisible();
-  const firstPerson = (await page.locator('main h2').first().textContent())!.trim();
+  const firstPerson = (await page.locator('main h2 a[href^="/people/"]').first().textContent())!.trim();
   await expect(page.locator('input[id^="subject-"]').first()).toBeVisible(); // template rendered
   await page.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(page.getByRole('status').or(page.getByText(/Step \d+ of \d+/))).toBeVisible();

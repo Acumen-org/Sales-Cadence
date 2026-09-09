@@ -87,7 +87,7 @@ export function RulesForm({ rules }: { rules: Settings['rules'] }) {
     <Card title="Caps, clock and working days">
       <ActionForm action={saveRulesSettingsAction} className="space-y-4 p-4">
         <div className="grid gap-4 md:grid-cols-3">
-          <Field label="Daily cap (actions per FO per day)" hint="Per-user overrides live in Users and pods.">
+          <Field label="Daily cap (actions per FO per day)">
             <input name="dailyCap" type="number" min={1} max={500} defaultValue={rules.dailyCap} className="w-32" />
           </Field>
           <Field label="Clock mode">
@@ -270,7 +270,7 @@ export function SyncForm({ sync }: { sync: Settings['sync'] }) {
   return (
     <Card title="Sync out to Twenty">
       <ActionForm action={saveSyncSettingsAction} className="space-y-3 p-4">
-        <Check name="writeCompletionNotes" label="Write a [Cadence] note on the person for every completed action" checked={sync.writeCompletionNotes} hint="e.g. [Cadence] Email 2 sent by Alisa" />
+        <Check name="writeCompletionNotes" label="Write a [Cadence] note on the person for every completed action" checked={sync.writeCompletionNotes} />
         <Check name="mirrorOpenTasks" label="Mirror open Cadence tasks as Twenty Tasks (assigned to the FO, due on the task day)" checked={sync.mirrorOpenTasks} />
         <Check name="deleteMirroredTaskOnSkip" label="Delete the mirrored Twenty task when a Cadence task is skipped or cancelled (otherwise mark it done)" checked={sync.deleteMirroredTaskOnSkip} />
         <Check name="writeCadenceTaskIdField" label="Write the Cadence task id into the optional Task.cadenceTaskId field" checked={sync.writeCadenceTaskIdField} hint="Requires the custom field on Task in Twenty." />

@@ -14,8 +14,8 @@ describe('database', () => {
     expect(await prisma.pod.count()).toBe(3);
     expect(await prisma.user.count()).toBe(6);
     expect(await prisma.personCache.count()).toBe(40);
-    const seq = await prisma.sequence.findUniqueOrThrow({ where: { id: basics.sequence.id }, include: { activeVersion: true } });
-    expect(seq.activeVersion?.version).toBe(1);
+    const seq = await prisma.sequence.findUniqueOrThrow({ where: { id: basics.sequence.id } });
+    expect((seq.steps as unknown[]).length).toBe(8);
   });
 
   it('enforces one active enrollment per person at the database level', async () => {
@@ -23,7 +23,6 @@ describe('database', () => {
       personId: 'person-01',
       foUserId: basics.users.alisa.id,
       sequenceId: basics.sequence.id,
-      sequenceVersionId: basics.version.id,
       startDate: '2026-09-07',
     };
     await prisma.enrollment.create({ data: { ...base, status: 'ACTIVE' } });

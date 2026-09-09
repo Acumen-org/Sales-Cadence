@@ -17,6 +17,8 @@ import type {
   TwentyView,
   TwentyWorkspaceMember,
   UpdateTaskInput,
+  EnrichPersonInput,
+  EnrichCompanyInput,
 } from './types';
 
 export type TwentyGraphqlClientOptions = {
@@ -60,6 +62,7 @@ export class TwentyGraphqlClient implements TwentyClient {
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
   private readonly fieldCache = new Map<string, Promise<Set<string> | null>>();
+  private aumTypePromise?: Promise<'number' | 'currency' | null>;
 
   constructor(private readonly opts: TwentyGraphqlClientOptions) {
     this.s = opts.schema;
@@ -290,6 +293,7 @@ export class TwentyGraphqlClient implements TwentyClient {
       this.sinceFilter(p.updatedAt, opts.updatedSince),
       opts.ids ? { id: { in: opts.ids } } : null,
       opts.podOwner ? { [p.podOwner]: { eq: opts.podOwner } } : null,
+      opts.companyId ? { [p.companyId]: { eq: opts.companyId } } : null,
       opts.includeDeleted ? { or: [{ [p.deletedAt]: { is: 'NULL' } }, { [p.deletedAt]: { is: 'NOT_NULL' } }] } : null,
     );
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.person.plural, this.s.objects.person.typeName, sel), {
@@ -315,20 +319,44 @@ export class TwentyGraphqlClient implements TwentyClient {
     return out;
   }
 
-  async listCompanies(opts: ListOptions & { ids?: string[] } = {}): Promise<Page<TwentyCompany>> {
+  private companyAumType() {
+    if (!this.aumTypePromise) {
+      this.aumTypePromise = this.request<{ __type: { fields: Array<{ name: string; type: { kind: string; name: string | null; ofType?: { kind: string; name: string | null } } }> } | null }>(
+        'query CompanyFieldTypes($name: String!) { __type(name: $name) { fields { name type { kind name ofType { kind name } } } } }',
+        { name: this.s.objects.company.typeName },
+      ).then((result) => {
+        const type = result.__type?.fields.find((field) => field.name === this.s.company.aum)?.type;
+        const named = type?.ofType ?? type;
+        if (!named) return null;
+        if (named.kind === 'OBJECT' && /Currency/i.test(named.name ?? '')) return 'currency';
+        if (named.kind === 'SCALAR' && /Float|Int|Numeric|Decimal|BigInt|Number/i.test(named.name ?? '')) return 'number';
+        return null;
+      }).catch(() => null);
+    }
+    return this.aumTypePromise;
+  }
+
+  private async companySelection() {
     const c = this.s.company;
-    const sel = await this.selection(this.s.objects.company.typeName, [
+    const aumType = await this.companyAumType();
+    return this.selection(this.s.objects.company.typeName, [
       'id',
       c.name,
       { field: c.domainName, sub: '{ primaryLinkUrl }' },
       c.accountOwnerId,
       c.industry,
       c.employees,
+      ...(aumType === 'currency' ? [{ field: c.aum, sub: '{ amountMicros currencyCode }' }] : aumType === 'number' ? [c.aum] : []),
       { field: c.address, sub: '{ addressCity }' },
       { field: c.linkedinLink, sub: '{ primaryLinkUrl }' },
       c.updatedAt,
       c.deletedAt,
     ]);
+  }
+
+  async listCompanies(opts: ListOptions & { ids?: string[] } = {}): Promise<Page<TwentyCompany>> {
+    const c = this.s.company;
+    const sel = await this.companySelection();
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.company.plural, this.s.objects.company.typeName, sel), {
       filter: this.and(this.sinceFilter(c.updatedAt, opts.updatedSince), opts.ids ? { id: { in: opts.ids } } : null),
       first: Math.min(opts.limit ?? PAGE_SIZE, 200),
@@ -558,6 +586,62 @@ export class TwentyGraphqlClient implements TwentyClient {
   async deleteTask(id: string): Promise<void> {
     const t = this.s.objects.task;
     await this.request(`mutation DeleteTask($id: UUID!) { delete${t.typeName}(id: $id) { id } }`, { id });
+  }
+
+  private async assertWritableFields(type: string, data: Raw) {
+    const available = await this.availableFields(type);
+    if (!available) throw new TwentyApiError('Twenty schema could not be verified. Check API permissions before applying enrichment.');
+    const missing = Object.keys(data).filter((key) => !available.has(key));
+    if (missing.length) throw new TwentyApiError(`Twenty is missing mapped fields: ${missing.join(', ')}. Update the field mapping before retrying.`);
+  }
+
+  async enrichPerson(id: string, patch: EnrichPersonInput, current?: TwentyPerson): Promise<TwentyPerson> {
+    const person = current ?? await this.getPerson(id);
+    if (!person || person.deletedAt) throw new TwentyApiError('This contact no longer exists in Twenty.');
+    const fields = this.s.person;
+    const data: Raw = {
+      ...(patch.firstName !== undefined || patch.lastName !== undefined ? { [fields.name]: { firstName: patch.firstName ?? person.firstName, lastName: patch.lastName ?? person.lastName } } : {}),
+      ...(patch.email !== undefined ? { [fields.emails]: { primaryEmail: patch.email, additionalEmails: person.additionalEmails } } : {}),
+      ...(patch.phone !== undefined ? { [fields.phones]: { primaryPhoneNumber: patch.phone } } : {}),
+      ...(patch.linkedinUrl !== undefined ? { [fields.linkedinLink]: { primaryLinkUrl: patch.linkedinUrl } } : {}),
+      ...(patch.jobTitle !== undefined ? { [fields.jobTitle]: patch.jobTitle } : {}),
+      ...(patch.city !== undefined ? { [fields.city]: patch.city } : {}),
+    };
+    const type = this.s.objects.person.typeName;
+    await this.assertWritableFields(type, data);
+    const selection = await this.personSelection();
+    const result = await this.request<Record<string, Raw>>(`mutation EnrichPerson($id: UUID!, $data: ${type}UpdateInput!) { update${type}(id: $id, data: $data) { ${selection} } }`, { id, data });
+    if (!result[`update${type}`]) throw new TwentyApiError('Twenty did not return the updated contact.');
+    return normalizePerson(result[`update${type}`], this.s);
+  }
+
+  async enrichCompany(id: string, patch: EnrichCompanyInput, current?: TwentyCompany): Promise<TwentyCompany> {
+    const company = current ?? (await this.listCompanies({ ids: [id], limit: 1 })).items[0];
+    if (!company || company.deletedAt) throw new TwentyApiError('This account no longer exists in Twenty.');
+    const fields = this.s.company;
+    const data: Raw = {
+      ...(patch.domain !== undefined ? { [fields.domainName]: { primaryLinkUrl: patch.domain } } : {}),
+      ...(patch.industry !== undefined ? { [fields.industry]: patch.industry } : {}),
+      ...(patch.employees !== undefined ? { [fields.employees]: patch.employees } : {}),
+      ...(patch.city !== undefined ? { [fields.address]: { addressCity: patch.city } } : {}),
+      ...(patch.linkedinUrl !== undefined ? { [fields.linkedinLink]: { primaryLinkUrl: patch.linkedinUrl } } : {}),
+    };
+    if (patch.aum !== undefined) {
+      const type = await this.companyAumType();
+      if (!type) throw new TwentyApiError('Map company.aum to a Number or USD Currency field in Settings before applying AUM enrichment.');
+      const previous = company.raw?.[fields.aum] as { currencyCode?: string } | null | undefined;
+      if (type === 'currency' && previous?.currencyCode && previous.currencyCode !== 'USD') throw new TwentyApiError('This AUM field uses another currency. Convert the enrichment value in Twenty before importing USD amounts.');
+      if (type === 'number' && patch.aum != null && Number(patch.aum).toFixed(2) !== patch.aum) throw new TwentyApiError('This amount exceeds the Number field’s precision. Use a Currency field for exact AUM amounts.');
+      const [whole, fraction = ''] = (patch.aum ?? '0').split('.');
+      const micros = BigInt(whole) * BigInt(1_000_000) + BigInt(fraction.padEnd(6, '0'));
+      data[fields.aum] = type === 'currency' ? { amountMicros: patch.aum === null ? null : micros.toString(), currencyCode: 'USD' } : patch.aum === null ? null : Number(patch.aum);
+    }
+    const type = this.s.objects.company.typeName;
+    await this.assertWritableFields(type, data);
+    const selection = await this.companySelection();
+    const result = await this.request<Record<string, Raw>>(`mutation EnrichCompany($id: UUID!, $data: ${type}UpdateInput!) { update${type}(id: $id, data: $data) { ${selection} } }`, { id, data });
+    if (!result[`update${type}`]) throw new TwentyApiError('Twenty did not return the updated account.');
+    return normalizeCompany(result[`update${type}`], this.s);
   }
 
   // ---------------------------------------------------------------------------

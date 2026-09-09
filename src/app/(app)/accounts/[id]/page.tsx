@@ -1,11 +1,8 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { requireUser, toActor } from '@/lib/auth/current-user';
-import { canEnroll } from '@/lib/auth/rbac';
+import { requireUser } from '@/lib/auth/current-user';
 import { accountDetail } from '@/lib/accounts-query';
 import { formatInstant, formatLocalDate, todayIn } from '@/lib/dates';
-import { syncAccountAction } from '@/lib/actions/accounts';
-import { ActionButton } from '@/components/action-form';
 import { OrgTree, type TreeNode, type TreePerson } from '@/components/accounts/org-tree';
 import { ActionIcon, IconExternal, IconPlus } from '@/components/icons';
 import {
@@ -28,7 +25,7 @@ import { optionLabels } from '@/lib/twenty/labels';
 
 const TABS = [
   { key: 'overview', label: 'Overview' },
-  { key: 'relationships', label: 'Relationship map' },
+  { key: 'relationships', label: 'People by title' },
   { key: 'people', label: 'People' },
   { key: 'timeline', label: 'Timeline' },
   { key: 'work', label: 'Campaigns and tasks' },
@@ -42,7 +39,6 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
   if (!detail) notFound();
   const { company, people, tree, meetings, campaigns, timeline, openTasks, stats, ownerName } = detail;
   const today = todayIn(user.timezone);
-  const editable = canEnroll(toActor(user));
 
   const toTreePerson = (p: (typeof people)[number]): TreePerson => ({
     id: p.id,
@@ -77,13 +73,6 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
         <RecordHeader
           name={company.name}
           shape="square"
-          sub={
-            <>
-              {[company.industry, company.city, company.employees ? `${company.employees} employees` : null].filter(Boolean).join(' · ') || 'Twenty account'}
-              {ownerName ? ` · owned by ${ownerName}` : ''}
-              {company.syncedAt ? ` · synced ${formatInstant(company.syncedAt, user.timezone)}` : ''}
-            </>
-          }
           badges={
             <>
               {detail.mine ? <Badge tone="blue">mine</Badge> : null}
@@ -101,9 +90,6 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
               <Link href={`/meetings/new?account=${company.id}`} className="btn-secondary btn-sm">
                 <IconPlus size={13} /> Meeting
               </Link>
-              <ActionButton action={syncAccountAction} payload={{ companyId: company.id }} className="btn-secondary btn-sm">
-                Sync from Twenty
-              </ActionButton>
               <Link href="/accounts" className="btn-ghost btn-sm">
                 All accounts
               </Link>
@@ -139,8 +125,10 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                       { k: 'Industry', v: company.industry },
                       { k: 'City', v: company.city },
                       { k: 'Employees', v: company.employees },
+                      { k: 'AUM', v: company.aum ? company.aum.toNumber().toLocaleString('en-US', { maximumFractionDigits: 0 }) : null },
                       { k: 'Owner', v: ownerName },
                       { k: 'LinkedIn', v: company.linkedinUrl },
+                      { k: 'Last synced', v: company.syncedAt ? formatInstant(company.syncedAt, user.timezone) : null },
                       { k: 'Twenty id', v: <span className="font-mono text-[11px]">{company.id}</span> },
                     ]}
                   />
@@ -153,7 +141,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                   <ul className="divide-y divide-line">
                     {timeline.slice(0, 8).map((it, i) => (
                       <li key={i} className="flex items-start gap-2.5 px-4 py-2.5 text-[13px]">
-                        <span className={it.tone === 'in' ? 'mt-0.5 text-emerald-600' : it.tone === 'out' ? 'mt-0.5 text-ink-400' : 'mt-0.5 text-ink-300'}>
+                        <span className={it.tone === 'in' ? 'mt-0.5 text-emerald-600' : it.tone === 'out' ? 'mt-0.5 font-semibold text-ink-700' : 'mt-0.5 text-ink-300'}>
                           {it.icon === 'MEETING' || it.icon === 'STATE' ? <span className="inline-block h-3.5 w-3.5 rounded-full border border-current" /> : <ActionIcon action={it.icon} size={14} />}
                         </span>
                         <span className="min-w-0 flex-1">
@@ -164,9 +152,9 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                           ) : (
                             <span className="text-ink-800">{it.title}</span>
                           )}
-                          <span className="block truncate text-[11.5px] text-ink-400">{[it.personName, it.detail].filter(Boolean).join(' · ')}</span>
+                          <span className="block truncate text-[11.5px] font-semibold text-ink-700">{[it.personName, it.detail].filter(Boolean).join(' · ')}</span>
                         </span>
-                        <span className="shrink-0 text-[11px] text-ink-400">{formatInstant(it.at, user.timezone)}</span>
+                        <span className="shrink-0 text-[11px] font-semibold text-ink-700">{formatInstant(it.at, user.timezone)}</span>
                       </li>
                     ))}
                   </ul>
@@ -179,9 +167,9 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
         {tab === 'relationships' ? (
           <Surface>
             {everyone.length === 0 ? (
-              <EmptyState title="Nobody at this account yet" hint="Sync from Twenty to pull its people in." />
+              <EmptyState title="Nobody at this account yet"  />
             ) : (
-              <OrgTree roots={roots} orphans={tree.orphans.map(toTreePerson)} everyone={everyone} editable={editable} />
+              <OrgTree roots={roots} orphans={tree.orphans.map(toTreePerson)} everyone={everyone} />
             )}
           </Surface>
         ) : null}
@@ -196,11 +184,9 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                   <thead>
                     <tr>
                       <th>Person</th>
-                      <th>Stance</th>
                       <th>Tier</th>
                       <th>Type</th>
                       <th>Next in Twenty</th>
-                      <th>Reports to</th>
                       <th>Sequence</th>
                       <th>FO</th>
                       <th>Touches</th>
@@ -214,11 +200,6 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                           <IdentityCell name={p.name} href={`/people/${p.id}`} shape="circle" size={28} sub={p.jobTitle} />
                         </td>
                         <td>
-                          <Badge tone={p.accountRole === 'CHAMPION' ? 'green' : p.accountRole === 'SUPPORTER' ? 'blue' : p.accountRole === 'DETRACTOR' ? 'red' : 'gray'} dot>
-                            {p.accountRole.toLowerCase()}
-                          </Badge>
-                        </td>
-                        <td>
                           <TierBadge tier={p.tier} />
                         </td>
                         <td className="text-[12.5px]">{optionLabels(p.contactType, ' / ') || <span className="text-ink-300">-</span>}</td>
@@ -226,13 +207,12 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                           {p.nextAction || p.nextActionDueDate ? (
                             <>
                               <div className="max-w-[10rem] truncate text-ink-700">{p.nextAction ?? '-'}</div>
-                              {p.nextActionDueDate ? <div className="text-ink-400">{formatLocalDate(p.nextActionDueDate)}</div> : null}
+                              {p.nextActionDueDate ? <div className="font-semibold text-ink-700">{formatLocalDate(p.nextActionDueDate)}</div> : null}
                             </>
                           ) : (
                             <span className="text-ink-300">-</span>
                           )}
                         </td>
-                        <td className="text-[12.5px]">{p.reportsToId ? people.find((o) => o.id === p.reportsToId)?.name ?? '-' : <span className="text-ink-300">-</span>}</td>
                         <td>
                           {p.enrollment ? (
                             <Badge tone={ENROLLMENT_TONE[p.enrollment.status] ?? 'gray'}>{enrollmentStatusLabel(p.enrollment)}</Badge>
@@ -241,7 +221,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                           )}
                         </td>
                         <td className="whitespace-nowrap text-[12.5px]">{p.enrollment?.foName ?? <span className="text-ink-300">-</span>}</td>
-                        <td>{p.touches}</td>
+                        <td className="font-bold text-ink-900">{p.touches}</td>
                         <td className="whitespace-nowrap text-[12px] text-ink-500">{p.lastTouchAt ? formatInstant(p.lastTouchAt, user.timezone) : <span className="text-ink-300">never</span>}</td>
                       </tr>
                     ))}
@@ -260,7 +240,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
               <ol className="divide-y divide-line">
                 {timeline.map((it, i) => (
                   <li key={i} className="flex items-start gap-3 px-4 py-3 text-[13px]">
-                    <span className={it.tone === 'in' ? 'mt-0.5 text-emerald-600' : it.tone === 'out' ? 'mt-0.5 text-ink-400' : 'mt-0.5 text-ink-300'}>
+                    <span className={it.tone === 'in' ? 'mt-0.5 text-emerald-600' : it.tone === 'out' ? 'mt-0.5 font-semibold text-ink-700' : 'mt-0.5 text-ink-300'}>
                       {it.icon === 'MEETING' || it.icon === 'STATE' ? <span className="inline-block h-3.5 w-3.5 rounded-full border border-current" /> : <ActionIcon action={it.icon} size={14} />}
                     </span>
                     <span className="min-w-0 flex-1">
@@ -271,12 +251,12 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                       ) : (
                         <span className="font-medium text-ink-800">{it.title}</span>
                       )}
-                      <span className="block text-[11.5px] text-ink-400">
+                      <span className="block text-[11.5px] font-semibold text-ink-700">
                         {[it.personName, it.detail].filter(Boolean).join(' · ')}
                         <span className="ml-1.5 rounded bg-canvas px-1 text-[10px] uppercase tracking-wide">{it.kind}</span>
                       </span>
                     </span>
-                    <span className="shrink-0 text-[11px] text-ink-400">{formatInstant(it.at, user.timezone)}</span>
+                    <span className="shrink-0 text-[11px] font-semibold text-ink-700">{formatInstant(it.at, user.timezone)}</span>
                   </li>
                 ))}
               </ol>
@@ -312,8 +292,8 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                         <td>
                           <Badge tone="gray">{c.status.toLowerCase()}</Badge>
                         </td>
-                        <td>{c.people}</td>
-                        <td>{c.replied}</td>
+                        <td className="font-bold text-ink-900">{c.people}</td>
+                        <td className="font-bold text-ink-900">{c.replied}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -344,7 +324,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                         </td>
                         <td className="text-[12.5px]">
                           <span className="inline-flex items-center gap-1.5">
-                            <ActionIcon action={t.action} size={13} className="text-ink-400" />
+                            <ActionIcon action={t.action} size={13} className="font-semibold text-ink-700" />
                             {t.label}
                           </span>
                         </td>
@@ -369,7 +349,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                         <Link href={`/meetings/${m.id}`} className="block truncate text-[13px] font-medium text-ink-900 hover:text-brand-700">
                           {m.title}
                         </Link>
-                        <span className="block text-[11.5px] text-ink-400">
+                        <span className="block text-[11.5px] font-semibold text-ink-700">
                           {formatInstant(m.occurredAt, user.timezone)} · {m.attendees.filter((a) => a.external).length} external
                         </span>
                       </span>

@@ -2,13 +2,11 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { prisma } from '@/lib/db';
 import { SYSTEM_ACTOR } from '@/lib/audit';
 import type { SessionUser } from '@/lib/auth/current-user';
-import { DEFAULT_SEQUENCE_STEPS } from '@/lib/sequences/default-sequence';
-import { pickVariant, resolveCopy } from '@/lib/sequences/steps';
 import { getSettings, saveSettingsSection } from '@/lib/settings';
-import { completeCall, createSequenceVersion, enrollPeople, finishEnrollment, moveToStep, optOutPerson, previewEnrollment, skipWithReason } from '@/lib/engine';
-import { variantStats } from '@/lib/sequences-query';
+import { completeCall, enrollPeople, finishEnrollment, moveToStep, optOutPerson, previewEnrollment, skipWithReason } from '@/lib/engine';
 import { listTasks } from '@/lib/tasks-query';
 import { getMockTwentyClient } from '@/lib/twenty/mock-client';
+import { WORKSPACE_TIMEZONE } from '@/lib/workspace';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 
 const at = (date: string) => new Date(`${date}T10:00:00Z`);
@@ -16,22 +14,6 @@ const at = (date: string) => new Date(`${date}T10:00:00Z`);
 async function pending(personId: string) {
   return prisma.task.findMany({ where: { enrollment: { personId }, state: 'PENDING' }, orderBy: [{ stepIndex: 'asc' }, { actionIndex: 'asc' }] });
 }
-
-describe('variant picking (pure)', () => {
-  const action = { variants: [{ id: 'a', label: 'A', enabled: true }, { id: 'b', label: 'B', enabled: true }, { id: 'c', label: 'C', enabled: false }] };
-  it('balances across enabled variants and never picks disabled ones', () => {
-    expect(pickVariant(action, new Map([['a', 3], ['b', 1]]))?.id).toBe('b');
-    expect(pickVariant(action, new Map([['a', 2], ['b', 2]]), () => 0)?.id).toBe('a');
-    expect(pickVariant(action, new Map([['a', 2], ['b', 2]]), () => 0.99)?.id).toBe('b');
-    expect(pickVariant({ variants: [] }, new Map())).toBeNull();
-    expect(pickVariant({ variants: [{ id: 'c', label: 'C', enabled: false }] }, new Map())).toBeNull();
-  });
-  it('resolves the copy of the assigned variant, falling back to the action', () => {
-    const a = { label: 'Email 1', subject: 'base', template: 'base body', variants: [{ id: 'x', label: 'X', subject: 'sub X', enabled: true }] };
-    expect(resolveCopy(a, 'x')).toEqual({ subject: 'sub X', template: 'base body', variantLabel: 'X' });
-    expect(resolveCopy(a, 'missing')).toEqual({ subject: 'base', template: 'base body', variantLabel: null });
-  });
-});
 
 describe('Outreach-style outcomes', () => {
   let b: Basics;
@@ -127,7 +109,8 @@ describe('Outreach-style outcomes', () => {
     const after = await prisma.enrollment.findUniqueOrThrow({ where: { id: e.id } });
     expect(after.currentStep).toBe(3);
     const open = await pending('person-06');
-    expect(open.map((t) => [t.label, t.dueDate])).toEqual([['LinkedIn message 2', '2026-09-15']]); // day 9 from Sep 7 = Sep 15
+    // Step days count working days only: from Mon 7 Sep, day 9 is Thu 17 Sep (two weekends skipped).
+    expect(open.map((t) => [t.label, t.dueDate])).toEqual([['LinkedIn message 2', '2026-09-17']]);
     expect(await prisma.task.count({ where: { enrollmentId: e.id, state: 'CANCELLED' } })).toBe(2);
 
     const fin = await finishEnrollment(e.id, 'no_reply', { actor: SYSTEM_ACTOR, now: at('2026-09-08') });
@@ -135,46 +118,29 @@ describe('Outreach-style outcomes', () => {
     expect(await pending('person-06')).toHaveLength(0);
   });
 
-  it('A/B variants are assigned evenly and reported per variant', async () => {
-    const steps = JSON.parse(JSON.stringify(DEFAULT_SEQUENCE_STEPS)) as typeof DEFAULT_SEQUENCE_STEPS;
-    steps[0].actions[0].variants = [
-      { id: 'v-a', label: 'A', subject: 'Subject A', template: 'Body A {{firstName}}', enabled: true },
-      { id: 'v-b', label: 'B', subject: 'Subject B', template: 'Body B {{firstName}}', enabled: true },
-    ];
-    await createSequenceVersion(b.sequence.id, steps, SYSTEM_ACTOR, 'add A/B on email 1');
+  it('a step with two modules makes two tasks the FO works together, and the channel filter splits them', async () => {
+    // Step 1 of the house sequence is an email plus a LinkedIn connect. That is one step, so the
+    // two land on the same day with the same stepId and are worked side by side in one task view.
     const r = await enrollPeople(
-      { personIds: ['person-11', 'person-12', 'person-13', 'person-14'], sequenceId: b.sequence.id, podId: b.pods.Alisa.id, startDate: '2026-09-08', assignment: { mode: 'FIXED', foUserId: b.users.alisa.id }, actor: SYSTEM_ACTOR },
+      { personIds: ['person-11', 'person-12'], sequenceId: b.sequence.id, podId: b.pods.Alisa.id, startDate: '2026-09-08', assignment: { mode: 'FIXED', foUserId: b.users.alisa.id }, actor: SYSTEM_ACTOR },
       { now: at('2026-09-08') },
     );
-    expect(r.enrolled).toHaveLength(4);
-    const emailTasks = await prisma.task.findMany({ where: { actionId: 'act-email-1', enrollment: { personId: { in: ['person-11', 'person-12', 'person-13', 'person-14'] } } } });
-    const counts = emailTasks.reduce((m, t) => m.set(t.variantId!, (m.get(t.variantId!) ?? 0) + 1), new Map<string, number>());
-    expect(counts.get('v-a')).toBe(2);
-    expect(counts.get('v-b')).toBe(2);
-    // LinkedIn connect tasks (no variants) have none
-    expect((await prisma.task.findFirst({ where: { actionId: 'act-li-connect-1', enrollment: { personId: 'person-11' } } }))?.variantId).toBeNull();
+    expect(r.enrolled).toHaveLength(2);
+    const first = await prisma.task.findMany({ where: { enrollment: { personId: 'person-11' } }, orderBy: { actionIndex: 'asc' } });
+    expect(first.map((t) => [t.action, t.actionIndex, t.dueDate])).toEqual([
+      ['EMAIL', 0, '2026-09-08'],
+      ['LINKEDIN_CONNECT', 1, '2026-09-08'],
+    ]);
+    expect(new Set(first.map((t) => t.stepId)).size).toBe(1);
 
-    // the brief renders the variant's copy
-    const admin: SessionUser = { id: b.users.ria.id, email: b.users.ria.email, name: b.users.ria.name, role: 'ADMIN', timezone: 'Europe/London', twentyMemberId: null, dailyCap: null, podIds: [], pods: [] };
+    const admin: SessionUser = { id: b.users.ria.id, email: b.users.ria.email, name: b.users.ria.name, role: 'ADMIN', timezone: WORKSPACE_TIMEZONE, twentyMemberId: null, dailyCap: null, podIds: [], pods: [] };
+    // The brief for either task shows both modules, so the FO sees the whole step at once.
     const { getTaskBrief } = await import('@/lib/brief');
-    const t = emailTasks.find((x) => x.variantId === 'v-b')!;
-    const brief = await getTaskBrief(t.id, admin);
-    expect(brief?.variantLabel).toBe('B');
-    expect(brief?.action.subject).toBe('Subject B');
+    const brief = await getTaskBrief(first[0].id, admin);
+    expect(brief?.modules.map((m) => m.action.type)).toEqual(['EMAIL', 'LINKEDIN_CONNECT']);
+    // Copy is literal: no variable syntax survives into what an FO would send.
+    expect(brief?.action.body).not.toMatch(/\{\{/);
 
-    // stats: complete one A email then reply -> credited to A
-    const { completeTask } = await import('@/lib/engine/tasks');
-    const { markReplied } = await import('@/lib/engine/enrollment');
-    const a = emailTasks.find((x) => x.variantId === 'v-a')!;
-    await completeTask({ taskId: a.id, source: 'MANUAL' }, { actor: SYSTEM_ACTOR, now: at('2026-09-08') });
-    await markReplied(a.enrollmentId, { at: at('2026-09-09'), actor: SYSTEM_ACTOR });
-    const stats = await variantStats(b.sequence.id, steps);
-    const rowA = stats.find((s) => s.variantId === 'v-a')!;
-    const rowB = stats.find((s) => s.variantId === 'v-b')!;
-    expect([rowA.assigned, rowA.done, rowA.replied]).toEqual([2, 1, 1]);
-    expect([rowB.assigned, rowB.done, rowB.replied]).toEqual([2, 0, 0]);
-
-    // task list filters by channel
     const list = await listTasks(admin, { tab: 'today', channel: 'LINKEDIN' }, at('2026-09-08'));
     expect(list.rows.every((x) => x.action.startsWith('LINKEDIN'))).toBe(true);
     expect(list.channelCounts.EMAIL).toBeGreaterThan(0);

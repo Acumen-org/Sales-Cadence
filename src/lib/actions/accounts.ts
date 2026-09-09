@@ -7,6 +7,7 @@ import { requireUser, toActor } from '../auth/current-user';
 import { canEnroll } from '../auth/rbac';
 import { logAudit, userActor } from '../audit';
 import type { ActionResult } from './users';
+import { paginate } from '../twenty/client';
 
 const RelationSchema = z.object({
   personId: z.string().min(1),
@@ -80,15 +81,9 @@ export async function syncAccountAction(formData: FormData): Promise<ActionResul
     const company = companies.items[0];
     if (company) await upsertCompanyCache(company);
     let people = 0;
-    for (let after: string | null = null, i = 0; i < 20; i++) {
-      const page = await client.listPeople({ after, limit: 100 });
-      const mine = page.items.filter((p) => p.companyId === companyId);
-      for (const p of mine) {
-        await upsertPersonCache(p);
-        people += 1;
-      }
-      if (!page.hasNextPage || !page.endCursor) break;
-      after = page.endCursor;
+    for await (const person of paginate((after) => client.listPeople({ after, companyId, limit: 100 }))) {
+      await upsertPersonCache(person);
+      people += 1;
     }
     await logAudit({ entityType: 'person', entityId: companyId, action: 'account_synced', actor: userActor(user), details: { people } });
     revalidatePath(`/accounts/${companyId}`);

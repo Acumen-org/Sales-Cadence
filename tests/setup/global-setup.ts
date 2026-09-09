@@ -1,6 +1,7 @@
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { loadTestPostgres } from './embedded-postgres';
 
 const URL_FILE = path.join(process.cwd(), '.test-db-url');
 const PG_PORT = 54329;
@@ -22,8 +23,7 @@ let embedded: Embedded | undefined;
 export default async function setup() {
   let url = process.env.TEST_DATABASE_URL;
   if (!url) {
-    const mod = await import('embedded-postgres');
-    const EmbeddedPostgres = (mod.default ?? mod) as unknown as new (opts: Record<string, unknown>) => Embedded;
+    const EmbeddedPostgres = await loadTestPostgres() as unknown as new (opts: Record<string, unknown>) => Embedded;
     const databaseDir = path.join(process.cwd(), '.pgdata-test');
     fs.rmSync(databaseDir, { recursive: true, force: true });
     embedded = new EmbeddedPostgres({

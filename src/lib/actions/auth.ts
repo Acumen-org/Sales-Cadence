@@ -6,6 +6,7 @@ import { prisma } from '../db';
 import { env } from '../env';
 import { verifyPassword } from '../auth/password';
 import { createSession, destroySession } from '../auth/session';
+import { safeReturnPath } from '../auth/redirect';
 import { logAudit, userActor } from '../audit';
 
 const LoginSchema = z.object({
@@ -31,7 +32,7 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   }
   await createSession(user.id);
   await logAudit({ entityType: 'user', entityId: user.id, action: 'login', actor: userActor(user) });
-  redirect(next && next.startsWith('/') && !next.startsWith('//') ? next : '/home');
+  redirect(safeReturnPath(next));
 }
 
 /**

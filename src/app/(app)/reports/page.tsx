@@ -1,64 +1,37 @@
+﻿import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
-import { canViewReports, toActor } from '@/lib/auth/rbac';
-import { formatInstant, formatLocalDate, todayIn } from '@/lib/dates';
-import { buildReports, type GroupRow } from '@/lib/reports-query';
-import { getSettings } from '@/lib/settings';
+import { canViewReports, toActor, visiblePodIds } from '@/lib/auth/rbac';
+import { prisma } from '@/lib/db';
+import { todayIn } from '@/lib/dates';
+import { buildReports, reportingRange, REPORTING_TIMEZONE, type GroupRow } from '@/lib/reports-query';
 import { IconReports } from '@/components/icons';
-import { Avatar, EmptyState, IdentityCell, Stat, Surface, Tabs, ViewHeader } from '@/components/ui';
-
-const pct = (n: number) => `${Math.round(n * 100)}%`;
+import { Avatar, EmptyState, Field, Notice, Stat, Surface, Tabs, ViewHeader } from '@/components/ui';
 
 function Rate({ value }: { value: number }) {
-  const v = Math.round(value * 100);
+  const percent = Math.round(value * 100);
   return (
     <span className="inline-flex items-center gap-2">
-      <span className="h-1.5 w-14 overflow-hidden rounded-full bg-canvas">
-        <span className="block h-full rounded-full bg-brand-500" style={{ width: `${Math.min(100, v)}%` }} />
+      <span className="h-1.5 w-12 overflow-hidden rounded-full bg-brand-50" aria-hidden="true">
+        <span className="block h-full rounded-full bg-brand-600" style={{ width: `${Math.min(100, percent)}%` }} />
       </span>
-      <span className="text-[12.5px] font-medium text-ink-900">{v}%</span>
+      <strong>{percent}%</strong>
     </span>
   );
 }
 
 function GroupTable({ rows, first }: { rows: GroupRow[]; first: string }) {
-  if (!rows.length) return <EmptyState icon={<IconReports size={20} />} title="No data yet" />;
+  const visible = rows.filter((r) => r.enrolled || r.replied || r.meeting || r.completed || r.exited || r.tasksDone || r.tasksSkipped);
+  if (!visible.length) return <EmptyState icon={<IconReports size={20} />} title="No results in this period" />;
   return (
     <div className="overflow-x-auto scroll-thin">
-      <table className="table table-tight">
-        <thead>
-          <tr>
-            <th>{first}</th>
-            <th>Enrolled</th>
-            <th>Active</th>
-            <th>Replied</th>
-            <th>Meetings</th>
-            <th>Finished</th>
-            <th>Exited</th>
-            <th>Reply rate</th>
-            <th>Meeting rate</th>
-            <th>Tasks done</th>
-            <th>Skipped</th>
-            <th>Overdue</th>
-          </tr>
-        </thead>
+      <table className="table data-table">
+        <thead><tr><th>{first}</th><th>Enrolled</th><th>Replies</th><th>Meetings</th><th>Finished</th><th>Exited</th><th>Reply rate</th><th>Meeting rate</th><th>Completed tasks</th><th>Skipped</th></tr></thead>
         <tbody>
-          {rows.map((r) => (
+          {visible.map((r) => (
             <tr key={r.key}>
-              <td className="font-medium text-ink-900">{r.label}</td>
-              <td>{r.enrolled}</td>
-              <td>{r.active}</td>
-              <td>{r.replied}</td>
-              <td>{r.meeting}</td>
-              <td>{r.completed}</td>
-              <td>{r.exited}</td>
-              <td>
-                <Rate value={r.replyRate} />
-              </td>
-              <td>{pct(r.meetingRate)}</td>
-              <td>{r.tasksDone}</td>
-              <td>{r.tasksSkipped}</td>
-              <td className={r.overdue ? 'font-medium text-red-600' : undefined}>{r.overdue}</td>
+              <td>{r.label}</td><td>{r.enrolled}</td><td>{r.replied}</td><td>{r.meeting}</td><td>{r.completed}</td><td>{r.exited}</td>
+              <td><Rate value={r.replyRate} /></td><td><Rate value={r.meetingRate} /></td><td>{r.tasksDone}</td><td>{r.tasksSkipped}</td>
             </tr>
           ))}
         </tbody>
@@ -68,205 +41,86 @@ function GroupTable({ rows, first }: { rows: GroupRow[]; first: string }) {
 }
 
 const TABS = [
-  { key: 'activity', label: 'Activity' },
+  { key: 'activity', label: 'Team performance' },
   { key: 'pods', label: 'By pod' },
   { key: 'fos', label: 'By FO' },
   { key: 'campaigns', label: 'By campaign' },
   { key: 'sequences', label: 'By sequence' },
   { key: 'channels', label: 'By channel' },
-  { key: 'overdue', label: 'Overdue' },
-  { key: 'stalled', label: 'Stalled' },
 ];
+type Search = { tab?: string; from?: string; to?: string; pod?: string; fo?: string };
 
-export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+export default async function ReportsPage({ searchParams }: { searchParams: Promise<Search> }) {
   const user = await requireUser();
   if (!canViewReports(toActor(user))) redirect('/tasks');
-  const { tab = 'activity' } = await searchParams;
-  const settings = await getSettings();
-  const todayDate = todayIn(user.timezone);
-  const r = await buildReports(user, todayDate, settings.rules.stalledDays);
-
+  const sp = await searchParams;
+  const tab = TABS.some((t) => t.key === sp.tab) ? sp.tab! : 'activity';
+  const today = todayIn(REPORTING_TIMEZONE);
+  const range = reportingRange(sp.from, sp.to, today);
+  const visiblePods = visiblePodIds(user);
+  const podId = sp.pod || null;
+  const foUserId = sp.fo || null;
+  const [pods, users, reports] = await Promise.all([
+    prisma.pod.findMany({ where: visiblePods === null ? {} : { id: { in: visiblePods } }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+    prisma.user.findMany({
+      where: { AND: [visiblePods === null ? {} : { OR: [{ id: user.id }, { pods: { some: { podId: { in: visiblePods } } } }] }, ...(podId ? [{ pods: { some: { podId } } }] : [])] },
+      select: { id: true, name: true }, orderBy: { name: 'asc' },
+    }),
+    buildReports(user, today, 7, { range, podId, foUserId }),
+  ]);
+  const tabHref = (key: string) => {
+    const params = new URLSearchParams({ tab: key, from: range.from, to: range.to });
+    if (podId) params.set('pod', podId);
+    if (foUserId) params.set('fo', foUserId);
+    return `/reports?${params.toString()}`;
+  };
   return (
-    <div className="space-y-3 px-6 pb-8 pt-2">
-      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <Stat label="Enrolled" value={r.totals.enrollments} />
-        <Stat label="Active" value={r.totals.active} />
-        <Stat label="Replied" value={r.totals.replied} tone="good" />
-        <Stat label="Meetings" value={r.totals.meeting} tone="good" />
-        <Stat label="Overdue tasks" value={r.totals.overdue} tone={r.totals.overdue ? 'warn' : 'default'} />
-        <Stat label={`Stalled (${settings.rules.stalledDays}d)`} value={r.totals.stalled} tone={r.totals.stalled ? 'warn' : 'default'} />
+    <div className="space-y-5 px-6 pb-8 pt-2">
+      <Surface>
+        <form method="get" className="flex flex-wrap items-end gap-3">
+          <input type="hidden" name="tab" value={tab} />
+          <Field label="From" className="min-w-[145px] flex-1"><input type="date" name="from" defaultValue={range.from} required /></Field>
+          <Field label="Through" className="min-w-[145px] flex-1"><input type="date" name="to" defaultValue={range.to} required /></Field>
+          <Field label="Pod" className="min-w-[150px] flex-1"><select name="pod" defaultValue={podId ?? ''}><option value="">All visible pods</option>{pods.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
+          <Field label="FO" className="min-w-[150px] flex-1"><select name="fo" defaultValue={foUserId ?? ''}><option value="">All visible FOs</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></Field>
+          <button type="submit" className="btn-primary">Apply filters</button>
+          <Link href={`/reports?tab=${tab}`} className="btn-ghost">Reset</Link>
+        </form>
+        {range.error ? <div className="mt-3"><Notice tone="error">{range.error}</Notice></div> : null}
+      </Surface>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Stat label="New enrollments" value={reports.totals.enrollments} />
+        <Stat label="Completed tasks" value={reports.totals.tasksDone} />
+        <Stat label="Replies" value={reports.totals.replied} tone="good" />
+        <Stat label="Meetings" value={reports.totals.meeting} tone="good" />
       </div>
-
       <Surface flush>
-        <ViewHeader title="Performance" caret meta={`as of ${formatLocalDate(todayDate, 'long')}`} />
-        <Tabs
-          inset={false}
-          current={tab}
-          tabs={TABS.map((t) => ({ ...t, href: `/reports?tab=${t.key}`, count: t.key === 'overdue' ? r.overdue.length : t.key === 'stalled' ? r.stalled.length : undefined }))}
-        />
-
+        <ViewHeader title="Performance" />
+        <Tabs inset={false} current={tab} tabs={TABS.map((t) => ({ ...t, href: tabHref(t.key) }))} />
         {tab === 'activity' ? (
-          r.activity.length === 0 ? (
-            <EmptyState icon={<IconReports size={20} />} title="No activity yet" />
-          ) : (
+          reports.activity.length ? (
             <div className="overflow-x-auto scroll-thin">
-              <table className="table table-tight">
-                <thead>
-                  <tr>
-                    <th rowSpan={2}>FO</th>
-                    <th colSpan={6} className="border-l border-line text-center">
-                      Last 7 days
-                    </th>
-                    <th colSpan={4} className="border-l border-line text-center">
-                      Last 28 days
-                    </th>
+              <table className="table data-table">
+                <thead><tr><th>FO</th><th>Email</th><th>Calls</th><th>Answered calls</th><th>LinkedIn</th><th>Replies</th><th>Meetings</th><th>Completed tasks</th></tr></thead>
+                <tbody>{reports.activity.map((row) => (
+                  <tr key={row.id}>
+                    <td><div className="flex items-center gap-2.5"><Avatar name={row.name} shape="circle" size={28} /><strong className="whitespace-nowrap">{row.name}</strong></div></td>
+                    <td>{row.period.emails}</td><td>{row.period.calls}</td><td>{row.period.answered}</td><td>{row.period.linkedin}</td><td>{row.period.replies}</td><td>{row.period.meetings}</td><td>{row.period.total}</td>
                   </tr>
-                  <tr>
-                    <th className="border-l border-line">Emails</th>
-                    <th>Calls</th>
-                    <th>Answered</th>
-                    <th>LinkedIn</th>
-                    <th>Replies</th>
-                    <th>Meetings</th>
-                    <th className="border-l border-line">Touches</th>
-                    <th>Observed</th>
-                    <th>Replies</th>
-                    <th>Meetings</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {r.activity.map((a) => (
-                    <tr key={a.id}>
-                      <td>
-                        <div className="flex items-center gap-2.5">
-                          <Avatar name={a.name} shape="circle" size={26} />
-                          <span className="whitespace-nowrap font-medium text-ink-900">{a.name}</span>
-                        </div>
-                      </td>
-                      <td className="border-l border-line">{a.last7.emails}</td>
-                      <td>{a.last7.calls}</td>
-                      <td>{a.last7.answered}</td>
-                      <td>{a.last7.linkedin}</td>
-                      <td>{a.last7.replies}</td>
-                      <td>{a.last7.meetings}</td>
-                      <td className="border-l border-line">{a.last28.total}</td>
-                      <td>{a.last28.total ? `${Math.round((a.last28.observed / a.last28.total) * 100)}%` : '-'}</td>
-                      <td>{a.last28.replies}</td>
-                      <td>{a.last28.meetings}</td>
-                    </tr>
-                  ))}
-                </tbody>
+                ))}</tbody>
               </table>
             </div>
-          )
+          ) : <EmptyState icon={<IconReports size={20} />} title="No results in this period" />
         ) : null}
-
-        {tab === 'pods' ? <GroupTable rows={r.byPod} first="Pod" /> : null}
-        {tab === 'fos' ? <GroupTable rows={r.byFo} first="FO" /> : null}
-        {tab === 'campaigns' ? <GroupTable rows={r.byCampaign} first="Campaign" /> : null}
-        {tab === 'sequences' ? <GroupTable rows={r.bySequence} first="Sequence" /> : null}
-
+        {tab === 'pods' ? <GroupTable rows={reports.byPod} first="Pod" /> : null}
+        {tab === 'fos' ? <GroupTable rows={reports.byFo} first="FO" /> : null}
+        {tab === 'campaigns' ? <GroupTable rows={reports.byCampaign} first="Campaign" /> : null}
+        {tab === 'sequences' ? <GroupTable rows={reports.bySequence} first="Sequence" /> : null}
         {tab === 'channels' ? (
-          <div className="overflow-x-auto scroll-thin">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Channel</th>
-                  <th>Pending</th>
-                  <th>Overdue</th>
-                  <th>Done</th>
-                  <th>Observed in Twenty</th>
-                  <th>Marked manually</th>
-                  <th>Skipped</th>
-                  <th>Cancelled</th>
-                </tr>
-              </thead>
-              <tbody>
-                {r.channels.map((c) => (
-                  <tr key={c.action}>
-                    <td className="font-medium text-ink-900">{c.label}</td>
-                    <td>{c.pending}</td>
-                    <td className={c.overdue ? 'font-medium text-red-600' : undefined}>{c.overdue}</td>
-                    <td>{c.done}</td>
-                    <td>{c.observed}</td>
-                    <td>{c.manual}</td>
-                    <td>{c.skipped}</td>
-                    <td>{c.cancelled}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-
-        {tab === 'overdue' ? (
-          r.overdue.length === 0 ? (
-            <EmptyState title="Nothing overdue" />
-          ) : (
-            <div className="overflow-x-auto scroll-thin">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Person</th>
-                    <th>Task</th>
-                    <th>FO</th>
-                    <th>Pod</th>
-                    <th>Due</th>
-                    <th>Days overdue</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {r.overdue.map((t) => (
-                    <tr key={t.id}>
-                      <td>
-                        <IdentityCell name={t.person} sub={t.company} shape="circle" size={28} />
-                      </td>
-                      <td>{t.label}</td>
-                      <td className="whitespace-nowrap">{t.fo}</td>
-                      <td className="whitespace-nowrap">{t.pod}</td>
-                      <td className="whitespace-nowrap">{formatLocalDate(t.due)}</td>
-                      <td className="font-medium text-red-600">{t.daysOverdue}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )
-        ) : null}
-
-        {tab === 'stalled' ? (
-          r.stalled.length === 0 ? (
-            <EmptyState title="Nothing stalled" hint={`Active enrollments with no touch in ${settings.rules.stalledDays} days would appear here.`} />
-          ) : (
-            <div className="overflow-x-auto scroll-thin">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Person</th>
-                    <th>FO</th>
-                    <th>Pod</th>
-                    <th>Started</th>
-                    <th>Step</th>
-                    <th>Last touch</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {r.stalled.map((s) => (
-                    <tr key={s.id}>
-                      <td>
-                        <IdentityCell name={s.person} sub={s.company} shape="circle" size={28} />
-                      </td>
-                      <td className="whitespace-nowrap">{s.fo}</td>
-                      <td className="whitespace-nowrap">{s.pod}</td>
-                      <td className="whitespace-nowrap">{formatLocalDate(s.startDate)}</td>
-                      <td>{s.currentStep + 1}</td>
-                      <td className="whitespace-nowrap">{s.lastTouch ? formatInstant(s.lastTouch, user.timezone) : <span className="text-ink-300">never</span>}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )
+          <div className="overflow-x-auto scroll-thin"><table className="table data-table">
+            <thead><tr><th>Channel</th><th>Scheduled</th><th>Completed</th><th>Confirmed by CRM</th><th>Logged by FO</th><th>Skipped</th><th>Cancelled</th></tr></thead>
+            <tbody>{reports.channels.map((channel) => <tr key={channel.action}><td>{channel.label}</td><td>{channel.pending}</td><td>{channel.done}</td><td>{channel.observed}</td><td>{channel.manual}</td><td>{channel.skipped}</td><td>{channel.cancelled}</td></tr>)}</tbody>
+          </table></div>
         ) : null}
       </Surface>
     </div>

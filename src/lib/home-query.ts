@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
 import { isAdmin, isSeniorFo, visiblePodIds } from './auth/rbac';
-import { todayIn, weekRange, type LocalDate } from './dates';
+import { addDays, startOfLocalDay, todayIn, weekRange, type LocalDate } from './dates';
 import { taskScopeWhere, type TaskChannel } from './tasks-query';
 import { myOwnershipCounts } from './accounts-query';
 
@@ -35,11 +35,12 @@ export async function buildHome(user: SessionUser, now = new Date()) {
   const week = weekRange(today, user.timezone);
   const mineTasks: Prisma.TaskWhereInput = { AND: [taskScopeWhere(user), { foUserId: user.id }] };
 
-  const [mine, ownership, team, needsReview] = await Promise.all([
+  const [mine, ownership, team, needsReview, completedToday] = await Promise.all([
     myOpenTasks(mineTasks, today),
     myOwnershipCounts(user),
     teamThisWeek(user, today, week),
     isAdmin(user) ? prisma.activityEvent.count({ where: { needsReview: true } }) : Promise.resolve(0),
+    prisma.task.count({ where: { AND: [mineTasks, { state: 'DONE', completedAt: { gte: startOfLocalDay(today, user.timezone), lt: startOfLocalDay(addDays(today, 1), user.timezone) } }] } }),
   ]);
   const byChannel = mine;
   const peopleToReachToday = mine.peopleToday;
@@ -58,6 +59,8 @@ export async function buildHome(user: SessionUser, now = new Date()) {
       peopleToReachToday,
       accounts: ownership.accounts,
       relationships: ownership.relationships,
+      completedToday,
+      nextTasks: mine.nextTasks,
     },
     team,
     needsReview,
@@ -79,7 +82,7 @@ function channelOfAction(action: string): TaskChannel {
 async function myOpenTasks(base: Prisma.TaskWhereInput, today: LocalDate) {
   const rows = await prisma.task.findMany({
     where: { AND: [base, { state: 'PENDING' }] },
-    select: { action: true, dueDate: true, snoozedTo: true, enrollment: { select: { personId: true } } },
+    select: { id: true, action: true, label: true, dueDate: true, snoozedTo: true, enrollment: { select: { personId: true, person: { select: { firstName: true, lastName: true, companyName: true } } } } },
   });
   const todayC = emptyChannels();
   const overdueC = emptyChannels();
@@ -94,7 +97,8 @@ async function myOpenTasks(base: Prisma.TaskWhereInput, today: LocalDate) {
     } else if (due < today) overdueC[ch] += 1;
     else upcomingC[ch] += 1;
   }
-  return { today: todayC, overdue: overdueC, upcoming: upcomingC, peopleToday: peopleToday.size };
+  const nextTasks = rows.sort((a, b) => (a.snoozedTo ?? a.dueDate).localeCompare(b.snoozedTo ?? b.dueDate) || a.id.localeCompare(b.id)).slice(0, 3).map((r) => ({ id: r.id, action: r.action, label: r.label, due: r.snoozedTo ?? r.dueDate, name: [r.enrollment.person.firstName, r.enrollment.person.lastName].filter(Boolean).join(' ') || 'Unnamed person', company: r.enrollment.person.companyName }));
+  return { today: todayC, overdue: overdueC, upcoming: upcomingC, peopleToday: peopleToday.size, nextTasks };
 }
 
 /**
@@ -111,12 +115,14 @@ async function teamThisWeek(user: SessionUser, today: LocalDate, week: { fromIns
   });
   if (!users.length) return [];
   const ids = users.map((u) => u.id);
+  const taskScope = taskScopeWhere(user);
+  const enrollmentScope: Prisma.EnrollmentWhereInput = pods === null ? {} : { OR: [{ podId: { in: pods } }, { foUserId: user.id }] };
 
   const [pending, doneRows, replyRows, meetingRows] = await Promise.all([
-    prisma.task.findMany({ where: { foUserId: { in: ids }, state: 'PENDING' }, select: { foUserId: true, dueDate: true, snoozedTo: true } }),
-    prisma.task.groupBy({ by: ['foUserId'], where: { foUserId: { in: ids }, state: 'DONE', completedAt: { gte: week.fromInstant, lt: week.toInstant } }, _count: { _all: true } }),
-    prisma.enrollment.groupBy({ by: ['foUserId'], where: { foUserId: { in: ids }, repliedAt: { gte: week.fromInstant, lt: week.toInstant } }, _count: { _all: true } }),
-    prisma.enrollment.groupBy({ by: ['foUserId'], where: { foUserId: { in: ids }, meetingAt: { gte: week.fromInstant, lt: week.toInstant } }, _count: { _all: true } }),
+    prisma.task.findMany({ where: { AND: [taskScope, { foUserId: { in: ids }, state: 'PENDING' }] }, select: { foUserId: true, dueDate: true, snoozedTo: true } }),
+    prisma.task.groupBy({ by: ['foUserId'], where: { AND: [taskScope, { foUserId: { in: ids }, state: 'DONE', completedAt: { gte: week.fromInstant, lt: week.toInstant } }] }, _count: { _all: true } }),
+    prisma.enrollment.groupBy({ by: ['foUserId'], where: { AND: [enrollmentScope, { foUserId: { in: ids }, repliedAt: { gte: week.fromInstant, lt: week.toInstant } }] }, _count: { _all: true } }),
+    prisma.enrollment.groupBy({ by: ['foUserId'], where: { AND: [enrollmentScope, { foUserId: { in: ids }, meetingAt: { gte: week.fromInstant, lt: week.toInstant } }] }, _count: { _all: true } }),
   ]);
 
   const doneBy = new Map(doneRows.map((r) => [r.foUserId, r._count._all]));

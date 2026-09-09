@@ -136,6 +136,8 @@ export const defaultTwentySchema = {
     employees: 'employees',
     linkedinLink: 'linkedinLink',
     industry: 'industry',
+    /** Optional custom Number or USD Currency field: assets under management. */
+    aum: 'aum',
     updatedAt: 'updatedAt',
     deletedAt: 'deletedAt',
   },

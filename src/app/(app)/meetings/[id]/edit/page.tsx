@@ -1,16 +1,12 @@
 import { notFound, redirect } from 'next/navigation';
-import { requireUser, toActor } from '@/lib/auth/current-user';
-import { isAdmin } from '@/lib/auth/rbac';
+import { requireUser } from '@/lib/auth/current-user';
 import { prisma } from '@/lib/db';
+import { canManageMeetingAction } from '@/lib/actions/meetings';
 import { MeetingForm } from '@/components/meetings/meeting-form';
 import { PageHeader, Surface } from '@/components/ui';
+import { dateTimeInputValue } from '@/lib/dates';
 
 /** Render an instant as the `datetime-local` value for the viewer's clock. */
-function localValue(d: Date, timezone: string): string {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(d);
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '00';
-  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
-}
 
 export default async function EditMeetingPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
@@ -20,7 +16,7 @@ export default async function EditMeetingPage({ params }: { params: Promise<{ id
     prisma.companyCache.findMany({ where: { deletedAt: null }, select: { id: true, name: true }, orderBy: { name: 'asc' }, take: 500 }),
   ]);
   if (!meeting) notFound();
-  if (meeting.createdById !== user.id && !isAdmin(toActor(user))) redirect(`/meetings/${id}`);
+  if (!(await canManageMeetingAction(id))) redirect(`/meetings/${id}`);
 
   return (
     <>
@@ -29,16 +25,16 @@ export default async function EditMeetingPage({ params }: { params: Promise<{ id
         <Surface>
           <MeetingForm
             mode="edit"
+            timezone={user.timezone}
             companies={companies}
             initial={{
               id: meeting.id,
               title: meeting.title,
               sourceUrl: meeting.sourceUrl,
-              occurredAt: localValue(meeting.occurredAt, user.timezone),
+              occurredAt: dateTimeInputValue(meeting.occurredAt, user.timezone),
               durationMin: meeting.durationSec ? Math.round(meeting.durationSec / 60) : '',
               companyId: meeting.companyId ?? '',
-              attendees: meeting.attendees.map((a) => (a.name && a.email ? `${a.name} <${a.email}>` : a.email ?? a.name ?? '')).filter(Boolean).join('\n'),
-              notes: meeting.notes ?? '',
+              attendees: meeting.attendees.map((a) => ({ name: a.name, email: a.email, personId: a.personId, userId: a.userId })),
               transcript: meeting.transcript ?? '',
             }}
           />

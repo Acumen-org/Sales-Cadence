@@ -11,7 +11,7 @@ test.use({ viewport: { width: 1600, height: 1000 } });
 
 async function shot(page: Page, name: string) {
   await page.waitForLoadState('networkidle').catch(() => {});
-  await page.screenshot({ path: path.join(OUT, `${name}.png`) });
+  await page.screenshot({ path: path.join(OUT, `${name}.png`), animations: 'disabled' });
 }
 
 test('capture screens', async ({ page }) => {
@@ -85,7 +85,7 @@ test('capture screens', async ({ page }) => {
   await page.goto('/settings?tab=twenty');
   await shot(page, '14-settings-twenty');
 
-  // Global search dialog: the utility cluster lives on Tasks only.
+  // Global search is available throughout the workspace.
   await page.goto('/tasks');
   await page.getByTitle('Search (Ctrl+K)').click();
   await page.getByPlaceholder('Search people, campaigns and sequences').fill('Dummy');

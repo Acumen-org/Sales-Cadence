@@ -2,12 +2,13 @@ import { Prisma, type CompletionSource, type Task, type TaskState } from '@prism
 import { prisma, type Tx } from '../db';
 import { logAudit, type AuditActor } from '../audit';
 import { addDays, isLocalDate, localDateToInstant, todayIn, toLocalDate, type LocalDate } from '../dates';
-import { channelOf, enabledVariants, parseSteps, pickVariant, type ActionType } from '../sequences/steps';
+import { channelOf, parseSteps, type ActionType } from '../sequences/steps';
 import { effectiveDailyCap, getSettings } from '../settings';
 import { findDateWithCapacity, loadFromRows, type DayLoad } from './caps';
 import { followingWorkingDay, nextWorkingDay, plannedDateForStep, shiftAfterStep, shouldGenerateNow } from './clock';
 import { loadSyncTask, loadSyncTasks, syncTaskCompleted, syncTaskResolved, syncTaskRescheduled, syncTasksCreated } from './sync-out';
-import { resolveNextStep } from './versioning';
+import { resolveNextStep } from './sequence-plan';
+import { WORKSPACE_TIMEZONE } from '../workspace';
 
 /** Who is acting, what time it is (tests), and whether to skip Twenty writes. */
 export type EngineContext = {
@@ -16,6 +17,8 @@ export type EngineContext = {
   skipSync?: boolean;
   /** Generate the next step now regardless of clock mode (used by "move to step"). */
   forceGenerate?: boolean;
+  /** Outcome handlers apply reply/exit before a last step can complete the enrollment. */
+  deferAdvance?: boolean;
 };
 
 export const RESOLVED_STATES: TaskState[] = ['DONE', 'SKIPPED', 'CANCELLED'];
@@ -66,28 +69,29 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
   let result: AdvanceResult;
   try {
     result = await prisma.$transaction(async (tx) => {
+      const identity = await tx.enrollment.findUnique({ where: { id: enrollmentId }, select: { sequenceId: true, campaignId: true } });
+      if (!identity) return { outcome: 'inactive' as const };
+      if (identity.campaignId) await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`campaign:${identity.campaignId}`}))`;
+      await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${identity.sequenceId}))`;
       const e = await tx.enrollment.findUnique({
         where: { id: enrollmentId },
-        include: { fo: true, sequence: { include: { activeVersion: true } }, sequenceVersion: true, tasks: true },
+        include: { fo: true, campaign: true, sequence: true, tasks: true },
       });
       if (!e || e.status !== 'ACTIVE') return { outcome: 'inactive' as const };
-      const active = e.sequence.activeVersion;
-      if (!active) return { outcome: 'no_version' as const };
-
-      const today = todayIn(e.fo.timezone, now);
-      const currentSteps = parseSteps(e.sequenceVersion.steps);
-      const activeSteps = parseSteps(active.steps);
+      if (e.campaign && e.campaign.status !== 'ACTIVE') return { outcome: 'inactive' as const, reason: 'Campaign is not running' };
+      const today = todayIn(WORKSPACE_TIMEZONE, now);
+      const steps = parseSteps(e.sequence.steps);
       const currentTasks = e.tasks.filter((t) => t.stepIndex === e.currentStep);
       const stepDone = e.currentStep >= 0 && currentTasks.length > 0 && currentTasks.every((t) => t.state !== 'PENDING');
 
       let shiftDays = e.shiftDays;
       if (stepDone && rules.clockMode === 'shift') {
-        shiftDays = shiftAfterStep(shiftDays, currentTasks[0].plannedDate, latestResolutionDate(currentTasks, e.fo.timezone), 'shift');
+        shiftDays = shiftAfterStep(shiftDays, currentTasks[0].plannedDate, latestResolutionDate(currentTasks, WORKSPACE_TIMEZONE), 'shift');
       }
 
-      const { nextIndex, steps } = resolveNextStep({ currentStep: e.currentStep, currentSteps, activeSteps });
+      const { nextIndex } = resolveNextStep({ currentStep: e.currentStep, currentStepId: e.currentStepId, steps });
       if (nextIndex >= steps.length) {
-        if (!stepDone) return { outcome: 'waiting' as const, reason: 'last step in progress' };
+        if (!stepDone || e.tasks.some(t => t.state === 'PENDING')) return { outcome: 'waiting' as const, reason: 'Required actions are still in progress' };
         await tx.enrollment.update({ where: { id: e.id }, data: { status: 'COMPLETED', completedAt: now, shiftDays } });
         await logAudit({ entityType: 'enrollment', entityId: e.id, action: 'completed', actor: ctx.actor, details: { steps: steps.length } }, tx);
         return { outcome: 'completed' as const };
@@ -109,42 +113,33 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
         dueDate = findDateWithCapacity(planned, step.actions.length, effectiveDailyCap(e.fo, rules), load, rules.workingDays);
       }
       const startDate = e.currentStep < 0 ? dueDate : e.startDate;
-      const dueAt = localDateToInstant(dueDate, e.fo.timezone, 9);
+      const dueAt = localDateToInstant(dueDate, WORKSPACE_TIMEZONE, 9);
 
       const taskIds: string[] = [];
       for (let i = 0; i < step.actions.length; i++) {
         const a = step.actions[i];
-        // A/B: balanced assignment across enabled variants for this action (all enrollments of the sequence).
-        let variantId: string | null = null;
-        if (enabledVariants(a).length) {
-          const rows = await tx.task.groupBy({ by: ['variantId'], where: { actionId: a.id, variantId: { not: null }, enrollment: { sequenceId: e.sequenceId } }, _count: { _all: true } });
-          const counts = new Map(rows.map((r) => [r.variantId as string, r._count._all]));
-          variantId = pickVariant(a, counts)?.id ?? null;
-        }
         const t = await tx.task.create({
           data: {
             enrollmentId: e.id,
             foUserId: e.foUserId,
-            sequenceVersionId: active.id,
             stepIndex: nextIndex,
             stepId: step.id,
             stepDay: step.day,
             actionIndex: i,
             actionId: a.id,
+            actionSnapshot: a,
             action: a.type,
-            altAction: a.alternative?.type ?? null,
             label: a.label,
             dueDate,
             dueAt,
             plannedDate: planned,
-            variantId,
           },
         });
         taskIds.push(t.id);
       }
       await tx.enrollment.update({
         where: { id: e.id },
-        data: { currentStep: nextIndex, sequenceVersionId: active.id, shiftDays, startDate },
+        data: { currentStep: nextIndex, currentStepId: step.id, shiftDays, startDate },
       });
       await logAudit(
         {
@@ -152,7 +147,7 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
           entityId: e.id,
           action: 'step_generated',
           actor: ctx.actor,
-          details: { stepIndex: nextIndex, stepId: step.id, day: step.day, plannedDate: planned, dueDate, shiftDays, version: active.version, taskIds },
+          details: { stepIndex: nextIndex, stepId: step.id, day: step.day, plannedDate: planned, dueDate, shiftDays, taskIds },
         },
         tx,
       );
@@ -203,12 +198,12 @@ export async function completeTask(input: CompleteTaskInput, ctx: EngineContext)
       if (used) return { ok: false as const, reason: 'evidence_used' as const, detail: used.id };
     }
     const chosen = input.chosenAction ?? task.action;
-    if (chosen !== task.action && chosen !== task.altAction) {
+    if (chosen !== task.action) {
       return { ok: false as const, reason: 'invalid' as const, detail: `action ${chosen} is not part of this task` };
     }
     const completedAt = input.occurredAt ?? now;
-    const updated = await tx.task.update({
-      where: { id: task.id },
+    const claimed = await tx.task.updateMany({
+      where: { id: task.id, state: 'PENDING' },
       data: {
         state: 'DONE',
         completedAt,
@@ -221,6 +216,8 @@ export async function completeTask(input: CompleteTaskInput, ctx: EngineContext)
         note: input.note?.trim() || null,
       },
     });
+    if (claimed.count === 0) return { ok: false as const, reason: 'already_resolved' as const };
+    const updated = await tx.task.findUniqueOrThrow({ where: { id: task.id } });
     if (input.source === 'MANUAL') {
       await tx.touch.upsert({
         where: { externalId: `task:${task.id}` },
@@ -251,7 +248,7 @@ export async function completeTask(input: CompleteTaskInput, ctx: EngineContext)
   });
   if (!tx_result.ok) return tx_result;
 
-  const advance = await advanceEnrollment(tx_result.task.enrollmentId, ctx);
+  const advance: AdvanceResult = ctx.deferAdvance ? { outcome: 'waiting', reason: 'applying outcome' } : await advanceEnrollment(tx_result.task.enrollmentId, ctx);
   if (!ctx.skipSync) {
     const full = await loadSyncTask(tx_result.task.id);
     if (full) await syncTaskCompleted(full);
@@ -266,15 +263,17 @@ export async function skipTask(input: { taskId: string; reason: string; note?: s
     const task = await tx.task.findUnique({ where: { id: input.taskId } });
     if (!task) return { ok: false as const, reason: 'not_found' as const };
     if (task.state !== 'PENDING') return { ok: false as const, reason: 'already_resolved' as const };
-    const updated = await tx.task.update({
-      where: { id: task.id },
+    const claimed = await tx.task.updateMany({
+      where: { id: task.id, state: 'PENDING' },
       data: { state: 'SKIPPED', skipReason: reason, note: input.note?.trim() || null, completedById: ctx.actor.type === 'USER' ? ctx.actor.id ?? null : null, snoozedTo: null },
     });
+    if (claimed.count === 0) return { ok: false as const, reason: 'already_resolved' as const };
+    const updated = await tx.task.findUniqueOrThrow({ where: { id: task.id } });
     await logAudit({ entityType: 'task', entityId: task.id, action: 'skipped', actor: ctx.actor, details: { reason, enrollmentId: task.enrollmentId } }, tx);
     return { ok: true as const, task: updated };
   });
   if (!res.ok) return res;
-  const advance = await advanceEnrollment(res.task.enrollmentId, ctx);
+  const advance: AdvanceResult = ctx.deferAdvance ? { outcome: 'waiting', reason: 'applying outcome' } : await advanceEnrollment(res.task.enrollmentId, ctx);
   if (!ctx.skipSync) {
     const full = await loadSyncTask(res.task.id);
     if (full) await syncTaskResolved(full);
@@ -297,7 +296,9 @@ export async function snoozeTask(input: { taskId: string; toDate: LocalDate }, c
     const today = todayIn(task.fo.timezone, ctx.now ?? new Date());
     if (input.toDate <= today) return { ok: false as const, reason: 'invalid' as const, detail: 'Snooze to a future date.' };
     const toDate = nextWorkingDay(input.toDate, settings.rules.workingDays);
-    const updated = await tx.task.update({ where: { id: task.id }, data: { snoozedTo: toDate } });
+    const claimed = await tx.task.updateMany({ where: { id: task.id, state: 'PENDING' }, data: { snoozedTo: toDate, dueAt: localDateToInstant(toDate, task.fo.timezone, 9) } });
+    if (claimed.count === 0) return { ok: false as const, reason: 'already_resolved' as const };
+    const updated = await tx.task.findUniqueOrThrow({ where: { id: task.id } });
     await logAudit({ entityType: 'task', entityId: task.id, action: 'snoozed', actor: ctx.actor, details: { from: task.snoozedTo ?? task.dueDate, to: toDate } }, tx);
     return { ok: true as const, task: updated };
   });
@@ -356,5 +357,6 @@ export async function runSchedulerTick(ctx: EngineContext): Promise<{ scanned: n
     }
     cursor = batch[batch.length - 1].id;
   }
+  await prisma.campaign.updateMany({ where: { status: 'ACTIVE', enrollments: { some: {}, none: { status: { in: ['ACTIVE','PAUSED'] } } } }, data: { status: 'COMPLETED' } });
   return stats;
 }

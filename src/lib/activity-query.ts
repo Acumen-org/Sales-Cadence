@@ -2,6 +2,8 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from './db';
 import { describeAudit } from './audit-format';
 import { cachedPersonName } from './person-cache';
+import type { SessionUser } from './auth/current-user';
+import { isJuniorFo, visiblePodIds } from './auth/rbac';
 
 /**
  * The Activity feed: what everyone did, newest first.
@@ -15,7 +17,7 @@ export const ACTIVITY_KINDS = ['touch', 'task', 'enrollment', 'meeting', 'campai
 export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
 
 export const KIND_LABELS: Record<ActivityKind, string> = {
-  touch: 'Emails and calls',
+  touch: 'Outreach',
   task: 'Tasks',
   enrollment: 'Sequence changes',
   meeting: 'Meetings',
@@ -57,6 +59,12 @@ export type ActivityFilters = {
   actorId?: string | null;
   kinds?: ActivityKind[] | null;
   q?: string | null;
+  channel?: 'EMAIL' | 'CALL' | 'LINKEDIN' | null;
+  /** Inclusive start and exclusive end, resolved from Central Time calendar dates. */
+  from?: Date;
+  to?: Date;
+  podId?: string | null;
+  viewer?: SessionUser;
 };
 
 /** `2026-09-08T10:00:00.000Z|t:abc` -> instant plus the id to resume after. */
@@ -79,37 +87,100 @@ const AUDIT_KIND: Record<string, ActivityKind> = {
   person: 'person',
 };
 
+type FeedScope = { audit: Prisma.AuditLogWhereInput; touch: Prisma.TouchWhereInput };
+
+/** Audit entities have no SQL relation, so resolve the allowed records before paging. */
+async function activityScope(f: ActivityFilters): Promise<FeedScope> {
+  if (!f.viewer) return { audit: {}, touch: {} };
+  const user = f.viewer;
+  const pods = visiblePodIds(user);
+  if (pods === null && !f.podId) return { audit: {}, touch: {} };
+  const enrollmentBase: Prisma.EnrollmentWhereInput = isJuniorFo(user) ? { foUserId: user.id } : pods === null ? {} : { OR: [{ foUserId: user.id }, { podId: { in: pods } }] };
+  const enrollment: Prisma.EnrollmentWhereInput = { AND: [enrollmentBase, ...(f.podId ? [{ podId: f.podId }] : [])] };
+  const allowedPods = await prisma.pod.findMany({ where: { AND: [pods === null ? {} : { id: { in: pods } }, ...(f.podId ? [{ id: f.podId }] : [])] }, select: { id: true, podOwnerValue: true } });
+  const personBase: Prisma.PersonCacheWhereInput = isJuniorFo(user)
+    ? { OR: [{ ownerMemberId: user.twentyMemberId ?? '__none__' }, { enrollments: { some: enrollmentBase } }] }
+    : { OR: [{ podOwner: { in: allowedPods.map((p) => p.podOwnerValue) } }, { ownerMemberId: user.twentyMemberId ?? '__none__' }, { enrollments: { some: enrollmentBase } }] };
+  const person: Prisma.PersonCacheWhereInput = { AND: [personBase, ...(f.podId ? [{ OR: [{ podOwner: { in: allowedPods.map((p) => p.podOwnerValue) } }, { enrollments: { some: enrollment } }] }] : [])] };
+  const [people, enrollments, tasks, campaigns, meetings] = await Promise.all([
+    prisma.personCache.findMany({ where: person, select: { id: true } }),
+    prisma.enrollment.findMany({ where: enrollment, select: { id: true, sequenceId: true } }),
+    prisma.task.findMany({ where: { enrollment }, select: { id: true } }),
+    prisma.campaign.findMany({ where: { podId: { in: allowedPods.map((p) => p.id) } }, select: { id: true, sequenceId: true } }),
+    prisma.meeting.findMany({ where: { OR: [{ attendees: { some: { person } } }, ...(!f.podId ? [{ createdById: user.id }, { attendees: { some: { userId: user.id } } }] : [])] }, select: { id: true } }),
+  ]);
+  return {
+    audit: { OR: [
+      { entityType: 'person', entityId: { in: people.map((p) => p.id) } },
+      { entityType: 'enrollment', entityId: { in: enrollments.map((e) => e.id) } },
+      { entityType: 'task', entityId: { in: tasks.map((t) => t.id) } },
+      { entityType: 'campaign', entityId: { in: campaigns.map((c) => c.id) } },
+      { entityType: 'meeting', entityId: { in: meetings.map((m) => m.id) } },
+      { entityType: 'sequence', entityId: { in: [...enrollments, ...campaigns].map((e) => e.sequenceId) } },
+    ] },
+    touch: { person },
+  };
+}
+
+function beforeWhere(field: 'createdAt' | 'occurredAt', prefix: 'a' | 't', before: Date | null, afterId: string | null) {
+  if (!before) return {};
+  if (!afterId) return { [field]: { lt: before } };
+  const cursorPrefix = afterId.slice(0, 1);
+  const sameInstant = prefix < cursorPrefix ? { [field]: before } : prefix === cursorPrefix ? { [field]: before, id: { lt: afterId.slice(2) } } : null;
+  return { OR: [{ [field]: { lt: before } }, ...(sameInstant ? [sameInstant] : [])] };
+}
+
 export async function listActivity(f: ActivityFilters = {}): Promise<ActivityPage> {
-  const limit = Math.min(Math.max(f.limit ?? 60, 10), 200);
+  const scope = await activityScope(f);
+  const q = f.q?.trim().toLocaleLowerCase();
+  if (!q) return activityPage(f, scope);
+  // Search resolved names and event details across successive pages, not only the first batch.
+  const limit = Math.min(Math.max(f.limit ?? 60, 1), 200);
+  const matches: ActivityItem[] = [];
+  let before = f.before;
+  do {
+    const page = await activityPage({ ...f, q: null, before, limit: 200 }, scope);
+    matches.push(...page.items.filter((item) => [item.title, item.detail, item.actorName, item.subjectName, item.companyName].some((value) => value?.toLocaleLowerCase().includes(q))));
+    before = page.nextCursor;
+    if (!before || matches.length > limit) break;
+  } while (true);
+  const items = matches.slice(0, limit);
+  const last = items.at(-1);
+  const hasMore = matches.length > limit;
+  return { items, hasMore, nextCursor: hasMore && last ? `${last.at.toISOString()}|${last.id}` : null };
+}
+
+async function activityPage(f: ActivityFilters, scope: FeedScope): Promise<ActivityPage> {
+  const limit = Math.min(Math.max(f.limit ?? 60, 1), 200);
   const { at: before, afterId } = parseActivityCursor(f.before);
   const wantKinds = f.kinds?.length ? new Set(f.kinds) : null;
-  const q = f.q?.trim() || null;
 
   const wantTouches = !wantKinds || wantKinds.has('touch');
-  const auditEntities = [...Object.keys(AUDIT_KIND)].filter((e) => !wantKinds || wantKinds.has(AUDIT_KIND[e]));
+  const auditEntities = f.channel ? [] : [...Object.keys(AUDIT_KIND)].filter((e) => !wantKinds || wantKinds.has(AUDIT_KIND[e]));
 
   // Fetch one page worth from each source, merge, then trim: correct and index-friendly.
   const auditWhere: Prisma.AuditLogWhereInput = {
     entityType: { in: auditEntities.length ? auditEntities : ['__none__'] },
     NOT: [{ entityType: { in: ADMIN_ENTITIES } }, { action: { in: ADMIN_ACTIONS } }],
-    // Inclusive of the cursor instant; the id below decides where the page really resumes.
-    ...(before ? { createdAt: afterId ? { lte: before } : { lt: before } } : {}),
+    AND: [scope.audit, beforeWhere('createdAt', 'a', before, afterId)],
+    createdAt: { ...(f.from ? { gte: f.from } : {}), ...(f.to ? { lt: f.to } : {}) },
     ...(f.actorId ? { actorId: f.actorId } : {}),
   };
   const touchWhere: Prisma.TouchWhereInput = {
-    ...(before ? { occurredAt: afterId ? { lte: before } : { lt: before } } : {}),
+    AND: [scope.touch, beforeWhere('occurredAt', 't', before, afterId)],
+    occurredAt: { ...(f.from ? { gte: f.from } : {}), ...(f.to ? { lt: f.to } : {}) },
+    ...(f.channel ? { channel: f.channel } : {}),
     ...(f.actorId ? { actorUserId: f.actorId } : {}),
-    ...(q ? { OR: [{ summary: { contains: q, mode: 'insensitive' } }, { person: { firstName: { contains: q, mode: 'insensitive' } } }, { person: { lastName: { contains: q, mode: 'insensitive' } } }, { person: { companyName: { contains: q, mode: 'insensitive' } } }] } : {}),
   };
 
   const [audits, touches, users] = await Promise.all([
     auditEntities.length
-      ? prisma.auditLog.findMany({ where: auditWhere, orderBy: { createdAt: 'desc' }, take: limit + 1 })
+      ? prisma.auditLog.findMany({ where: auditWhere, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: limit + 1 })
       : Promise.resolve([]),
     wantTouches
       ? prisma.touch.findMany({
           where: touchWhere,
-          orderBy: { occurredAt: 'desc' },
+          orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
           take: limit + 1,
           include: { person: { select: { id: true, firstName: true, lastName: true, companyName: true } } },
         })
@@ -233,16 +304,7 @@ export async function listActivity(f: ActivityFilters = {}): Promise<ActivityPag
   }));
 
   // Newest first, with the id as a tie-break so the order is total and paging cannot loop.
-  let merged = [...auditItems, ...touchItems].sort((a, b) => b.at.getTime() - a.at.getTime() || b.id.localeCompare(a.id));
-  if (q) {
-    const needle = q.toLowerCase();
-    merged = merged.filter((i) => [i.title, i.detail, i.actorName, i.subjectName, i.companyName].some((v) => v?.toLowerCase().includes(needle)));
-  }
-  if (afterId) {
-    const i = merged.findIndex((x) => x.id === afterId);
-    // Cursor row still there: resume just after it. Gone (deleted): fall back to a strict cut.
-    merged = i >= 0 ? merged.slice(i + 1) : merged.filter((x) => !before || x.at < before);
-  }
+  const merged = [...auditItems, ...touchItems].sort((a, b) => b.at.getTime() - a.at.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
   const page = merged.slice(0, limit);
   const hasMore = merged.length > limit;
   const last = page[page.length - 1];

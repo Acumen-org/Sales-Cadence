@@ -30,6 +30,7 @@ export type ParsedMeetingLink = {
 };
 
 const MEDIA_EXT = /\.(mp4|webm|m4v|ogv|ogg|mov)(\?|#|$)/i;
+const isHost = (host: string, domain: string) => host === domain || host.endsWith(`.${domain}`);
 
 function safeUrl(raw: string): URL | null {
   try {
@@ -60,11 +61,11 @@ export function parseMeetingLink(raw: string): ParsedMeetingLink {
     host === 'drive.google.com' ||
     host === 'docs.google.com' ||
     host === 'meet.google.com' ||
-    host.endsWith('teams.microsoft.com') ||
-    host.endsWith('teams.live.com') ||
-    host.endsWith('zoom.us') ||
-    host.endsWith('zoom.com') ||
-    host.endsWith('zoomgov.com');
+    isHost(host, 'teams.microsoft.com') ||
+    isHost(host, 'teams.live.com') ||
+    isHost(host, 'zoom.us') ||
+    isHost(host, 'zoom.com') ||
+    isHost(host, 'zoomgov.com');
 
   // Direct media file: play it ourselves.
   if (!knownHost && MEDIA_EXT.test(path)) {
@@ -105,7 +106,7 @@ export function parseMeetingLink(raw: string): ParsedMeetingLink {
   }
 
   // Teams: join links, or a recording redirect.
-  if (host.endsWith('teams.microsoft.com') || host.endsWith('teams.live.com')) {
+  if (isHost(host, 'teams.microsoft.com') || isHost(host, 'teams.live.com')) {
     const join = path.includes('/l/meetup-join') || path.includes('/l/meeting') || url.searchParams.has('meetingId');
     return {
       provider: 'TEAMS',
@@ -120,7 +121,7 @@ export function parseMeetingLink(raw: string): ParsedMeetingLink {
   }
 
   // Zoom: cloud recordings and join links both refuse framing.
-  if (host.endsWith('zoom.us') || host.endsWith('zoom.com') || host.endsWith('zoomgov.com')) {
+  if (isHost(host, 'zoom.us') || isHost(host, 'zoom.com') || isHost(host, 'zoomgov.com')) {
     const rec = path.includes('/rec/');
     return {
       provider: 'ZOOM',

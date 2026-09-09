@@ -1,70 +1,69 @@
-'use client';
+﻿'use client';
 
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
-import clsx from 'clsx';
-import { ACTIVITY_KINDS, KIND_LABELS, type ActivityKind } from '@/lib/activity-query';
-import { IconSearch } from '@/components/icons';
+import Link from 'next/link';
+import { useState } from 'react';
+import type { ActivityKind } from '@/lib/activity-query';
+import { ActionIcon, IconSearch } from '@/components/icons';
+import { Field } from '@/components/ui';
 
-export function ActivityToolbar({ users, actorId, kinds, q }: { users: { id: string; name: string }[]; actorId: string | null; kinds: ActivityKind[]; q: string }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const params = useSearchParams();
-  const [text, setText] = useState(q);
+const EVENT_TYPES: { value: ActivityKind; label: string }[] = [
+  { value: 'touch', label: 'Outreach' }, { value: 'task', label: 'Task updates' },
+  { value: 'enrollment', label: 'Enrollment updates' }, { value: 'meeting', label: 'Meetings' },
+  { value: 'campaign', label: 'Campaign updates' }, { value: 'sequence', label: 'Sequence edits' },
+  { value: 'person', label: 'Contact updates' },
+];
+const CHANNELS = [
+  { value: '', label: 'All activity' },
+  { value: 'EMAIL', label: 'Email' },
+  { value: 'CALL', label: 'Calls' },
+  { value: 'LINKEDIN', label: 'LinkedIn' },
+];
 
-  const push = (patch: Record<string, string | null>) => {
-    const next = new URLSearchParams(params.toString());
-    for (const [k, v] of Object.entries(patch)) {
-      if (v) next.set(k, v);
-      else next.delete(k);
-    }
-    // Any filter change restarts the feed at the newest item.
-    next.delete('before');
-    router.push(`${pathname}?${next.toString()}`);
+type Props = {
+  users: { id: string; name: string; podIds: string[] }[];
+  pods: { id: string; name: string }[];
+  actorId: string | null;
+  podId: string | null;
+  kinds: ActivityKind[];
+  channel: string | null;
+  q: string;
+  from: string;
+  to: string;
+};
+
+export function ActivityToolbar({ users, pods, actorId, podId, kinds, channel, q, from, to }: Props) {
+  const [pod, setPod] = useState(podId ?? '');
+  const [actor, setActor] = useState(actorId ?? '');
+  const availableUsers = pod ? users.filter((user) => user.podIds.includes(pod)) : users;
+  const channelHref = (value: string) => {
+    const params = new URLSearchParams({ from, to });
+    if (actorId) params.set('actor', actorId);
+    if (podId) params.set('pod', podId);
+    if (q) params.set('q', q);
+    if (value) params.set('channel', value);
+    return `/activity?${params.toString()}`;
   };
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      if (text !== q) push({ q: text || null });
-    }, 350);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text]);
-
-  const toggleKind = (k: ActivityKind) => {
-    const set = new Set(kinds);
-    if (set.has(k)) set.delete(k);
-    else set.add(k);
-    push({ kind: set.size ? [...set].join(',') : null });
-  };
-
   return (
-    <div className="flex flex-1 flex-wrap items-center gap-2">
-      <div className="relative w-full max-w-xs">
-        <IconSearch size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search activity" aria-label="Search activity" className="!pl-9" />
-      </div>
-
-      <select value={actorId ?? ''} onChange={(e) => push({ actor: e.target.value || null })} aria-label="Filter by person" className="!w-auto !py-2 !text-[12.5px]">
-        <option value="">Everyone</option>
-        {users.map((u) => (
-          <option key={u.id} value={u.id}>
-            {u.name}
-          </option>
+    <div className="w-full space-y-4">
+      <nav aria-label="Activity channels" className="flex flex-wrap gap-1 border-b border-line pb-3">
+        {CHANNELS.map((item) => (
+          <Link key={item.value} href={channelHref(item.value)} aria-current={(channel ?? '') === item.value ? 'page' : undefined} className={(channel ?? '') === item.value ? 'chip' : 'chip-muted'}>
+            {item.value ? <ActionIcon action={item.value} size={16} /> : null}{item.label}
+          </Link>
         ))}
-      </select>
-
-      {ACTIVITY_KINDS.map((k) => (
-        <button key={k} type="button" onClick={() => toggleKind(k)} className={clsx(kinds.includes(k) ? 'chip' : 'chip-muted')}>
-          {KIND_LABELS[k]}
-        </button>
-      ))}
-
-      {kinds.length || actorId || q ? (
-        <button type="button" onClick={() => push({ kind: null, actor: null, q: null })} className="btn-ghost btn-sm">
-          Clear
-        </button>
-      ) : null}
+      </nav>
+      <form method="get" className="grid grid-cols-2 items-end gap-3 lg:grid-cols-4 xl:grid-cols-7">
+        {channel ? <input type="hidden" name="channel" value={channel} /> : null}
+        <Field label="Search" className="col-span-2 xl:col-span-2">
+          <div className="relative"><IconSearch size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" /><input name="q" defaultValue={q} placeholder="Search activity" aria-label="Search activity" className="!pl-9" /></div>
+        </Field>
+        <Field label="From"><input type="date" name="from" defaultValue={from} required /></Field>
+        <Field label="Through"><input type="date" name="to" defaultValue={to} required /></Field>
+        <Field label="Pod"><select name="pod" value={pod} onChange={(event) => { setPod(event.target.value); setActor(''); }}><option value="">All visible pods</option>{pods.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
+        <Field label="Team member"><select name="actor" value={actor} onChange={(event) => setActor(event.target.value)}><option value="">Everyone visible</option>{availableUsers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
+        {!channel ? <Field label="Event type"><select name="kind" defaultValue={kinds.length === 1 ? kinds[0] : ''}><option value="">All events</option>{EVENT_TYPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></Field> : null}
+        <div className="col-span-2 flex flex-wrap gap-2 lg:col-span-4 xl:col-span-7"><button type="submit" className="btn-primary">Apply filters</button><Link href="/activity" className="btn-ghost">Reset</Link></div>
+      </form>
     </div>
   );
 }

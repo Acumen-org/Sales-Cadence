@@ -146,7 +146,7 @@ export type AccountPerson = {
   listCategory: string | null;
   nextAction: string | null;
   nextActionDueDate: string | null;
-  enrollment: { status: string; exitReason: string | null; campaignName: string | null; foName: string; stepIndex: number; steps: number } | null;
+  enrollment: { status: string; exitReason: string | null; campaignName: string | null; foName: string; foUserId: string; stepIndex: number; steps: number } | null;
   lastTouchAt: Date | null;
   touches: number;
 };
@@ -219,7 +219,7 @@ export async function accountDetail(companyId: string, user: SessionUser) {
         enrollments: {
           orderBy: { createdAt: 'desc' },
           take: 1,
-          include: { fo: { select: { name: true } }, campaign: { select: { name: true } }, sequenceVersion: { select: { steps: true } } },
+          include: { fo: { select: { name: true } }, campaign: { select: { name: true } }, sequence: { select: { steps: true } } },
         },
         touches: { orderBy: { occurredAt: 'desc' }, take: 1, select: { occurredAt: true } },
         _count: { select: { touches: true } },
@@ -237,8 +237,8 @@ export async function accountDetail(companyId: string, user: SessionUser) {
   const accountPeople: AccountPerson[] = people.map((p) => {
     const e = p.enrollments[0];
     let steps = 0;
-    if (e?.sequenceVersion?.steps) {
-      const parsed = e.sequenceVersion.steps as unknown;
+    if (e?.sequence?.steps) {
+      const parsed = e.sequence.steps as unknown;
       steps = Array.isArray(parsed) ? parsed.length : 0;
     }
     return {
@@ -259,7 +259,7 @@ export async function accountDetail(companyId: string, user: SessionUser) {
       nextAction: p.nextAction,
       nextActionDueDate: p.nextActionDueDate,
       enrollment: e
-        ? { status: e.status, exitReason: e.exitReason, campaignName: e.campaign?.name ?? null, foName: e.fo.name, stepIndex: e.currentStep, steps }
+        ? { status: e.status, exitReason: e.exitReason, campaignName: e.campaign?.name ?? null, foName: e.fo.name, foUserId: e.foUserId, stepIndex: e.currentStep, steps }
         : null,
       lastTouchAt: p.touches[0]?.occurredAt ?? null,
       touches: p._count.touches,
@@ -268,12 +268,11 @@ export async function accountDetail(companyId: string, user: SessionUser) {
 
   const personIds = people.map((p) => p.id);
   const [touches, tasks, audit] = await Promise.all([
-    personIds.length ? prisma.touch.findMany({ where: { personId: { in: personIds } }, orderBy: { occurredAt: 'desc' }, take: 120 }) : Promise.resolve([]),
+    personIds.length ? prisma.touch.findMany({ where: { personId: { in: personIds } }, orderBy: { occurredAt: 'desc' } }) : Promise.resolve([]),
     personIds.length
       ? prisma.task.findMany({
           where: { enrollment: { personId: { in: personIds } } },
           orderBy: [{ dueAt: 'desc' }],
-          take: 200,
           include: { fo: { select: { name: true } }, enrollment: { select: { personId: true, person: { select: { firstName: true, lastName: true } } } } },
         })
       : Promise.resolve([]),
@@ -383,10 +382,10 @@ export async function accountDetail(companyId: string, user: SessionUser) {
       inSequence: accountPeople.filter((p) => p.enrollment && (p.enrollment.status === 'ACTIVE' || p.enrollment.status === 'PAUSED')).length,
       replied: accountPeople.filter((p) => p.enrollment && (p.enrollment.status === 'REPLIED' || p.enrollment.status === 'MEETING')).length,
       meetings: meetings.length,
-      touches: touches.length,
+      touches: accountPeople.reduce((sum, person) => sum + person.touches, 0),
       openTasks: openTasks.length,
     },
-    mine: Boolean(user.twentyMemberId && company.ownerMemberId === user.twentyMemberId) || accountPeople.some((p) => p.enrollment?.foName === user.name),
+    mine: Boolean(user.twentyMemberId && company.ownerMemberId === user.twentyMemberId) || accountPeople.some((p) => p.enrollment?.foUserId === user.id),
   };
 }
 

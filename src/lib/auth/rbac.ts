@@ -22,12 +22,14 @@ export function toActor(user: { id: string; role: Role; podIds: string[] }): Act
 
 export const isAdmin = (a: Actor) => a.role === 'ADMIN';
 export const isSeniorFo = (a: Actor) => a.role === 'SENIOR_FO';
+export const isSalesLeader = (a: Actor) => a.role === 'SALES_LEADER';
+export const isPodLeader = (a: Actor) => isSeniorFo(a) || isSalesLeader(a);
 export const isJuniorFo = (a: Actor) => a.role === 'JUNIOR_FO';
 
 /** Admin: every pod. Senior FO: own pods. Junior FO: none (they see their own tasks only). */
 export function canManagePod(a: Actor, podId: string | null | undefined): boolean {
   if (isAdmin(a)) return true;
-  if (isSeniorFo(a) && podId) return a.podIds.includes(podId);
+  if (isPodLeader(a) && podId) return a.podIds.includes(podId);
   return false;
 }
 
@@ -39,13 +41,13 @@ export function visiblePodIds(a: Actor): string[] | null {
 
 export function canEnroll(a: Actor, podId?: string | null): boolean {
   if (isAdmin(a)) return true;
-  if (!isSeniorFo(a)) return false;
+  if (!isPodLeader(a)) return false;
   return podId ? a.podIds.includes(podId) : a.podIds.length > 0;
 }
 
 export function canManageEnrollment(a: Actor, e: { foUserId: string; podId: string | null }): boolean {
   if (isAdmin(a)) return true;
-  if (isSeniorFo(a)) return (e.podId ? a.podIds.includes(e.podId) : false) || e.foUserId === a.id;
+  if (isPodLeader(a)) return (e.podId ? a.podIds.includes(e.podId) : false) || e.foUserId === a.id;
   return false;
 }
 
@@ -53,7 +55,7 @@ export function canManageEnrollment(a: Actor, e: { foUserId: string; podId: stri
 export function canActOnTask(a: Actor, t: { foUserId: string; podId: string | null }): boolean {
   if (t.foUserId === a.id) return true;
   if (isAdmin(a)) return true;
-  if (isSeniorFo(a) && t.podId) return a.podIds.includes(t.podId);
+  if (isPodLeader(a) && t.podId) return a.podIds.includes(t.podId);
   return false;
 }
 
@@ -61,11 +63,12 @@ export function canViewTasksOf(a: Actor, foUserId: string, podId: string | null)
   return canActOnTask(a, { foUserId, podId });
 }
 
-export const canEditSequences = (a: Actor) => isAdmin(a);
+export const canEditSequences = (a: Actor) => isAdmin(a) || isPodLeader(a);
 export const canManageSettings = (a: Actor) => isAdmin(a);
 export const canManageUsers = (a: Actor) => isAdmin(a);
 export const canManageCampaigns = (a: Actor, podId?: string | null) => canEnroll(a, podId);
-export const canViewReports = (a: Actor) => isAdmin(a) || isSeniorFo(a);
+export const canViewReports = (a: Actor) => isAdmin(a) || isPodLeader(a);
+export const canApproveCampaign = (a: Actor, podId: string | null) => isAdmin(a) || (isSalesLeader(a) && canManagePod(a, podId));
 
 /** Junior FOs may snooze only to the next working day; others may pick a date. */
 export const canSnoozeFreely = (a: Actor) => !isJuniorFo(a);
@@ -76,6 +79,7 @@ export function assertAllowed(condition: boolean, message?: string): asserts con
 
 export const ROLE_LABELS: Record<Role, string> = {
   ADMIN: 'Admin',
+  SALES_LEADER: 'Sales Leader',
   SENIOR_FO: 'Senior FO',
   JUNIOR_FO: 'Junior FO',
 };

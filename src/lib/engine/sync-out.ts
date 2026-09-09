@@ -3,7 +3,7 @@ import { prisma } from '../db';
 import { logAudit, SYSTEM_ACTOR } from '../audit';
 import { cachedPersonName } from '../person-cache';
 import { getSettings } from '../settings';
-import { firstNameOf } from '../templates';
+import { firstNameOf } from '../names';
 import { getTwentyClient, type TwentyClient } from '../twenty';
 import { channelOf, type ActionType } from '../sequences/steps';
 
@@ -113,7 +113,6 @@ export async function syncTaskCompleted(task: SyncTask): Promise<void> {
         `${task.label} (${action.toLowerCase().replace('_', ' ')}) completed by ${task.fo.name} in Cadence.`,
         `Sequence "${task.enrollment.sequence.name}", step ${task.stepIndex + 1} (day ${task.stepDay}).`,
         ...(dispositionLabel ? [`Outcome: ${dispositionLabel}.`] : []),
-        ...(task.variantId ? [`Template variant: ${task.variantId}.`] : []),
         ...(task.note ? ['', task.note] : []),
         `Source: ${task.completionSource ?? 'MANUAL'}${task.evidenceId ? ` (${task.evidenceId})` : ''}.`,
       ].join('\n'),

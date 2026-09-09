@@ -40,7 +40,7 @@ export function campaignScope(user: SessionUser): Prisma.CampaignWhereInput {
 
 export async function listCampaigns(user: SessionUser): Promise<CampaignSummary[]> {
   const campaigns = await prisma.campaign.findMany({ where: campaignScope(user), include: { sequence: { select: { name: true } }, pod: { select: { name: true } } }, orderBy: [{ status: 'asc' }, { createdAt: 'desc' }] });
-  const groups = await prisma.enrollment.groupBy({ by: ['campaignId', 'status'], where: { campaignId: { in: campaigns.map((c) => c.id) } }, _count: { _all: true } });
+  const groups = await prisma.enrollment.groupBy({ by: ['campaignId', 'campaignRun', 'status'], where: { campaignId: { in: campaigns.map((c) => c.id) } }, _count: { _all: true } });
   return campaigns.map((c) => ({
     id: c.id,
     name: c.name,
@@ -54,7 +54,7 @@ export async function listCampaigns(user: SessionUser): Promise<CampaignSummary[
     assignmentMode: c.assignmentMode,
     sourceType: c.sourceType,
     createdAt: c.createdAt,
-    ...summarise(groups.filter((g) => g.campaignId === c.id)),
+    ...summarise(groups.filter((g) => g.campaignId === c.id && g.campaignRun === c.runNumber)),
   }));
 }
 
@@ -63,21 +63,21 @@ export type CampaignDetail = Awaited<ReturnType<typeof campaignDetail>>;
 export async function campaignDetail(id: string, today: string) {
   const campaign = await prisma.campaign.findUnique({
     where: { id },
-    include: { sequence: { include: { activeVersion: true } }, pod: { include: { users: { include: { user: { select: { id: true, name: true, active: true } } } } } } },
+    include: { sequence: true, pod: { include: { users: { include: { user: { select: { id: true, name: true, active: true } } } } } } },
   });
   if (!campaign) return null;
-  const enrollments = await prisma.enrollment.findMany({
+  const history = await prisma.enrollment.findMany({
     where: { campaignId: id },
     include: {
       person: true,
       fo: { select: { id: true, name: true } },
-      sequenceVersion: { select: { version: true } },
       tasks: { select: { id: true, state: true, stepIndex: true, stepId: true, label: true, dueDate: true, snoozedTo: true, action: true, completedAt: true } },
     },
     orderBy: [{ status: 'asc' }, { startDate: 'asc' }],
   });
-  const steps = campaign.sequence.activeVersion ? parseSteps(campaign.sequence.activeVersion.steps) : [];
-  const statusRows = await prisma.enrollment.groupBy({ by: ['status'], where: { campaignId: id }, _count: { _all: true } });
+  const steps = parseSteps(campaign.sequence.steps);
+  const enrollments = history.filter(e => e.campaignRun === campaign.runNumber);
+  const statusRows = await prisma.enrollment.groupBy({ by: ['status'], where: { campaignId: id, campaignRun: campaign.runNumber }, _count: { _all: true } });
   const summary = summarise(statusRows);
 
   // Funnel by step: who is at each step now, who got through it
@@ -117,6 +117,7 @@ export async function campaignDetail(id: string, today: string) {
     campaign,
     steps,
     enrollments,
+    history,
     summary,
     byStep,
     byFo: [...fos.values()].sort((a, b) => a.name.localeCompare(b.name)),
@@ -125,15 +126,19 @@ export async function campaignDetail(id: string, today: string) {
 }
 
 /** Enrollments in a campaign that finished the sequence without a reply, at least `days` ago. */
-export async function nonReplierCandidates(campaignId: string, days: number, now = new Date()) {
+export async function nonReplierCandidates(campaignId: string, days: number, now = new Date(), sourceRun?: number) {
   const cutoff = new Date(now.getTime() - days * 86_400_000);
+  const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
+  if (!campaign) return [];
   const finished = await prisma.enrollment.findMany({
-    where: { campaignId, status: 'COMPLETED', completedAt: { lte: cutoff }, repliedAt: null, meetingAt: null },
+    where: { campaignId, campaignRun: sourceRun ?? campaign.runNumber, status: 'COMPLETED', completedAt: { lte: cutoff }, repliedAt: null, meetingAt: null },
     include: { person: true, fo: { select: { id: true, name: true } } },
   });
-  // exclude anyone who has since been enrolled elsewhere or flagged dnd
+  // Exclude anyone re-enrolled elsewhere, removed, or marked do-not-contact in either system.
   const ids = finished.map((f) => f.personId);
   const busy = await prisma.enrollment.findMany({ where: { personId: { in: ids }, status: { in: ['ACTIVE', 'PAUSED'] } }, select: { personId: true } });
   const busySet = new Set(busy.map((b) => b.personId));
-  return finished.filter((f) => !busySet.has(f.personId) && !f.person.dnd && !f.person.deletedAt);
+  const inbound = await prisma.touch.findMany({ where: { personId: { in: ids }, direction: 'INBOUND', occurredAt: { gte: campaign.createdAt } }, select: { personId: true } });
+  for (const reply of inbound) busySet.add(reply.personId);
+  return finished.filter((f) => !busySet.has(f.personId) && !f.person.dnd && !f.person.optedOut && !f.person.deletedAt);
 }

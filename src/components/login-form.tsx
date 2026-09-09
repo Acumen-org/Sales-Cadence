@@ -16,7 +16,7 @@ export function LoginForm({ next }: { next?: string }) {
         <label htmlFor="password">Password</label>
         <input id="password" name="password" type="password" autoComplete="current-password" required className="w-full" />
       </div>
-      {state?.error ? <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{state.error}</p> : null}
+      {state?.error ? <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{state.error}</p> : null}
       <button type="submit" disabled={pending} className="btn-primary w-full">
         {pending ? 'Signing in...' : 'Sign in'}
       </button>

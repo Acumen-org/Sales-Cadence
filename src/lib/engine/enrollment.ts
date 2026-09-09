@@ -8,6 +8,7 @@ import { getTwentyClient, type TwentyClient } from '../twenty';
 import type { TwentyPerson } from '../twenty/types';
 import { findDateWithCapacity, reserve, type DayLoad } from './caps';
 import { nextWorkingDay } from './clock';
+import { WORKSPACE_TIMEZONE } from '../workspace';
 import { advanceEnrollment, cancelOpenTasks, isUniqueViolation, syncCancelled, type EngineContext } from './tasks';
 import { loadSyncTasks, syncTaskRescheduled, syncTaskResolved, syncTasksCreated } from './sync-out';
 
@@ -88,14 +89,14 @@ export async function previewEnrollment(req: EnrollRequest, client?: TwentyClien
   const byId = new Map(people.map((p) => [p.id, p]));
 
   const pod = await prisma.pod.findUnique({ where: { id: req.podId }, include: { users: { include: { user: true } } } });
-  if (!pod) throw new Error('Pod not found');
+  if (!pod || pod.archived) throw new Error('Pod not found or removed');
   const podFos = pod.users.map((u) => u.user).filter((u) => u.active);
   const assignment = req.assignment;
   const fixedFoId = assignment.mode === 'FIXED' ? assignment.foUserId : null;
   const restrictIds = assignment.mode !== 'FIXED' && assignment.foUserIds?.length ? new Set(assignment.foUserIds) : null;
   const allowed = restrictIds ? podFos.filter((u) => restrictIds.has(u.id)) : podFos;
-  const fixedFo = fixedFoId ? podFos.find((u) => u.id === fixedFoId) ?? (await prisma.user.findUnique({ where: { id: fixedFoId } })) : null;
-  if (fixedFoId && !fixedFo) throw new Error('Assigned FO not found');
+  const fixedFo = fixedFoId ? podFos.find((u) => u.id === fixedFoId) : null;
+  if (assignment.mode === 'FIXED' && !fixedFo) throw new Error('Assigned FO must be an active member of this pod');
 
   const active = await prisma.enrollment.findMany({ where: { personId: { in: ids }, status: { in: OCCUPYING_STATUSES } }, include: { campaign: true } });
   const activeByPerson = new Map(active.map((e) => [e.personId, e]));
@@ -200,8 +201,8 @@ export type EnrollOutcome = {
 /** Enrol everyone the preview allows. Each enrollment gets its first step immediately. */
 export async function enrollPeople(req: EnrollRequest, ctx: Omit<EngineContext, 'actor'> = {}, client?: TwentyClient): Promise<EnrollOutcome> {
   const preview = await previewEnrollment(req, client);
-  const sequence = await prisma.sequence.findUnique({ where: { id: req.sequenceId }, include: { activeVersion: true } });
-  if (!sequence?.activeVersion) throw new Error('Sequence has no active version');
+  const sequence = await prisma.sequence.findUnique({ where: { id: req.sequenceId } });
+  if (!sequence) throw new Error('Sequence not found');
   const engineCtx: EngineContext = { actor: req.actor, now: ctx.now, skipSync: ctx.skipSync };
   const enrolled: EnrollOutcome['enrolled'] = [];
   const conflicts = [...preview.conflicts];
@@ -218,7 +219,6 @@ export async function enrollPeople(req: EnrollRequest, ctx: Omit<EngineContext, 
             podId: req.podId,
             campaignId: req.campaignId ?? null,
             sequenceId: sequence.id,
-            sequenceVersionId: sequence.activeVersion!.id,
             startDate: c.startDate,
             status: 'ACTIVE',
             createdById: req.actor.type === 'USER' ? req.actor.id ?? null : null,
@@ -234,7 +234,7 @@ export async function enrollPeople(req: EnrollRequest, ctx: Omit<EngineContext, 
             entityId: created.id,
             action: 'enrolled',
             actor: req.actor,
-            details: { personId: c.personId, foUserId: c.foUserId, assignedBy: c.assignedBy, startDate: c.startDate, campaignId: req.campaignId ?? null, sequenceVersion: sequence.activeVersion!.version },
+            details: { personId: c.personId, foUserId: c.foUserId, assignedBy: c.assignedBy, startDate: c.startDate, campaignId: req.campaignId ?? null },
           },
           tx,
         );
@@ -295,11 +295,14 @@ export async function resumeEnrollment(enrollmentId: string, opts: { actor: Audi
   const settings = await getSettings();
   const now = opts.now ?? new Date();
   const { updated, movedIds } = await prisma.$transaction(async (tx) => {
+    const identity = await tx.enrollment.findUnique({ where: { id: enrollmentId }, select: { campaignId: true } });
+    if (identity?.campaignId) await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`campaign:${identity.campaignId}`}))`;
     const e = await tx.enrollment.findUnique({ where: { id: enrollmentId }, include: { fo: true } });
     if (!e) throw new Error('Enrollment not found');
     if (e.status !== 'PAUSED') return { updated: e, movedIds: [] as string[] };
-    const today = todayIn(e.fo.timezone, now);
-    const pausedOn = e.pausedAt ? todayIn(e.fo.timezone, e.pausedAt) : today;
+    if (e.campaignId) { const campaign = await tx.campaign.findUnique({ where: { id: e.campaignId } }); if (campaign?.status !== 'ACTIVE') return { updated: e, movedIds: [] as string[] }; }
+    const today = todayIn(WORKSPACE_TIMEZONE, now);
+    const pausedOn = e.pausedAt ? todayIn(WORKSPACE_TIMEZONE, e.pausedAt) : today;
     const pausedDays = Math.max(0, diffDays(pausedOn, today));
     const shiftDays = settings.rules.clockMode === 'shift' ? e.shiftDays + pausedDays : e.shiftDays;
     const movedIds: string[] = [];

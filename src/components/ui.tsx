@@ -15,8 +15,8 @@ export function PageHeader({ title, subtitle, actions }: { title: ReactNode; sub
   return (
     <div className="flex flex-wrap items-start justify-between gap-3 px-6 pb-1 pt-2">
       <div className="min-w-0">
-        <h2 className="truncate text-[17px] font-semibold tracking-[-0.01em] text-ink-900">{title}</h2>
-        {subtitle ? <div className="mt-0.5 text-[13px] text-ink-500">{subtitle}</div> : null}
+        <h2 className="text-[22px] font-semibold tracking-[-0.03em] text-ink-900">{title}</h2>
+        {subtitle ? <div className="mt-1 text-[14px] font-semibold text-ink-800">{subtitle}</div> : null}
       </div>
       {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
@@ -32,16 +32,15 @@ export function Surface({ children, className, flush }: { children: ReactNode; c
 }
 
 /** Header inside a surface: bold view name (optionally with a caret) and a right-hand meta slot. */
-export function ViewHeader({ title, meta, actions, caret }: { title: ReactNode; meta?: ReactNode; actions?: ReactNode; caret?: boolean }) {
+export function ViewHeader({ title, meta, actions }: { title: ReactNode; meta?: ReactNode; actions?: ReactNode; caret?: boolean }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 px-4 pb-3 pt-4">
-      <div className="flex items-center gap-1.5 text-[16px] font-semibold text-ink-900">
+    <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-5">
+      <h2 className="flex items-center gap-2 text-[15px] font-semibold tracking-[-0.015em] text-ink-900">
         {title}
-        {caret ? <IconCaret /> : null}
-      </div>
+      </h2>
       <div className="flex items-center gap-2">
         {actions}
-        {meta ? <span className="text-[13px] text-ink-500">{meta}</span> : null}
+        {meta ? <DataValue>{meta}</DataValue> : null}
       </div>
     </div>
   );
@@ -50,14 +49,6 @@ export function ViewHeader({ title, meta, actions, caret }: { title: ReactNode; 
 /** Filter/toolbar strip under a view header. */
 export function Toolbar({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={clsx('flex flex-wrap items-center gap-2 px-4 pb-3', className)}>{children}</div>;
-}
-
-function IconCaret() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" aria-hidden className="text-ink-400">
-      <path d="M6 9l6 6 6-6" />
-    </svg>
-  );
 }
 
 export function Card({ children, className, title, actions, flush }: { children: ReactNode; className?: string; title?: ReactNode; actions?: ReactNode; flush?: boolean }) {
@@ -79,7 +70,7 @@ export function Card({ children, className, title, actions, flush }: { children:
 /* -------------------------------------------------------------------------- */
 
 const BADGE_TONES = {
-  gray: 'bg-canvas text-ink-500',
+  gray: 'bg-canvas text-ink-800',
   blue: 'bg-brand-50 text-brand-700',
   green: 'bg-emerald-50 text-emerald-700',
   amber: 'bg-amber-50 text-amber-700',
@@ -167,13 +158,13 @@ export function IdentityCell({ name, sub, href, shape = 'square', size = 32 }: {
       <Avatar name={name} shape={shape} size={size} />
       <div className="min-w-0">
         {href ? (
-          <Link href={href} className="block truncate text-[13.5px] font-medium text-ink-900 hover:text-brand-700">
+          <Link href={href} className="block truncate text-[14px] font-bold text-ink-900 hover:text-brand-700">
             {name}
           </Link>
         ) : (
-          <div className="truncate text-[13.5px] font-medium text-ink-900">{name}</div>
+          <div className="truncate text-[14px] font-bold text-ink-900">{name}</div>
         )}
-        {sub ? <div className="truncate text-[12px] text-ink-500">{sub}</div> : null}
+        {sub ? <div className="truncate text-[13px] font-semibold text-ink-800">{sub}</div> : null}
       </div>
     </div>
   );
@@ -333,21 +324,22 @@ export function EmptyState({ title, hint, action, icon }: { title: string; hint?
 /** Underline tabs. `inset` adds the page gutter; inside a surface pass inset={false}. */
 export function Tabs({ tabs, current, inset = true }: { tabs: { key: string; label: ReactNode; href: string; count?: number }[]; current: string; inset?: boolean }) {
   return (
-    <div className={clsx('flex gap-5 border-b border-line', inset ? 'px-6' : 'px-4')}>
+    <div className={clsx('flex gap-5 overflow-x-auto border-b border-line scroll-thin', inset ? 'px-6' : 'px-5')}>
       {tabs.map((t) => {
         const active = t.key === current;
         return (
           <Link
             key={t.key}
             href={t.href}
+            aria-current={active ? 'page' : undefined}
             className={clsx(
-              '-mb-px flex items-center gap-1.5 border-b-2 py-2.5 text-[13.5px] font-medium transition-colors',
+              'flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 py-3 text-[13px] font-medium transition-colors',
               active ? 'border-brand-600 text-ink-900' : 'border-transparent text-ink-500 hover:text-ink-700',
             )}
           >
             {t.label}
             {typeof t.count === 'number' ? (
-              <span className={clsx('rounded-full px-1.5 text-[11.5px] font-medium leading-5', active ? 'bg-brand-100 text-brand-800' : 'bg-canvas text-ink-500')}>{t.count}</span>
+              <span className={clsx('rounded-full px-2 text-[12px] font-bold tabular-nums leading-5', active ? 'bg-brand-100 text-brand-800' : 'bg-canvas text-ink-900')}>{t.count}</span>
             ) : null}
           </Link>
         );
@@ -358,11 +350,11 @@ export function Tabs({ tabs, current, inset = true }: { tabs: { key: string; lab
 
 export function Stat({ label, value, hint, tone, icon }: { label: string; value: ReactNode; hint?: ReactNode; tone?: 'default' | 'warn' | 'good'; icon?: ReactNode }) {
   return (
-    <div className="surface flex items-start gap-3 px-4 py-3.5">
+    <div className="surface flex items-start gap-3 px-5 py-5">
       {icon ? <span className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-[10px] bg-brand-50 text-brand-600">{icon}</span> : null}
       <div className="min-w-0">
-        <div className="text-[11.5px] font-medium uppercase tracking-wide text-ink-400">{label}</div>
-        <div className={clsx('mt-0.5 text-[24px] font-semibold leading-tight', tone === 'warn' ? 'text-amber-600' : tone === 'good' ? 'text-emerald-600' : 'text-ink-900')}>{value}</div>
+        <div className="text-[11px] font-medium text-ink-500">{label}</div>
+        <div className={clsx('mt-3 text-[30px] font-bold leading-tight tracking-[-0.04em] tabular-nums', tone === 'warn' ? 'text-amber-700' : tone === 'good' ? 'text-brand-700' : 'text-ink-900')}>{value}</div>
         {hint ? <div className="text-[12px] text-ink-500">{hint}</div> : null}
       </div>
     </div>
@@ -390,14 +382,15 @@ export function Field({ label, children, hint, className }: { label: ReactNode; 
   const single = isValidElement(children) && typeof children.type === 'string' && FORM_CONTROLS.has(children.type);
   const existingId = single ? (children as ReactElement<{ id?: string }>).props.id : undefined;
   const controlId = single ? existingId ?? autoId : undefined;
-  const control = single && !existingId ? cloneElement(children as ReactElement<{ id?: string }>, { id: controlId }) : children;
+  const hintId = `${autoId}-hint`;
+  const control = single ? cloneElement(children as ReactElement<{ id?: string; 'aria-describedby'?: string }>, { id: controlId, 'aria-describedby': [(children as ReactElement<{ 'aria-describedby'?: string }>).props['aria-describedby'], hint ? hintId : undefined].filter(Boolean).join(' ') || undefined }) : children;
   return (
     <div className={clsx('space-y-1.5', className)}>
       <label htmlFor={controlId} className="block">
         {label}
       </label>
       {control}
-      {hint ? <p className="text-[11.5px] leading-snug text-ink-400">{hint}</p> : null}
+      {hint ? <p id={hintId} className="text-[11.5px] leading-relaxed text-ink-500">{hint}</p> : null}
     </div>
   );
 }
@@ -415,8 +408,27 @@ export function KeyValue({ items }: { items: { k: string; v: ReactNode }[] }) {
   );
 }
 
+/** Record data is visually distinct from the muted, static labels around it. */
+export function DataValue({ children, className }: { children: ReactNode; className?: string }) {
+  return <span className={clsx('data-value', className)}>{children}</span>;
+}
+
+/** Compact labelled fields for live record metadata, without sentence-like subtitles. */
+export function RecordFields({ items, className }: { items: { label: string; value: ReactNode }[]; className?: string }) {
+  return (
+    <dl className={clsx('grid grid-cols-2 gap-x-6 gap-y-5 md:grid-cols-3', className)}>
+      {items.map((item) => (
+        <div key={item.label} className="min-w-0 space-y-1.5">
+          <dt className="text-[12px] text-ink-500">{item.label}</dt>
+          <dd className="break-words text-[14px] font-bold text-ink-900">{item.value ?? <span className="font-normal text-ink-400">Not recorded</span>}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 export function Pill({ children }: { children: ReactNode }) {
-  return <span className="rounded bg-canvas px-1.5 py-0.5 font-mono text-[11px] text-ink-500">{children}</span>;
+  return <span className="rounded bg-canvas px-2 py-1 text-[12px] font-bold text-ink-800">{children}</span>;
 }
 
 /**
@@ -442,7 +454,7 @@ export function RecordHeader({
         <Avatar name={name} shape={shape} size={44} />
         <div className="min-w-0">
           <h2 className="truncate text-[20px] font-semibold tracking-[-0.01em] text-ink-900">{name}</h2>
-          {sub ? <div className="mt-0.5 text-[13px] text-ink-500">{sub}</div> : null}
+          {sub ? <div className="mt-1 text-[14px] font-semibold text-ink-800">{sub}</div> : null}
           {badges ? <div className="mt-2 flex flex-wrap items-center gap-1.5">{badges}</div> : null}
         </div>
       </div>

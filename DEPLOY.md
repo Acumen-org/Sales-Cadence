@@ -59,6 +59,8 @@ docker compose up -d --build      # first build ~5 min
 
 Web listens on **3100** (host) → 3000 (container). Point the reverse proxy at it. Migrations and the seed run automatically on start.
 
+The Postgres 18 volume mounts at `/var/lib/postgresql` (the image keeps its cluster in `18/docker`), and its published port binds to `127.0.0.1`. Local databases, environment overrides, screenshots, and review artifacts are excluded from the Docker build context. For an existing deployment with a volume at the old `/var/lib/postgresql/data` path, take a database backup and confirm the actual cluster location before changing the mount; the Compose edit does not migrate existing data. See the [official image's volume layout](https://github.com/docker-library/postgres/blob/master/18/alpine3.23/Dockerfile).
+
 Then follow [INTEGRATION.md](INTEGRATION.md): create the Twenty API key, register webhooks at `https://<host>/api/webhooks/twenty`, run `docker compose exec web pnpm verify:schema`, pilot one pod with dry run on, then set `CADENCE_DRY_RUN=false`.
 
 ## Running it

@@ -22,7 +22,6 @@ const TABLES = [
   'CompanyCache',
   'PersonCache',
   'Sequence',
-  'SequenceVersion',
   'User',
   'Pod',
 ];
@@ -48,7 +47,7 @@ export async function seedBasics() {
     const name = value.charAt(0) + value.slice(1).toLowerCase();
     pods[name] = await prisma.pod.create({ data: { name: `Pod ${name}`, podOwnerValue: value } });
   }
-  const mk = async (memberId: string, role: 'ADMIN' | 'SENIOR_FO' | 'JUNIOR_FO', podNames: string[]) => {
+  const mk = async (memberId: string, role: 'ADMIN' | 'SALES_LEADER' | 'SENIOR_FO' | 'JUNIOR_FO', podNames: string[]) => {
     const m = MOCK_MEMBERS.find((x) => x.id === memberId)!;
     const user = await prisma.user.create({
       data: {
@@ -71,13 +70,9 @@ export async function seedBasics() {
   const daniel = await mk('wm-daniel', 'JUNIOR_FO', ['Leigh']);
   const ria = await mk('wm-ria', 'ADMIN', []);
 
-  const sequence = await prisma.sequence.create({ data: { name: DEFAULT_SEQUENCE_NAME } });
-  const version = await prisma.sequenceVersion.create({
-    data: { sequenceId: sequence.id, version: 1, steps: DEFAULT_SEQUENCE_STEPS },
-  });
-  await prisma.sequence.update({ where: { id: sequence.id }, data: { activeVersionId: version.id } });
+  const sequence = await prisma.sequence.create({ data: { name: DEFAULT_SEQUENCE_NAME, steps: DEFAULT_SEQUENCE_STEPS } });
 
   for (const p of MOCK_PEOPLE) await upsertPersonCache(p);
 
-  return { pods, users: { alisa, leigh, andrew, karson, daniel, ria }, sequence, version };
+  return { pods, users: { alisa, leigh, andrew, karson, daniel, ria }, sequence };
 }

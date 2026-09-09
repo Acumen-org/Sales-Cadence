@@ -2,10 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/*
- * Cadence design system, modelled on Outreach: lavender canvas, pale sidebar with soft-indigo
- * active pills, a slim top bar, and content on a white rounded surface with dense tables.
- */
+/* Cadence's shared workspace language: quiet surfaces, purposeful color, clear hierarchy. */
 
 @layer base {
   :root {
@@ -19,6 +16,7 @@
   body {
     font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
   ::selection {
     @apply bg-brand-100 text-brand-900;
@@ -28,7 +26,7 @@
   input:not([type='checkbox']):not([type='radio']):not([type='file']),
   select,
   textarea {
-    @apply w-full rounded-[10px] border border-line bg-white px-3 py-2 text-[13.5px] font-normal text-ink-900 shadow-none outline-none transition placeholder:text-ink-300;
+    @apply w-full rounded-[10px] border border-line bg-white px-3 py-2 text-[13.5px] font-semibold text-ink-900 shadow-none outline-none transition placeholder:font-normal placeholder:text-ink-400;
   }
   input:not([type='checkbox']):not([type='radio']):not([type='file']):focus,
   select:focus,
@@ -61,18 +59,25 @@
   a {
     @apply transition-colors;
   }
+  :focus-visible {
+    outline: 2px solid #24735e;
+    outline-offset: 4px;
+  }
+  button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+  button { touch-action: manipulation; }
 }
 
 @layer components {
   /* ---------- buttons ---------- */
   .btn {
-    @apply inline-flex select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-[10px] border px-3.5 text-[13.5px] font-medium leading-none transition disabled:cursor-not-allowed disabled:opacity-50;
-    min-height: 2.25rem;
+    @apply inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-lg border px-3.5 text-[13px] font-medium leading-none transition disabled:cursor-not-allowed disabled:opacity-50;
+    min-height: 2.4rem;
     padding-top: 0.5rem;
     padding-bottom: 0.5rem;
   }
   .btn-primary {
     @apply btn border-brand-600 bg-brand-600 text-white hover:border-brand-700 hover:bg-brand-700 focus-visible:ring-4 focus-visible:ring-brand-100;
+    box-shadow: 0 1px 2px #102b261a, inset 0 1px 0 #ffffff1a;
   }
   .btn-secondary {
     @apply btn border-line bg-white text-ink-700 hover:border-ink-300 hover:bg-canvas focus-visible:ring-4 focus-visible:ring-brand-100;
@@ -109,13 +114,13 @@
 
   /* ---------- surfaces ---------- */
   .surface {
-    @apply rounded-2xl border border-line bg-white shadow-surface;
+    @apply rounded-xl border border-line bg-white shadow-surface;
   }
   .card {
     @apply surface;
   }
   .card-head {
-    @apply flex items-center justify-between gap-3 border-b border-line px-4 py-3;
+    @apply flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4;
   }
   .card-title {
     @apply text-[14px] font-semibold text-ink-900;
@@ -123,13 +128,13 @@
 
   /* ---------- chips, badges, dots ---------- */
   .chip {
-    @apply inline-flex items-center gap-1.5 rounded-full bg-brand-50 py-1.5 pl-3 pr-2.5 text-[12.5px] font-medium text-brand-700;
+    @apply inline-flex items-center gap-1.5 rounded-lg bg-brand-50 px-3 py-2 text-[12px] font-semibold text-brand-700;
   }
   .chip-muted {
-    @apply inline-flex items-center gap-1.5 rounded-[10px] bg-canvas py-2 px-3 text-[12.5px] font-medium text-ink-500 transition hover:bg-brand-50 hover:text-brand-700;
+    @apply inline-flex items-center gap-1.5 rounded-lg bg-transparent py-2 px-3 text-[12px] font-medium text-ink-500 transition hover:bg-canvas hover:text-ink-900;
   }
   .badge {
-    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11.5px] font-medium leading-5;
+    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[12px] font-bold leading-5;
   }
   .dot {
     @apply inline-block h-[7px] w-[7px] shrink-0 rounded-full;
@@ -140,10 +145,10 @@
     @apply w-full border-collapse text-left text-[13.5px];
   }
   .table th {
-    @apply whitespace-nowrap border-b border-line px-4 py-2.5 text-[12px] font-medium text-ink-500;
+    @apply whitespace-nowrap border-y border-line bg-[#fafbf9] px-5 py-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-500;
   }
   .table td {
-    @apply border-b border-line px-4 py-3 align-middle text-ink-700;
+    @apply border-b border-line/80 px-5 py-4 align-middle font-semibold text-ink-900;
   }
   .table tbody tr {
     @apply transition-colors hover:bg-brand-50/40;
@@ -158,10 +163,70 @@
 
   /* ---------- sidebar ---------- */
   .nav-item {
-    @apply flex items-center gap-3 rounded-[10px] px-3 py-2 text-[13.5px] font-medium text-ink-700 transition hover:bg-brand-50;
+    @apply relative flex min-h-10 items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium text-[#b6c5bf] transition hover:bg-white/[0.06] hover:text-white;
   }
   .nav-item-active {
-    @apply bg-brand-100/80 text-brand-800;
+    @apply bg-[#d5e9ad]/[0.10] text-[#dfefc1];
+  }
+  .nav-item-active::before {
+    content: '';
+    @apply absolute -left-3 h-4 w-[3px] rounded-r-full bg-[#d5e9ad];
+  }
+  .nav-item:focus-visible { outline-color: #d5e9ad; }
+  .sidebar-shell {
+    @apply flex h-dvh w-[232px] shrink-0 flex-col bg-[#192c28] text-white;
+  }
+  .workspace-topbar {
+    @apply flex h-16 items-center gap-3 border-b border-line bg-white/90 px-5 sm:px-8;
+  }
+  .page-content > div {
+    @apply px-4 sm:px-8;
+  }
+  .page-content {
+    animation: arrive 220ms ease-out both;
+  }
+  .eyebrow {
+    @apply text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-500;
+  }
+  .metric-value {
+    @apply text-[32px] font-bold leading-none tracking-[-0.045em] text-ink-900;
+    font-variant-numeric: tabular-nums;
+  }
+  .focus-art {
+    position: absolute;
+    width: 300px;
+    height: 300px;
+    right: -55px;
+    top: -70px;
+    border: 1px solid #d5e9ad24;
+    border-radius: 50%;
+    box-shadow: 0 0 0 28px #d5e9ad08, 0 0 0 29px #d5e9ad15, 0 0 0 57px #d5e9ad05, 0 0 0 58px #d5e9ad12, 0 0 0 87px #d5e9ad04, 0 0 0 88px #d5e9ad0c;
+    pointer-events: none;
+  }
+  .cadence-modal {
+    width: min(580px, calc(100vw - 32px));
+    max-height: calc(100dvh - 48px);
+    margin: 12vh auto auto;
+    padding: 0;
+    overflow: auto;
+    @apply rounded-2xl border border-line bg-white text-ink-900 shadow-pop;
+  }
+  .cadence-modal::backdrop {
+    background: #14292366;
+    backdrop-filter: blur(5px);
+  }
+  .cadence-modal.nav-drawer {
+    width: 280px;
+    max-height: 100dvh;
+    height: 100dvh;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: #192c28;
+  }
+  .nav-drawer .sidebar-shell { width: 280px; }
+  .skip-link {
+    @apply fixed left-4 top-3 z-[100] -translate-y-24 rounded-lg bg-white px-4 py-3 text-sm font-semibold text-brand-800 shadow-pop focus:translate-y-0;
   }
 
   /* ---------- misc ---------- */
@@ -169,14 +234,20 @@
     @apply text-[11px] font-medium uppercase tracking-wide text-ink-400;
   }
   .kv dd {
-    @apply text-[13.5px] text-ink-900;
+    @apply text-[14px] font-bold text-ink-900;
+  }
+  .data-value {
+    @apply text-[13px] font-bold tabular-nums text-ink-900;
+  }
+  .data-table td {
+    @apply text-[14px] font-bold tabular-nums text-ink-900;
   }
   .hairline {
     @apply border-line;
   }
   .scroll-thin {
     scrollbar-width: thin;
-    scrollbar-color: #cdcdf2 transparent;
+    scrollbar-color: #bccac1 transparent;
   }
   .scroll-thin::-webkit-scrollbar {
     width: 10px;
@@ -185,4 +256,12 @@
   .scroll-thin::-webkit-scrollbar-thumb {
     @apply rounded-full border-[3px] border-solid border-transparent bg-brand-200 bg-clip-content;
   }
+}
+
+@keyframes arrive {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }

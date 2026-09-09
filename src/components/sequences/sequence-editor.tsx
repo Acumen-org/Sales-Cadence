@@ -1,233 +1,62 @@
 'use client';
-
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ACTION_LABELS, ACTION_TYPES, newStepId, StepsSchema, type ActionType, type SequenceStep, type StepAction } from '@/lib/sequences/steps';
-import { TEMPLATE_VARIABLES } from '@/lib/templates';
 import { ActionForm } from '@/components/action-form';
 import type { ActionResult } from '@/lib/actions/users';
-import { IconArrowDown, IconArrowUp, IconPlus, IconTrash } from '@/components/icons';
+import { ActionIcon, IconArrowDown, IconArrowUp, IconPlus, IconTrash } from '@/components/icons';
 import { Field } from '@/components/ui';
+import { RichTextEditor } from '@/components/rich-text-editor';
 
-type Props = {
-  sequenceId?: string;
-  initialSteps: SequenceStep[];
-  action: (formData: FormData) => Promise<ActionResult>;
-  submitLabel: string;
-  /** Extra fields rendered above the steps (name/description for a new sequence). */
-  header?: React.ReactNode;
-  askChangeNote?: boolean;
-};
+function blankAction(type: ActionType): StepAction { return { id: newStepId('act'), type, label: ACTION_LABELS[type], template: '', bodyHtml: '<p></p>' }; }
+function htmlOf(a: StepAction) { return a.bodyHtml ?? '<p>' + (a.template ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') + '</p>'; }
 
-function blankAction(type: ActionType = 'EMAIL'): StepAction {
-  return { id: newStepId('act'), type, label: ACTION_LABELS[type], template: '' };
-}
-
-/**
- * Add/remove/reorder steps, edit day offsets, actions, either/or alternatives and templates.
- * Step and action ids are preserved so enrollments can be mapped into the new version.
- */
-export function SequenceEditor({ sequenceId, initialSteps, action, submitLabel, header, askChangeNote }: Props) {
+export function SequenceEditor({ sequenceId, initialSteps, action, submitLabel, header, lockedSteps = {}, readOnly = false }: {
+  sequenceId?: string; initialSteps: SequenceStep[]; action: (data: FormData) => Promise<ActionResult>; submitLabel: string;
+  header?: React.ReactNode; lockedSteps?: Record<string, number>; readOnly?: boolean;
+}) {
   const router = useRouter();
-  const [steps, setSteps] = useState<SequenceStep[]>(() => JSON.parse(JSON.stringify(initialSteps)));
-  const validation = useMemo(() => {
-    const r = StepsSchema.safeParse(steps);
-    return r.success ? null : r.error.issues.map((i) => `Step ${Number(i.path[0]) + 1}: ${i.message}`).join(' · ');
-  }, [steps]);
-
-  const update = (i: number, patch: Partial<SequenceStep>) => setSteps((s) => s.map((st, idx) => (idx === i ? { ...st, ...patch } : st)));
-  const updateAction = (i: number, j: number, patch: Partial<StepAction>) =>
-    setSteps((s) => s.map((st, idx) => (idx === i ? { ...st, actions: st.actions.map((a, k) => (k === j ? { ...a, ...patch } : a)) } : st)));
-  const move = (i: number, dir: -1 | 1) =>
-    setSteps((s) => {
-      const j = i + dir;
-      if (j < 0 || j >= s.length) return s;
-      const copy = [...s];
-      const [a, b] = [copy[i], copy[j]];
-      // swap positions but keep the day offsets in ascending order
-      copy[i] = { ...b, day: a.day };
-      copy[j] = { ...a, day: b.day };
-      return copy;
-    });
-  const addStep = () =>
-    setSteps((s) => {
-      const lastDay = s.length ? s[s.length - 1].day : 0;
-      return [...s, { id: newStepId('step'), day: lastDay + 3, title: '', actions: [blankAction()] }];
-    });
-
-  return (
-    <ActionForm
-      action={action}
-      onSuccess={(r) => {
-        if (r.redirectTo) router.push(r.redirectTo);
-        router.refresh();
-      }}
-      className="space-y-4"
-    >
-      {sequenceId ? <input type="hidden" name="sequenceId" value={sequenceId} /> : null}
-      <input type="hidden" name="steps" value={JSON.stringify(steps)} />
-      {header}
-
-      <ol className="space-y-3">
-        {steps.map((step, i) => (
-          <li key={step.id} className="card p-4">
-            <div className="mb-3 flex flex-wrap items-end gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink-900 text-sm font-semibold text-white">{i + 1}</div>
-              <Field label="Day" className="w-24">
-                <input type="number" min={1} value={step.day} onChange={(e) => update(i, { day: Number(e.target.value) })} className="w-full" />
-              </Field>
-              <Field label="Step title (optional)" className="min-w-[200px] flex-1">
-                <input value={step.title ?? ''} onChange={(e) => update(i, { title: e.target.value })} className="w-full" placeholder="e.g. First call" />
-              </Field>
-              <div className="ml-auto flex items-center gap-1">
-                <button type="button" className="btn-ghost btn-sm" onClick={() => move(i, -1)} disabled={i === 0} title="Move up">
-                  <IconArrowUp size={14} />
-                </button>
-                <button type="button" className="btn-ghost btn-sm" onClick={() => move(i, 1)} disabled={i === steps.length - 1} title="Move down">
-                  <IconArrowDown size={14} />
-                </button>
-                <button type="button" className="btn-ghost btn-sm text-red-600" onClick={() => setSteps((s) => s.filter((_, idx) => idx !== i))} disabled={steps.length === 1} title="Remove step">
-                  <IconTrash size={14} />
-                </button>
-              </div>
+  const [steps, setSteps] = useState(initialSteps);
+  const [dragged, setDragged] = useState<number | null>(null);
+  const validation = useMemo(() => { const parsed = StepsSchema.safeParse(steps); return parsed.success ? null : parsed.error.issues.map(i => i.message).join(' · '); }, [steps]);
+  const locked = (i: number) => readOnly || Boolean(lockedSteps[steps[i]?.id]);
+  const update = (i: number, patch: Partial<SequenceStep>) => { if (!locked(i)) setSteps(s => s.map((step, n) => n === i ? { ...step, ...patch } : step)); };
+  const changeAction = (i: number, j: number, patch: Partial<StepAction>) => update(i, { actions: steps[i].actions.map((a, n) => n === j ? { ...a, ...patch } : a) });
+  const move = (from: number, to: number) => {
+    if (to < 0 || to >= steps.length || steps.slice(Math.min(from, to), Math.max(from, to) + 1).some(s => lockedSteps[s.id]) || readOnly) return;
+    const days = steps.map(s => s.day); const next = [...steps]; const [item] = next.splice(from, 1); next.splice(to, 0, item);
+    setSteps(next.map((s, i) => ({ ...s, day: days[i] })));
+  };
+  const append = (type: ActionType) => setSteps(s => [...s, { id: newStepId(), day: (s.at(-1)?.day ?? -1) + 2, actions: [blankAction(type)] }]);
+  return <ActionForm action={action} onSuccess={r => { if (r.redirectTo) router.push(r.redirectTo); router.refresh(); }} className="space-y-5">
+    {sequenceId && <input type="hidden" name="sequenceId" value={sequenceId} />}
+    <input type="hidden" name="steps" value={JSON.stringify(steps)} />
+    {header}
+    <ol className="space-y-0">
+      {steps.map((step, i) => <li key={step.id} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); if (dragged !== null) move(dragged, i); setDragged(null); }}>
+        {i > 0 && <div className="ml-8 flex h-11 items-center border-l-2 border-brand-200 pl-5 text-xs text-ink-500">Wait <strong className="mx-1 text-ink-900">{step.day - steps[i - 1].day}</strong> business {step.day - steps[i - 1].day === 1 ? 'day' : 'days'}</div>}
+        <section className="surface overflow-hidden">
+          <div className="flex flex-wrap items-center gap-3 border-b border-line bg-canvas/50 px-5 py-4">
+            {!readOnly && <button draggable={!locked(i)} type="button" aria-label={'Drag step ' + (i + 1)} disabled={locked(i)} onDragStart={() => setDragged(i)} onDragEnd={() => setDragged(null)} className="cursor-grab px-1 text-lg text-ink-500 disabled:cursor-default">⠿</button>}
+            <span className="rounded-lg bg-brand-900 px-3 py-2 text-sm font-bold text-white">{i + 1}</span>
+            <label className="flex items-center gap-2 text-xs text-ink-500">Business day <input aria-label={'Step ' + (i + 1) + ' business day'} type="number" min={i ? steps[i - 1].day + 1 : 1} max={steps[i + 1] ? steps[i + 1].day - 1 : 999} value={step.day} onChange={e => update(i, { day: Number(e.target.value) })} disabled={locked(i)} className="!w-20 !font-bold !text-ink-900" /></label>
+            <div className="ml-auto flex items-center gap-1">
+              {lockedSteps[step.id] ? <span className="chip-muted"><strong>{lockedSteps[step.id]}</strong> open {lockedSteps[step.id] === 1 ? 'action' : 'actions'} · locked</span> : null}
+              {!readOnly && <><button type="button" className="btn-ghost btn-sm" disabled={locked(i) || !i || locked(i - 1)} aria-label={'Move step ' + (i + 1) + ' up'} onClick={() => move(i, i - 1)}><IconArrowUp size={14} /></button><button type="button" className="btn-ghost btn-sm" disabled={locked(i) || i === steps.length - 1 || locked(i + 1)} aria-label={'Move step ' + (i + 1) + ' down'} onClick={() => move(i, i + 1)}><IconArrowDown size={14} /></button><button type="button" className="btn-ghost btn-sm" disabled={locked(i) || steps.length < 2 || steps.slice(i + 1).some(s => lockedSteps[s.id])} aria-label={'Remove step ' + (i + 1)} onClick={() => setSteps(s => s.filter(x => x.id !== step.id))}><IconTrash size={14} /></button></>}
             </div>
-
-            <div className="space-y-3">
-              {step.actions.map((a, j) => (
-                <div key={a.id} className="rounded-md border border-line bg-canvas p-3">
-                  <div className="grid gap-3 md:grid-cols-[160px_1fr_auto]">
-                    <Field label={j === 0 ? 'Action' : `Then`}>
-                      <select value={a.type} onChange={(e) => updateAction(i, j, { type: e.target.value as ActionType, label: a.label === ACTION_LABELS[a.type] ? ACTION_LABELS[e.target.value as ActionType] : a.label })} className="w-full">
-                        {ACTION_TYPES.map((t) => (
-                          <option key={t} value={t}>
-                            {ACTION_LABELS[t]}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Field label="Label" hint="Shown to FOs and in the Twenty note, e.g. Email 2">
-                      <input value={a.label} onChange={(e) => updateAction(i, j, { label: e.target.value })} className="w-full" />
-                    </Field>
-                    <div className="flex items-end gap-1">
-                      <button
-                        type="button"
-                        className="btn-secondary btn-sm"
-                        onClick={() =>
-                          updateAction(i, j, {
-                            alternative: a.alternative ? undefined : { type: a.type === 'EMAIL' ? 'LINKEDIN_MESSAGE' : 'EMAIL', label: a.type === 'EMAIL' ? 'LinkedIn message' : 'Follow-up email', template: '' },
-                          })
-                        }
-                      >
-                        {a.alternative ? 'Remove either/or' : 'Add either/or'}
-                      </button>
-                      <button type="button" className="btn-ghost btn-sm text-red-600" disabled={step.actions.length === 1} onClick={() => update(i, { actions: step.actions.filter((_, k) => k !== j) })} title="Remove action">
-                        <IconTrash size={14} />
-                      </button>
-                    </div>
-                  </div>
-                  {a.type === 'EMAIL' ? (
-                    <Field label="Subject" className="mt-2">
-                      <input value={a.subject ?? ''} onChange={(e) => updateAction(i, j, { subject: e.target.value })} className="w-full" />
-                    </Field>
-                  ) : null}
-                  <Field label={a.type === 'CALL' ? 'Call script' : a.variants?.length ? 'Template (fallback when every variant is disabled)' : 'Template'} className="mt-2">
-                    <textarea rows={4} value={a.template ?? ''} onChange={(e) => updateAction(i, j, { template: e.target.value })} className="w-full font-mono text-xs" />
-                  </Field>
-                  {a.type === 'EMAIL' ? (
-                    <div className="mt-2 space-y-2">
-                      <label className="inline-flex items-center gap-1.5 text-sm font-normal text-ink-700">
-                        <input type="checkbox" checked={Boolean(a.replyInThread)} onChange={(e) => updateAction(i, j, { replyInThread: e.target.checked || undefined })} className="h-4 w-4 rounded" />
-                        Send as a reply in the existing thread
-                      </label>
-                      {(a.variants ?? []).map((v, k) => (
-                        <div key={v.id} className={`rounded-md border p-3 ${v.enabled === false ? 'border-line bg-canvas opacity-70' : 'border-violet-200 bg-violet-50/40'}`}>
-                          <div className="mb-2 flex flex-wrap items-center gap-2">
-                            <span className="text-xs font-semibold uppercase tracking-wide text-violet-700">A/B variant</span>
-                            <input value={v.label} onChange={(e) => updateAction(i, j, { variants: a.variants!.map((x, idx) => (idx === k ? { ...x, label: e.target.value } : x)) })} className="w-32 py-1 text-xs" />
-                            <label className="inline-flex items-center gap-1 text-xs font-normal text-ink-700">
-                              <input type="checkbox" checked={v.enabled !== false} onChange={(e) => updateAction(i, j, { variants: a.variants!.map((x, idx) => (idx === k ? { ...x, enabled: e.target.checked } : x)) })} className="h-3.5 w-3.5 rounded" /> enabled
-                            </label>
-                            <button type="button" className="btn-ghost btn-sm text-red-600" onClick={() => updateAction(i, j, { variants: a.variants!.filter((_, idx) => idx !== k).length ? a.variants!.filter((_, idx) => idx !== k) : undefined })}>
-                              <IconTrash size={12} />
-                            </button>
-                          </div>
-                          <Field label="Subject">
-                            <input value={v.subject ?? ''} onChange={(e) => updateAction(i, j, { variants: a.variants!.map((x, idx) => (idx === k ? { ...x, subject: e.target.value } : x)) })} className="w-full" />
-                          </Field>
-                          <Field label="Template" className="mt-2">
-                            <textarea rows={3} value={v.template ?? ''} onChange={(e) => updateAction(i, j, { variants: a.variants!.map((x, idx) => (idx === k ? { ...x, template: e.target.value } : x)) })} className="w-full font-mono text-xs" />
-                          </Field>
-                        </div>
-                      ))}
-                      <button
-                        type="button"
-                        className="btn-secondary btn-sm"
-                        onClick={() => {
-                          const n = (a.variants?.length ?? 0) + 1;
-                          const label = String.fromCharCode(64 + n);
-                          const existing = a.variants ?? [];
-                          // The first variant starts as a copy of the current template so A vs B is a fair test.
-                          const seed = existing.length ? [] : [{ id: newStepId('act'), label: 'A', subject: a.subject, template: a.template, enabled: true }];
-                          updateAction(i, j, { variants: [...existing, ...seed, { id: newStepId('act'), label: seed.length ? 'B' : label, subject: a.subject, template: a.template, enabled: true }] });
-                        }}
-                      >
-                        <IconPlus size={12} /> {a.variants?.length ? 'Add another variant' : 'Add A/B test'}
-                      </button>
-                    </div>
-                  ) : null}
-                  {a.alternative ? (
-                    <div className="mt-3 rounded-md border border-dashed border-line bg-white p-3">
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-500">Or instead</div>
-                      <div className="grid gap-3 md:grid-cols-[160px_1fr]">
-                        <Field label="Action">
-                          <select value={a.alternative.type} onChange={(e) => updateAction(i, j, { alternative: { ...a.alternative!, type: e.target.value as ActionType } })} className="w-full">
-                            {ACTION_TYPES.filter((t) => t !== a.type).map((t) => (
-                              <option key={t} value={t}>
-                                {ACTION_LABELS[t]}
-                              </option>
-                            ))}
-                          </select>
-                        </Field>
-                        <Field label="Label">
-                          <input value={a.alternative.label} onChange={(e) => updateAction(i, j, { alternative: { ...a.alternative!, label: e.target.value } })} className="w-full" />
-                        </Field>
-                      </div>
-                      {a.alternative.type === 'EMAIL' ? (
-                        <Field label="Subject" className="mt-2">
-                          <input value={a.alternative.subject ?? ''} onChange={(e) => updateAction(i, j, { alternative: { ...a.alternative!, subject: e.target.value } })} className="w-full" />
-                        </Field>
-                      ) : null}
-                      <Field label="Template" className="mt-2">
-                        <textarea rows={3} value={a.alternative.template ?? ''} onChange={(e) => updateAction(i, j, { alternative: { ...a.alternative!, template: e.target.value } })} className="w-full font-mono text-xs" />
-                      </Field>
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-              <button type="button" className="btn-secondary btn-sm" onClick={() => update(i, { actions: [...step.actions, blankAction('CALL')] })}>
-                <IconPlus size={14} /> Add action to this step
-              </button>
-            </div>
-          </li>
-        ))}
-      </ol>
-
-      <div className="flex flex-wrap items-center gap-3">
-        <button type="button" className="btn-secondary" onClick={addStep}>
-          <IconPlus size={16} /> Add step
-        </button>
-        <span className="text-xs text-ink-500">Variables: {TEMPLATE_VARIABLES.map((v) => `{{${v}}}`).join(' ')}</span>
-      </div>
-
-      {askChangeNote ? (
-        <Field label="What changed? (kept in version history)">
-          <input name="changeNote" className="w-full" placeholder="e.g. Softer Email 2, moved call to day 4" />
-        </Field>
-      ) : null}
-      {validation ? <p className="text-sm text-red-700">{validation}</p> : null}
-      <button type="submit" className="btn-primary" disabled={Boolean(validation)}>
-        {submitLabel}
-      </button>
-    </ActionForm>
-  );
+          </div>
+          <div className="space-y-4 p-5">
+            {step.actions.map((a, j) => <fieldset key={a.id} disabled={locked(i)} className="space-y-3 rounded-xl border border-line bg-canvas/30 p-4">
+              <div className="flex items-center gap-2"><span className="rounded-lg bg-white p-2 text-brand-700"><ActionIcon action={a.type} size={19} /></span><strong className="text-sm">{ACTION_LABELS[a.type]}</strong>{!readOnly && step.actions.length > 1 && <button type="button" aria-label={'Remove ' + ACTION_LABELS[a.type] + ' module'} className="btn-ghost btn-sm ml-auto" onClick={() => update(i, { actions: step.actions.filter(x => x.id !== a.id) })}><IconTrash size={14} /></button>}</div>
+              {a.type === 'EMAIL' && <Field label="Subject"><input aria-label={'Step ' + (i + 1) + ' email subject'} className="w-full !font-semibold" value={a.subject ?? ''} onChange={e => changeAction(i, j, { subject: e.target.value })} /></Field>}
+              <RichTextEditor value={htmlOf(a)} label={'Step ' + (i + 1) + ' ' + ACTION_LABELS[a.type]} disabled={locked(i)} onChange={(bodyHtml, template) => changeAction(i, j, { bodyHtml, template })} />
+            </fieldset>)}
+            {!locked(i) && <div className="flex flex-wrap items-center gap-2"><span className="mr-1 text-xs text-ink-500">Add to this step</span>{ACTION_TYPES.map(type => <button key={type} type="button" className="btn-secondary btn-sm" onClick={() => update(i, { actions: [...step.actions, blankAction(type)] })}><ActionIcon action={type} size={13} />{ACTION_LABELS[type]}</button>)}</div>}
+          </div>
+        </section>
+      </li>)}
+    </ol>
+    {!readOnly && <><div className="flex flex-wrap items-center justify-center gap-2 rounded-xl border border-dashed border-brand-300 bg-brand-50/40 p-5"><span className="mr-2 text-sm font-semibold">New touchpoint</span>{ACTION_TYPES.map(type => <button key={type} type="button" className="btn-secondary" onClick={() => append(type)}><IconPlus size={13} /><ActionIcon action={type} size={14} />{ACTION_LABELS[type]}</button>)}</div>
+      <div className="sticky bottom-3 z-10 flex items-center justify-end gap-4 rounded-xl border border-line bg-white/95 p-3 shadow-lg">{validation && <p role="alert" className="text-sm text-red-700">{validation}</p>}<button type="submit" className="btn-primary" disabled={Boolean(validation)}>{submitLabel}</button></div></>}
+  </ActionForm>;
 }

@@ -23,12 +23,12 @@ export function followingWorkingDay(date: LocalDate, workingDays: number[]): Loc
 }
 
 /**
- * Planned date of a step: enrollment start + (day - 1) + accumulated shift, rolled forward
- * to a working day. Day 1 is the start date itself.
+ * Step days count working days. Shifts remain elapsed calendar days so lateness is preserved.
  */
 export function plannedDateForStep(startDate: LocalDate, stepDay: number, shiftDays: number, workingDays: number[]): LocalDate {
-  const raw = addDays(startDate, Math.max(0, stepDay - 1) + Math.max(0, shiftDays));
-  return nextWorkingDay(raw, workingDays);
+  let date = nextWorkingDay(startDate, workingDays);
+  for (let n = 1; n < stepDay; n++) date = followingWorkingDay(date, workingDays);
+  return nextWorkingDay(addDays(date, Math.max(0, shiftDays)), workingDays);
 }
 
 /** Calendar days a step finished after its planned date (never negative). */

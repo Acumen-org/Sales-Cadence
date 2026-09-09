@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { prisma } from '../src/lib/db';
 import { env } from '../src/lib/env';
 import { hashPassword } from '../src/lib/auth/password';
-import { DEFAULT_SEQUENCE_DESCRIPTION, DEFAULT_SEQUENCE_NAME, DEFAULT_SEQUENCE_STEPS } from '../src/lib/sequences/default-sequence';
+import { DEFAULT_SEQUENCE_NAME, DEFAULT_SEQUENCE_STEPS } from '../src/lib/sequences/default-sequence';
 import { StepsSchema } from '../src/lib/sequences/steps';
 import { DEMO_MEMBERS, DEMO_POD_OPTIONS } from '../src/lib/twenty/demo-fixtures';
 import { DEMO_MEETINGS, DEMO_RELATIONSHIPS, DEMO_USER_MAILBOXES } from '../src/lib/meetings/demo-meetings';
@@ -28,11 +28,9 @@ async function seedCore() {
   const steps = StepsSchema.parse(DEFAULT_SEQUENCE_STEPS);
   let sequence = await prisma.sequence.findUnique({ where: { name: DEFAULT_SEQUENCE_NAME } });
   if (!sequence) {
-    sequence = await prisma.sequence.create({ data: { name: DEFAULT_SEQUENCE_NAME, description: DEFAULT_SEQUENCE_DESCRIPTION } });
-    const version = await prisma.sequenceVersion.create({ data: { sequenceId: sequence.id, version: 1, steps, changeNote: 'Seeded default sequence' } });
-    await prisma.sequence.update({ where: { id: sequence.id }, data: { activeVersionId: version.id } });
-    await logAudit({ entityType: 'sequence', entityId: sequence.id, action: 'seeded', actor: SYSTEM_ACTOR, details: { version: 1 } });
-    console.log(`  + sequence "${DEFAULT_SEQUENCE_NAME}" v1 (${steps.length} steps)`);
+    sequence = await prisma.sequence.create({ data: { name: DEFAULT_SEQUENCE_NAME, steps } });
+    await logAudit({ entityType: 'sequence', entityId: sequence.id, action: 'seeded', actor: SYSTEM_ACTOR, details: { steps: steps.length } });
+    console.log(`  + sequence "${DEFAULT_SEQUENCE_NAME}" (${steps.length} steps)`);
   } else {
     console.log(`  = sequence "${DEFAULT_SEQUENCE_NAME}" exists`);
   }

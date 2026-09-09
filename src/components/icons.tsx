@@ -13,7 +13,7 @@ function base({ size = 18, ...props }: IconProps) {
     viewBox: '0 0 24 24',
     fill: 'none',
     stroke: 'currentColor',
-    strokeWidth: 2.1,
+    strokeWidth: 1.7,
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
     'aria-hidden': true,
@@ -27,6 +27,9 @@ export const IconHome = (p: IconProps) => (
     <path d="M5 9.5V21h14V9.5" />
     <path d="M10 21v-6h4v6" />
   </svg>
+);
+export const IconMenu = (p: IconProps) => (
+  <svg {...base(p)}><path d="M4 6h16M4 12h16M4 18h16" /></svg>
 );
 export const IconTasks = (p: IconProps) => (
   <svg {...base(p)}>

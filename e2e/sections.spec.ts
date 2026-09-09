@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 /**
  * The sections added for meetings, accounts and activity, plus the Home and chrome rules:
- * one row of tiles, this-week boxes, utilities only on Tasks, Settings only for an admin.
+ * Personal priorities, weekly team performance, global utilities and role-aware navigation.
  */
 test.describe.configure({ mode: 'serial' });
 
@@ -17,27 +17,15 @@ async function logout(page: Page) {
   await expect(page).toHaveURL(/\/login/);
 }
 
-test('Home greets the signed-in user and drops the old boxes', async ({ page }) => {
+test('Home greets the signed-in user and opens personal work from its priorities', async ({ page }) => {
   await loginAs(page, 'Alisa');
   await expect(page.getByRole('heading', { name: 'Good day, Alisa' })).toBeVisible();
 
-  // The date-and-counts line under the greeting is gone.
-  await expect(page.getByText(/people in your sequences/)).toHaveCount(0);
-
-  // One row of six bordered tiles, and these are all of them: the old "Done this week",
-  // "Replies this week" and "OVERDUE" tiles are not among them.
-  const tileLabels = await page.locator('a.surface span.uppercase').allTextContents();
-  expect(tileLabels.map((t) => t.trim())).toEqual(['To reach today', 'Calls today', 'Emails today', 'LinkedIn today', 'My accounts', 'My relationships']);
-
-  for (const label of ['To reach today', 'Calls today', 'Emails today', 'LinkedIn today', 'My accounts', 'My relationships']) {
+  for (const label of ['To reach today', 'Completed today', 'Calls today', 'Emails today', 'LinkedIn today', 'My accounts', 'My relationships']) {
     await expect(page.getByText(label, { exact: true })).toBeVisible();
   }
-  const tiles = page.locator('a.surface');
-  await expect(tiles).toHaveCount(6);
-
-  // The two week boxes were removed: the tiles and the team board are the whole page.
-  await expect(page.getByText('Replies this week')).toHaveCount(0);
-  await expect(page.getByText('Meetings booked this week')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Up next' })).toBeVisible();
+  await expect(page.getByRole('progressbar', { name: "Today's progress" })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Your pods this week' })).toBeVisible();
   await logout(page);
 });
@@ -60,18 +48,14 @@ test('the team board reports this week, with a total row', async ({ page }) => {
   await logout(page);
 });
 
-test('only the help button sits top right, except on Tasks', async ({ page }) => {
+test('search and help are available from every workspace section', async ({ page }) => {
   await loginAs(page, 'Alisa');
-  const header = page.locator('header');
+  const header = page.locator('.workspace-topbar');
   for (const path of ['/home', '/accounts', '/people', '/meetings', '/campaigns', '/activity']) {
     await page.goto(path);
     await expect(header.getByLabel('Help')).toBeVisible();
-    await expect(header.getByLabel('Search')).toHaveCount(0);
-    await expect(header.getByLabel('Overdue tasks')).toHaveCount(0);
-    await expect(header.getByLabel('Call tasks')).toHaveCount(0);
-    // The two purple buttons are gone everywhere.
-    await expect(header.getByRole('link', { name: /Campaign/ })).toHaveCount(0);
-    await expect(header.locator('.btn-primary')).toHaveCount(0);
+    await expect(header.getByLabel('Search')).toBeVisible();
+    await expect(header.getByLabel('Overdue tasks')).toBeVisible();
   }
   await page.goto('/tasks');
   await expect(header.getByLabel('Search')).toBeVisible();
@@ -81,13 +65,14 @@ test('only the help button sits top right, except on Tasks', async ({ page }) =>
 
 test('Settings is admin-only, in the sidebar and by URL', async ({ page }) => {
   await loginAs(page, 'Karson');
-  await expect(page.locator('nav').getByRole('link', { name: 'Settings' })).toHaveCount(0);
+  await expect(page.locator('aside').getByRole('link', { name: 'Settings' })).toHaveCount(0);
+  await expect(page.locator('aside').getByRole('link', { name: 'Reports' })).toHaveCount(0);
   await page.goto('/settings');
   await expect(page).not.toHaveURL(/\/settings/);
   await logout(page);
 
   await loginAs(page, 'Admin');
-  await expect(page.locator('nav').getByRole('link', { name: 'Settings' })).toBeVisible();
+  await expect(page.locator('aside').getByRole('link', { name: 'Settings' })).toBeVisible();
   await logout(page);
 });
 

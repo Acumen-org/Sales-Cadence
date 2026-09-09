@@ -12,6 +12,8 @@ import type {
   TwentyView,
   TwentyWorkspaceMember,
   UpdateTaskInput,
+  EnrichPersonInput,
+  EnrichCompanyInput,
 } from './types';
 
 export type ListOptions = {
@@ -24,6 +26,7 @@ export type ListOptions = {
 export type ListPeopleOptions = ListOptions & {
   ids?: string[];
   podOwner?: string;
+  companyId?: string;
   includeDeleted?: boolean;
 };
 
@@ -59,6 +62,9 @@ export interface TwentyClient {
   createTask(input: CreateTaskInput): Promise<{ id: string }>;
   updateTask(id: string, patch: UpdateTaskInput): Promise<void>;
   deleteTask(id: string): Promise<void>;
+  /** Explicitly reviewed enrichment; unlike task writes, this updates existing CRM records. */
+  enrichPerson(id: string, patch: EnrichPersonInput, current?: TwentyPerson): Promise<TwentyPerson>;
+  enrichCompany(id: string, patch: EnrichCompanyInput, current?: TwentyCompany): Promise<TwentyCompany>;
 
   // ---- schema ----
   introspect(): Promise<TwentyIntrospection>;
@@ -72,12 +78,16 @@ export async function* paginate<T>(
   maxPages = 1000,
 ): AsyncGenerator<T, void, undefined> {
   let after: string | null = null;
+  const cursors = new Set<string>();
   for (let i = 0; i < maxPages; i++) {
     const page: Page<T> = await fetchPage(after);
     for (const item of page.items) yield item;
-    if (!page.hasNextPage || !page.endCursor) return;
+    if (!page.hasNextPage) return;
+    if (!page.endCursor || cursors.has(page.endCursor)) throw new Error('Twenty pagination did not advance; sync is incomplete.');
+    cursors.add(page.endCursor);
     after = page.endCursor;
   }
+  throw new Error(`Twenty pagination exceeded ${maxPages} pages; sync is incomplete.`);
 }
 
 export async function collectAll<T>(fetchPage: (after: string | null) => Promise<Page<T>>): Promise<T[]> {

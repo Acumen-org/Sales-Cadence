@@ -136,6 +136,7 @@ export async function upsertCompanyCache(c: TwentyCompany, tx: Tx | typeof prism
     ownerMemberId: c.ownerMemberId ?? null,
     industry: c.industry ?? null,
     employees: c.employees ?? null,
+    aum: c.aum ?? null,
     city: c.city ?? null,
     linkedinUrl: c.linkedinUrl ?? null,
     raw: (c.raw ?? undefined) as Prisma.InputJsonValue | undefined,

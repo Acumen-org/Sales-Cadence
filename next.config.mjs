@@ -11,6 +11,7 @@ const cpus = Number(process.env.NEXT_BUILD_CPUS ?? 1);
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   serverExternalPackages: ['@prisma/client', 'bcryptjs'],
   outputFileTracingRoot: path.dirname(fileURLToPath(import.meta.url)),
   poweredByHeader: false,

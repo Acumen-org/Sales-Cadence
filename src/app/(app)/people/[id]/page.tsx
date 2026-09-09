@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
-import { canEnroll, canManageEnrollment, toActor, visiblePodIds } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
 import { formatInstant, formatLocalDate } from '@/lib/dates';
 import { cachedPersonName, upsertPersonCache } from '@/lib/person-cache';
@@ -11,17 +10,19 @@ import { getTwentyConnection } from '@/lib/settings';
 import { getTwentyClient } from '@/lib/twenty';
 import type { TwentyNote, TwentyOpportunity } from '@/lib/twenty/types';
 import { twentyPersonUrl } from '@/lib/twenty/urls';
+import { CrmHistory } from '@/components/people/crm-history';
 import { ActionIcon, IconExternal } from '@/components/icons';
-import { PersonControls } from '@/components/people/person-controls';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
 import { Avatar, Badge, Card, contactWarnings, crmStanding, ENROLLMENT_TONE, enrollmentStatusLabel, KeyValue, RecordHeader, Surface, Tabs, TierBadge } from '@/components/ui';
 
 type TimelineItem = { at: Date; kind: 'touch' | 'note' | 'task' | 'state'; icon: string; title: string; detail?: string | null; tone?: 'in' | 'out' | 'neutral' };
 
-export default async function PersonPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string }> }) {
+export default async function PersonPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; crmNotes?: string; crmEmails?: string }> }) {
   const user = await requireUser();
   const { id } = await params;
-  const { tab = 'activity' } = await searchParams;
+  const sp = await searchParams;
+  const requested = sp.tab;
+  const tab = requested === 'activity' || requested === 'sequences' || requested === 'crm' ? requested : 'overview';
   let person = await prisma.personCache.findUnique({ where: { id } });
   // Instant sync: re-read this person from Twenty on every visit so CRM edits show immediately,
   // even between webhooks. Failures fall back to the cache.
@@ -37,20 +38,18 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
     liveWarning = `Showing cached data; Twenty unavailable (${err instanceof Error ? err.message : String(err)}).`;
   }
   if (!person) notFound();
-  const actor = toActor(user);
 
-  const [enrollments, touches, tasks, audit, conn, pods, sequences, colleagues] = await Promise.all([
+  const [enrollments, touches, tasks, audit, conn, pods, colleagues] = await Promise.all([
     prisma.enrollment.findMany({
       where: { personId: id },
-      include: { fo: { select: { id: true, name: true } }, sequence: { include: { activeVersion: true } }, sequenceVersion: true, campaign: { select: { id: true, name: true } }, pod: { include: { users: { include: { user: { select: { id: true, name: true, active: true } } } } } } },
+      include: { fo: { select: { id: true, name: true } }, sequence: true, campaign: { select: { id: true, name: true, status: true } }, pod: { include: { users: { include: { user: { select: { id: true, name: true, active: true } } } } } } },
       orderBy: { createdAt: 'desc' },
     }),
-    prisma.touch.findMany({ where: { personId: id }, orderBy: { occurredAt: 'desc' }, take: 100 }),
+    prisma.touch.findMany({ where: { personId: id }, orderBy: { occurredAt: 'desc' } }),
     prisma.task.findMany({ where: { enrollment: { personId: id } }, include: { fo: { select: { name: true } } }, orderBy: [{ stepIndex: 'asc' }, { actionIndex: 'asc' }] }),
-    prisma.auditLog.findMany({ where: { OR: [{ entityType: 'person', entityId: id }, { entityType: 'enrollment', entityId: { in: (await prisma.enrollment.findMany({ where: { personId: id }, select: { id: true } })).map((e) => e.id) } }] }, orderBy: { createdAt: 'desc' }, take: 100 }),
+    prisma.auditLog.findMany({ where: { OR: [{ entityType: 'person', entityId: id }, { entityType: 'enrollment', entityId: { in: (await prisma.enrollment.findMany({ where: { personId: id }, select: { id: true } })).map((e) => e.id) } }] }, orderBy: { createdAt: 'desc' } }),
     getTwentyConnection(),
     prisma.pod.findMany({ include: { users: { include: { user: { select: { id: true, name: true, active: true } } } } }, orderBy: { name: 'asc' } }),
-    prisma.sequence.findMany({ where: { archived: false }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
     person.companyId ? prisma.personCache.findMany({ where: { companyId: person.companyId, id: { not: id }, deletedAt: null }, include: { enrollments: { orderBy: { createdAt: 'desc' }, take: 1 } }, take: 30 }) : Promise.resolve([]),
   ]);
 
@@ -64,16 +63,12 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
     twentyWarning = `Twenty unavailable: ${err instanceof Error ? err.message : String(err)}`;
   }
 
-  const active = enrollments.find((e) => e.status === 'ACTIVE' || e.status === 'PAUSED') ?? null;
+  const currentEnrollments = enrollments.filter((e) => e.status === 'ACTIVE' || e.status === 'PAUSED');
   const standing = crmStanding(person);
   const warnings = contactWarnings(person);
   const podName = person.podOwner ? pods.find((x) => x.podOwnerValue === person.podOwner)?.name ?? optionLabel(person.podOwner) : null;
   const ownerName = person.ownerMemberId ? (await prisma.user.findFirst({ where: { twentyMemberId: person.ownerMemberId }, select: { name: true } }))?.name ?? null : null;
   const twentyUrl = twentyPersonUrl(conn.baseUrl, id);
-  const visible = visiblePodIds(user);
-  const enrolPods = pods.filter((p) => visible === null || visible.includes(p.id)).map((p) => ({ id: p.id, name: p.name, podOwnerValue: p.podOwnerValue, fos: p.users.filter((u) => u.user.active).map((u) => ({ id: u.user.id, name: u.user.name })) }));
-  const activeSteps = active?.sequence.activeVersion ? parseSteps(active.sequence.activeVersion.steps) : [];
-
   // Unified timeline
   const items: TimelineItem[] = [
     ...touches.map<TimelineItem>((t) => ({ at: t.occurredAt, kind: 'touch', icon: t.channel, title: t.summary, detail: t.actorLabel, tone: t.direction === 'INBOUND' ? 'in' : 'out' })),
@@ -92,9 +87,10 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
   ].sort((a, b) => b.at.getTime() - a.at.getTime());
 
   const tabs = [
+    { key: 'overview', label: 'Overview' },
+    { key: 'sequences', label: 'Campaigns & sequences', count: enrollments.length },
     { key: 'activity', label: 'Activity', count: items.length },
-    { key: 'sequences', label: 'Sequences', count: enrollments.length },
-    { key: 'details', label: 'Details' },
+    { key: 'crm', label: 'CRM emails & notes' },
   ];
 
   return (
@@ -102,14 +98,6 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
       <div className="px-6 pt-2">
         <RecordHeader
           name={cachedPersonName(person)}
-          sub={
-            <>
-              {person.jobTitle ?? 'Unknown title'}
-              {person.companyName ? ` · ${person.companyName}` : ''}
-              {podName ? ` · ${podName}` : ''}
-              {ownerName ? ` · owned by ${ownerName}` : ''}
-            </>
-          }
           badges={
             <>
               <Badge tone={standing.tone} dot>
@@ -158,6 +146,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
             <Tabs inset={false} current={tab} tabs={tabs.map((t) => ({ ...t, href: `/people/${id}?tab=${t.key}` }))} />
           </Surface>
           <div className="pt-3">
+            {tab === 'crm' ? <CrmHistory personId={id} timezone={user.timezone} baseHref={`/people/${id}?tab=crm`} notesAfter={sp.crmNotes} emailsAfter={sp.crmEmails} /> : null}
             {tab === 'activity' ? (
               <Card title="Activity">
                 {twentyWarning ?? liveWarning ? <div className="px-4 pt-3 text-xs text-amber-700">{twentyWarning ?? liveWarning}</div> : null}
@@ -167,14 +156,14 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                   <ol className="divide-y divide-line">
                     {items.map((it, i) => (
                       <li key={i} className="flex gap-3 px-4 py-2.5 text-sm">
-                        <span className={it.tone === 'in' ? 'mt-0.5 text-emerald-600' : it.tone === 'out' ? 'mt-0.5 text-ink-500' : 'mt-0.5 text-ink-400'}>
+                        <span className={it.tone === 'in' ? 'mt-0.5 text-emerald-600' : it.tone === 'out' ? 'mt-0.5 text-ink-500' : 'mt-0.5 font-semibold text-ink-700'}>
                           {it.icon === 'NOTE' || it.icon === 'STATE' ? <span className="inline-block h-3.5 w-3.5 rounded-full border border-current" /> : <ActionIcon action={it.icon} size={14} />}
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="text-ink-800">{it.title}</span>
-                          {it.detail ? <span className="block truncate text-xs text-ink-500">{it.detail}</span> : null}
+                          {it.detail ? <span className="block whitespace-pre-wrap text-sm text-ink-700">{it.detail}</span> : null}
                         </span>
-                        <span className="shrink-0 text-xs text-ink-400">{formatInstant(it.at, user.timezone)}</span>
+                        <span className="shrink-0 text-xs font-semibold text-ink-700">{formatInstant(it.at, user.timezone)}</span>
                       </li>
                     ))}
                   </ol>
@@ -186,31 +175,26 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
               <div className="space-y-4">
                 {enrollments.length === 0 ? <Card><div className="p-4 text-sm text-ink-500">Never enrolled.</div></Card> : null}
                 {enrollments.map((e) => {
-                  const steps = parseSteps(e.sequenceVersion.steps);
+                  const steps = parseSteps(e.sequence.steps);
                   const eTasks = tasks.filter((t) => t.enrollmentId === e.id);
                   return (
                     <Card
                       key={e.id}
-                      title={
-                        <>
-                          <Link href={`/sequences/${e.sequenceId}`} className="hover:underline">
-                            {e.sequence.name}
-                          </Link>{' '}
-                          v{e.sequenceVersion.version} <Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'} className="ml-1">{enrollmentStatusLabel(e)}</Badge>
-                          <span className="ml-2 text-xs font-normal text-ink-500">
-                            {e.fo.name} · started {formatLocalDate(e.startDate, 'long')}
-                            {e.campaign ? ` · ${e.campaign.name}` : ''}
-                            {e.shiftDays ? ` · shifted ${e.shiftDays}d` : ''}
-                          </span>
-                        </>
-                      }
+                      title={<Link href={`/sequences/${e.sequenceId}`} className="font-semibold hover:underline">{e.sequence.name}</Link>}
+                      actions={<Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'}>{enrollmentStatusLabel(e)}</Badge>}
                     >
+                      <div className="grid gap-4 border-b border-line bg-canvas/50 p-4 sm:grid-cols-2 lg:grid-cols-4">
+                        <div><div className="text-xs text-ink-500">Campaign</div><div className="mt-1 font-semibold text-ink-900">{e.campaign ? <Link href={`/campaigns/${e.campaign.id}`} className="text-brand-700 hover:underline">{e.campaign.name}</Link> : 'Direct enrollment'}</div></div>
+                        <div><div className="text-xs text-ink-500">Assigned to</div><div className="mt-1 font-semibold text-ink-900">{e.fo.name}</div></div>
+                        <div><div className="text-xs text-ink-500">Started</div><div className="mt-1 font-semibold text-ink-900">{formatLocalDate(e.startDate, 'long')}</div></div>
+                        <div><div className="text-xs text-ink-500">Campaign status</div><div className="mt-1 font-semibold capitalize text-ink-900">{e.campaign?.status.toLowerCase() ?? 'Not linked'}</div></div>
+                      </div>
                       <ol className="divide-y divide-line">
                         {steps.map((step, i) => {
                           const st = eTasks.filter((t) => t.stepIndex === i);
                           const reached = st.length > 0;
                           return (
-                            <li key={step.id} className={`flex items-center gap-3 px-4 py-2 text-sm ${reached ? '' : 'opacity-50'}`}>
+                            <li key={step.id} className={`flex items-center gap-3 px-4 py-2 text-sm `}>
                               <span className="w-14 shrink-0 text-xs font-semibold uppercase text-ink-500">Day {step.day}</span>
                               <span className="flex-1 text-ink-800">{describeStep(step)}</span>
                               <span className="flex flex-wrap gap-1">
@@ -220,7 +204,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                                     {t.disposition ? ` (${t.disposition})` : ''}
                                   </Badge>
                                 ))}
-                                {!reached ? <span className="text-xs text-ink-400">not reached</span> : null}
+                                {!reached ? <span className="text-xs font-semibold text-ink-700">not reached</span> : null}
                               </span>
                             </li>
                           );
@@ -232,9 +216,13 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
               </div>
             ) : null}
 
-            {tab === 'details' ? (
+            {tab === 'overview' ? (
               // Grouped the way the record is grouped in Twenty, so the two read the same.
               <div className="space-y-3">
+                {twentyWarning ?? liveWarning ? <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">CRM temporarily unavailable. Showing the last synced record.</div> : null}
+                <Card title="Current campaigns" actions={<Link href={`/people/${id}?tab=sequences`} className="btn-ghost btn-sm">View history</Link>}>
+                  {currentEnrollments.length ? <div className="divide-y divide-line">{currentEnrollments.map((e) => <div key={e.id} className="flex flex-wrap items-center justify-between gap-3 p-4"><div><div className="font-semibold text-ink-900">{e.campaign ? <Link href={`/campaigns/${e.campaign.id}`} className="hover:text-brand-700 hover:underline">{e.campaign.name}</Link> : 'Direct enrollment'}</div><Link href={`/sequences/${e.sequenceId}`} className="mt-1 block text-sm font-semibold text-brand-700">{e.sequence.name}</Link></div><Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'}>{enrollmentStatusLabel(e)}</Badge></div>)}</div> : <div className="p-4 text-sm text-ink-500">No current campaign</div>}
+                </Card>
                 <Card title="Contact details">
                   <div className="p-4">
                     {/* Consent only appears when there is a restriction: its absence is normal. */}
@@ -252,7 +240,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                         { k: 'LinkedIn', v: person.linkedinUrl },
                         { k: 'X', v: person.xUrl },
                         { k: 'Title', v: person.jobTitle },
-                        { k: 'Company', v: person.companyName },
+                        { k: 'Company', v: person.companyId ? <Link href={`/accounts/${person.companyId}`} className="text-brand-700 hover:underline">{person.companyName}</Link> : person.companyName },
                         { k: 'City', v: person.city },
                       ]}
                     />
@@ -280,7 +268,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                         { k: 'Contact type', v: optionLabels(person.contactType, ' / ') || null },
                         { k: 'Pipeline stage', v: person.pipelineStage ? optionLabel(person.pipelineStage) : null },
                         {
-                          k: 'Cadence',
+                          k: 'CRM cadence tag',
                           v: person.listCategory
                             ? `${optionLabel(person.listCategory)}${person.previousCadence ? ` (was ${optionLabel(person.previousCadence)})` : ''}`
                             : null,
@@ -309,7 +297,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                   </div>
                 </Card>
 
-                <Card title="Next action, as Twenty holds it">
+                <Card title="CRM activity details">
                   <div className="p-4">
                     <KeyValue
                       items={[
@@ -332,7 +320,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                           k: 'Recording',
                           v: person.recordingUrl ? (
                             <Link href={`/meetings/new?personId=${person.id}&url=${encodeURIComponent(person.recordingUrl)}`} className="text-brand-700 hover:underline">
-                              Add to Cadence
+                              Add meeting
                             </Link>
                           ) : null,
                         },
@@ -359,20 +347,6 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
         </div>
 
         <aside className="min-w-0 space-y-3">
-          <PersonControls
-            personId={id}
-            optedOut={person.optedOut}
-            badEmail={person.badEmail}
-            badPhone={person.badPhone}
-            dnd={person.dnd}
-            canManagePerson={canEnroll(actor)}
-            active={active ? { id: active.id, status: active.status, foUserId: active.foUserId, currentStep: active.currentStep, canManage: canManageEnrollment(actor, active) } : null}
-            steps={activeSteps.map((s, index) => ({ index, label: `Day ${s.day} · ${describeStep(s)}` }))}
-            fos={active?.pod?.users.filter((u) => u.user.active).map((u) => ({ id: u.user.id, name: u.user.name })) ?? []}
-            sequences={sequences}
-            pods={enrolPods}
-            defaultPodId={person.podOwner ? pods.find((p) => p.podOwnerValue === person.podOwner)?.id ?? null : null}
-          />
           <Card title="Open opportunities">
             {opportunities.length === 0 ? (
               <div className="p-4 text-sm text-ink-500">None.</div>
@@ -400,7 +374,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                         <Avatar name={cachedPersonName(c)} shape="circle" size={24} />
                         <span className="min-w-0 truncate text-ink-800">
                           {cachedPersonName(c)}
-                          {c.jobTitle ? <span className="text-ink-400"> · {c.jobTitle}</span> : null}
+                          {c.jobTitle ? <span className="font-semibold text-ink-700"> · {c.jobTitle}</span> : null}
                         </span>
                       </Link>
                       <Badge tone={st.tone} dot>

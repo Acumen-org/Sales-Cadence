@@ -24,7 +24,7 @@ Server sizing and deploy: [DEPLOY.md](DEPLOY.md). Full list of assumptions: [DEC
 
 Double-click **start-cadence.cmd**. It installs dependencies on the first run, starts an embedded Postgres, applies migrations, seeds the dummy workspace, starts the app and worker, and opens http://localhost:3100/login in your browser. The login page has one-click "sign in as" buttons for the demo users (mock mode only). Close the window to stop; data is kept in `.pgdata-dev`.
 
-The same thing from a terminal: `pnpm start:local`.
+The same thing from a terminal: `pnpm start:local`. Each launch builds the current source before serving it. Set `CADENCE_SKIP_BUILD=1` only when deliberately reusing a build you just made. Database directories must be direct subdirectories of the project; the launcher refuses a running database or a nonempty, uninitialized directory instead of deleting files.
 
 **The dummy data** (everything is named "Dummy ..." so it cannot be mistaken for real data): two pods (Alisa's pod, Andrew's pod) plus one discovered from a person's `podOwner` value; one user per role (Admin, Alisa and Andrew as Senior FOs, Karson and Daniel as Junior FOs); three Dummy Companies and sixteen Dummy people carrying the real shape of the CRM record (every tier, every contact type, every list category, a booked meeting with a recording, a rotated-out record, a do-not-contact select and tags that say the contact details are missing); two campaigns per pod (one a week old, one starting today) with enrollments in every state: due today, overdue, replied, bounced, finished, meeting booked, and one dnd person who could not be enrolled; a reporting chart and a stance for every dummy person, so the Accounts relationship map has something to show; and four dummy meetings, one of each kind - a media file that really plays, a SharePoint recording, a Zoom page that has to open in a new tab, and a Google Meet join link - two of them with transcripts. To start over, delete `.pgdata-dev` and launch again.
 
@@ -43,7 +43,7 @@ The same thing from a terminal: `pnpm start:local`.
 
 ## Stack
 
-TypeScript, Node 20, Next.js 15 (App Router, server actions), Postgres 18, Prisma 6, Tailwind 3, Vitest 3, Playwright, Docker Compose. Tests run on an embedded Postgres 18, so no Docker is needed to run them. Verified against Twenty 1.23.
+TypeScript, Node 20+, Next.js 15 (App Router, server actions), Postgres 18, Prisma 6, Tailwind 3, Vitest 4, Playwright, Docker Compose. Tests run on an embedded Postgres 18, so no Docker is needed to run them. The existing integration targets Twenty 1.23; check your live workspace with `pnpm verify:schema`.
 
 ## Run on Windows with Docker Desktop
 
@@ -111,7 +111,13 @@ pnpm screens       # captures every screen to .screens/ for design review
 pnpm build
 ```
 
-The end-to-end suite covers demo sign-in, campaign creation with the conflict preview, the task flow (done, log a call with an outcome, skip with a bounce, answered call finishing as replied), sequence editing, settings, role restrictions, reports and the people pages.
+The end-to-end suite covers demo sign-in, campaign creation with the conflict preview, the task flow (done, log a call with an outcome, skip with a bounce, answered call finishing as replied), sequence editing, settings, role restrictions, reports, account maps, meeting forms, global search, dialog focus, and mobile navigation. To use a separate browser-test database without clearing an existing one, build first, then set `E2E_DB_DIR` to a new project subdirectory and run `pnpm exec playwright test`.
+
+## Workspace design and review
+
+Cadence uses a warm canvas, evergreen navigation, lime accents, a custom mark, and a consistent set of cards, tables, controls, and record headers. Home combines personal priorities, a focused task-flow entry point, upcoming touches, and weekly team performance. Sequences have a searchable visual library with real touch plans. Search (`Ctrl+K` / `Cmd+K`) and help are available from every section; the sidebar becomes a keyboard-accessible drawer on mobile.
+
+The project review and its verification scope are recorded in [AUDIT.md](AUDIT.md). Meeting times are entered in the signed-in user's timezone. Meeting analysis and suggested approaches remain explicitly unconnected until a model provider is implemented.
 
 ## Roles
 

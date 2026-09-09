@@ -17,6 +17,7 @@ datasource db {
 
 enum Role {
   ADMIN
+  SALES_LEADER
   SENIOR_FO
   JUNIOR_FO
 }
@@ -46,6 +47,8 @@ enum TaskState {
 
 enum CampaignStatus {
   DRAFT
+  PENDING_APPROVAL
+  SCHEDULED
   ACTIVE
   PAUSED
   STOPPED
@@ -136,7 +139,8 @@ model User {
   twentyMemberId String?   @unique
   /// Extra handles that identify this user in note titles, e.g. "tw_alisa".
   aliases        String[]  @default([])
-  timezone       String    @default("Europe/London")
+  timezone       String    @default("America/Chicago")
+  notificationsReadAt DateTime?
   /// Per-user override of the daily action cap. Null = use the global setting.
   dailyCap       Int?
   active         Boolean   @default(true)
@@ -170,6 +174,7 @@ model Pod {
   podOwnerValue String   @unique
   /// Set when Cadence created the pod itself because a person arrived with an unknown podOwner.
   discoveredAt  DateTime?
+  archived      Boolean @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -188,40 +193,25 @@ model UserPod {
 }
 
 // ---------------------------------------------------------------------------
-// Sequences (versioned)
+// Sequences
 // ---------------------------------------------------------------------------
 
+/// One editable plan per sequence. There are no versions: a step is edited in place, and a step
+/// that has open tasks is refused until they are worked, so nothing shifts under a live task.
+/// What a task actually says is frozen on the task itself (Task.actionSnapshot), so editing the
+/// plan never rewrites work already handed to an FO.
 model Sequence {
   id              String   @id @default(uuid())
   name            String   @unique
   description     String?
   archived        Boolean  @default(false)
-  activeVersionId String?  @unique
-  activeVersion   SequenceVersion? @relation("ActiveVersion", fields: [activeVersionId], references: [id])
+  /// SequenceStep[] - see src/lib/sequences/steps.ts for the schema.
+  steps           Json     @default("[]")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  versions    SequenceVersion[] @relation("SequenceVersions")
   campaigns   Campaign[]
   enrollments Enrollment[]
-}
-
-model SequenceVersion {
-  id          String   @id @default(uuid())
-  sequenceId  String
-  sequence    Sequence @relation("SequenceVersions", fields: [sequenceId], references: [id], onDelete: Cascade)
-  version     Int
-  /// SequenceStep[] - see src/lib/sequences/steps.ts for the schema.
-  steps       Json
-  changeNote  String?
-  createdById String?
-  createdAt   DateTime @default(now())
-
-  activeFor   Sequence?    @relation("ActiveVersion")
-  enrollments Enrollment[]
-  tasks       Task[]
-
-  @@unique([sequenceId, version])
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +237,12 @@ model Campaign {
   dailyRampPerFo Int?
   status         CampaignStatus @default(DRAFT)
   notes          String?
+  followupSourceId String?
+  followupSourceRun Int?
+  followupWaitDays Int @default(0)
+  approvedAt DateTime?
+  approvedById String?
+  runNumber Int @default(1)
   createdById    String?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
@@ -264,16 +260,17 @@ model Enrollment {
   podId             String?
   pod               Pod?             @relation(fields: [podId], references: [id])
   campaignId        String?
+  campaignRun       Int @default(1)
   campaign          Campaign?        @relation(fields: [campaignId], references: [id])
   sequenceId        String
   sequence          Sequence         @relation(fields: [sequenceId], references: [id])
-  /// Version used for the most recently generated step ("which version the enrollment is on").
-  sequenceVersionId String
-  sequenceVersion   SequenceVersion  @relation(fields: [sequenceVersionId], references: [id])
   /// YYYY-MM-DD in the FO's timezone. Day 1 of the sequence.
   startDate         String
   /// Index of the latest step whose tasks have been generated. -1 = none yet.
   currentStep       Int              @default(-1)
+  /// Id of that step. The index alone would drift if the plan were edited; this is what the
+  /// next step is resolved from, so an edit above an enrollment cannot skip or repeat a step.
+  currentStepId     String?
   /// Accumulated delay (calendar days) applied to not-yet-generated steps (clock mode = shift).
   shiftDays         Int              @default(0)
   status            EnrollmentStatus @default(ACTIVE)
@@ -306,17 +303,14 @@ model Task {
   enrollment        Enrollment        @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
   foUserId          String
   fo                User              @relation("TaskFo", fields: [foUserId], references: [id])
-  sequenceVersionId String
-  sequenceVersion   SequenceVersion   @relation(fields: [sequenceVersionId], references: [id])
   stepIndex         Int
   stepId            String
   stepDay           Int
   actionIndex       Int
   actionId          String
   action            ActionType
-  /// Either/or secondary action the FO may pick instead of `action`.
-  altAction         ActionType?
-  /// Which of action/altAction was actually performed (set on completion).
+  /// The action actually performed (set on completion). Same as `action` today; kept because a
+  /// completion is evidence of a specific channel and reports read this rather than the plan.
   chosenAction      ActionType?
   label             String
   /// YYYY-MM-DD in the FO's timezone (after caps/rollover).
@@ -336,12 +330,14 @@ model Task {
   evidenceId        String?
   skipReason        String?
   cancelReason      String?
-  /// A/B template variant assigned at generation (email actions with variants).
-  variantId         String?
   /// Call outcome key from settings.rules.callDispositions (calls only).
   disposition       String?
   /// Free-text note entered when completing or skipping (call notes, context).
   note              String?
+  draftSubject      String?
+  draftHtml         String?
+  draftRevision     Int @default(0)
+  actionSnapshot    Json?
   /// Twenty Task mirrored while open (setting `mirrorOpenTasks`).
   twentyTaskId      String?
   /// Twenty Note written on completion.
@@ -469,6 +465,7 @@ model CompanyCache {
   ownerMemberId String?
   industry      String?
   employees     Int?
+  aum           Decimal? @db.Decimal(24, 2)
   city          String?
   linkedinUrl   String?
   raw           Json?
@@ -625,4 +622,31 @@ model Setting {
   key       String   @id
   value     Json
   updatedAt DateTime @updatedAt
+}
+
+model EnrichmentBatch {
+  id String @id @default(uuid())
+  entity String
+  name String
+  createdById String
+  createdAt DateTime @default(now())
+  rows EnrichmentRow[]
+}
+
+model EnrichmentRow {
+  id String @id @default(uuid())
+  batchId String
+  batch EnrichmentBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  rowNumber Int
+  recordId String?
+  recordLabel String?
+  input Json
+  changes Json
+  original Json
+  status String @default("READY")
+  error String?
+  appliedAt DateTime?
+  updatedAt DateTime @updatedAt
+  @@unique([batchId, rowNumber])
+  @@index([batchId, status])
 }

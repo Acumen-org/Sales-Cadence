@@ -8,7 +8,8 @@ import {
   advanceEnrollment,
   applyPersonFlags,
   completeTask,
-  createSequenceVersion,
+  createSequence,
+  saveSequenceSteps,
   enrollPeople,
   exitEnrollment,
   markMeeting,
@@ -62,7 +63,7 @@ describe('enrollment engine', () => {
     expect(r.enrolled).toHaveLength(2);
     const e = await prisma.enrollment.findUniqueOrThrow({ where: { id: r.enrolled[0].enrollmentId } });
     expect(e.currentStep).toBe(0);
-    expect(e.sequenceVersionId).toBe(b.version.id);
+    expect(e.currentStepId).toBe('step-d1');
     expect(e.status).toBe('ACTIVE');
     const tasks = await tasksOf(e.id);
     expect(tasks.map((t) => [t.label, t.action, t.dueDate, t.state])).toEqual([
@@ -148,18 +149,20 @@ describe('enrollment engine', () => {
     // step 0 done on time (Mon 7th) -> step 1 (day 3) due Wed 9th
     await completeStep(e.id, 0, '2026-09-07');
     let tasks = await tasksOf(e.id);
-    expect(tasks.filter((t) => t.stepIndex === 1).map((t) => [t.label, t.altAction, t.dueDate])).toEqual([
-      ['Call 1', null, '2026-09-09'],
-      ['Follow-up email', 'LINKEDIN_MESSAGE', '2026-09-09'],
+    // Both modules of step 1 (the call and its follow-up) are due the same day.
+    expect(tasks.filter((t) => t.stepIndex === 1).map((t) => [t.label, t.dueDate])).toEqual([
+      ['Call 1', '2026-09-09'],
+      ['Follow-up email', '2026-09-09'],
     ]);
-    // step 1 done 5 days late (Mon 14th) -> shift 5 -> step 2 (day 6 = Sat 12th) + 5 = Thu 17th
+    // Step 1 is 5 calendar days late. Business day 6 is Mon 14th;
+    // adding that delay reaches Sat 19th, which rolls forward to Mon 21st.
     await completeStep(e.id, 1, '2026-09-14');
     const after = await prisma.enrollment.findUniqueOrThrow({ where: { id: e.id } });
     expect(after.shiftDays).toBe(5);
     expect(after.currentStep).toBe(2);
     tasks = await tasksOf(e.id);
     const step2 = tasks.filter((t) => t.stepIndex === 2);
-    expect(step2.map((t) => [t.label, t.dueDate, t.plannedDate])).toEqual([['Email 2', '2026-09-17', '2026-09-17']]);
+    expect(step2.map((t) => [t.label, t.dueDate, t.plannedDate])).toEqual([['Email 2', '2026-09-21', '2026-09-21']]);
     // completion notes written to Twenty for each completed action
     const notes = getMockTwentyClient().writes.filter((w) => w.op === 'createNote');
     expect(notes.length).toBeGreaterThanOrEqual(4);
@@ -182,7 +185,7 @@ describe('enrollment engine', () => {
     const tasks = await tasksOf(id);
     expect(tasks.filter((t) => t.stepIndex === 0).every((t) => t.state === 'PENDING')).toBe(true);
     expect(tasks.filter((t) => t.stepIndex === 1).map((t) => t.dueDate)).toEqual(['2026-09-09', '2026-09-09']);
-    // finishing both steps late does not move the plan: day 6 = Sat 12th -> Mon 14th
+    // Finishing both steps late does not move the plan: business day 6 is Mon 14th.
     await completeStep(id, 0, '2026-09-16');
     await completeStep(id, 1, '2026-09-16');
     const e = await prisma.enrollment.findUniqueOrThrow({ where: { id } });
@@ -204,9 +207,12 @@ describe('enrollment engine', () => {
     await setRules({ dailyCap: 40 });
   });
 
-  it('pins already-generated tasks to their version and uses the new version for later steps', async () => {
+  it('leaves generated work alone when a later step is edited, and generates the edited step next', async () => {
+    // Other cases in this suite leave step 2 in use. This case requires an unused
+    // future step, so its plan is isolated without bypassing the in-use lock.
+    const { sequence } = await createSequence({ name: 'Future-step edit isolation', steps: DEFAULT_SEQUENCE_STEPS }, SYSTEM_ACTOR);
     const r = await enrollPeople(
-      { personIds: ['person-21'], sequenceId: b.sequence.id, podId: b.pods.Leigh.id, startDate: '2026-09-07', assignment: alisaFixed(b.users.daniel.id), actor: SYSTEM_ACTOR },
+      { personIds: ['person-21'], sequenceId: sequence.id, podId: b.pods.Leigh.id, startDate: '2026-09-07', assignment: alisaFixed(b.users.daniel.id), actor: SYSTEM_ACTOR },
       { now: at('2026-09-07') },
     );
     const id = r.enrolled[0].enrollmentId;
@@ -214,28 +220,28 @@ describe('enrollment engine', () => {
     const before = await tasksOf(id);
     expect(before.filter((t) => t.stepIndex === 1).map((t) => t.label)).toEqual(['Call 1', 'Follow-up email']);
 
-    // Admin edits the sequence: Email 2 moves to day 7 and is renamed
+    // A Senior FO edits the plan: Email 2 moves to day 7 and is renamed. Step 2 has no tasks
+    // yet, so the edit is allowed.
     const steps = JSON.parse(JSON.stringify(DEFAULT_SEQUENCE_STEPS)) as typeof DEFAULT_SEQUENCE_STEPS;
     steps[2].day = 7;
-    steps[2].actions[0].label = 'Email 2 (v2)';
-    const v2 = await createSequenceVersion(b.sequence.id, steps, userActor(b.users.ria), 'move email 2');
-    expect(v2.version).toBe(2);
+    steps[2].actions[0].label = 'Email 2, reworked';
+    await saveSequenceSteps(sequence.id, steps, userActor(b.users.ria));
 
-    // already-generated tasks are untouched
+    // Work already handed to an FO is untouched: the task carries its own copy.
     const mid = await tasksOf(id);
-    expect(mid.filter((t) => t.stepIndex === 1).map((t) => [t.label, t.sequenceVersionId])).toEqual([
-      ['Call 1', b.version.id],
-      ['Follow-up email', b.version.id],
-    ]);
-    expect((await prisma.enrollment.findUniqueOrThrow({ where: { id } })).sequenceVersionId).toBe(b.version.id);
+    expect(mid.filter((t) => t.stepIndex === 1).map((t) => t.label)).toEqual(['Call 1', 'Follow-up email']);
 
-    // next generated step comes from v2: day 7 = Sun 13th -> Mon 14th
+    // The next step generated is the edited one: business day 7 is Tue 15th.
     await completeStep(id, 1, '2026-09-09');
     const after = await prisma.enrollment.findUniqueOrThrow({ where: { id } });
-    expect(after.sequenceVersionId).toBe(v2.id);
-    expect(after.currentStep).toBe(2);
+    expect([after.currentStep, after.currentStepId]).toEqual([2, 'step-d6']);
     const step2 = (await tasksOf(id)).filter((t) => t.stepIndex === 2);
-    expect(step2.map((t) => [t.label, t.dueDate, t.sequenceVersionId])).toEqual([['Email 2 (v2)', '2026-09-14', v2.id]]);
+    expect(step2.map((t) => [t.label, t.dueDate])).toEqual([['Email 2, reworked', '2026-09-15']]);
+
+    // A step people are standing on is refused rather than moved under them.
+    const moveLive = JSON.parse(JSON.stringify(steps)) as typeof steps;
+    moveLive[2].actions[0].label = 'Changed while in use';
+    await expect(saveSequenceSteps(sequence.id, moveLive, userActor(b.users.ria))).rejects.toThrow(/open action/i);
   });
 
   it('skips need a reason, snoozes land on working days, and resolving a step advances it', async () => {

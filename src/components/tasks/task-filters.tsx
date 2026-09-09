@@ -57,6 +57,7 @@ export function TaskFilters({ pods, fos, podId, foUserId, mode }: Props) {
           <button
             key={m}
             type="button"
+            aria-pressed={mode === m}
             onClick={() => update({ mode: m === 'flow' ? 'flow' : null })}
             className={clsx('rounded-lg px-2.5 py-1 font-medium transition', mode === m ? 'bg-brand-600 text-white' : 'text-ink-500 hover:text-ink-700')}
           >

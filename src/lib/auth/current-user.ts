@@ -4,6 +4,7 @@ import type { Role } from '@prisma/client';
 import { prisma } from '../db';
 import { readSessionToken } from './session';
 import { ForbiddenError, isAdmin, type Actor } from './rbac';
+import { WORKSPACE_TIMEZONE } from '../workspace';
 
 export type SessionUser = {
   id: string;
@@ -23,7 +24,7 @@ export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
   if (!token) return null;
   const session = await prisma.session.findUnique({
     where: { token },
-    include: { user: { include: { pods: { include: { pod: { select: { id: true, name: true } } } } } } },
+    include: { user: { include: { pods: { where: { pod: { archived: false } }, include: { pod: { select: { id: true, name: true } } } } } } },
   });
   if (!session || session.expiresAt < new Date() || !session.user.active) return null;
   const u = session.user;
@@ -32,7 +33,7 @@ export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
     email: u.email,
     name: u.name,
     role: u.role,
-    timezone: u.timezone,
+    timezone: WORKSPACE_TIMEZONE,
     twentyMemberId: u.twentyMemberId,
     dailyCap: u.dailyCap,
     podIds: u.pods.map((p) => p.podId),
