@@ -27,16 +27,22 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const tab = parseTab(sp.tab); const channel = parseChannel(sp.type); const mode = sp.mode === 'flow' ? 'flow' : 'list';
   const manager = isAdmin(user) || isPodLeader(user); const podId = manager ? sp.pod || null : null; const foUserId = manager ? sp.fo || null : null;
   const limit = Math.min(2000, Math.max(200, Number(sp.limit) || 200));
-  const [{ rows, counts, channelCounts, today, total }, options, settings] = await Promise.all([listTaskGroups(user, { tab, podId, foUserId, channel }, new Date(), limit), filterOptions(user), getSettings()]);
+  const [{ rows, counts, channelCounts, today, total, held }, options, settings] = await Promise.all([listTaskGroups(user, { tab, podId, foUserId, channel }, new Date(), limit), filterOptions(user), getSettings()]);
   const base = new URLSearchParams({ tab, mode });
   if (podId) base.set('pod', podId); if (foUserId) base.set('fo', foUserId); if (channel) base.set('type', channel); if (limit > 200) base.set('limit', String(limit));
   const href = (patch: Record<string, string | null>) => { const next = new URLSearchParams(base); for (const [k,v] of Object.entries(patch)) { if (v === null) next.delete(k); else next.set(k,v); } return '/tasks?' + next.toString(); };
-  const selected = rows.find(r => r.id === sp.task || r.childIds.includes(sp.task ?? '')) ?? rows[0];
+  // A ?task= that is not in this tab used to fall through to the first row, so a link from Home
+  // or a bookmark opened somebody else's touch with the composer and the Done button attached to
+  // it. The requested task is opened on its own if it is this user's; otherwise the screen says so.
+  const requested = sp.task?.trim() || null;
+  const inView = rows.find(r => r.id === requested || r.childIds.includes(requested ?? '')) ?? null;
+  const selected = inView ?? (requested ? null : rows[0] ?? null);
   const index = selected ? rows.findIndex(r => r.id === selected.id) : -1;
-  const following = rows[index + 1] ?? (rows.length > 1 ? rows[0] : null);
+  const following = index >= 0 ? rows[index + 1] ?? (rows.length > 1 ? rows[0] : null) : rows[0] ?? null;
   const nextUrl = following ? href({ task: following.id }) : href({ task: null });
   const prevUrl = index > 0 ? href({ task: rows[index - 1].id }) : null;
-  const brief = selected ? await getTaskBrief(selected.id, user) : null;
+  const brief = selected ? await getTaskBrief(selected.id, user) : requested ? await getTaskBrief(requested, user) : null;
+  const missing = Boolean(requested && !inView && !brief);
   const nextWorkingDay = nextWorkingDaySnooze(today, settings.rules.workingDays);
   const dispositions = settings.rules.callDispositions.map(d => ({ key: d.key, label: d.label, answered: d.answered }));
   const skipReasons = settings.rules.skipReasons.map(r => ({ key: r.key, label: r.label, exit: r.exit }));
@@ -47,7 +53,10 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
       <Toolbar><Link href={href({ type: null, task: null })} className={channel ? 'chip-muted' : 'chip'}>All types</Link>{TASK_CHANNELS.map(c => <Link key={c} href={href({ type: c, task: null })} className={channel === c ? 'chip' : 'chip-muted'}><ActionIcon action={c} size={13} />{CHANNEL_LABELS[c]}<strong className="ml-1">{channelCounts[c]}</strong></Link>)}<span className="w-full sm:ml-auto sm:w-auto"><TaskFilters pods={options.pods} fos={options.fos} podId={podId} foUserId={foUserId} mode={mode} /></span></Toolbar>
     </Surface>
     {sp.flash && <TaskFlash message={sp.flash.slice(0,300)} />}
-    {!rows.length ? <Surface><EmptyState title={'No ' + TAB_LABELS[tab].toLowerCase() + ' tasks'} icon={<ActionIcon action={channel ?? 'EMAIL'} size={22} />}
+    {missing ? <Notice tone="warn">That task is not in your list any more. It may have been completed, cancelled, or reassigned.</Notice> : null}
+    {requested && !inView && brief ? <Notice tone="info">Showing one touch that is not in <strong>{TAB_LABELS[tab]}</strong>. <Link href={href({ task: null })} className="font-semibold underline">Back to the list</Link></Notice> : null}
+    {held ? <Notice tone="info"><strong>{held}</strong> {held === 1 ? 'touch is' : 'touches are'} held while their campaign is paused. <Link href="/campaigns" className="font-semibold underline">Open campaigns</Link> to resume.</Notice> : null}
+    {!rows.length && !brief ? <Surface><EmptyState title={'No ' + TAB_LABELS[tab].toLowerCase() + ' tasks'} icon={<ActionIcon action={channel ?? 'EMAIL'} size={22} />}
       /* An empty Today with work sitting in Overdue is the one case where the FO must not be left
          looking at a clear screen: send them to the tab that actually has the work. */
       action={tab !== 'overdue' && counts.overdue ? <Link href={href({ tab: 'overdue', task: null })} className="btn-primary"><strong>{counts.overdue}</strong> overdue {counts.overdue === 1 ? 'task' : 'tasks'} waiting</Link> : tab !== 'upcoming' && counts.upcoming ? <Link href={href({ tab: 'upcoming', task: null })} className="btn-secondary"><strong>{counts.upcoming}</strong> upcoming</Link> : undefined} /></Surface> : <>

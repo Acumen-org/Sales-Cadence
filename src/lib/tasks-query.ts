@@ -45,6 +45,15 @@ export function effectiveDate(t: { dueDate: string; snoozedTo: string | null }):
 }
 
 /** Tasks the user may see at all (before filters). Junior: own. Senior: own + pods. Admin: all. */
+/**
+ * Open work somebody can actually do.
+ *
+ * A paused campaign has stopped, so its open touches are held. This lives here, next to the scope,
+ * because every figure has to agree with the list: a sidebar badge or a Home tile that counts work
+ * the Tasks page then refuses to show is worse than no figure at all.
+ */
+export const WORKABLE: Prisma.TaskWhereInput = { enrollment: { status: { not: 'PAUSED' } } };
+
 export function taskScopeWhere(user: SessionUser): Prisma.TaskWhereInput {
   if (isAdmin(user)) return {};
   if (isPodLeader(user)) {
@@ -147,17 +156,19 @@ export function parseTab(v: string | undefined): TaskTab {
 /** One workspace item per contact and touchpoint; each required action retains its own result. */
 export async function listTaskGroups(user: SessionUser, filters: TaskFilters, now = new Date(), limit = 200) {
   const today = todayIn(user.timezone, now);
-  const records = await prisma.task.findMany({ where: { AND: [taskScopeWhere(user), filtersWhere(filters)], state: { in: ['PENDING', 'DONE', 'SKIPPED'] } }, select: { id: true, enrollmentId: true, stepId: true, state: true, action: true, dueDate: true, snoozedTo: true, completedAt: true, updatedAt: true, enrollment: { select: { status: true } } }, orderBy: [{ dueAt: 'asc' }, { actionIndex: 'asc' }] });
+  const recent = startOfLocalDay(addDays(today, -DONE_TAB_DAYS), WORKSPACE_TIMEZONE);
+  const records = await prisma.task.findMany({ where: { AND: [taskScopeWhere(user), filtersWhere(filters), { OR: [{ state: 'PENDING' }, { state: { in: ['DONE', 'SKIPPED'] }, updatedAt: { gte: recent } }] }] }, select: { id: true, enrollmentId: true, stepId: true, state: true, action: true, dueDate: true, snoozedTo: true, completedAt: true, updatedAt: true, enrollment: { select: { status: true } } }, orderBy: [{ dueAt: 'asc' }, { actionIndex: 'asc' }] });
   const grouped = new Map<string, typeof records>();
   for (const t of records) { const key = `${t.enrollmentId}:${t.stepId}`; const group = grouped.get(key) ?? []; group.push(t); grouped.set(key, group); }
   const counts: Record<TaskTab, number> = { today: 0, overdue: 0, upcoming: 0, done: 0 };
   const channelCounts: Record<TaskChannel, number> = { CALL: 0, EMAIL: 0, LINKEDIN: 0 };
   const selected: Array<{ id: string; ids: string[]; tab: TaskTab; at: number; date: string }> = [];
+  let held = 0;
   for (const group of grouped.values()) {
     const pending = group.filter(t => t.state === 'PENDING');
     // A paused campaign has stopped: its open touches are held, so they are not anybody's work
     // today. Steps that are already resolved stay in Done, because that is history.
-    if (pending.length && group[0].enrollment.status === 'PAUSED') continue;
+    if (pending.length && group[0].enrollment.status === 'PAUSED') { held++; continue; }
     const current = pending.length ? pending : group;
     const date = current.map(effectiveDate).sort()[0];
     const tab: TaskTab = !pending.length ? 'done' : date < today ? 'overdue' : date === today ? 'today' : 'upcoming';
@@ -171,5 +182,5 @@ export async function listTaskGroups(user: SessionUser, filters: TaskFilters, no
   const page = selected.slice(0, limit);
   const rows = await prisma.task.findMany({ where: { id: { in: page.map(g => g.id) } }, include: taskRowInclude });
   const byId = new Map(rows.map(t => [t.id, t]));
-  return { rows: page.flatMap(g => { const row = byId.get(g.id); return row ? [{ ...row, childIds: g.ids, childActions: records.filter(t => g.ids.includes(t.id)).map(t => ({ id: t.id, action: t.action, state: t.state })) }] : []; }), counts, channelCounts, today, total: selected.length };
+  return { rows: page.flatMap(g => { const row = byId.get(g.id); return row ? [{ ...row, childIds: g.ids, childActions: records.filter(t => g.ids.includes(t.id)).map(t => ({ id: t.id, action: t.action, state: t.state })) }] : []; }), counts, channelCounts, today, total: selected.length, held };
 }

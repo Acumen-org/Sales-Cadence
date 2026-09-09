@@ -3,7 +3,7 @@ import { isAdmin } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
 import { env } from '@/lib/env';
 import { todayIn } from '@/lib/dates';
-import { tabWhere, taskScopeWhere } from '@/lib/tasks-query';
+import { tabWhere, taskScopeWhere, WORKABLE } from '@/lib/tasks-query';
 import { Sidebar } from '@/components/sidebar';
 import { TopBar } from '@/components/topbar';
 import { unreadNotifications } from '@/lib/notifications';
@@ -13,7 +13,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const user = await requireUser();
   const e = env();
   const today = todayIn(user.timezone);
-  const mine = { AND: [taskScopeWhere(user), { foUserId: user.id }] };
+  const mine = { AND: [taskScopeWhere(user), WORKABLE, { foUserId: user.id }] };
   const [unread, todayGroups, needsReview] = await Promise.all([
     unreadNotifications(user),
     prisma.task.groupBy({ by: ['enrollmentId','stepId'], where: { AND: [mine, tabWhere('today', today)] } }),

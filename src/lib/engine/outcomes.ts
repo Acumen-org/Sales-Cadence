@@ -87,9 +87,13 @@ export async function skipWithReason(input: SkipOutcomeInput, ctx: EngineContext
  * the current step are cancelled, the target step is generated now.
  */
 export async function moveToStep(enrollmentId: string, targetIndex: number, ctx: EngineContext): Promise<{ ok: true; generated: string[] } | { ok: false; error: string }> {
+  // A paused campaign generates nothing, so a move would cancel the open touches and replace them
+  // with nothing at all - and report success while doing it.
+  const current = await prisma.enrollment.findUnique({ where: { id: enrollmentId }, select: { status: true } });
+  if (current?.status === 'PAUSED') return { ok: false as const, error: 'This campaign is paused. Resume it before moving anyone to another step.' };
   const e = await prisma.enrollment.findUnique({ where: { id: enrollmentId }, include: { sequence: true } });
   if (!e) return { ok: false, error: 'Enrollment not found.' };
-  if (e.status !== 'ACTIVE' && e.status !== 'PAUSED') return { ok: false, error: 'Only active or paused enrollments can be moved.' };
+  if (e.status !== 'ACTIVE') return { ok: false, error: 'Only a live enrollment can be moved to another step.' };
   const steps = parseSteps(e.sequence.steps);
   if (targetIndex < 0 || targetIndex >= steps.length) return { ok: false, error: 'That step does not exist.' };
   if (targetIndex <= e.currentStep) return { ok: false, error: 'You can only move forward to a later step.' };

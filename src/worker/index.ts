@@ -36,9 +36,7 @@ async function nightly(now:Date){
  if(await nightlyAlreadyRan(now)){lastNightly=today;return;}
  lastNightly=today;
  try{const stats=await reconcile({actor:SYSTEM_ACTOR,now});log('nightly reconcile',stats);}catch(error){log('nightly reconcile failed',error);}
- if(config.CACHE_REFRESH_HOUR<=hour){
-   try{const stats=await refreshPersonCache(await getTwentyClient());log('cache refresh',stats);}catch(error){log('cache refresh failed',error);}
- }
+ try{const stats=await refreshPersonCache(await getTwentyClient());log('cache refresh',stats);}catch(error){log('cache refresh failed',error);}
 }
 async function tick(){
  if(running||stopping)return;running=true;

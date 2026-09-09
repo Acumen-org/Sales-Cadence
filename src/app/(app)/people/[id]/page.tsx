@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { accountScopeCompanyIds } from '@/lib/accounts-query';
 import { notFound } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
 import { prisma } from '@/lib/db';
@@ -62,6 +63,11 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
   } catch (err) {
     twentyWarning = `Twenty unavailable: ${err instanceof Error ? err.message : String(err)}`;
   }
+
+  // Accounts are pod-scoped even though people are not, so the company is only a link when this
+  // viewer can actually open it. A rendered link that leads to not-found is worse than plain text.
+  const accountScope = person.companyId ? await accountScopeCompanyIds(user) : null;
+  const canOpenAccount = Boolean(person.companyId) && (accountScope === null || accountScope.includes(person.companyId!));
 
   const currentEnrollments = enrollments.filter((e) => e.status === 'ACTIVE' || e.status === 'PAUSED');
   // With nothing running, how the last engagement ended is the fact that decides what to do next,
@@ -203,7 +209,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                               <span className="flex flex-wrap gap-1">
                                 {st.map((t) => (
                                   <Badge key={t.id} tone={t.state === 'DONE' ? 'green' : t.state === 'PENDING' ? 'blue' : t.state === 'SKIPPED' ? 'amber' : 'gray'}>
-                                    {t.label}: {t.state === 'PENDING' ? `due ${t.snoozedTo ?? t.dueDate}` : t.state.toLowerCase()}
+                                    {t.label}: {t.state === 'PENDING' ? `due ${formatLocalDate(t.snoozedTo ?? t.dueDate)}` : t.state.toLowerCase()}
                                     {t.disposition ? ` (${t.disposition})` : ''}
                                   </Badge>
                                 ))}
@@ -240,10 +246,11 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                         { k: 'Other emails', v: person.additionalEmails.join(', ') || null },
                         { k: 'Phone', v: person.phone },
                         { k: 'Other phone', v: person.additionalPhone },
-                        { k: 'LinkedIn', v: person.linkedinUrl },
+                        // The handle, not the whole URL set in bold: the link carries the rest.
+                        { k: 'LinkedIn', v: person.linkedinUrl ? <a href={person.linkedinUrl} target="_blank" rel="noreferrer" title={person.linkedinUrl} className="text-brand-700 hover:underline">{person.linkedinUrl.replace(/^https?:\/\/(www\.)?linkedin\.com\//i, '')}</a> : null },
                         { k: 'X', v: person.xUrl },
                         { k: 'Title', v: person.jobTitle },
-                        { k: 'Company', v: person.companyId ? <Link href={`/accounts/${person.companyId}`} className="text-brand-700 hover:underline">{person.companyName}</Link> : person.companyName },
+                        { k: 'Company', v: canOpenAccount ? <Link href={`/accounts/${person.companyId}`} className="text-brand-700 hover:underline">{person.companyName}</Link> : person.companyName },
                         { k: 'City', v: person.city },
                       ]}
                     />

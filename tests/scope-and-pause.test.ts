@@ -5,6 +5,7 @@ import type { SessionUser } from '@/lib/auth/current-user';
 import { accountDetail } from '@/lib/accounts-query';
 import { meetingReadWhere, canReadMeeting } from '@/lib/meetings-query';
 import { listTaskGroups } from '@/lib/tasks-query';
+import { buildHome } from '@/lib/home-query';
 import { completeTask, enrollPeople, pauseEnrollment, resumeEnrollment, skipTask, snoozeTask } from '@/lib/engine';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 
@@ -82,10 +83,12 @@ describe('reading scope and a paused campaign', () => {
     const enrollment = await prisma.enrollment.findFirstOrThrow({ where: { personId: 'person-01' } });
     const before = await listTaskGroups(karson, { tab: 'today', channel: null, podId: null, foUserId: null }, at('2026-09-07'));
     expect(before.rows.some((r) => r.enrollmentId === enrollment.id)).toBe(true);
+    const homeBefore = await buildHome(karson, at('2026-09-07'));
 
     await pauseEnrollment(enrollment.id, { reason: 'campaign paused', actor: SYSTEM_ACTOR, now: at('2026-09-07') });
 
     const during = await listTaskGroups(karson, { tab: 'today', channel: null, podId: null, foUserId: null }, at('2026-09-07'));
+    const homeDuring = await buildHome(karson, at('2026-09-07'));
     expect(during.rows.some((r) => r.enrollmentId === enrollment.id)).toBe(false);
     // The other enrollment is untouched, so this is a hold and not an empty list.
     expect(during.rows.length).toBe(before.rows.length - 1);
@@ -96,6 +99,14 @@ describe('reading scope and a paused campaign', () => {
     expect((await snoozeTask({ taskId: task.id, toDate: '2026-09-11' }, { actor: SYSTEM_ACTOR, now: at('2026-09-07') })).ok).toBe(false);
     // Held, not cancelled: the touch is still there and still pending.
     expect((await prisma.task.findUniqueOrThrow({ where: { id: task.id } })).state).toBe('PENDING');
+
+    // Every figure has to agree with the list, or a badge sends the FO to an empty screen. Home
+    // counts touches and the list counts steps, so the check is that Home lost exactly the touches
+    // that were held - not that the two numbers are equal.
+    const heldTouches = await prisma.task.count({ where: { enrollmentId: enrollment.id, state: 'PENDING' } });
+    expect(heldTouches).toBeGreaterThan(0);
+    expect(homeBefore.my.todayTotal + homeBefore.my.overdueTotal - (homeDuring.my.todayTotal + homeDuring.my.overdueTotal)).toBe(heldTouches);
+    expect(during.held).toBe(1);
 
     await resumeEnrollment(enrollment.id, { actor: SYSTEM_ACTOR, now: at('2026-09-07') });
     const after = await listTaskGroups(karson, { tab: 'today', channel: null, podId: null, foUserId: null }, at('2026-09-07'));

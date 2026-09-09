@@ -8,8 +8,8 @@ export type AuditActor = {
   label?: string | null;
 };
 
-export const SYSTEM_ACTOR: AuditActor = { type: 'SYSTEM', label: 'cadence-worker' };
-export const RECONCILE_ACTOR: AuditActor = { type: 'RECONCILE', label: 'reconcile' };
+export const SYSTEM_ACTOR: AuditActor = { type: 'SYSTEM', label: 'Cadence' };
+export const RECONCILE_ACTOR: AuditActor = { type: 'RECONCILE', label: 'Cadence (catch-up)' };
 
 export function userActor(user: { id: string; name?: string | null; email?: string | null }): AuditActor {
   return { type: 'USER', id: user.id, label: user.name ?? user.email ?? user.id };

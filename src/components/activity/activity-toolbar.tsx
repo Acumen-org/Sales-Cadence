@@ -40,6 +40,7 @@ export function ActivityToolbar({ users, pods, actorId, podId, kinds, channel, q
     if (actorId) params.set('actor', actorId);
     if (podId) params.set('pod', podId);
     if (q) params.set('q', q);
+    if (kinds.length) params.set('kind', kinds.join(','));
     if (value) params.set('channel', value);
     return `/activity?${params.toString()}`;
   };

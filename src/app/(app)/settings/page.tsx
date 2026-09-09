@@ -118,7 +118,7 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
   const baseUrl = settings.twenty.baseUrl || env().TWENTY_API_URL || '';
   return (
     <div className="space-y-3">
-      {mode === 'mock' ? <Notice tone="warn">Running against the built-in dummy workspace. Set TWENTY_MODE=graphql and an API key to connect to your Twenty.</Notice> : null}
+      {mode === 'mock' ? <Notice tone="warn">Running against the built-in demo workspace. Add your Twenty base URL and API key below to connect the real one.</Notice> : null}
       {dryRun ? <Notice tone="info">Dry run is on: Cadence logs what it would write to Twenty and writes nothing.</Notice> : null}
       <Card title="Status">
         <div className="p-4">
@@ -127,7 +127,7 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
               { k: 'Mode', v: mode === 'mock' ? 'Demo workspace' : 'Twenty (GraphQL)' },
               { k: 'Connection', v: <Badge tone={ok ? 'green' : 'red'}>{ok ? 'Reachable' : 'Not connected'}</Badge> },
               { k: 'Base URL', v: baseUrl || null },
-              { k: 'People', v: counts.people ?? null },
+              ...(counts.people === undefined ? [] : [{ k: 'People', v: counts.people }]),
               { k: 'Workspace members', v: counts.members ?? null },
               ...(ok ? [] : [{ k: 'Last error', v: <span className="text-red-700">{ping}</span> }]),
               { k: 'Webhook URL', v: <code className="text-[12px]">{`${env().APP_URL.replace(/\/+$/, '')}/api/webhooks/twenty${env().CADENCE_WEBHOOK_TOKEN ? '?token=...' : ''}`}</code> },

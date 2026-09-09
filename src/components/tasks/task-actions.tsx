@@ -41,7 +41,7 @@ const END_REASONS = [
   { key: 'no_reply', label: 'Ran its course, no reply', detail: 'Every step was worked and nobody answered.' },
   { key: 'not_interested', label: 'Not interested', detail: 'They said no.' },
   { key: 'opted_out', label: 'Asked not to be contacted', detail: 'Stops all outreach to this person.' },
-  { key: 'bad_data', label: 'Wrong or missing details', detail: 'The email or phone number is not usable.' },
+  { key: 'bad_data', label: 'Wrong or missing details', detail: 'Ends the sequence. Correct the record in Twenty or Enrichment.' },
   { key: 'removed', label: 'Another reason', detail: 'Ends the sequence without one of the labels above.' },
 ] as const;
 

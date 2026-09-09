@@ -182,9 +182,6 @@
   .page-content > div {
     @apply px-4 sm:px-8;
   }
-  .page-content {
-    animation: arrive 220ms ease-out both;
-  }
   .eyebrow {
     @apply text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-500;
   }
@@ -258,10 +255,6 @@
   }
 }
 
-@keyframes arrive {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }
