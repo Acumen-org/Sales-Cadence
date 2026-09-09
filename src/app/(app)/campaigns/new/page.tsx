@@ -17,7 +17,8 @@ export default async function NewCampaignPage({ searchParams }: { searchParams: 
   const podIds = visiblePodIds(user);
   const [sequences, pods, settings] = await Promise.all([
     prisma.sequence.findMany({ where: { archived: false }, orderBy: { name: 'asc' } }),
-    prisma.pod.findMany({ where: podIds === null ? {} : { id: { in: podIds } }, orderBy: { name: 'asc' } }),
+    // An archived pod cannot take a campaign, so it is never offered as one.
+    prisma.pod.findMany({ where: { archived: false, ...(podIds === null ? {} : { id: { in: podIds } }) }, orderBy: { name: 'asc' } }),
     getSettings(),
   ]);
   const mockViews = env().TWENTY_MODE === 'mock' ? getMockTwentyClient().views.map((v) => ({ id: v.id, name: v.name })) : undefined;

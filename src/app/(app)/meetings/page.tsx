@@ -1,5 +1,7 @@
 import Link from 'next/link';
+import type { Prisma } from '@prisma/client';
 import { requireUser } from '@/lib/auth/current-user';
+import { meetingReadWhere } from '@/lib/meetings-query';
 import { prisma } from '@/lib/db';
 import { formatInstant, todayIn, weekRange } from '@/lib/dates';
 import { PROVIDER_LABELS } from '@/lib/meetings/providers';
@@ -16,14 +18,16 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
   const today = todayIn(user.timezone);
   const week = weekRange(today, user.timezone);
 
-  const where =
+  // A transcript is a prospect conversation, so the list is scoped like the rest of the workspace.
+  const readable = await meetingReadWhere(user);
+  const where: Prisma.MeetingWhereInput =
     scope === 'mine'
-      ? { createdById: user.id }
+      ? { AND: [readable, { createdById: user.id }] }
       : scope === 'week'
-        ? { occurredAt: { gte: week.fromInstant, lt: week.toInstant } }
-        : {};
+        ? { AND: [readable, { occurredAt: { gte: week.fromInstant, lt: week.toInstant } }] }
+        : readable;
 
-  const [meetings, total, mine, thisWeek, recordings] = await Promise.all([
+  const [meetings, total, mine, thisWeek, recordingTotal, recordings] = await Promise.all([
     prisma.meeting.findMany({
       where,
       orderBy: { occurredAt: 'desc' },
@@ -45,11 +49,12 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
       },
     }),
     prisma.meeting.count({ where }),
-    prisma.meeting.count({ where: { createdById: user.id } }),
-    prisma.meeting.count({ where: { occurredAt: { gte: week.fromInstant, lt: week.toInstant } } }),
+    prisma.meeting.count({ where: { AND: [readable, { createdById: user.id }] } }),
+    prisma.meeting.count({ where: { AND: [readable, { occurredAt: { gte: week.fromInstant, lt: week.toInstant } }] } }),
     // Recordings Twenty holds on a person record. Cadence does not invent a Meeting row from
     // one, because a meeting here carries attendees and a transcript that only a human can
     // supply - so these are listed for one-click adding instead.
+    prisma.personCache.count({ where: { deletedAt: null, recordingUrl: { not: null } } }),
     prisma.personCache.findMany({
       where: { deletedAt: null, recordingUrl: { not: null } },
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
@@ -157,7 +162,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
 
       {recordings.length ? (
         <Surface flush>
-          <ViewHeader title="Recordings in Twenty" caret meta={`${recordings.length} on a person record`} />
+          <ViewHeader title="Recordings in Twenty" caret meta={<><strong>{recordingTotal}</strong> on a person record{recordingTotal > recordings.length ? <> · showing <strong>{recordings.length}</strong></> : null}</>} />
           <div className="overflow-x-auto scroll-thin">
             <table className="table">
               <thead>
@@ -201,7 +206,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                           <span className="text-[12px] font-semibold text-ink-700">Already added</span>
                         ) : (
                           <Link href={`/meetings/new?personId=${b.id}`} className="btn-secondary btn-sm">
-                            <IconPlus size={12} /> Add with transcript
+                            <IconPlus size={12} /> Add with recording
                           </Link>
                         )}
                       </td>

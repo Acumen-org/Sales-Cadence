@@ -8,7 +8,7 @@ import { canActOnTask, canManageEnrollment, canSnoozeFreely } from '../auth/rbac
 import { userActor } from '../audit';
 import { isLocalDate, todayIn } from '../dates';
 import { exitEnrollment, finishEnrollment, reassignEnrollment } from '../engine/enrollment';
-import { completeCall, moveToStep, skipWithReason } from '../engine/outcomes';
+import { applyExitConsequence, completeCall, moveToStep, skipWithReason } from '../engine/outcomes';
 import { completeTask, nextWorkingDaySnooze, skipTask, snoozeTask } from '../engine/tasks';
 import { ACTION_TYPES } from '../sequences/steps';
 import { getSettings } from '../settings';
@@ -117,12 +117,22 @@ export async function snoozeTaskAction(formData: FormData): Promise<ActionResult
 // Ending a sequence early, and moving someone to a different step (enrollment-level)
 // ---------------------------------------------------------------------------
 
-async function loadEnrollmentForTask(taskId: string) {
+/**
+ * The enrollment behind a task, for the two kinds of change that are made from it.
+ *
+ * Recording what happened - they replied, they said no, they asked us to stop - is the job of
+ * whoever worked the task, so the owner of the task may do it. Re-planning the sequence is not:
+ * jumping to another step cancels touches somebody planned, so it needs `canManageEnrollment`.
+ * Pass `manage` for that, and the check is here rather than in the component, because a hidden
+ * control is not a permission.
+ */
+async function loadEnrollmentForTask(taskId: string, opts: { manage?: boolean } = {}) {
   const user = await requireUser();
   const task = await prisma.task.findUnique({ where: { id: taskId }, include: { enrollment: true } });
   if (!task) return { user, enrollment: null, error: 'Task not found.' };
   const actor = toActor(user);
-  const allowed = canManageEnrollment(actor, task.enrollment) || task.foUserId === user.id;
+  const managed = canManageEnrollment(actor, task.enrollment);
+  const allowed = opts.manage ? managed : managed || task.foUserId === user.id;
   if (!allowed) return { user, enrollment: null, error: 'You cannot change this enrollment.' };
   return { user, enrollment: task.enrollment, error: null };
 }
@@ -140,15 +150,18 @@ export async function finishFromTaskAction(formData: FormData): Promise<ActionRe
 export async function removeFromSequenceAction(formData: FormData): Promise<ActionResult> {
   const { user, enrollment, error } = await loadEnrollmentForTask(String(formData.get('taskId') ?? ''));
   if (!enrollment) return { ok: false, error: error ?? 'Not found.' };
-  await exitEnrollment(enrollment.id, { reason: String(formData.get('reason') ?? 'removed').trim() || 'removed', actor: userActor(user) });
+  const reason = String(formData.get('reason') ?? 'removed').trim() || 'removed';
+  await exitEnrollment(enrollment.id, { reason, actor: userActor(user) });
+  // "Asked not to be contacted" has to hold for every future campaign, not just this one.
+  await applyExitConsequence(enrollment.personId, reason, userActor(user));
   revalidate();
-  return { ok: true, message: 'Sequence ended. No more tasks for this person.' };
+  return { ok: true, message: reason === 'opted_out' ? 'Sequence ended and this person is opted out of all outreach.' : 'Sequence ended. No more tasks for this person.' };
 }
 
 export async function moveToStepAction(formData: FormData): Promise<ActionResult> {
   const target = Number.parseInt(String(formData.get('stepIndex') ?? ''), 10);
   if (!Number.isInteger(target)) return { ok: false, error: 'Pick a step.' };
-  const { user, enrollment, error } = await loadEnrollmentForTask(String(formData.get('taskId') ?? ''));
+  const { user, enrollment, error } = await loadEnrollmentForTask(String(formData.get('taskId') ?? ''), { manage: true });
   if (!enrollment) return { ok: false, error: error ?? 'Not found.' };
   const r = await moveToStep(enrollment.id, target, { actor: userActor(user) });
   revalidate();
@@ -254,6 +267,8 @@ function describeFailure(reason: string, detail?: string): string {
       return 'This task was already completed or skipped (possibly by an observed email or call).';
     case 'evidence_used':
       return 'That evidence already completed another task.';
+    case 'paused':
+      return detail ?? 'This campaign is paused. Resume it to work this touch.';
     default:
       return detail ?? 'Could not update the task.';
   }

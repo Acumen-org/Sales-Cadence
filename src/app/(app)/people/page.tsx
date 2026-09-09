@@ -133,7 +133,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
         ? { status: e.status, label: enrollmentStatusLabel(e), tone: ENROLLMENT_TONE[e.status] ?? 'gray', campaignName: e.campaign?.name ?? null, campaignId: e.campaign?.id ?? null, sequenceName: e.sequence.name, foName: e.fo.name }
         : null,
       activeEnrollmentId: active?.id ?? null,
-      lastTouch: touch ? { summary: touch.summary, at: formatInstant(touch.occurredAt, user.timezone) } : null,
+      lastTouch: touch ? { summary: touch.summary, at: formatInstant(touch.occurredAt, user.timezone), channel: touch.channel, inbound: touch.direction === 'INBOUND' } : null,
       activity: p.touches.map((t) => ({ at: t.occurredAt.getTime(), lane: t.direction === 'INBOUND' ? ('in' as const) : ('out' as const) })),
       twentyUrl: twentyPersonUrl(conn.baseUrl, p.id),
     };

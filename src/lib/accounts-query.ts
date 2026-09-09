@@ -6,8 +6,10 @@ import { cachedPersonName } from './person-cache';
 import { describeAudit } from './audit-format';
 
 /**
- * Accounts are Twenty companies. Cadence adds, locally: who reports to whom (the relationship
- * map), each person's stance on the account, and a note. Nothing here is written back to Twenty.
+ * Accounts are Twenty companies. Cadence adds no fields of its own: what it contributes is the
+ * engagement around them - the campaigns, tasks, touches and meetings its own people generated -
+ * merged into one timeline. The hierarchy shown is derived from the job titles Twenty holds, not
+ * from a chart anybody maintained here.
  */
 
 export type AccountListRow = {
@@ -170,6 +172,10 @@ export type AccountTimelineItem = {
 export type AccountDetail = NonNullable<Awaited<ReturnType<typeof accountDetail>>>;
 
 export async function accountDetail(companyId: string, user: SessionUser) {
+  // The same scope the list uses. Without it the record page was reachable from any person's
+  // company link, which handed a junior every contact, timeline and open task in another pod.
+  const scope = await accountScopeCompanyIds(user);
+  if (scope !== null && !scope.includes(companyId)) return null;
   const company = await prisma.companyCache.findUnique({ where: { id: companyId } });
   if (!company) return null;
 

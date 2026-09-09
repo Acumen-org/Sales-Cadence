@@ -8,14 +8,15 @@ Cadence never sends email or automates LinkedIn. Humans do every touch.
 
 - **Home**: one row of tiles for the signed-in user - people to reach today, calls / emails / LinkedIn due today, accounts owned, relationships owned - and, for managers, the week's board: what each FO owes, a bar for what they have finished, and their replies and meetings (Sunday to Saturday).
 - **Tasks**: today / overdue / upcoming by type, filtered by pod and FO. Two ways to work: **List** for picking from a table, and **Task flow** for working a run one person at a time with a progress rail. The step's message is editable in place, so the template is a starting point you personalise before sending from your own mailbox. One row of controls with one panel beneath it: Done, Skip with a reason, Snooze, Open in Twenty, and More for ending the sequence or jumping to another step. Call outcomes with notes, bulk actions across selected rows, keyboard shortcuts.
-- **Sequences**: versioned step plans (day offsets, email / call / LinkedIn actions, either/or steps, A/B template variants, templates with `{{firstName}} {{company}} {{jobTitle}} {{city}} {{leadSource}} {{product}} {{foFirstName}}`). Editing creates a new version; running enrollments pick it up at their next step. Per-step funnel and per-variant reply stats.
+- **Sequences**: one editable plan per sequence. A step is a business day offset and the modules on it - email, call, LinkedIn - dragged into the order you want; one step can hold a call and its follow-up email, and both appear inside that person's task. Copy is literal text, not a template: no placeholders to expand and nothing to substitute. There are no versions: edit a step whenever you like and every enrollment sees it, except a step with open tasks on it, which is refused until those are worked or cancelled - each task keeps its own frozen copy of the action, so an edit can never rewrite the message an FO is looking at. Days count business days only, so day 1 on a Monday makes day 7 the following Tuesday. The library shows each sequence as its full flow with one number: how many campaigns use it. Per-step funnel in Reports.
 - **Campaigns**: enrol from pasted ids, a CSV export, a saved Twenty view or a bulk selection on People; conflict preview (dnd, opted out, already enrolled, unknown); FO assignment by Twenty owner or round robin; daily ramp; funnel by step and FO; pause / stop / re-enrol non-repliers.
-- **Accounts**: one page per firm - a reporting chart built from who reports to whom, each contact's stance on the account (champion, supporter, neutral, detractor), every call, email, meeting, task and campaign anyone there has been part of, and one timeline of the whole relationship. Filter to the accounts you own.
+- **Accounts**: one page per firm - the CRM record as labelled fields (industry, city, employees, AUM, owner, last synced), the people grouped into bands by the job titles Twenty holds, every call, email, meeting, task and campaign anyone there has been part of, and one timeline of the whole relationship. Filter to the accounts you own.
 - **Meetings**: paste a recording link and it plays inside Cadence, with the transcript underneath (click a line to seek) and an analysis panel on the right. Recordings Twenty already holds on a person record are listed separately with a one-click "Add with transcript" that pre-fills the form from that person. Media files and SharePoint / OneDrive / Google Drive recordings play in place; Zoom pages and Teams or Meet join links cannot be framed, so those open in a new tab and say so. Analysis is deliberately empty until a model is connected - see [DECISIONS.md](DECISIONS.md).
+- **Enrichment**: what is missing before this data can be worked - a contact with no email is critical, an account with no AUM is useful - filterable by priority and by field. Enrichment you are given arrives as a CSV or JSON import: Cadence parses it, maps the columns, matches each row by Twenty id, email or domain, shows what would change, refuses a row whose CRM value moved since the preview, writes it to Twenty and verifies what Twenty returned.
 - **Activity**: everything the team did, newest first, grouped by day, with actor / kind / text filters. Administration (settings, users, pods, logins) is excluded by design.
-- **The person panel**, beside every task: how to reach them, **what Twenty says to do next** (the pod's own "FU-2, due Thursday, by email", which Cadence reads and never overwrites), how Twenty classifies them (tier, contact type, expected cadence, pipeline stage, product interest, campaigns, lead source), their tags, any booked meeting, one merged history of touches, synced emails, CRM notes and sequence events, their colleagues, and a space reserved for the analyzer.
-- **People**: fast searchable list from a local cache of Twenty people, filtered on what the CRM actually holds - pod, tier, contact type, expected cadence - plus the sequence state Cadence itself knows. Each row shows Twenty's standing and tier, Twenty's next action and its due date, the sequence, recent activity, owner and last touch. A person page carries the activity timeline, the sequence history, the controls, and the whole Twenty record grouped the way Twenty groups it.
-- **Reports**: activity leaderboard per FO, and roll-ups by pod, FO, campaign, sequence and channel; overdue and stalled lists.
+- **The person panel**, beside every task: how to reach them, **what Twenty says to do next** (the pod's own "FU-2, due Thursday, by email", which Cadence reads and never overwrites), how Twenty classifies them (tier, contact type, expected cadence, pipeline stage, product interest, campaigns, lead source), their tags, any booked meeting, one merged history of touches, synced emails, CRM notes and sequence events, their colleagues, and the Cadence AI panel.
+- **People**: fast searchable list from a local cache of Twenty people, filtered on what the CRM actually holds - pod, tier, contact type - plus the sequence state Cadence itself knows. Each row shows Twenty's standing and tier, Twenty's next action and its due date, the sequence, recent activity, owner and last touch. A person page opens on Overview - the whole Twenty record grouped the way Twenty groups it, and the campaign they are in now or how the last one ended - with their full campaign history, their activity, and Twenty's own emails and notes on the tabs beside it.
+- **Reports**: activity leaderboard per FO, and roll-ups by pod, FO, campaign, sequence and channel, over any date range you ask for (28 days by default).
 - **Twenty integration**: every field name and option value the app relies on lives in one file (`src/lib/twenty/twenty-schema.ts`) and matches the real workspace - ownership is `assignedTo`, consent is the `dnd` select, "where we met" is the `leadSource` multi-select. Webhooks + nightly reconcile complete email and call steps from Twenty activity, replies close open tasks, a new opportunity marks a meeting, dnd is honoured, every completed action is written back as a `[Cadence] ...` note and open tasks are mirrored as Twenty Tasks. Option constants are shown as readable labels, never raw. `CADENCE_DRY_RUN=true` logs writes without making them. Field-by-field mapping: [INTEGRATION.md](INTEGRATION.md#4-confirm-field-names).
 
 Server sizing and deploy: [DEPLOY.md](DEPLOY.md). Full list of assumptions: [DECISIONS.md](DECISIONS.md). Connecting a real workspace: [INTEGRATION.md](INTEGRATION.md).
@@ -26,16 +27,16 @@ Double-click **start-cadence.cmd**. It installs dependencies on the first run, s
 
 The same thing from a terminal: `pnpm start:local`. Each launch builds the current source before serving it. Set `CADENCE_SKIP_BUILD=1` only when deliberately reusing a build you just made. Database directories must be direct subdirectories of the project; the launcher refuses a running database or a nonempty, uninitialized directory instead of deleting files.
 
-**The dummy data** (everything is named "Dummy ..." so it cannot be mistaken for real data): two pods (Alisa's pod, Andrew's pod) plus one discovered from a person's `podOwner` value; one user per role (Admin, Alisa and Andrew as Senior FOs, Karson and Daniel as Junior FOs); three Dummy Companies and sixteen Dummy people carrying the real shape of the CRM record (every tier, every contact type, every list category, a booked meeting with a recording, a rotated-out record, a do-not-contact select and tags that say the contact details are missing); two campaigns per pod (one a week old, one starting today) with enrollments in every state: due today, overdue, replied, bounced, finished, meeting booked, and one dnd person who could not be enrolled; a reporting chart and a stance for every dummy person, so the Accounts relationship map has something to show; and four dummy meetings, one of each kind - a media file that really plays, a SharePoint recording, a Zoom page that has to open in a new tab, and a Google Meet join link - two of them with transcripts. To start over, delete `.pgdata-dev` and launch again.
+**The dummy data** (everything is named "Dummy ..." so it cannot be mistaken for real data): two pods (Alisa's pod, Andrew's pod) plus one discovered from a person's `podOwner` value; one user per role (Admin, Alisa and Andrew as Senior FOs, Karson and Daniel as Junior FOs); three Dummy Companies and sixteen Dummy people carrying the real shape of the CRM record (every tier, every contact type, every list category, a booked meeting with a recording, a rotated-out record, a do-not-contact select and tags that say the contact details are missing); two campaigns per pod (one a week old, one starting today) with enrollments in every state: due today, overdue, replied, bounced, finished, meeting booked, and one dnd person who could not be enrolled; and four dummy meetings, one of each kind - a media file that really plays, a SharePoint recording, a Zoom page that has to open in a new tab, and a Google Meet join link - two of them with transcripts. To start over, delete `.pgdata-dev` and launch again.
 
-**Pods follow Twenty.** Which pod a person is in comes from Twenty's `podOwner` field: unknown values create pods automatically, option labels renamed in Twenty rename the pod here. Admins decide which FOs work each pod and who can log in (Settings > Users and pods). What Cadence writes back to Twenty is spelled out in [INTEGRATION.md](INTEGRATION.md#what-cadence-writes-to-twenty-and-what-it-never-touches): only `[Cadence]` activity notes and mirrored tasks, never person fields.
+**Pods follow Twenty.** Which pod a person is in comes from Twenty's `podOwner` field: unknown values create pods automatically, option labels renamed in Twenty rename the pod here. Admins decide which FOs work each pod and who can log in (Settings > Users and pods). What Cadence writes back to Twenty is spelled out in [INTEGRATION.md](INTEGRATION.md#what-cadence-writes-to-twenty-and-what-it-never-touches): `[Cadence]` activity notes, mirrored tasks, and the fields an admin or pod leader imports through Enrichment. Nothing else is ever written.
 
 ## Status
 
 | Phase | Scope | State |
 |---|---|---|
 | 1 | Scaffold, schema, auth and roles, mock Twenty client, seed with the default sequence | done |
-| 2 | Enrollment engine, clocks, caps, versioning | done |
+| 2 | Enrollment engine, clocks, caps | done |
 | 3 | Tasks page and brief | done |
 | 4 | Webhook ingestion, matching, completions, replies, Twenty sync out | done |
 | 5 | Sequences, Campaigns, People, Reports pages | done |
@@ -58,7 +59,7 @@ TypeScript, Node 20+, Next.js 15 (App Router, server actions), Postgres 18, Pris
 4. Open http://localhost:3100 and sign in with `admin@cadence.local` / `admin12345` (from `.env`), or use the one-click demo buttons (Alisa and Andrew are Senior FOs, Karson and Daniel Junior FOs, Ria a second Admin; all `password123`).
 5. Open Tasks: the dummy workspace already has work due today, overdue work, and replies to look at.
 
-The `web` container applies migrations and runs the seed on start (`SEED_ON_START=true`, idempotent). The `worker` container runs the scheduler every `WORKER_TICK_SECONDS`, the nightly reconcile at `RECONCILE_HOUR` and the cache refresh at `CACHE_REFRESH_HOUR`. Postgres is published on `localhost:5433` so it never collides with Twenty's own database.
+The `web` container applies migrations and runs the seed on start (`SEED_ON_START=true`, idempotent). The `worker` container syncs from Twenty every `CRM_SYNC_SECONDS`, runs the scheduler every `WORKER_TICK_SECONDS`, and once a day after `RECONCILE_HOUR` (US Central) re-scans recent Twenty activity for anything a webhook missed and refreshes the person cache in full. Postgres is published on `localhost:5433` so it never collides with Twenty's own database.
 
 Useful commands:
 
@@ -111,13 +112,13 @@ pnpm screens       # captures every screen to .screens/ for design review
 pnpm build
 ```
 
-The end-to-end suite covers demo sign-in, campaign creation with the conflict preview, the task flow (done, log a call with an outcome, skip with a bounce, answered call finishing as replied), sequence editing, settings, role restrictions, reports, account maps, meeting forms, global search, dialog focus, and mobile navigation. To use a separate browser-test database without clearing an existing one, build first, then set `E2E_DB_DIR` to a new project subdirectory and run `pnpm exec playwright test`.
+The end-to-end suite covers demo sign-in, campaign creation with the conflict preview, the task flow (done, log a call with an outcome, skip with a bounce, answered call finishing as replied), sequence editing including the refusal to change a step in use, settings, role restrictions checked by URL as well as by the missing link, reports, accounts, meeting forms, enrichment, global search, dialog focus, and mobile navigation. `e2e/roles.spec.ts` drives one full journey per role. To use a separate browser-test database without clearing an existing one, build first, then set `E2E_DB_DIR` to a new project subdirectory and run `pnpm exec playwright test`.
 
 ## Workspace design and review
 
 Cadence uses a warm canvas, evergreen navigation, lime accents, a custom mark, and a consistent set of cards, tables, controls, and record headers. Home combines personal priorities, a focused task-flow entry point, upcoming touches, and weekly team performance. Sequences have a searchable visual library with real touch plans. Search (`Ctrl+K` / `Cmd+K`) and help are available from every section; the sidebar becomes a keyboard-accessible drawer on mobile.
 
-The project review and its verification scope are recorded in [AUDIT.md](AUDIT.md). Meeting times are entered in the signed-in user's timezone. Meeting analysis and suggested approaches remain explicitly unconnected until a model provider is implemented.
+The project review and its verification scope are recorded in [AUDIT.md](AUDIT.md). Meeting times are entered in the one workspace timezone, US Central. Meeting analysis and suggested approaches remain explicitly unconnected until a model provider is implemented.
 
 ## Roles
 
@@ -128,7 +129,7 @@ The project review and its verification scope are recorded in [AUDIT.md](AUDIT.m
 | Enrol, bulk-enrol, pause, exit, reassign within pod | all pods | own pods | no |
 | Campaigns | all | own pods | read-only own enrollments |
 | Reports | all | own pods | no |
-| Sequences (edit, versions) | yes | view | view |
+| Sequences (edit the plan) | yes | yes | view |
 | Settings, users, pods | yes | no | no |
 | Accounts, Meetings, Activity | all | own pods' accounts | own work |
 
@@ -143,7 +144,7 @@ src/app/                Next.js routes: home, tasks, accounts, people, meetings,
                         activity, replies, reports, settings, api/webhooks/twenty
 src/components/         UI (no component library; inline SVG icons)
 src/lib/auth/           sessions, passwords, RBAC
-src/lib/engine/         clock, caps, versioning, tasks, enrollment, matching, ingest, reconcile, sync-out
+src/lib/engine/         clock, caps, sequence-plan, tasks, enrollment, matching, ingest, reconcile, sync-out
 src/lib/meetings/       recording-link parsing, transcript parsing, the analyzer seam
 src/lib/sequences/      step schema and the default 23-day sequence
 src/lib/twenty/         twenty-schema.ts (all field names), types, client interface, mock + fixtures,
@@ -158,12 +159,12 @@ tests/                  vitest on embedded Postgres 18, including a per-page que
 | Day | Actions |
 |---|---|
 | 1 | Email 1, LinkedIn connect |
-| 3 | Call 1, then email OR LinkedIn message |
+| 3 | Call 1 + follow-up email |
 | 6 | Email 2 |
 | 9 | LinkedIn message 2 |
-| 12 | Call 2, then email OR LinkedIn message |
+| 12 | Call 2 + LinkedIn message |
 | 16 | LinkedIn message 3 |
-| 20 | Call 3, then email OR LinkedIn message |
+| 20 | Call 3 + follow-up email |
 | 23 | Email 3 |
 
-Seeded as version 1 of "Default outbound (23 days)". Admins edit it in Sequences.
+Seeded as "Default outbound". Days are business days, so this runs over roughly five calendar weeks. Senior FOs and above edit it in Sequences; a step with open tasks on it is locked until those are worked.

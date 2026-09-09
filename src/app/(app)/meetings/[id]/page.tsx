@@ -7,6 +7,7 @@ import { parseAnalysis } from '@/lib/meetings/analysis';
 import { parseMeetingLink, PROVIDER_LABELS } from '@/lib/meetings/providers';
 import { canManageMeetingAction, deleteMeetingAction, saveTranscriptAction } from '@/lib/actions/meetings';
 import { ActionButton, ActionForm } from '@/components/action-form';
+import { meetingReadWhere } from '@/lib/meetings-query';
 import { MeetingAnalysisPanel } from '@/components/meetings/meeting-analysis';
 import { AttendeeEditor } from '@/components/meetings/attendee-editor';
 import { MeetingStage } from '@/components/meetings/meeting-stage';
@@ -16,8 +17,9 @@ import { Avatar, Badge, Card, EmptyState, Field, KeyValue, RecordHeader } from '
 export default async function MeetingPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
   const { id } = await params;
-  const meeting = await prisma.meeting.findUnique({
-    where: { id },
+  const meeting = await prisma.meeting.findFirst({
+    // Scoped, not merely fetched: a transcript is a prospect conversation.
+    where: { AND: [{ id }, await meetingReadWhere(user)] },
     include: { attendees: { orderBy: [{ host: 'desc' }, { external: 'asc' }, { name: 'asc' }] }, createdBy: { select: { name: true } } },
   });
   if (!meeting) notFound();

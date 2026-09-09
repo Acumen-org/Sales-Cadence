@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
-import { isAdmin, isSeniorFo, visiblePodIds } from './auth/rbac';
+import { isAdmin, isPodLeader, visiblePodIds } from './auth/rbac';
 import { addDays, startOfLocalDay, todayIn, weekRange, type LocalDate } from './dates';
 import { taskScopeWhere, type TaskChannel } from './tasks-query';
 import { myOwnershipCounts } from './accounts-query';
@@ -9,14 +9,14 @@ import { myOwnershipCounts } from './accounts-query';
 export type HomeData = Awaited<ReturnType<typeof buildHome>>;
 
 /**
- * People this user is responsible for: owned in Twenty, in one of their pods (seniors), or
+ * People this user is responsible for: owned in Twenty, in one of their pods (pod leaders), or
  * enrolled with them as the FO. Admins see everyone, since they supervise.
  */
 export async function assignedPersonWhere(user: SessionUser): Promise<Prisma.PersonCacheWhereInput> {
   if (isAdmin(user)) return {};
   const or: Prisma.PersonCacheWhereInput[] = [{ enrollments: { some: { foUserId: user.id } } }];
   if (user.twentyMemberId) or.push({ ownerMemberId: user.twentyMemberId });
-  if (isSeniorFo(user)) {
+  if (isPodLeader(user)) {
     const podIds = visiblePodIds(user) ?? [];
     if (podIds.length) {
       const values = (await prisma.pod.findMany({ where: { id: { in: podIds } }, select: { podOwnerValue: true } })).map((p) => p.podOwnerValue);
@@ -108,7 +108,7 @@ async function myOpenTasks(base: Prisma.TaskWhereInput, today: LocalDate) {
  * Four grouped queries for the whole team rather than five per person.
  */
 async function teamThisWeek(user: SessionUser, today: LocalDate, week: { fromInstant: Date; toInstant: Date }) {
-  if (!isAdmin(user) && !isSeniorFo(user)) return [];
+  if (!isAdmin(user) && !isPodLeader(user)) return [];
   const pods = visiblePodIds(user);
   const users = await prisma.user.findMany({
     where: { active: true, ...(pods === null ? {} : { pods: { some: { podId: { in: pods } } } }) },

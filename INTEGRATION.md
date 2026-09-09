@@ -1,6 +1,6 @@
 # Connecting Cadence to your Twenty workspace
 
-Cadence reads people, notes, messages, tasks and opportunities from Twenty and writes back activity notes and mirrored tasks. Twenty stays the system of record. Follow these steps in order; each one is safe to redo.
+Cadence reads people, notes, messages, tasks and opportunities from Twenty and writes back activity notes, mirrored tasks, and the enrichment an admin or pod leader imports. Twenty stays the system of record. Follow these steps in order; each one is safe to redo.
 
 ## 1. Create an API key
 
@@ -229,15 +229,17 @@ Writes, and only these:
 | An FO completes an action (or Twenty activity completes it) | One **Note** on the person: `[Cadence] Email 2 sent by Alisa`, `[Cadence] Call 1 made by Alisa - Left voicemail`. Body: sequence, step, outcome, the FO's notes, source. |
 | A Cadence task is generated (setting *Mirror open tasks*, on by default) | One **Task**: `Cadence: Email 1 - Dummy One`, assigned to the FO, due on the task day, linked to the person. |
 | That Cadence task is done / skipped / cancelled | The mirrored Task is marked done, or deleted (setting *Delete mirrored task on skip*). |
+| An admin or pod leader applies an Enrichment import | The fields in that import, on the records it matched: `email`, `phone`, `jobTitle`, `linkedinUrl`, `city` on a **Person**; `domain`, `industry`, `employees`, `aum`, `city`, `linkedinUrl` on a **Company**. Each row is matched by Twenty id, email or domain; a row whose CRM value changed since the preview is refused as a conflict; the write is verified against what Twenty returns before the row is marked applied. |
 
-Never: person, company or opportunity fields - not `dnd`, `podOwner`, `assignedTo`, `tier`,
-`listCategory`, `nextAction`, `nextActionDueDate`, `tags`, emails or stages - nor notes or tasks
-Cadence did not create, nor messages. In particular the CRM's own next action is read and
+Never on its own initiative: person, company or opportunity fields - not `dnd`, `podOwner`,
+`assignedTo`, `tier`, `listCategory`, `nextAction`, `nextActionDueDate`, `tags`, emails or stages -
+nor notes or tasks Cadence did not create, nor messages. The contact and account fields listed in
+the last row above are the one exception, and only from an import a person reviewed and applied. In particular the CRM's own next action is read and
 displayed, never rewritten: the pod plans in Twenty and Cadence shows that plan beside its own. Opt-out and bad-data flags set in Cadence stay in Cadence; set `dnd` in Twenty yourself if it should apply everywhere. Every write appears in **Settings > Activity log > Writes to Twenty**; `CADENCE_DRY_RUN=true` logs them without writing.
 
-The relationship layer is Cadence's own and is never written back, because Twenty has no field for it: who reports to whom, each contact's stance on the account, the relationship note, and everything about meetings (the recording link, the transcript and any analysis). Meetings link to a Twenty company so they show on that account's timeline; they are not created in Twenty.
+Meetings are Cadence's own and are never written back, because Twenty has no field for them: the recording link, the transcript and any analysis. A meeting links to a Twenty company so it shows against that account here; it is not created in Twenty.
 
-Sync is immediate in both directions: webhooks are processed as Twenty sends them (people, companies, notes, messages, tasks and opportunities), every Cadence write happens right after the action that caused it, and opening a person in Cadence re-reads that person from Twenty. An account page has a **Sync from Twenty** button that pulls the company and its people on demand. The nightly reconcile only catches anything a webhook missed.
+Sync is immediate in both directions: webhooks are processed as Twenty sends them (people, companies, notes, messages, tasks and opportunities), every Cadence write happens right after the action that caused it, and opening a person in Cadence re-reads that person from Twenty. Opening an account re-reads that company and its people, so there is no sync button to press. The nightly reconcile only catches anything a webhook missed.
 
 Tested against **Twenty 1.23** and **Postgres 18**.
 

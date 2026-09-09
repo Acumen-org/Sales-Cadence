@@ -96,6 +96,9 @@ enum Channel {
   EMAIL
   CALL
   LINKEDIN
+  /// A meeting Twenty told us about (an opportunity booked against a contact). Not a touch
+  /// anybody performed, which is why it is its own channel rather than filed as a call.
+  MEETING
 }
 
 /// Where a recording lives. Only some providers allow embedding in an iframe.

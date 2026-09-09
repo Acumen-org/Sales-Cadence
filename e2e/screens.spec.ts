@@ -55,14 +55,23 @@ test('capture screens', async ({ page }) => {
     await shot(page, '07-person');
   }
   // The Twenty record itself, grouped the way Twenty groups it.
-  await page.goto('/people/dummy-01?tab=details');
-  await shot(page, '07b-person-details');
+  await page.goto('/people/dummy-01?tab=overview');
+  await shot(page, '07b-person-overview');
+  await page.goto('/people/dummy-01?tab=sequences');
+  await shot(page, '07c-person-history');
+  await page.goto('/people/dummy-01?tab=crm');
+  await shot(page, '07d-person-crm');
+
+  await page.goto('/enrichment');
+  await shot(page, '07e-enrichment');
 
   await page.goto('/sequences');
   await shot(page, '08-sequences');
   await page.getByRole('link', { name: /Default outbound/ }).first().click();
   await page.waitForURL(/\/sequences\//);
   await shot(page, '09-sequence-detail');
+  await page.goto('/sequences/new');
+  await shot(page, '09b-sequence-new');
 
   await page.goto('/campaigns');
   await shot(page, '10-campaigns');
@@ -115,7 +124,7 @@ test('capture screens', async ({ page }) => {
     await shot(page, '20-account-overview');
     const url = page.url().replace(/\?.*$/, '');
     await page.goto(`${url}?tab=relationships`);
-    await shot(page, '21-account-relationships');
+    await shot(page, '21-account-people-by-title');
     await page.goto(`${page.url().split('?')[0]}?tab=people`);
     await shot(page, '21b-account-people');
     await page.goto(`${url}?tab=timeline`);
@@ -126,4 +135,24 @@ test('capture screens', async ({ page }) => {
   await shot(page, '23-activity');
   await page.goto('/settings?tab=rules');
   await shot(page, '25-settings-rules');
+  await page.goto('/settings?tab=ai');
+  await shot(page, '26-settings-ai');
+  await page.goto('/campaigns/new');
+  await shot(page, '27-campaign-new');
+
+  // What a Junior FO sees: fewer sections, no administration.
+  await page.getByRole('button', { name: /Sign out/i }).click();
+  await page.waitForURL(/\/login/);
+  await page.getByRole('button', { name: /^Karson/ }).click();
+  await page.waitForURL(/\/home/);
+  await shot(page, '28-junior-home');
+  await page.goto('/tasks?tab=today');
+  await shot(page, '29-junior-tasks');
+
+  // And the same workspace on a phone.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/tasks?tab=today');
+  await shot(page, '30-mobile-tasks');
+  await page.goto('/home');
+  await shot(page, '31-mobile-home');
 });
