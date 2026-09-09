@@ -1,5 +1,24 @@
 import { expect, test, type Page } from '@playwright/test';
 
+const DEMO_EMAILS: Record<string, string> = {
+  Admin: 'admin@cadence.local',
+  Ria: 'ria@cadence.local',
+  Leigh: 'leigh@cadence.local',
+  Alisa: 'alisa@cadence.local',
+  Andrew: 'andrew@cadence.local',
+  Karson: 'karson@cadence.local',
+  Daniel: 'daniel@cadence.local',
+};
+
+/** Sign in the way everyone signs in now: an email and a password, no one-click buttons. */
+async function signInAs(page: Page, who: string) {
+  await page.goto('/login');
+  await page.getByLabel('Email').fill(DEMO_EMAILS[who] ?? who);
+  await page.getByLabel('Password').fill(who === 'Admin' ? 'admin12345' : 'password123');
+  await page.getByRole('button', { name: /^Sign in/ }).click();
+  await page.waitForURL(/\/home/);
+}
+
 /**
  * How the Tasks screen behaves after the rework: one action row, one panel slot, an editable
  * message, a person panel that carries the CRM record, and a task flow that is a different way
@@ -9,7 +28,7 @@ test.describe.configure({ mode: 'serial' });
 
 async function loginAs(page: Page, name: 'Admin' | 'Alisa') {
   await page.goto('/login');
-  await page.getByRole('button', { name: new RegExp(`^${name}\\b`) }).click();
+  await signInAs(page, name);
   await expect(page).toHaveURL(/\/home/);
 }
 

@@ -1,8 +1,27 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+
+const DEMO_EMAILS: Record<string, string> = {
+  Admin: 'admin@cadence.local',
+  Ria: 'ria@cadence.local',
+  Leigh: 'leigh@cadence.local',
+  Alisa: 'alisa@cadence.local',
+  Andrew: 'andrew@cadence.local',
+  Karson: 'karson@cadence.local',
+  Daniel: 'daniel@cadence.local',
+};
+
+/** Sign in the way everyone signs in now: an email and a password, no one-click buttons. */
+async function signInAs(page: Page, who: string) {
+  await page.goto('/login');
+  await page.getByLabel('Email').fill(DEMO_EMAILS[who] ?? who);
+  await page.getByLabel('Password').fill(who === 'Admin' ? 'admin12345' : 'password123');
+  await page.getByRole('button', { name: /^Sign in/ }).click();
+  await page.waitForURL(/\/home/);
+}
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/login');
-  await page.getByRole('button', { name: /^Alisa/ }).click();
+  await signInAs(page, 'Alisa');
   await expect(page).toHaveURL(/\/home/);
 });
 

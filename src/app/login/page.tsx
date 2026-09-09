@@ -1,10 +1,8 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth/current-user';
 import { LoginForm } from '@/components/login-form';
-import { DemoLogin } from '@/components/demo-login';
 import { BrandMark } from '@/components/brand';
 import { IconMail, IconPeople, IconPhone } from '@/components/icons';
-import { env } from '@/lib/env';
 
 /**
  * The way in.
@@ -24,7 +22,6 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const user = await getCurrentUser();
   if (user) redirect('/home');
   const { next } = await searchParams;
-  const demo = env().TWENTY_MODE === 'mock';
   return (
     <main className="grid min-h-dvh bg-[#fafbf8] lg:grid-cols-[1.05fr_1fr]">
       <section className="relative hidden min-h-dvh flex-col overflow-hidden bg-[#1c352d] p-12 text-white lg:flex xl:p-16">
@@ -53,7 +50,6 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           <h2 className="text-[32px] font-semibold tracking-[-0.045em] text-ink-900">Sign in</h2>
           <p className="mb-8 mt-2 text-[13px] leading-relaxed text-ink-500">Use your work email.</p>
           <LoginForm next={next} />
-          {demo ? <DemoLogin /> : null}
         </div>
       </section>
     </main>

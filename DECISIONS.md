@@ -41,7 +41,8 @@ Every assumption made while building Cadence, grouped by area. Each entry says w
 ## Seed
 
 - **Core profile** creates the default sequence as version 1 exactly as specified and the admin from `ADMIN_EMAIL` / `ADMIN_PASSWORD` (password set only on first creation).
-- **Demo profile** (mock mode only) creates pods Alisa/Leigh/Andrew, six users mapped to the six mock workspace members (`alisa@cadence.local` ... all `password123`; Ria is an Admin, Alisa/Leigh/Andrew Senior FOs, Karson/Daniel Junior FOs) and caches the 40 mock people. Remove `demo` from `SEED_PROFILE` in production.
+- **`core` is the only seed a deployment runs**: the default outbound sequence and one admin account from `ADMIN_EMAIL`/`ADMIN_PASSWORD`, which the seed refuses to create without a password rather than defaulting to a known one. No pods and no users beyond that: pods come from Twenty's `podOwner` options, contacts come from Twenty, and the rest of the team is added in Settings.
+- **The `demo` profile is for local work and the test suites** and only runs in mock mode: pods Alisa/Leigh/Andrew, six accounts mapped to the mock workspace members (all `password123`), and the sample contacts. `pnpm db:reset` empties a workspace back to the `core` state without touching Twenty.
 - **Seeding is idempotent** and safe to run on every start.
 
 ## Testing

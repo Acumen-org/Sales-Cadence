@@ -2,6 +2,25 @@ import { test, type Page } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 
+const DEMO_EMAILS: Record<string, string> = {
+  Admin: 'admin@cadence.local',
+  Ria: 'ria@cadence.local',
+  Leigh: 'leigh@cadence.local',
+  Alisa: 'alisa@cadence.local',
+  Andrew: 'andrew@cadence.local',
+  Karson: 'karson@cadence.local',
+  Daniel: 'daniel@cadence.local',
+};
+
+/** Sign in the way everyone signs in now: an email and a password, no one-click buttons. */
+async function signInAs(page: Page, who: string) {
+  await page.goto('/login');
+  await page.getByLabel('Email').fill(DEMO_EMAILS[who] ?? who);
+  await page.getByLabel('Password').fill(who === 'Admin' ? 'admin12345' : 'password123');
+  await page.getByRole('button', { name: /^Sign in/ }).click();
+  await page.waitForURL(/\/home/);
+}
+
 /**
  * Not an assertion suite: captures the main screens so the design can be reviewed.
  * `pnpm screens` writes PNGs to .screens/.
@@ -20,7 +39,7 @@ test('capture screens', async ({ page }) => {
   await page.goto('/login');
   await shot(page, '01-login');
 
-  await page.getByRole('button', { name: /^Alisa/ }).click();
+  await signInAs(page, 'Alisa');
   await page.waitForURL(/\/home/);
   await shot(page, '02-home');
 
@@ -104,7 +123,7 @@ test('capture screens', async ({ page }) => {
   // Admin-only screens
   await page.getByTitle('Sign out').click();
   await page.waitForURL(/\/login/);
-  await page.getByRole('button', { name: /^Admin/ }).click();
+  await signInAs(page, 'Admin');
   await page.waitForURL(/\/home/);
   await page.goto('/reports');
   await shot(page, '12-reports');
@@ -162,7 +181,7 @@ test('capture screens', async ({ page }) => {
   // What a Junior FO sees: fewer sections, no administration.
   await page.getByRole('button', { name: /Sign out/i }).click();
   await page.waitForURL(/\/login/);
-  await page.getByRole('button', { name: /^Karson/ }).click();
+  await signInAs(page, 'Karson');
   await page.waitForURL(/\/home/);
   await shot(page, '28-junior-home');
   await page.goto('/tasks?tab=today');

@@ -1,5 +1,24 @@
 import { expect, test, type Page } from '@playwright/test';
 
+const DEMO_EMAILS: Record<string, string> = {
+  Admin: 'admin@cadence.local',
+  Ria: 'ria@cadence.local',
+  Leigh: 'leigh@cadence.local',
+  Alisa: 'alisa@cadence.local',
+  Andrew: 'andrew@cadence.local',
+  Karson: 'karson@cadence.local',
+  Daniel: 'daniel@cadence.local',
+};
+
+/** Sign in the way everyone signs in now: an email and a password, no one-click buttons. */
+async function signInAs(page: Page, who: string) {
+  await page.goto('/login');
+  await page.getByLabel('Email').fill(DEMO_EMAILS[who] ?? who);
+  await page.getByLabel('Password').fill(who === 'Admin' ? 'admin12345' : 'password123');
+  await page.getByRole('button', { name: /^Sign in/ }).click();
+  await page.waitForURL(/\/home/);
+}
+
 /**
  * End-to-end flows an FO and a manager actually perform, against the seeded demo workspace.
  * Runs serially: later tests build on the campaign created earlier.
@@ -8,7 +27,7 @@ test.describe.configure({ mode: 'serial' });
 
 async function loginAs(page: Page, name: 'Admin' | 'Alisa' | 'Leigh' | 'Karson') {
   await page.goto('/login');
-  await page.getByRole('button', { name: new RegExp(`^${name}\\b`) }).click();
+  await signInAs(page, name);
   await expect(page).toHaveURL(/\/home/);
 }
 
@@ -19,10 +38,21 @@ async function logout(page: Page) {
 
 const isWeekend = () => [0, 6].includes(new Date().getDay());
 
-test('login page offers one-click demo sign-in and lands on Home', async ({ page }) => {
+test('everyone signs in with an email and a password, and lands on Home', async ({ page }) => {
   await page.goto('/login');
-  await expect(page.getByText('Demo workspace: sign in as')).toBeVisible();
-  await page.getByRole('button', { name: /^Alisa/ }).click();
+  // One way in. There are no per-person shortcuts, on any deployment.
+  await expect(page.getByLabel('Email')).toBeVisible();
+  await expect(page.getByLabel('Password')).toBeVisible();
+  await expect(page.getByRole('button', { name: /sign in as/i })).toHaveCount(0);
+  // And the session can be kept on a machine one person uses, or expire in a day.
+  await expect(page.getByLabel(/Keep me signed in/)).toBeVisible();
+
+  await page.getByLabel('Email').fill('alisa@cadence.local');
+  await page.getByLabel('Password').fill('wrong-password');
+  await page.getByRole('button', { name: /^Sign in/ }).click();
+  await expect(page.getByText(/Email or password is incorrect/i)).toBeVisible();
+
+  await signInAs(page, 'Alisa');
   await expect(page).toHaveURL(/\/home/);
   await expect(page.getByRole('heading', { name: /Good day, Alisa/ })).toBeVisible();
   await expect(page.getByText('Calls today')).toBeVisible();
