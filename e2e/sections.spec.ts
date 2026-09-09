@@ -286,3 +286,32 @@ test('recordings Twenty holds are offered for adding, pre-filled', async ({ page
   await expect(page.getByText(/Media file/)).toBeVisible();
   await logout(page);
 });
+
+test('a meeting is tagged with the products it was about', async ({ page }) => {
+  await loginAs(page, 'Alisa');
+  await page.goto('/meetings');
+  await page.getByRole('link', { name: /intro call/ }).first().click();
+  await page.waitForURL(/\/meetings\/[0-9a-f-]+/);
+
+  // Three products, none tagged to begin with, toggled from the record itself.
+  const phh = page.getByRole('button', { name: 'PHH', exact: true });
+  await expect(phh).toHaveAttribute('aria-pressed', 'false');
+  await phh.click();
+  await expect(phh).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'Glynac', exact: true }).click();
+
+  // It survives a reload, and the list shows both.
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'PHH', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'Glynac', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.goto('/meetings');
+  const row = page.locator('table').first().locator('tr').filter({ hasText: 'intro call' }).first();
+  await expect(row).toContainText('PHH');
+  await expect(row).toContainText('Glynac');
+
+  // Untagging takes it off again.
+  await row.getByRole('link').first().click();
+  await page.getByRole('button', { name: 'PHH', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'PHH', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  await logout(page);
+});

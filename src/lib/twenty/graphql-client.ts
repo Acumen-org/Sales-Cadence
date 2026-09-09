@@ -620,6 +620,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     if (!company || company.deletedAt) throw new TwentyApiError('This account no longer exists in Twenty.');
     const fields = this.s.company;
     const data: Raw = {
+      ...(patch.name !== undefined ? { [fields.name]: patch.name } : {}),
       ...(patch.domain !== undefined ? { [fields.domainName]: { primaryLinkUrl: patch.domain } } : {}),
       ...(patch.industry !== undefined ? { [fields.industry]: patch.industry } : {}),
       ...(patch.employees !== undefined ? { [fields.employees]: patch.employees } : {}),

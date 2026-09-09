@@ -486,6 +486,8 @@ model Meeting {
   company          CompanyCache?   @relation(fields: [companyId], references: [id], onDelete: SetNull)
   /// Kept even when the company is not cached, so the label always renders.
   companyName      String?
+  /// Which of the team's products this meeting was about. A meeting can cover more than one.
+  products         String[]        @default([])
   notes            String?
   /// Raw transcript as pasted or uploaded (WebVTT, SRT or plain text).
   transcript       String?

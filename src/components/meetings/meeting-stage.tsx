@@ -106,7 +106,7 @@ export function MeetingStage(p: Props) {
         <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
           <span className="text-[13px] font-semibold text-ink-900">
             Transcript
-            {cues.length ? <span className="ml-2 font-normal text-ink-600"><strong className="font-bold text-ink-900">{cues.length}</strong> segments{format ? ` · ${format.toUpperCase()}` : ''}</span> : null}
+            {cues.length ? <span className="ml-2 font-normal text-ink-600"><span className="font-medium text-ink-900">{cues.length}</span> segments{format ? ` · ${format.toUpperCase()}` : ''}</span> : null}
           </span>
           <span className="text-[12px] text-ink-500">{open ? 'Hide' : 'Show'}</span>
         </button>

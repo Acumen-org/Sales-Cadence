@@ -37,6 +37,7 @@ export default async function NewMeetingPage({ searchParams }: { searchParams: P
               durationMin: '',
               companyId: account ?? person?.companyId ?? '',
               attendees: [{ userId: user.id, name: user.name, email: user.email }, ...(person ? [{ personId: person.id, name: personName, email: person.email }] : [])],
+              products: [],
               transcript: '',
             }}
           />

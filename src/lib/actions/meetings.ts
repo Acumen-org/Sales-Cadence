@@ -1,6 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { optionLabel } from '../twenty/labels';
+import { PRODUCTS, type Product } from '../workspace';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
@@ -36,6 +38,34 @@ export async function canManageMeetingAction(meetingId: string): Promise<boolean
   const user = await requireUser();
   const meeting = await prisma.meeting.findUnique({ where: { id: meetingId }, select: { id: true, createdById: true, companyId: true } });
   return meeting ? mayManageMeeting(user, meeting) : false;
+}
+
+/**
+ * Tag or untag one product on an open meeting.
+ *
+ * Separate from the edit form on purpose: tagging is something you do while reading the notes,
+ * and sending someone through a full form - which also re-parses the transcript and clears any
+ * analysis - to add "Glynac" would be absurd.
+ */
+export async function toggleMeetingProductAction(formData: FormData): Promise<ActionResult> {
+  const user = await requireUser();
+  const id = String(formData.get('meetingId') ?? '');
+  const product = String(formData.get('product') ?? '');
+  if (!(PRODUCTS as readonly string[]).includes(product)) return { ok: false, error: 'Unknown product.' };
+  const meeting = await prisma.meeting.findUnique({ where: { id }, select: { id: true, createdById: true, companyId: true, products: true } });
+  if (!meeting) return { ok: false, error: 'Meeting not found.' };
+  if (!(await mayManageMeeting(user, meeting))) return { ok: false, error: 'You do not have permission to edit this meeting.' };
+
+  const on = meeting.products.includes(product);
+  const products = on ? meeting.products.filter((p) => p !== product) : [...meeting.products, product];
+  // Stored in the order the list defines, so two meetings with the same tags read the same.
+  const ordered = PRODUCTS.filter((p) => products.includes(p));
+  await prisma.meeting.update({ where: { id }, data: { products: ordered } });
+  await logAudit({ entityType: 'meeting', entityId: id, action: on ? 'product_removed' : 'product_added', actor: userActor(user), details: { product } });
+  revalidatePath(`/meetings/${id}`);
+  revalidatePath('/meetings');
+  if (meeting.companyId) revalidatePath(`/accounts/${meeting.companyId}`);
+  return { ok: true, message: on ? `${optionLabel(product)} removed.` : `${optionLabel(product)} added.` };
 }
 
 const AttendeeSchema = z.object({
@@ -84,6 +114,9 @@ const MeetingSchema = z.object({
   occurredAt: z.string().trim().min(1),
   durationSec: z.coerce.number().int().min(0).max(86_400).optional().nullable(),
   companyId: z.string().trim().optional().nullable(),
+  // A meeting can be about more than one product, so unknown values are dropped rather than
+  // rejected: the list is ours, and a stale form should not lose the rest of the edit.
+  products: z.array(z.string()).default([]).transform((v) => v.filter((p): p is Product => (PRODUCTS as readonly string[]).includes(p))),
   attendees: z.string().optional().default(''),
   transcript: z.string().max(2_000_000).optional().nullable(),
 });
@@ -95,6 +128,7 @@ function readForm(formData: FormData) {
     occurredAt: formData.get('occurredAt'),
     durationSec: formData.get('durationMin') ? Number(formData.get('durationMin')) * 60 : null,
     companyId: formData.get('companyId') || null,
+    products: formData.getAll('products').map(String),
     attendees: formData.get('attendees') ?? '',
     transcript: formData.get('transcript') || null,
   });
@@ -171,6 +205,7 @@ export async function createMeetingAction(formData: FormData): Promise<ActionRes
       durationSec: d.durationSec ?? null,
       companyId: company?.id ?? null,
       companyName: company?.name ?? null,
+      products: d.products,
       transcript,
       transcriptFormat: transcript ? detectTranscriptFormat(transcript) : null,
       createdById: user.id,
@@ -217,6 +252,7 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
         durationSec: d.durationSec ?? null,
         companyId: company?.id ?? null,
         companyName: company?.name ?? null,
+        products: d.products,
         transcript,
         transcriptFormat: transcript ? detectTranscriptFormat(transcript) : null,
         // A changed transcript invalidates any analysis.

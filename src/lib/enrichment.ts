@@ -18,10 +18,43 @@ export const ENRICHMENT_FIELDS: Record<EnrichmentEntity, EnrichmentField[]> = {
   ],
   company: [
     { key: 'recordId', label: 'Twenty account ID', identity: true }, { key: 'matchDomain', label: 'Existing domain (match only)', identity: true },
-    { key: 'domain', label: 'Website domain' }, { key: 'industry', label: 'Industry' }, { key: 'employees', label: 'Employees' },
+    { key: 'name', label: 'Account name' }, { key: 'domain', label: 'Website domain' }, { key: 'industry', label: 'Industry' }, { key: 'employees', label: 'Employees' },
     { key: 'aum', label: 'AUM (USD)' }, { key: 'city', label: 'City' }, { key: 'linkedinUrl', label: 'LinkedIn URL' },
   ],
 };
+/**
+ * What counts as missing, and how badly.
+ *
+ * **Critical** is what stops the work: without it you cannot reach the person, or you cannot tell
+ * who they are. An address and a number are obvious; so are the company they work for and their
+ * LinkedIn, because a contact with neither cannot be researched, verified or approached on the
+ * one channel that does not need an address.
+ *
+ * **Useful** is what makes the work better rather than possible: the qualifying detail an FO
+ * wants before a first call, and the account facts a pod leader wants before committing a
+ * campaign to it. AUM is the clearest example - nothing stops without it, and everything is
+ * better aimed with it.
+ */
+const CONTACT_CRITICAL = [
+  ['companyId', 'Company'],
+  ['linkedinUrl', 'LinkedIn'],
+] as const;
+const CONTACT_USEFUL = [
+  ['jobTitle', 'Job title'],
+  ['city', 'City'],
+] as const;
+const ACCOUNT_CRITICAL = [
+  ['domain', 'Website'],
+  ['linkedinUrl', 'LinkedIn'],
+] as const;
+const ACCOUNT_USEFUL = [
+  ['industry', 'Industry'],
+  ['employees', 'Employees'],
+  ['city', 'City'],
+  ['aum', 'AUM'],
+  ['ownerMemberId', 'Account owner'],
+] as const;
+
 export const canEnrich = (user: SessionUser) => isAdmin(user) || isPodLeader(user);
 const MAX_ROWS = 5_000;
 const MAX_BYTES = 4_000_000;
@@ -133,6 +166,9 @@ export function validateEnrichmentValue(field: string, value: string): string | 
     const [whole, fraction = ''] = amount.split('.');
     return `${BigInt(whole).toString()}.${fraction.padEnd(2, '0')}`;
   }
+  // A record's own name is the one free-text field that cannot be blanked: an account with no
+  // name is unfindable, and an import row with an empty cell should say so rather than wipe it.
+  if (field === 'name' && !text) throw new Error('An account name cannot be empty.');
   if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text)) throw new Error('Control characters are not accepted.');
   return text;
 }
@@ -154,7 +190,7 @@ export type EnrichmentQueueItem = { id: string; label: string; company: string |
 export async function enrichmentQueue(user: SessionUser) {
   const [people, companies, schema] = await Promise.all([
     prisma.personCache.findMany({ where: await enrichmentPeopleScope(user), select: { id: true, firstName: true, lastName: true, companyId: true, companyName: true, email: true, phone: true, jobTitle: true, linkedinUrl: true, city: true, tags: true, badEmail: true, badPhone: true, emailMissing: true, phoneMissing: true }, orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }] }),
-    prisma.companyCache.findMany({ where: await enrichmentCompanyScope(user), select: { id: true, name: true, domain: true, industry: true, employees: true, city: true, aum: true }, orderBy: { name: 'asc' } }),
+    prisma.companyCache.findMany({ where: await enrichmentCompanyScope(user), select: { id: true, name: true, domain: true, industry: true, employees: true, city: true, aum: true, linkedinUrl: true, ownerMemberId: true }, orderBy: { name: 'asc' } }),
     getTwentySchema(),
   ]);
   const enrichmentTags = new Set(schema.personValues.needsEnrichmentTags);
@@ -163,13 +199,15 @@ export async function enrichmentQueue(user: SessionUser) {
     const gaps: EnrichmentGap[] = [];
     if (!person.email || person.badEmail || person.emailMissing) gaps.push({ field: 'email', label: person.email ? 'Email needs verification' : 'Email missing', priority: 'critical' });
     if (!person.phone || person.badPhone || person.phoneMissing) gaps.push({ field: 'phone', label: person.phone ? 'Phone needs verification' : 'Phone missing', priority: 'critical' });
-    for (const [field, label] of [['jobTitle', 'Job title'], ['linkedinUrl', 'LinkedIn'], ['city', 'City'], ['companyId', 'Company']] as const) if (!person[field]) gaps.push({ field, label: `${label} missing`, priority: 'useful' });
+    for (const [field, label] of CONTACT_CRITICAL) if (!person[field]) gaps.push({ field, label: `${label} missing`, priority: 'critical' });
+    for (const [field, label] of CONTACT_USEFUL) if (!person[field]) gaps.push({ field, label: `${label} missing`, priority: 'useful' });
     if (person.tags.some((tag) => enrichmentTags.has(tag) || /enrichment[\s_-]*(required|needed)/i.test(tag))) gaps.push({ field: 'tags', label: 'Flagged in CRM', priority: 'useful' });
     if (gaps.length) items.push({ id: person.id, label: cachedPersonName(person), company: person.companyName, entity: 'person', href: `/people/${person.id}`, gaps });
   }
   for (const company of companies) {
     const gaps: EnrichmentGap[] = [];
-    for (const [field, label] of [['domain', 'Website'], ['industry', 'Industry'], ['employees', 'Employees'], ['city', 'City'], ['aum', 'AUM']] as const) if (company[field] === null || company[field] === '') gaps.push({ field, label: `${label} missing`, priority: 'useful' });
+    for (const [field, label] of ACCOUNT_CRITICAL) if (company[field] === null || company[field] === '') gaps.push({ field, label: `${label} missing`, priority: 'critical' });
+    for (const [field, label] of ACCOUNT_USEFUL) if (company[field] === null || company[field] === '') gaps.push({ field, label: `${label} missing`, priority: 'useful' });
     if (gaps.length) items.push({ id: company.id, label: company.name, company: null, entity: 'company', href: `/accounts/${company.id}`, gaps });
   }
   return items.sort((a, b) => Number(b.gaps.some((gap) => gap.priority === 'critical')) - Number(a.gaps.some((gap) => gap.priority === 'critical')) || a.label.localeCompare(b.label));
