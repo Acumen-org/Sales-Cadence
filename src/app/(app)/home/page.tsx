@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { requireUser } from '@/lib/auth/current-user';
-import { isAdmin } from '@/lib/auth/rbac';
+import { isAdmin, isPodLeader } from '@/lib/auth/rbac';
 import { formatLocalDate } from '@/lib/dates';
 import { buildHome } from '@/lib/home-query';
 import { TASK_CHANNELS, type TaskChannel } from '@/lib/tasks-query';
@@ -101,7 +101,7 @@ export default async function HomePage() {
         </Surface>
       </div>
 
-      {h.team.length ? <TeamBoard rows={h.team} week={{ from: h.week.from, to: h.week.to }} isAdmin={isAdmin(user)} /> : null}
+      {h.team.length ? <TeamBoard rows={h.team} week={{ from: h.week.from, to: h.week.to }} title={isAdmin(user) ? 'The team this week' : isPodLeader(user) ? 'Your pods this week' : 'Your week'} /> : null}
     </div>
   );
 }
@@ -124,7 +124,7 @@ type TeamRow = { id: string; name: string; today: number; overdue: number; doneW
  * right. The bar is scaled to the busiest person, which is the only comparison that matters
  * when you are scanning for who needs help.
  */
-function TeamBoard({ rows, week, isAdmin: admin }: { rows: TeamRow[]; week: { from: string; to: string }; isAdmin: boolean }) {
+function TeamBoard({ rows, week, title }: { rows: TeamRow[]; week: { from: string; to: string }; title: string }) {
   const total = rows.reduce(
     (a, r) => ({
       today: a.today + r.today,
@@ -140,9 +140,9 @@ function TeamBoard({ rows, week, isAdmin: admin }: { rows: TeamRow[]; week: { fr
   return (
     <Surface flush>
       <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line px-5 py-5">
-        <h2 className="text-[14px] font-semibold text-ink-900">{admin ? 'The team this week' : 'Your pods this week'}</h2>
-        <p className="text-[11.5px] text-ink-600">
-          {formatLocalDate(week.from)} - {formatLocalDate(week.to)} · <N>{rows.length}</N> {rows.length === 1 ? 'person' : 'people'}
+        <h2 className="text-[14px] font-semibold text-ink-900">{title}</h2>
+        <p className="text-[11.5px] font-semibold text-ink-700">
+          {formatLocalDate(week.from)} to {formatLocalDate(week.to)}
         </p>
       </div>
 
