@@ -259,5 +259,6 @@ export const IconSort = (p: IconProps) => (
 export function ActionIcon({ action, size = 16, className }: { action: string; size?: number; className?: string }) {
   if (action === 'EMAIL') return <IconMail size={size} className={className} />;
   if (action === 'CALL') return <IconPhone size={size} className={className} />;
+  if (action === 'MEETING') return <IconCalendar size={size} className={className} />;
   return <IconLinkedin size={size} className={className} />;
 }

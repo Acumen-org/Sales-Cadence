@@ -40,6 +40,7 @@ export type ColleagueRow = {
   name: string;
   jobTitle: string | null;
   status: string | null;
+  exitReason: string | null;
   foName: string | null;
   lastTouchAt: Date | null;
 };
@@ -69,10 +70,10 @@ export type TaskBrief = {
   colleagues: ColleagueRow[];
   opportunities: TwentyOpportunity[];
   nextStep: { step: SequenceStep; plannedDate: LocalDate; description: string } | null;
-  /** Steps of the active version (for "move to step") and where the enrollment is. */
+  /** Steps of the plan (for "move to step") and where the enrollment is. */
   steps: { index: number; day: number; label: string }[];
   currentStep: number;
-  enrollment: { id: string; status: string; startDate: string; campaignName: string | null; sequenceName: string; foName: string; shiftDays: number };
+  enrollment: { id: string; status: string; exitReason: string | null; startDate: string; campaignName: string | null; sequenceName: string; foName: string; shiftDays: number };
   warnings: string[];
 };
 
@@ -191,6 +192,7 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
     enrollment: {
       id: enrollmentFull.id,
       status: enrollmentFull.status,
+      exitReason: enrollmentFull.exitReason,
       startDate: enrollmentFull.startDate,
       campaignName: task.enrollment.campaign?.name ?? null,
       sequenceName: task.enrollment.sequence.name,
@@ -217,6 +219,7 @@ async function loadColleagues(companyId: string | null, personId: string): Promi
       name: cachedPersonName(p),
       jobTitle: p.jobTitle,
       status: e?.status ?? (p.dnd ? 'DND' : null),
+      exitReason: e?.exitReason ?? null,
       foName: e?.fo.name ?? null,
       lastTouchAt: lastByPerson.get(p.id) ?? null,
     };
@@ -270,7 +273,7 @@ function buildTimeline(input: {
   /** Twenty's own last-touch stamps, which exist for people Cadence never worked. */
   crm: { lastCallAt: Date | null; lastEmailAt: Date | null };
 }): BriefTimelineItem[] {
-  const kindOfChannel = (channel: string): BriefTimelineItem['kind'] => (channel === 'EMAIL' ? 'email' : channel === 'CALL' ? 'call' : 'linkedin');
+  const kindOfChannel = (channel: string): BriefTimelineItem['kind'] => (channel === 'EMAIL' ? 'email' : channel === 'CALL' ? 'call' : channel === 'MEETING' ? 'meeting' : 'linkedin');
   // An email listed in full from Twenty would otherwise show again as its touch record.
   const emailSubjects = new Set(input.emails.map((e) => (e.subject ?? '').toLowerCase()).filter(Boolean));
   const looksLikeListedEmail = (summary: string) => {

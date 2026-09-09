@@ -19,7 +19,6 @@ import type { TwentyCompany, TwentyMessage, TwentyNote, TwentyOpportunity, Twent
 import { OCCUPYING_STATUSES, applyPersonFlags, markMeeting, markReplied } from './enrollment';
 import { actionTypesFor, classifyMessage, classifyNoteTitle, resolveNoteActor, type UserLike } from './matching';
 import { completeTask, type EngineContext } from './tasks';
-import { channelOf } from '../sequences/steps';
 
 export type IngestInput = {
   source: EventSource;
@@ -192,7 +191,7 @@ async function handlePerson(person: TwentyPerson, deleted: boolean, ctx: EngineC
 // notes
 // ---------------------------------------------------------------------------
 
-async function recordTouch(data: { personId: string; channel: 'EMAIL' | 'CALL' | 'LINKEDIN'; direction: 'OUTBOUND' | 'INBOUND'; occurredAt: Date; summary: string; externalId: string; actorUserId?: string | null; actorLabel?: string | null }) {
+async function recordTouch(data: { personId: string; channel: 'EMAIL' | 'CALL' | 'LINKEDIN' | 'MEETING'; direction: 'OUTBOUND' | 'INBOUND'; occurredAt: Date; summary: string; externalId: string; actorUserId?: string | null; actorLabel?: string | null }) {
   const person = await prisma.personCache.findUnique({ where: { id: data.personId }, select: { id: true } });
   if (!person) return false;
   await prisma.touch.upsert({
@@ -384,7 +383,7 @@ async function handleOpportunity(o: TwentyOpportunity, ctx: EngineContext, setti
   if (!enrollment) return { result: 'opportunity_no_active_enrollment' };
   await recordTouch({
     personId: enrollment.personId,
-    channel: channelOf('CALL'),
+    channel: 'MEETING',
     direction: 'INBOUND',
     occurredAt: new Date(o.createdAt),
     summary: `Opportunity created: ${o.name}`,

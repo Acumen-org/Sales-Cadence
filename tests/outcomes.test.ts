@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { SYSTEM_ACTOR } from '@/lib/audit';
 import type { SessionUser } from '@/lib/auth/current-user';
 import { getSettings, saveSettingsSection } from '@/lib/settings';
-import { completeCall, enrollPeople, finishEnrollment, moveToStep, optOutPerson, previewEnrollment, skipWithReason } from '@/lib/engine';
+import { applyExitConsequence, completeCall, enrollPeople, exitEnrollment, finishEnrollment, moveToStep, previewEnrollment, skipWithReason } from '@/lib/engine';
 import { listTasks } from '@/lib/tasks-query';
 import { getMockTwentyClient } from '@/lib/twenty/mock-client';
 import { WORKSPACE_TIMEZONE } from '@/lib/workspace';
@@ -93,9 +93,13 @@ describe('Outreach-style outcomes', () => {
     await saveSettingsSection('rules', { ...s.rules, exitOnBounce: true });
   });
 
-  it('opted out people cannot be enrolled again', async () => {
-    const r = await optOutPerson('person-05', { actor: SYSTEM_ACTOR, optedOut: true });
-    expect(r.exited).toHaveLength(1);
+  // The reason lives on the enrollment, but "asked not to be contacted" has to outlive it: the
+  // consequence goes on the person, or the next campaign re-enrols somebody who told us to stop.
+  it('ending a sequence because they asked us to stop opts the person out of every future campaign', async () => {
+    const e = await prisma.enrollment.findFirstOrThrow({ where: { personId: 'person-05' } });
+    await exitEnrollment(e.id, { reason: 'opted_out', actor: SYSTEM_ACTOR });
+    await applyExitConsequence('person-05', 'opted_out', SYSTEM_ACTOR);
+    expect((await prisma.personCache.findUniqueOrThrow({ where: { id: 'person-05' } })).optedOut).toBe(true);
     const p = await previewEnrollment({ personIds: ['person-05'], sequenceId: b.sequence.id, podId: b.pods.Alisa.id, startDate: '2026-09-08', assignment: { mode: 'OWNER' }, actor: SYSTEM_ACTOR });
     expect(p.conflicts.map((c) => c.reason)).toEqual(['opted_out']);
   });

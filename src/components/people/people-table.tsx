@@ -2,9 +2,9 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { Badge, DotTimeline, IdentityCell, TierBadge, type BadgeTone, type TimelinePoint } from '@/components/ui';
+import { Badge, DotTimeline, IdentityCell, TierBadge, touchTitle, type BadgeTone, type TimelinePoint } from '@/components/ui';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
-import { IconPlus } from '@/components/icons';
+import { ActionIcon, IconPlus } from '@/components/icons';
 
 export type PeopleTableRow = {
   id: string;
@@ -27,7 +27,7 @@ export type PeopleTableRow = {
   optedOut: boolean;
   enrollment: { status: string; label: string; tone: BadgeTone; campaignName: string | null; campaignId: string | null; sequenceName: string; foName: string } | null;
   activeEnrollmentId: string | null;
-  lastTouch: { summary: string; at: string } | null;
+  lastTouch: { summary: string; at: string; channel: 'EMAIL' | 'CALL' | 'LINKEDIN' | 'MEETING'; inbound: boolean } | null;
   activity: TimelinePoint[];
   twentyUrl: string | null;
 };
@@ -38,6 +38,21 @@ type Props = {
 };
 
 /** People list with stages, an activity timeline, row actions and bulk "add to sequence". */
+/**
+ * The CRM tags left to show. Twenty carries the same fact as both a field and a tag - a person
+ * marked do-not-contact has the flag and the tag, a person with no address has the flag and
+ * MISSING_EMAIL - and the badges above are built from the fields. Rendering both put the same
+ * word in the cell twice, so anything already said is dropped here.
+ */
+function distinctTags(p: PeopleTableRow): string[] {
+  const shown = new Set(
+    [p.standing.label, p.listCategory ? optionLabel(p.listCategory) : null, ...p.warnings.map((w) => w.label)]
+      .filter((label): label is string => Boolean(label))
+      .map((label) => label.toLowerCase()),
+  );
+  return p.tags.filter((tag) => !shown.has(optionLabel(tag).toLowerCase()));
+}
+
 export function PeopleTable({ rows, canEnroll }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const selectable = rows.filter((r) => !r.activeEnrollmentId && !r.dnd && !r.optedOut);
@@ -100,20 +115,19 @@ export function PeopleTable({ rows, canEnroll }: Props) {
                 <td>
                   <IdentityCell name={p.name} href={`/people/${p.id}`} shape="circle" sub={[p.jobTitle, p.companyName].filter(Boolean).join(' · ') || null} />
                 </td>
-                {/* Everything Twenty says about the person in one cell: standing, tier, how
-                    often they should be touched, and anything wrong with their details. */}
+                {/* Everything Twenty says about the person, each value once. Standing, tier and
+                    the data-quality flags are derived from fields Twenty also carries as tags, so
+                    a tag already shown as a badge is dropped rather than repeated. */}
                 <td title={p.leadSource.length ? `Lead source: ${optionLabels(p.leadSource)}` : undefined}>
                   <div className="flex flex-wrap items-center gap-1">
                     <Badge tone={p.standing.tone} dot>
                       {p.standing.label}
                     </Badge>
                     <TierBadge tier={p.tier} />
+                    {p.listCategory ? <Badge tone="gray">{optionLabel(p.listCategory)}</Badge> : null}
+                    {p.warnings.map((w) => <Badge key={w.label} tone={w.tone}>{w.label}</Badge>)}
+                    {distinctTags(p).map((tag) => <Badge key={tag} tone="gray">{optionLabel(tag)}</Badge>)}
                   </div>
-                  <div className="mt-0.5 whitespace-nowrap text-[11px] font-semibold text-ink-700">
-                    {p.listCategory ? optionLabel(p.listCategory) : null}
-                    {p.warnings.length ? <span className="text-amber-700">{p.listCategory ? ' · ' : ''}{p.warnings.map((w) => w.label).join(' · ')}</span> : null}
-                  </div>
-                  {p.tags.length ? <div className="mt-1 flex flex-wrap gap-1">{p.tags.map((tag) => <Badge key={tag} tone="gray">{optionLabel(tag)}</Badge>)}</div> : null}
                 </td>
                 <td className="text-[12px]">
                   {p.next?.action || p.next?.due ? (
@@ -148,8 +162,11 @@ export function PeopleTable({ rows, canEnroll }: Props) {
                 <td className="text-[12px]">
                   {p.lastTouch ? (
                     <>
-                      <div className="max-w-[13rem] truncate font-semibold text-ink-800">{p.lastTouch.summary}</div>
-                      <div className="font-semibold text-ink-700">{p.lastTouch.at}</div>
+                      <div className="flex max-w-[13rem] items-center gap-1.5" title={p.lastTouch.summary}>
+                        <span className={p.lastTouch.inbound ? 'shrink-0 text-emerald-700' : 'shrink-0 text-ink-400'}><ActionIcon action={p.lastTouch.channel} size={13} /></span>
+                        <span className="truncate font-semibold text-ink-800">{touchTitle(p.lastTouch.summary)}</span>
+                      </div>
+                      <div className="mt-0.5 font-semibold text-ink-700">{p.lastTouch.at}</div>
                     </>
                   ) : (
                     <span className="text-ink-300">-</span>

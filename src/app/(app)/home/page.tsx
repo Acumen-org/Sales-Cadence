@@ -94,7 +94,7 @@ export default async function HomePage() {
           </Link>)}</div>
         </Surface>
         <Surface flush>
-          <div className="flex items-center justify-between border-b border-line px-5 py-4"><h2 className="text-[14px] font-semibold">Up next</h2><Link href={`/tasks?tab=${focusTab}&${mine}`} className="text-[11px] font-medium text-brand-700">View all <N>{h.my.todayTotal + h.my.overdueTotal}</N> <span aria-hidden>↗</span></Link></div>
+          <div className="flex items-center justify-between border-b border-line px-5 py-4"><h2 className="text-[14px] font-semibold">Up next</h2><Link href={`/tasks?tab=${focusTab}&${mine}`} className="text-[11px] font-medium text-brand-700">{h.my.todayTotal + h.my.overdueTotal ? <>View all <N>{h.my.todayTotal + h.my.overdueTotal}</N></> : 'Open tasks'} <span aria-hidden>↗</span></Link></div>
           {h.my.nextTasks.length ? <div className="divide-y divide-line/70">{h.my.nextTasks.map((task) => <Link key={task.id} href={`/tasks?task=${task.id}&mode=flow&tab=${task.due < h.today ? 'overdue' : task.due === h.today ? 'today' : 'upcoming'}&${mine}`} className="flex items-center gap-3 px-5 py-4 transition hover:bg-brand-50/50">
             <Avatar name={task.name} shape="circle" size={34} /><span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold">{task.name}</span><span className="mt-0.5 block truncate text-[10px] text-ink-500">{task.company ?? task.label}</span></span><span className="text-right"><span className={`block text-[9px] font-medium ${task.due < h.today ? 'text-amber-700' : 'text-ink-500'}`}>{task.due < h.today ? 'Overdue' : task.due === h.today ? 'Today' : formatLocalDate(task.due)}</span><span className="mt-1.5 flex justify-end text-ink-400"><ActionIcon action={task.action} size={13} /></span></span>
           </Link>)}</div> : <EmptyState icon={<IconCheck size={20} />} title="Nothing scheduled" />}
@@ -104,6 +104,16 @@ export default async function HomePage() {
       {h.team.length ? <TeamBoard rows={h.team} week={{ from: h.week.from, to: h.week.to }} isAdmin={isAdmin(user)} /> : null}
     </div>
   );
+}
+
+/**
+ * One figure in the board. Zero reads as an empty cell, in the rows and in the totals alike, so
+ * the eye lands only on people who actually owe work.
+ */
+function Figure({ value, tone }: { value: number; tone?: 'warn' | 'good' | 'brand' }) {
+  if (!value) return <span className="text-ink-300">-</span>;
+  const colour = tone === 'warn' ? 'text-red-700' : tone === 'good' ? 'text-emerald-700' : tone === 'brand' ? 'text-brand-700' : 'text-ink-900';
+  return <span className={`font-bold ${colour}`}>{value}</span>;
 }
 
 type TeamRow = { id: string; name: string; today: number; overdue: number; doneWeek: number; replies: number; meetings: number };
@@ -162,23 +172,23 @@ function TeamBoard({ rows, week, isAdmin: admin }: { rows: TeamRow[]; week: { fr
                       <span className="truncate font-medium text-ink-900">{t.name}</span>
                     </div>
                   </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{t.today ? <span className="font-bold text-ink-900">{t.today}</span> : <span className="text-ink-300">-</span>}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums"><Figure value={t.today} /></td>
                   <td className="px-3 py-2.5 text-right tabular-nums">
-                    {t.overdue ? <span className="font-bold text-red-700">{t.overdue}</span> : <span className="text-ink-300">-</span>}
+                    <Figure value={t.overdue} tone="warn" />
                   </td>
                   <td className="px-3 py-2.5">
                     <div className="flex items-center gap-2.5">
                       <span className="h-1.5 w-full max-w-[104px] overflow-hidden rounded-full bg-line">
                         <span className="block h-full rounded-full bg-brand-500 transition-[width]" style={{ width: `${Math.round((t.doneWeek / peak) * 100)}%` }} />
                       </span>
-                      <span className="w-6 shrink-0 text-right font-bold tabular-nums text-ink-900">{t.doneWeek}</span>
+                      <span className="w-6 shrink-0 text-right tabular-nums"><Figure value={t.doneWeek} /></span>
                     </div>
                   </td>
                   <td className="px-3 py-2.5 text-right tabular-nums">
-                    {t.replies ? <span className="font-bold text-emerald-700">{t.replies}</span> : <span className="text-ink-300">-</span>}
+                    <Figure value={t.replies} tone="good" />
                   </td>
                   <td className="px-3 py-2.5 text-right tabular-nums">
-                    {t.meetings ? <span className="font-bold text-brand-700">{t.meetings}</span> : <span className="text-ink-300">-</span>}
+                    <Figure value={t.meetings} tone="brand" />
                   </td>
                   <td className="px-4 py-2.5 text-right">
                     <Link
@@ -195,11 +205,11 @@ function TeamBoard({ rows, week, isAdmin: admin }: { rows: TeamRow[]; week: { fr
               <tfoot>
                 <tr className="border-t border-line bg-canvas/50 text-[12.5px] text-ink-700">
                   <td className="px-4 py-2 font-medium">Everyone</td>
-                  <td className="px-3 py-2 text-right font-bold tabular-nums text-ink-900">{total.today}</td>
-                  <td className="px-3 py-2 text-right font-bold tabular-nums text-ink-900">{total.overdue}</td>
-                  <td className="px-3 py-2 font-bold tabular-nums text-ink-900">{total.doneWeek}</td>
-                  <td className="px-3 py-2 text-right font-bold tabular-nums text-ink-900">{total.replies}</td>
-                  <td className="px-3 py-2 text-right font-bold tabular-nums text-ink-900">{total.meetings}</td>
+                  <td className="px-3 py-2 text-right tabular-nums"><Figure value={total.today} /></td>
+                  <td className="px-3 py-2 text-right tabular-nums"><Figure value={total.overdue} tone="warn" /></td>
+                  <td className="px-3 py-2 tabular-nums"><Figure value={total.doneWeek} /></td>
+                  <td className="px-3 py-2 text-right tabular-nums"><Figure value={total.replies} tone="good" /></td>
+                  <td className="px-3 py-2 text-right tabular-nums"><Figure value={total.meetings} tone="brand" /></td>
                   <td />
                 </tr>
               </tfoot>

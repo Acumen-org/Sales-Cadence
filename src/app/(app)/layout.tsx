@@ -27,7 +27,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <Sidebar user={user} mode={e.TWENTY_MODE} dryRun={e.CADENCE_DRY_RUN} todayCount={todayCount} />
       <main id="main-content" tabIndex={-1} className="flex min-w-0 flex-1 flex-col outline-none">
         <LiveRefresh />
-        <TopBar role={user.role} unread={unread} todayCount={todayCount} needsReview={needsReview} />
+        <TopBar role={user.role} unread={unread} needsReview={needsReview} />
         <div className="page-content min-w-0 flex-1">{children}</div>
       </main>
     </div>

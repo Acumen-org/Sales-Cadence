@@ -1,5 +1,5 @@
 import { prisma } from '../db';
-import { logAudit } from '../audit';
+import { logAudit, type AuditActor } from '../audit';
 import { getSettings, type RulesSettings } from '../settings';
 import { exitEnrollment, finishEnrollment, markReplied, setPersonFlags } from './enrollment';
 import { advanceEnrollment, cancelOpenTasks, completeTask, skipTask, syncCancelled, type EngineContext, type ResolveResult } from './tasks';
@@ -43,6 +43,18 @@ export async function completeCall(input: CallOutcomeInput, ctx: EngineContext):
   return { ...r, replied };
 }
 
+/**
+ * The person-level consequence of ending a sequence.
+ *
+ * The reason belongs on the enrollment, but "asked not to be contacted" has to outlive it: without
+ * the flag on the person, the next campaign's conflict preview sees nothing wrong and re-enrols
+ * somebody who told us to stop. The skip path already does this; ending a sequence from the task
+ * or the person has to do the same.
+ */
+export async function applyExitConsequence(personId: string, reason: string, actor: AuditActor): Promise<void> {
+  if (reason === 'opted_out') await setPersonFlags(personId, { optedOut: true }, actor);
+}
+
 export type SkipOutcomeInput = { taskId: string; reasonKey: string; note?: string | null };
 
 /** Skip with a configured reason; some reasons end the enrollment and flag the person. */
@@ -71,7 +83,7 @@ export async function skipWithReason(input: SkipOutcomeInput, ctx: EngineContext
 }
 
 /**
- * Outreach "Move to step": jump ahead to `targetIndex` (in the active version). Pending tasks of
+ * Outreach "Move to step": jump ahead to `targetIndex` (in the plan). Pending tasks of
  * the current step are cancelled, the target step is generated now.
  */
 export async function moveToStep(enrollmentId: string, targetIndex: number, ctx: EngineContext): Promise<{ ok: true; generated: string[] } | { ok: false; error: string }> {

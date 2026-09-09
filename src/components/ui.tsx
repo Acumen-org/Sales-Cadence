@@ -288,6 +288,16 @@ export function TierBadge({ tier }: { tier: string | null }) {
 }
 
 /**
+ * Twenty's own note titles lead with a bracketed channel - `[Email] Outbound email: ...`,
+ * `[CALL] Outbound Call by tw_alisa` - which is how the workspace's automations write them and
+ * how Cadence recognises them. The channel is already carried by the icon beside the row, so the
+ * bracket is dropped for display rather than eating the width of a truncated cell.
+ */
+export function touchTitle(summary: string): string {
+  return summary.replace(/^\[[^\]]{1,24}\]\s*/, '');
+}
+
+/**
  * Data-quality problems worth flagging next to a person, from both sides: the tags Twenty
  * carries and Cadence's own flags from a bounce or a wrong-number call. Consent is deliberately
  * absent - `crmStanding` already leads with "Do not contact", and saying it twice reads as noise.

@@ -26,7 +26,7 @@
     "start:local": "tsx scripts/start-local.ts",
     "reconcile": "tsx scripts/reconcile.ts",
     "verify:schema": "tsx scripts/verify-schema.ts",
-    "screens": "pnpm build && node -e \"require('fs').rmSync('.pgdata-e2e',{recursive:true,force:true})\" && playwright test e2e/screens.spec.ts"
+    "screens": "pnpm build && tsx scripts/screens.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

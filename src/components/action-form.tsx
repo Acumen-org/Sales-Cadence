@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
 import clsx from 'clsx';
 import type { ActionResult } from '@/lib/actions/users';
 
@@ -80,6 +81,7 @@ export function ActionButton({
 }) {
   const [pending, start] = useTransition();
   const [result, setResult] = useState<ActionResult | null>(null);
+  const router = useRouter();
   return (
     <span className="inline-flex flex-col items-start">
       <button
@@ -95,6 +97,9 @@ export function ActionButton({
             try {
               const r = await action(fd);
               setResult(r);
+              // Deleting a record leaves the user on a URL that no longer resolves, so an action
+              // that says where to go next is followed here rather than only by forms.
+              if (r.ok && r.redirectTo) router.push(r.redirectTo);
             } catch (err) {
               setResult({ ok: false, error: err instanceof Error ? err.message : String(err) });
             }

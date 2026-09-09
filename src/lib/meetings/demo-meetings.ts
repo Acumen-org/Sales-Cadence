@@ -161,34 +161,3 @@ export const DEMO_USER_MAILBOXES: Record<string, string> = {
   'karson@cadence.local': 'karson@acumen-strategy.com',
   'daniel@cadence.local': 'daniel@acumen-strategy.com',
 };
-
-export type DemoRelationship = {
-  personId: string;
-  /** Person id of the manager, or null for the top of the chart. */
-  reportsToId: string | null;
-  accountRole: 'CHAMPION' | 'SUPPORTER' | 'NEUTRAL' | 'DETRACTOR' | 'UNKNOWN';
-  relationshipNote?: string;
-};
-
-/** Three dummy org charts, one per account, including two roots in Company C. */
-export const DEMO_RELATIONSHIPS: DemoRelationship[] = [
-  // Dummy Company A
-  { personId: 'dummy-01', reportsToId: null, accountRole: 'CHAMPION', relationshipNote: 'Runs the account for us. Left a voicemail Thursday, wants a call back.' },
-  { personId: 'dummy-02', reportsToId: 'dummy-01', accountRole: 'SUPPORTER', relationshipNote: 'Replied and asked to talk next week.' },
-  { personId: 'dummy-03', reportsToId: 'dummy-01', accountRole: 'DETRACTOR', relationshipNote: 'Email bounced; treats new tooling as a distraction.' },
-  { personId: 'dummy-13', reportsToId: 'dummy-01', accountRole: 'NEUTRAL', relationshipNote: 'Holds the budget for the reporting work.' },
-  { personId: 'dummy-10', reportsToId: 'dummy-13', accountRole: 'UNKNOWN', relationshipNote: 'Procurement. Will appear at contract stage.' },
-  { personId: 'dummy-16', reportsToId: 'dummy-02', accountRole: 'UNKNOWN' },
-  // Dummy Company B
-  { personId: 'dummy-04', reportsToId: null, accountRole: 'NEUTRAL', relationshipNote: 'CEO. Polite but delegates everything downward.' },
-  { personId: 'dummy-05', reportsToId: 'dummy-04', accountRole: 'UNKNOWN', relationshipNote: 'No owner in Twenty yet.' },
-  { personId: 'dummy-06', reportsToId: 'dummy-04', accountRole: 'UNKNOWN', relationshipNote: 'Do not contact: marked dnd in Twenty.' },
-  { personId: 'dummy-11', reportsToId: 'dummy-04', accountRole: 'NEUTRAL' },
-  { personId: 'dummy-14', reportsToId: 'dummy-04', accountRole: 'SUPPORTER', relationshipNote: 'Met at the dummy conference, friendly.' },
-  // Dummy Company C
-  { personId: 'dummy-07', reportsToId: null, accountRole: 'SUPPORTER', relationshipNote: 'Signs anything under 200k. Wants six months with a break at four.' },
-  { personId: 'dummy-08', reportsToId: 'dummy-07', accountRole: 'CHAMPION', relationshipNote: 'Meeting booked. Building the internal case for the reporting pack.' },
-  { personId: 'dummy-09', reportsToId: 'dummy-07', accountRole: 'NEUTRAL' },
-  { personId: 'dummy-15', reportsToId: null, accountRole: 'NEUTRAL', relationshipNote: 'Engineering line, separate from the commercial chain.' },
-  { personId: 'dummy-12', reportsToId: 'dummy-15', accountRole: 'UNKNOWN', relationshipNote: 'Carries pod owner "Karson", which is how pod discovery shows up.' },
-];

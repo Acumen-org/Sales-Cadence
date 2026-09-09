@@ -40,6 +40,8 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
               <thead>
                 <tr>
                   <th>Account</th>
+                  <th>Industry</th>
+                  <th>City</th>
                   <th>Owner</th>
                   <th>People</th>
                   <th>In sequence</th>
@@ -53,14 +55,17 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
                   <tr key={a.id}>
                     <td>
                       <div className="flex items-center gap-2">
-                        <IdentityCell name={a.name} href={`/accounts/${a.id}`} sub={[a.industry, a.city, a.domain].filter(Boolean).join(' · ') || null} />
+                        <IdentityCell name={a.name} href={`/accounts/${a.id}`} sub={a.domain} />
                         {a.mine ? <Badge tone="blue">mine</Badge> : null}
                       </div>
                     </td>
+                    {/* Industry and city are fields, not a dotted sentence under the name. */}
+                    <td className="whitespace-nowrap text-[12.5px]">{a.industry ?? <span className="text-ink-300">-</span>}</td>
+                    <td className="whitespace-nowrap text-[12.5px]">{a.city ?? <span className="text-ink-300">-</span>}</td>
                     <td className="whitespace-nowrap text-[12.5px]">{a.ownerName ?? <span className="text-ink-300">unassigned</span>}</td>
                     <td className="font-bold text-ink-900">{a.people}</td>
                     <td>
-                      <StatusDot tone={a.inSequence ? 'green' : 'gray'}><strong className="text-ink-900">{a.inSequence}</strong> In sequence</StatusDot>
+                      <StatusDot tone={a.inSequence ? 'green' : 'gray'}><strong className="text-ink-900">{a.inSequence}</strong></StatusDot>
                     </td>
                     <td className="font-bold text-ink-900">{a.replied}</td>
                     <td className="font-bold text-ink-900">{a.meetings}</td>

@@ -185,7 +185,15 @@ export type CompleteTaskInput = {
 
 export type ResolveResult =
   | { ok: true; task: Task; advance: AdvanceResult }
-  | { ok: false; reason: 'not_found' | 'already_resolved' | 'evidence_used' | 'invalid' ; detail?: string };
+  | { ok: false; reason: 'not_found' | 'already_resolved' | 'evidence_used' | 'invalid' | 'paused'; detail?: string };
+
+/**
+ * A paused campaign has stopped, which has to mean its open touches stop too. They are held
+ * rather than cancelled - the schedule is intact and resuming releases it - so nothing here may
+ * resolve one. Evidence is checked before this, so observed activity is not consumed either and
+ * the reconcile can still complete the touch once the campaign is resumed.
+ */
+const HELD = { ok: false as const, reason: 'paused' as const, detail: 'This campaign is paused. Resume it to work this touch.' };
 
 export async function completeTask(input: CompleteTaskInput, ctx: EngineContext): Promise<ResolveResult> {
   const now = ctx.now ?? new Date();
@@ -197,6 +205,7 @@ export async function completeTask(input: CompleteTaskInput, ctx: EngineContext)
       const used = await tx.task.findFirst({ where: { evidenceId: input.evidenceId }, select: { id: true } });
       if (used) return { ok: false as const, reason: 'evidence_used' as const, detail: used.id };
     }
+    if (task.enrollment.status === 'PAUSED') return HELD;
     const chosen = input.chosenAction ?? task.action;
     if (chosen !== task.action) {
       return { ok: false as const, reason: 'invalid' as const, detail: `action ${chosen} is not part of this task` };
@@ -260,9 +269,10 @@ export async function skipTask(input: { taskId: string; reason: string; note?: s
   const reason = input.reason.trim();
   if (!reason) return { ok: false, reason: 'invalid', detail: 'A skip reason is required.' };
   const res = await prisma.$transaction(async (tx) => {
-    const task = await tx.task.findUnique({ where: { id: input.taskId } });
+    const task = await tx.task.findUnique({ where: { id: input.taskId }, include: { enrollment: { select: { status: true } } } });
     if (!task) return { ok: false as const, reason: 'not_found' as const };
     if (task.state !== 'PENDING') return { ok: false as const, reason: 'already_resolved' as const };
+    if (task.enrollment.status === 'PAUSED') return HELD;
     const claimed = await tx.task.updateMany({
       where: { id: task.id, state: 'PENDING' },
       data: { state: 'SKIPPED', skipReason: reason, note: input.note?.trim() || null, completedById: ctx.actor.type === 'USER' ? ctx.actor.id ?? null : null, snoozedTo: null },
@@ -290,9 +300,10 @@ export async function snoozeTask(input: { taskId: string; toDate: LocalDate }, c
   const settings = await getSettings();
   if (!isLocalDate(input.toDate)) return { ok: false, reason: 'invalid', detail: 'Invalid date.' };
   const res = await prisma.$transaction(async (tx) => {
-    const task = await tx.task.findUnique({ where: { id: input.taskId }, include: { fo: true } });
+    const task = await tx.task.findUnique({ where: { id: input.taskId }, include: { fo: true, enrollment: { select: { status: true } } } });
     if (!task) return { ok: false as const, reason: 'not_found' as const };
     if (task.state !== 'PENDING') return { ok: false as const, reason: 'already_resolved' as const };
+    if (task.enrollment.status === 'PAUSED') return HELD;
     const today = todayIn(task.fo.timezone, ctx.now ?? new Date());
     if (input.toDate <= today) return { ok: false as const, reason: 'invalid' as const, detail: 'Snooze to a future date.' };
     const toDate = nextWorkingDay(input.toDate, settings.rules.workingDays);

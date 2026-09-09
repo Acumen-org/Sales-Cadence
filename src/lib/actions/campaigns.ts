@@ -98,7 +98,7 @@ export async function createCampaignAction(formData: FormData): Promise<ActionRe
     if (!sequence || sequence.archived) return { ok: false, error: 'Choose an available sequence.' };
     const preview = await previewEnrollment({ personIds: ids, sequenceId: d.sequenceId, podId: d.podId, startDate: d.startDate, assignment: { mode: d.assignmentMode }, actor: userActor(user) });
     if (!preview.candidates.length) return { ok: false, error: 'No eligible contacts. Review the audience and assignment.' };
-    const campaign = await prisma.campaign.create({ data: { name: d.name, sequenceId: d.sequenceId, podId: d.podId, sourceType: d.sourceType, sourceRef, personIds: ids, assignmentMode: d.assignmentMode, startDate: d.startDate, dailyRampPerFo: d.dailyRampPerFo || null, status: 'SCHEDULED', approvedAt: new Date(), approvedById: user.id, createdById: user.id } });
+    const campaign = await prisma.campaign.create({ data: { name: d.name, sequenceId: d.sequenceId, podId: d.podId, sourceType: d.sourceType, sourceRef, personIds: ids, assignmentMode: d.assignmentMode, startDate: d.startDate, dailyRampPerFo: d.dailyRampPerFo || null, notes: d.notes?.trim() || null, status: 'SCHEDULED', approvedAt: new Date(), approvedById: user.id, createdById: user.id } });
     await logAudit({ entityType: 'campaign', entityId: campaign.id, action: 'created', actor: userActor(user), details: { people: ids.length, startDate: d.startDate } });
     await activateCampaign(campaign.id, { actor: userActor(user) });
     refreshCampaign(campaign.id);

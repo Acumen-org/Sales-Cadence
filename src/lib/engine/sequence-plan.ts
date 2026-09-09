@@ -58,6 +58,20 @@ export async function updateSequenceMeta(
   patch: { name?: string; description?: string | null; archived?: boolean },
   actor: AuditActor,
 ) {
+  // An archived sequence is refused by campaign launch, and a scheduled campaign that hits that
+  // refusal sits SCHEDULED forever with nothing on screen to explain it. So the archive is
+  // refused here instead, naming the campaigns that would have been stranded.
+  if (patch.archived) {
+    const blocking = await prisma.campaign.findMany({
+      where: { sequenceId, status: { in: ['PENDING_APPROVAL', 'SCHEDULED', 'ACTIVE', 'PAUSED'] } },
+      select: { name: true },
+      orderBy: { name: 'asc' },
+      take: 5,
+    });
+    if (blocking.length) {
+      throw new Error(`${blocking.length === 1 ? 'A campaign is' : `${blocking.length} campaigns are`} still running on this sequence (${blocking.map((c) => c.name).join(', ')}). Stop ${blocking.length === 1 ? 'it' : 'them'} before archiving.`);
+    }
+  }
   const updated = await prisma.sequence.update({
     where: { id: sequenceId },
     data: {

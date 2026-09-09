@@ -22,6 +22,10 @@ export function TaskComposer({ taskId, subject, body, html, label, channel, revi
   const queue = useRef<Promise<boolean>>(Promise.resolve(true));
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const alive = useRef(true);
+  // The editor normalises the HTML it is handed and reports that back as a change before anybody
+  // has typed. Without this, opening a task marked its draft unsaved and then persisted a copy
+  // nobody edited - which froze that task's message against later edits to the sequence step.
+  const touched = useRef(false);
   const flush = useCallback((): Promise<boolean> => {
     if (timer.current) clearTimeout(timer.current);
     queue.current = queue.current.then(async () => {
@@ -47,7 +51,9 @@ export function TaskComposer({ taskId, subject, body, html, label, channel, revi
     return () => { alive.current = false; unregister(); window.removeEventListener('beforeunload', unload); void flush(); };
   }, [flush]);
   const change = (patch: Partial<typeof draft>) => {
-    const next = { ...latest.current, ...patch }; latest.current = next; setDraft(next); setState('Unsaved');
+    const next = { ...latest.current, ...patch }; latest.current = next; setDraft(next);
+    if (!touched.current) { saved.current = { subject: next.subject, html: next.html }; return; }
+    setState('Unsaved');
     try { localStorage.setItem('cadence:recovery:' + taskId, JSON.stringify(next)); } catch {}
     if (timer.current) clearTimeout(timer.current); timer.current = setTimeout(() => { void flush(); }, 650);
   };
@@ -60,8 +66,8 @@ export function TaskComposer({ taskId, subject, body, html, label, channel, revi
       setCopied(true); setTimeout(() => setCopied(false), 1800);
     } catch { setError('Clipboard unavailable. Select the message to copy it.'); }
   };
-  return <section className="space-y-3">
-    <header className="flex flex-wrap items-center gap-2"><span className="rounded-lg bg-brand-50 p-2 text-brand-700"><ActionIcon action={channel} size={19} /></span><h3 className="text-base font-semibold">{channel === 'CALL' ? 'Call preparation' : label}</h3><span className="ml-auto flex items-center gap-2">{!readOnly && <button type="button" onClick={() => { void flush(); }} className="btn-ghost btn-sm" disabled={state === 'Saved' || state === 'Saving'}>{state === 'Saved' ? <IconCheck size={12} /> : null}<strong>{state}</strong></button>}<button type="button" className="btn-secondary btn-sm" onClick={copy}><IconCopy size={13} />{copied ? 'Copied' : 'Copy message'}</button></span></header>
+  return <section className="space-y-3" onFocusCapture={() => { touched.current = true; }}>
+    <header className="flex flex-wrap items-center gap-2"><span className="rounded-lg bg-brand-50 p-2 text-brand-700"><ActionIcon action={channel} size={19} /></span><h3 className="text-base font-semibold">{channel === 'CALL' ? 'Call preparation' : label}</h3><span className="ml-auto flex items-center gap-2">{!readOnly && <button type="button" onClick={() => { void flush(); }} aria-live="polite" className={state === 'Saved' ? 'btn-ghost btn-sm' : state === 'Saving' ? 'btn-ghost btn-sm' : 'btn-sm rounded-lg border border-amber-300 bg-amber-50 px-2.5 font-semibold text-amber-800 hover:bg-amber-100'} disabled={state === 'Saved' || state === 'Saving'}>{state === 'Saved' ? <IconCheck size={12} /> : null}<strong>{state === 'Unsaved' ? 'Unsaved - save now' : state}</strong></button>}<button type="button" className="btn-secondary btn-sm" onClick={copy}><IconCopy size={13} />{copied ? 'Copied' : 'Copy message'}</button></span></header>
     {channel === 'CALL' && <div className="space-y-3 rounded-xl border border-brand-200 bg-brand-50/40 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><div className="text-xs text-ink-500">Phone</div><strong className="mt-1 block text-lg text-ink-900">{phone || 'No number in Twenty'}</strong></div>

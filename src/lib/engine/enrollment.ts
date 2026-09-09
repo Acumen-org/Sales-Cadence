@@ -447,16 +447,6 @@ export async function setPersonFlags(personId: string, flags: { optedOut?: boole
   await logAudit({ entityType: 'person', entityId: personId, action: 'flags_updated', actor, details: data });
 }
 
-/** Opt a person out of outreach in Cadence and exit any live enrollment. */
-export async function optOutPerson(personId: string, opts: { actor: AuditActor; optedOut: boolean; now?: Date; skipSync?: boolean }) {
-  await setPersonFlags(personId, { optedOut: opts.optedOut }, opts.actor);
-  if (!opts.optedOut) return { exited: [] as string[] };
-  const active = await prisma.enrollment.findMany({ where: { personId, status: { in: OCCUPYING_STATUSES } }, select: { id: true } });
-  for (const e of active) await exitEnrollment(e.id, { reason: 'opted_out', actor: opts.actor, now: opts.now, skipSync: opts.skipSync });
-  return { exited: active.map((e) => e.id) };
-}
-
-/** Active enrollments of the same company (for the brief and the colleague rule). */
 export async function colleagueEnrollments(companyId: string | null, excludePersonId: string) {
   if (!companyId) return [];
   return prisma.enrollment.findMany({

@@ -24,6 +24,8 @@ const CONFLICT_LABEL: Record<string, string> = {
   duplicate: 'Duplicate id',
   no_fo: 'No FO in pod',
   invalid_start: 'Invalid start date',
+  opted_out: 'Asked not to be contacted',
+  bad_data: 'Contact details are not usable',
 };
 
 /** Create a campaign: choose people (ids, CSV or Twenty view), preview conflicts, confirm. */
