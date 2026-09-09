@@ -97,37 +97,6 @@ export type TaskListResult = {
   today: LocalDate;
 };
 
-export async function listTasks(user: SessionUser, filters: TaskFilters, now = new Date(), limit = 500): Promise<TaskListResult> {
-  const today = todayIn(user.timezone, now);
-  const scoped: Prisma.TaskWhereInput = { AND: [taskScopeWhere(user), filtersWhere(filters)] };
-  const base: Prisma.TaskWhereInput = { AND: [scoped, channelWhere(filters.channel)] };
-  // One grouped query covers all three channel buckets for the current tab.
-  const channelGroups = await prisma.task.groupBy({ by: ['action'], where: { AND: [scoped, tabWhere(filters.tab, today)] }, _count: { _all: true } });
-  const channelCounts: Record<TaskChannel, number> = { CALL: 0, EMAIL: 0, LINKEDIN: 0 };
-  for (const g of channelGroups) {
-    const key: TaskChannel = g.action === 'CALL' ? 'CALL' : g.action === 'EMAIL' ? 'EMAIL' : 'LINKEDIN';
-    channelCounts[key] += g._count._all;
-  }
-  const [rows, ...countValues] = await Promise.all([
-    prisma.task.findMany({
-      where: { AND: [base, tabWhere(filters.tab, today)] },
-      include: taskRowInclude,
-      orderBy:
-        filters.tab === 'done'
-          ? [{ completedAt: 'desc' }, { updatedAt: 'desc' }]
-          : [{ dueAt: 'asc' }, { enrollment: { person: { lastName: 'asc' } } }, { stepIndex: 'asc' }, { actionIndex: 'asc' }],
-      take: limit,
-    }),
-    ...TASK_TABS.map((tab) => prisma.task.count({ where: { AND: [base, tabWhere(tab, today)] } })),
-  ]);
-  // Snoozed tasks sort by their snoozed day, not the original due instant.
-  if (filters.tab !== 'done') {
-    rows.sort((a, b) => effectiveDate(a).localeCompare(effectiveDate(b)) || a.dueAt.getTime() - b.dueAt.getTime());
-  }
-  const counts = Object.fromEntries(TASK_TABS.map((tab, i) => [tab, countValues[i]])) as Record<TaskTab, number>;
-  return { rows, counts, channelCounts, today };
-}
-
 /** Pods and FOs the user may filter by. */
 export async function filterOptions(user: SessionUser) {
   if (!isAdmin(user) && !isPodLeader(user)) return { pods: [], fos: [] };

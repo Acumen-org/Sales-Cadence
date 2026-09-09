@@ -4,7 +4,7 @@ import type { SessionUser } from '@/lib/auth/current-user';
 import { buildHome } from '@/lib/home-query';
 import { accountDetail, listAccounts, myOwnershipCounts } from '@/lib/accounts-query';
 import { listActivity } from '@/lib/activity-query';
-import { listTasks } from '@/lib/tasks-query';
+import { listTaskGroups } from '@/lib/tasks-query';
 import { getTaskBrief } from '@/lib/brief';
 import { SYSTEM_ACTOR } from '@/lib/audit';
 import { enrollPeople } from '@/lib/engine';
@@ -71,7 +71,8 @@ describe('query budget per page', () => {
   const pages = () => ({
     'home (senior)': () => buildHome(alisa, NOW),
     'home (admin)': () => buildHome(admin, NOW),
-    tasks: () => listTasks(alisa, { tab: 'today' }, NOW),
+    // The query the Tasks page actually runs, so the guard follows the page.
+    tasks: () => listTaskGroups(alisa, { tab: 'today' }, NOW),
     // The task screen's right-hand panel: the heaviest read in the app, because it merges the
     // person, their history, the emails and notes Twenty holds, and the sequence's own events.
     'task brief': () => getTaskBrief(taskId, alisa),

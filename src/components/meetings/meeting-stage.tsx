@@ -133,7 +133,7 @@ export function MeetingStage(p: Props) {
                             {formatCueTime(c.start)}
                           </button>
                         ) : (
-                          <span className="shrink-0 font-mono text-[11.5px] text-ink-400">{formatCueTime(c.start)}</span>
+                          <span className="shrink-0 font-mono text-[11.5px] font-semibold text-ink-700">{formatCueTime(c.start)}</span>
                         )
                       ) : null}
                       <span className="min-w-0">
@@ -146,7 +146,7 @@ export function MeetingStage(p: Props) {
                 {filtered.length === 0 ? <li className="px-4 py-6 text-center text-[13px] text-ink-400">Nothing matches “{q}”.</li> : null}
               </ol>
               {!canSeek && cues.some((c) => c.start > 0) ? (
-                <p className="border-t border-line px-4 py-2 text-[11.5px] text-ink-400">Timestamps are shown for reference; seeking works when the recording is a media file Cadence can play itself.</p>
+                <p className="border-t border-line px-4 py-2 text-[11.5px] text-ink-600">Timestamps are for reference: seeking needs a recording Cadence can play itself.</p>
               ) : null}
             </div>
           )

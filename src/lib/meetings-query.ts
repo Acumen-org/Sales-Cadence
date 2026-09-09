@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
 import { isAdmin, visiblePodIds } from './auth/rbac';
+import { accountScopeCompanyIds } from './accounts-query';
 
 /**
  * Which meetings a user may read.
@@ -45,4 +46,15 @@ export async function canReadMeeting(user: SessionUser, meetingId: string): Prom
   if (isAdmin(user)) return true;
   const where = await meetingReadWhere(user);
   return (await prisma.meeting.count({ where: { AND: [{ id: meetingId }, where] } })) > 0;
+}
+
+/** Accounts this user may attach a meeting to. Same scope as the Accounts section. */
+export async function companiesInScope(user: SessionUser): Promise<{ id: string; name: string }[]> {
+  const ids = await accountScopeCompanyIds(user);
+  return prisma.companyCache.findMany({
+    where: { deletedAt: null, ...(ids === null ? {} : { id: { in: ids } }) },
+    select: { id: true, name: true },
+    orderBy: { name: 'asc' },
+    take: 500,
+  });
 }

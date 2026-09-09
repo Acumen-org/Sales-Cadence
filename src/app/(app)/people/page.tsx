@@ -38,14 +38,17 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   if (owner === 'mine') {
     where.AND = [{ OR: [{ ownerMemberId: user.twentyMemberId ?? '__none__' }, { enrollments: { some: { foUserId: user.id } } }] }];
   }
+  const and: Prisma.PersonCacheWhereInput[] = (where.AND as Prisma.PersonCacheWhereInput[]) ?? [];
   if (q) {
-    where.OR = [
-      { firstName: { contains: q, mode: 'insensitive' } },
-      { lastName: { contains: q, mode: 'insensitive' } },
-      { companyName: { contains: q, mode: 'insensitive' } },
-      { email: { contains: q, mode: 'insensitive' } },
-      { jobTitle: { contains: q, mode: 'insensitive' } },
-    ];
+    and.push({
+      OR: [
+        { firstName: { contains: q, mode: 'insensitive' } },
+        { lastName: { contains: q, mode: 'insensitive' } },
+        { companyName: { contains: q, mode: 'insensitive' } },
+        { email: { contains: q, mode: 'insensitive' } },
+        { jobTitle: { contains: q, mode: 'insensitive' } },
+      ],
+    });
   }
   if (pod) where.podOwner = pod;
   if (tier) where.tier = tier;
@@ -57,17 +60,19 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     where.optedOut = false;
   }
   if (status === 'replied') where.enrollments = { some: { status: { in: ['REPLIED', 'MEETING'] } } };
-  if (status === 'unresponsive')
-    where.AND = [...((where.AND as Prisma.PersonCacheWhereInput[]) ?? []), { enrollments: { some: { status: 'COMPLETED' } } }, { enrollments: { none: { status: { in: ['ACTIVE', 'PAUSED', 'REPLIED', 'MEETING'] } } } }];
-  if (status === 'dnd') where.OR = [{ dnd: true }, { optedOut: true }];
+  if (status === 'unresponsive') and.push({ enrollments: { some: { status: 'COMPLETED' } } }, { enrollments: { none: { status: { in: ['ACTIVE', 'PAUSED', 'REPLIED', 'MEETING'] } } } });
+  if (status === 'dnd') and.push({ OR: [{ dnd: true }, { optedOut: true }] });
   if (status === 'bad_data')
-    where.OR = [
-      { badEmail: true },
-      { badPhone: true },
-      { emailMissing: true },
-      { phoneMissing: true },
-      { enrollments: { some: { status: 'EXITED', exitReason: { in: ['bounced', 'bad_data'] } } } },
-    ];
+    and.push({
+      OR: [
+        { badEmail: true },
+        { badPhone: true },
+        { emailMissing: true },
+        { phoneMissing: true },
+        { enrollments: { some: { status: 'EXITED', exitReason: { in: ['bounced', 'bad_data'] } } } },
+      ],
+    });
+  if (and.length) where.AND = and;
 
   const [people, total, pods, conn] = await Promise.all([
     prisma.personCache.findMany({

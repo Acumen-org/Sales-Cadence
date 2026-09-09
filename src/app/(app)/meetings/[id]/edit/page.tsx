@@ -1,4 +1,5 @@
 import { notFound, redirect } from 'next/navigation';
+import { companiesInScope } from '@/lib/meetings-query';
 import { requireUser } from '@/lib/auth/current-user';
 import { prisma } from '@/lib/db';
 import { canManageMeetingAction } from '@/lib/actions/meetings';
@@ -13,7 +14,7 @@ export default async function EditMeetingPage({ params }: { params: Promise<{ id
   const { id } = await params;
   const [meeting, companies] = await Promise.all([
     prisma.meeting.findUnique({ where: { id }, include: { attendees: true } }),
-    prisma.companyCache.findMany({ where: { deletedAt: null }, select: { id: true, name: true }, orderBy: { name: 'asc' }, take: 500 }),
+    companiesInScope(user),
   ]);
   if (!meeting) notFound();
   if (!(await canManageMeetingAction(id))) redirect(`/meetings/${id}`);

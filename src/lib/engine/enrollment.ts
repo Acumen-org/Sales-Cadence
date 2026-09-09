@@ -291,16 +291,16 @@ export async function pauseEnrollment(enrollmentId: string, opts: { reason: stri
  * Resume a paused enrollment. In shift mode the pause length is added to the clock and
  * pending tasks move to today or later, so the cadence resumes with its spacing intact.
  */
-export async function resumeEnrollment(enrollmentId: string, opts: { actor: AuditActor } & Omit<EngineContext, 'actor'>): Promise<Enrollment> {
+export async function resumeEnrollment(enrollmentId: string, opts: { actor: AuditActor } & Omit<EngineContext, 'actor'>): Promise<{ enrollment: Enrollment; resumed: boolean; refused: string | null }> {
   const settings = await getSettings();
   const now = opts.now ?? new Date();
-  const { updated, movedIds } = await prisma.$transaction(async (tx) => {
+  const { updated, movedIds, refused } = await prisma.$transaction(async (tx) => {
     const identity = await tx.enrollment.findUnique({ where: { id: enrollmentId }, select: { campaignId: true } });
     if (identity?.campaignId) await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`campaign:${identity.campaignId}`}))`;
     const e = await tx.enrollment.findUnique({ where: { id: enrollmentId }, include: { fo: true } });
     if (!e) throw new Error('Enrollment not found');
-    if (e.status !== 'PAUSED') return { updated: e, movedIds: [] as string[] };
-    if (e.campaignId) { const campaign = await tx.campaign.findUnique({ where: { id: e.campaignId } }); if (campaign?.status !== 'ACTIVE') return { updated: e, movedIds: [] as string[] }; }
+    if (e.status !== 'PAUSED') return { updated: e, movedIds: [] as string[], refused: 'This enrollment is not paused.' as string | null };
+    if (e.campaignId) { const campaign = await tx.campaign.findUnique({ where: { id: e.campaignId } }); if (campaign?.status !== 'ACTIVE') return { updated: e, movedIds: [] as string[], refused: 'The campaign itself is paused. Resume the campaign to release its people.' as string | null }; }
     const today = todayIn(WORKSPACE_TIMEZONE, now);
     const pausedOn = e.pausedAt ? todayIn(WORKSPACE_TIMEZONE, e.pausedAt) : today;
     const pausedDays = Math.max(0, diffDays(pausedOn, today));
@@ -318,11 +318,12 @@ export async function resumeEnrollment(enrollmentId: string, opts: { actor: Audi
     }
     const updated = await tx.enrollment.update({ where: { id: enrollmentId }, data: { status: 'ACTIVE', pausedAt: null, pauseReason: null, shiftDays } });
     await logAudit({ entityType: 'enrollment', entityId: enrollmentId, action: 'resumed', actor: opts.actor, details: { pausedDays, shiftDays, movedTasks: movedIds.length } }, tx);
-    return { updated, movedIds };
+    return { updated, movedIds, refused: null as string | null };
   });
+  if (refused) return { enrollment: updated, resumed: false as const, refused };
   if (!opts.skipSync) for (const t of await loadSyncTasks(movedIds)) await syncTaskRescheduled(t);
   await advanceEnrollment(enrollmentId, { actor: opts.actor, now, skipSync: opts.skipSync });
-  return updated;
+  return { enrollment: updated, resumed: true as const, refused: null };
 }
 
 /** Hand an enrollment (and its pending tasks) to another FO in the same pod. */

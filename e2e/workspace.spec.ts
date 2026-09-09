@@ -62,8 +62,11 @@ test('sequence library supports search and empty-state recovery', async ({ page 
 });
 
 test('mobile navigation and all main sections fit a phone', async ({ page }) => {
+  // The stack is kept with the message: a page error caught here has been intermittent, and
+  // "something threw on /activity" is not a bug report anybody can act on.
   const errors: string[] = [];
-  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('pageerror', (error) => errors.push(`${error.message}
+${error.stack ?? 'no stack'}`));
   await page.setViewportSize({ width: 390, height: 844 });
   for (const route of ['home', 'tasks', 'accounts', 'people', 'meetings', 'sequences', 'campaigns', 'activity', 'reports']) {
     await page.goto(`/${route}`);

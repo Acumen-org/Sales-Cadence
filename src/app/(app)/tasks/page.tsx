@@ -55,7 +55,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
     {sp.flash && <TaskFlash message={sp.flash.slice(0,300)} />}
     {missing ? <Notice tone="warn">That task is not in your list any more. It may have been completed, cancelled, or reassigned.</Notice> : null}
     {requested && !inView && brief ? <Notice tone="info">Showing one touch that is not in <strong>{TAB_LABELS[tab]}</strong>. <Link href={href({ task: null })} className="font-semibold underline">Back to the list</Link></Notice> : null}
-    {held ? <Notice tone="info"><strong>{held}</strong> {held === 1 ? 'touch is' : 'touches are'} held while their campaign is paused. <Link href="/campaigns" className="font-semibold underline">Open campaigns</Link> to resume.</Notice> : null}
+    {held ? <Notice tone="info"><strong>{held}</strong> {held === 1 ? 'touchpoint is' : 'touchpoints are'} held: their sequence is paused. {manager ? <Link href="/campaigns" className="font-semibold underline">Open campaigns</Link> : 'Ask a pod leader to resume it.'}</Notice> : null}
     {!rows.length && !brief ? <Surface><EmptyState title={'No ' + TAB_LABELS[tab].toLowerCase() + ' tasks'} icon={<ActionIcon action={channel ?? 'EMAIL'} size={22} />}
       /* An empty Today with work sitting in Overdue is the one case where the FO must not be left
          looking at a clear screen: send them to the tab that actually has the work. */

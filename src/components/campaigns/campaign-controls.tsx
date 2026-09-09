@@ -5,16 +5,10 @@ import { approveCampaignAction, rejectCampaignAction, pauseCampaignAction, reenr
 import { ActionButton, ActionForm } from '@/components/action-form';
 import { Card, Field } from '@/components/ui';
 
-type Props = { campaignId: string; status: string; sequences: {id:string;name:string}[]; currentSequenceId:string; defaultName:string; today:string; canApprove?: boolean };
-export function CampaignControls({ campaignId,status,sequences,currentSequenceId,defaultName,today,canApprove=false }: Props) {
+type Props = { campaignId: string; status: string; sequences: {id:string;name:string}[]; currentSequenceId:string; defaultName:string; today:string };
+export function CampaignControls({ campaignId,status,sequences,currentSequenceId,defaultName,today }: Props) {
  const router=useRouter(); const [preview,setPreview]=useState<FollowupPreview|null>(null);
  return <div className="space-y-4">
-   <div className="flex flex-wrap gap-2">
-     {status === 'PENDING_APPROVAL' && (canApprove ? <><ActionButton action={approveCampaignAction} payload={{campaignId}} className="btn-primary">Approve campaign</ActionButton><ActionButton action={rejectCampaignAction} payload={{campaignId}}>Decline</ActionButton></> : <span className="chip">Awaiting Sales Leader approval</span>)}
-     {(status === 'ACTIVE' || status === 'SCHEDULED') && <ActionButton action={pauseCampaignAction} payload={{campaignId}}>Pause campaign</ActionButton>}
-     {status === 'PAUSED' && <ActionButton action={resumeCampaignAction} payload={{campaignId}}>Resume campaign</ActionButton>}
-     {['ACTIVE','PAUSED','SCHEDULED'].includes(status) && <ActionButton action={stopCampaignAction} payload={{campaignId}} className="btn-danger" confirm="Stop outreach for everyone in this campaign? You can restart it from the beginning later.">Stop campaign</ActionButton>}
-   </div>
    {['STOPPED','COMPLETED'].includes(status) && <Card title="Restart from the beginning"><ActionForm action={restartCampaignAction} className="flex flex-wrap items-end gap-3 p-4" onSuccess={() => router.refresh()}><input type="hidden" name="campaignId" value={campaignId}/><Field label="Start date"><input type="date" name="startDate" defaultValue={today} required/></Field><button type="submit" className="btn-primary">Restart campaign</button></ActionForm></Card>}
    {status !== 'PENDING_APPROVAL' && <Card title="Follow up with non-repliers"><div onChange={() => setPreview(null)}><ActionForm action={reenrollNonRepliersAction} className="space-y-4 p-5" onSuccess={r => { if(r.redirectTo) router.push(r.redirectTo); else if(r.data) setPreview(r.data as FollowupPreview); }}>
      <input type="hidden" name="campaignId" value={campaignId}/><input type="hidden" name="confirm" value={preview ? 'yes':'no'}/>
@@ -23,4 +17,14 @@ export function CampaignControls({ campaignId,status,sequences,currentSequenceId
      <div className="flex gap-2"><button type="submit" className={preview ? 'btn-primary':'btn-secondary'} disabled={Boolean(preview && !preview.candidates.length)}>{preview ? 'Submit for approval':'Find who qualifies'}</button>{preview && <button type="button" className="btn-ghost" onClick={()=>setPreview(null)}>Reset preview</button>}</div>
    </ActionForm></div></Card>}
  </div>;
+}
+
+/** The campaign's own lifecycle, for the record header. */
+export function CampaignLifecycle({ campaignId, status, canApprove = false }: { campaignId: string; status: string; canApprove?: boolean }) {
+ return <>
+   {status === 'PENDING_APPROVAL' && (canApprove ? <><ActionButton action={approveCampaignAction} payload={{campaignId}} className="btn-primary">Approve campaign</ActionButton><ActionButton action={rejectCampaignAction} payload={{campaignId}}>Decline</ActionButton></> : <span className="chip">Awaiting Sales Leader approval</span>)}
+   {(status === 'ACTIVE' || status === 'SCHEDULED') && <ActionButton action={pauseCampaignAction} payload={{campaignId}}>Pause campaign</ActionButton>}
+   {status === 'PAUSED' && <ActionButton action={resumeCampaignAction} payload={{campaignId}}>Resume campaign</ActionButton>}
+   {['ACTIVE','PAUSED','SCHEDULED'].includes(status) && <ActionButton action={stopCampaignAction} payload={{campaignId}} className="btn-ghost text-red-700" confirm="Stop outreach for everyone in this campaign? You can restart it from the beginning later.">Stop campaign</ActionButton>}
+ </>;
 }

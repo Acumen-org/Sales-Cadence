@@ -437,6 +437,22 @@ export function DataValue({ children, className }: { children: ReactNode; classN
  * a field whose value is exactly that shape is shown the way every other date in the app is shown.
  * The stored form still goes into date inputs and URLs, which is where it belongs.
  */
+/**
+ * The secondary line under a timeline event. Audit descriptions carry several facts - a start
+ * date, an assignment rule, a count of closed tasks - and joining them with middots produced the
+ * run-on grey line the whole app has been getting rid of. They are rendered as separate values.
+ */
+export function EventDetail({ text, className }: { text: string; className?: string }) {
+  const parts = text.split(' \u00b7 ').filter(Boolean);
+  return (
+    <span className={clsx('flex flex-wrap items-center gap-x-3 gap-y-1', className)}>
+      {parts.map((part) => (
+        <span key={part} className="text-[11.5px] text-ink-600">{part}</span>
+      ))}
+    </span>
+  );
+}
+
 export function displayValue(value: ReactNode): ReactNode {
   return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? formatLocalDate(value as LocalDate, 'long') : value;
 }
