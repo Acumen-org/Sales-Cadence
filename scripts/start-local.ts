@@ -25,14 +25,39 @@ const isWin = process.platform === 'win32';
 const bin = (name: string) => path.join(root, 'node_modules', '.bin', isWin ? `${name}.cmd` : name);
 const log = (msg: string) => console.log(`[cadence] ${msg}`);
 
+/**
+ * A `.env` for running on this machine, written only when there is none.
+ *
+ * `.env.example` is the production template - a real CRM, TLS cookies, no admin password - so it
+ * is not what a local run wants. This writes the local answers explicitly, and labels the file so
+ * nobody mistakes it for a deployment's configuration.
+ */
 function ensureEnv() {
   const envPath = path.join(root, '.env');
-  if (!fs.existsSync(envPath)) {
-    let text = fs.readFileSync(path.join(root, '.env.example'), 'utf8');
-    text = text.replace(/^DATABASE_URL=.*$/m, `DATABASE_URL=${databaseUrl}`).replace(/^APP_URL=.*$/m, `APP_URL=http://localhost:${port}`);
-    fs.writeFileSync(envPath, text);
-    log('created .env from .env.example (mock Twenty, embedded database)');
-  }
+  if (fs.existsSync(envPath)) return;
+  fs.writeFileSync(
+    envPath,
+    [
+      '# Local development only, written by `pnpm start:local`. Not a deployment configuration:',
+      '# for that, copy .env.example and fill it in. Delete this file to have it written again.',
+      '',
+      `DATABASE_URL=${databaseUrl}`,
+      `APP_URL=http://localhost:${port}`,
+      'SESSION_SECRET=local-development-only-not-a-secret',
+      'COOKIE_SECURE=false',
+      'SEED_ON_START=true',
+      '',
+      '# The built-in sample workspace, so there is something to look at without touching a CRM.',
+      'TWENTY_MODE=mock',
+      'SEED_PROFILE=core,demo',
+      '',
+      '# The account to sign in with locally.',
+      'ADMIN_EMAIL=admin@cadence.local',
+      'ADMIN_PASSWORD=admin12345',
+      '',
+    ].join('\n'),
+  );
+  log('wrote .env for local development (sample workspace, embedded database)');
 }
 
 function readEnvFile(): Record<string, string> {
