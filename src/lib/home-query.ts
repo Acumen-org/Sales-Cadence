@@ -108,13 +108,15 @@ async function myOpenTasks(base: Prisma.TaskWhereInput, today: LocalDate) {
  * Four grouped queries for the whole team rather than five per person.
  */
 async function teamThisWeek(user: SessionUser, today: LocalDate, week: { fromInstant: Date; toInstant: Date }) {
-  if (!isAdmin(user) && !isPodLeader(user)) return [];
+  const leads = isAdmin(user) || isPodLeader(user);
   const pods = visiblePodIds(user);
-  const users = await prisma.user.findMany({
-    where: { active: true, ...(pods === null ? {} : { pods: { some: { podId: { in: pods } } } }) },
-    select: { id: true, name: true },
-    orderBy: { name: 'asc' },
-  });
+  const users = leads
+    ? await prisma.user.findMany({
+        where: { active: true, ...(pods === null ? {} : { pods: { some: { podId: { in: pods } } } }) },
+        select: { id: true, name: true },
+        orderBy: { name: 'asc' },
+      })
+    : [{ id: user.id, name: user.name }];
   if (!users.length) return [];
   const ids = users.map((u) => u.id);
   const taskScope = taskScopeWhere(user);

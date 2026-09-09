@@ -93,9 +93,11 @@ describe('home', () => {
     expect(home.team.filter((t) => t.replies > 0)).toHaveLength(1);
   });
 
-  it('gives a junior no team board', async () => {
+  // A junior leads nobody, so the board is their own week and nobody else's - not an empty card,
+  // which left the Home screen of the role that uses this app most stopping half way down.
+  it('gives a junior their own week and no colleagues', async () => {
     const home = await buildHome(sessionUser(b.users.karson, [b.pods.Alisa.id]), TUESDAY);
-    expect(home.team).toEqual([]);
+    expect(home.team.map((t) => t.id)).toEqual([b.users.karson.id]);
     expect(home.needsReview).toBe(0);
   });
 });
