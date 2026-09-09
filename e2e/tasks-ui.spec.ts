@@ -130,7 +130,8 @@ test('the person panel carries the CRM record, not a made-up stage', async ({ pa
   await expect(panel.getByText(/^[A-Z][A-Z0-9]+_[A-Z0-9_]+$/)).toHaveCount(0);
   // The assistant has a reserved place and says plainly that no model is connected.
   await expect(panel.getByText('Cadence AI').first()).toBeVisible();
-  await expect(panel.getByText(/No model provider is connected/)).toBeVisible();
+  await expect(panel.getByText('Not connected').first()).toBeVisible();
+  await expect(panel.getByText(/Connect a model provider to turn it on/)).toBeVisible();
   await logout(page);
 });
 

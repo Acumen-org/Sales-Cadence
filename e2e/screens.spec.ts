@@ -30,6 +30,25 @@ test('capture screens', async ({ page }) => {
   await page.goto('/tasks?tab=today&mode=flow');
   await shot(page, '04-tasks-flow');
 
+  // Point 3 is that each channel shows something relevant to that channel, so each one is
+  // captured deliberately rather than whichever happens to be first in the queue. A call is on
+  // day 3 of the plan and is only generated once day 1 is worked, so one person is taken there
+  // first - which is also how an FO reaches it.
+  await page.goto('/tasks?tab=today&type=LINKEDIN');
+  await shot(page, '04c-task-linkedin');
+
+  for (const type of ['EMAIL', 'LINKEDIN']) {
+    await page.goto(`/tasks?tab=today&type=${type}`);
+    const done = page.getByRole('button', { name: 'Done', exact: true }).first();
+    if (await done.isVisible().catch(() => false)) {
+      await done.click();
+      await page.waitForLoadState('networkidle').catch(() => {});
+    }
+  }
+  await page.goto('/tasks?tab=upcoming&type=CALL');
+  await shot(page, '04b-task-call');
+  await page.goto('/tasks?tab=today&type=EMAIL');
+
   const call = page.getByRole('button', { name: 'Log call' }).first();
   if (await call.isVisible().catch(() => false)) {
     await call.click();

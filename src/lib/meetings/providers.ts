@@ -146,8 +146,8 @@ export const PROVIDER_LABELS: Record<MeetingProvider, string> = {
   GOOGLE_MEET: 'Google Meet',
   SHAREPOINT: 'SharePoint',
   DRIVE: 'Drive',
-  FILE: 'File',
-  OTHER: 'Link',
+  FILE: 'Uploaded file',
+  OTHER: 'Other link',
 };
 
 /** Guess a provider for the meeting itself (not the recording) from any of its links. */

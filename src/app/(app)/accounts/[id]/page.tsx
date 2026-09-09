@@ -106,7 +106,8 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                       { k: 'Employees', v: company.employees },
                       { k: 'AUM', v: company.aum ? company.aum.toNumber().toLocaleString('en-US', { maximumFractionDigits: 0 }) : null },
                       { k: 'Owner', v: ownerName },
-                      { k: 'LinkedIn', v: company.linkedinUrl },
+                      // The handle, not the whole URL set in bold, matching the person record.
+                      { k: 'LinkedIn', v: company.linkedinUrl ? <a href={company.linkedinUrl} target="_blank" rel="noreferrer" title={company.linkedinUrl} className="text-brand-700 hover:underline">{company.linkedinUrl.replace(/^https?:\/\/(www\.)?linkedin\.com\//i, '')}</a> : null },
                       { k: 'Last synced', v: company.syncedAt ? formatInstant(company.syncedAt, user.timezone) : null },
                       { k: 'Twenty id', v: <span className="font-mono text-[11px]">{company.id}</span> },
                     ]}

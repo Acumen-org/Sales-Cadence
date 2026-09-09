@@ -191,7 +191,7 @@ export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, m
                       <tr key={`${c.personId}-${c.reason}`}>
                         <td>
                           {c.name}
-                          <div className="font-mono text-[11px] text-ink-400">{c.personId}</div>
+                          <div className="font-mono text-[11px] text-ink-600">{c.personId}</div>
                         </td>
                         <td>
                           <Badge tone={c.reason === 'dnd' ? 'red' : 'amber'}>{CONFLICT_LABEL[c.reason] ?? c.reason}</Badge>

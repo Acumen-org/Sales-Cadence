@@ -46,7 +46,16 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const nextWorkingDay = nextWorkingDaySnooze(today, settings.rules.workingDays);
   const dispositions = settings.rules.callDispositions.map(d => ({ key: d.key, label: d.label, answered: d.answered }));
   const skipReasons = settings.rules.skipReasons.map(r => ({ key: r.key, label: r.label, exit: r.exit }));
-  const openModules = brief?.modules.filter(m => m.task.state === 'PENDING') ?? [];
+  // A step holds several modules. With a channel filter on, the module for that channel is the
+  // one the FO came here for, so it leads - otherwise filtering to LinkedIn opened an email
+  // composer and the filter and the screen disagreed. Open modules still come before resolved ones.
+  const modules = (brief?.modules ?? []).slice().sort((a, b) => {
+    const open = Number(b.task.state === 'PENDING') - Number(a.task.state === 'PENDING');
+    if (open) return open;
+    if (!channel) return 0;
+    return Number(channelOf(b.task.action) === channel) - Number(channelOf(a.task.action) === channel);
+  });
+  const openModules = modules.filter(m => m.task.state === 'PENDING');
   const listRows = rows.map(t => ({ id: t.id, childActions: t.childActions, personName: cachedPersonName(t.enrollment.person), companyName: t.enrollment.person.companyName, label: [...new Set(t.childActions.map(c => ACTION_LABELS[c.action]))].join(' + '), action: t.action, stepIndex: t.stepIndex, stepDay: t.stepDay, due: t.snoozedTo ?? t.dueDate, snoozed: Boolean(t.snoozedTo), state: t.state, foName: t.fo.name, campaignName: t.enrollment.campaign?.name ?? null }));
   return <div className="space-y-4 px-6 pb-8 pt-2">
     <Surface flush><Tabs inset={false} current={tab} tabs={(['today','overdue','upcoming','done'] as TaskTab[]).map(t => ({ key: t, label: TAB_LABELS[t], href: href({ tab: t, task: null }), count: counts[t] }))} />
@@ -68,7 +77,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
             <RecordFields items={[{ label:'Company', value:brief.person.companyName },{ label:'Campaign', value:brief.task.enrollment.campaign ? <Link href={'/campaigns/' + brief.task.enrollment.campaign.id}>{brief.task.enrollment.campaign.name}</Link> : null },{ label:'Sequence', value:<Link href={'/sequences/' + brief.task.enrollment.sequence.id}>{brief.enrollment.sequenceName}</Link> },{ label:'Business day', value:brief.task.stepDay },{ label:'Due', value:brief.task.snoozedTo ?? brief.task.dueDate },{ label:'Assigned to', value:brief.enrollment.foName }]} />
           </header>
           {brief.task.enrollment.status === 'PAUSED' ? <div className="border-b border-line px-5 py-4"><Notice tone="warn">This campaign is paused, so these touches are held. {brief.task.enrollment.campaign ? <Link href={'/campaigns/' + brief.task.enrollment.campaign.id} className="font-semibold underline">Open the campaign</Link> : null}</Notice></div> : null}
-          <div className="divide-y divide-line">{brief.modules.map(({task,action}) => <div key={task.id} className="space-y-4 p-5">
+          <div className="divide-y divide-line">{modules.map(({task,action}) => <div key={task.id} className="space-y-4 p-5">
             {task.action === 'EMAIL' && (!brief.person.email || brief.person.badEmail) && <Notice tone="warn">Email needs verification. <Link href={'/enrichment?q=' + encodeURIComponent(brief.personName)} className="font-semibold underline">Review contact data</Link></Notice>}
             <TaskComposer key={task.id} taskId={task.id} label={ACTION_LABELS[task.action]} subject={action.subject} body={action.body} html={action.html} channel={channelOf(task.action)} revision={task.draftRevision} readOnly={task.state !== 'PENDING'} phone={brief.person.phone} clickToCall={Boolean(settings.rules.clickToCallUrl)} />
             {task.state === 'PENDING' ? <TaskActions taskId={task.id} action={task.action} nextUrl={openModules.length > 1 ? href({ task: openModules.find(m => m.task.id !== task.id)?.task.id ?? task.id }) : nextUrl} prevUrl={prevUrl} twentyUrl={brief.twentyUrl} nextWorkingDay={nextWorkingDay} canPickSnoozeDate={canSnoozeFreely(user)} dispositions={dispositions} skipReasons={skipReasons} steps={brief.steps} currentStep={brief.currentStep} canManageEnrollment={canManageEnrollment(user, { foUserId: task.foUserId, podId: task.enrollment.podId })} keyboardEnabled={openModules[0]?.task.id === task.id} /> : <RecordFields items={[{label:'Result',value:task.state},{label:'Outcome',value:task.disposition ? dispositions.find(d => d.key === task.disposition)?.label ?? task.disposition : task.skipReason ?? task.cancelReason},{label:'Logged note',value:task.note}]} />}
