@@ -5,7 +5,7 @@ import { requireUser } from '@/lib/auth/current-user';
 import { prisma } from '@/lib/db';
 import { formatInstant, formatLocalDate } from '@/lib/dates';
 import { cachedPersonName, upsertPersonCache } from '@/lib/person-cache';
-import { describeAudit } from '@/lib/audit-format';
+import { auditDetailText, describeAudit } from '@/lib/audit-format';
 import { describeStep, parseSteps } from '@/lib/sequences/steps';
 import { getTwentyConnection } from '@/lib/settings';
 import { getTwentyClient } from '@/lib/twenty';
@@ -90,8 +90,8 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
     ...audit
       .filter((a) => ['enrolled', 'replied', 'meeting', 'exited', 'completed', 'paused', 'resumed', 'finished', 'moved_to_step', 'flags_updated', 'reassigned'].includes(a.action))
       .map<TimelineItem>((a) => {
-        const { title, detail } = describeAudit(a.action, a.details as Record<string, unknown> | null, a.actorLabel);
-        return { at: a.createdAt, kind: 'state', icon: 'STATE', title, detail, tone: 'neutral' };
+        const { title, fields } = describeAudit(a.action, a.details as Record<string, unknown> | null, a.actorLabel);
+        return { at: a.createdAt, kind: 'state', icon: 'STATE', title, detail: auditDetailText(fields), fields, tone: 'neutral' };
       }),
   ].sort((a, b) => b.at.getTime() - a.at.getTime());
 

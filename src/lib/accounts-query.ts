@@ -3,7 +3,7 @@ import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
 import { isAdmin, visiblePodIds } from './auth/rbac';
 import { cachedPersonName } from './person-cache';
-import { describeAudit } from './audit-format';
+import { auditDetailText, describeAudit } from './audit-format';
 
 /**
  * Accounts are Twenty companies. Cadence adds no fields of its own: what it contributes is the
@@ -169,6 +169,8 @@ export type AccountTimelineItem = {
   kind: 'touch' | 'meeting' | 'task' | 'state' | 'note';
   title: string;
   detail: string | null;
+  /** Labelled values for the row; `detail` is the same content on one line. */
+  fields: { label: string; value: string }[];
   personId: string | null;
   personName: string | null;
   href: string | null;
@@ -276,6 +278,7 @@ export async function accountDetail(companyId: string, user: SessionUser) {
       kind: 'touch',
       title: t.summary,
       detail: t.actorLabel,
+      fields: t.actorLabel ? [{ label: 'By', value: t.actorLabel }] : [],
       personId: t.personId,
       personName: nameById.get(t.personId) ?? null,
       href: `/people/${t.personId}`,
@@ -290,6 +293,7 @@ export async function accountDetail(companyId: string, user: SessionUser) {
         const n = m.attendees.filter((a) => a.external).length;
         return `${n} external attendee${n === 1 ? '' : 's'}`;
       })(),
+      fields: [{ label: 'External attendees', value: String(m.attendees.filter((a) => a.external).length) }],
       personId: null,
       personName: null,
       href: `/meetings/${m.id}`,
@@ -303,6 +307,7 @@ export async function accountDetail(companyId: string, user: SessionUser) {
         kind: 'task',
         title: `${t.label} ${t.state.toLowerCase()}${t.disposition ? ` · ${t.disposition}` : ''}`,
         detail: t.note ?? t.skipReason ?? t.fo.name,
+        fields: [t.skipReason ? { label: 'Reason', value: t.skipReason } : null, t.note ? { label: 'Note', value: t.note } : null, { label: 'By', value: t.fo.name }].filter((f): f is { label: string; value: string } => Boolean(f)),
         personId: t.enrollment.personId,
         personName: nameById.get(t.enrollment.personId) ?? null,
         href: `/people/${t.enrollment.personId}`,
@@ -321,7 +326,8 @@ export async function accountDetail(companyId: string, user: SessionUser) {
           at: a.createdAt,
           kind: 'state',
           title: said.title,
-          detail: [said.detail, a.actorLabel].filter(Boolean).join(' · ') || null,
+          detail: auditDetailText([...said.fields, ...(a.actorLabel ? [{ label: 'By', value: a.actorLabel }] : [])]),
+          fields: [...said.fields, ...(a.actorLabel ? [{ label: 'By', value: a.actorLabel }] : [])],
           personId: p?.id ?? null,
           personName: p?.name ?? null,
           href: p ? `/people/${p.id}` : null,

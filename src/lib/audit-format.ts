@@ -16,26 +16,38 @@ const num = (v: unknown) => (typeof v === 'number' ? v : Number.parseInt(String(
 const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
 const words = (v: string) => v.replace(/_/g, ' ');
 
-export function describeAudit(action: string, details: Details, actorLabel: string | null): { title: string; detail: string | null } {
+export type AuditField = { label: string; value: string };
+
+/** One line joining the fields, for a title attribute or a plain-text surface. */
+export function auditDetailText(fields: AuditField[]): string | null {
+  return fields.length ? fields.map((f) => `${f.label}: ${f.value}`).join(' \u2014 ') : null;
+}
+
+export function describeAudit(action: string, details: Details, actorLabel: string | null): { title: string; fields: AuditField[] } {
   const d = (details ?? {}) as Record<string, unknown>;
   const by = actorLabel ? ` by ${actorLabel}` : '';
   const cancelled = num(d.cancelledTasks);
-  const cancelledNote = Number.isFinite(cancelled) && cancelled > 0 ? `${plural(cancelled, 'open task')} closed` : null;
+  const closed: AuditField[] = Number.isFinite(cancelled) && cancelled > 0 ? [{ label: 'Open touches closed', value: String(cancelled) }] : [];
 
   switch (action) {
     case 'enrolled': {
-      const bits = [str(d.startDate) ? `starts ${dateText(str(d.startDate))}` : null, str(d.assignedBy) ? `assigned ${words(str(d.assignedBy)!)}` : null].filter(Boolean);
-      return { title: `Enrolled in a sequence${by}`, detail: bits.length ? bits.join(' · ') : null };
+      const fields: AuditField[] = [];
+      if (str(d.startDate)) fields.push({ label: 'Starts', value: dateText(str(d.startDate)) });
+      if (str(d.assignedBy)) fields.push({ label: 'Assigned by', value: words(str(d.assignedBy)!) });
+      return { title: `Enrolled in a sequence${by}`, fields };
     }
     case 'step_generated': {
       const step = num(d.stepIndex);
       const day = num(d.day);
-      return { title: `Step ${Number.isFinite(step) ? step + 1 : '?'} scheduled`, detail: Number.isFinite(day) ? `Business day ${day}, due ${dateText(str(d.dueDate))}` : null };
+      const fields: AuditField[] = [];
+      if (Number.isFinite(day)) fields.push({ label: 'Business day', value: String(day) });
+      if (str(d.dueDate)) fields.push({ label: 'Due', value: dateText(str(d.dueDate)) });
+      return { title: `Step ${Number.isFinite(step) ? step + 1 : '?'} scheduled`, fields };
     }
     case 'replied':
-      return { title: `Replied${by === ' by twenty:message.created' ? ' (seen in Twenty)' : by}`, detail: cancelledNote };
+      return { title: `Replied${by === ' by twenty:message.created' ? ' (seen in Twenty)' : by}`, fields: closed };
     case 'meeting':
-      return { title: 'Meeting booked', detail: [cancelledNote, str(d.evidenceId)?.startsWith('opportunity:') ? 'from an opportunity in Twenty' : null].filter(Boolean).join(' · ') || null };
+      return { title: 'Meeting booked', fields: [...closed, ...(str(d.evidenceId)?.startsWith('opportunity:') ? [{ label: 'Source', value: 'Opportunity in Twenty' }] : [])] };
     case 'exited': {
       const reason = str(d.reason);
       const label =
@@ -54,24 +66,25 @@ export function describeAudit(action: string, details: Details, actorLabel: stri
                     : reason?.startsWith('campaign_')
                       ? 'Removed: campaign stopped'
                       : `Removed from the sequence${by}`;
-      return { title: label, detail: cancelledNote };
+      return { title: label, fields: closed };
     }
     case 'completed':
-      return { title: 'Finished the sequence (no reply)', detail: Number.isFinite(num(d.steps)) ? `${plural(num(d.steps), 'step')} in the plan` : null };
+      return { title: 'Finished the sequence (no reply)', fields: Number.isFinite(num(d.steps)) ? [{ label: 'Steps in the plan', value: String(num(d.steps)) }] : [] };
     case 'finished':
-      return { title: str(d.kind) === 'replied' ? `Marked as replied${by}` : `Finished by hand${by}`, detail: cancelledNote };
+      return { title: str(d.kind) === 'replied' ? `Marked as replied${by}` : `Finished by hand${by}`, fields: closed };
     case 'paused': {
       const reason = str(d.reason);
-      return { title: `Paused${by}`, detail: reason === 'campaign_paused' ? 'campaign paused' : reason?.startsWith('colleague_replied') ? 'a colleague at this company replied' : reason ? words(reason) : null };
+      const why = reason === 'campaign_paused' ? 'Campaign paused' : reason?.startsWith('colleague_replied') ? 'A colleague at this company replied' : reason ? words(reason) : null;
+      return { title: `Paused${by}`, fields: why ? [{ label: 'Reason', value: why }] : [] };
     }
     case 'resumed':
-      return { title: `Resumed${by}`, detail: Number.isFinite(num(d.pausedDays)) ? `paused for ${plural(num(d.pausedDays), 'day')}` : null };
+      return { title: `Resumed${by}`, fields: Number.isFinite(num(d.pausedDays)) ? [{ label: 'Paused for', value: plural(num(d.pausedDays), 'day') }] : [] };
     case 'moved_to_step': {
       const to = num(d.to);
-      return { title: `Moved ahead to step ${Number.isFinite(to) ? to + 1 : '?'}${by}`, detail: cancelledNote };
+      return { title: `Moved ahead to step ${Number.isFinite(to) ? to + 1 : '?'}${by}`, fields: closed };
     }
     case 'reassigned':
-      return { title: `Reassigned to another FO${by}`, detail: Number.isFinite(num(d.tasks)) ? `${plural(num(d.tasks), 'open task')} moved` : null };
+      return { title: `Reassigned to another FO${by}`, fields: Number.isFinite(num(d.tasks)) ? [{ label: 'Open touches moved', value: String(num(d.tasks)) }] : [] };
     case 'flags_updated': {
       const on = Object.entries(d)
         .filter(([, v]) => v === true)
@@ -79,10 +92,12 @@ export function describeAudit(action: string, details: Details, actorLabel: stri
       const off = Object.entries(d)
         .filter(([, v]) => v === false)
         .map(([k]) => (k === 'optedOut' ? 'opt-out' : k === 'badEmail' ? 'bad email' : k === 'badPhone' ? 'bad phone' : words(k)));
-      const parts = [on.length ? `set ${on.join(', ')}` : null, off.length ? `cleared ${off.join(', ')}` : null].filter(Boolean);
-      return { title: `Flags updated${by}`, detail: parts.join(' · ') || null };
+      const fields: AuditField[] = [];
+      if (on.length) fields.push({ label: 'Set', value: on.join(', ') });
+      if (off.length) fields.push({ label: 'Cleared', value: off.join(', ') });
+      return { title: `Flags updated${by}`, fields };
     }
     default:
-      return { title: `${words(action).replace(/^./, (c) => c.toUpperCase())}${by}`, detail: null };
+      return { title: `${words(action).replace(/^./, (c) => c.toUpperCase())}${by}`, fields: [] };
   }
 }

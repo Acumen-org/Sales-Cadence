@@ -6,7 +6,7 @@ import { plannedDateForStep } from './engine/clock';
 import { previewNextStep } from './engine/sequence-plan';
 import { colleagueEnrollments } from './engine/enrollment';
 import { cachedPersonName } from './person-cache';
-import { describeAudit } from './audit-format';
+import { auditDetailText, describeAudit } from './audit-format';
 import { describeStep, parseSteps, StepActionSchema, type SequenceStep, type StepAction } from './sequences/steps';
 import { cleanRichText, plainToHtml } from './rich-text';
 import { getSettings, getTwentyConnection } from './settings';
@@ -319,7 +319,7 @@ function buildTimeline(input: {
         kind: a.action === 'meeting' ? 'meeting' : 'state',
         direction: a.action === 'replied' || a.action === 'meeting' ? 'in' : 'neutral',
         title: said.title,
-        detail: said.detail,
+        detail: auditDetailText(said.fields),
         actor: a.actorLabel,
       };
     }),
