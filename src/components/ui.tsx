@@ -447,8 +447,9 @@ export function EventDetail({ fields, className }: { fields: { label: string; va
   return (
     <span className={clsx('flex flex-wrap items-center gap-x-4 gap-y-1', className)}>
       {fields.map((f) => (
-        <span key={f.label} className="text-[11.5px] text-ink-500">
-          {f.label} <span className="text-ink-800">{f.value}</span>
+        <span key={f.label} className="inline-flex items-baseline gap-1.5 rounded bg-canvas/70 px-1.5 py-0.5 text-[11.5px] text-ink-500">
+          {f.label}
+          <span className="font-medium text-ink-900">{f.value}</span>
         </span>
       ))}
     </span>

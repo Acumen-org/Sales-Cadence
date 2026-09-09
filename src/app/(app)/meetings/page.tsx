@@ -160,7 +160,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                       ) : m.analysisStatus === 'PENDING' ? (
                         <Badge tone="amber">running</Badge>
                       ) : (
-                        <span className="text-[12px] text-ink-300">not run</span>
+                        <span className="text-[12px] text-ink-500">Not run</span>
                       )}
                     </td>
                     <td className="whitespace-nowrap text-[12.5px]">{m.createdBy?.name ?? '-'}</td>

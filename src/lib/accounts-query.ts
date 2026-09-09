@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { meetingReadWhere } from './meetings-query';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
 import { isAdmin, visiblePodIds } from './auth/rbac';
@@ -203,7 +204,7 @@ export async function accountDetail(companyId: string, user: SessionUser) {
       },
     }),
     prisma.user.findMany({ where: { twentyMemberId: { not: null } }, select: { name: true, twentyMemberId: true } }),
-    prisma.meeting.findMany({ where: { companyId }, orderBy: { occurredAt: 'desc' }, include: { attendees: { select: { external: true } } } }),
+    prisma.meeting.findMany({ where: { AND: [{ companyId }, await meetingReadWhere(user)] }, orderBy: { occurredAt: 'desc' }, include: { attendees: { select: { external: true } } } }),
     prisma.enrollment.findMany({
       where: { companyId },
       select: { campaignId: true, status: true, campaign: { select: { id: true, name: true, status: true, sequence: { select: { name: true } } } } },

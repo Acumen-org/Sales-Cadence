@@ -12,7 +12,8 @@ const STATES: Record<string, { label: string; tone: BadgeTone }> = {
   APPLIED: { label: 'Verified in CRM', tone: 'green' }, APPLYING: { label: 'Applying', tone: 'blue' }, FAILED: { label: 'Failed', tone: 'red' },
   NO_CHANGE: { label: 'Already current', tone: 'gray' }, SKIPPED: { label: 'Skipped', tone: 'gray' }, DRY_RUN: { label: 'Simulated', tone: 'amber' },
 };
-const LABELS: Record<string, string> = { firstName: 'First name', lastName: 'Last name', email: 'Email', phone: 'Phone', linkedinUrl: 'LinkedIn', jobTitle: 'Job title', city: 'City', domain: 'Website', industry: 'Industry', employees: 'Employees', aum: 'AUM (USD)' };
+const LABELS: Record<string, string> = {
+  name: 'Account name', firstName: 'First name', lastName: 'Last name', email: 'Email', phone: 'Phone', linkedinUrl: 'LinkedIn', jobTitle: 'Job title', city: 'City', domain: 'Website', industry: 'Industry', employees: 'Employees', aum: 'AUM (USD)' };
 const SELECTABLE = new Set(['READY', 'CONFLICT', 'FAILED', 'DRY_RUN', 'APPLYING']);
 
 export function EnrichmentBatchReview({ batchId, entity, rows, dryRun }: { batchId: string; entity: string; rows: ReviewRow[]; dryRun: boolean }) {

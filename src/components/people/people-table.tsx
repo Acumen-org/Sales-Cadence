@@ -94,7 +94,7 @@ export function PeopleTable({ rows, canEnroll }: Props) {
               <th>Next in Twenty</th>
               <th>Campaign / sequence</th>
               <th>Activity</th>
-              <th>Owner</th>
+              <th>Pod</th>
               <th>Last touch</th>
             </tr>
           </thead>
@@ -164,7 +164,7 @@ export function PeopleTable({ rows, canEnroll }: Props) {
                     <>
                       <div className="flex max-w-[13rem] items-center gap-1.5" title={p.lastTouch.summary}>
                         <span className={p.lastTouch.inbound ? 'shrink-0 text-emerald-700' : 'shrink-0 text-ink-400'}><ActionIcon action={p.lastTouch.channel} size={13} /></span>
-                        <span className="truncate font-semibold text-ink-800">{touchTitle(p.lastTouch.summary)}</span>
+                        <span className="min-w-0 truncate font-semibold text-ink-800">{touchTitle(p.lastTouch.summary)}</span>
                       </div>
                       <div className="mt-0.5 font-semibold text-ink-700">{p.lastTouch.at}</div>
                     </>

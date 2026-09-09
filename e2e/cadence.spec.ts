@@ -172,7 +172,7 @@ test('a sequence is one editable plan: a free step saves, a step in use is refus
   // The plan is modules on business days, and a step people are standing on says so.
   await expect(page.getByLabel('Sequence name')).toHaveValue(/Default outbound/);
   await expect(page.getByText(/Business day/).first()).toBeVisible();
-  await expect(page.getByText(/Locked . \d+ open actions?/).first()).toBeVisible();
+  await expect(page.getByText(/Locked\s*\d+ open touch(es)?/).first()).toBeVisible();
 
   // Editing a step nobody is on saves in place. There is no version to choose.
   const lastSubject = page.getByLabel(/email subject/i).last();
@@ -184,7 +184,7 @@ test('a sequence is one editable plan: a free step saves, a step in use is refus
 
   // The locked step's fields cannot be typed into at all, so the refusal is not a surprise
   // that arrives on save.
-  const lockedStep = page.locator('section').filter({ hasText: /Locked . \d+ open actions?/ }).first();
+  const lockedStep = page.locator('section').filter({ hasText: /Locked\s*\d+ open touch(es)?/ }).first();
   await expect(lockedStep.getByLabel(/email subject/i).first()).toBeDisabled();
   await logout(page);
 });

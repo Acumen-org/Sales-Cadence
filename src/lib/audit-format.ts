@@ -1,4 +1,5 @@
 import { formatLocalDate, isLocalDate } from './dates';
+import { optionLabel } from './twenty/labels';
 
 /**
  * Plain-language descriptions of audit entries for the person timeline.
@@ -27,7 +28,7 @@ export function describeAudit(action: string, details: Details, actorLabel: stri
   const d = (details ?? {}) as Record<string, unknown>;
   const by = actorLabel ? ` by ${actorLabel}` : '';
   const cancelled = num(d.cancelledTasks);
-  const closed: AuditField[] = Number.isFinite(cancelled) && cancelled > 0 ? [{ label: 'Open touches closed', value: String(cancelled) }] : [];
+  const closed: AuditField[] = Number.isFinite(cancelled) && cancelled > 0 ? [{ label: 'Touches closed', value: String(cancelled) }] : [];
 
   switch (action) {
     case 'enrolled': {
@@ -84,7 +85,7 @@ export function describeAudit(action: string, details: Details, actorLabel: stri
       return { title: `Moved ahead to step ${Number.isFinite(to) ? to + 1 : '?'}${by}`, fields: closed };
     }
     case 'reassigned':
-      return { title: `Reassigned to another FO${by}`, fields: Number.isFinite(num(d.tasks)) ? [{ label: 'Open touches moved', value: String(num(d.tasks)) }] : [] };
+      return { title: `Reassigned to another FO${by}`, fields: Number.isFinite(num(d.tasks)) ? [{ label: 'Touches moved', value: String(num(d.tasks)) }] : [] };
     case 'flags_updated': {
       const on = Object.entries(d)
         .filter(([, v]) => v === true)
@@ -97,6 +98,12 @@ export function describeAudit(action: string, details: Details, actorLabel: stri
       if (off.length) fields.push({ label: 'Cleared', value: off.join(', ') });
       return { title: `Flags updated${by}`, fields };
     }
+    case 'product_added':
+    case 'product_removed':
+      return {
+        title: `${action === 'product_added' ? 'Product tagged' : 'Product removed'}${by}`,
+        fields: str(d.product) ? [{ label: 'Product', value: optionLabel(str(d.product)!) }] : [],
+      };
     default:
       return { title: `${words(action).replace(/^./, (c) => c.toUpperCase())}${by}`, fields: [] };
   }

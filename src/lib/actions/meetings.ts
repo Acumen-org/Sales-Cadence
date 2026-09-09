@@ -56,16 +56,20 @@ export async function toggleMeetingProductAction(formData: FormData): Promise<Ac
   if (!meeting) return { ok: false, error: 'Meeting not found.' };
   if (!(await mayManageMeeting(user, meeting))) return { ok: false, error: 'You do not have permission to edit this meeting.' };
 
-  const on = meeting.products.includes(product);
-  const products = on ? meeting.products.filter((p) => p !== product) : [...meeting.products, product];
+  // The caller says what it wants, not "flip it": two tabs open on the same meeting must not be
+  // able to ask for opposite things and both be told they succeeded.
+  const want = String(formData.get('on') ?? '') === 'true';
+  const products = want ? [...meeting.products, product] : meeting.products.filter((p) => p !== product);
   // Stored in the order the list defines, so two meetings with the same tags read the same.
   const ordered = PRODUCTS.filter((p) => products.includes(p));
   await prisma.meeting.update({ where: { id }, data: { products: ordered } });
-  await logAudit({ entityType: 'meeting', entityId: id, action: on ? 'product_removed' : 'product_added', actor: userActor(user), details: { product } });
+  if (want !== meeting.products.includes(product)) {
+    await logAudit({ entityType: 'meeting', entityId: id, action: want ? 'product_added' : 'product_removed', actor: userActor(user), details: { product } });
+  }
   revalidatePath(`/meetings/${id}`);
   revalidatePath('/meetings');
   if (meeting.companyId) revalidatePath(`/accounts/${meeting.companyId}`);
-  return { ok: true, message: on ? `${optionLabel(product)} removed.` : `${optionLabel(product)} added.` };
+  return { ok: true, message: want ? `${optionLabel(product)} added.` : `${optionLabel(product)} removed.`, data: { products: ordered } };
 }
 
 const AttendeeSchema = z.object({
