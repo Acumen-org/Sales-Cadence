@@ -10,6 +10,7 @@ import { filterOptions, listTaskGroups, parseChannel, parseTab, TASK_CHANNELS, t
 import { ActionIcon, IconChevronLeft, IconChevronRight } from '@/components/icons';
 import { TaskActions } from '@/components/tasks/task-actions';
 import { TaskBriefPanel } from '@/components/tasks/task-brief';
+import { SuggestedApproach } from '@/components/tasks/suggested-approach';
 import { TaskComposer } from '@/components/tasks/task-composer';
 import { TaskFilters } from '@/components/tasks/task-filters';
 import { TaskFlash } from '@/components/tasks/task-flash';
@@ -46,7 +47,10 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
       <Toolbar><Link href={href({ type: null, task: null })} className={channel ? 'chip-muted' : 'chip'}>All types</Link>{TASK_CHANNELS.map(c => <Link key={c} href={href({ type: c, task: null })} className={channel === c ? 'chip' : 'chip-muted'}><ActionIcon action={c} size={13} />{CHANNEL_LABELS[c]}<strong className="ml-1">{channelCounts[c]}</strong></Link>)}<span className="ml-auto"><TaskFilters pods={options.pods} fos={options.fos} podId={podId} foUserId={foUserId} mode={mode} /></span></Toolbar>
     </Surface>
     {sp.flash && <TaskFlash message={sp.flash.slice(0,300)} />}
-    {!rows.length ? <Surface><EmptyState title={'No ' + TAB_LABELS[tab].toLowerCase() + ' tasks'} icon={<ActionIcon action={channel ?? 'EMAIL'} size={22} />} /></Surface> : <>
+    {!rows.length ? <Surface><EmptyState title={'No ' + TAB_LABELS[tab].toLowerCase() + ' tasks'} icon={<ActionIcon action={channel ?? 'EMAIL'} size={22} />}
+      /* An empty Today with work sitting in Overdue is the one case where the FO must not be left
+         looking at a clear screen: send them to the tab that actually has the work. */
+      action={tab !== 'overdue' && counts.overdue ? <Link href={href({ tab: 'overdue', task: null })} className="btn-primary"><strong>{counts.overdue}</strong> overdue {counts.overdue === 1 ? 'task' : 'tasks'} waiting</Link> : tab !== 'upcoming' && counts.upcoming ? <Link href={href({ tab: 'upcoming', task: null })} className="btn-secondary"><strong>{counts.upcoming}</strong> upcoming</Link> : undefined} /></Surface> : <>
       {mode === 'flow' && <div className="flex items-center gap-3 rounded-xl border border-brand-200 bg-brand-50 p-3"><strong>{index + 1} / {total}</strong><span className="text-sm text-ink-500">Task flow</span><div className="ml-auto flex gap-2">{prevUrl && <Link aria-label="Previous task" href={prevUrl} className="btn-secondary btn-sm"><IconChevronLeft size={14} /></Link>}{following && <Link href={nextUrl} className="btn-secondary btn-sm">Next<IconChevronRight size={14} /></Link>}<Link href={href({ mode: 'list', task: selected?.id ?? null })} className="btn-secondary btn-sm">Back to list</Link></div></div>}
       <div className={mode === 'flow' ? 'grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_380px]' : 'grid items-start gap-4 xl:grid-cols-[300px_minmax(0,1fr)] 2xl:grid-cols-[300px_minmax(0,1fr)_360px]'}>
         {mode === 'list' && <Surface flush className="max-h-[65vh] overflow-y-auto scroll-thin xl:sticky xl:top-4 xl:max-h-[calc(100vh-17rem)]"><TaskList key={tab + '-' + (channel ?? '')} rows={listRows} selectedId={selected?.id ?? null} today={today} showFo={manager} hrefTemplate={href({ task: '__ID__' })} dispositions={dispositions} skipReasons={skipReasons} fos={options.fos} nextWorkingDay={nextWorkingDay} canPickSnoozeDate={canSnoozeFreely(user)} bulkEnabled={tab !== 'done'} />{rows.length < total && <Link href={href({ limit: String(limit + 200) })} className="btn-ghost m-3">Load more · <strong>{total - rows.length}</strong></Link>}</Surface>}
@@ -56,11 +60,11 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
           </header>
           <div className="divide-y divide-line">{brief.modules.map(({task,action}) => <div key={task.id} className="space-y-4 p-5">
             {task.action === 'EMAIL' && (!brief.person.email || brief.person.badEmail) && <Notice tone="warn">Email needs verification. <Link href={'/enrichment?q=' + encodeURIComponent(brief.personName)} className="font-semibold underline">Review contact data</Link></Notice>}
-            <TaskComposer key={task.id} taskId={task.id} label={ACTION_LABELS[task.action]} subject={action.subject} body={action.body} html={action.html} channel={channelOf(task.action)} revision={task.draftRevision} readOnly={task.state !== 'PENDING'} phone={brief.person.phone} />
+            <TaskComposer key={task.id} taskId={task.id} label={ACTION_LABELS[task.action]} subject={action.subject} body={action.body} html={action.html} channel={channelOf(task.action)} revision={task.draftRevision} readOnly={task.state !== 'PENDING'} phone={brief.person.phone} clickToCall={Boolean(settings.rules.clickToCallUrl)} />
             {task.state === 'PENDING' ? <TaskActions taskId={task.id} action={task.action} nextUrl={openModules.length > 1 ? href({ task: openModules.find(m => m.task.id !== task.id)?.task.id ?? task.id }) : nextUrl} prevUrl={prevUrl} twentyUrl={brief.twentyUrl} nextWorkingDay={nextWorkingDay} canPickSnoozeDate={canSnoozeFreely(user)} dispositions={dispositions} skipReasons={skipReasons} steps={brief.steps} currentStep={brief.currentStep} canManageEnrollment={canManageEnrollment(user, { foUserId: task.foUserId, podId: task.enrollment.podId }) || task.foUserId === user.id} keyboardEnabled={openModules[0]?.task.id === task.id} /> : <RecordFields items={[{label:'Result',value:task.state},{label:'Outcome',value:task.disposition ? dispositions.find(d => d.key === task.disposition)?.label ?? task.disposition : task.skipReason ?? task.cancelReason},{label:'Logged note',value:task.note}]} />}
           </div>)}</div>
         </Surface>}</div>
-        {brief && <aside className="min-w-0 space-y-4 xl:col-start-2 2xl:col-auto"><TaskBriefPanel brief={brief} timezone={user.timezone} /><CrmHistory personId={brief.person.id} timezone={user.timezone} baseHref={href({ task: brief.task.id })} notesAfter={sp.crmNotes} emailsAfter={sp.crmEmails} /></aside>}
+        {brief && <aside className="min-w-0 space-y-4 xl:col-start-2 2xl:col-auto"><TaskBriefPanel brief={brief} timezone={user.timezone} /><SuggestedApproach canConfigure={isAdmin(user)} /><CrmHistory personId={brief.person.id} timezone={user.timezone} baseHref={href({ task: brief.task.id })} notesAfter={sp.crmNotes} emailsAfter={sp.crmEmails} /></aside>}
       </div>
     </>}
   </div>;

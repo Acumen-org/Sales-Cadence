@@ -47,8 +47,6 @@ export const RulesSettingsSchema = z.object({
   clockMode: z.enum(['shift', 'hold']).default('shift'),
   companyReplyPausesColleagues: z.boolean().default(false),
   meetingOnOpportunityCreated: z.boolean().default(true),
-  /** Enrollments with no touch in this many days are reported as stalled. */
-  stalledDays: z.number().int().min(1).default(7),
   reconcileLookbackDays: z.number().int().min(1).max(90).default(3),
   /** Default daily ramp (new enrollments per FO per day) for new campaigns. */
   defaultDailyRampPerFo: z.number().int().min(1).default(20),
@@ -59,6 +57,16 @@ export const RulesSettingsSchema = z.object({
   internalDomains: z
     .array(z.string().trim().toLowerCase())
     .default(['acumen-strategy.com', 'prairie-hill.com', 'glynac.ai', 'acubooth.com']),
+  /**
+   * Endpoint that places a call, owned by us (a Twilio-backed service, for instance). Cadence
+   * posts { to, personId, taskId, userId, userEmail } and reports what comes back. Blank means
+   * the task screen offers a tel: link instead of a Call button.
+   */
+  clickToCallUrl: z
+    .string()
+    .trim()
+    .refine((v) => v === '' || /^https?:\/\/\S+$/i.test(v), 'Enter an http(s) URL, or leave it blank.')
+    .default(''),
   /** A skip reason flagged as bounce ends the sequence (Outreach: Bounced state). */
   exitOnBounce: z.boolean().default(true),
   /** A call logged with an "answered" disposition counts as a reply and finishes the sequence. */

@@ -66,7 +66,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       where: { AND: [visiblePods === null ? {} : { OR: [{ id: user.id }, { pods: { some: { podId: { in: visiblePods } } } }] }, ...(podId ? [{ pods: { some: { podId } } }] : [])] },
       select: { id: true, name: true }, orderBy: { name: 'asc' },
     }),
-    buildReports(user, today, 7, { range, podId, foUserId }),
+    buildReports(user, today, { range, podId, foUserId }),
   ]);
   const tabHref = (key: string) => {
     const params = new URLSearchParams({ tab: key, from: range.from, to: range.to });

@@ -111,7 +111,7 @@ describe('scoped activity and performance', () => {
   });
 
   it('counts events in a chosen period even for older enrollments, with no next-day leakage', async () => {
-    const report = await buildReports(leader, '2026-09-09', 7, { range });
+    const report = await buildReports(leader, '2026-09-09', { range });
     expect(report.totals.enrollments).toBe(1);
     expect(report.totals.tasksDone).toBe(2);
     expect(report.totals.replied).toBe(1);
@@ -123,12 +123,12 @@ describe('scoped activity and performance', () => {
 
   it('combines pod and FO filters inside viewer scope and allows long history', async () => {
     const wide = reportingRange('2026-01-01', '2026-09-08', '2026-09-09');
-    const report = await buildReports(admin, '2026-09-09', 7, { range: wide, podId: basics.pods.Alisa.id, foUserId: basics.users.karson.id });
+    const report = await buildReports(admin, '2026-09-09', { range: wide, podId: basics.pods.Alisa.id, foUserId: basics.users.karson.id });
     expect(report.totals.tasksDone).toBe(3);
     expect(report.totals.enrollments).toBe(2);
-    const forbidden = await buildReports(leader, '2026-09-09', 7, { range, podId: basics.pods.Leigh.id });
+    const forbidden = await buildReports(leader, '2026-09-09', { range, podId: basics.pods.Leigh.id });
     expect(forbidden.totals.tasksDone).toBe(0);
-    const own = await buildReports(junior, '2026-09-09', 7, { range });
+    const own = await buildReports(junior, '2026-09-09', { range });
     expect(own.activity.every((item) => item.id === basics.users.karson.id)).toBe(true);
   });
 });

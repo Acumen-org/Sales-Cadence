@@ -112,16 +112,23 @@ export async function listAccounts(user: SessionUser, opts: { q?: string; scope?
  * How many accounts and relationships the signed-in user owns (Home tiles).
  * An account counts as mine when I own it in Twenty or I work anyone in it.
  */
-export async function myOwnershipCounts(user: SessionUser): Promise<{ accounts: number; relationships: number }> {
+/**
+ * What this user owns, plus how much of it is live. The live counts exist so the Home tiles can
+ * say something that changes rather than carry a fixed sentence describing what the tile means.
+ */
+export async function myOwnershipCounts(user: SessionUser): Promise<{ accounts: number; relationships: number; inSequence: number; activeAccounts: number }> {
   const member = user.twentyMemberId ?? '__none__';
   const mineWhere: Prisma.PersonCacheWhereInput = { deletedAt: null, OR: [{ ownerMemberId: member }, { enrollments: { some: { foUserId: user.id } } }] };
-  const [owned, viaPeople, relationships] = await Promise.all([
+  const liveWhere: Prisma.PersonCacheWhereInput = { ...mineWhere, enrollments: { some: { status: { in: ['ACTIVE', 'PAUSED'] } } } };
+  const [owned, viaPeople, relationships, inSequence, liveCompanies] = await Promise.all([
     prisma.companyCache.findMany({ where: { deletedAt: null, ownerMemberId: member }, select: { id: true } }),
     prisma.personCache.findMany({ where: { ...mineWhere, companyId: { not: null } }, select: { companyId: true }, distinct: ['companyId'] }),
     prisma.personCache.count({ where: mineWhere }),
+    prisma.personCache.count({ where: liveWhere }),
+    prisma.personCache.findMany({ where: { ...liveWhere, companyId: { not: null } }, select: { companyId: true }, distinct: ['companyId'] }),
   ]);
   const accounts = new Set<string>([...owned.map((o) => o.id), ...viaPeople.map((p) => p.companyId!)]);
-  return { accounts: accounts.size, relationships };
+  return { accounts: accounts.size, relationships, inSequence, activeAccounts: liveCompanies.length };
 }
 
 // ---------------------------------------------------------------------------

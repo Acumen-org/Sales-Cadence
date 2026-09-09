@@ -12,15 +12,15 @@ import { AdminTools } from '@/components/settings/admin-tools';
 import { ReviewButton } from '@/components/settings/review-button';
 import { MatchingForm, RulesForm, SyncForm, TwentyConnectionForm } from '@/components/settings/settings-forms';
 import { getMeetingAnalyzer } from '@/lib/meetings/analysis';
-import { ASSISTANT_NAME } from '@/lib/workspace';
-import { IconBolt } from '@/components/icons';
+import { ASSISTANT_NAME, ASSISTANT_SETTINGS_TAB } from '@/lib/workspace';
+import { IconAssistant } from '@/components/icons';
 
 const TABS = [
   { key: 'twenty', label: 'Twenty' },
   { key: 'rules', label: 'Rules and matching' },
   { key: 'sync', label: 'Sync out' },
   { key: 'users', label: 'Team & pods' },
-  { key: 'scout', label: ASSISTANT_NAME },
+  { key: ASSISTANT_SETTINGS_TAB, label: ASSISTANT_NAME },
   { key: 'activity', label: 'Activity log' },
 ];
 
@@ -48,21 +48,22 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       ) : null}
       {tab === 'sync' ? <SyncForm sync={settings.sync} /> : null}
       {tab === 'users' ? <UsersTab /> : null}
-      {tab === 'scout' ? <ScoutTab /> : null}
+      {tab === ASSISTANT_SETTINGS_TAB ? <AssistantTab /> : null}
       {tab === 'activity' ? <ActivityTab /> : null}
     </div>
   );
 }
 
-function ScoutTab() {
+function AssistantTab() {
   const analyzer = getMeetingAnalyzer();
   const connected = analyzer.name !== 'local-stats';
-  return <Card title={<span className="flex items-center gap-2"><IconBolt size={18} />{ASSISTANT_NAME}</span>}>
+  return <Card title={<span className="flex items-center gap-2"><IconAssistant size={18} />{ASSISTANT_NAME}</span>}>
     <div className="space-y-4 p-5"><KeyValue items={[
-      { k: 'AI provider', v: connected ? analyzer.name : 'Not configured' },
-      { k: 'Meeting analysis', v: connected ? 'Available with a transcript' : 'Disabled until a provider is connected' },
-      { k: 'Transcript statistics', v: 'Available locally' },
-    ]} />{!connected ? <Notice tone="info">A model provider has not been connected to this workspace. Scout will use the configured provider when available.</Notice> : null}</div>
+      { k: 'Model provider', v: connected ? analyzer.name : 'Not connected' },
+      { k: 'Meeting analysis', v: connected ? 'Available where a transcript exists' : 'Waiting on a provider' },
+      { k: 'Suggested approach', v: connected ? 'Available on every task' : 'Waiting on a provider' },
+      { k: 'Talk time', v: 'Computed locally from transcript timestamps' },
+    ]} />{!connected ? <Notice tone="info">Nothing is generated until a provider is connected. Talk time is measured from the transcript itself and works either way.</Notice> : null}</div>
   </Card>;
 }
 

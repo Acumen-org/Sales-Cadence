@@ -23,7 +23,7 @@ export default async function NewCampaignPage({ searchParams }: { searchParams: 
   const mockViews = env().TWENTY_MODE === 'mock' ? getMockTwentyClient().views.map((v) => ({ id: v.id, name: v.name })) : undefined;
   return (
     <>
-      <PageHeader title="New campaign" subtitle="Choose the sequence, the pod and the people. Conflicts are shown before anything is created." />
+      <PageHeader title="New campaign" />
       <div className="max-w-4xl p-6">
         <CampaignForm
           sequences={sequences.map((s) => ({ id: s.id, name: s.name }))}
