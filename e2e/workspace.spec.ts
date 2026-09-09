@@ -41,11 +41,15 @@ test('task shortcuts stay inactive while help is open', async ({ page }) => {
   await expect(page.getByText('Skip this one step')).toHaveCount(0);
 });
 
-test('account sync confirms the account and its people were refreshed', async ({ page }) => {
+test('an account reads from Twenty on open, with no sync button to press', async ({ page }) => {
   await page.goto('/accounts');
   await page.getByRole('link', { name: 'Dummy Company A', exact: true }).click();
-  await page.getByRole('button', { name: 'Sync from Twenty', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText(/Synced from Twenty: account details and \d+ people/);
+  await page.waitForURL(/\/accounts\/[a-z0-9-]+/);
+  // Syncing is continuous: nothing asks the user to fetch their own data.
+  await expect(page.getByRole('button', { name: /Sync/i })).toHaveCount(0);
+  // And the record is there, freshly read.
+  await expect(page.getByRole('heading', { name: 'Dummy Company A' })).toBeVisible();
+  await expect(page.locator('main')).toContainText('Asset management');
 });
 
 test('sequence library supports search and empty-state recovery', async ({ page }) => {
@@ -65,6 +69,8 @@ test('mobile navigation and all main sections fit a phone', async ({ page }) => 
     await page.goto(`/${route}`);
     await expect(page.getByLabel('Open navigation')).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), route).toBe(true);
+    // Named per route, because "something threw" is not a bug report.
+    expect(errors, route).toEqual([]);
   }
   await page.getByLabel('Open navigation').click();
   const menu = page.getByRole('dialog', { name: 'Navigation' });

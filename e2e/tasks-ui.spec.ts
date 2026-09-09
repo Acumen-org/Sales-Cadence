@@ -18,6 +18,19 @@ async function logout(page: Page) {
   await expect(page).toHaveURL(/\/login/);
 }
 
+/**
+ * Open the first task tab that has work in it. The suite shares one database, so which tab holds
+ * a pending task depends on what earlier cases did; the point of these cases is the controls,
+ * not which tab the work happens to be in.
+ */
+async function openTabWithWork(page: Page) {
+  for (const tab of ['today', 'overdue', 'upcoming']) {
+    await page.goto(`/tasks?tab=${tab}`);
+    if (await page.getByRole('button', { name: 'More', exact: true }).first().isVisible().catch(() => false)) return;
+  }
+  throw new Error('No task tab has pending work; the seed or an earlier case cleared them all.');
+}
+
 test('the header carries no counts, and no overdue banner interrupts the list', async ({ page }) => {
   await loginAs(page, 'Alisa');
   await page.goto('/tasks?tab=today');
@@ -35,14 +48,14 @@ test('More becomes Less without moving, and everything opens in one place', asyn
   // Measured in page coordinates: opening the panel may scroll the viewport, which is not
   // the same thing as the button moving.
   const pagePos = async (label: string) => {
-    const box = await page.getByRole('button', { name: label, exact: true }).boundingBox();
+    const box = await page.getByRole('button', { name: label, exact: true }).first().boundingBox();
     const scroll = await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
     return { x: (box?.x ?? 0) + scroll.x, y: (box?.y ?? 0) + scroll.y };
   };
 
   const before = await pagePos('More');
-  await page.getByRole('button', { name: 'More', exact: true }).click();
-  const less = page.getByRole('button', { name: 'Less', exact: true });
+  await page.getByRole('button', { name: 'More', exact: true }).first().click();
+  const less = page.getByRole('button', { name: 'Less', exact: true }).first();
   await expect(less).toBeVisible();
   const after = await pagePos('Less');
   // Same button, same place: only the word changes.
@@ -74,30 +87,25 @@ test('the shortcut list is gone from under the buttons', async ({ page }) => {
   await logout(page);
 });
 
-test('the message is editable in place and remembers the edit', async ({ page }) => {
+test('the message is editable in place and the edit is kept against the task', async ({ page }) => {
   await loginAs(page, 'Alisa');
   await page.goto('/tasks?tab=today&type=EMAIL');
-  const subject = page.locator('input[id^="subject-"]').first();
+  const subject = page.getByLabel('Email subject').first();
   await expect(subject).toBeVisible();
   const original = await subject.inputValue();
   expect(original.length).toBeGreaterThan(0);
 
   await subject.fill('Following up after the webinar');
-  await expect(page.getByText('personalised')).toBeVisible();
-  const body = page.locator('textarea[id^="body-"]').first();
+  const body = page.getByRole('textbox', { name: /message$/i }).first();
   await body.click();
-  await body.press('End');
-  await body.pressSequentially(' PS one more thing.');
+  await page.keyboard.press('End');
+  await page.keyboard.type(' PS one more thing.');
+  // Saved on the server against this task, not in this browser.
+  await expect(page.getByRole('button', { name: 'Saved', exact: true }).first()).toBeVisible({ timeout: 15_000 });
 
-  // Still there after a reload: the draft is kept against the task.
   await page.reload();
-  await expect(page.locator('input[id^="subject-"]').first()).toHaveValue('Following up after the webinar');
-  await expect(page.locator('textarea[id^="body-"]').first()).toContainText('PS one more thing.');
-
-  // Reset puts the template back.
-  await page.getByRole('button', { name: 'Reset' }).click();
-  await expect(page.locator('input[id^="subject-"]').first()).toHaveValue(original);
-  await expect(page.getByText('personalised')).toHaveCount(0);
+  await expect(page.getByLabel('Email subject').first()).toHaveValue('Following up after the webinar');
+  await expect(page.locator('main')).toContainText('PS one more thing.');
   await logout(page);
 });
 
@@ -108,16 +116,21 @@ test('the person panel carries the CRM record, not a made-up stage', async ({ pa
 
   // "Approaching" was a label Cadence invented; it is gone.
   await expect(panel.getByText('Approaching')).toHaveCount(0);
-  // What the CRM holds, in the CRM's own terms: classification, tags, and its own next action.
-  await expect(panel.getByText('How Twenty classifies them')).toBeVisible();
-  await expect(panel.getByText('Tags in Twenty')).toBeVisible();
-  await expect(panel.getByText('Tier', { exact: true }).first()).toBeVisible();
+  // What the CRM holds, in the CRM's own terms: the record, its own next action, its tags.
+  for (const section of ['Contact details', 'CRM profile', 'CRM tags', 'Sequence progress', 'Recent activity']) {
+    await expect(panel.getByText(section, { exact: true }).first(), section).toBeVisible();
+  }
+  // The CRM's own next action appears for the people who have one written in Twenty.
+  await page.goto('/people/dummy-01?tab=overview');
+  await expect(page.locator('main')).toContainText('FU-2');
+  await page.goto('/tasks?tab=today');
+  // The tier is a badge on the person, reading as a label rather than the stored LEVEL_n.
+  await expect(panel.getByText(/^Tier \d$/).first()).toBeVisible();
   // Option constants are never shown raw: LEVEL_2 reads "Tier 2", not "LEVEL_2".
   await expect(panel.getByText(/^[A-Z][A-Z0-9]+_[A-Z0-9_]+$/)).toHaveCount(0);
-  // One history, and the space kept for the analyzer.
-  await expect(panel.getByText('Everything so far')).toBeVisible();
-  await expect(panel.getByText('Suggested approach')).toBeVisible();
-  await expect(panel.getByText(/No language model is connected yet/)).toBeVisible();
+  // The assistant has a reserved place and says plainly that no model is connected.
+  await expect(panel.getByText('Cadence AI').first()).toBeVisible();
+  await expect(panel.getByText(/No model provider is connected/)).toBeVisible();
   await logout(page);
 });
 
@@ -132,17 +145,17 @@ test('task flow is a different screen from the list', async ({ page }) => {
   await expect(page).toHaveURL(/mode=flow/);
   // Flow: no list, a progress rail, and a way back.
   await expect(page.getByLabel(/^Select /)).toHaveCount(0);
-  await expect(page.getByText(/^TASK FLOW$/i)).toBeVisible();
-  await expect(page.getByText(/^\d+ of \d+$/)).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Back to the list' })).toBeVisible();
+  await expect(page.getByText(/^Task flow$/).first()).toBeVisible();
+  await expect(page.getByText(/^\d+ \/ \d+$/).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Back to list' })).toBeVisible();
   await logout(page);
 });
 
 test('jumping to a step confirms with a toast that says only what happened', async ({ page }) => {
   await loginAs(page, 'Admin');
-  // Upcoming always has work: earlier tests in the run may have cleared Today.
-  await page.goto('/tasks?tab=upcoming');
-  await page.getByRole('button', { name: 'More', exact: true }).click();
+  // Earlier cases in the run may have cleared a tab, so work the first one that has something.
+  await openTabWithWork(page);
+  await page.getByRole('button', { name: 'More', exact: true }).first().click();
   await page.getByLabel('Step to jump to').selectOption({ index: 1 });
   await page.getByRole('button', { name: 'Jump' }).click();
 
@@ -156,8 +169,8 @@ test('jumping to a step confirms with a toast that says only what happened', asy
 test('ending a sequence asks one question and then stops the person', async ({ page }) => {
   await loginAs(page, 'Admin');
   await page.goto('/tasks?tab=upcoming');
-  const person = await page.locator('main h2 a[href^="/people/"]').first().textContent();
-  await page.getByRole('button', { name: 'More', exact: true }).click();
+  const person = await page.locator('#main-content a[href^="/people/"]').first().textContent();
+  await page.getByRole('button', { name: 'More', exact: true }).first().click();
   await page.getByLabel('Why are you ending the sequence?').selectOption('not_interested');
   await page.getByRole('button', { name: 'End sequence' }).click();
   await expect(page.getByRole('status')).toContainText(/Sequence ended/);

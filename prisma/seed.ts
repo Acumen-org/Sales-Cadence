@@ -5,7 +5,7 @@ import { hashPassword } from '../src/lib/auth/password';
 import { DEFAULT_SEQUENCE_NAME, DEFAULT_SEQUENCE_STEPS } from '../src/lib/sequences/default-sequence';
 import { StepsSchema } from '../src/lib/sequences/steps';
 import { DEMO_MEMBERS, DEMO_POD_OPTIONS } from '../src/lib/twenty/demo-fixtures';
-import { DEMO_MEETINGS, DEMO_RELATIONSHIPS, DEMO_USER_MAILBOXES } from '../src/lib/meetings/demo-meetings';
+import { DEMO_MEETINGS, DEMO_USER_MAILBOXES } from '../src/lib/meetings/demo-meetings';
 import { parseMeetingLink } from '../src/lib/meetings/providers';
 import { detectTranscriptFormat } from '../src/lib/meetings/transcript';
 import { isExternalEmail } from '../src/lib/settings';
@@ -61,8 +61,9 @@ async function seedDemo(sequenceId: string, withCampaigns: boolean) {
   console.log(`  + pods synced from Twenty options; ${cache.people} dummy people, ${cache.companies} dummy companies cached`);
 
   const pod = async (value: string) => (await prisma.pod.findUniqueOrThrow({ where: { podOwnerValue: value } })).id;
-  const users: Array<{ memberId: string; email: string; name: string; role: 'ADMIN' | 'SENIOR_FO' | 'JUNIOR_FO'; pods: string[] }> = [
+  const users: Array<{ memberId: string; email: string; name: string; role: 'ADMIN' | 'SALES_LEADER' | 'SENIOR_FO' | 'JUNIOR_FO'; pods: string[] }> = [
     { memberId: 'wm-ria', email: 'ria@cadence.local', name: 'Ria Admin', role: 'ADMIN', pods: [] },
+    { memberId: 'wm-leigh', email: 'leigh@cadence.local', name: 'Leigh Leader', role: 'SALES_LEADER', pods: ['ALISA', 'ANDREW'] },
     { memberId: 'wm-alisa', email: 'alisa@cadence.local', name: 'Alisa Senior', role: 'SENIOR_FO', pods: ['ALISA'] },
     { memberId: 'wm-andrew', email: 'andrew@cadence.local', name: 'Andrew Senior', role: 'SENIOR_FO', pods: ['ANDREW'] },
     { memberId: 'wm-karson', email: 'karson@cadence.local', name: 'Karson Junior', role: 'JUNIOR_FO', pods: ['ALISA'] },
@@ -86,8 +87,6 @@ async function seedDemo(sequenceId: string, withCampaigns: boolean) {
     }
   }
   console.log(`  + ${users.length} demo users (password: ${DEMO_PASSWORD})`);
-
-  await seedRelationships();
   await seedMeetings();
 
   if (!withCampaigns) {
@@ -183,24 +182,6 @@ async function seedDemo(sequenceId: string, withCampaigns: boolean) {
   for (const t of await pendingFor('dummy-04')) await completeTask({ taskId: t.id, source: 'MANUAL' }, ctx);
   // Dummy Five: untouched -> overdue. Dummy Six: dnd -> never enrolled. Andrew's pod: due today.
   console.log('  + states: Dummy One (call logged), Two (replied), Three (bounced), Four (call due), Five (overdue), Six (dnd), Eight (meeting)');
-}
-
-/**
- * The dummy relationship map: who reports to whom and how each contact leans. These three fields
- * are Cadence-local (a refresh from Twenty never touches them), so writing them here is safe.
- */
-async function seedRelationships() {
-  let written = 0;
-  for (const r of DEMO_RELATIONSHIPS) {
-    const exists = await prisma.personCache.findUnique({ where: { id: r.personId }, select: { id: true } });
-    if (!exists) continue;
-    await prisma.personCache.update({
-      where: { id: r.personId },
-      data: { reportsToId: r.reportsToId, accountRole: r.accountRole, relationshipNote: r.relationshipNote ?? null },
-    });
-    written += 1;
-  }
-  console.log(`  + relationship map on ${written} dummy people (hierarchy + stance)`);
 }
 
 /**

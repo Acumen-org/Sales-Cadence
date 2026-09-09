@@ -1,24 +1,18 @@
 import Link from 'next/link';
-import type { AccountRole } from '@prisma/client';
 import { Avatar, Badge, type BadgeTone } from '@/components/ui';
 
 export type TreePerson = {
   id: string;
   name: string;
   jobTitle: string | null;
-  reportsToId: string | null;
-  accountRole: AccountRole;
-  relationshipNote: string | null;
   dnd: boolean;
   optedOut: boolean;
   enrollment: { status: string; label: string; tone: BadgeTone; foName: string; stepIndex: number; steps: number } | null;
   lastTouch: string | null;
   touches: number;
 };
-export type TreeNode = { person: TreePerson; children: TreeNode[] };
-
 /** Title bands describe known titles, without claiming a reporting relationship. */
-export function OrgTree({ everyone }: { roots?: TreeNode[]; orphans?: TreePerson[]; everyone: TreePerson[]; editable?: boolean }) {
+export function OrgTree({ everyone }: { everyone: TreePerson[] }) {
   const bands = [
     { label: 'Executive titles', match: /\b(chief|ceo|cfo|cio|cto|coo|cmo|president|founder|owner|partner)\b/i },
     { label: 'Leadership titles', match: /\b(vp|vice president|director|head)\b/i },
