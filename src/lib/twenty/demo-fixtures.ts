@@ -13,6 +13,7 @@ export const DEMO_MEMBERS: TwentyWorkspaceMember[] = [
   { id: 'wm-andrew', firstName: 'Andrew', lastName: 'Senior', email: 'andrew@dummy.example', timeZone: 'Europe/London' },
   { id: 'wm-karson', firstName: 'Karson', lastName: 'Junior', email: 'karson@dummy.example', timeZone: 'Europe/London' },
   { id: 'wm-daniel', firstName: 'Daniel', lastName: 'Junior', email: 'daniel@dummy.example', timeZone: 'Europe/London' },
+  { id: 'wm-leigh', firstName: 'Leigh', lastName: 'Leader', email: 'leigh@dummy.example', timeZone: 'Europe/London' },
 ];
 
 /**

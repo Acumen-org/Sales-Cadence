@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
 import { accountDetail } from '@/lib/accounts-query';
 import { formatInstant, formatLocalDate, todayIn } from '@/lib/dates';
-import { OrgTree, type TreeNode, type TreePerson } from '@/components/accounts/org-tree';
+import { OrgTree, type TreePerson } from '@/components/accounts/org-tree';
 import { ActionIcon, IconExternal, IconPlus } from '@/components/icons';
 import {
   Avatar,
@@ -37,16 +37,13 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
   const { tab = 'overview' } = await searchParams;
   const detail = await accountDetail(id, user);
   if (!detail) notFound();
-  const { company, people, tree, meetings, campaigns, timeline, openTasks, stats, ownerName } = detail;
+  const { company, people, meetings, campaigns, timeline, openTasks, stats, ownerName } = detail;
   const today = todayIn(user.timezone);
 
   const toTreePerson = (p: (typeof people)[number]): TreePerson => ({
     id: p.id,
     name: p.name,
     jobTitle: p.jobTitle,
-    reportsToId: p.reportsToId,
-    accountRole: p.accountRole,
-    relationshipNote: p.relationshipNote,
     dnd: p.dnd,
     optedOut: p.optedOut,
     enrollment: p.enrollment
@@ -63,9 +60,6 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
     touches: p.touches,
   });
   const everyone = people.map(toTreePerson);
-  const roots: TreeNode[] = tree.roots.map(function map(n): TreeNode {
-    return { person: toTreePerson(n.person), children: n.children.map(map) };
-  });
 
   return (
     <>
@@ -169,7 +163,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
             {everyone.length === 0 ? (
               <EmptyState title="Nobody at this account yet"  />
             ) : (
-              <OrgTree roots={roots} orphans={tree.orphans.map(toTreePerson)} everyone={everyone} />
+              <OrgTree everyone={everyone} />
             )}
           </Surface>
         ) : null}

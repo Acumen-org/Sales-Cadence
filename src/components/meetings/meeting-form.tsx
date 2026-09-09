@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { WORKSPACE_TIMEZONE, WORKSPACE_TIMEZONE_LABEL } from '@/lib/workspace';
 import { useState } from 'react';
 import { createMeetingAction, updateMeetingAction, type AttendeeSelection } from '@/lib/actions/meetings';
 import { parseMeetingLink } from '@/lib/meetings/providers';
@@ -48,9 +49,12 @@ export function MeetingForm({ companies, initial, mode, timezone }: { companies:
           <input name="sourceUrl" required value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://" />
         </Field>
 
-        {parsed ? <div className="flex flex-wrap gap-2 md:col-span-2"><Badge tone="blue">{parsed.label}</Badge><Badge tone={parsed.mediaUrl || parsed.embedUrl ? 'green' : 'gray'}>{parsed.mediaUrl || parsed.embedUrl ? 'Inline playback' : 'Opens externally'}</Badge></div> : null}
+        {parsed ? <div className="space-y-2 md:col-span-2">
+          <div className="flex flex-wrap gap-2"><Badge tone="blue">{parsed.label}</Badge><Badge tone={parsed.mediaUrl || parsed.embedUrl ? 'green' : 'gray'}>{parsed.mediaUrl || parsed.embedUrl ? 'Inline playback' : 'Opens externally'}</Badge></div>
+          {parsed.note ? <p className="text-sm text-ink-600">{parsed.note}</p> : null}
+        </div> : null}
 
-        <Field label="Date and time" hint={timezone === 'America/Chicago' ? 'Central Time (USA)' : timezone}>
+        <Field label="Date and time" hint={timezone === WORKSPACE_TIMEZONE ? WORKSPACE_TIMEZONE_LABEL : timezone}>
           <input name="occurredAt" type="datetime-local" required defaultValue={initial.occurredAt} />
         </Field>
         <Field label="Duration (minutes)">

@@ -1,4 +1,4 @@
-import type { AccountRole, Prisma } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
 import { isAdmin, visiblePodIds } from './auth/rbac';
@@ -140,9 +140,6 @@ export type AccountPerson = {
   name: string;
   jobTitle: string | null;
   email: string | null;
-  reportsToId: string | null;
-  accountRole: AccountRole;
-  relationshipNote: string | null;
   dnd: boolean;
   optedOut: boolean;
   podOwner: string | null;
@@ -157,48 +154,6 @@ export type AccountPerson = {
   lastTouchAt: Date | null;
   touches: number;
 };
-
-export type AccountTreeNode = { person: AccountPerson; children: AccountTreeNode[] };
-
-/**
- * Nest people by `reportsToId`. A manager who is not in this account, is the person themselves,
- * or would close a loop is treated as no manager, so the chart is always a forest and everyone
- * appears exactly once. Only the edge that closes a loop is cut, not the branch under it.
- */
-export function buildOrgTree(people: AccountPerson[]): { roots: AccountTreeNode[]; orphans: AccountPerson[] } {
-  const byId = new Map(people.map((p) => [p.id, p]));
-  const nodes = new Map<string, AccountTreeNode>(people.map((p) => [p.id, { person: p, children: [] }]));
-  const roots: AccountTreeNode[] = [];
-
-  /** True when walking up from `fromId` reaches `targetId`, i.e. linking them would loop. */
-  const reaches = (fromId: string, targetId: string): boolean => {
-    const seen = new Set<string>();
-    let cur: string | null = fromId;
-    while (cur && !seen.has(cur)) {
-      if (cur === targetId) return true;
-      seen.add(cur);
-      cur = byId.get(cur)?.reportsToId ?? null;
-    }
-    return false;
-  };
-
-  for (const p of people) {
-    const node = nodes.get(p.id)!;
-    const wanted = p.reportsToId;
-    const parentId = wanted && wanted !== p.id && byId.has(wanted) && !reaches(wanted, p.id) ? wanted : null;
-    if (parentId) nodes.get(parentId)!.children.push(node);
-    else roots.push(node);
-  }
-
-  const sortRec = (list: AccountTreeNode[]) => {
-    list.sort((a, b) => b.children.length - a.children.length || a.person.name.localeCompare(b.person.name));
-    for (const n of list) sortRec(n.children);
-  };
-  sortRec(roots);
-  // A root with nobody under it is "unplaced": listed separately so the chart stays readable.
-  const orphans = roots.filter((r) => r.children.length === 0).map((r) => r.person);
-  return { roots: roots.filter((r) => r.children.length > 0), orphans };
-}
 
 export type AccountTimelineItem = {
   at: Date;
@@ -253,9 +208,6 @@ export async function accountDetail(companyId: string, user: SessionUser) {
       name: cachedPersonName(p),
       jobTitle: p.jobTitle,
       email: p.email,
-      reportsToId: p.reportsToId,
-      accountRole: p.accountRole,
-      relationshipNote: p.relationshipNote,
       dnd: p.dnd,
       optedOut: p.optedOut,
       podOwner: p.podOwner,
@@ -371,7 +323,6 @@ export async function accountDetail(companyId: string, user: SessionUser) {
     company,
     ownerName: company.ownerMemberId ? memberName.get(company.ownerMemberId) ?? null : null,
     people: accountPeople,
-    tree: buildOrgTree(accountPeople),
     meetings,
     campaigns,
     timeline,
@@ -396,10 +347,3 @@ export async function accountDetail(companyId: string, user: SessionUser) {
   };
 }
 
-export const ACCOUNT_ROLE_LABELS: Record<AccountRole, string> = {
-  CHAMPION: 'Champion',
-  SUPPORTER: 'Supporter',
-  NEUTRAL: 'Neutral',
-  DETRACTOR: 'Detractor',
-  UNKNOWN: 'Unknown',
-};

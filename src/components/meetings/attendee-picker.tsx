@@ -33,6 +33,8 @@ export function AttendeePicker({ initial, name = 'attendeesJson' }: { initial: A
     setQuery(''); setOpen(false);
   };
 
+  const visibleOptions = options.filter((o) => !selected.some((a) => keyOf(a) === keyOf(o) || Boolean(a.email && o.email && a.email.toLowerCase() === o.email.toLowerCase())));
+
   return <div className="space-y-3">
     <input name={name} type="hidden" value={JSON.stringify(selected)} />
     {selected.length ? <ul className="divide-y divide-line rounded-xl border border-line">{selected.map((a) => <li key={keyOf(a)} className="flex items-center gap-3 p-3">
@@ -43,10 +45,12 @@ export function AttendeePicker({ initial, name = 'attendeesJson' }: { initial: A
       <input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setOpen(true); }} onFocus={() => setOpen(true)} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setOpen(false); } if (event.key === 'Enter') event.preventDefault(); }} aria-label="Find a contact or team member" placeholder="Find a contact or team member" />
       {open ? <div className="mt-2 max-h-72 overflow-y-auto rounded-xl border border-line bg-white p-1 shadow-surface" role="region" aria-label="Attendee search results">
         <div className="flex items-center justify-between px-2 py-1"><span className="text-xs text-ink-500">{loading ? 'Searching…' : 'Contacts and team'}</span><button type="button" className="btn-ghost btn-sm" onClick={() => setOpen(false)}>Close</button></div>
-        {options.filter((o) => !selected.some((a) => keyOf(a) === keyOf(o) || Boolean(a.email && o.email && a.email.toLowerCase() === o.email.toLowerCase()))).map((option) => <button key={option.key} type="button" onClick={() => add(option)} className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-canvas">
+        {visibleOptions.map((option) => <button key={option.key} type="button" onClick={() => add(option)} className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-canvas">
           <Avatar name={option.name ?? option.email ?? '?'} shape="circle" size={28} /><span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-ink-900">{option.name ?? option.email}</span><span className="block truncate text-xs font-medium text-ink-700">{option.detail ?? option.email}</span></span><Badge tone={option.kind === 'team' ? 'blue' : 'gray'}>{option.kind === 'team' ? 'Team' : 'Contact'}</Badge>
         </button>)}
-        {!loading && !options.length && !error ? <div className="p-3 text-sm text-ink-500">No matching people</div> : null}
+        {/* Every outcome says something. A dropdown that goes blank looks like a broken search. */}
+        {error ? <p role="alert" className="p-3 text-sm font-semibold text-red-700">{error}</p> : null}
+        {!loading && !error && !visibleOptions.length ? <div className="p-3 text-sm text-ink-500">{query.trim() ? 'No matching people' : 'Start typing a name, email or company'}</div> : null}
       </div> : null}
     </div>
     {error ? <p role="alert" className="text-sm text-red-700">{error}</p> : null}

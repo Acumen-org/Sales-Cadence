@@ -25,7 +25,8 @@ test('Home greets the signed-in user and opens personal work from its priorities
     await expect(page.getByText(label, { exact: true })).toBeVisible();
   }
   await expect(page.getByRole('heading', { name: 'Up next' })).toBeVisible();
-  await expect(page.getByRole('progressbar', { name: "Today's progress" })).toBeVisible();
+  // Every figure on Home is a value, so nothing that moves is left in muted prose.
+  await expect(page.locator('main').getByText(/^\d+ overdue tasks?$/)).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Your pods this week' })).toBeVisible();
   await logout(page);
 });
@@ -55,7 +56,7 @@ test('search and help are available from every workspace section', async ({ page
     await page.goto(path);
     await expect(header.getByLabel('Help')).toBeVisible();
     await expect(header.getByLabel('Search')).toBeVisible();
-    await expect(header.getByLabel('Overdue tasks')).toBeVisible();
+    await expect(header.getByLabel('Notifications')).toBeVisible();
   }
   await page.goto('/tasks');
   await expect(header.getByLabel('Search')).toBeVisible();
@@ -83,9 +84,35 @@ test('a meeting plays in the app with its transcript and an empty analysis panel
   await page.getByLabel('Recording or meeting link').fill('https://files.example.com/e2e/recording.mp4');
   // The form says what it can do with the link before saving.
   await expect(page.getByText(/Media file/)).toBeVisible();
-  await page.getByLabel('When').fill('2026-09-08T10:00');
+  await page.getByLabel('Date and time').fill('2026-09-08T10:00');
   await page.getByLabel('Duration (minutes)').fill('18');
-  await page.getByLabel('Attendees').fill('Dummy One <dummy.one@dummy-a.example>\nalisa@acumen-strategy.com');
+
+  // Attendees are picked from the CRM directory and the team, and guests can be typed in.
+  const finder = page.getByLabel('Find a contact or team member');
+  const results = page.getByRole('region', { name: 'Attendee search results' });
+  const pick = async (query: string, name: RegExp) => {
+    await finder.click();
+    await finder.fill(query);
+    await expect(results).toBeVisible();
+    await results.getByRole('button', { name }).first().click({ timeout: 20_000 });
+  };
+  // The organiser is already on the meeting, so they are not offered again.
+  await expect(page.locator('#main-content').getByText('Alisa Senior')).toBeVisible();
+  await finder.click();
+  await finder.fill('Alisa');
+  await expect(results).toContainText('No matching people');
+  // A contact from the CRM directory, and a colleague from the team.
+  await pick('dummy.one@', /Dummy One/);
+  await pick('Karson', /Karson/);
+  await page.getByRole('button', { name: 'Add someone outside the directory' }).click();
+  await page.getByLabel('Guest name').fill('Outside Guest');
+  await page.getByLabel('Guest email').fill('guest@prospect.example');
+  await page.getByRole('button', { name: 'Add attendee' }).click();
+  // One of each kind, and any of them can be taken off again.
+  for (const kind of ['Contact', 'Team', 'Guest']) await expect(page.getByText(kind, { exact: true }).first(), kind).toBeVisible();
+  await page.getByRole('button', { name: 'Remove Outside Guest' }).click();
+  await expect(page.getByText('Outside Guest')).toHaveCount(0);
+
   await page.getByLabel('Transcript (optional)').fill('WEBVTT\n\n00:00:01.000 --> 00:00:06.000\n<v Alisa Senior>Thanks for making the time today.\n\n00:00:07.000 --> 00:00:12.000\n<v Dummy One>Happy to. Tell me about the reporting pack.\n');
   await page.getByRole('button', { name: /Add meeting|Save/ }).click();
   await expect(page).toHaveURL(/\/meetings\/[0-9a-f-]+$/);
@@ -95,8 +122,9 @@ test('a meeting plays in the app with its transcript and an empty analysis panel
   // Transcript underneath, with speakers.
   await expect(page.getByText('Thanks for making the time today.')).toBeVisible();
   await expect(page.getByText('Dummy One').first()).toBeVisible();
-  // Analysis panel: deliberately empty until a model is connected.
-  await expect(page.getByText('No analysis yet')).toBeVisible();
+  // The assistant's panel, named and honest about not being connected.
+  await expect(page.getByText('Cadence AI').first()).toBeVisible();
+  await expect(page.getByText(/No model provider is connected/)).toBeVisible();
 
   // One external attendee, so it counts as booked this week.
   await page.goto('/meetings?scope=week');
@@ -112,7 +140,7 @@ test('a Zoom recording link is offered as a link-out, not a broken frame', async
   await page.getByLabel('Title').fill('E2E zoom review');
   await page.getByLabel('Recording or meeting link').fill('https://acme.zoom.us/rec/share/e2e');
   await expect(page.getByText(/blocks embedding/)).toBeVisible();
-  await page.getByLabel('When').fill('2026-09-08T14:00');
+  await page.getByLabel('Date and time').fill('2026-09-08T14:00');
   await page.getByRole('button', { name: /Add meeting|Save/ }).click();
   await expect(page).toHaveURL(/\/meetings\/[0-9a-f-]+$/);
   await expect(page.locator('video')).toHaveCount(0);
@@ -129,11 +157,15 @@ test('an account shows its people, hierarchy and one timeline', async ({ page })
   await expect(page).toHaveURL(/\/accounts\//);
   await expect(page.getByRole('heading', { name: 'Dummy Company A' })).toBeVisible();
 
-  await page.getByRole('link', { name: 'Relationship map' }).click();
-  // The seeded chart puts Dummy Two and Dummy Three under Dummy One.
+  await page.getByRole('link', { name: 'People by title' }).click();
   await expect(page.getByRole('link', { name: 'Dummy One' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Dummy Two' })).toBeVisible();
-  await expect(page.getByText('Champion').first()).toBeVisible();
+  // Grouped by the job title the CRM holds, not by a stance nobody could measure.
+  await expect(page.getByText('Grouped from CRM job titles')).toBeVisible();
+  await expect(page.getByText(/^(Executive|Leadership|Management|Other) titles$/).first()).toBeVisible();
+  for (const invented of ['Champion', 'Supporter', 'Detractor']) {
+    await expect(page.getByText(invented, { exact: true }), invented).toHaveCount(0);
+  }
 
   await page.locator('main').getByRole('link', { name: 'People', exact: true }).click();
   // The people table names each person's manager.
@@ -145,25 +177,22 @@ test('an account shows its people, hierarchy and one timeline', async ({ page })
   await logout(page);
 });
 
-test('the relationship map can be edited and refuses to make a loop', async ({ page }) => {
+test('the people view is grouped from CRM titles and holds nothing invented', async ({ page }) => {
   await loginAs(page, 'Admin');
   await page.goto('/accounts');
   await page.getByRole('link', { name: 'Dummy Company B' }).click();
-  await page.getByRole('link', { name: 'Relationship map' }).click();
+  await page.getByRole('link', { name: 'People by title' }).click();
 
-  // Change a stance: the chart itself is the confirmation. Nobody here starts as a detractor.
-  await expect(page.locator('main')).not.toContainText('Detractor');
-  await page.getByRole('button', { name: 'Edit Dummy Eleven' }).click();
-  await page.getByLabel('Stance').selectOption('DETRACTOR');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0);
-  await expect(page.locator('main')).toContainText('Detractor');
-
-  // Dummy Five already reports to Dummy Four, so pointing Four at Five would loop.
-  await page.getByRole('button', { name: 'Edit Dummy Four', exact: true }).click();
-  await page.getByLabel('Reports to').selectOption('dummy-05');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByText('That would create a loop in the reporting line.')).toBeVisible();
+  // Derived from what Twenty holds, so there is nothing to edit and nothing to keep in step.
+  await expect(page.getByText('Grouped from CRM job titles')).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Edit / })).toHaveCount(0);
+  await expect(page.getByLabel('Stance')).toHaveCount(0);
+  await expect(page.getByLabel('Reports to')).toHaveCount(0);
+  for (const invented of ['Champion', 'Supporter', 'Neutral', 'Detractor']) {
+    await expect(page.locator('main').getByText(invented, { exact: true }), invented).toHaveCount(0);
+  }
+  // The titles themselves are what the reader sees.
+  await expect(page.locator('main')).toContainText('CEO');
   await logout(page);
 });
 
@@ -183,7 +212,8 @@ test('Activity lists work in time order and hides administration', async ({ page
   await expect(page.locator('main').getByText(/^Settings/)).toHaveCount(0);
 
   // Filters are real query state.
-  await page.getByRole('button', { name: 'Emails and calls' }).click();
+  await page.getByLabel('Event type').selectOption('touch');
+  await page.getByRole('button', { name: 'Apply filters' }).click();
   await expect(page).toHaveURL(/kind=touch/);
   await expect(page.locator('main')).toContainText(/Email|Call/);
   await logout(page);
@@ -205,12 +235,13 @@ test('per-user views: my accounts and my relationships', async ({ page }) => {
 
 test('the person record shows the real Twenty fields, grouped as Twenty groups them', async ({ page }) => {
   await loginAs(page, 'Alisa');
-  await page.goto('/people/dummy-01?tab=details');
+  await page.goto('/people/dummy-01?tab=overview');
   const main = page.locator('main');
 
-  // The four groups the CRM record has, in that order.
-  for (const card of ['Contact details', 'Ownership', 'Classification', 'Next action, as Twenty holds it']) {
-    await expect(main.getByText(card, { exact: true })).toBeVisible();
+  // The groups the CRM record has: identity, who owns it, how it is classified, what the CRM
+  // itself last recorded, and the provenance of the row.
+  for (const card of ['Contact details', 'Ownership', 'Classification', 'CRM activity details', 'Record']) {
+    await expect(main.getByText(card, { exact: true }), card).toBeVisible();
   }
 
   // Ownership comes from assignedTo and podOwner, not from an invented owner field.
@@ -243,7 +274,9 @@ test('recordings Twenty holds are offered for adding, pre-filled', async ({ page
   await page.goto('/meetings/new?personId=dummy-04');
   await expect(page.getByLabel('Title')).toHaveValue(/Dummy Four/);
   await expect(page.getByLabel('Recording or meeting link')).toHaveValue(/ForBiggerMeetings\.mp4/);
-  await expect(page.getByLabel('Attendees')).toHaveValue(/dummy\.four@dummy-b\.example/);
+  // The person is already on the attendee list, alongside the organiser.
+  await expect(page.locator('#main-content')).toContainText('Dummy Four');
+  await expect(page.locator('#main-content')).toContainText('dummy.four@dummy-b.example');
   await expect(page.getByText(/Media file/)).toBeVisible();
   await logout(page);
 });

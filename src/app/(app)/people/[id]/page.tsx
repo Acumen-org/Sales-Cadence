@@ -64,6 +64,9 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
   }
 
   const currentEnrollments = enrollments.filter((e) => e.status === 'ACTIVE' || e.status === 'PAUSED');
+  // With nothing running, how the last engagement ended is the fact that decides what to do next,
+  // so the card carries it rather than reading as if this person had never been worked.
+  const lastFinished = currentEnrollments.length ? null : enrollments.find((e) => e.status !== 'ACTIVE' && e.status !== 'PAUSED') ?? null;
   const standing = crmStanding(person);
   const warnings = contactWarnings(person);
   const podName = person.podOwner ? pods.find((x) => x.podOwnerValue === person.podOwner)?.name ?? optionLabel(person.podOwner) : null;
@@ -220,8 +223,8 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
               // Grouped the way the record is grouped in Twenty, so the two read the same.
               <div className="space-y-3">
                 {twentyWarning ?? liveWarning ? <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">CRM temporarily unavailable. Showing the last synced record.</div> : null}
-                <Card title="Current campaigns" actions={<Link href={`/people/${id}?tab=sequences`} className="btn-ghost btn-sm">View history</Link>}>
-                  {currentEnrollments.length ? <div className="divide-y divide-line">{currentEnrollments.map((e) => <div key={e.id} className="flex flex-wrap items-center justify-between gap-3 p-4"><div><div className="font-semibold text-ink-900">{e.campaign ? <Link href={`/campaigns/${e.campaign.id}`} className="hover:text-brand-700 hover:underline">{e.campaign.name}</Link> : 'Direct enrollment'}</div><Link href={`/sequences/${e.sequenceId}`} className="mt-1 block text-sm font-semibold text-brand-700">{e.sequence.name}</Link></div><Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'}>{enrollmentStatusLabel(e)}</Badge></div>)}</div> : <div className="p-4 text-sm text-ink-500">No current campaign</div>}
+                <Card title={currentEnrollments.length || !lastFinished ? 'Current campaigns' : 'Last campaign'} actions={<Link href={`/people/${id}?tab=sequences`} className="btn-ghost btn-sm">View history</Link>}>
+                  {currentEnrollments.length ? <div className="divide-y divide-line">{currentEnrollments.map((e) => <div key={e.id} className="flex flex-wrap items-center justify-between gap-3 p-4"><div><div className="font-semibold text-ink-900">{e.campaign ? <Link href={`/campaigns/${e.campaign.id}`} className="hover:text-brand-700 hover:underline">{e.campaign.name}</Link> : 'Direct enrollment'}</div><Link href={`/sequences/${e.sequenceId}`} className="mt-1 block text-sm font-semibold text-brand-700">{e.sequence.name}</Link></div><Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'}>{enrollmentStatusLabel(e)}</Badge></div>)}</div> : lastFinished ? <div className="flex flex-wrap items-center justify-between gap-3 p-4"><div><div className="font-semibold text-ink-900">{lastFinished.campaign ? <Link href={`/campaigns/${lastFinished.campaign.id}`} className="hover:text-brand-700 hover:underline">{lastFinished.campaign.name}</Link> : 'Direct enrollment'}</div><Link href={`/sequences/${lastFinished.sequenceId}`} className="mt-1 block text-sm font-semibold text-brand-700">{lastFinished.sequence.name}</Link></div><div className="text-right"><Badge tone={ENROLLMENT_TONE[lastFinished.status] ?? 'gray'}>{enrollmentStatusLabel(lastFinished)}</Badge><div className="mt-1 text-xs text-ink-500">Ended <strong className="font-semibold text-ink-800">{formatInstant(lastFinished.repliedAt ?? lastFinished.meetingAt ?? lastFinished.exitedAt ?? lastFinished.completedAt ?? lastFinished.updatedAt, user.timezone)}</strong></div></div></div> : <div className="p-4 text-sm text-ink-500">Never enrolled in a campaign</div>}
                 </Card>
                 <Card title="Contact details">
                   <div className="p-4">

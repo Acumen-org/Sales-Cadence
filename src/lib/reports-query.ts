@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { WORKSPACE_TIMEZONE } from './workspace';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
 import { isJuniorFo, visiblePodIds } from './auth/rbac';
@@ -21,7 +22,7 @@ export type GroupRow = {
   overdue: number;
 };
 
-export const REPORTING_TIMEZONE = 'America/Chicago';
+export const REPORTING_TIMEZONE = WORKSPACE_TIMEZONE;
 export type ReportingRange = { from: LocalDate; to: LocalDate; fromInstant: Date; toInstant: Date; error: string | null };
 
 /** Inclusive calendar dates, translated to a half-open Central Time interval (including DST). */

@@ -60,7 +60,7 @@ export default async function HomePage() {
         <Tile
           label="To reach today"
           value={h.my.peopleToReachToday}
-          hint={h.my.overdueTotal ? <><N tone="warn">{h.my.overdueTotal}</N> overdue</> : <><N>{h.my.todayTotal}</N> scheduled {h.my.todayTotal === 1 ? 'touch' : 'touches'}</>}
+          hint={h.my.overdueTotal ? <><N tone="warn">{h.my.overdueTotal}</N> overdue {h.my.overdueTotal === 1 ? 'task' : 'tasks'}</> : <><N>{h.my.todayTotal}</N> scheduled {h.my.todayTotal === 1 ? 'touch' : 'touches'}</>}
           href={`/tasks?tab=today&mode=flow&${mine}`}
           icon={<IconPeople size={17} />}
           tone={h.my.overdueTotal ? 'warn' : undefined}
@@ -98,7 +98,6 @@ export default async function HomePage() {
           {h.my.nextTasks.length ? <div className="divide-y divide-line/70">{h.my.nextTasks.map((task) => <Link key={task.id} href={`/tasks?task=${task.id}&mode=flow&tab=${task.due < h.today ? 'overdue' : task.due === h.today ? 'today' : 'upcoming'}&${mine}`} className="flex items-center gap-3 px-5 py-4 transition hover:bg-brand-50/50">
             <Avatar name={task.name} shape="circle" size={34} /><span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold">{task.name}</span><span className="mt-0.5 block truncate text-[10px] text-ink-500">{task.company ?? task.label}</span></span><span className="text-right"><span className={`block text-[9px] font-medium ${task.due < h.today ? 'text-amber-700' : 'text-ink-500'}`}>{task.due < h.today ? 'Overdue' : task.due === h.today ? 'Today' : formatLocalDate(task.due)}</span><span className="mt-1.5 flex justify-end text-ink-400"><ActionIcon action={task.action} size={13} /></span></span>
           </Link>)}</div> : <EmptyState icon={<IconCheck size={20} />} title="Nothing scheduled" />}
-          <div className="border-t border-line bg-canvas/40 px-5 py-3"><div className="mb-2 flex justify-between text-[11px] text-ink-600"><span>Completed today</span><span><N>{completed}</N> of <N>{allToday}</N></span></div><div role="progressbar" aria-label="Today's progress" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} className="h-1 overflow-hidden rounded-full bg-line"><div className="h-full rounded-full bg-brand-500" style={{ width: `${progress}%` }} /></div></div>
         </Surface>
       </div>
 

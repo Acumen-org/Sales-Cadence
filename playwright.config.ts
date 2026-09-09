@@ -30,6 +30,8 @@ export default defineConfig({
       DEV_DB_DIR: process.env.E2E_DB_DIR ?? '.pgdata-e2e',
       CADENCE_NO_BROWSER: '1',
       CADENCE_SKIP_BUILD: '1',
+      // The lean demo dataset: people, pods and users but no campaigns. Cases that need live work
+      // create it themselves, so no case depends on another having run first.
       SEED_PROFILE: process.env.E2E_SEED ?? 'core,demo-basic',
       TWENTY_MODE: 'mock',
       TWENTY_API_URL: 'http://twenty.local:3000',

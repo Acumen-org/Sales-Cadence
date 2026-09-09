@@ -300,8 +300,12 @@ export function contactWarnings(p: {
   rotatedTo: string | null;
 }): { label: string; tone: BadgeTone }[] {
   const out: { label: string; tone: BadgeTone }[] = [];
-  if (p.badEmail || p.emailMissing) out.push({ label: 'Email missing', tone: 'amber' });
-  if (p.badPhone || p.phoneMissing) out.push({ label: 'Phone missing', tone: 'amber' });
+  // A bounce and a blank are different problems: one needs a new address found, the other needs
+  // the address we have replaced. Saying "missing" for both sends the FO looking for the wrong thing.
+  if (p.badEmail) out.push({ label: 'Email bounced', tone: 'amber' });
+  else if (p.emailMissing) out.push({ label: 'Email missing', tone: 'amber' });
+  if (p.badPhone) out.push({ label: 'Wrong number', tone: 'amber' });
+  else if (p.phoneMissing) out.push({ label: 'Phone missing', tone: 'amber' });
   if (p.rotatedTo) out.push({ label: optionLabel(p.rotatedTo), tone: 'gray' });
   return out;
 }

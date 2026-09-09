@@ -116,15 +116,6 @@ enum AnalysisStatus {
   FAILED
 }
 
-/// Cadence-local stance of a person on their account (for the relationship map).
-enum AccountRole {
-  CHAMPION
-  SUPPORTER
-  NEUTRAL
-  DETRACTOR
-  UNKNOWN
-}
-
 // ---------------------------------------------------------------------------
 // Users, sessions, pods
 // ---------------------------------------------------------------------------
@@ -430,12 +421,6 @@ model PersonCache {
   optedOut        Boolean   @default(false)
   badEmail        Boolean   @default(false)
   badPhone        Boolean   @default(false)
-  /// Cadence-local org chart: who this person reports to (normally at the same company).
-  reportsToId     String?
-  /// Cadence-local stance on the account, shown on the relationship map.
-  accountRole     AccountRole @default(UNKNOWN)
-  /// Free-text note the FO keeps about the relationship.
-  relationshipNote String?
   raw             Json?
   twentyUpdatedAt DateTime?
   deletedAt       DateTime?
@@ -450,7 +435,6 @@ model PersonCache {
   @@index([email])
   @@index([lastName, firstName])
   @@index([ownerMemberId])
-  @@index([reportsToId])
   @@index([companyId, lastName])
   @@index([tier])
   @@index([listCategory])
