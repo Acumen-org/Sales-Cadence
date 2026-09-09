@@ -174,7 +174,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
       {pages > 1 ? (
         <div className="flex items-center justify-between text-[13px] text-ink-500">
           <span>
-            Page <strong className="text-ink-900">{page}</strong> of <strong className="text-ink-900">{pages}</strong>
+            Page <span className="font-medium text-ink-900">{page}</span> of <span className="font-medium text-ink-900">{pages}</span>
           </span>
           <div className="flex gap-2">
             {page > 1 ? (

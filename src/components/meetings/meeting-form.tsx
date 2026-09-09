@@ -1,7 +1,8 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { WORKSPACE_TIMEZONE, WORKSPACE_TIMEZONE_LABEL } from '@/lib/workspace';
+import { optionLabel } from '@/lib/twenty/labels';
+import { PRODUCTS, WORKSPACE_TIMEZONE, WORKSPACE_TIMEZONE_LABEL } from '@/lib/workspace';
 import { useState } from 'react';
 import { createMeetingAction, updateMeetingAction, type AttendeeSelection } from '@/lib/actions/meetings';
 import { parseMeetingLink } from '@/lib/meetings/providers';
@@ -16,6 +17,7 @@ export type MeetingFormValues = {
   occurredAt: string; // datetime-local value
   durationMin: number | '';
   companyId: string;
+  products?: string[];
   attendees: AttendeeSelection[];
   transcript: string;
 };
@@ -74,6 +76,16 @@ export function MeetingForm({ companies, initial, mode, timezone }: { companies:
 
         <div className="space-y-2 md:col-span-2"><div className="text-sm font-medium text-ink-700">Attendees</div><AttendeePicker initial={initial.attendees} /></div>
 
+        <Field label="Products" className="md:col-span-2">
+          <div className="flex flex-wrap gap-2">
+            {PRODUCTS.map((product) => (
+              <label key={product} className="flex cursor-pointer items-center gap-2 rounded-lg border border-line px-3 py-2 text-[13px] font-medium text-ink-800">
+                <input type="checkbox" name="products" value={product} defaultChecked={initial.products?.includes(product)} />
+                {optionLabel(product)}
+              </label>
+            ))}
+          </div>
+        </Field>
         <Field label="Transcript (optional)" className="md:col-span-2" hint="Paste the WebVTT or SRT export, or plain text. Format is detected automatically.">
           <textarea name="transcript" rows={6} defaultValue={initial.transcript} className="font-mono !text-[12px]" placeholder="Paste the transcript" />
         </Field>

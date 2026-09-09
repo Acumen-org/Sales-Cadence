@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { optionLabel } from '@/lib/twenty/labels';
 import type { Prisma } from '@prisma/client';
 import { requireUser } from '@/lib/auth/current-user';
 import { meetingReadWhere } from '@/lib/meetings-query';
@@ -41,6 +42,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
         durationSec: true,
         companyName: true,
         companyId: true,
+        products: true,
         transcript: true,
         analysisStatus: true,
         createdBy: { select: { name: true } },
@@ -112,6 +114,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                   <th>When</th>
                   <th>Length</th>
                   <th>Account</th>
+                  <th>Products</th>
                   <th>Attendees</th>
                   <th>Transcript</th>
                   <th>Analysis</th>
@@ -136,7 +139,16 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                       )}
                     </td>
                     <td className="text-[12.5px]">
-                      <strong className="text-ink-900">{m._count.attendees}</strong>
+                      {m.products.length ? (
+                        <span className="flex flex-wrap gap-1">
+                          {m.products.map((p) => <span key={p} className="whitespace-nowrap rounded bg-brand-50 px-1.5 py-0.5 text-[11.5px] font-medium text-brand-800">{optionLabel(p)}</span>)}
+                        </span>
+                      ) : (
+                        <span className="text-ink-300">-</span>
+                      )}
+                    </td>
+                    <td className="text-[12.5px]">
+                      <span className="font-medium text-ink-900">{m._count.attendees}</span>
                       {m.attendees.length ? <Badge tone="green" className="ml-1.5">external</Badge> : null}
                     </td>
                     <td>{m.transcript ? <Badge tone="blue">yes</Badge> : <span className="text-[12px] text-ink-300">-</span>}</td>
@@ -162,7 +174,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
 
       {recordings.length ? (
         <Surface flush>
-          <ViewHeader title="Recordings in Twenty" caret meta={<><strong>{recordingTotal}</strong> on a person record{recordingTotal > recordings.length ? <> · showing <strong>{recordings.length}</strong></> : null}</>} />
+          <ViewHeader title="Recordings in Twenty" caret meta={<><span className="font-medium text-ink-900">{recordingTotal}</span> on a person record{recordingTotal > recordings.length ? <> · showing <strong>{recordings.length}</strong></> : null}</>} />
           <div className="overflow-x-auto scroll-thin">
             <table className="table">
               <thead>
@@ -222,7 +234,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
       {pages > 1 ? (
         <div className="flex items-center justify-between text-[13px] text-ink-500">
           <span>
-            Page <strong className="text-ink-900">{page}</strong> of <strong className="text-ink-900">{pages}</strong>
+            Page <span className="font-medium text-ink-900">{page}</span> of <span className="font-medium text-ink-900">{pages}</span>
           </span>
           <div className="flex gap-2">
             {page > 1 ? (

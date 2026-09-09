@@ -24,9 +24,12 @@ function Tile({ label, value, hint, href, icon, tone }: { label: string; value: 
   );
 }
 
-/** A number inside a sentence. Point 1: anything that moves is bold and full-contrast. */
+/**
+ * A number inside a sentence. It has to read as live data without breaking the line: the step up
+ * is in colour, against the muted words around it, rather than a jump to bold mid-sentence.
+ */
 function N({ children, tone }: { children: React.ReactNode; tone?: 'warn' }) {
-  return <strong className={tone === 'warn' ? 'font-bold text-amber-800' : 'font-bold text-ink-900'}>{children}</strong>;
+  return <span className={tone === 'warn' ? 'font-medium text-amber-800' : 'font-medium text-ink-900'}>{children}</span>;
 }
 
 export default async function HomePage() {
@@ -81,9 +84,9 @@ export default async function HomePage() {
                 <span>{h.my.overdueTotal ? `overdue ${h.my.overdueTotal === 1 ? 'touch' : 'touches'}` : h.my.todayTotal ? `${h.my.todayTotal === 1 ? 'touch' : 'touches'} due today` : 'due today'}</span>
               </h2>
               <p className="mb-5 mt-3 text-[12px] text-[#c1d4ca]">
-                {h.my.overdueTotal && h.my.todayTotal ? <><strong className="font-bold text-white">{h.my.todayTotal}</strong> more due today across <strong className="font-bold text-white">{h.my.peopleToReachToday}</strong> {h.my.peopleToReachToday === 1 ? 'person' : 'people'}</> : null}
-                {!h.my.overdueTotal && h.my.todayTotal ? <>across <strong className="font-bold text-white">{h.my.peopleToReachToday}</strong> {h.my.peopleToReachToday === 1 ? 'person' : 'people'}, <strong className="font-bold text-white">{completed}</strong> already done</> : null}
-                {!h.my.overdueTotal && !h.my.todayTotal ? <><strong className="font-bold text-white">{completed}</strong> completed today</> : null}
+                {h.my.overdueTotal && h.my.todayTotal ? <><span className="font-medium text-white">{h.my.todayTotal}</span> more due today across <span className="font-medium text-white">{h.my.peopleToReachToday}</span> {h.my.peopleToReachToday === 1 ? 'person' : 'people'}</> : null}
+                {!h.my.overdueTotal && h.my.todayTotal ? <>across <span className="font-medium text-white">{h.my.peopleToReachToday}</span> {h.my.peopleToReachToday === 1 ? 'person' : 'people'}, <span className="font-medium text-white">{completed}</span> already done</> : null}
+                {!h.my.overdueTotal && !h.my.todayTotal ? <><span className="font-medium text-white">{completed}</span> completed today</> : null}
                 {h.my.overdueTotal && !h.my.todayTotal ? <>nothing else is due today</> : null}
               </p>
               <Link href={`/tasks?tab=${focusTab}&mode=flow&${mine}`} className="inline-flex items-center gap-3 rounded-lg bg-[#d5e9ad] px-4 py-2.5 text-[12px] font-semibold text-[#203e35] transition hover:bg-[#e2f0c6]">{h.my.todayTotal || h.my.overdueTotal ? 'Start task flow' : 'View upcoming tasks'}<IconChevronRight size={15} /></Link>

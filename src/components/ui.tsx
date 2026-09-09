@@ -447,9 +447,8 @@ export function EventDetail({ fields, className }: { fields: { label: string; va
   return (
     <span className={clsx('flex flex-wrap items-center gap-x-4 gap-y-1', className)}>
       {fields.map((f) => (
-        <span key={f.label} className="text-[11.5px]">
-          <span className="text-ink-500">{f.label}</span>
-          <strong className="ml-1.5 font-semibold text-ink-800">{f.value}</strong>
+        <span key={f.label} className="text-[11.5px] text-ink-500">
+          {f.label} <span className="text-ink-800">{f.value}</span>
         </span>
       ))}
     </span>
@@ -466,7 +465,7 @@ export function RecordFields({ items, className }: { items: { label: string; val
       {items.map((item) => (
         <div key={item.label} className="min-w-0 space-y-1.5">
           <dt className="text-[12px] text-ink-500">{item.label}</dt>
-          <dd className="break-words text-[14px] font-bold text-ink-900">{item.value == null || item.value === '' ? <span className="font-normal text-ink-400">Not recorded</span> : displayValue(item.value)}</dd>
+          <dd className="break-words text-[14px] font-semibold text-ink-900">{item.value == null || item.value === '' ? <span className="font-normal text-ink-400">Not recorded</span> : displayValue(item.value)}</dd>
         </div>
       ))}
     </dl>

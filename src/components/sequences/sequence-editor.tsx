@@ -34,7 +34,7 @@ export function SequenceEditor({ sequenceId, initialSteps, action, submitLabel, 
     {header}
     <ol className="space-y-0">
       {steps.map((step, i) => <li key={step.id} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); if (dragged !== null) move(dragged, i); setDragged(null); }}>
-        {i > 0 && <div className="ml-8 flex h-11 items-center border-l-2 border-brand-200 pl-5 text-xs text-ink-500">Wait <strong className="mx-1 text-ink-900">{step.day - steps[i - 1].day}</strong> business {step.day - steps[i - 1].day === 1 ? 'day' : 'days'}</div>}
+        {i > 0 && <div className="ml-8 flex h-11 items-center border-l-2 border-brand-200 pl-5 text-xs text-ink-500">Wait <span className="mx-1 font-medium text-ink-900">{step.day - steps[i - 1].day}</span> business {step.day - steps[i - 1].day === 1 ? 'day' : 'days'}</div>}
         <section className="surface overflow-hidden">
           <div className="flex flex-wrap items-center gap-3 border-b border-line bg-canvas/50 px-5 py-4">
             {!readOnly && <button draggable={!locked(i)} type="button" aria-label={'Drag step ' + (i + 1)} disabled={locked(i)} onDragStart={() => setDragged(i)} onDragEnd={() => setDragged(null)} className="cursor-grab px-1 text-lg text-ink-500 disabled:cursor-default">⠿</button>}
@@ -58,7 +58,7 @@ export function SequenceEditor({ sequenceId, initialSteps, action, submitLabel, 
     </ol>
     {!readOnly && <><div className="flex flex-wrap items-center justify-center gap-2 rounded-xl border border-dashed border-brand-300 bg-brand-50/40 p-5"><span className="mr-2 text-sm font-semibold">New touchpoint</span>{ACTION_TYPES.map(type => <button key={type} type="button" className="btn-secondary" onClick={() => append(type)}><IconPlus size={13} /><ActionIcon action={type} size={14} />{ACTION_LABELS[type]}</button>)}</div>
       {/* The bar floats over the page, so the page reserves its height rather than hiding a card behind it. */}
-      <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-end gap-4 rounded-xl border border-line bg-white p-3 shadow-lg">{validation && <p role="alert" className="mr-auto text-sm font-semibold text-red-700">{validation}</p>}<span className="text-[12px] text-ink-500"><strong className="text-ink-900">{steps.length}</strong> {steps.length === 1 ? 'touchpoint' : 'touchpoints'} over <strong className="text-ink-900">{(steps.at(-1)?.day ?? 1)}</strong> business {(steps.at(-1)?.day ?? 1) === 1 ? 'day' : 'days'}</span><button type="submit" className="btn-primary" disabled={Boolean(validation)}>{submitLabel}</button></div>
+      <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-end gap-4 rounded-xl border border-line bg-white p-3 shadow-lg">{validation && <p role="alert" className="mr-auto text-sm font-semibold text-red-700">{validation}</p>}<span className="text-[12px] text-ink-500"><span className="font-medium text-ink-900">{steps.length}</span> {steps.length === 1 ? 'touchpoint' : 'touchpoints'} over <span className="font-medium text-ink-900">{(steps.at(-1)?.day ?? 1)}</span> business {(steps.at(-1)?.day ?? 1) === 1 ? 'day' : 'days'}</span><button type="submit" className="btn-primary" disabled={Boolean(validation)}>{submitLabel}</button></div>
       <div aria-hidden className="h-24" /></>}
   </ActionForm>;
 }

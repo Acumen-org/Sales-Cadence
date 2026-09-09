@@ -51,7 +51,7 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
   return (
     <div className="space-y-4 px-6 pb-8 pt-2">
       <Surface flush>
-        <ViewHeader title="Workspace timeline" meta={<><strong>{page.items.length}{page.hasMore ? '+' : ''}</strong> <span className="font-normal text-ink-500">events</span></>} />
+        <ViewHeader title="Workspace timeline" meta={<><span className="font-medium text-ink-900">{page.items.length}{page.hasMore ? '+' : ''}</span> <span className="text-ink-500">events</span></>} />
         <Toolbar><ActivityToolbar key={`${podId}:${actorId}:${range.from}:${range.to}:${channel}:${kinds.join(',')}:${q}`} users={users.map((item) => ({ id: item.id, name: item.name, podIds: item.pods.map((pod) => pod.podId) }))} pods={pods} actorId={actorId} podId={podId} channel={channel} kinds={kinds} q={q} from={range.from} to={range.to} /></Toolbar>
         {range.error ? <div className="px-4 pb-4"><Notice tone="error">{range.error}</Notice></div> : null}
         {page.items.length === 0 ? <EmptyState title="No activity in this view" action={<Link href="/activity" className="btn-secondary">Reset filters</Link>} /> : (
@@ -69,7 +69,7 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
                   </span>
                   <div className="min-w-0 space-y-2">
                     <p className="break-words text-[14px] font-semibold text-ink-900">{item.title}</p>
-                    {item.subjectName ? <div className="flex flex-wrap items-center gap-x-3 gap-y-1">{item.subjectHref ? <Link href={item.subjectHref} className="text-[14px] font-bold text-brand-700 hover:underline">{item.subjectName}</Link> : <DataValue>{item.subjectName}</DataValue>}{item.companyName ? <DataValue>{item.companyName}</DataValue> : null}</div> : null}
+                    {item.subjectName ? <div className="flex flex-wrap items-center gap-x-3 gap-y-1">{item.subjectHref ? <Link href={item.subjectHref} className="text-[14px] font-medium text-brand-700 hover:underline">{item.subjectName}</Link> : <DataValue>{item.subjectName}</DataValue>}{item.companyName ? <DataValue>{item.companyName}</DataValue> : null}</div> : null}
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px]"><span className="inline-flex items-center gap-2 text-ink-500">By <DataValue>{item.actorName ?? 'System'}</DataValue></span><EventDetail fields={item.fields} /></div>
                   </div>
                   <div className="col-start-2 sm:col-start-auto"><Badge tone={item.tone === 'in' ? 'green' : 'gray'}>{item.kind === 'touch' ? item.icon === 'EMAIL' ? 'Email' : item.icon === 'CALL' ? 'Call' : item.icon === 'LINKEDIN' ? 'LinkedIn' : item.icon === 'MEETING' ? 'Meeting' : KIND_LABELS[item.kind] : KIND_LABELS[item.kind]}</Badge></div>
