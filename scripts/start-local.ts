@@ -2,6 +2,8 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import { parse } from 'dotenv';
+import { prepareDatabaseDirectory } from './local-runtime';
 
 /**
  * One-click local run, no Docker:
@@ -34,12 +36,7 @@ function ensureEnv() {
 }
 
 function readEnvFile(): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const line of fs.readFileSync(path.join(root, '.env'), 'utf8').split(/\r?\n/)) {
-    const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*(#.*)?$/.exec(line);
-    if (m && !line.trim().startsWith('#')) out[m[1]] = m[2].replace(/^"|"$/g, '');
-  }
-  return out;
+  return parse(fs.readFileSync(path.join(root, '.env'), 'utf8'));
 }
 
 function run(cmd: string, args: string[], env: NodeJS.ProcessEnv, label: string) {
@@ -117,15 +114,12 @@ async function main() {
   if (!env.TWENTY_MODE) env.TWENTY_MODE = 'mock';
 
   // 1. database
-  const databaseDir = path.resolve(root, process.env.DEV_DB_DIR ?? '.pgdata-dev');
-  const fresh = !fs.existsSync(path.join(databaseDir, 'PG_VERSION'));
-  if (!fresh) fs.rmSync(path.join(databaseDir, 'postmaster.pid'), { force: true }); // stale lock from a hard exit
+  const { databaseDir, fresh } = prepareDatabaseDirectory(root, process.env.DEV_DB_DIR ?? '.pgdata-dev');
   const mod = await import('embedded-postgres');
   const EmbeddedPostgres = (mod.default ?? mod) as unknown as new (opts: Record<string, unknown>) => { initialise(): Promise<void>; start(): Promise<void>; stop(): Promise<void>; createDatabase(n: string): Promise<void> };
   const instance = new EmbeddedPostgres({ databaseDir, user: 'postgres', password: 'postgres', port: dbPort, persistent: true, onLog: () => {} });
   log(fresh ? 'creating the local database...' : 'starting the local database...');
   if (fresh) {
-    fs.rmSync(databaseDir, { recursive: true, force: true });
     await instance.initialise();
   }
   await instance.start();
@@ -136,8 +130,8 @@ async function main() {
   run(bin('prisma'), ['migrate', 'deploy'], env, 'applying migrations');
   run(bin('tsx'), ['prisma/seed.ts'], env, 'seeding (default sequence, admin, demo pods, users, people)');
 
-  // 3. build if needed
-  if (!fs.existsSync(path.join(root, '.next', 'BUILD_ID'))) run(bin('next'), ['build'], env, 'building the app (first run only, a minute or two)');
+  // Local launches pick up source changes. Test runs can explicitly reuse a build they just made.
+  if (env.CADENCE_SKIP_BUILD !== '1' || !fs.existsSync(path.join(root, env.NEXT_DIST_DIR || '.next', 'BUILD_ID'))) run(bin('next'), ['build'], env, 'building the current app');
 
   // 4. web + worker
   // Spawn node directly (no shell wrapper) so the pids we track are the real processes and
@@ -161,8 +155,7 @@ async function main() {
   console.log('');
   log('====================================================');
   log(`Cadence is running: ${url}`);
-  log('Mock Twenty workspace: 3 pods, 6 FOs, 40 people.');
-  log('Use the one-click buttons on the login page, or admin@cadence.local / admin12345.');
+  log(env.TWENTY_MODE === 'mock' ? 'Demo workspace: use the sign-in buttons on the login page.' : 'Connected to Twenty: sign in with your Cadence account.');
   log('Close this window or press Ctrl+C to stop.');
   log('====================================================');
   if (!process.env.CADENCE_NO_BROWSER) openBrowser(url);

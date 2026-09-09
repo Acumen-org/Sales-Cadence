@@ -4,21 +4,17 @@ import { isAdmin } from '@/lib/auth/rbac';
 import { formatLocalDate } from '@/lib/dates';
 import { buildHome } from '@/lib/home-query';
 import { TASK_CHANNELS, type TaskChannel } from '@/lib/tasks-query';
-import { ActionIcon, IconCampaigns, IconChevronRight, IconPeople } from '@/components/icons';
+import { ActionIcon, IconBolt, IconCalendar, IconCheck, IconChevronRight, IconCompany, IconPeople } from '@/components/icons';
 import { Avatar, EmptyState, Notice, Surface } from '@/components/ui';
 
 const CHANNEL_LABELS: Record<TaskChannel, string> = { CALL: 'Calls', EMAIL: 'Emails', LINKEDIN: 'LinkedIn' };
 
-/** One bordered tile. The whole row is a single line of tiles by design. */
 function Tile({ label, value, hint, href, icon, tone }: { label: string; value: number | string; hint?: string; href: string; icon: React.ReactNode; tone?: 'warn' }) {
   return (
-    <Link href={href} className="surface flex items-center gap-3 px-3.5 py-3 transition hover:border-brand-300">
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-brand-50 text-brand-600">{icon}</span>
-      <span className="min-w-0">
-        <span className="block text-[11px] font-medium uppercase tracking-wide text-ink-400">{label}</span>
-        <span className={`block text-[22px] font-semibold leading-tight ${tone === 'warn' ? 'text-amber-600' : 'text-ink-900'}`}>{value}</span>
-        {hint ? <span className="block truncate text-[11px] text-ink-400">{hint}</span> : null}
-      </span>
+    <Link href={href} className="surface group relative block px-5 py-5 transition hover:border-brand-300 hover:shadow-md">
+      <span className="flex items-center justify-between gap-2 text-[12px] font-medium text-ink-500">{label}<span className="text-ink-400 group-hover:text-brand-600">{icon}</span></span>
+      <span className="metric-value mt-4 block">{value}</span>
+      {hint ? <span className={`mt-3 block text-[10px] ${tone === 'warn' ? 'text-amber-700' : 'text-ink-500'}`}>{hint}</span> : null}
     </Link>
   );
 }
@@ -27,10 +23,18 @@ export default async function HomePage() {
   const user = await requireUser();
   const h = await buildHome(user);
   const first = user.name.split(/\s+/)[0];
+  const mine = `fo=${encodeURIComponent(user.id)}`;
+  const focusTab = h.my.overdueTotal ? 'overdue' : h.my.todayTotal ? 'today' : 'upcoming';
+  const completed = h.my.completedToday;
+  const allToday = completed + h.my.todayTotal;
+  const progress = allToday ? Math.round(completed / allToday * 100) : 0;
 
   return (
-    <div className="space-y-4 px-6 pb-8 pt-2">
-      <h2 className="text-[17px] font-semibold text-ink-900">Good day, {first}</h2>
+    <div className="space-y-5 px-6 pb-8 pt-7">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div><p className="eyebrow mb-2">Your workspace, in focus</p><h1 className="text-[30px] font-semibold tracking-[-0.045em] text-ink-900">Good day, {first}<span className="text-brand-500">.</span></h1><p className="mt-1 text-[12.5px] text-ink-500">A clear view of your day. A little more momentum.</p></div>
+        <span className="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-[11px] text-ink-600"><IconCalendar size={14} />{formatLocalDate(h.today, 'long')}</span>
+      </div>
 
       {h.needsReview ? (
         <Notice tone="warn">
@@ -42,29 +46,41 @@ export default async function HomePage() {
         </Notice>
       ) : null}
 
-      {/* One row: today's work by channel, then what this user owns. */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <Tile
           label="To reach today"
           value={h.my.peopleToReachToday}
-          hint={h.my.overdueTotal ? `${h.my.overdueTotal} overdue` : 'people, not tasks'}
-          href="/tasks?tab=today&mode=flow"
+          hint={h.my.overdueTotal ? `${h.my.overdueTotal} overdue tasks need attention` : `${h.my.todayTotal} scheduled touches today`}
+          href={`/tasks?tab=today&mode=flow&${mine}`}
           icon={<IconPeople size={17} />}
           tone={h.my.overdueTotal ? 'warn' : undefined}
         />
-        {TASK_CHANNELS.map((c) => (
-          <Tile
-            key={c}
-            label={`${CHANNEL_LABELS[c]} today`}
-            value={h.my.today[c]}
-            hint={h.my.overdue[c] ? `${h.my.overdue[c]} overdue` : `${h.my.upcoming[c]} upcoming`}
-            href={`/tasks?tab=${h.my.today[c] ? 'today' : h.my.overdue[c] ? 'overdue' : 'upcoming'}&type=${c}&mode=flow`}
-            icon={<ActionIcon action={c} size={17} />}
-            tone={h.my.overdue[c] ? 'warn' : undefined}
-          />
-        ))}
-        <Tile label="My accounts" value={h.my.accounts} hint="firms I own or work" href="/accounts?scope=mine" icon={<IconCampaigns size={17} />} />
-        <Tile label="My relationships" value={h.my.relationships} hint="people assigned to me" href="/people?owner=mine" icon={<IconPeople size={17} />} />
+        <Tile label="Completed today" value={completed} hint={allToday ? `${progress}% of today's work complete` : 'A fresh start for your next conversation'} href={`/tasks?tab=done&${mine}`} icon={<IconCheck size={17} />} />
+        <Tile label="My accounts" value={h.my.accounts} hint="Companies you own or work with" href="/accounts?scope=mine" icon={<IconCompany size={17} />} />
+        <Tile label="My relationships" value={h.my.relationships} hint="People assigned to you" href="/people?owner=mine" icon={<IconPeople size={17} />} />
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(300px,1fr)]">
+        <Surface flush>
+          <div className="relative overflow-hidden bg-[#203e35] px-6 py-6 text-white">
+            <div className="focus-art" aria-hidden />
+            <div className="relative"><p className="mb-3 flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-[#d5e9ad]"><IconBolt size={12} /> Today's focus</p>
+              <h2 className="max-w-sm text-[25px] font-medium leading-[1.25] tracking-[-0.035em]">Your next conversation<br />starts here.</h2>
+              <p className="mb-5 mt-3 text-[12px] text-[#c1d4ca]">{h.my.overdueTotal ? `${h.my.overdueTotal} overdue touches. Pick up where you left off.` : h.my.todayTotal ? `${h.my.todayTotal} touches ready. Give each one your full attention.` : 'You’re all caught up. Get a head start on what’s next.'}</p>
+              <Link href={`/tasks?tab=${focusTab}&mode=flow&${mine}`} className="inline-flex items-center gap-3 rounded-lg bg-[#d5e9ad] px-4 py-2.5 text-[12px] font-semibold text-[#203e35] transition hover:bg-[#e2f0c6]">{h.my.todayTotal || h.my.overdueTotal ? 'Start task flow' : 'View upcoming tasks'}<IconChevronRight size={15} /></Link>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 divide-x divide-line">{TASK_CHANNELS.map((c) => <Link key={c} href={`/tasks?tab=${h.my.today[c] ? 'today' : h.my.overdue[c] ? 'overdue' : 'upcoming'}&type=${c}&mode=flow&${mine}`} className="group px-3 py-4 transition hover:bg-brand-50/50 sm:px-5">
+            <span className="flex items-center gap-2 text-[11px] font-medium text-ink-500"><ActionIcon action={c} size={14} />{CHANNEL_LABELS[c]} today</span><span className="mt-2 flex items-baseline gap-2"><span className="text-[25px] font-semibold tracking-tight text-ink-900">{h.my.today[c]}</span><span className="text-[10px] text-ink-500">{h.my.overdue[c] ? `${h.my.overdue[c]} overdue` : `${h.my.upcoming[c]} upcoming`}</span></span>
+          </Link>)}</div>
+        </Surface>
+        <Surface flush>
+          <div className="flex items-center justify-between border-b border-line px-5 py-4"><div><h2 className="text-[14px] font-semibold">Up next</h2><p className="mt-1 text-[11px] text-ink-500">Your next three touches, in order</p></div><Link href={`/tasks?tab=${focusTab}&${mine}`} className="text-[11px] font-medium text-brand-700">View tasks <span aria-hidden>↗</span></Link></div>
+          {h.my.nextTasks.length ? <div className="divide-y divide-line/70">{h.my.nextTasks.map((task) => <Link key={task.id} href={`/tasks?task=${task.id}&mode=flow&tab=${task.due < h.today ? 'overdue' : task.due === h.today ? 'today' : 'upcoming'}&${mine}`} className="flex items-center gap-3 px-5 py-4 transition hover:bg-brand-50/50">
+            <Avatar name={task.name} shape="circle" size={34} /><span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold">{task.name}</span><span className="mt-0.5 block truncate text-[10px] text-ink-500">{task.company ?? task.label}</span></span><span className="text-right"><span className={`block text-[9px] font-medium ${task.due < h.today ? 'text-amber-700' : 'text-ink-500'}`}>{task.due < h.today ? 'Overdue' : task.due === h.today ? 'Today' : formatLocalDate(task.due)}</span><span className="mt-1.5 flex justify-end text-ink-400"><ActionIcon action={task.action} size={13} /></span></span>
+          </Link>)}</div> : <EmptyState icon={<IconCheck size={20} />} title="A clear desk" hint="Your next scheduled touches will appear here." />}
+          <div className="border-t border-line bg-canvas/40 px-5 py-3"><div className="mb-2 flex justify-between text-[10px] text-ink-500"><span>Today's progress</span><span className="font-medium text-brand-700">{completed} / {allToday} completed</span></div><div role="progressbar" aria-label="Today's progress" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} className="h-1 overflow-hidden rounded-full bg-line"><div className="h-full rounded-full bg-brand-500" style={{ width: `${progress}%` }} /></div></div>
+        </Surface>
       </div>
 
       {h.team.length ? <TeamBoard rows={h.team} week={{ from: h.week.from, to: h.week.to }} isAdmin={isAdmin(user)} /> : null}
@@ -95,7 +111,7 @@ function TeamBoard({ rows, week, isAdmin: admin }: { rows: TeamRow[]; week: { fr
 
   return (
     <Surface flush>
-      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line px-4 py-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line px-5 py-5">
         <h2 className="text-[14px] font-semibold text-ink-900">{admin ? 'The team this week' : 'Your pods this week'}</h2>
         <p className="text-[11.5px] text-ink-400">
           {formatLocalDate(week.from)} - {formatLocalDate(week.to)} · {rows.length} {rows.length === 1 ? 'person' : 'people'}
@@ -108,7 +124,7 @@ function TeamBoard({ rows, week, isAdmin: admin }: { rows: TeamRow[]; week: { fr
         <div className="overflow-x-auto scroll-thin">
           <table className="w-full border-collapse text-[13px]">
             <thead>
-              <tr className="border-b border-line text-[11px] font-medium uppercase tracking-wide text-ink-400">
+              <tr className="border-b border-line bg-[#fafbf9] text-[10px] font-medium uppercase tracking-[0.07em] text-ink-500">
                 {/* Explicit widths: the name column absorbs the slack so the figures stay together. */}
                 <th className="px-4 py-2 text-left font-medium">Person</th>
                 <th className="w-[92px] px-3 py-2 text-right font-medium">Due today</th>
@@ -134,7 +150,7 @@ function TeamBoard({ rows, week, isAdmin: admin }: { rows: TeamRow[]; week: { fr
                   </td>
                   <td className="px-3 py-2.5">
                     <div className="flex items-center gap-2.5">
-                      <span className="h-1.5 w-full max-w-[104px] overflow-hidden rounded-full bg-canvas">
+                      <span className="h-1.5 w-full max-w-[104px] overflow-hidden rounded-full bg-line">
                         <span className="block h-full rounded-full bg-brand-500 transition-[width]" style={{ width: `${Math.round((t.doneWeek / peak) * 100)}%` }} />
                       </span>
                       <span className="w-6 shrink-0 text-right tabular-nums text-ink-700">{t.doneWeek}</span>

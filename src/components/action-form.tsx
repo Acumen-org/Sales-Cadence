@@ -51,7 +51,7 @@ export function ActionForm({ action, children, className, resetOnSuccess, confir
       <fieldset disabled={pending} className="contents">
         <div className={className}>
           {children}
-          {result ? (
+          {result && (!result.ok || result.message) ? (
             <p className={clsx('text-xs', result.ok ? 'text-emerald-700' : 'text-red-700')} role="status">
               {result.ok ? result.message ?? 'Done.' : result.error}
             </p>
@@ -79,7 +79,7 @@ export function ActionButton({
   title?: string;
 }) {
   const [pending, start] = useTransition();
-  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<ActionResult | null>(null);
   return (
     <span className="inline-flex flex-col items-start">
       <button
@@ -94,16 +94,16 @@ export function ActionButton({
           start(async () => {
             try {
               const r = await action(fd);
-              setError(r.ok ? null : r.error);
+              setResult(r);
             } catch (err) {
-              setError(err instanceof Error ? err.message : String(err));
+              setResult({ ok: false, error: err instanceof Error ? err.message : String(err) });
             }
           });
         }}
       >
         {children}
       </button>
-      {error ? <span className="mt-1 text-xs text-red-700">{error}</span> : null}
+      {result ? <span role="status" className={clsx('mt-1 text-xs', result.ok ? 'text-brand-700' : 'text-red-700')}>{result.ok ? result.message ?? 'Done.' : result.error}</span> : null}
     </span>
   );
 }

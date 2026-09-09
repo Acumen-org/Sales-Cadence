@@ -3,15 +3,14 @@ import type { SessionUser } from './auth/current-user';
 import { canActOnTask, toActor } from './auth/rbac';
 import { formatLocalDate, todayIn, type LocalDate } from './dates';
 import { plannedDateForStep } from './engine/clock';
-import { previewNextStep } from './engine/versioning';
+import { previewNextStep } from './engine/sequence-plan';
 import { colleagueEnrollments } from './engine/enrollment';
 import { cachedPersonName } from './person-cache';
 import { describeAudit } from './audit-format';
-import { describeStep, parseSteps, resolveCopy, type SequenceStep, type StepAction } from './sequences/steps';
+import { describeStep, parseSteps, StepActionSchema, type SequenceStep, type StepAction } from './sequences/steps';
+import { cleanRichText, plainToHtml } from './rich-text';
 import { getSettings, getTwentyConnection } from './settings';
-import { renderTemplate, type TemplateVars } from './templates';
 import { getTwentyClient } from './twenty';
-import { optionLabel, optionLabels } from './twenty/labels';
 import type { TwentyMessage, TwentyNote, TwentyOpportunity } from './twenty/types';
 import { twentyPersonUrl } from './twenty/urls';
 import { taskRowInclude, type TaskRow } from './tasks-query';
@@ -21,6 +20,7 @@ export type RenderedAction = {
   label: string;
   subject: string | null;
   body: string;
+  html?: string;
   rawTemplate: string | null;
 };
 
@@ -46,6 +46,7 @@ export type ColleagueRow = {
 
 export type TaskBrief = {
   task: TaskRow;
+  modules: Array<{ task: TaskRow; action: RenderedAction }>;
   person: TaskRow['enrollment']['person'];
   personName: string;
   /** Today in the reader's timezone, so "due" dates from Twenty can be coloured. */
@@ -59,11 +60,6 @@ export type TaskBrief = {
   stepCount: number;
   step: SequenceStep | null;
   action: RenderedAction;
-  alternative: RenderedAction | null;
-  /** A/B variant label assigned to this task, if the action has variants. */
-  variantLabel: string | null;
-  /** Hint: send as a reply in the existing thread. */
-  replyInThread: boolean;
   touches: Array<{ id: string; channel: string; direction: string; occurredAt: Date; summary: string; actorLabel: string | null }>;
   notes: TwentyNote[];
   /** Emails Twenty has synced for this person, newest first. */
@@ -76,16 +72,23 @@ export type TaskBrief = {
   /** Steps of the active version (for "move to step") and where the enrollment is. */
   steps: { index: number; day: number; label: string }[];
   currentStep: number;
-  enrollment: { id: string; status: string; startDate: string; version: number; campaignName: string | null; sequenceName: string; foName: string; shiftDays: number };
+  enrollment: { id: string; status: string; startDate: string; campaignName: string | null; sequenceName: string; foName: string; shiftDays: number };
   warnings: string[];
 };
 
-function render(a: { type: StepAction['type']; label: string; subject?: string; template?: string }, vars: TemplateVars): RenderedAction {
+/**
+ * The copy an FO starts from. It is the module's own text, verbatim: there is no substitution,
+ * so nothing can arrive half-filled. The FO edits it in the composer with the person's record
+ * open beside it, and the edit is saved against the task.
+ */
+function render(a: { type: StepAction['type']; label: string; subject?: string; template?: string; bodyHtml?: string }): RenderedAction {
+  const text = a.template ?? '';
   return {
     type: a.type,
     label: a.label,
-    subject: a.subject ? renderTemplate(a.subject, vars) : null,
-    body: renderTemplate(a.template, vars),
+    subject: a.subject ?? null,
+    body: text,
+    html: a.bodyHtml ? cleanRichText(a.bodyHtml) : plainToHtml(text),
     rawTemplate: a.template ?? null,
   };
 }
@@ -105,41 +108,29 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
     getTwentyConnection(),
     prisma.enrollment.findUniqueOrThrow({
       where: { id: task.enrollmentId },
-      include: { sequenceVersion: true, sequence: { include: { activeVersion: true } }, fo: { select: { name: true } } },
+      include: { sequence: true, fo: { select: { name: true } } },
     }),
   ]);
   const person = task.enrollment.person;
   const warnings: string[] = [];
 
-  const currentSteps = parseSteps(enrollmentFull.sequenceVersion.steps);
-  const activeSteps = enrollmentFull.sequence.activeVersion ? parseSteps(enrollmentFull.sequence.activeVersion.steps) : currentSteps;
-  // Usually the task was generated from the version the enrollment is on, and it is already
-  // loaded. Only fetch when they differ, which happens after the sequence is edited mid-run.
-  const taskSteps =
-    task.sequenceVersionId === enrollmentFull.sequenceVersionId
-      ? currentSteps
-      : parseSteps((await prisma.sequenceVersion.findUnique({ where: { id: task.sequenceVersionId } }))?.steps ?? enrollmentFull.sequenceVersion.steps);
-  const step = taskSteps.find((s) => s.id === task.stepId) ?? taskSteps[task.stepIndex] ?? null;
-  const actionDef = step?.actions.find((a) => a.id === task.actionId) ?? step?.actions[task.actionIndex];
+  // One plan per sequence. What this task says is frozen on the task itself, so an edit to the
+  // plan since it was generated cannot rewrite the message an FO is looking at.
+  const steps = parseSteps(enrollmentFull.sequence.steps);
+  const step = steps.find((s) => s.id === task.stepId) ?? steps[task.stepIndex] ?? null;
+  const snapshot = StepActionSchema.safeParse(task.actionSnapshot);
+  const actionDef = snapshot.success ? snapshot.data : step?.actions.find((a) => a.id === task.actionId) ?? step?.actions[task.actionIndex];
 
-  const vars: TemplateVars = {
-    firstName: person.firstName,
-    lastName: person.lastName,
-    company: person.companyName,
-    jobTitle: person.jobTitle,
-    city: person.city,
-    // Humanised here, not in the template: a prospect must never read FPA_WISCONSIN_JULY_2026.
-    leadSource: optionLabels(person.leadSource, ' and '),
-    product: optionLabel(person.primaryProduct ?? person.productInterest[0] ?? null),
-    foName: task.fo.name,
-  };
-  const copy = actionDef ? resolveCopy(actionDef, task.variantId) : null;
   const action: RenderedAction = actionDef
-    ? render({ type: actionDef.type, label: actionDef.label, subject: copy?.subject, template: copy?.template }, vars)
-    : { type: task.action, label: task.label, subject: null, body: '', rawTemplate: null };
-  const alternative = actionDef?.alternative ? render(actionDef.alternative, vars) : null;
-  const variantLabel = copy?.variantLabel ?? null;
-  const replyInThread = Boolean(actionDef?.replyInThread);
+    ? render(actionDef)
+    : { type: task.action, label: task.label, subject: null, body: '', html: '<p></p>', rawTemplate: null };
+  const siblings = await prisma.task.findMany({ where: { enrollmentId: task.enrollmentId, stepId: task.stepId }, include: taskRowInclude, orderBy: { actionIndex: 'asc' } });
+  const modules = siblings.filter(t => canActOnTask(user, { foUserId: t.foUserId, podId: t.enrollment.podId })).map(t => {
+    const snapshot = StepActionSchema.safeParse(t.actionSnapshot);
+    const def = snapshot.success ? snapshot.data : step?.actions.find(a => a.id === t.actionId);
+    const rendered = def ? render(def) : { type: t.action, label: t.label, subject: null, body: '', html: '<p></p>', rawTemplate: null };
+    return { task: t, action: { ...rendered, subject: t.draftSubject ?? rendered.subject, html: t.draftHtml ?? rendered.html } };
+  });
 
   const [touches, colleagues, notesResult, oppsResult, emailsResult, stateEvents, pod, owner] = await Promise.all([
     // 20 feeds both the dot timeline and the merged timeline below it.
@@ -160,7 +151,7 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
   if (oppsResult.error && oppsResult.error !== notesResult.error) warnings.push(oppsResult.error);
   if (emailsResult.error && emailsResult.error !== notesResult.error) warnings.push(emailsResult.error);
 
-  const next = previewNextStep({ currentStep: enrollmentFull.currentStep, currentSteps, activeSteps });
+  const next = previewNextStep({ currentStep: enrollmentFull.currentStep, currentStepId: enrollmentFull.currentStepId, steps });
   const nextStep = next
     ? {
         step: next,
@@ -171,6 +162,7 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
 
   return {
     task,
+    modules,
     person,
     personName: cachedPersonName(person),
     today: todayIn(user.timezone),
@@ -178,12 +170,9 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
     ownerName: owner?.name ?? null,
     twentyUrl: twentyPersonUrl(conn.baseUrl, person.id),
     stepIndex: task.stepIndex,
-    stepCount: taskSteps.length,
+    stepCount: steps.length,
     step,
     action,
-    alternative,
-    variantLabel,
-    replyInThread,
     touches: touches.map((t) => ({ id: t.id, channel: t.channel, direction: t.direction, occurredAt: t.occurredAt, summary: t.summary, actorLabel: t.actorLabel })),
     notes: notesResult.notes,
     emails: emailsResult.emails,
@@ -197,13 +186,12 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
     colleagues,
     opportunities: oppsResult.opportunities,
     nextStep,
-    steps: activeSteps.map((s, index) => ({ index, day: s.day, label: describeStep(s) })),
+    steps: steps.map((s, index) => ({ index, day: s.day, label: describeStep(s) })),
     currentStep: enrollmentFull.currentStep,
     enrollment: {
       id: enrollmentFull.id,
       status: enrollmentFull.status,
       startDate: enrollmentFull.startDate,
-      version: enrollmentFull.sequenceVersion.version,
       campaignName: task.enrollment.campaign?.name ?? null,
       sequenceName: task.enrollment.sequence.name,
       foName: enrollmentFull.fo.name,

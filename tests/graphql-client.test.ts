@@ -56,6 +56,11 @@ const rawPerson = {
 };
 
 describe('TwentyGraphqlClient', () => {
+  it('filters account sync in Twenty using the mapped company relation', async () => {
+    const { client, calls } = fakeClient(() => ({ data: { people: { edges: [], pageInfo: { hasNextPage: false, endCursor: null } } } }), { schema: mergeTwentySchema({ person: { companyId: 'accountId' } }) });
+    await client.listPeople({ companyId: 'account-7' });
+    expect(calls.find((c) => c.query.includes('people('))?.variables.filter).toEqual({ accountId: { eq: 'account-7' } });
+  });
   it('lists people with a since filter, paginates, and normalises records', async () => {
     const { client, calls } = fakeClient((call) => {
       if (call.query.includes('people(')) {

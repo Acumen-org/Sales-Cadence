@@ -13,7 +13,7 @@ import { resetDb, seedBasics, type Basics } from './helpers/db';
 const TUESDAY = new Date('2026-09-08T10:00:00Z');
 
 function sessionUser(
-  u: { id: string; email: string; name: string; role: 'ADMIN' | 'SENIOR_FO' | 'JUNIOR_FO'; timezone: string; twentyMemberId: string | null; dailyCap: number | null },
+  u: { id: string; email: string; name: string; role: 'ADMIN' | 'SALES_LEADER' | 'SENIOR_FO' | 'JUNIOR_FO'; timezone: string; twentyMemberId: string | null; dailyCap: number | null },
   podIds: string[],
 ): SessionUser {
   return { id: u.id, email: u.email, name: u.name, role: u.role, timezone: u.timezone, twentyMemberId: u.twentyMemberId, dailyCap: u.dailyCap, podIds, pods: podIds.map((id) => ({ id, name: id })) };

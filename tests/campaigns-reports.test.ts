@@ -12,7 +12,7 @@ import { resetDb, seedBasics, type Basics } from './helpers/db';
 
 const at = (date: string) => new Date(`${date}T10:00:00Z`);
 
-function sessionUser(u: { id: string; email: string; name: string; role: 'ADMIN' | 'SENIOR_FO' | 'JUNIOR_FO'; timezone: string; twentyMemberId: string | null; dailyCap: number | null }, podIds: string[]): SessionUser {
+function sessionUser(u: { id: string; email: string; name: string; role: 'ADMIN' | 'SALES_LEADER' | 'SENIOR_FO' | 'JUNIOR_FO'; timezone: string; twentyMemberId: string | null; dailyCap: number | null }, podIds: string[]): SessionUser {
   return { id: u.id, email: u.email, name: u.name, role: u.role, timezone: u.timezone, twentyMemberId: u.twentyMemberId, dailyCap: u.dailyCap, podIds, pods: podIds.map((id) => ({ id, name: id })) };
 }
 
@@ -92,7 +92,7 @@ describe('campaigns and reports', () => {
     expect(s.stepCount).toBe(8);
     expect(s.lastDay).toBe(23);
     expect(s.enrollments.total).toBe(4);
-    const steps = parseSteps(b.version.steps as unknown);
+    const steps = parseSteps(b.sequence.steps as unknown);
     const funnel = await sequenceFunnel(b.sequence.id, steps, '2026-09-10');
     expect(funnel[0].done).toBe(2);
     expect(funnel[0].replied).toBe(1); // person-01 replied while on step 1

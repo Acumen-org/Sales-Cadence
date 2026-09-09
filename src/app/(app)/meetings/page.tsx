@@ -81,10 +81,10 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
             All
           </Link>
           <Link href={href('mine')} className={scope === 'mine' ? 'chip' : 'chip-muted'}>
-            Added by me <span className="ml-0.5 opacity-60">{mine}</span>
+            Added by me <span className="ml-0.5 font-bold text-ink-900">{mine}</span>
           </Link>
           <Link href={href('week')} className={scope === 'week' ? 'chip' : 'chip-muted'}>
-            This week <span className="ml-0.5 opacity-60">{thisWeek}</span>
+            This week <span className="ml-0.5 font-bold text-ink-900">{thisWeek}</span>
           </Link>
         </Toolbar>
 
@@ -92,7 +92,6 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
           <EmptyState
             icon={<IconCalendar size={20} />}
             title="No meetings yet"
-            hint="Paste a Teams, Zoom or Google Meet recording link and Cadence plays it here with the transcript underneath."
             action={
               <Link href="/meetings/new" className="btn-primary">
                 <IconPlus size={15} /> Add meeting
@@ -132,7 +131,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                       )}
                     </td>
                     <td className="text-[12.5px]">
-                      {m._count.attendees}
+                      <strong className="text-ink-900">{m._count.attendees}</strong>
                       {m.attendees.length ? <Badge tone="green" className="ml-1.5">external</Badge> : null}
                     </td>
                     <td>{m.transcript ? <Badge tone="blue">yes</Badge> : <span className="text-[12px] text-ink-300">-</span>}</td>
@@ -199,7 +198,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                       </td>
                       <td className="text-right">
                         {already ? (
-                          <span className="text-[12px] text-ink-400">Already added</span>
+                          <span className="text-[12px] font-semibold text-ink-700">Already added</span>
                         ) : (
                           <Link href={`/meetings/new?personId=${b.id}`} className="btn-secondary btn-sm">
                             <IconPlus size={12} /> Add with transcript
@@ -218,7 +217,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
       {pages > 1 ? (
         <div className="flex items-center justify-between text-[13px] text-ink-500">
           <span>
-            Page {page} of {pages}
+            Page <strong className="text-ink-900">{page}</strong> of <strong className="text-ink-900">{pages}</strong>
           </span>
           <div className="flex gap-2">
             {page > 1 ? (

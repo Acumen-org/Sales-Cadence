@@ -36,12 +36,12 @@ function tally(stats: ReconcileStats, r: IngestResult) {
  * Nightly and on-demand: re-scan Twenty activity for the last N days and run it through the
  * same ingestion pipeline as webhooks. Dedupe makes this safe to run any time.
  */
-export async function reconcile(opts: { days?: number; actor?: AuditActor; now?: Date; skipSync?: boolean } = {}, client?: TwentyClient): Promise<ReconcileStats> {
+export async function reconcile(opts: { days?: number; since?: string; actor?: AuditActor; now?: Date; skipSync?: boolean } = {}, client?: TwentyClient): Promise<ReconcileStats> {
   const settings = await getSettings();
   const c = client ?? (await getTwentyClient());
   const days = opts.days ?? settings.rules.reconcileLookbackDays;
   const now = opts.now ?? new Date();
-  const since = new Date(now.getTime() - days * 86_400_000).toISOString();
+  const since = opts.since ?? new Date(now.getTime() - days * 86_400_000).toISOString();
   const actor = opts.actor ?? RECONCILE_ACTOR;
   const stats: ReconcileStats = { since, people: 0, notes: 0, messages: 0, opportunities: 0, tasks: 0, processed: 0, duplicates: 0, completions: 0, replies: 0, meetings: 0, errors: 0, needsReview: 0 };
   const common = { source: 'RECONCILE' as const, now, skipSync: opts.skipSync };

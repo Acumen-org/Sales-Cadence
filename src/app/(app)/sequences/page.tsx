@@ -1,73 +1,20 @@
 import Link from 'next/link';
 import { requireUser } from '@/lib/auth/current-user';
-import { isAdmin } from '@/lib/auth/rbac';
+import { canEditSequences } from '@/lib/auth/rbac';
 import { listSequences } from '@/lib/sequences-query';
-import { IconPlus, IconSequences } from '@/components/icons';
-import { Badge, EmptyState, IdentityCell, StatusDot, Surface, ViewHeader } from '@/components/ui';
+import { ACTION_LABELS, type ActionType } from '@/lib/sequences/steps';
+import { ActionIcon, IconPlus, IconSequences } from '@/components/icons';
+import { Badge, EmptyState } from '@/components/ui';
 
-export default async function SequencesPage() {
-  const user = await requireUser();
-  const sequences = await listSequences();
-  const admin = isAdmin(user);
-  return (
-    <div className="px-6 pb-8 pt-2">
-      <Surface flush>
-        <ViewHeader
-          title="All sequences"
-          caret
-          meta={`${sequences.length} sequence${sequences.length === 1 ? '' : 's'}`}
-          actions={
-            admin ? (
-              <Link href="/sequences/new" className="btn-secondary btn-sm">
-                <IconPlus size={13} /> New sequence
-              </Link>
-            ) : null
-          }
-        />
-        {sequences.length === 0 ? (
-          <EmptyState icon={<IconSequences size={20} />} title="No sequences" hint="Run the seed to create the default sequence, or create one." />
-        ) : (
-          <div className="overflow-x-auto scroll-thin">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Sequence</th>
-                  <th>Version</th>
-                  <th>Steps</th>
-                  <th>Active</th>
-                  <th>Replied</th>
-                  <th>Meetings</th>
-                  <th>Finished</th>
-                  <th>Campaigns</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sequences.map((s) => (
-                  <tr key={s.id} className={s.archived ? 'opacity-60' : undefined}>
-                    <td>
-                      <div className="flex items-center gap-2">
-                        <IdentityCell name={s.name} href={`/sequences/${s.id}`} sub={s.description ?? `${s.stepCount} steps over ${s.lastDay} days`} />
-                        {s.archived ? <Badge tone="gray">archived</Badge> : null}
-                      </div>
-                    </td>
-                    <td className="whitespace-nowrap">v{s.version ?? '-'}</td>
-                    <td className="whitespace-nowrap text-[12.5px]">
-                      {s.stepCount} steps · {s.lastDay} days
-                    </td>
-                    <td>
-                      <StatusDot tone={s.enrollments.active + s.enrollments.paused ? 'green' : 'gray'}>{s.enrollments.active + s.enrollments.paused} Active</StatusDot>
-                    </td>
-                    <td>{s.enrollments.replied}</td>
-                    <td>{s.enrollments.meeting}</td>
-                    <td>{s.enrollments.completed}</td>
-                    <td>{s.campaigns}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Surface>
-    </div>
-  );
+export default async function SequencesPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string }> }) {
+  const user = await requireUser(); const all = await listSequences(); const { q = '', status = 'active' } = await searchParams;
+  const sequences = all.filter(s => s.name.toLowerCase().includes(q.toLowerCase()) && (status === 'archived' ? s.archived : !s.archived));
+  return <div className="space-y-5 px-6 pb-8 pt-2">
+    <div className="flex flex-wrap items-center gap-3"><div className="flex gap-1 rounded-lg border border-line bg-white p-1">{[['active', 'Available'], ['archived', 'Archived']].map(([key, label]) => <Link key={key} href={'/sequences?status=' + key + '&q=' + encodeURIComponent(q)} className={status === key ? 'chip' : 'chip-muted'}>{label}</Link>)}</div><form className="ml-auto" role="search"><input type="hidden" name="status" value={status} /><input name="q" defaultValue={q} aria-label="Search sequences" placeholder="Find a sequence" /></form>{canEditSequences(user) && <Link href="/sequences/new" className="btn-primary"><IconPlus size={15} />New sequence</Link>}</div>
+    {!sequences.length && <div className="surface"><EmptyState title="No sequences found" icon={<IconSequences size={22} />} /></div>}
+    {sequences.map(s => <Link key={s.id} href={'/sequences/' + s.id} className="surface group block overflow-hidden p-6 transition hover:border-brand-300 hover:shadow-md">
+      <div className="mb-6 flex flex-wrap items-center gap-3"><span className="rounded-xl bg-brand-50 p-3 text-brand-700"><IconSequences size={22} /></span><h2 className="text-xl font-semibold tracking-tight group-hover:text-brand-700">{s.name}</h2><Badge tone="green" className="ml-auto"><strong>{s.campaigns}</strong> {s.campaigns === 1 ? 'campaign' : 'campaigns'}</Badge></div>
+      <div className="flex flex-wrap items-center gap-y-4">{s.preview.map((step, i) => <div key={step.id} className="flex items-center">{i > 0 && <span className="mx-2 h-px w-5 bg-brand-200" />}<div className="min-w-32 rounded-xl border border-line bg-canvas/60 p-3"><div className="mb-2 text-xs text-ink-500">Business day <strong className="text-ink-900">{step.day}</strong></div><div className="space-y-2">{step.actions.map((a, j) => <span key={j} className="flex items-center gap-2 text-xs font-semibold text-ink-900"><ActionIcon action={a} size={14} />{ACTION_LABELS[a as ActionType]}</span>)}</div></div></div>)}</div>
+    </Link>)}
+  </div>;
 }

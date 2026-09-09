@@ -10,15 +10,16 @@ import { relativeDays, formatLocalDate, type LocalDate } from '@/lib/dates';
 import { ActionIcon } from '@/components/icons';
 import { Avatar, Badge } from '@/components/ui';
 import type { DispositionOption, SkipReasonOption } from './task-actions';
+import { flushTaskDrafts } from './draft-registry';
 
 /** Serialisable row for the client list. */
 export type TaskListRow = {
+  childActions?: Array<{ id: string; action: string; state: string }>;
   id: string;
   personName: string;
   companyName: string | null;
   label: string;
   action: string;
-  altAction: string | null;
   stepIndex: number;
   stepDay: number;
   due: LocalDate;
@@ -56,32 +57,32 @@ export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispos
   const [result, setResult] = useState<ActionResult | null>(null);
 
   const pendingRows = rows.filter((r) => r.state === 'PENDING');
-  const allSelected = pendingRows.length > 0 && pendingRows.every((r) => selected.has(r.id));
-  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(pendingRows.map((r) => r.id)));
+  const allSelected = pendingRows.length > 0 && pendingRows.slice(0, 200).every((r) => selected.has(r.id));
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(pendingRows.slice(0, 200).map((r) => r.id)));
   const toggleOne = (id: string) =>
     setSelected((s) => {
       const n = new Set(s);
       if (n.has(id)) n.delete(id);
-      else n.add(id);
+      else if (n.size < 200) n.add(id);
       return n;
     });
-  const selectedHasCalls = [...selected].some((id) => rows.find((r) => r.id === id)?.action === 'CALL');
+  const selectedHasCalls = rows.some(r => selected.has(r.id) && (r.childActions?.some(a => a.action === 'CALL' && a.state === 'PENDING') ?? r.action === 'CALL'));
 
   const runBulk = () =>
     start(async () => {
+      if (!(await flushTaskDrafts())) { setResult({ ok: false, error: 'Save or copy your draft before continuing.' }); return; }
       const fd = new FormData();
-      fd.set('taskIds', [...selected].join(','));
+      fd.set('taskIds', rows.filter(r => selected.has(r.id)).flatMap(r => r.childActions ? r.childActions.filter(a => a.state === 'PENDING').map(a => a.id) : [r.id]).join(','));
       fd.set('op', op);
       if (op === 'skip') fd.set('reasonKey', reasonKey);
       if (op === 'snooze') fd.set('toDate', canPickSnoozeDate ? toDate : 'next');
       if (op === 'reassign') fd.set('foUserId', foUserId);
       if (op === 'complete' && selectedHasCalls) fd.set('disposition', disposition);
-      const r = await bulkTasksAction(fd);
-      setResult(r);
-      if (r.ok) {
-        setSelected(new Set());
-        router.refresh();
-      }
+      try {
+        const r = await bulkTasksAction(fd);
+        setResult(r);
+        if (r.ok) { setSelected(new Set()); router.refresh(); }
+      } catch { setResult({ ok: false, error: 'Unable to update these tasks. Please try again.' }); }
     });
 
   return (
@@ -90,7 +91,7 @@ export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispos
         <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border-line bg-white/95 px-3 py-2 text-[12px] backdrop-blur">
           <label className="inline-flex items-center gap-2 font-normal text-ink-500">
             <input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={!pendingRows.length} />
-            {selected.size ? `${selected.size} selected` : 'Select all'}
+            {selected.size ? `${selected.size} selected` : pendingRows.length > 200 ? 'Select first 200' : 'Select all'}
           </label>
           {selected.size ? (
             <>
@@ -162,7 +163,6 @@ export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispos
                     <ActionIcon action={t.action} size={12} className="text-ink-400" />
                     <span className="truncate">
                       {t.label}
-                      {t.altAction ? ' (either/or)' : ''}
                     </span>
                   </span>
                   <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[11.5px] text-ink-400">

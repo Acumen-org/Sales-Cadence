@@ -24,45 +24,31 @@ export function isObservable(action: ActionType): boolean {
   return action === 'EMAIL' || action === 'CALL';
 }
 
-const AlternativeSchema = z.object({
-  type: ActionTypeSchema,
-  label: z.string().min(1),
-  subject: z.string().optional(),
-  template: z.string().optional(),
-});
-
-/** An A/B template variant. Balanced random assignment at task generation; disable to retire it. */
-export const VariantSchema = z.object({
-  id: z.string().min(1),
-  label: z.string().min(1),
-  subject: z.string().optional(),
-  template: z.string().optional(),
-  enabled: z.boolean().default(true),
-});
-export type TemplateVariant = z.infer<typeof VariantSchema>;
-
+/**
+ * One module of a step: an email, a call or a LinkedIn touch, with the copy the FO starts from.
+ *
+ * The copy is literal text. There is no variable syntax: the FO reads the person's record beside
+ * the message and writes what fits, so a half-substituted "Hi ," can never reach a prospect.
+ */
 export const StepActionSchema = z.object({
-  /** Stable id, preserved across versions so enrollments can be mapped between versions. */
+  /** Stable id, kept across edits so a live enrollment stays matched to its module. */
   id: z.string().min(1),
   type: ActionTypeSchema,
   label: z.string().min(1),
-  /** Email subject (email actions only). */
+  /** Email subject (email modules only). */
   subject: z.string().optional(),
-  /** Email body, call script or LinkedIn message with {{variables}}. */
+  /** Plain-text fallback of the body, kept in step with bodyHtml. */
   template: z.string().optional(),
-  /** Either/or: the FO may do this instead of `type`. */
-  alternative: AlternativeSchema.optional(),
-  /** A/B test: when present with at least one enabled variant, each task gets one variant. */
-  variants: z.array(VariantSchema).optional(),
-  /** Hint for the FO: send this as a reply in the existing email thread. */
-  replyInThread: z.boolean().optional(),
+  /** The body as rich text, which is what the editor and the task composer work with. */
+  bodyHtml: z.string().max(100000).optional(),
 });
 
 export const SequenceStepSchema = z.object({
   id: z.string().min(1),
-  /** Day offset from enrollment start. Day 1 = the start date. */
+  /** Working-day offset from the enrollment start. Day 1 = the start date. */
   day: z.number().int().min(1),
   title: z.string().optional(),
+  /** One or more modules. A call and its follow-up email belong to one step, not two. */
   actions: z.array(StepActionSchema).min(1),
 });
 
@@ -91,23 +77,6 @@ export const StepsSchema = z
           ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Duplicate action id ${a.id}`, path: [i, 'actions', j, 'id'] });
         }
         actionIds.add(a.id);
-        if (a.alternative && a.alternative.type === a.type) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: 'Either/or alternative must be a different action type',
-            path: [i, 'actions', j, 'alternative'],
-          });
-        }
-        if (a.variants) {
-          const vids = new Set<string>();
-          for (const v of a.variants) {
-            if (vids.has(v.id)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Duplicate variant id ${v.id}`, path: [i, 'actions', j, 'variants'] });
-            vids.add(v.id);
-          }
-          if (a.variants.length && !a.variants.some((v) => v.enabled !== false)) {
-            ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'At least one A/B variant must stay enabled (or remove the variants)', path: [i, 'actions', j, 'variants'] });
-          }
-        }
       }
     }
   });
@@ -131,8 +100,8 @@ export function newStepId(prefix: 'step' | 'act' = 'step'): string {
   return `${prefix}_${Date.now().toString(36)}${counter.toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
-export function describeAction(a: Pick<StepAction, 'label' | 'alternative'>): string {
-  return a.alternative ? `${a.label} or ${a.alternative.label}` : a.label;
+export function describeAction(a: Pick<StepAction, 'label'>): string {
+  return a.label;
 }
 
 export function describeStep(step: SequenceStep): string {
@@ -141,27 +110,4 @@ export function describeStep(step: SequenceStep): string {
 
 export function lastDay(steps: SequenceStep[]): number {
   return steps.length ? steps[steps.length - 1].day : 0;
-}
-
-export function enabledVariants(action: Pick<StepAction, 'variants'>): TemplateVariant[] {
-  return (action.variants ?? []).filter((v) => v.enabled !== false);
-}
-
-/**
- * Balanced random assignment (Outreach style): pick among the enabled variants with the fewest
- * assignments so far; ties broken at random.
- */
-export function pickVariant(action: Pick<StepAction, 'variants'>, counts: Map<string, number>, random: () => number = Math.random): TemplateVariant | null {
-  const enabled = enabledVariants(action);
-  if (!enabled.length) return null;
-  const min = Math.min(...enabled.map((v) => counts.get(v.id) ?? 0));
-  const pool = enabled.filter((v) => (counts.get(v.id) ?? 0) === min);
-  return pool[Math.floor(random() * pool.length)] ?? pool[0];
-}
-
-/** The subject/template the FO should use: the assigned variant if any, else the action's own copy. */
-export function resolveCopy(action: Pick<StepAction, 'subject' | 'template' | 'variants' | 'label'>, variantId: string | null | undefined): { subject?: string; template?: string; variantLabel: string | null } {
-  const v = variantId ? action.variants?.find((x) => x.id === variantId) : undefined;
-  if (v) return { subject: v.subject ?? action.subject, template: v.template ?? action.template, variantLabel: v.label };
-  return { subject: action.subject, template: action.template, variantLabel: null };
 }

@@ -224,12 +224,11 @@ async function completeFromEvidence(params: {
   const graceMs = params.matching.evidenceGraceDays * 86_400_000;
   if (occurredAt.getTime() < enrollment.createdAt.getTime() - graceMs) return { code: 'stale_evidence' };
   const task = await prisma.task.findFirst({
-    where: { enrollmentId: enrollment.id, state: 'PENDING', OR: [{ action: { in: types } }, { altAction: { in: types } }] },
+    where: { enrollmentId: enrollment.id, state: 'PENDING', action: { in: types } },
     orderBy: [{ stepIndex: 'asc' }, { actionIndex: 'asc' }],
   });
   if (!task) return { code: 'no_pending_task' };
-  const chosen = types.includes(task.action as 'EMAIL' | 'CALL') ? task.action : task.altAction!;
-  const r = await completeTask({ taskId: task.id, source, evidenceId, chosenAction: chosen, occurredAt }, ctx);
+  const r = await completeTask({ taskId: task.id, source, evidenceId, chosenAction: task.action, occurredAt }, ctx);
   if (!r.ok) return { code: r.reason, taskId: task.id };
   return { code: 'completed', taskId: task.id };
 }

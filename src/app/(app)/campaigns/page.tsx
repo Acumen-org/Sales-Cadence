@@ -1,94 +1,18 @@
 import Link from 'next/link';
 import { requireUser } from '@/lib/auth/current-user';
-import { canEnroll, toActor } from '@/lib/auth/rbac';
+import { canEnroll, canApproveCampaign } from '@/lib/auth/rbac';
 import { listCampaigns } from '@/lib/campaigns-query';
-import { formatLocalDate } from '@/lib/dates';
-import { IconCampaigns, IconPlus } from '@/components/icons';
-import { Badge, CAMPAIGN_TONE, EmptyState, IdentityCell, StatusDot, Surface, ViewHeader } from '@/components/ui';
-
-const pct = (n: number) => `${Math.round(n * 100)}%`;
-
+import { approveCampaignAction, rejectCampaignAction } from '@/lib/actions/campaigns';
+import { ActionButton } from '@/components/action-form';
+import { IconPlus } from '@/components/icons';
+import { Badge, EmptyState, RecordFields, Surface, ViewHeader } from '@/components/ui';
+const label = (status:string) => ({ACTIVE:'Running',PENDING_APPROVAL:'Needs approval',SCHEDULED:'Scheduled',PAUSED:'Paused',STOPPED:'Stopped',COMPLETED:'Completed',DRAFT:'Draft'}[status] ?? status);
 export default async function CampaignsPage() {
-  const user = await requireUser();
-  const campaigns = await listCampaigns(user);
-  const mayCreate = canEnroll(toActor(user));
-  return (
-    <div className="px-6 pb-8 pt-2">
-      <Surface flush>
-        <ViewHeader
-          title="All campaigns"
-          caret
-          meta={`${campaigns.length} campaign${campaigns.length === 1 ? '' : 's'}`}
-          actions={
-            mayCreate ? (
-              <Link href="/campaigns/new" className="btn-secondary btn-sm">
-                <IconPlus size={13} /> New campaign
-              </Link>
-            ) : null
-          }
-        />
-        {campaigns.length === 0 ? (
-          <EmptyState
-            icon={<IconCampaigns size={20} />}
-            title="No campaigns yet"
-            hint={mayCreate ? 'Create one from pasted person ids, a CSV export or a saved Twenty view.' : 'Your pod has no campaigns yet.'}
-            action={
-              mayCreate ? (
-                <Link href="/campaigns/new" className="btn-primary">
-                  <IconPlus size={15} /> New campaign
-                </Link>
-              ) : null
-            }
-          />
-        ) : (
-          <div className="overflow-x-auto scroll-thin">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Campaign</th>
-                  <th>Status</th>
-                  <th>Pod</th>
-                  <th>Sequence</th>
-                  <th>Start</th>
-                  <th>People</th>
-                  <th>Active</th>
-                  <th>Replied</th>
-                  <th>Meetings</th>
-                  <th>Reply rate</th>
-                </tr>
-              </thead>
-              <tbody>
-                {campaigns.map((c) => (
-                  <tr key={c.id}>
-                    <td>
-                      <IdentityCell
-                        name={c.name}
-                        href={`/campaigns/${c.id}`}
-                        sub={`${c.sourceType === 'TWENTY_VIEW' ? 'Twenty view' : c.sourceType === 'CSV' ? 'CSV' : 'ids'} · ${c.assignmentMode === 'OWNER' ? 'by owner' : 'round robin'}${c.dailyRampPerFo ? ` · ramp ${c.dailyRampPerFo}/day` : ''}`}
-                      />
-                    </td>
-                    <td>
-                      <Badge tone={CAMPAIGN_TONE[c.status] ?? 'gray'} dot>
-                        {c.status.toLowerCase()}
-                      </Badge>
-                    </td>
-                    <td className="whitespace-nowrap text-[12.5px]">{c.podName}</td>
-                    <td className="max-w-[12rem] truncate text-[12.5px]">{c.sequenceName}</td>
-                    <td className="whitespace-nowrap text-[12.5px]">{formatLocalDate(c.startDate)}</td>
-                    <td>{c.counts.total}</td>
-                    <td>
-                      <StatusDot tone={c.counts.active + c.counts.paused ? 'green' : 'gray'}>{c.counts.active + c.counts.paused} Active</StatusDot>
-                    </td>
-                    <td>{c.counts.replied}</td>
-                    <td>{c.counts.meeting}</td>
-                    <td className="font-medium text-ink-900">{pct(c.replyRate)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Surface>
-    </div>
-  );
+ const user=await requireUser(); const all=await listCampaigns(user); const requests=all.filter(c=>c.status==='PENDING_APPROVAL'); const campaigns=all.filter(c=>c.status!=='PENDING_APPROVAL');
+ return <div className="space-y-5 px-6 pb-8 pt-2">
+   {requests.length>0 && <Surface flush><ViewHeader title="Needs approval" meta={<strong>{requests.length}</strong>}/><div className="divide-y divide-line">{requests.map(c=><div key={c.id} className="space-y-4 p-5"><Link href={'/campaigns/'+c.id} className="text-lg font-semibold hover:text-brand-700">{c.name}</Link><RecordFields items={[{label:'Pod',value:c.podName},{label:'Sequence',value:c.sequenceName},{label:'Requested start',value:c.startDate}]}/><div className="flex gap-2">{canApproveCampaign(user,c.podId) && <><ActionButton action={approveCampaignAction} payload={{campaignId:c.id}} className="btn-primary btn-sm">Approve</ActionButton><ActionButton action={rejectCampaignAction} payload={{campaignId:c.id}}>Decline</ActionButton></>}<Link href={'/campaigns/'+c.id} className="btn-secondary btn-sm">Review audience</Link></div></div>)}</div></Surface>}
+   <Surface flush><ViewHeader title="Campaigns" meta={<strong>{campaigns.length}</strong>} actions={canEnroll(user) ? <Link href="/campaigns/new" className="btn-primary"><IconPlus size={14}/>New campaign</Link>:null}/>
+   {!campaigns.length ? <EmptyState title="No campaigns"/> : <div className="overflow-x-auto"><table className="table"><thead><tr><th>Campaign</th><th>Status</th><th>Pod</th><th>Sequence</th><th>Start</th><th>People</th><th>Replied</th><th>Meetings</th><th>Reply rate</th></tr></thead><tbody>{campaigns.map(c=><tr key={c.id}><td><Link href={'/campaigns/'+c.id} className="font-semibold hover:text-brand-700">{c.name}</Link></td><td><Badge tone={c.status==='ACTIVE'?'green':c.status==='PAUSED'?'amber':'gray'}>{label(c.status)}</Badge></td><td>{c.podName}</td><td><Link href={'/sequences/'+c.sequenceId}>{c.sequenceName}</Link></td><td>{c.startDate}</td><td>{c.counts.total}</td><td>{c.counts.replied}</td><td>{c.counts.meeting}</td><td>{Math.round(c.replyRate*100)}%</td></tr>)}</tbody></table></div>}
+   </Surface>
+ </div>;
 }

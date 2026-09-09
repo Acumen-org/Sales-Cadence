@@ -165,6 +165,14 @@ export function normalizeCompany(raw: Raw, s: TwentySchema): TwentyCompany {
   const address = obj(raw[s.company.address]);
   const linkedin = obj(raw[s.company.linkedinLink]);
   const employees = raw[s.company.employees];
+  const aumValue = raw[s.company.aum];
+  const currency = obj(aumValue);
+  let aum = typeof aumValue === 'number' || typeof aumValue === 'string' ? String(aumValue) : null;
+  if (currency.currencyCode === 'USD' && /^\d+$/.test(String(currency.amountMicros ?? ''))) {
+    const micros = BigInt(String(currency.amountMicros));
+    const cents = (micros + BigInt(5_000)) / BigInt(10_000);
+    aum = `${cents / BigInt(100)}.${(cents % BigInt(100)).toString().padStart(2, '0')}`;
+  }
   return {
     id: String(raw.id),
     name: str(raw[s.company.name]) ?? '',
@@ -172,6 +180,7 @@ export function normalizeCompany(raw: Raw, s: TwentySchema): TwentyCompany {
     ownerMemberId: str(raw[s.company.accountOwnerId]) ?? str(obj(raw[s.company.accountOwner]).id),
     industry: str(raw[s.company.industry]),
     employees: typeof employees === 'number' ? employees : Number.isFinite(Number(employees)) && employees !== null && employees !== '' ? Number(employees) : null,
+    aum: aum !== null && aum !== '' && Number.isFinite(Number(aum)) && Number(aum) >= 0 ? String(aum) : null,
     city: str(address.addressCity) ?? str(raw.city),
     linkedinUrl: str(linkedin.primaryLinkUrl),
     updatedAt: iso(raw[s.company.updatedAt] ?? raw.updatedAt),

@@ -1,369 +1,91 @@
 import Link from 'next/link';
 import type { BriefTimelineItem, TaskBrief } from '@/lib/brief';
-import { compareLocalDates, formatInstant, formatLocalDate, toLocalDate, type LocalDate } from '@/lib/dates';
+import { compareLocalDates, formatInstant, formatLocalDate, type LocalDate } from '@/lib/dates';
 import { ACTION_LABELS } from '@/lib/sequences/steps';
-import { ActionIcon, IconBolt, IconExternal, IconInfo, IconNote } from '@/components/icons';
+import { ActionIcon, IconExternal, IconNote } from '@/components/icons';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
-import {
-  Avatar,
-  Badge,
-  contactWarnings,
-  crmStanding,
-  DotTimeline,
-  ENROLLMENT_TONE,
-  enrollmentStatusLabel,
-  KeyValue,
-  Notice,
-  Surface,
-  TierBadge,
-  type BadgeTone,
-} from '@/components/ui';
-import { CopyButton } from '@/components/copy-button';
+import { Avatar, Badge, contactWarnings, crmStanding, ENROLLMENT_TONE, enrollmentStatusLabel, KeyValue, Notice, RecordFields, Surface, TierBadge, type BadgeTone } from '@/components/ui';
 
 function Section({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
-  return (
-    <section className="border-b border-line px-4 py-3.5 last:border-b-0">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">{title}</h3>
-        {right}
-      </div>
-      {children}
-    </section>
-  );
+  return <section className="border-b border-line px-4 py-4 last:border-b-0"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold text-ink-900">{title}</h3>{right}</div>{children}</section>;
 }
-
-/** Drop the rows Twenty holds nothing for. */
 const filled = (items: { k: string; v: React.ReactNode }[]) => items.filter((i) => i.v !== null && i.v !== undefined && i.v !== '');
-
-/** Twenty's own due date: red once it is past, amber on the day. */
-function dueTone(due: LocalDate, today: LocalDate): BadgeTone {
-  const c = compareLocalDates(due, today);
-  return c < 0 ? 'red' : c === 0 ? 'amber' : 'gray';
-}
-
-const KIND_ICON: Record<BriefTimelineItem['kind'], string> = {
-  email: 'EMAIL',
-  call: 'CALL',
-  linkedin: 'LINKEDIN_MESSAGE',
-  note: 'NOTE',
-  meeting: 'MEETING',
-  state: 'STATE',
-};
+function dueTone(due: LocalDate, today: LocalDate): BadgeTone { const comparison = compareLocalDates(due, today); return comparison < 0 ? 'red' : comparison === 0 ? 'amber' : 'gray'; }
+const KIND_ICON: Record<BriefTimelineItem['kind'], string> = { email: 'EMAIL', call: 'CALL', linkedin: 'LINKEDIN_MESSAGE', note: 'NOTE', meeting: 'MEETING', state: 'STATE' };
 
 function TimelineRow({ item, timezone }: { item: BriefTimelineItem; timezone: string }) {
-  const tone = item.direction === 'in' ? 'text-emerald-600' : item.direction === 'out' ? 'text-ink-400' : 'text-ink-300';
   const icon = KIND_ICON[item.kind];
-  return (
-    <li className="relative pl-6">
-      {/* The rail and its dot: one vertical line through the whole history. */}
-      <span aria-hidden className="absolute left-[7px] top-0 h-full w-px bg-line" />
-      <span aria-hidden className={`absolute left-0 top-[3px] flex h-[15px] w-[15px] items-center justify-center rounded-full bg-white ${tone}`}>
-        {icon === 'NOTE' ? <IconNote size={11} /> : icon === 'STATE' || icon === 'MEETING' ? <span className="h-[7px] w-[7px] rounded-full border border-current" /> : <ActionIcon action={icon} size={11} />}
-      </span>
-      <div className="pb-3">
-        <p className="text-[12.5px] leading-snug text-ink-800">
-          {item.direction === 'in' ? <span className="font-medium text-emerald-700">In · </span> : null}
-          {item.title}
-        </p>
-        {item.detail ? <p className="mt-0.5 line-clamp-2 text-[11.5px] leading-snug text-ink-500">{item.detail}</p> : null}
-        <p className="mt-0.5 text-[11px] text-ink-400">
-          {formatInstant(item.at, timezone)}
-          {item.actor ? ` · ${item.actor}` : ''}
-        </p>
-      </div>
-    </li>
-  );
+  return <li className="relative pl-7"><span aria-hidden className="absolute left-[7px] top-2 h-full w-px bg-line" /><span aria-hidden className="absolute left-0 top-1 rounded-full bg-white text-brand-700">{icon === 'NOTE' ? <IconNote size={15} /> : icon === 'STATE' || icon === 'MEETING' ? <span className="block h-3.5 w-3.5 rounded-full border-2 border-current" /> : <ActionIcon action={icon} size={15} />}</span>
+    <div className="space-y-2 pb-5"><div className="text-sm font-semibold leading-relaxed text-ink-900">{item.title}</div>{item.detail ? <details><summary className="cursor-pointer text-xs font-semibold text-brand-700">Details</summary><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed text-ink-800">{item.detail}</p></details> : null}<div className="flex flex-wrap gap-2"><time dateTime={item.at.toISOString()} className="text-xs font-semibold text-ink-700">{formatInstant(item.at, timezone)}</time>{item.direction === 'in' ? <Badge tone="green">Inbound</Badge> : null}</div>{item.actor ? <div className="text-xs"><span className="text-ink-500">By</span><strong className="ml-2 text-ink-900">{item.actor}</strong></div> : null}</div>
+  </li>;
 }
 
-/**
- * The right-hand panel: who this person is and everything we know about them, so an FO can
- * personalise the message on the left without opening the CRM. Their own stance and stage are
- * deliberately absent: a label Cadence guessed is noise next to the record itself.
- */
+/** The selected contact's CRM context. Full emails and notes follow in CrmHistory. */
 export function TaskBriefPanel({ brief, timezone }: { brief: TaskBrief; timezone: string }) {
-  const p = brief.person;
-  const points = brief.touches.map((t) => ({ at: t.occurredAt.getTime(), lane: t.direction === 'INBOUND' ? ('in' as const) : ('out' as const) }));
-  const standing = crmStanding(p);
-  const warnings = contactWarnings(p);
-  // The CRM's own plan for this person. It is written by hand in Twenty and Cadence never
-  // changes it, so it is shown as-is: an FO who contradicts it should do so knowingly.
-  const hasCrmPlan = Boolean(p.nextAction || p.nextActionDueDate || p.nextStep || p.lastNote);
+  const person = brief.person;
+  const standing = crmStanding(person);
+  const warnings = contactWarnings(person);
+  const localActivity = brief.timeline.filter((item) => item.kind !== 'email' && item.kind !== 'note');
+  const campaign = brief.task.enrollment.campaign;
+  return <Surface flush>
+    <header className="space-y-4 border-b border-line bg-canvas/50 p-4"><div className="flex items-start gap-3"><Avatar name={brief.personName} shape="circle" size={40} /><div className="min-w-0 flex-1"><Link href={`/people/${person.id}`} className="text-base font-semibold text-ink-900 hover:text-brand-700">{brief.personName}</Link><div className="mt-1 text-sm font-semibold text-ink-700">{person.jobTitle ?? 'Title missing'}</div></div>{brief.twentyUrl ? <a href={brief.twentyUrl} target="_blank" rel="noreferrer" className="btn-icon shrink-0" aria-label="Open contact in Twenty"><IconExternal size={15} /></a> : null}</div>
+      {person.companyName ? <Link href={person.companyId ? `/accounts/${person.companyId}` : `/people/${person.id}`} className="block font-semibold text-brand-700 hover:underline">{person.companyName}</Link> : null}
+      <div className="flex flex-wrap gap-1.5"><Badge tone={standing.tone} dot>{standing.label}</Badge>{person.tier ? <TierBadge tier={person.tier} /> : null}{warnings.map((warning) => <Badge key={warning.label} tone={warning.tone}>{warning.label}</Badge>)}</div>
+    </header>
+    {brief.warnings.length ? <div className="p-4"><Notice tone="warn">Some CRM information is temporarily unavailable. Cached contact data is shown.</Notice></div> : null}
 
-  return (
-    <div className="space-y-3">
-      <Surface flush>
-        <div className="flex items-start justify-between gap-3 border-b border-line bg-gradient-to-b from-canvas/70 to-white px-4 py-4">
-          <div className="flex min-w-0 items-start gap-3">
-            <Avatar name={brief.personName} shape="circle" size={40} />
-            <div className="min-w-0">
-              <Link href={`/people/${p.id}`} className="block truncate text-[15.5px] font-semibold tracking-[-0.01em] text-ink-900 hover:text-brand-700">
-                {brief.personName}
-              </Link>
-              <div className="truncate text-[12.5px] text-ink-500">{p.jobTitle ?? 'Unknown title'}</div>
-              {p.companyName ? (
-                <Link href={p.companyId ? `/accounts/${p.companyId}` : `/people/${p.id}`} className="truncate text-[12.5px] font-medium text-brand-700 hover:underline">
-                  {p.companyName}
-                </Link>
-              ) : null}
-              <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                <Badge tone={standing.tone} dot>
-                  {standing.label}
-                </Badge>
-                {p.tier ? <TierBadge tier={p.tier} /> : null}
-                {warnings.map((w) => (
-                  <Badge key={w.label} tone={w.tone}>
-                    {w.label}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          </div>
-          {brief.twentyUrl ? (
-            <a href={brief.twentyUrl} target="_blank" rel="noreferrer" className="btn-icon shrink-0" title="Open in Twenty" aria-label="Open in Twenty">
-              <IconExternal size={15} />
-            </a>
-          ) : null}
-        </div>
+    <Section title="Contact details">
+      <KeyValue items={filled([
+        { k: 'Email', v: person.email ? <a href={`mailto:${person.email}`} className="break-all text-brand-700 hover:underline">{person.email}</a> : null },
+        { k: 'Other emails', v: person.additionalEmails.length ? <span className="space-y-1">{person.additionalEmails.map((email) => <a key={email} href={`mailto:${email}`} className="block break-all text-brand-700 hover:underline">{email}</a>)}</span> : null },
+        { k: 'Phone', v: person.phone ? <a href={`tel:${person.phone}`} className="text-brand-700 hover:underline">{person.phone}</a> : null },
+        { k: 'Other phone', v: person.additionalPhone ? <a href={`tel:${person.additionalPhone}`} className="text-brand-700 hover:underline">{person.additionalPhone}</a> : null },
+        { k: 'City', v: person.city }, { k: 'Owner', v: brief.ownerName }, { k: 'Pod', v: brief.podName ?? (person.podOwner ? optionLabel(person.podOwner) : null) },
+      ])} />
+      <div className="mt-3 flex flex-wrap gap-2">{person.linkedinUrl ? <a href={person.linkedinUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm"><ActionIcon action="LINKEDIN_MESSAGE" size={13} />LinkedIn</a> : null}{person.xUrl ? <a href={person.xUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm">X profile<IconExternal size={12} /></a> : null}<Link href={`/people/${person.id}`} className="btn-ghost btn-sm">Full overview</Link></div>
+    </Section>
 
-        {brief.warnings.map((w) => (
-          <div key={w} className="px-4 pt-3">
-            <Notice tone="warn">{w}</Notice>
-          </div>
-        ))}
+    {person.nextAction || person.nextActionDueDate || person.nextStep || person.lastNote ? <Section title="CRM next action">
+      <RecordFields items={[
+        { label: 'Action', value: person.nextAction },
+        { label: 'Due', value: person.nextActionDueDate ? <Badge tone={dueTone(person.nextActionDueDate, brief.today)}>{formatLocalDate(person.nextActionDueDate, 'long')}</Badge> : null },
+        { label: 'Channel', value: person.nextStep ? optionLabel(person.nextStep) : null },
+        { label: 'POC due', value: person.nextActionDueDatePoc ? formatLocalDate(person.nextActionDueDatePoc) : null },
+      ]} />
+      {person.lastNote ? <details className="mt-4 rounded-lg border border-line p-3"><summary className="cursor-pointer text-sm font-semibold text-ink-900">Latest CRM note</summary><div className="mt-3 whitespace-pre-wrap break-words text-sm leading-7 text-ink-800">{person.lastNote}</div></details> : null}
+    </Section> : null}
 
-        <Section title="Reach them">
-          <div className="flex flex-wrap gap-1.5">
-            {p.email ? (
-              <a href={`mailto:${p.email}`} className="chip-muted" title={p.email}>
-                <ActionIcon action="EMAIL" size={13} /> {p.email}
-              </a>
-            ) : null}
-            {p.phone ? (
-              <a href={`tel:${p.phone}`} className="chip-muted" title={p.phone}>
-                <ActionIcon action="CALL" size={13} /> {p.phone}
-              </a>
-            ) : null}
-            {p.linkedinUrl ? (
-              <a href={p.linkedinUrl} target="_blank" rel="noreferrer" className="chip-muted">
-                <ActionIcon action="LINKEDIN_MESSAGE" size={13} /> LinkedIn
-              </a>
-            ) : null}
-          </div>
-        </Section>
+    <Section title="CRM profile"><KeyValue items={filled([
+      { k: 'Type', v: optionLabels(person.contactType, ' / ') || null }, { k: 'Pipeline', v: person.pipelineStage ? optionLabel(person.pipelineStage) : null },
+      { k: 'Product interest', v: optionLabels(person.productInterest) || null }, { k: 'Primary product', v: person.primaryProduct ? optionLabel(person.primaryProduct) : null },
+      { k: 'CRM campaigns', v: optionLabels(person.campaigns) || null }, { k: 'Lead source', v: optionLabels(person.leadSource) || null }, { k: 'Source notes', v: person.leadSourceNotes },
+      { k: 'Calling list', v: person.onCallingList ? 'Included' : null }, { k: 'Deal signal', v: person.dealSignalStrength ? optionLabel(person.dealSignalStrength) : null },
+    ])} /></Section>
 
-        {/*
-          What the CRM says to do next, above everything else. The pod plans in Twenty by hand
-          ("FU-2", due Thursday, by email) and Cadence's own step is a separate thing; showing
-          both, in this order, is how an FO avoids sending a second first-touch.
-        */}
-        {hasCrmPlan ? (
-          <Section title="What Twenty says next">
-            {p.nextAction ? (
-              <p className="text-[13px] font-medium leading-snug text-ink-900">{p.nextAction}</p>
-            ) : (
-              <p className="text-[12.5px] text-ink-400">No next action written in Twenty.</p>
-            )}
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              {p.nextActionDueDate ? (
-                <Badge tone={dueTone(p.nextActionDueDate, brief.today)}>Due {formatLocalDate(p.nextActionDueDate, 'long')}</Badge>
-              ) : null}
-              {p.nextStep ? (
-                <span className="chip-muted">
-                  <ActionIcon action={p.nextStep === 'LINKEDIN_MESSAGE' ? 'LINKEDIN_MESSAGE' : 'EMAIL'} size={13} /> {optionLabel(p.nextStep)}
-                </span>
-              ) : null}
-              {p.nextActionDueDatePoc ? <span className="text-[11.5px] text-ink-400">POC due {formatLocalDate(p.nextActionDueDatePoc)}</span> : null}
-            </div>
-            {p.lastNote ? (
-              <p className="mt-2.5 border-l-2 border-line pl-2.5 text-[12.5px] leading-snug text-ink-600">
-                <span className="text-ink-400">Last note: </span>
-                {p.lastNote}
-              </p>
-            ) : null}
-          </Section>
-        ) : null}
+    <Section title="CRM tags"><div className="flex flex-wrap gap-1.5">{person.tags.map((tag) => <Badge key={tag} tone="gray">{optionLabel(tag)}</Badge>)}{person.listCategory ? <Badge tone="gray">{optionLabel(person.listCategory)}</Badge> : null}{!person.tags.length && !person.listCategory ? <span className="text-sm text-ink-500">No tags</span> : null}</div></Section>
 
-        {/* Links Twenty keeps on the person. The recording plays in the Meetings section. */}
-        {p.recordingUrl || p.meetingUrl ? (
-          <Section title="Links in Twenty">
-            <div className="flex flex-wrap gap-1.5">
-              {p.meetingUrl ? (
-                <a href={p.meetingUrl} target="_blank" rel="noreferrer" className="chip-muted">
-                  <IconExternal size={13} /> Join link
-                </a>
-              ) : null}
-              {p.recordingUrl ? (
-                <Link href={`/meetings/new?personId=${p.id}&url=${encodeURIComponent(p.recordingUrl)}`} className="chip-muted">
-                  <ActionIcon action="MEETING" size={13} /> Add the recording
-                </Link>
-              ) : null}
-              {p.bookingId ? <span className="text-[11.5px] text-ink-400">Booking {p.bookingId}</span> : null}
-            </div>
-          </Section>
-        ) : null}
+    {person.recordingUrl || person.meetingUrl ? <Section title="Meetings"><div className="flex flex-wrap gap-2">{person.meetingUrl ? <a href={person.meetingUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm">Meeting link<IconExternal size={12} /></a> : null}{person.recordingUrl ? <Link href={`/meetings/new?personId=${person.id}&url=${encodeURIComponent(person.recordingUrl)}`} className="btn-secondary btn-sm">Add recording</Link> : null}</div>{person.bookingId ? <div className="mt-3"><RecordFields items={[{ label: 'Booking ID', value: person.bookingId }]} /></div> : null}</Section> : null}
 
-        {/*
-          How Twenty classifies them. Values are Twenty's own; only the wording is softened.
-          Rows the CRM has nothing for are left out rather than filled with dashes: on a panel
-          this narrow a column of empty rows buries the two or three that matter.
-        */}
-        <Section title="How Twenty classifies them">
-          <KeyValue
-            items={filled([
-              { k: 'Tier', v: p.tier ? optionLabel(p.tier) : null },
-              { k: 'Type', v: optionLabels(p.contactType, ' / ') || null },
-              {
-                k: 'Cadence',
-                v: p.listCategory ? `${optionLabel(p.listCategory)}${p.previousCadence ? ` (was ${optionLabel(p.previousCadence)})` : ''}` : null,
-              },
-              { k: 'Pipeline', v: p.pipelineStage ? optionLabel(p.pipelineStage) : null },
-              { k: 'Interested in', v: optionLabels(p.productInterest) || null },
-              { k: 'Campaigns', v: optionLabels(p.campaigns) || null },
-              {
-                k: 'Lead source',
-                v: p.leadSource.length ? `${optionLabels(p.leadSource)}${p.leadSourceNotes ? ` - ${p.leadSourceNotes}` : ''}` : p.leadSourceNotes,
-              },
-              { k: 'City', v: p.city },
-              { k: 'Pod', v: brief.podName ?? (p.podOwner ? optionLabel(p.podOwner) : null) },
-              { k: 'Owner', v: brief.ownerName },
-            ])}
-          />
-          {p.onCallingList ? <p className="mt-2 text-[11.5px] font-medium text-brand-700">On the pod owner&apos;s calling list.</p> : null}
-        </Section>
+    <Section title="Sequence progress" right={<Badge tone={ENROLLMENT_TONE[brief.enrollment.status] ?? 'gray'}>{enrollmentStatusLabel({ status: brief.enrollment.status })}</Badge>}>
+      <KeyValue items={[
+        { k: 'Sequence', v: <Link href={`/sequences/${brief.task.enrollment.sequence.id}`} className="text-brand-700 hover:underline">{brief.enrollment.sequenceName}</Link> },
+        { k: 'Campaign', v: campaign ? <Link href={`/campaigns/${campaign.id}`} className="text-brand-700 hover:underline">{campaign.name}</Link> : null },
+        { k: 'Step', v: <span className="font-bold">{brief.stepIndex + 1} / {brief.stepCount}</span> },
+        { k: 'Channels', v: [...new Set(brief.modules.map((module) => ACTION_LABELS[module.task.action]))].join(' + ') },
+        { k: 'Assigned to', v: brief.enrollment.foName }, { k: 'Started', v: formatLocalDate(brief.enrollment.startDate, 'long') },
+      ]} />
+      {brief.nextStep ? <div className="mt-4 rounded-xl bg-canvas p-3"><div className="mb-3 text-sm font-semibold text-ink-900">Next touchpoint</div><RecordFields items={[{ label: 'Business day', value: brief.nextStep.step.day }, { label: 'Scheduled', value: formatLocalDate(brief.nextStep.plannedDate) }, { label: 'Channels', value: brief.nextStep.description }]} /></div> : <div className="mt-3"><Badge tone="gray">Final touchpoint</Badge></div>}
+      <Link href={`/people/${person.id}?tab=sequences`} className="btn-ghost btn-sm mt-3">All campaigns & sequence history</Link>
+    </Section>
 
-        {/* Tags are how the team labels people, and they mean things, so they get their own row. */}
-        <Section title="Tags in Twenty">
-          {p.tags.length ? (
-            <div className="flex flex-wrap gap-1.5">
-              {p.tags.map((t) => (
-                <span key={t} className="rounded-md border border-line bg-canvas px-2 py-0.5 text-[11.5px] font-medium text-ink-700" title={t}>
-                  {optionLabel(t)}
-                </span>
-              ))}
-            </div>
-          ) : (
-            <p className="text-[12.5px] text-ink-400">No tags on this person in Twenty.</p>
-          )}
-        </Section>
+    <Section title="Recent activity" right={<Link href={`/people/${person.id}?tab=activity`} className="text-xs font-semibold text-brand-700 hover:underline">Full timeline</Link>}>
+      {person.lastCallAt || person.lastEmailAt ? <div className="mb-4"><RecordFields items={[{ label: 'Last call', value: person.lastCallAt ? formatInstant(new Date(person.lastCallAt), timezone) : null }, { label: 'Last email', value: person.lastEmailAt ? formatInstant(new Date(person.lastEmailAt), timezone) : null }]} /></div> : null}
+      {localActivity.length ? <ul className="max-h-96 overflow-y-auto scroll-thin">{localActivity.map((item) => <TimelineRow key={item.id} item={item} timezone={timezone} />)}</ul> : <div className="text-sm text-ink-500">No calls or sequence events recorded</div>}
+    </Section>
 
-        <Section
-          title="Everything so far"
-          right={
-            p.lastCallAt || p.lastEmailAt ? (
-              <span className="text-[11px] text-ink-400">
-                {[p.lastCallAt ? `called ${formatLocalDate(toLocalDate(p.lastCallAt, timezone))}` : null, p.lastEmailAt ? `emailed ${formatLocalDate(toLocalDate(p.lastEmailAt, timezone))}` : null]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </span>
-            ) : points.length ? (
-              <span className="text-[11px] text-ink-400">30 days</span>
-            ) : null
-          }
-        >
-          {points.length ? <DotTimeline points={points} width={330} /> : null}
-          {brief.timeline.length === 0 ? (
-            <p className="text-[12.5px] text-ink-400">Nothing recorded yet. This is the first touch.</p>
-          ) : (
-            <ul className="mt-2 max-h-[340px] overflow-y-auto scroll-thin">
-              {brief.timeline.map((item) => (
-                <TimelineRow key={item.id} item={item} timezone={timezone} />
-              ))}
-            </ul>
-          )}
-        </Section>
-
-        <Section title="Where they are in the sequence">
-          <KeyValue
-            items={[
-              { k: 'Plan', v: `${brief.enrollment.sequenceName} · v${brief.enrollment.version}` },
-              { k: 'Campaign', v: brief.enrollment.campaignName },
-              { k: 'Step', v: `${brief.stepIndex + 1} of ${brief.stepCount} · ${ACTION_LABELS[brief.task.action]}${brief.task.altAction ? ` or ${ACTION_LABELS[brief.task.altAction]}` : ''}` },
-              { k: 'FO', v: brief.enrollment.foName },
-              { k: 'Started', v: formatLocalDate(brief.enrollment.startDate, 'long') },
-              { k: 'State', v: <Badge tone={ENROLLMENT_TONE[brief.enrollment.status] ?? 'gray'}>{enrollmentStatusLabel({ status: brief.enrollment.status })}</Badge> },
-              { k: 'Clock', v: brief.enrollment.shiftDays ? `shifted ${brief.enrollment.shiftDays} day${brief.enrollment.shiftDays === 1 ? '' : 's'}` : 'on plan' },
-              {
-                k: 'Next',
-                v: brief.nextStep ? `Day ${brief.nextStep.step.day} · ${formatLocalDate(brief.nextStep.plannedDate)} · ${brief.nextStep.description}` : 'This is the last step.',
-              },
-            ]}
-          />
-        </Section>
-
-        {/* The either/or alternative has no home on the left, where one message is being written. */}
-        {brief.alternative ? (
-          <Section
-            title={`Or instead: ${brief.alternative.label}`}
-            right={<CopyButton text={[brief.alternative.subject ? `Subject: ${brief.alternative.subject}` : null, brief.alternative.body].filter(Boolean).join('\n\n')} label="Copy" className="btn-ghost btn-sm" />}
-          >
-            {brief.alternative.subject ? <div className="mb-1 text-[12.5px] font-medium text-ink-900">Subject: {brief.alternative.subject}</div> : null}
-            <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded-lg bg-canvas/70 p-3 font-sans text-[12.5px] leading-relaxed text-ink-700 scroll-thin">{brief.alternative.body}</pre>
-          </Section>
-        ) : null}
-
-        {brief.opportunities.length ? (
-          <Section title="Open opportunities">
-            <ul className="space-y-1 text-[12.5px]">
-              {brief.opportunities.map((o) => (
-                <li key={o.id} className="flex items-center justify-between gap-2">
-                  <span className="text-ink-700">{o.name}</span>
-                  <Badge tone="purple">{o.stage ?? 'open'}</Badge>
-                </li>
-              ))}
-            </ul>
-          </Section>
-        ) : null}
-
-        <Section title={`Colleagues at ${p.companyName ?? 'this company'}`}>
-          {brief.colleagues.length === 0 ? (
-            <p className="text-[12.5px] text-ink-400">Nobody else known here.</p>
-          ) : (
-            <ul className="space-y-1.5">
-              {brief.colleagues.slice(0, 6).map((c) => (
-                <li key={c.personId} className="flex items-center justify-between gap-2 text-[12.5px]">
-                  <Link href={`/people/${c.personId}`} className="flex min-w-0 items-center gap-2 hover:text-brand-700">
-                    <Avatar name={c.name} shape="circle" size={22} />
-                    <span className="min-w-0 truncate text-ink-700">{c.name}</span>
-                  </Link>
-                  <span className="shrink-0">
-                    {c.status ? (
-                      <Badge tone={c.status === 'DND' ? 'red' : ENROLLMENT_TONE[c.status] ?? 'gray'}>{enrollmentStatusLabel({ status: c.status })}</Badge>
-                    ) : (
-                      <span className="text-[11.5px] text-ink-300">not enrolled</span>
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-      </Surface>
-
-      {/* Reserved for the analyzer. Empty on purpose: no model is connected yet. */}
-      <Surface flush>
-        <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
-          <span className="text-brand-500">
-            <IconBolt size={15} />
-          </span>
-          <h3 className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">Suggested approach</h3>
-        </div>
-        <div className="px-4 py-3.5">
-          <div className="flex gap-2 rounded-lg bg-brand-50/60 px-3 py-2.5 text-[12px] leading-snug text-ink-600">
-            <span className="mt-[1px] shrink-0 text-brand-500">
-              <IconInfo size={13} />
-            </span>
-            <span>No language model is connected yet. When one is, this panel reads the history above and suggests what to say.</span>
-          </div>
-          <ul className="mt-2.5 space-y-1 text-[11.5px] text-ink-400">
-            {['What has and has not worked with this person', 'An angle drawn from their replies and meetings', 'A draft you can accept into the message on the left'].map((line) => (
-              <li key={line} className="flex gap-1.5">
-                <span aria-hidden className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-ink-300" />
-                {line}
-              </li>
-            ))}
-          </ul>
-        </div>
-      </Surface>
-    </div>
-  );
+    {brief.opportunities.length ? <Section title="Open opportunities"><ul className="space-y-3">{brief.opportunities.map((opportunity) => <li key={opportunity.id} className="flex items-center justify-between gap-2 text-sm"><span className="font-semibold text-ink-900">{opportunity.name}</span><Badge tone="purple">{opportunity.stage ?? 'Open'}</Badge></li>)}</ul></Section> : null}
+    <Section title="Colleagues" right={person.companyId ? <Link href={`/accounts/${person.companyId}?tab=people`} className="text-xs font-semibold text-brand-700 hover:underline">All company contacts</Link> : null}>
+      {brief.colleagues.length ? <ul className="space-y-4">{brief.colleagues.map((colleague) => <li key={colleague.personId} className="flex items-start gap-2.5"><Avatar name={colleague.name} shape="circle" size={28} /><div className="min-w-0 flex-1"><Link href={`/people/${colleague.personId}`} className="text-sm font-semibold text-ink-900 hover:text-brand-700">{colleague.name}</Link>{colleague.jobTitle ? <div className="mt-1 text-xs font-semibold text-ink-700">{colleague.jobTitle}</div> : null}{colleague.status ? <div className="mt-2"><Badge tone={colleague.status === 'DND' ? 'red' : ENROLLMENT_TONE[colleague.status] ?? 'gray'}>{enrollmentStatusLabel({ status: colleague.status })}</Badge></div> : null}</div></li>)}</ul> : <span className="text-sm text-ink-500">No other contacts linked</span>}
+    </Section>
+  </Surface>;
 }

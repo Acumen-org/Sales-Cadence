@@ -7,7 +7,7 @@ import type { ActionResult } from '@/lib/actions/users';
 import { Badge, Card, Field, Notice } from '@/components/ui';
 
 type Props = {
-  sequences: { id: string; name: string; version: number | null }[];
+  sequences: { id: string; name: string }[];
   pods: { id: string; name: string; podOwnerValue: string }[];
   defaultStartDate: string;
   defaultRamp: number;
@@ -73,7 +73,6 @@ export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, m
               {sequences.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
-                  {s.version ? ` (v${s.version})` : ''}
                 </option>
               ))}
             </select>

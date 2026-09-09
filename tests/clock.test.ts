@@ -20,8 +20,8 @@ describe('clock', () => {
   it('plans steps from the start date: day 1 is the start itself', () => {
     expect(plannedDateForStep('2026-09-07', 1, 0, MON_FRI)).toBe('2026-09-07');
     expect(plannedDateForStep('2026-09-07', 3, 0, MON_FRI)).toBe('2026-09-09');
-    expect(plannedDateForStep('2026-09-07', 6, 0, MON_FRI)).toBe('2026-09-14'); // Sat 12th -> Mon 14th
-    expect(plannedDateForStep('2026-09-07', 6, 5, MON_FRI)).toBe('2026-09-17'); // shifted by 5
+    expect(plannedDateForStep('2026-09-07', 6, 0, MON_FRI)).toBe('2026-09-14'); // Business day 6 is Monday 14th.
+    expect(plannedDateForStep('2026-09-07', 6, 5, MON_FRI)).toBe('2026-09-21'); // Five calendar days late -> Sat 19th -> Mon 21st.
   });
 
   it('shift mode accumulates late days, hold mode ignores them', () => {

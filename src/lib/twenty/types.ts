@@ -101,6 +101,8 @@ export type TwentyCompany = {
   ownerMemberId: string | null;
   industry: string | null;
   employees: number | null;
+  /** Assets under management in USD, as a decimal string to preserve precision. */
+  aum?: string | null;
   city: string | null;
   linkedinUrl: string | null;
   updatedAt: string;
@@ -235,6 +237,9 @@ export type UpdateTaskInput = {
   dueAt?: string | null;
   bodyMarkdown?: string;
 };
+
+export type EnrichPersonInput = Partial<Pick<TwentyPerson, 'firstName' | 'lastName' | 'email' | 'phone' | 'linkedinUrl' | 'jobTitle' | 'city'>>;
+export type EnrichCompanyInput = Partial<Pick<TwentyCompany, 'domain' | 'industry' | 'employees' | 'city' | 'linkedinUrl' | 'aum'>>;
 
 export function personFullName(p: Pick<TwentyPerson, 'firstName' | 'lastName'>): string {
   return [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || '(no name)';

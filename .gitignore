@@ -20,3 +20,6 @@ tsconfig.tsbuildinfo
 playwright-report
 test-results
 .screens
+.next-review/
+.pgdata-review*/
+.review/

@@ -27,8 +27,9 @@ export default defineConfig({
     env: {
       PORT: String(PORT),
       DEV_DB_PORT: '5435',
-      DEV_DB_DIR: '.pgdata-e2e',
+      DEV_DB_DIR: process.env.E2E_DB_DIR ?? '.pgdata-e2e',
       CADENCE_NO_BROWSER: '1',
+      CADENCE_SKIP_BUILD: '1',
       SEED_PROFILE: process.env.E2E_SEED ?? 'core,demo-basic',
       TWENTY_MODE: 'mock',
       TWENTY_API_URL: 'http://twenty.local:3000',

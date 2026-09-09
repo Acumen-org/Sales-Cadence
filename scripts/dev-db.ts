@@ -1,5 +1,4 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import { prepareDatabaseDirectory } from './local-runtime';
 
 /**
  * `pnpm dev:db`: start an embedded Postgres for local development when Docker is not around.
@@ -10,8 +9,7 @@ import path from 'node:path';
  */
 async function main() {
   const port = Number.parseInt(process.argv[2] ?? '5434', 10);
-  const databaseDir = path.join(process.cwd(), '.pgdata-dev');
-  const fresh = !fs.existsSync(databaseDir);
+  const { databaseDir, fresh } = prepareDatabaseDirectory(process.cwd(), '.pgdata-dev');
   const mod = await import('embedded-postgres');
   const EmbeddedPostgres = (mod.default ?? mod) as unknown as new (opts: Record<string, unknown>) => {
     initialise(): Promise<void>;

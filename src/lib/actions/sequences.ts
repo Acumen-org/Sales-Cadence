@@ -3,11 +3,11 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '../db';
-import { requireAdmin } from '../auth/current-user';
+import { requireUser } from '../auth/current-user';
+import { assertAllowed, canEditSequences } from '../auth/rbac';
 import { userActor } from '../audit';
-import { createSequence, createSequenceVersion, updateSequenceMeta } from '../engine/versioning';
+import { createSequence, saveSequenceSteps, updateSequenceMeta } from '../engine/sequence-plan';
 import { StepsSchema } from '../sequences/steps';
-import { unknownVariables } from '../templates';
 import type { ActionResult } from './users';
 
 function parseStepsField(raw: unknown): { ok: true; steps: unknown } | { ok: false; error: string } {
@@ -20,16 +20,14 @@ function parseStepsField(raw: unknown): { ok: true; steps: unknown } | { ok: fal
   }
   const parsed = StepsSchema.safeParse(json);
   if (!parsed.success) return { ok: false, error: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') };
-  const unknown = new Set<string>();
-  for (const s of parsed.data) for (const a of s.actions) for (const t of [a.template, a.subject, a.alternative?.template, a.alternative?.subject]) if (t) for (const v of unknownVariables(t)) unknown.add(v);
-  if (unknown.size) return { ok: false, error: `Unknown template variables: ${[...unknown].map((v) => `{{${v}}}`).join(', ')}` };
   return { ok: true, steps: parsed.data };
 }
 
 const CreateSchema = z.object({ name: z.string().trim().min(1).max(120), description: z.string().trim().max(1000).optional() });
 
 export async function createSequenceAction(formData: FormData): Promise<ActionResult> {
-  const admin = await requireAdmin();
+  const admin = await requireUser();
+  assertAllowed(canEditSequences(admin));
   const meta = CreateSchema.safeParse({ name: formData.get('name'), description: formData.get('description') || undefined });
   if (!meta.success) return { ok: false, error: 'Name is required.' };
   const steps = parseStepsField(formData.get('steps'));
@@ -40,21 +38,27 @@ export async function createSequenceAction(formData: FormData): Promise<ActionRe
   return { ok: true, message: 'Sequence created.', redirectTo: `/sequences/${sequence.id}` };
 }
 
-export async function saveSequenceVersionAction(formData: FormData): Promise<ActionResult> {
-  const admin = await requireAdmin();
+export async function saveSequenceAction(formData: FormData): Promise<ActionResult> {
+  const admin = await requireUser();
+  assertAllowed(canEditSequences(admin));
   const sequenceId = String(formData.get('sequenceId') ?? '');
-  const changeNote = String(formData.get('changeNote') ?? '').trim() || null;
   const steps = parseStepsField(formData.get('steps'));
   if (!steps.ok) return steps;
-  const sequence = await prisma.sequence.findUnique({ where: { id: sequenceId }, include: { activeVersion: true } });
+  const sequence = await prisma.sequence.findUnique({ where: { id: sequenceId } });
   if (!sequence) return { ok: false, error: 'Sequence not found.' };
-  if (sequence.activeVersion && JSON.stringify(sequence.activeVersion.steps) === JSON.stringify(steps.steps)) {
-    return { ok: false, error: 'No changes to save.' };
+  const name = String(formData.get('name') ?? sequence.name).trim();
+  if (!name || name.length > 120) return { ok: false, error: 'Enter a sequence name of up to 120 characters.' };
+  const clash = await prisma.sequence.findUnique({ where: { name } });
+  if (clash && clash.id !== sequenceId) return { ok: false, error: 'Another sequence has that name.' };
+  try {
+    if (JSON.stringify(sequence.steps) !== JSON.stringify(steps.steps)) await saveSequenceSteps(sequenceId, steps.steps, userActor(admin));
+    await updateSequenceMeta(sequenceId, { name, archived: formData.get('archived') === 'on' }, userActor(admin));
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Could not save sequence.' };
   }
-  const version = await createSequenceVersion(sequenceId, steps.steps, userActor(admin), changeNote);
   revalidatePath('/sequences');
   revalidatePath(`/sequences/${sequenceId}`);
-  return { ok: true, message: `Saved as version ${version.version}. Active enrollments use it for their next step.` };
+  return { ok: true, message: 'Sequence saved.' };
 }
 
 const MetaSchema = z.object({
@@ -65,7 +69,8 @@ const MetaSchema = z.object({
 });
 
 export async function updateSequenceMetaAction(formData: FormData): Promise<ActionResult> {
-  const admin = await requireAdmin();
+  const admin = await requireUser();
+  assertAllowed(canEditSequences(admin));
   const parsed = MetaSchema.safeParse({ sequenceId: formData.get('sequenceId'), name: formData.get('name'), description: formData.get('description') || undefined, archived: formData.get('archived') || undefined });
   if (!parsed.success) return { ok: false, error: 'Name is required.' };
   const clash = await prisma.sequence.findUnique({ where: { name: parsed.data.name } });

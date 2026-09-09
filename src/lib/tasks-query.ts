@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
-import { isAdmin, isSeniorFo } from './auth/rbac';
+import { isAdmin, isPodLeader } from './auth/rbac';
 import { todayIn, type LocalDate } from './dates';
 
 export type TaskTab = 'today' | 'overdue' | 'upcoming' | 'done';
@@ -43,7 +43,7 @@ export function effectiveDate(t: { dueDate: string; snoozedTo: string | null }):
 /** Tasks the user may see at all (before filters). Junior: own. Senior: own + pods. Admin: all. */
 export function taskScopeWhere(user: SessionUser): Prisma.TaskWhereInput {
   if (isAdmin(user)) return {};
-  if (isSeniorFo(user)) {
+  if (isPodLeader(user)) {
     return { OR: [{ foUserId: user.id }, { enrollment: { podId: { in: user.podIds } } }] };
   }
   return { foUserId: user.id };
@@ -115,8 +115,8 @@ export async function listTasks(user: SessionUser, filters: TaskFilters, now = n
 
 /** Pods and FOs the user may filter by. */
 export async function filterOptions(user: SessionUser) {
-  if (!isAdmin(user) && !isSeniorFo(user)) return { pods: [], fos: [] };
-  const podWhere = isAdmin(user) ? {} : { id: { in: user.podIds } };
+  if (!isAdmin(user) && !isPodLeader(user)) return { pods: [], fos: [] };
+  const podWhere = isAdmin(user) ? { archived: false } : { archived: false, id: { in: user.podIds } };
   const pods = await prisma.pod.findMany({ where: podWhere, orderBy: { name: 'asc' }, include: { users: { include: { user: { select: { id: true, name: true, active: true } } } } } });
   const fos = new Map<string, { id: string; name: string; podIds: string[] }>();
   for (const pod of pods) {
@@ -136,4 +136,31 @@ export async function filterOptions(user: SessionUser) {
 
 export function parseTab(v: string | undefined): TaskTab {
   return TASK_TABS.includes(v as TaskTab) ? (v as TaskTab) : 'today';
+}
+
+/** One workspace item per contact and touchpoint; each required action retains its own result. */
+export async function listTaskGroups(user: SessionUser, filters: TaskFilters, now = new Date(), limit = 200) {
+  const today = todayIn(user.timezone, now);
+  const records = await prisma.task.findMany({ where: { AND: [taskScopeWhere(user), filtersWhere(filters)], state: { in: ['PENDING', 'DONE', 'SKIPPED'] } }, select: { id: true, enrollmentId: true, stepId: true, state: true, action: true, dueDate: true, snoozedTo: true, completedAt: true, updatedAt: true }, orderBy: [{ dueAt: 'asc' }, { actionIndex: 'asc' }] });
+  const grouped = new Map<string, typeof records>();
+  for (const t of records) { const key = `${t.enrollmentId}:${t.stepId}`; const group = grouped.get(key) ?? []; group.push(t); grouped.set(key, group); }
+  const counts: Record<TaskTab, number> = { today: 0, overdue: 0, upcoming: 0, done: 0 };
+  const channelCounts: Record<TaskChannel, number> = { CALL: 0, EMAIL: 0, LINKEDIN: 0 };
+  const selected: Array<{ id: string; ids: string[]; tab: TaskTab; at: number; date: string }> = [];
+  for (const group of grouped.values()) {
+    const pending = group.filter(t => t.state === 'PENDING');
+    const current = pending.length ? pending : group;
+    const date = current.map(effectiveDate).sort()[0];
+    const tab: TaskTab = !pending.length ? 'done' : date < today ? 'overdue' : date === today ? 'today' : 'upcoming';
+    const channels = new Set(current.map(t => t.action === 'EMAIL' ? 'EMAIL' : t.action === 'CALL' ? 'CALL' : 'LINKEDIN'));
+    if (tab === filters.tab) for (const c of channels) channelCounts[c]++;
+    if (filters.channel && !channels.has(filters.channel)) continue;
+    counts[tab]++;
+    if (tab === filters.tab) selected.push({ id: current[0].id, ids: group.map(t => t.id), tab, date, at: Math.max(...current.map(t => (t.completedAt ?? t.updatedAt).getTime())) });
+  }
+  selected.sort((a, b) => filters.tab === 'done' ? b.at - a.at : a.date.localeCompare(b.date));
+  const page = selected.slice(0, limit);
+  const rows = await prisma.task.findMany({ where: { id: { in: page.map(g => g.id) } }, include: taskRowInclude });
+  const byId = new Map(rows.map(t => [t.id, t]));
+  return { rows: page.flatMap(g => { const row = byId.get(g.id); return row ? [{ ...row, childIds: g.ids, childActions: records.filter(t => g.ids.includes(t.id)).map(t => ({ id: t.id, action: t.action, state: t.state })) }] : []; }), counts, channelCounts, today, total: selected.length };
 }

@@ -21,6 +21,7 @@ const EnvSchema = z.object({
   CADENCE_WEBHOOK_TOKEN: z.string().optional(),
   CADENCE_DRY_RUN: BoolString,
   WORKER_TICK_SECONDS: z.coerce.number().int().positive().default(300),
+  CRM_SYNC_SECONDS: z.coerce.number().int().min(15).max(300).default(60),
   RECONCILE_HOUR: z.coerce.number().int().min(0).max(23).default(2),
   CACHE_REFRESH_HOUR: z.coerce.number().int().min(0).max(23).default(3),
 });

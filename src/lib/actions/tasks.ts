@@ -13,6 +13,17 @@ import { completeTask, nextWorkingDaySnooze, skipTask, snoozeTask } from '../eng
 import { ACTION_TYPES } from '../sequences/steps';
 import { getSettings } from '../settings';
 import type { ActionResult } from './users';
+import { cleanRichText } from '../rich-text';
+
+export async function saveTaskDraftAction(input: { taskId: string; subject: string; html: string; revision: number }): Promise<{ ok: true; revision: number } | { ok: false; error: string }> {
+  const parsed = z.object({ taskId: z.string().min(1), subject: z.string().max(2000), html: z.string().max(100000), revision: z.number().int().min(0) }).safeParse(input);
+  if (!parsed.success) return { ok: false, error: 'Draft is too large or invalid.' };
+  const { task, error } = await loadForUser(input.taskId);
+  if (!task) return { ok: false, error: error ?? 'Task not found.' };
+  const saved = await prisma.task.updateMany({ where: { id: task.id, state: 'PENDING', draftRevision: input.revision }, data: { draftSubject: input.subject, draftHtml: cleanRichText(input.html), draftRevision: { increment: 1 } } });
+  if (!saved.count) return { ok: false, error: 'This draft changed in another window, or the task was completed. Copy your work before reloading.' };
+  return { ok: true, revision: input.revision + 1 };
+}
 
 async function loadForUser(taskId: string, user?: SessionUser) {
   const u = user ?? (await requireUser());
@@ -150,7 +161,7 @@ export async function moveToStepAction(formData: FormData): Promise<ActionResult
 // ---------------------------------------------------------------------------
 
 const BulkSchema = z.object({
-  taskIds: z.array(z.string().min(1)).min(1).max(200),
+  taskIds: z.array(z.string().min(1)).min(1).max(1000),
   op: z.enum(['complete', 'skip', 'snooze', 'reassign']),
   reasonKey: z.string().optional(),
   toDate: z.string().optional(),

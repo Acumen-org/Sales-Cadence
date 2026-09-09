@@ -1,156 +1,67 @@
 'use client';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { saveTaskDraftAction } from '@/lib/actions/tasks';
+import { RichTextEditor } from '@/components/rich-text-editor';
+import { ActionIcon, IconCheck, IconCopy } from '@/components/icons';
+import { registerDraftWriter } from './draft-registry';
 
-import { useEffect, useRef, useState } from 'react';
-import clsx from 'clsx';
-import { IconCheck, IconCopy, IconRefresh } from '@/components/icons';
-
-type Props = {
-  taskId: string;
-  /** Rendered from the sequence template, with the person's details filled in. */
-  subject: string | null;
-  body: string;
-  /** "Email 2", "LinkedIn message"... shown as the panel's label. */
-  label: string;
-  variantLabel?: string | null;
-  channel: 'EMAIL' | 'CALL' | 'LINKEDIN';
-};
-
-const key = (taskId: string) => `cadence:draft:${taskId}`;
-
-/**
- * The message for this step, editable in place.
- *
- * The template is a starting point, not the thing you send: an FO reads the person's history on
- * the right and personalises the copy here before sending it from their own mailbox. Edits are
- * kept in this browser against the task id, so switching tasks or reloading does not lose them,
- * and "Reset" puts the template back. Nothing is written to Twenty from here.
- */
-export function TaskComposer({ taskId, subject, body, label, variantLabel, channel }: Props) {
-  const [draftSubject, setDraftSubject] = useState(subject ?? '');
-  const [draftBody, setDraftBody] = useState(body);
-  const [edited, setEdited] = useState(false);
+type Props = { taskId: string; subject: string | null; body: string; html?: string; label: string; channel: 'EMAIL' | 'CALL' | 'LINKEDIN'; revision?: number; readOnly?: boolean; phone?: string | null };
+export function TaskComposer({ taskId, subject, body, html, label, channel, revision = 0, readOnly = false, phone }: Props) {
+  const initialHtml = html ?? '<p>' + body.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') + '</p>';
+  const [draft, setDraft] = useState({ subject: subject ?? '', html: initialHtml, text: body });
+  const [state, setState] = useState('Saved');
+  const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
-  const bodyRef = useRef<HTMLTextAreaElement>(null);
-
-  // Load any draft for this task, then keep the textarea sized to its content.
+  const [phoneCopied, setPhoneCopied] = useState(false);
+  const latest = useRef(draft);
+  const saved = useRef({ subject: draft.subject, html: draft.html });
+  const rev = useRef(revision);
+  const queue = useRef<Promise<boolean>>(Promise.resolve(true));
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const alive = useRef(true);
+  const flush = useCallback((): Promise<boolean> => {
+    if (timer.current) clearTimeout(timer.current);
+    queue.current = queue.current.then(async () => {
+      const next = latest.current;
+      if (readOnly || (saved.current.subject === next.subject && saved.current.html === next.html)) return true;
+      if (alive.current) setState('Saving');
+      try {
+        const result = await saveTaskDraftAction({ taskId, subject: next.subject, html: next.html, revision: rev.current });
+        if (!result.ok) { if (alive.current) { setState('Unsaved'); setError(result.error); } return false; }
+        rev.current = result.revision; saved.current = { subject: next.subject, html: next.html };
+        if (alive.current) { setState(latest.current.html === next.html && latest.current.subject === next.subject ? 'Saved' : 'Unsaved'); setError(''); }
+        try { localStorage.removeItem('cadence:recovery:' + taskId); } catch {}
+        return true;
+      } catch { if (alive.current) { setState('Unsaved'); setError('Draft could not be saved. Retry or copy your work.'); } return false; }
+    });
+    return queue.current;
+  }, [taskId, readOnly]);
   useEffect(() => {
-    let s = subject ?? '';
-    let b = body;
-    let isEdited = false;
-    try {
-      const raw = window.localStorage.getItem(key(taskId));
-      if (raw) {
-        const saved = JSON.parse(raw) as { subject?: string; body?: string };
-        if (typeof saved.subject === 'string') s = saved.subject;
-        if (typeof saved.body === 'string') b = saved.body;
-        isEdited = s !== (subject ?? '') || b !== body;
-      }
-    } catch {
-      /* private window, or storage blocked: the template is still fine */
-    }
-    setDraftSubject(s);
-    setDraftBody(b);
-    setEdited(isEdited);
-  }, [taskId, subject, body]);
-
-  useEffect(() => {
-    const el = bodyRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 520)}px`;
-  }, [draftBody]);
-
-  const save = (next: { subject?: string; body?: string }) => {
-    const s = next.subject ?? draftSubject;
-    const b = next.body ?? draftBody;
-    setEdited(s !== (subject ?? '') || b !== body);
-    try {
-      if (s === (subject ?? '') && b === body) window.localStorage.removeItem(key(taskId));
-      else window.localStorage.setItem(key(taskId), JSON.stringify({ subject: s, body: b }));
-    } catch {
-      /* not fatal: the edit still applies for this view */
-    }
+    alive.current = true;
+    const unregister = registerDraftWriter(flush);
+    const unload = (event: BeforeUnloadEvent) => { if (latest.current.html !== saved.current.html || latest.current.subject !== saved.current.subject) { event.preventDefault(); void flush(); } };
+    window.addEventListener('beforeunload', unload);
+    return () => { alive.current = false; unregister(); window.removeEventListener('beforeunload', unload); void flush(); };
+  }, [flush]);
+  const change = (patch: Partial<typeof draft>) => {
+    const next = { ...latest.current, ...patch }; latest.current = next; setDraft(next); setState('Unsaved');
+    try { localStorage.setItem('cadence:recovery:' + taskId, JSON.stringify(next)); } catch {}
+    if (timer.current) clearTimeout(timer.current); timer.current = setTimeout(() => { void flush(); }, 650);
   };
-
-  const reset = () => {
-    setDraftSubject(subject ?? '');
-    setDraftBody(body);
-    setEdited(false);
-    try {
-      window.localStorage.removeItem(key(taskId));
-    } catch {
-      /* ignore */
-    }
-  };
-
   const copy = async () => {
-    const text = [draftSubject ? `Subject: ${draftSubject}` : null, draftBody].filter(Boolean).join('\n\n');
     try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
-    } catch {
-      /* clipboard blocked: the text is selectable in the field */
-    }
+      const doc = new DOMParser().parseFromString(draft.html, 'text/html');
+      const plain = doc.body.textContent ?? draft.text;
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard.write) await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([draft.html], { type: 'text/html' }), 'text/plain': new Blob([plain], { type: 'text/plain' }) })]);
+      else await navigator.clipboard.writeText(plain);
+      setCopied(true); setTimeout(() => setCopied(false), 1800);
+    } catch { setError('Clipboard unavailable. Select the message to copy it.'); }
   };
-
-  const words = draftBody.trim() ? draftBody.trim().split(/\s+/).length : 0;
-
-  return (
-    <section className="overflow-hidden rounded-xl border border-line bg-white">
-      <header className="flex flex-wrap items-center gap-2 border-b border-line bg-canvas/60 px-3.5 py-2">
-        <h3 className="text-[11.5px] font-semibold uppercase tracking-wide text-ink-500">{label}</h3>
-        {variantLabel ? <span className="rounded bg-purple-50 px-1.5 text-[10.5px] font-medium text-purple-700">Variant {variantLabel}</span> : null}
-        {edited ? <span className="rounded bg-brand-50 px-1.5 text-[10.5px] font-medium text-brand-700">personalised</span> : null}
-        <span className="ml-auto flex items-center gap-1">
-          {edited ? (
-            <button type="button" onClick={reset} className="btn-ghost btn-sm" title="Put the template back">
-              <IconRefresh size={13} /> Reset
-            </button>
-          ) : null}
-          <button type="button" onClick={copy} className={clsx('btn-secondary btn-sm', copied && 'border-emerald-300 text-emerald-700')}>
-            {copied ? <IconCheck size={13} /> : <IconCopy size={13} />} {copied ? 'Copied' : 'Copy'}
-          </button>
-        </span>
-      </header>
-
-      <div className="px-3.5 py-3">
-        {channel === 'EMAIL' && subject !== null ? (
-          <div className="mb-2.5 flex items-baseline gap-2 border-b border-line pb-2.5">
-            <label htmlFor={`subject-${taskId}`} className="shrink-0 text-[12px] font-medium text-ink-400">
-              Subject
-            </label>
-            <input
-              id={`subject-${taskId}`}
-              value={draftSubject}
-              onChange={(e) => {
-                setDraftSubject(e.target.value);
-                save({ subject: e.target.value });
-              }}
-              className="!border-0 !bg-transparent !px-0 !py-0 !text-[14px] !font-semibold !text-ink-900 !ring-0"
-              placeholder="Subject line"
-            />
-          </div>
-        ) : null}
-
-        <textarea
-          ref={bodyRef}
-          id={`body-${taskId}`}
-          aria-label={`${label} message`}
-          value={draftBody}
-          onChange={(e) => {
-            setDraftBody(e.target.value);
-            save({ body: e.target.value });
-          }}
-          rows={6}
-          className="w-full resize-none !border-0 !bg-transparent !px-0 !py-0 !text-[13.5px] !leading-relaxed !text-ink-800 !ring-0"
-          placeholder={channel === 'CALL' ? 'Notes to work from on the call...' : 'Write the message...'}
-        />
-
-        <p className="mt-2 border-t border-line pt-2 text-[11px] text-ink-400">
-          {words} word{words === 1 ? '' : 's'} · edit freely, then copy into your mailbox. Cadence never sends it for you.
-        </p>
-      </div>
-    </section>
-  );
+  return <section className="space-y-3">
+    <header className="flex flex-wrap items-center gap-2"><span className="rounded-lg bg-brand-50 p-2 text-brand-700"><ActionIcon action={channel} size={19} /></span><h3 className="text-base font-semibold">{channel === 'CALL' ? 'Call preparation' : label}</h3><span className="ml-auto flex items-center gap-2">{!readOnly && <button type="button" onClick={() => { void flush(); }} className="btn-ghost btn-sm" disabled={state === 'Saved' || state === 'Saving'}>{state === 'Saved' ? <IconCheck size={12} /> : null}<strong>{state}</strong></button>}<button type="button" className="btn-secondary btn-sm" onClick={copy}><IconCopy size={13} />{copied ? 'Copied' : 'Copy message'}</button></span></header>
+    {channel === 'CALL' && <div className="flex items-center justify-between rounded-xl border border-brand-200 bg-brand-50/40 p-4"><div><div className="text-xs text-ink-500">Phone</div><strong className="mt-1 block text-lg">{phone || 'Missing phone'}</strong></div>{phone && <button type="button" className="btn-secondary" onClick={async () => { try { await navigator.clipboard.writeText(phone); setPhoneCopied(true); setTimeout(() => setPhoneCopied(false), 1800); } catch { setError('Clipboard unavailable. Select the phone number to copy.'); } }}>{phoneCopied ? 'Copied' : 'Copy number'}</button>}</div>}
+    {channel === 'EMAIL' && <label className="block text-xs text-ink-500">Subject<input aria-label="Email subject" value={draft.subject} readOnly={readOnly} className="mt-1 w-full !font-semibold !text-ink-900" onChange={e => change({ subject: e.target.value })} onBlur={() => { void flush(); }} /></label>}
+    <RichTextEditor value={draft.html} label={channel === 'CALL' ? 'Call script' : label + ' message'} disabled={readOnly} onChange={(nextHtml, text) => change({ html: nextHtml, text })} />
+    {error && <p role="alert" className="text-sm font-medium text-red-700">{error}</p>}
+  </section>;
 }

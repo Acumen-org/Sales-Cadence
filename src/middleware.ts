@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 const SESSION_COOKIE = 'cadence_session';
-const PUBLIC_PREFIXES = ['/login', '/api/health', '/api/webhooks', '/_next', '/favicon.ico'];
+const PUBLIC_PREFIXES = ['/login', '/api/health', '/api/webhooks', '/_next', '/favicon.ico', '/icon.svg'];
 
 /**
  * Cheap gate: redirect anonymous visitors to /login. The cookie is only checked for
@@ -10,7 +10,7 @@ const PUBLIC_PREFIXES = ['/login', '/api/health', '/api/webhooks', '/_next', '/f
  */
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  if (PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + '/') || pathname.startsWith(p))) {
+  if (PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + '/'))) {
     return NextResponse.next();
   }
   if (!req.cookies.get(SESSION_COOKIE)?.value) {

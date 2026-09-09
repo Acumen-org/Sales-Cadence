@@ -6,7 +6,7 @@ export async function GET() {
   try {
     await prisma.$queryRaw`SELECT 1`;
     return NextResponse.json({ ok: true, db: 'up', twentyMode: env().TWENTY_MODE, dryRun: env().CADENCE_DRY_RUN });
-  } catch (err) {
-    return NextResponse.json({ ok: false, db: 'down', error: String(err) }, { status: 503 });
+  } catch {
+    return NextResponse.json({ ok: false, db: 'down' }, { status: 503 });
   }
 }

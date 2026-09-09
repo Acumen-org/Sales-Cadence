@@ -1,4 +1,4 @@
-import { fromZonedTime, toZonedTime } from 'date-fns-tz';
+import { formatInTimeZone, fromZonedTime, toZonedTime } from 'date-fns-tz';
 
 /** A calendar date in a person's local timezone, formatted YYYY-MM-DD. */
 export type LocalDate = string;
@@ -81,6 +81,20 @@ export function safeTimezone(tz: string | null | undefined): string {
   } catch {
     return 'UTC';
   }
+}
+
+/** A datetime-local field represents the user's wall clock, independent of the server clock. */
+export function dateTimeInputValue(instant: Date, timezone: string): string {
+  return formatInTimeZone(instant, safeTimezone(timezone), "yyyy-MM-dd'T'HH:mm");
+}
+
+/** Reject impossible dates and times skipped by a daylight-saving transition. */
+export function localDateTimeToInstant(value: string, timezone: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return null;
+  if (!isLocalDate(value.slice(0, 10))) return null;
+  const instant = fromZonedTime(value, safeTimezone(timezone));
+  if (Number.isNaN(instant.getTime()) || dateTimeInputValue(instant, timezone) !== value) return null;
+  return instant;
 }
 
 export function formatLocalDate(date: LocalDate, style: 'short' | 'long' = 'short'): string {

@@ -156,7 +156,7 @@ test('jumping to a step confirms with a toast that says only what happened', asy
 test('ending a sequence asks one question and then stops the person', async ({ page }) => {
   await loginAs(page, 'Admin');
   await page.goto('/tasks?tab=upcoming');
-  const person = await page.locator('main h2').first().textContent();
+  const person = await page.locator('main h2 a[href^="/people/"]').first().textContent();
   await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByLabel('Why are you ending the sequence?').selectOption('not_interested');
   await page.getByRole('button', { name: 'End sequence' }).click();

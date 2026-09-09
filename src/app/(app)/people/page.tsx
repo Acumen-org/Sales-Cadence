@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import type { Prisma } from '@prisma/client';
 import { requireUser } from '@/lib/auth/current-user';
-import { canEnroll, canManageEnrollment, isAdmin, isSeniorFo, toActor, visiblePodIds } from '@/lib/auth/rbac';
+import { canEnroll, toActor } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
 import { formatInstant, formatLocalDate } from '@/lib/dates';
 import { cachedPersonName } from '@/lib/person-cache';
@@ -9,7 +9,6 @@ import { getTwentyConnection } from '@/lib/settings';
 import { twentyPersonUrl } from '@/lib/twenty/urls';
 import { PeopleToolbar } from '@/components/people/people-toolbar';
 import { PeopleTable, type PeopleTableRow } from '@/components/people/people-table';
-import { SyncNow } from '@/components/people/sync-now';
 import { IconPeople } from '@/components/icons';
 import { defaultTwentySchema } from '@/lib/twenty/twenty-schema';
 import { compareLocalDates, todayIn } from '@/lib/dates';
@@ -17,7 +16,7 @@ import { contactWarnings, crmStanding, EmptyState, ENROLLMENT_TONE, enrollmentSt
 
 const PAGE_SIZE = 100;
 
-type Search = { q?: string; pod?: string; status?: string; page?: string; owner?: string; tier?: string; type?: string; list?: string };
+type Search = { q?: string; pod?: string; status?: string; page?: string; owner?: string; tier?: string; type?: string };
 
 export default async function PeoplePage({ searchParams }: { searchParams: Promise<Search> }) {
   const user = await requireUser();
@@ -31,7 +30,6 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   const pick = (v: string | undefined, allowed: readonly string[]) => (v && allowed.includes(v) ? v : '');
   const tier = pick(sp.tier, values.tier);
   const contactType = pick(sp.type, values.contactType);
-  const list = pick(sp.list, values.listCategory);
   const page = Math.max(1, Number.parseInt(sp.page ?? '1', 10) || 1);
   const actor = toActor(user);
 
@@ -52,7 +50,6 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   if (pod) where.podOwner = pod;
   if (tier) where.tier = tier;
   if (contactType) where.contactType = { has: contactType };
-  if (list) where.listCategory = list;
   if (status === 'enrolled' || status === 'approaching') where.enrollments = { some: { status: { in: ['ACTIVE', 'PAUSED'] } } };
   if (status === 'not_enrolled' || status === 'cold') {
     where.enrollments = { none: {} };
@@ -72,26 +69,21 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
       { enrollments: { some: { status: 'EXITED', exitReason: { in: ['bounced', 'bad_data'] } } } },
     ];
 
-  const visible = visiblePodIds(user);
-  const [people, total, pods, sequences, conn] = await Promise.all([
+  const [people, total, pods, conn] = await Promise.all([
     prisma.personCache.findMany({
       where,
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
       include: {
-        enrollments: { orderBy: { createdAt: 'desc' }, take: 1, include: { fo: { select: { id: true, name: true } }, pod: { select: { id: true, name: true } }, campaign: { select: { name: true } } } },
+        enrollments: { orderBy: { createdAt: 'desc' }, take: 1, include: { fo: { select: { id: true, name: true } }, pod: { select: { id: true, name: true } }, campaign: { select: { id: true, name: true } }, sequence: { select: { name: true } } } },
         touches: { orderBy: { occurredAt: 'desc' }, take: 8 },
       },
     }),
     prisma.personCache.count({ where }),
     prisma.pod.findMany({ orderBy: { name: 'asc' }, include: { users: { include: { user: { select: { id: true, name: true, active: true } } } } } }),
-    prisma.sequence.findMany({ where: { archived: false }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
     getTwentyConnection(),
   ]);
-  const enrolPods = pods
-    .filter((p) => visible === null || visible.includes(p.id))
-    .map((p) => ({ id: p.id, name: p.name, podOwnerValue: p.podOwnerValue, fos: p.users.filter((u) => u.user.active).map((u) => ({ id: u.user.id, name: u.user.name })) }));
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const pageHref = (n: number) => {
     const p = new URLSearchParams();
@@ -101,11 +93,9 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     if (owner) p.set('owner', owner);
     if (tier) p.set('tier', tier);
     if (contactType) p.set('type', contactType);
-    if (list) p.set('list', list);
     p.set('page', String(n));
     return `/people?${p.toString()}`;
   };
-  const showActions = isAdmin(user) || isSeniorFo(user);
 
   const today = todayIn(user.timezone);
   const podByOwner = new Map(pods.map((x) => [x.podOwnerValue, x]));
@@ -126,6 +116,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
       tier: p.tier,
       listCategory: p.listCategory,
       leadSource: p.leadSource,
+      tags: p.tags,
       warnings: contactWarnings(p),
       next:
         p.nextAction || p.nextActionDueDate
@@ -139,10 +130,9 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
       dnd: p.dnd,
       optedOut: p.optedOut,
       enrollment: e
-        ? { status: e.status, label: enrollmentStatusLabel(e), tone: ENROLLMENT_TONE[e.status] ?? 'gray', campaignName: e.campaign?.name ?? null, foName: e.fo.name }
+        ? { status: e.status, label: enrollmentStatusLabel(e), tone: ENROLLMENT_TONE[e.status] ?? 'gray', campaignName: e.campaign?.name ?? null, campaignId: e.campaign?.id ?? null, sequenceName: e.sequence.name, foName: e.fo.name }
         : null,
       activeEnrollmentId: active?.id ?? null,
-      activeCanExit: active ? canManageEnrollment(actor, { foUserId: active.foUserId, podId: active.podId }) : false,
       lastTouch: touch ? { summary: touch.summary, at: formatInstant(touch.occurredAt, user.timezone) } : null,
       activity: p.touches.map((t) => ({ at: t.occurredAt.getTime(), lane: t.direction === 'INBOUND' ? ('in' as const) : ('out' as const) })),
       twentyUrl: twentyPersonUrl(conn.baseUrl, p.id),
@@ -156,33 +146,30 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
           title={owner === 'mine' ? 'My relationships' : q || pod || status ? 'Filtered people' : 'All people'}
           caret
           meta={`${total} result${total === 1 ? '' : 's'}`}
-          actions={isAdmin(user) ? <SyncNow /> : null}
         />
         <Toolbar>
           <PeopleToolbar
             pods={pods.map((p) => ({ podOwnerValue: p.podOwnerValue, name: p.name }))}
             tiers={[...values.tier]}
             types={[...values.contactType]}
-            lists={[...values.listCategory]}
             q={q}
             pod={pod}
             status={status}
             tier={tier}
             type={contactType}
-            list={list}
           />
         </Toolbar>
         {rows.length === 0 ? (
-          <EmptyState icon={<IconPeople size={20} />} title="No people match" hint="Adjust the filters, or sync from Twenty to pull people in." />
+          <EmptyState icon={<IconPeople size={20} />} title="No people match" hint="Adjust the filters to find a contact." />
         ) : (
-          <PeopleTable rows={rows} showActions={showActions} canEnroll={canEnroll(actor)} sequences={sequences} pods={enrolPods} />
+          <PeopleTable rows={rows} canEnroll={canEnroll(actor)} />
         )}
       </Surface>
 
       {pages > 1 ? (
         <div className="flex items-center justify-between text-[13px] text-ink-500">
           <span>
-            Page {page} of {pages}
+            Page <strong className="text-ink-900">{page}</strong> of <strong className="text-ink-900">{pages}</strong>
           </span>
           <div className="flex gap-2">
             {page > 1 ? (

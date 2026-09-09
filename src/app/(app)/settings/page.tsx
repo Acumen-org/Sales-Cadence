@@ -7,16 +7,20 @@ import { getSettings, getTwentySchema } from '@/lib/settings';
 import { getTwentyClient } from '@/lib/twenty';
 import { recentEvents } from '@/lib/engine/ingest';
 import { Card, KeyValue, Notice, Surface, Tabs, ViewHeader } from '@/components/ui';
-import { UsersPanel, type MemberOption } from '@/components/settings/users-panel';
+import { UsersPanel } from '@/components/settings/users-panel';
 import { AdminTools } from '@/components/settings/admin-tools';
 import { ReviewButton } from '@/components/settings/review-button';
 import { MatchingForm, RulesForm, SyncForm, TwentyConnectionForm } from '@/components/settings/settings-forms';
+import { getMeetingAnalyzer } from '@/lib/meetings/analysis';
+import { ASSISTANT_NAME } from '@/lib/workspace';
+import { IconBolt } from '@/components/icons';
 
 const TABS = [
   { key: 'twenty', label: 'Twenty' },
   { key: 'rules', label: 'Rules and matching' },
   { key: 'sync', label: 'Sync out' },
-  { key: 'users', label: 'Users and pods' },
+  { key: 'users', label: 'Team & pods' },
+  { key: 'scout', label: ASSISTANT_NAME },
   { key: 'activity', label: 'Activity log' },
 ];
 
@@ -33,9 +37,6 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       <Surface flush>
         <ViewHeader title="Workspace settings" meta="Admin only" />
         <Tabs inset={false} current={tab} tabs={TABS.map((t) => ({ ...t, href: `/settings?tab=${t.key}`, count: t.key === 'activity' && reviewCount ? reviewCount : undefined }))} />
-        <p className="px-4 py-3 text-[12.5px] text-ink-500">
-          Twenty stays the system of record. Cadence only writes <span className="font-medium text-ink-700">[Cadence]</span> activity notes and mirrored tasks back to it.
-        </p>
       </Surface>
 
       {tab === 'twenty' ? <TwentyTab mode={e.TWENTY_MODE} dryRun={e.CADENCE_DRY_RUN} hasEnvKey={Boolean(e.TWENTY_API_KEY)} /> : null}
@@ -47,25 +48,31 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       ) : null}
       {tab === 'sync' ? <SyncForm sync={settings.sync} /> : null}
       {tab === 'users' ? <UsersTab /> : null}
+      {tab === 'scout' ? <ScoutTab /> : null}
       {tab === 'activity' ? <ActivityTab /> : null}
     </div>
   );
 }
 
+function ScoutTab() {
+  const analyzer = getMeetingAnalyzer();
+  const connected = analyzer.name !== 'local-stats';
+  return <Card title={<span className="flex items-center gap-2"><IconBolt size={18} />{ASSISTANT_NAME}</span>}>
+    <div className="space-y-4 p-5"><KeyValue items={[
+      { k: 'AI provider', v: connected ? analyzer.name : 'Not configured' },
+      { k: 'Meeting analysis', v: connected ? 'Available with a transcript' : 'Disabled until a provider is connected' },
+      { k: 'Transcript statistics', v: 'Available locally' },
+    ]} />{!connected ? <Notice tone="info">A model provider has not been connected to this workspace. Scout will use the configured provider when available.</Notice> : null}</div>
+  </Card>;
+}
+
 async function UsersTab() {
   const [users, pods, peopleByPod] = await Promise.all([
-    prisma.user.findMany({ include: { pods: true }, orderBy: [{ role: 'asc' }, { name: 'asc' }] }),
-    prisma.pod.findMany({ include: { _count: { select: { users: true } } }, orderBy: { name: 'asc' } }),
+    prisma.user.findMany({ include: { pods: true, enrollments: { where: { status: { in: ['ACTIVE', 'PAUSED'] } }, select: { podId: true } }, _count: { select: { enrollments: { where: { status: { in: ['ACTIVE', 'PAUSED'] } } } } } }, orderBy: [{ role: 'asc' }, { name: 'asc' }] }),
+    prisma.pod.findMany({ include: { _count: { select: { users: { where: { user: { active: true } } } } } }, orderBy: { name: 'asc' } }),
     prisma.personCache.groupBy({ by: ['podOwner'], where: { deletedAt: null }, _count: { _all: true } }),
   ]);
   const peopleCount = new Map(peopleByPod.map((r) => [r.podOwner, r._count._all]));
-  let members: MemberOption[] = [];
-  try {
-    const client = await getTwentyClient();
-    members = (await client.listWorkspaceMembers()).map((m) => ({ id: m.id, label: `${m.firstName} ${m.lastName}${m.email ? ` (${m.email})` : ''}` }));
-  } catch {
-    members = [];
-  }
   return (
     <UsersPanel
       users={users.map((u) => ({
@@ -73,11 +80,9 @@ async function UsersTab() {
         email: u.email,
         name: u.name,
         role: u.role,
-        timezone: u.timezone,
-        twentyMemberId: u.twentyMemberId,
-        aliases: u.aliases,
-        dailyCap: u.dailyCap,
         active: u.active,
+        openWork: u._count.enrollments,
+        openPodIds: [...new Set(u.enrollments.flatMap((e) => e.podId ? [e.podId] : []))],
         podIds: u.pods.map((p) => p.podId),
       }))}
       pods={pods.map((p) => ({
@@ -86,9 +91,8 @@ async function UsersTab() {
         podOwnerValue: p.podOwnerValue,
         userCount: p._count.users,
         peopleCount: peopleCount.get(p.podOwnerValue) ?? 0,
-        discovered: Boolean(p.discoveredAt),
+        archived: p.archived,
       }))}
-      members={members}
     />
   );
 }

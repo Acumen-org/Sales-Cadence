@@ -54,12 +54,16 @@ import type {
   TwentyView,
   TwentyWorkspaceMember,
   UpdateTaskInput,
+  EnrichPersonInput,
+  EnrichCompanyInput,
 } from './types';
 
 export type MockWrite =
   | { op: 'createNote'; id: string; input: CreateNoteInput }
   | { op: 'createTask'; id: string; input: CreateTaskInput }
   | { op: 'updateTask'; id: string; patch: UpdateTaskInput }
+  | { op: 'enrichPerson'; id: string; patch: EnrichPersonInput }
+  | { op: 'enrichCompany'; id: string; patch: EnrichCompanyInput }
   | { op: 'deleteTask'; id: string };
 
 function clone<T>(v: T): T {
@@ -208,6 +212,7 @@ export class MockTwentyClient implements TwentyClient {
       items = items.filter((p) => set.has(p.id));
     }
     if (opts?.podOwner) items = items.filter((p) => p.podOwner === opts.podOwner);
+    if (opts?.companyId) items = items.filter((p) => p.companyId === opts.companyId);
     items = since(items, opts);
     return page(clone(items), opts);
   }
@@ -355,6 +360,24 @@ export class MockTwentyClient implements TwentyClient {
     this.maybeFail();
     this.tasks = this.tasks.filter((t) => t.id !== id);
     this.writes.push({ op: 'deleteTask', id });
+  }
+
+  async enrichPerson(id: string, patch: EnrichPersonInput) {
+    this.maybeFail();
+    const person = this.people.find((item) => item.id === id && !item.deletedAt);
+    if (!person) throw new Error('This contact no longer exists in Twenty.');
+    Object.assign(person, patch, { updatedAt: new Date().toISOString() });
+    this.writes.push({ op: 'enrichPerson', id, patch: clone(patch) });
+    return clone(person);
+  }
+
+  async enrichCompany(id: string, patch: EnrichCompanyInput) {
+    this.maybeFail();
+    const company = this.companies.find((item) => item.id === id && !item.deletedAt);
+    if (!company) throw new Error('This account no longer exists in Twenty.');
+    Object.assign(company, patch, { updatedAt: new Date().toISOString() });
+    this.writes.push({ op: 'enrichCompany', id, patch: clone(patch) });
+    return clone(company);
   }
 
   // ---- schema -------------------------------------------------------------

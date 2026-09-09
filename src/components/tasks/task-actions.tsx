@@ -3,9 +3,10 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import clsx from 'clsx';
+import { flushTaskDrafts } from './draft-registry';
 import { completeTaskAction, finishFromTaskAction, moveToStepAction, removeFromSequenceAction, skipTaskAction, snoozeTaskAction } from '@/lib/actions/tasks';
 import type { ActionResult } from '@/lib/actions/users';
-import { ACTION_LABELS, type ActionType } from '@/lib/sequences/steps';
+import { type ActionType } from '@/lib/sequences/steps';
 import { IconCheck, IconChevronLeft, IconChevronRight, IconClock, IconExternal, IconPhone, IconSkip } from '@/components/icons';
 
 export type DispositionOption = { key: string; label: string; answered: boolean };
@@ -14,7 +15,6 @@ export type SkipReasonOption = { key: string; label: string; exit: string };
 type Props = {
   taskId: string;
   action: ActionType;
-  altAction: ActionType | null;
   nextUrl: string | null;
   prevUrl: string | null;
   twentyUrl: string | null;
@@ -26,6 +26,7 @@ type Props = {
   currentStep: number;
   canManageEnrollment: boolean;
   size?: 'md' | 'lg';
+  keyboardEnabled?: boolean;
 };
 
 type Panel = 'none' | 'call' | 'skip' | 'snooze' | 'more';
@@ -69,6 +70,7 @@ export function TaskActions(p: Props) {
     (fn: () => Promise<ActionResult>, advance = true) => {
       start(async () => {
         try {
+          if (!(await flushTaskDrafts())) { setError('Save or copy your draft before continuing.'); return; }
           const r = await fn();
           if (!r.ok) {
             setError(r.error);
@@ -151,7 +153,10 @@ export function TaskActions(p: Props) {
   // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (p.keyboardEnabled === false) return;
+      if (pending || e.repeat || e.defaultPrevented || document.querySelector('dialog[open]')) return;
       const target = e.target as HTMLElement | null;
+      if (target?.closest('[role="toolbar"]')) return;
       const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable);
       if (e.key === 'Escape') {
         setPanel('none');
@@ -162,7 +167,7 @@ export function TaskActions(p: Props) {
         if (d) setDisposition(d.key);
         return;
       }
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey || !typing)) {
+      if (e.key === 'Enter' && !target?.closest('[contenteditable="true"]') && (e.ctrlKey || e.metaKey || (!typing && !target?.closest('button,a,summary,[role="button"]')))) {
         if (panel === 'call' && disposition) {
           e.preventDefault();
           submitComplete(pendingAction, disposition);
@@ -208,7 +213,7 @@ export function TaskActions(p: Props) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [panel, disposition, pendingAction, p, router, startDone, submitComplete, submitSkip, submitSnooze]);
+  }, [panel, disposition, pending, pendingAction, p, router, startDone, submitComplete, submitSkip, submitSnooze]);
 
   const big = p.size === 'lg';
   const primary = clsx('btn-primary', big && 'px-4 py-2 text-[14.5px]');
@@ -220,20 +225,9 @@ export function TaskActions(p: Props) {
     <div>
       {/* One row of controls. Its height never changes, so nothing below it jumps. */}
       <div className="flex flex-wrap items-center gap-2">
-        {p.altAction ? (
-          <>
-            <button type="button" disabled={pending} className={primary} onClick={() => startDone(p.action)}>
-              <IconCheck size={16} /> {ACTION_LABELS[p.action]} done
-            </button>
-            <button type="button" disabled={pending} className={secondary} onClick={() => startDone(p.altAction!)}>
-              <IconCheck size={16} /> {ACTION_LABELS[p.altAction]} instead
-            </button>
-          </>
-        ) : (
-          <button type="button" disabled={pending} className={primary} onClick={() => startDone(p.action)}>
-            {p.action === 'CALL' ? <IconPhone size={16} /> : <IconCheck size={16} />} {p.action === 'CALL' ? 'Log call' : 'Done'}
-          </button>
-        )}
+        <button type="button" disabled={pending} className={primary} onClick={() => startDone(p.action)}>
+          {p.action === 'CALL' ? <IconPhone size={16} /> : <IconCheck size={16} />} {p.action === 'CALL' ? 'Log call' : 'Done'}
+        </button>
         <button type="button" disabled={pending} className={clsx(secondary, panel === 'skip' && 'border-ink-300 bg-canvas')} onClick={() => toggle('skip')}>
           <IconSkip size={16} /> Skip
         </button>

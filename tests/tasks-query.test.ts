@@ -9,7 +9,7 @@ import { resetDb, seedBasics, type Basics } from './helpers/db';
 
 const at = (date: string) => new Date(`${date}T10:00:00Z`);
 
-function sessionUser(u: { id: string; email: string; name: string; role: 'ADMIN' | 'SENIOR_FO' | 'JUNIOR_FO'; timezone: string; twentyMemberId: string | null; dailyCap: number | null }, podIds: string[]): SessionUser {
+function sessionUser(u: { id: string; email: string; name: string; role: 'ADMIN' | 'SALES_LEADER' | 'SENIOR_FO' | 'JUNIOR_FO'; timezone: string; twentyMemberId: string | null; dailyCap: number | null }, podIds: string[]): SessionUser {
   return { id: u.id, email: u.email, name: u.name, role: u.role, timezone: u.timezone, twentyMemberId: u.twentyMemberId, dailyCap: u.dailyCap, podIds, pods: podIds.map((id) => ({ id, name: id })) };
 }
 
@@ -75,27 +75,24 @@ describe('tasks query and brief', () => {
     const brief = await getTaskBrief(email1.id, senior);
     expect(brief).not.toBeNull();
     expect(brief!.personName).toBe('Nina Halvorsen');
-    expect(brief!.action.subject).toBe('Acme Logistics <> a quick idea');
-    expect(brief!.action.body).toContain('Hi Nina,');
-    expect(brief!.action.body).toContain('VP Operations at Acme Logistics');
-    // The lead source reaches a template humanised, never as the raw option value.
-    const connect = await getTaskBrief(e.tasks.find((t) => t.label === 'LinkedIn connect')!.id, senior);
-    expect(connect!.action.body).toContain('FPA Wisconsin July 2026');
-    expect(connect!.action.body).not.toContain('FPA_WISCONSIN_JULY_2026');
+    // Copy is the module's own text, verbatim: no substitution, so no half-filled greeting.
+    expect(brief!.action.subject).toBe('A quick idea for your team');
+    expect(brief!.action.body).toContain('keep it short');
+    expect(brief!.action.body).not.toMatch(/\{\{/);
+    // Both modules of step 1 are offered together, the email and the LinkedIn connect.
+    expect(brief!.modules.map((m) => m.action.type)).toEqual(['EMAIL', 'LINKEDIN_CONNECT']);
     // What Twenty itself says about the person, carried onto the panel.
     expect(brief!.podName).toBe('Pod Alisa');
     expect(brief!.ownerName).toBe('Alisa Marsh');
     expect(brief!.person.tier).toBe('LEVEL_1');
     expect(brief!.person.leadSource).toEqual(['FPA_WISCONSIN_JULY_2026']);
-    expect(brief!.action.body.trim().endsWith('Alisa')).toBe(true);
     // Tomas Berg is a colleague at Acme Logistics (not enrolled); Mateo Silva too
     expect(brief!.colleagues.map((c) => c.name)).toEqual(expect.arrayContaining(['Tomas Berg', 'Mateo Silva']));
     expect(brief!.nextStep?.step.day).toBe(3);
     expect(brief!.nextStep?.plannedDate).toBe('2026-09-09');
-    expect(brief!.nextStep?.description).toBe('Call 1, then Follow-up email or LinkedIn message');
+    expect(brief!.nextStep?.description).toBe('Call 1, then Follow-up email');
     expect(brief!.notes.map((n) => n.id)).toEqual(['note-01']); // from the mock workspace
     expect(brief!.twentyUrl).toContain('/object/person/person-01');
-    expect(brief!.enrollment.version).toBe(1);
 
     // a junior from another pod may not see it
     const daniel = sessionUser(b.users.daniel, [b.pods.Leigh.id]);

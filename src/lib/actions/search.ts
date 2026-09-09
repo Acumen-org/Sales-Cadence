@@ -3,6 +3,7 @@
 import { prisma } from '../db';
 import { requireUser } from '../auth/current-user';
 import { cachedPersonName } from '../person-cache';
+import { campaignScope } from '../campaigns-query';
 
 export type SearchHit = {
   kind: 'person' | 'campaign' | 'sequence';
@@ -14,8 +15,8 @@ export type SearchHit = {
 
 /** Global search (the magnifier / Ctrl+K in the top bar): people, campaigns, sequences. */
 export async function globalSearchAction(query: string): Promise<SearchHit[]> {
-  await requireUser();
-  const q = query.trim();
+  const user = await requireUser();
+  const q = query.trim().slice(0, 200);
   if (q.length < 2) return [];
   const like = { contains: q, mode: 'insensitive' as const };
   const [people, campaigns, sequences] = await Promise.all([
@@ -24,7 +25,7 @@ export async function globalSearchAction(query: string): Promise<SearchHit[]> {
       orderBy: [{ lastName: 'asc' }],
       take: 6,
     }),
-    prisma.campaign.findMany({ where: { name: like }, select: { id: true, name: true, status: true }, take: 3 }),
+    prisma.campaign.findMany({ where: { AND: [campaignScope(user), { name: like }] }, select: { id: true, name: true, status: true }, orderBy: { name: 'asc' }, take: 3 }),
     prisma.sequence.findMany({ where: { name: like, archived: false }, select: { id: true, name: true }, take: 3 }),
   ]);
   return [

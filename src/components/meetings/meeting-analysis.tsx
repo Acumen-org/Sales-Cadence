@@ -1,15 +1,20 @@
+import Link from 'next/link';
 import type { AnalysisStatus } from '@prisma/client';
 import { formatCueTime } from '@/lib/meetings/transcript';
-import { isAnalysisEmpty, type MeetingAnalysis } from '@/lib/meetings/analysis';
-import { IconBolt, IconInfo } from '@/components/icons';
+import { getMeetingAnalyzer, isAnalysisEmpty, type MeetingAnalysis } from '@/lib/meetings/analysis';
+import { IconBolt } from '@/components/icons';
 import { ActionButton } from '@/components/action-form';
 import { analyseMeetingAction } from '@/lib/actions/meetings';
-import { Badge, Notice, Surface } from '@/components/ui';
+import { Badge, Notice, RecordFields, Surface } from '@/components/ui';
+import { requireUser } from '@/lib/auth/current-user';
+import { isAdmin } from '@/lib/auth/rbac';
+import { formatInstant } from '@/lib/dates';
+import { ASSISTANT_NAME } from '@/lib/workspace';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="border-b border-line px-4 py-3.5 last:border-b-0">
-      <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-400">{title}</h3>
+      <h3 className="mb-2 text-sm font-semibold text-ink-900">{title}</h3>
       {children}
     </section>
   );
@@ -20,7 +25,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
  * written and otherwise explains what will appear here. The shape it reads is fixed
  * (src/lib/meetings/analysis.ts), so connecting a model later needs no UI change.
  */
-export function MeetingAnalysisPanel({
+export async function MeetingAnalysisPanel({
   meetingId,
   analysis,
   status,
@@ -40,6 +45,10 @@ export function MeetingAnalysisPanel({
   canRun: boolean;
 }) {
   const empty = isAnalysisEmpty(analysis);
+  const user = await requireUser();
+  const analyzer = getMeetingAnalyzer();
+  const configured = analyzer.name !== 'local-stats';
+  const statisticsOnly = model === 'local-stats';
 
   return (
     <Surface flush>
@@ -48,15 +57,13 @@ export function MeetingAnalysisPanel({
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
             <IconBolt size={15} />
           </span>
-          <h2 className="text-[14px] font-semibold text-ink-900">Analysis</h2>
-          {status === 'READY' ? <Badge tone="green">ready</Badge> : status === 'PENDING' ? <Badge tone="amber">running</Badge> : status === 'FAILED' ? <Badge tone="red">failed</Badge> : null}
+          <h2 className="text-[14px] font-semibold text-ink-900">{ASSISTANT_NAME}</h2>
+          <Badge tone={configured ? 'green' : 'gray'}>{configured ? 'Connected' : 'Not configured'}</Badge>
         </div>
-        {canRun ? (
-          <ActionButton action={analyseMeetingAction} payload={{ meetingId }} className="btn-secondary btn-sm" title="Run the configured analyzer">
-            {status === 'READY' ? 'Re-run' : 'Run'}
-          </ActionButton>
-        ) : null}
+        {canRun && hasTranscript && status !== 'PENDING' ? <ActionButton action={analyseMeetingAction} payload={{ meetingId }} className="btn-secondary btn-sm">{configured ? 'Analyze meeting' : 'Talk time'}</ActionButton> : null}
       </div>
+      {!configured ? <div className="space-y-3 border-b border-line p-4"><div className="text-sm font-semibold text-ink-900">AI provider not configured</div><button type="button" disabled className="btn-secondary btn-sm">Analyze with {ASSISTANT_NAME}</button>{isAdmin(user) ? <Link href="/settings?tab=scout" className="ml-2 text-sm font-semibold text-brand-700 hover:underline">Scout settings</Link> : null}</div> : null}
+      {status === 'PENDING' ? <div role="status" className="border-b border-line p-4"><Badge tone="amber">Analysis in progress</Badge></div> : null}
 
       {error ? (
         <div className="px-4 pt-3">
@@ -65,40 +72,12 @@ export function MeetingAnalysisPanel({
       ) : null}
 
       {empty ? (
-        <div className="space-y-3 px-4 py-4">
-          <div className="flex items-start gap-2.5 rounded-xl border border-brand-100 bg-brand-50/60 px-3.5 py-3">
-            <IconInfo size={15} className="mt-0.5 shrink-0 text-brand-600" />
-            <div className="text-[12.5px] leading-relaxed text-brand-900">
-              <p className="font-medium">No analysis yet</p>
-              <p className="mt-0.5 text-brand-800">
-                No language model is connected. {hasTranscript ? 'Run the analyzer for talk-time statistics now,' : 'Add a transcript,'} and when an open model is wired in it will fill this panel.
-              </p>
-            </div>
-          </div>
-          <div>
-            <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-400">What will appear here</h3>
-            <ul className="space-y-1 text-[12.5px] text-ink-500">
-              {[
-                'Outcome: what happened and what happens next',
-                'Key points grouped by topic, with timestamps',
-                'Next steps and who owns them',
-                'Questions left unanswered',
-                'Objections, risks and competitors mentioned',
-                'Talk-time share per speaker',
-              ].map((t) => (
-                <li key={t} className="flex gap-2">
-                  <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-ink-300" />
-                  {t}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
+        <div className="p-4 text-sm text-ink-500">{analysis && statisticsOnly ? 'This transcript has no timed speaker segments.' : hasTranscript ? 'No analysis saved' : 'Add a transcript to analyze this meeting.'}</div>
       ) : (
         <>
           {analysis!.outcome ? (
             <Section title="Outcome">
-              <p className="text-[13px] leading-relaxed text-ink-700">{analysis!.outcome}</p>
+              <p className="text-sm leading-7 text-ink-800">{analysis!.outcome}</p>
             </Section>
           ) : null}
 
@@ -107,11 +86,11 @@ export function MeetingAnalysisPanel({
               <div className="space-y-3">
                 {analysis!.keyPoints.map((g) => (
                   <div key={g.topic}>
-                    <div className="text-[12.5px] font-medium text-ink-900">{g.topic}</div>
+                    <div className="text-sm font-medium text-ink-900">{g.topic}</div>
                     <ul className="mt-1 space-y-1.5">
                       {g.points.map((pt, i) => (
-                        <li key={i} className="flex gap-2.5 text-[12.5px]">
-                          {pt.at !== null ? <span className="shrink-0 font-mono text-[11px] text-ink-400">{formatCueTime(pt.at)}</span> : null}
+                        <li key={i} className="flex gap-2.5 text-sm">
+                          {pt.at !== null ? <span className="shrink-0 font-mono text-xs font-bold text-ink-900">{formatCueTime(pt.at)}</span> : null}
                           <span className="text-ink-700">{pt.text}</span>
                         </li>
                       ))}
@@ -125,20 +104,14 @@ export function MeetingAnalysisPanel({
           {analysis!.nextSteps.length ? (
             <Section title="Next steps">
               <ul className="space-y-1.5">
-                {analysis!.nextSteps.map((s, i) => (
-                  <li key={i} className="text-[12.5px] text-ink-700">
-                    {s.text}
-                    {s.owner ? <span className="text-ink-400"> · {s.owner}</span> : null}
-                    {s.due ? <span className="text-ink-400"> · {s.due}</span> : null}
-                  </li>
-                ))}
+                {analysis!.nextSteps.map((step, index) => <li key={index} className="rounded-lg border border-line p-3"><div className="mb-3 text-sm font-semibold text-ink-900">{step.text}</div><RecordFields items={[{ label: 'Owner', value: step.owner }, { label: 'Due', value: step.due }]} /></li>)}
               </ul>
             </Section>
           ) : null}
 
           {analysis!.openQuestions.length ? (
             <Section title="Open questions">
-              <ul className="space-y-1 text-[12.5px] text-ink-700">
+              <ul className="space-y-1 text-sm text-ink-700">
                 {analysis!.openQuestions.map((t, i) => (
                   <li key={i}>{t}</li>
                 ))}
@@ -149,7 +122,7 @@ export function MeetingAnalysisPanel({
           {analysis!.risks.length || analysis!.competitors.length ? (
             <Section title="Risks and competitors">
               {analysis!.risks.length ? (
-                <ul className="space-y-1 text-[12.5px] text-ink-700">
+                <ul className="space-y-1 text-sm text-ink-700">
                   {analysis!.risks.map((t, i) => (
                     <li key={i}>{t}</li>
                   ))}
@@ -168,13 +141,13 @@ export function MeetingAnalysisPanel({
           ) : null}
 
           {analysis!.talkShare.length ? (
-            <Section title="Talk time">
+            <Section title={statisticsOnly ? 'Transcript talk time' : 'Talk time'}>
               <ul className="space-y-2">
                 {analysis!.talkShare.map((t) => (
                   <li key={t.speaker}>
-                    <div className="flex items-baseline justify-between gap-2 text-[12.5px]">
+                    <div className="flex items-baseline justify-between gap-2 text-sm">
                       <span className="truncate text-ink-700">{t.speaker}</span>
-                      <span className="font-medium text-ink-900">{Math.round(t.share * 100)}%</span>
+                      <span className="font-bold text-ink-900">{Math.round(t.share * 100)}%</span>
                     </div>
                     <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-canvas">
                       <div className="h-full rounded-full bg-brand-500" style={{ width: `${Math.round(t.share * 100)}%` }} />
@@ -187,17 +160,11 @@ export function MeetingAnalysisPanel({
 
           {analysis!.sections.map((s) => (
             <Section key={s.title} title={s.title}>
-              <p className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-ink-700">{s.body}</p>
+              <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink-700">{s.body}</p>
             </Section>
           ))}
 
-          <Section title="Provenance">
-            <p className="text-[11.5px] text-ink-400">
-              {model ? `Model: ${model}. ` : ''}
-              {analysedAt ? `Generated ${analysedAt.toLocaleString('en-GB')}.` : ''}
-              {analysis!.confidence !== null ? ` Confidence ${Math.round(analysis!.confidence * 100)}%.` : ''}
-            </p>
-          </Section>
+          <Section title="Analysis details"><RecordFields items={[{ label: statisticsOnly ? 'Method' : 'Model', value: statisticsOnly ? 'Computed from transcript timestamps' : model }, { label: 'Generated', value: analysedAt ? formatInstant(analysedAt, user.timezone) : null }, { label: 'Confidence', value: analysis!.confidence !== null ? `${Math.round(analysis!.confidence * 100)}%` : null }]} /></Section>
         </>
       )}
     </Surface>

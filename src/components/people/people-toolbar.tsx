@@ -10,13 +10,11 @@ type Props = {
   /** Option values from the Twenty mapping, so the filters offer exactly what the CRM holds. */
   tiers: string[];
   types: string[];
-  lists: string[];
   q: string;
   pod: string;
   status: string;
   tier: string;
   type: string;
-  list: string;
 };
 
 /**
@@ -34,7 +32,7 @@ const SEQUENCE_STATES = [
   { value: 'dnd', label: 'Do not contact' },
 ];
 
-export function PeopleToolbar({ pods, tiers, types, lists, q, pod, status, tier, type, list }: Props) {
+export function PeopleToolbar({ pods, tiers, types, q, pod, status, tier, type }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -47,6 +45,7 @@ export function PeopleToolbar({ pods, tiers, types, lists, q, pod, status, tier,
       else next.delete(k);
     }
     next.delete('page');
+    next.delete('list');
     router.push(`${pathname}?${next.toString()}`);
   };
 
@@ -62,7 +61,6 @@ export function PeopleToolbar({ pods, tiers, types, lists, q, pod, status, tier,
     pod ? { key: 'pod', label: `Pod is ${pods.find((p) => p.podOwnerValue === pod)?.name ?? optionLabel(pod)}` } : null,
     tier ? { key: 'tier', label: optionLabel(tier) } : null,
     type ? { key: 'type', label: optionLabel(type) } : null,
-    list ? { key: 'list', label: `Cadence is ${optionLabel(list)}` } : null,
     status ? { key: 'status', label: SEQUENCE_STATES.find((s) => s.value === status)?.label ?? status } : null,
   ].filter((x): x is { key: string; label: string } => Boolean(x));
 
@@ -103,7 +101,6 @@ export function PeopleToolbar({ pods, tiers, types, lists, q, pod, status, tier,
       </select>
       <Select name="tier" value={tier} label="Filter by tier" options={tiers} all="Any tier" />
       <Select name="type" value={type} label="Filter by contact type" options={types} all="Any type" />
-      <Select name="list" value={list} label="Filter by cadence in Twenty" options={lists} all="Any cadence" />
       <select value={status} onChange={(e) => update({ status: e.target.value || null })} aria-label="Filter by sequence state" className="!w-auto !py-2 !text-[12.5px]">
         {SEQUENCE_STATES.map((s) => (
           <option key={s.value} value={s.value}>
