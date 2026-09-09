@@ -173,7 +173,7 @@ async function ActivityTab() {
               <tbody>
                 {events.map((ev) => (
                   <tr key={ev.id} className={ev.needsReview ? 'bg-amber-50/60' : undefined}>
-                    <td className="whitespace-nowrap text-[12px]">{ev.receivedAt.toLocaleString('en-GB')}</td>
+                    <td className="whitespace-nowrap text-[12px]">{formatInstant(ev.receivedAt, WORKSPACE_TIMEZONE)}</td>
                     <td className="text-[12px]">{ev.source.toLowerCase()}</td>
                     <td className="text-[12px]">{ev.eventName}</td>
                     <td className="font-mono text-[11px]">{ev.externalId}</td>
@@ -207,14 +207,14 @@ async function ActivityTab() {
               <tbody>
                 {writes.map((w) => (
                   <tr key={w.id}>
-                    <td className="whitespace-nowrap text-[12px]">{w.createdAt.toLocaleString('en-GB')}</td>
+                    <td className="whitespace-nowrap text-[12px]">{formatInstant(w.createdAt, WORKSPACE_TIMEZONE)}</td>
                     <td className="text-[12px]">
                       {w.operation}
                       {w.dryRun ? <span className="ml-1 rounded bg-sky-50 px-1 text-[10px] text-sky-700">dry run</span> : null}
                     </td>
                     <td className="text-[12px]">{w.objectType}</td>
                     <td className="font-mono text-[11px]">{w.twentyId}</td>
-                    <td className="max-w-md truncate font-mono text-[11px] text-ink-400">{JSON.stringify(w.payload)}</td>
+                    <td className="max-w-md truncate font-mono text-[11px] text-ink-700" title={JSON.stringify(w.payload)}>{JSON.stringify(w.payload)}</td>
                   </tr>
                 ))}
               </tbody>

@@ -4,7 +4,7 @@ import { SYSTEM_ACTOR } from '@/lib/audit';
 import type { SessionUser } from '@/lib/auth/current-user';
 import { getSettings, saveSettingsSection } from '@/lib/settings';
 import { applyExitConsequence, completeCall, enrollPeople, exitEnrollment, finishEnrollment, moveToStep, previewEnrollment, skipWithReason } from '@/lib/engine';
-import { listTasks } from '@/lib/tasks-query';
+import { listTaskGroups } from '@/lib/tasks-query';
 import { getMockTwentyClient } from '@/lib/twenty/mock-client';
 import { WORKSPACE_TIMEZONE } from '@/lib/workspace';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
@@ -145,8 +145,9 @@ describe('Outreach-style outcomes', () => {
     // Copy is literal: no variable syntax survives into what an FO would send.
     expect(brief?.action.body).not.toMatch(/\{\{/);
 
-    const list = await listTasks(admin, { tab: 'today', channel: 'LINKEDIN' }, at('2026-09-08'));
-    expect(list.rows.every((x) => x.action.startsWith('LINKEDIN'))).toBe(true);
+    const list = await listTaskGroups(admin, { tab: 'today', channel: 'LINKEDIN' }, at('2026-09-08'));
+    // A row is a step, so the filter keeps steps that contain a LinkedIn module.
+    expect(list.rows.every((x) => x.childActions.some((c) => c.action.startsWith('LINKEDIN')))).toBe(true);
     expect(list.channelCounts.EMAIL).toBeGreaterThan(0);
   });
 });

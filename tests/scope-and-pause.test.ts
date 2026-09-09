@@ -108,7 +108,17 @@ describe('reading scope and a paused campaign', () => {
     expect(homeBefore.my.todayTotal + homeBefore.my.overdueTotal - (homeDuring.my.todayTotal + homeDuring.my.overdueTotal)).toBe(heldTouches);
     expect(during.held).toBe(1);
 
-    await resumeEnrollment(enrollment.id, { actor: SYSTEM_ACTOR, now: at('2026-09-07') });
+    // Resuming one person inside a campaign that is itself paused must refuse and say why, not
+    // report success and leave their work held.
+    await prisma.campaign.create({ data: { id: 'camp-paused', name: 'Paused campaign', sequenceId: b.sequence.id, podId: b.pods.Alisa.id, startDate: '2026-09-07', status: 'PAUSED' } });
+    await prisma.enrollment.update({ where: { id: enrollment.id }, data: { campaignId: 'camp-paused' } });
+    const refused = await resumeEnrollment(enrollment.id, { actor: SYSTEM_ACTOR, now: at('2026-09-07') });
+    expect(refused.resumed).toBe(false);
+    expect(refused.refused).toMatch(/campaign/i);
+    expect((await prisma.enrollment.findUniqueOrThrow({ where: { id: enrollment.id } })).status).toBe('PAUSED');
+    await prisma.enrollment.update({ where: { id: enrollment.id }, data: { campaignId: null } });
+
+    expect((await resumeEnrollment(enrollment.id, { actor: SYSTEM_ACTOR, now: at('2026-09-07') })).resumed).toBe(true);
     const after = await listTaskGroups(karson, { tab: 'today', channel: null, podId: null, foUserId: null }, at('2026-09-07'));
     expect(after.rows.some((r) => r.enrollmentId === enrollment.id)).toBe(true);
     expect((await completeTask({ taskId: task.id, source: 'MANUAL' }, { actor: SYSTEM_ACTOR, now: at('2026-09-07') })).ok).toBe(true);

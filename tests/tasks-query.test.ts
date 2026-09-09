@@ -4,7 +4,7 @@ import { SYSTEM_ACTOR } from '@/lib/audit';
 import type { SessionUser } from '@/lib/auth/current-user';
 import { getTaskBrief } from '@/lib/brief';
 import { enrollPeople, snoozeTask } from '@/lib/engine';
-import { listTasks } from '@/lib/tasks-query';
+import { listTaskGroups } from '@/lib/tasks-query';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 
 const at = (date: string) => new Date(`${date}T10:00:00Z`);
@@ -25,26 +25,37 @@ describe('tasks query and brief', () => {
     await enrollPeople({ personIds: ['person-15'], sequenceId: b.sequence.id, podId: b.pods.Leigh.id, startDate: '2026-09-03', assignment: { mode: 'FIXED', foUserId: b.users.leigh.id }, actor: SYSTEM_ACTOR }, { now: at('2026-09-03') });
   });
 
-  it('classifies tasks into today / overdue / upcoming by the effective date', async () => {
+  // A row is one step, not one task: the day-1 step is an email and a LinkedIn connect, and the
+  // FO works them as one touchpoint. Every count on this screen is in that unit.
+  it('classifies each step into today / overdue / upcoming by its earliest open touch', async () => {
     const admin = sessionUser(b.users.ria, []);
-    const today = await listTasks(admin, { tab: 'today' }, at('2026-09-07'));
+    const today = await listTaskGroups(admin, { tab: 'today' }, at('2026-09-07'));
     expect(today.today).toBe('2026-09-07');
-    expect(today.rows.map((r) => r.enrollment.personId)).toEqual(['person-01', 'person-01']);
-    expect(today.counts).toEqual({ today: 2, overdue: 2, upcoming: 2, done: 0 });
-    const overdue = await listTasks(admin, { tab: 'overdue' }, at('2026-09-07'));
+    expect(today.rows.map((r) => r.enrollment.personId)).toEqual(['person-01']);
+    expect(today.rows[0].childActions).toHaveLength(2);
+    expect(today.counts).toEqual({ today: 1, overdue: 1, upcoming: 1, done: 0 });
+    const overdue = await listTaskGroups(admin, { tab: 'overdue' }, at('2026-09-07'));
     expect(overdue.rows.every((r) => r.enrollment.personId === 'person-15')).toBe(true);
-    const upcoming = await listTasks(admin, { tab: 'upcoming' }, at('2026-09-07'));
+    const upcoming = await listTaskGroups(admin, { tab: 'upcoming' }, at('2026-09-07'));
     expect(upcoming.rows.every((r) => r.enrollment.personId === 'person-02')).toBe(true);
   });
 
-  it('snoozed tasks move to their snoozed day', async () => {
+  it('a step moves day only when every open touch on it has moved', async () => {
     const admin = sessionUser(b.users.ria, []);
-    const [task] = (await listTasks(admin, { tab: 'today' }, at('2026-09-07'))).rows;
-    await snoozeTask({ taskId: task.id, toDate: '2026-09-08' }, { actor: SYSTEM_ACTOR, now: at('2026-09-07') });
-    const today = await listTasks(admin, { tab: 'today' }, at('2026-09-07'));
-    expect(today.rows.map((r) => r.id)).not.toContain(task.id);
-    const tomorrow = await listTasks(admin, { tab: 'today' }, at('2026-09-08'));
-    expect(tomorrow.rows.map((r) => r.id)).toContain(task.id);
+    const [step] = (await listTaskGroups(admin, { tab: 'today' }, at('2026-09-07'))).rows;
+    const [first, second] = step.childIds;
+
+    // Snoozing one module leaves the step where it is: its sibling is still due today.
+    await snoozeTask({ taskId: first, toDate: '2026-09-08' }, { actor: SYSTEM_ACTOR, now: at('2026-09-07') });
+    const partly = await listTaskGroups(admin, { tab: 'today' }, at('2026-09-07'));
+    expect(partly.rows.map((r) => r.id)).toContain(second);
+
+    // With both snoozed the whole step is tomorrow's work.
+    await snoozeTask({ taskId: second, toDate: '2026-09-08' }, { actor: SYSTEM_ACTOR, now: at('2026-09-07') });
+    const none = await listTaskGroups(admin, { tab: 'today' }, at('2026-09-07'));
+    expect(none.rows.some((r) => r.enrollment.personId === 'person-01')).toBe(false);
+    const tomorrow = await listTaskGroups(admin, { tab: 'today' }, at('2026-09-08'));
+    expect(tomorrow.rows.some((r) => r.enrollment.personId === 'person-01')).toBe(true);
   });
 
   it('scopes by role: junior sees own, senior sees pod, admin sees all', async () => {
@@ -54,17 +65,17 @@ describe('tasks query and brief', () => {
     const admin = sessionUser(b.users.ria, []);
     const now = at('2026-09-07');
 
-    const j = await listTasks(junior, { tab: all('upcoming') }, now);
+    const j = await listTaskGroups(junior, { tab: all('upcoming') }, now);
     expect(j.rows.every((r) => r.foUserId === b.users.karson.id)).toBe(true);
     expect(j.counts.overdue).toBe(0); // Leigh's overdue work is invisible to Karson
 
-    const s = await listTasks(senior, { tab: all('upcoming') }, now);
+    const s = await listTaskGroups(senior, { tab: all('upcoming') }, now);
     expect(s.rows.some((r) => r.foUserId === b.users.karson.id)).toBe(true); // pod colleague
     expect(s.counts.overdue).toBe(0); // other pod
 
-    const a = await listTasks(admin, { tab: all('overdue') }, now);
-    expect(a.counts.overdue).toBe(2);
-    const filtered = await listTasks(admin, { tab: all('upcoming'), podId: b.pods.Alisa.id, foUserId: b.users.karson.id }, now);
+    const a = await listTaskGroups(admin, { tab: all('overdue') }, now);
+    expect(a.counts.overdue).toBe(1);
+    const filtered = await listTaskGroups(admin, { tab: all('upcoming'), podId: b.pods.Alisa.id, foUserId: b.users.karson.id }, now);
     expect(filtered.rows.every((r) => r.foUserId === b.users.karson.id)).toBe(true);
   });
 

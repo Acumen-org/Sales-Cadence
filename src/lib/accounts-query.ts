@@ -29,11 +29,18 @@ export type AccountListRow = {
   mine: boolean;
 };
 
-/** Accounts the user may see: admins everything, others their pods' people's companies. */
+/**
+ * Accounts the user may see: admins everything, everyone else the companies of their pods' people,
+ * of the contacts they own in Twenty, of anyone they are the FO for - and the accounts Twenty says
+ * they own, which otherwise would not appear until somebody worked a contact there.
+ */
 export async function accountScopeCompanyIds(user: SessionUser): Promise<string[] | null> {
   if (isAdmin(user)) return null;
   const pods = visiblePodIds(user) ?? [];
   const podValues = pods.length ? (await prisma.pod.findMany({ where: { id: { in: pods } }, select: { podOwnerValue: true } })).map((p) => p.podOwnerValue) : [];
+  const owned = user.twentyMemberId
+    ? (await prisma.companyCache.findMany({ where: { deletedAt: null, ownerMemberId: user.twentyMemberId }, select: { id: true } })).map((c) => c.id)
+    : [];
   const rows = await prisma.personCache.findMany({
     where: {
       deletedAt: null,
@@ -47,7 +54,7 @@ export async function accountScopeCompanyIds(user: SessionUser): Promise<string[
     select: { companyId: true },
     distinct: ['companyId'],
   });
-  return rows.map((r) => r.companyId!).filter(Boolean);
+  return [...new Set([...owned, ...rows.map((r) => r.companyId!).filter(Boolean)])];
 }
 
 export async function listAccounts(user: SessionUser, opts: { q?: string; scope?: 'all' | 'mine' } = {}): Promise<AccountListRow[]> {
@@ -238,7 +245,7 @@ export async function accountDetail(companyId: string, user: SessionUser) {
       ? prisma.task.findMany({
           where: { enrollment: { personId: { in: personIds } } },
           orderBy: [{ dueAt: 'desc' }],
-          include: { fo: { select: { name: true } }, enrollment: { select: { personId: true, person: { select: { firstName: true, lastName: true } } } } },
+          include: { fo: { select: { name: true } }, enrollment: { select: { personId: true, status: true, person: { select: { firstName: true, lastName: true } } } } },
         })
       : Promise.resolve([]),
     personIds.length
@@ -324,7 +331,9 @@ export async function accountDetail(companyId: string, user: SessionUser) {
       }),
   ].sort((a, b) => b.at.getTime() - a.at.getTime());
 
-  const openTasks = tasks.filter((t) => t.state === 'PENDING');
+  // Held work is not open work: a paused enrollment's touches appear in no task list, so
+  // counting them here would promise the FO something they cannot open.
+  const openTasks = tasks.filter((t) => t.state === 'PENDING' && t.enrollment.status !== 'PAUSED');
   return {
     company,
     ownerName: company.ownerMemberId ? memberName.get(company.ownerMemberId) ?? null : null,

@@ -1,4 +1,5 @@
 import { requireUser } from '@/lib/auth/current-user';
+import { companiesInScope } from '@/lib/meetings-query';
 import { prisma } from '@/lib/db';
 import { MeetingForm } from '@/components/meetings/meeting-form';
 import { PageHeader, Surface } from '@/components/ui';
@@ -15,7 +16,7 @@ export default async function NewMeetingPage({ searchParams }: { searchParams: P
   const user = await requireUser();
   const { account, personId, url } = await searchParams;
   const [companies, person] = await Promise.all([
-    prisma.companyCache.findMany({ where: { deletedAt: null }, select: { id: true, name: true }, orderBy: { name: 'asc' }, take: 500 }),
+    companiesInScope(user),
     personId ? prisma.personCache.findUnique({ where: { id: personId } }) : Promise.resolve(null),
   ]);
   const personName = person ? [person.firstName, person.lastName].filter(Boolean).join(' ').trim() : '';

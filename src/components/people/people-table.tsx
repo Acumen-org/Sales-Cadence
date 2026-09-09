@@ -159,10 +159,10 @@ export function PeopleTable({ rows, canEnroll }: Props) {
                   {p.podName ?? <span className="text-ink-300">-</span>}
                   {p.enrollment?.foName ? <div className="text-[11px] font-semibold text-ink-700">{p.enrollment.foName}</div> : null}
                 </td>
-                <td className="max-w-[14rem] text-[12px]">
+                <td className="text-[12px]">
                   {p.lastTouch ? (
                     <>
-                      <div className="flex min-w-0 items-center gap-1.5" title={p.lastTouch.summary}>
+                      <div className="flex max-w-[13rem] items-center gap-1.5" title={p.lastTouch.summary}>
                         <span className={p.lastTouch.inbound ? 'shrink-0 text-emerald-700' : 'shrink-0 text-ink-400'}><ActionIcon action={p.lastTouch.channel} size={13} /></span>
                         <span className="truncate font-semibold text-ink-800">{touchTitle(p.lastTouch.summary)}</span>
                       </div>

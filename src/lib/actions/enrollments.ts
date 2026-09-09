@@ -44,8 +44,9 @@ export async function pauseEnrollmentAction(formData: FormData): Promise<ActionR
 export async function resumeEnrollmentAction(formData: FormData): Promise<ActionResult> {
   const { user, e, error } = await loadEnrollmentForUser(String(formData.get('enrollmentId') ?? ''));
   if (!e) return { ok: false, error: error ?? 'Not found.' };
-  await resumeEnrollment(e.id, { actor: userActor(user) });
+  const r = await resumeEnrollment(e.id, { actor: userActor(user) });
   revalidateAll(e.campaignId);
+  if (!r.resumed) return { ok: false, error: r.refused ?? 'This enrollment could not be resumed.' };
   return { ok: true, message: 'Resumed.' };
 }
 

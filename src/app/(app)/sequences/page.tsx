@@ -20,10 +20,9 @@ export default async function SequencesPage({ searchParams }: { searchParams: Pr
     /></div>}
     {sequences.map(s => <Link key={s.id} href={'/sequences/' + s.id} className="surface group block overflow-hidden p-6 transition hover:border-brand-300 hover:shadow-md">
       <div className="mb-6 flex flex-wrap items-center gap-3"><span className="rounded-xl bg-brand-50 p-3 text-brand-700"><IconSequences size={22} /></span><h2 className="text-xl font-semibold tracking-tight group-hover:text-brand-700">{s.name}</h2><Badge tone="green" className="ml-auto"><strong>{s.campaigns}</strong> {s.campaigns === 1 ? 'campaign' : 'campaigns'}</Badge></div>
-      {/* The connector trails each step rather than leading the next one, so a flow that wraps
-          ends a row with "continues below" instead of starting one with a stub joined to nothing.
-          Cards stretch to a common height so the line stays level across a row. */}
-      <div className="flex flex-wrap items-stretch gap-y-4">{s.preview.map((step, i) => <div key={step.id} className="flex items-stretch"><div className="flex min-w-32 flex-col rounded-xl border border-line bg-canvas/60 p-3"><div className="mb-2 text-xs text-ink-500">Business day <strong className="text-ink-900">{step.day}</strong></div><div className="space-y-2">{step.actions.map((a, j) => <span key={j} className="flex items-center gap-2 text-xs font-semibold text-ink-900"><ActionIcon action={a} size={14} />{ACTION_LABELS[a as ActionType]}</span>)}</div></div>{i < s.preview.length - 1 && <span aria-hidden className="mx-2 h-px w-5 self-center bg-brand-200" />}</div>)}</div>
+      {/* No connectors: every card is labelled with its own business day, so the line added
+          nothing except a stub trailing into white space wherever the flow wrapped. */}
+      <div className="flex flex-wrap items-stretch gap-2.5">{s.preview.map((step) => <div key={step.id} className="flex min-w-32 flex-col rounded-xl border border-line bg-canvas/60 p-3"><div className="mb-2 text-xs text-ink-500">Business day <strong className="text-ink-900">{step.day}</strong></div><div className="space-y-2">{step.actions.map((a, j) => <span key={j} className="flex items-center gap-2 text-xs font-semibold text-ink-900"><ActionIcon action={a} size={14} />{ACTION_LABELS[a as ActionType]}</span>)}</div></div>)}</div>
     </Link>)}
   </div>;
 }

@@ -181,3 +181,23 @@ test('ending a sequence asks one question and then stops the person', async ({ p
   if (person) await expect(page.getByLabel(`Select ${person.trim()}`)).toHaveCount(0);
   await logout(page);
 });
+
+test('a task that is not in this view is never silently swapped for another', async ({ page }) => {
+  await loginAs(page, 'Alisa');
+  // The person on the first row of Today, and their task id.
+  await page.goto('/tasks?tab=today');
+  const first = page.locator('#main-content a[href*="task="]').first();
+  const href = (await first.getAttribute('href'))!;
+  const taskId = new URL(href, 'http://x').searchParams.get('task')!;
+  const person = (await first.locator('span.font-medium').first().textContent())!.trim();
+
+  // Asking for that task from a tab it is not in must open that task, not the first row of the tab.
+  await page.goto(`/tasks?tab=done&task=${taskId}`);
+  await expect(page.locator('main')).toContainText(person);
+  await expect(page.getByText(/not in/i).first()).toBeVisible();
+
+  // And a task that does not exist says so rather than opening somebody else's.
+  await page.goto('/tasks?tab=today&task=00000000-0000-0000-0000-000000000000');
+  await expect(page.getByText(/not in your list any more/i)).toBeVisible();
+  await logout(page);
+});
