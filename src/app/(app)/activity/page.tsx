@@ -70,7 +70,7 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
                   <div className="min-w-0 space-y-2">
                     <p className="break-words text-[14px] font-semibold text-ink-900">{item.title}</p>
                     {item.subjectName ? <div className="flex flex-wrap items-center gap-x-3 gap-y-1">{item.subjectHref ? <Link href={item.subjectHref} className="text-[14px] font-bold text-brand-700 hover:underline">{item.subjectName}</Link> : <DataValue>{item.subjectName}</DataValue>}{item.companyName ? <DataValue>{item.companyName}</DataValue> : null}</div> : null}
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px]"><span className="inline-flex items-center gap-2 text-ink-500">By <DataValue>{item.actorName ?? 'System'}</DataValue></span>{item.detail ? <EventDetail text={item.detail} /> : null}</div>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px]"><span className="inline-flex items-center gap-2 text-ink-500">By <DataValue>{item.actorName ?? 'System'}</DataValue></span><EventDetail fields={item.fields} /></div>
                   </div>
                   <div className="col-start-2 sm:col-start-auto"><Badge tone={item.tone === 'in' ? 'green' : 'gray'}>{item.kind === 'touch' ? item.icon === 'EMAIL' ? 'Email' : item.icon === 'CALL' ? 'Call' : item.icon === 'LINKEDIN' ? 'LinkedIn' : item.icon === 'MEETING' ? 'Meeting' : KIND_LABELS[item.kind] : KIND_LABELS[item.kind]}</Badge></div>
                 </li>

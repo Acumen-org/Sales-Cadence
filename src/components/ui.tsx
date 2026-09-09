@@ -438,16 +438,19 @@ export function DataValue({ children, className }: { children: ReactNode; classN
  * The stored form still goes into date inputs and URLs, which is where it belongs.
  */
 /**
- * The secondary line under a timeline event. Audit descriptions carry several facts - a start
- * date, an assignment rule, a count of closed tasks - and joining them with middots produced the
- * run-on grey line the whole app has been getting rid of. They are rendered as separate values.
+ * The secondary values under a timeline event. An event carries several facts - a start date, who
+ * assigned it, how many open touches it closed - and joining them into one grey line was the
+ * run-on subtext the whole app has been getting rid of. Each is a label and a value.
  */
-export function EventDetail({ text, className }: { text: string; className?: string }) {
-  const parts = text.split(' \u00b7 ').filter(Boolean);
+export function EventDetail({ fields, className }: { fields: { label: string; value: string }[]; className?: string }) {
+  if (!fields.length) return null;
   return (
-    <span className={clsx('flex flex-wrap items-center gap-x-3 gap-y-1', className)}>
-      {parts.map((part) => (
-        <span key={part} className="text-[11.5px] text-ink-600">{part}</span>
+    <span className={clsx('flex flex-wrap items-center gap-x-4 gap-y-1', className)}>
+      {fields.map((f) => (
+        <span key={f.label} className="text-[11.5px]">
+          <span className="text-ink-500">{f.label}</span>
+          <strong className="ml-1.5 font-semibold text-ink-800">{f.value}</strong>
+        </span>
       ))}
     </span>
   );

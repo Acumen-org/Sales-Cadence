@@ -132,7 +132,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                             <span className="text-ink-800">{it.title}</span>
                           )}
                           {it.personName ? <span className="block truncate text-[12px] font-semibold text-ink-900">{it.personName}</span> : null}
-                          {it.detail ? <EventDetail text={it.detail} className="mt-0.5" /> : null}
+                          <EventDetail fields={it.fields} className="mt-0.5" />
                         </span>
                         <span className="shrink-0 text-[11px] font-semibold text-ink-700">{formatInstant(it.at, user.timezone)}</span>
                       </li>
@@ -232,7 +232,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                         <span className="font-medium text-ink-800">{it.title}</span>
                       )}
                       {it.personName ? <span className="mt-0.5 block text-[12px] font-semibold text-ink-900">{it.personName}</span> : null}
-                      {it.detail ? <EventDetail text={it.detail} className="mt-0.5" /> : null}
+                      <EventDetail fields={it.fields} className="mt-0.5" />
                     </span>
                     <span className="flex shrink-0 flex-col items-end gap-1.5">
                       <span className="text-[11px] font-semibold text-ink-700">{formatInstant(it.at, user.timezone)}</span>

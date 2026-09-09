@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from './db';
-import { describeAudit } from './audit-format';
+import { auditDetailText, describeAudit, type AuditField } from './audit-format';
 import { cachedPersonName } from './person-cache';
 import type { SessionUser } from './auth/current-user';
 import { isJuniorFo, visiblePodIds } from './auth/rbac';
@@ -37,6 +37,8 @@ export type ActivityItem = {
   /** What happened, in plain language. */
   title: string;
   detail: string | null;
+  /** Labelled values for the row. `detail` is the same content on one line, for search. */
+  fields: AuditField[];
   /** Who did it. */
   actorName: string | null;
   actorId: string | null;
@@ -221,7 +223,7 @@ async function activityPage(f: ActivityFilters, scope: FeedScope): Promise<Activ
   const auditItems: ActivityItem[] = audits.map((a) => {
     const kind = AUDIT_KIND[a.entityType] ?? 'person';
     const actorName = a.actorType === 'USER' ? (a.actorId ? userName.get(a.actorId) ?? a.actorLabel : a.actorLabel) : a.actorLabel;
-    const { title, detail } = describeAudit(a.action, a.details as Record<string, unknown> | null, null);
+    const { title, fields } = describeAudit(a.action, a.details as Record<string, unknown> | null, null);
 
     let subjectName: string | null = null;
     let subjectHref: string | null = null;
@@ -277,7 +279,8 @@ async function activityPage(f: ActivityFilters, scope: FeedScope): Promise<Activ
       at: a.createdAt,
       kind,
       title,
-      detail,
+      detail: auditDetailText(fields),
+      fields,
       actorName: actorName ?? null,
       actorId: a.actorId ?? null,
       subjectName,
@@ -294,6 +297,7 @@ async function activityPage(f: ActivityFilters, scope: FeedScope): Promise<Activ
     kind: 'touch',
     title: t.summary,
     detail: t.direction === 'INBOUND' ? 'Inbound' : 'Outbound',
+    fields: [{ label: 'Direction', value: t.direction === 'INBOUND' ? 'Inbound' : 'Outbound' }],
     actorName: t.actorUserId ? userName.get(t.actorUserId) ?? t.actorLabel : t.actorLabel,
     actorId: t.actorUserId ?? null,
     subjectName: cachedPersonName(t.person),

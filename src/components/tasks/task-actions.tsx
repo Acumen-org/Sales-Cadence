@@ -222,8 +222,10 @@ export function TaskActions(p: Props) {
   const laterSteps = p.steps.filter((s) => s.index > p.currentStep);
 
   return (
-    <div>
-      {/* One row of controls. Its height never changes, so nothing below it jumps. */}
+    <div className="sticky bottom-0 -mx-5 -mb-5 border-t border-line bg-white/95 px-5 pb-5 pt-4 backdrop-blur supports-[backdrop-filter]:bg-white/85">
+      {/* One row of controls. Its height never changes, so nothing below it jumps. It stays at the
+          foot of the task while the message scrolls, because committing the task is the one thing
+          the FO does on every single row. */}
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" disabled={pending} className={primary} onClick={() => startDone(p.action)}>
           {p.action === 'CALL' ? <IconPhone size={16} /> : <IconCheck size={16} />} {p.action === 'CALL' ? 'Log call' : 'Done'}
