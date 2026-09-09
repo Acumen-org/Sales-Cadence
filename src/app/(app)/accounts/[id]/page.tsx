@@ -216,7 +216,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                         </td>
                         <td className="whitespace-nowrap text-[12.5px]">{p.enrollment?.foName ?? <span className="text-ink-300">-</span>}</td>
                         <td className="font-bold text-ink-900">{p.touches}</td>
-                        <td className="whitespace-nowrap text-[12px] text-ink-500">{p.lastTouchAt ? formatInstant(p.lastTouchAt, user.timezone) : <span className="text-ink-300">never</span>}</td>
+                        <td className="whitespace-nowrap text-[12px] font-semibold text-ink-700">{p.lastTouchAt ? formatInstant(p.lastTouchAt, user.timezone) : <span className="font-normal text-ink-300">never</span>}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -262,7 +262,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
           <div className="space-y-3">
             <Card title={`Campaigns (${campaigns.length})`}>
               {campaigns.length === 0 ? (
-                <EmptyState title="No campaigns have touched this account" />
+                <EmptyState title="No campaigns have touched this account" hint="Enrol someone here from People, or start a campaign for this pod." action={<Link href="/campaigns/new" className="btn-secondary">New campaign</Link>} />
               ) : (
                 <table className="table">
                   <thead>

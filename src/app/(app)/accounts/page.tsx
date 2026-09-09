@@ -69,7 +69,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
                     </td>
                     <td className="font-bold text-ink-900">{a.replied}</td>
                     <td className="font-bold text-ink-900">{a.meetings}</td>
-                    <td className="whitespace-nowrap text-[12px] text-ink-500">{a.lastTouchAt ? formatInstant(a.lastTouchAt, user.timezone) : <span className="text-ink-300">never</span>}</td>
+                    <td className="whitespace-nowrap text-[12px] font-semibold text-ink-700">{a.lastTouchAt ? formatInstant(a.lastTouchAt, user.timezone) : <span className="font-normal text-ink-300">never</span>}</td>
                   </tr>
                 ))}
               </tbody>

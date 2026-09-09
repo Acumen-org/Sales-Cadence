@@ -704,9 +704,9 @@ export class TwentyGraphqlClient implements TwentyClient {
     }
   }
 
-  async ping(): Promise<{ ok: true; detail: string }> {
+  async ping(): Promise<{ ok: true; detail: string; members: number }> {
     const members = await this.listWorkspaceMembers();
-    return { ok: true, detail: `connected to ${this.opts.baseUrl}: ${members.length} workspace members` };
+    return { ok: true, detail: `Connected to ${this.opts.baseUrl}`, members: members.length };
   }
 }
 

@@ -155,7 +155,7 @@ export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispos
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline justify-between gap-2">
                     <span className="truncate text-[13.5px] font-medium text-ink-900">{t.personName}</span>
-                    <span className={clsx('shrink-0 text-[11.5px]', overdue ? 'font-medium text-red-600' : 'text-ink-400')} title={formatLocalDate(t.due, 'long')}>
+                    <span className={clsx('shrink-0 text-[11.5px] font-semibold', overdue ? 'text-red-700' : 'text-ink-700')} title={formatLocalDate(t.due, 'long')}>
                       {t.state === 'PENDING' ? relativeDays(t.due, today) : t.state.toLowerCase()}
                     </span>
                   </span>
@@ -167,7 +167,7 @@ export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispos
                   </span>
                   <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[11.5px] text-ink-400">
                     <span className="truncate">{t.companyName ?? 'no company'}</span>
-                    <span>· Day {t.stepDay}</span>
+                    <span>· Day <strong className="font-semibold text-ink-700">{t.stepDay}</strong></span>
                     {t.snoozed ? <Badge tone="sky">snoozed</Badge> : null}
                     {showFo ? <span>· {t.foName}</span> : null}
                   </span>

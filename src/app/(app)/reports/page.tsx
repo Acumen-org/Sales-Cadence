@@ -1,4 +1,4 @@
-﻿import Link from 'next/link';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
 import { canViewReports, toActor, visiblePodIds } from '@/lib/auth/rbac';

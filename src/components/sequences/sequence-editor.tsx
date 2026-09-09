@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { ACTION_LABELS, ACTION_TYPES, newStepId, StepsSchema, type ActionType, type SequenceStep, type StepAction } from '@/lib/sequences/steps';
 import { ActionForm } from '@/components/action-form';
 import type { ActionResult } from '@/lib/actions/users';
-import { ActionIcon, IconArrowDown, IconArrowUp, IconPlus, IconTrash } from '@/components/icons';
+import { ActionIcon, IconArrowDown, IconArrowUp, IconLock, IconPlus, IconTrash } from '@/components/icons';
 import { Field } from '@/components/ui';
 import { RichTextEditor } from '@/components/rich-text-editor';
 
@@ -41,7 +41,7 @@ export function SequenceEditor({ sequenceId, initialSteps, action, submitLabel, 
             <span className="rounded-lg bg-brand-900 px-3 py-2 text-sm font-bold text-white">{i + 1}</span>
             <label className="flex items-center gap-2 text-xs text-ink-500">Business day <input aria-label={'Step ' + (i + 1) + ' business day'} type="number" min={i ? steps[i - 1].day + 1 : 1} max={steps[i + 1] ? steps[i + 1].day - 1 : 999} value={step.day} onChange={e => update(i, { day: Number(e.target.value) })} disabled={locked(i)} className="!w-20 !font-bold !text-ink-900" /></label>
             <div className="ml-auto flex items-center gap-1">
-              {lockedSteps[step.id] ? <span className="chip-muted"><strong>{lockedSteps[step.id]}</strong> open {lockedSteps[step.id] === 1 ? 'action' : 'actions'} · locked</span> : null}
+              {lockedSteps[step.id] ? <span className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-[12px] font-semibold text-amber-800" title="Work or cancel these before changing this step"><IconLock size={12} />Locked · <strong>{lockedSteps[step.id]}</strong> open {lockedSteps[step.id] === 1 ? 'action' : 'actions'}</span> : null}
               {!readOnly && <><button type="button" className="btn-ghost btn-sm" disabled={locked(i) || !i || locked(i - 1)} aria-label={'Move step ' + (i + 1) + ' up'} onClick={() => move(i, i - 1)}><IconArrowUp size={14} /></button><button type="button" className="btn-ghost btn-sm" disabled={locked(i) || i === steps.length - 1 || locked(i + 1)} aria-label={'Move step ' + (i + 1) + ' down'} onClick={() => move(i, i + 1)}><IconArrowDown size={14} /></button><button type="button" className="btn-ghost btn-sm" disabled={locked(i) || steps.length < 2 || steps.slice(i + 1).some(s => lockedSteps[s.id])} aria-label={'Remove step ' + (i + 1)} onClick={() => setSteps(s => s.filter(x => x.id !== step.id))}><IconTrash size={14} /></button></>}
             </div>
           </div>
@@ -57,6 +57,8 @@ export function SequenceEditor({ sequenceId, initialSteps, action, submitLabel, 
       </li>)}
     </ol>
     {!readOnly && <><div className="flex flex-wrap items-center justify-center gap-2 rounded-xl border border-dashed border-brand-300 bg-brand-50/40 p-5"><span className="mr-2 text-sm font-semibold">New touchpoint</span>{ACTION_TYPES.map(type => <button key={type} type="button" className="btn-secondary" onClick={() => append(type)}><IconPlus size={13} /><ActionIcon action={type} size={14} />{ACTION_LABELS[type]}</button>)}</div>
-      <div className="sticky bottom-3 z-10 flex items-center justify-end gap-4 rounded-xl border border-line bg-white/95 p-3 shadow-lg">{validation && <p role="alert" className="text-sm text-red-700">{validation}</p>}<button type="submit" className="btn-primary" disabled={Boolean(validation)}>{submitLabel}</button></div></>}
+      {/* The bar floats over the page, so the page reserves its height rather than hiding a card behind it. */}
+      <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-end gap-4 rounded-xl border border-line bg-white/95 p-3 shadow-lg backdrop-blur">{validation && <p role="alert" className="mr-auto text-sm font-semibold text-red-700">{validation}</p>}<span className="text-[12px] text-ink-500"><strong className="text-ink-900">{steps.length}</strong> {steps.length === 1 ? 'touchpoint' : 'touchpoints'} over <strong className="text-ink-900">{(steps.at(-1)?.day ?? 1)}</strong> business days</span><button type="submit" className="btn-primary" disabled={Boolean(validation)}>{submitLabel}</button></div>
+      <div aria-hidden className="h-4" /></>}
   </ActionForm>;
 }

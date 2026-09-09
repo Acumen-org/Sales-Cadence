@@ -36,6 +36,9 @@ export type ListPeopleOptions = ListOptions & {
  * TwentyGraphqlClient (real workspace). Writes go through DryRunTwentyClient
  * when CADENCE_DRY_RUN=true.
  */
+/** What a connection check found: reachable, and how much is on the other side. */
+export type TwentyPing = { ok: true; detail: string; people?: number; members?: number };
+
 export interface TwentyClient {
   readonly kind: 'mock' | 'graphql' | 'dry-run';
 
@@ -69,7 +72,7 @@ export interface TwentyClient {
   // ---- schema ----
   introspect(): Promise<TwentyIntrospection>;
   /** Cheap connectivity check; throws with a readable message on failure. */
-  ping(): Promise<{ ok: true; detail: string }>;
+  ping(): Promise<TwentyPing>;
 }
 
 /** Iterate every page of a paginated list. */

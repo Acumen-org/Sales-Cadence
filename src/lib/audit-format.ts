@@ -1,7 +1,14 @@
+import { formatLocalDate, isLocalDate } from './dates';
+
 /**
  * Plain-language descriptions of audit entries for the person timeline.
  * Never dumps raw JSON at the user: unknown actions fall back to the action name.
  */
+/** A stored calendar date, read the way the rest of the app reads it. */
+function dateText(value: string | null | undefined): string {
+  return value && isLocalDate(value) ? formatLocalDate(value, 'long') : 'an unknown date';
+}
+
 type Details = Record<string, unknown> | null | undefined;
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -23,7 +30,7 @@ export function describeAudit(action: string, details: Details, actorLabel: stri
     case 'step_generated': {
       const step = num(d.stepIndex);
       const day = num(d.day);
-      return { title: `Step ${Number.isFinite(step) ? step + 1 : '?'} scheduled`, detail: Number.isFinite(day) ? `Day ${day} · due ${str(d.dueDate) ?? 'unknown'}` : null };
+      return { title: `Step ${Number.isFinite(step) ? step + 1 : '?'} scheduled`, detail: Number.isFinite(day) ? `Business day ${day}, due ${dateText(str(d.dueDate))}` : null };
     }
     case 'replied':
       return { title: `Replied${by === ' by twenty:message.created' ? ' (seen in Twenty)' : by}`, detail: cancelledNote };

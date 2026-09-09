@@ -29,6 +29,10 @@ export function MeetingStage(p: Props) {
   const [open, setOpen] = useState(true);
   const [q, setQ] = useState('');
   const [active, setActive] = useState<number | null>(null);
+  // A recording link that no longer resolves left a black rectangle and a spinner that never
+  // finished, with nothing to click. Losing the media falls back to the same panel an
+  // un-framable provider gets, which at least offers the source.
+  const [mediaFailed, setMediaFailed] = useState(false);
 
   const { cues, format } = useMemo(() => {
     if (!p.transcript) return { cues: [] as TranscriptCue[], format: null as string | null };
@@ -42,7 +46,8 @@ export function MeetingStage(p: Props) {
     return cues.filter((c) => c.text.toLowerCase().includes(needle) || (c.speaker ?? '').toLowerCase().includes(needle));
   }, [cues, q]);
 
-  const canSeek = Boolean(p.mediaUrl);
+  const canSeek = Boolean(p.mediaUrl) && !mediaFailed;
+
   const seek = (seconds: number) => {
     const v = videoRef.current;
     if (!v) return;
@@ -59,6 +64,7 @@ export function MeetingStage(p: Props) {
             src={p.mediaUrl}
             controls
             preload="metadata"
+            onError={() => setMediaFailed(true)}
             className="aspect-video w-full bg-black"
             onTimeUpdate={(e) => {
               const t = e.currentTarget.currentTime;
@@ -87,13 +93,19 @@ export function MeetingStage(p: Props) {
         )}
       </div>
 
-      {(p.embedUrl || p.mediaUrl) && p.providerNote ? <p className="text-[11.5px] text-ink-400">{p.providerNote}</p> : null}
+      {mediaFailed ? (
+        <p role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12.5px] font-medium text-amber-900">
+          This recording did not load. The link may have expired or need a sign-in.
+          <a href={p.sourceUrl} target="_blank" rel="noreferrer" className="font-semibold underline">Open the source</a>
+        </p>
+      ) : null}
+      {(p.embedUrl || p.mediaUrl) && p.providerNote ? <p className="text-[11.5px] text-ink-600">{p.providerNote}</p> : null}
 
       <div className="surface overflow-hidden">
         <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
           <span className="text-[13px] font-semibold text-ink-900">
             Transcript
-            {cues.length ? <span className="ml-2 font-normal text-ink-400">{cues.length} segments{format ? ` · ${format.toUpperCase()}` : ''}</span> : null}
+            {cues.length ? <span className="ml-2 font-normal text-ink-600"><strong className="font-bold text-ink-900">{cues.length}</strong> segments{format ? ` · ${format.toUpperCase()}` : ''}</span> : null}
           </span>
           <span className="text-[12px] text-ink-500">{open ? 'Hide' : 'Show'}</span>
         </button>
