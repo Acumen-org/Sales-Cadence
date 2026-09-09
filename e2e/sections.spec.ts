@@ -21,7 +21,7 @@ test('Home greets the signed-in user and opens personal work from its priorities
   await loginAs(page, 'Alisa');
   await expect(page.getByRole('heading', { name: 'Good day, Alisa' })).toBeVisible();
 
-  for (const label of ['To reach today', 'Completed today', 'Calls today', 'Emails today', 'LinkedIn today', 'My accounts', 'My relationships']) {
+  for (const label of ['To reach today', 'Completed today', 'Calls today', 'Emails today', 'LinkedIn today', 'My accounts', 'My people']) {
     await expect(page.getByText(label, { exact: true })).toBeVisible();
   }
   await expect(page.getByRole('heading', { name: 'Up next' })).toBeVisible();
@@ -233,7 +233,7 @@ test('per-user views: my accounts and my relationships', async ({ page }) => {
   await expect(page.locator('table tbody tr').first()).toBeVisible();
 
   await page.goto('/home');
-  await page.getByRole('link', { name: /My relationships/ }).click();
+  await page.getByRole('link', { name: /My people/ }).click();
   await expect(page).toHaveURL(/\/people\?owner=mine/);
   await expect(page.locator('table tbody tr').first()).toBeVisible();
   await logout(page);

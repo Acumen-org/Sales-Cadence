@@ -22,6 +22,14 @@ type Search = { tab?: string; mode?: string; task?: string; pod?: string; fo?: s
 const TAB_LABELS: Record<TaskTab, string> = { today: 'Today', overdue: 'Overdue', upcoming: 'Upcoming', done: 'Done' };
 const CHANNEL_LABELS: Record<TaskChannel, string> = { CALL: 'Calls', EMAIL: 'Emails', LINKEDIN: 'LinkedIn' };
 
+/** What an empty tab says. Assembling it from the tab label produced "No done tasks". */
+const EMPTY_TITLES: Record<TaskTab, string> = {
+  today: 'Nothing due today',
+  overdue: 'Nothing overdue',
+  upcoming: 'Nothing scheduled yet',
+  done: 'Nothing finished in the last 30 days',
+};
+
 export default async function TasksPage({ searchParams }: { searchParams: Promise<Search> }) {
   const user = await requireUser(); const sp = await searchParams;
   const tab = parseTab(sp.tab); const channel = parseChannel(sp.type); const mode = sp.mode === 'flow' ? 'flow' : 'list';
@@ -65,10 +73,10 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
     {missing ? <Notice tone="warn">That task is not in your list any more. It may have been completed, cancelled, or reassigned.</Notice> : null}
     {requested && !inView && brief ? <Notice tone="info">Showing one touch that is not in <span className="font-medium">{TAB_LABELS[tab]}</span>. <Link href={href({ task: null })} className="font-semibold underline">Back to the list</Link></Notice> : null}
     {held ? <Notice tone="info"><span className="font-medium">{held}</span> {held === 1 ? 'touchpoint is' : 'touchpoints are'} held: their sequence is paused. {manager ? <Link href="/campaigns" className="font-semibold underline">Open campaigns</Link> : 'Ask a pod leader to resume it.'}</Notice> : null}
-    {!rows.length && !brief ? <Surface><EmptyState title={'No ' + TAB_LABELS[tab].toLowerCase() + ' tasks'} icon={<ActionIcon action={channel ?? 'EMAIL'} size={22} />}
+    {!rows.length && !brief ? <Surface><EmptyState title={EMPTY_TITLES[tab]} icon={<ActionIcon action={channel ?? 'EMAIL'} size={22} />}
       /* An empty Today with work sitting in Overdue is the one case where the FO must not be left
          looking at a clear screen: send them to the tab that actually has the work. */
-      action={tab !== 'overdue' && counts.overdue ? <Link href={href({ tab: 'overdue', task: null })} className="btn-primary"><strong>{counts.overdue}</strong> overdue {counts.overdue === 1 ? 'task' : 'tasks'} waiting</Link> : tab !== 'upcoming' && counts.upcoming ? <Link href={href({ tab: 'upcoming', task: null })} className="btn-secondary"><strong>{counts.upcoming}</strong> upcoming</Link> : undefined} /></Surface> : <>
+      action={tab !== 'overdue' && counts.overdue ? <Link href={href({ tab: 'overdue', task: null })} className="btn-primary">View {counts.overdue} overdue {counts.overdue === 1 ? 'touchpoint' : 'touchpoints'}</Link> : tab !== 'upcoming' && counts.upcoming ? <Link href={href({ tab: 'upcoming', task: null })} className="btn-secondary">View {counts.upcoming} upcoming</Link> : undefined} /></Surface> : <>
       {mode === 'flow' && <div className="flex items-center gap-3 rounded-xl border border-brand-200 bg-brand-50 p-3"><strong>{index + 1} / {total}</strong><span className="text-sm text-ink-500">Task flow</span><div className="ml-auto flex gap-2">{prevUrl && <Link aria-label="Previous task" href={prevUrl} className="btn-secondary btn-sm"><IconChevronLeft size={14} /></Link>}{following && <Link href={nextUrl} className="btn-secondary btn-sm">Next<IconChevronRight size={14} /></Link>}<Link href={href({ mode: 'list', task: selected?.id ?? null })} className="btn-secondary btn-sm">Back to list</Link></div></div>}
       <div className={mode === 'flow' ? 'grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_380px]' : 'grid items-start gap-4 xl:grid-cols-[300px_minmax(0,1fr)] 2xl:grid-cols-[300px_minmax(0,1fr)_360px]'}>
         {mode === 'list' && <Surface flush className="max-h-[65vh] overflow-y-auto scroll-thin xl:sticky xl:top-4 xl:max-h-[calc(100vh-17rem)]"><TaskList key={tab + '-' + (channel ?? '')} rows={listRows} selectedId={selected?.id ?? null} today={today} showFo={manager} hrefTemplate={href({ task: '__ID__' })} dispositions={dispositions} skipReasons={skipReasons} fos={options.fos} nextWorkingDay={nextWorkingDay} canPickSnoozeDate={canSnoozeFreely(user)} bulkEnabled={tab !== 'done'} />{rows.length < total && <Link href={href({ limit: String(limit + 200) })} className="btn-ghost m-3">Load more · <strong>{total - rows.length}</strong></Link>}</Surface>}

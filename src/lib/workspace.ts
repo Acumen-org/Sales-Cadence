@@ -6,8 +6,12 @@ export const WORKSPACE_TIMEZONE_LABEL = 'US Central';
  */
 /**
  * What the team sells. A meeting can be about more than one, which is why it is a list rather
- * than a select. The values are Twenty's own product constants, so a meeting tagged here reads
- * the same as a contact's product interest.
+ * than a select.
+ *
+ * These three, and only these three. Twenty's `productInterest` select also carries TOLLBOOTH,
+ * which is deliberately not offered here - the owner named the three a meeting can be about. If
+ * that changes, add it here; a value stored outside this list is dropped the next time anything
+ * on the meeting is toggled.
  */
 export const PRODUCTS = ['PHH', 'ACUBOOTH', 'GLYNAC'] as const;
 export type Product = (typeof PRODUCTS)[number];

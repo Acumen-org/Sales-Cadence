@@ -29,7 +29,7 @@ function Tile({ label, value, hint, href, icon, tone }: { label: string; value: 
  * is in colour, against the muted words around it, rather than a jump to bold mid-sentence.
  */
 function N({ children, tone }: { children: React.ReactNode; tone?: 'warn' }) {
-  return <span className={tone === 'warn' ? 'font-medium text-amber-800' : 'font-medium text-ink-900'}>{children}</span>;
+  return <span className={tone === 'warn' ? 'text-amber-800' : 'text-ink-900'}>{children}</span>;
 }
 
 export default async function HomePage() {
@@ -70,7 +70,7 @@ export default async function HomePage() {
         />
         <Tile label="Completed today" value={completed} hint={allToday ? <><N>{progress}%</N> of <N>{allToday}</N> done</> : undefined} href={`/tasks?tab=done&${mine}`} icon={<IconCheck size={17} />} />
         <Tile label="My accounts" value={h.my.accounts} hint={<><N>{h.my.activeAccounts}</N> with live work</>} href="/accounts?scope=mine" icon={<IconCompany size={17} />} />
-        <Tile label="My relationships" value={h.my.relationships} hint={<><N>{h.my.inSequence}</N> in a sequence</>} href="/people?owner=mine" icon={<IconPeople size={17} />} />
+        <Tile label="My people" value={h.my.relationships} hint={<><N>{h.my.inSequence}</N> in a sequence</>} href="/people?owner=mine" icon={<IconPeople size={17} />} />
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(300px,1fr)]">

@@ -5,7 +5,7 @@ import clsx from 'clsx';
 import { toggleMeetingProductAction } from '@/lib/actions/meetings';
 import { optionLabel } from '@/lib/twenty/labels';
 import { PRODUCTS } from '@/lib/workspace';
-import { IconCheck, IconPlus } from '@/components/icons';
+import { IconCheck } from '@/components/icons';
 
 /**
  * Which products a meeting was about. A conversation can cover more than one, so these are tags
@@ -40,9 +40,11 @@ export function ProductTags({ meetingId, products, canEdit }: { meetingId: strin
       const fd = new FormData();
       fd.set('meetingId', meetingId);
       fd.set('product', product);
+      fd.set('on', String(!on));
       const result = await toggleMeetingProductAction(fd);
-      if (!result.ok) {
-        // Put the tag back: the screen must not claim a change the server refused.
+      // Whatever the server stored is the truth, whether it agreed with us or not.
+      if (result.ok) setCurrent((result.data as { products: string[] }).products);
+      else {
         setCurrent((list) => (on ? PRODUCTS.filter((p) => p === product || list.includes(p)) : list.filter((p) => p !== product)));
         setError(result.error);
       }
@@ -66,7 +68,7 @@ export function ProductTags({ meetingId, products, canEdit }: { meetingId: strin
                 on ? 'border-brand-300 bg-brand-50 text-brand-800' : 'border-line bg-white text-ink-600 hover:border-ink-300',
               )}
             >
-              {on ? <IconCheck size={12} /> : <IconPlus size={12} />}
+              {on ? <IconCheck size={12} /> : null}
               {optionLabel(product)}
             </button>
           );

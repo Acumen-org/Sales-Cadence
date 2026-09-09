@@ -18,7 +18,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
     <div className="space-y-5 px-6 pb-8 pt-2">
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <Stat label="Accounts in view" value={rows.length} />
-        <Stat label="Relationships" value={rows.reduce((n, a) => n + a.people, 0)} />
+        <Stat label="People" value={rows.reduce((n, a) => n + a.people, 0)} />
         <Stat label="In sequence" value={rows.reduce((n, a) => n + a.inSequence, 0)} />
         <Stat label="Engaged accounts" value={rows.filter((a) => a.replied > 0 || a.meetings > 0).length} tone="good" />
       </div>

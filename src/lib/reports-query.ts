@@ -102,7 +102,9 @@ export async function buildReports(user: SessionUser, today: LocalDate, filters?
   const enrollmentIds = enrollments.map((e) => e.id);
   const tasks = await prisma.task.findMany({
     where: { enrollmentId: { in: enrollmentIds }, ...(range ? { OR: [{ state: { in: ['DONE', 'SKIPPED'] }, completedAt: { gte: range.fromInstant, lt: range.toInstant } }, { state: { in: ['PENDING', 'CANCELLED'] }, dueDate: { gte: range.from, lte: range.to } }] } : {}) },
-    select: { enrollmentId: true, state: true, dueDate: true, snoozedTo: true, action: true, chosenAction: true, completionSource: true, foUserId: true },
+    // The enrollment's own status comes with it: a paused campaign's open touches are held, and
+    // reporting them as scheduled is the one place that rule could still leak.
+    select: { enrollmentId: true, state: true, dueDate: true, snoozedTo: true, action: true, chosenAction: true, completionSource: true, foUserId: true, enrollment: { select: { status: true } } },
   });
   const name = (list: { id: string; name: string }[], id: string | null, fallback: string) => list.find((x) => x.id === id)?.name ?? fallback;
 
@@ -116,8 +118,8 @@ export async function buildReports(user: SessionUser, today: LocalDate, filters?
     return {
       action,
       label: ACTION_LABELS[action],
-      pending: ts.filter((t) => t.state === 'PENDING').length,
-      overdue: ts.filter((t) => t.state === 'PENDING' && (t.snoozedTo ?? t.dueDate) < today).length,
+      pending: ts.filter((t) => t.state === 'PENDING' && t.enrollment.status !== 'PAUSED').length,
+      overdue: ts.filter((t) => t.state === 'PENDING' && t.enrollment.status !== 'PAUSED' && (t.snoozedTo ?? t.dueDate) < today).length,
       done: ts.filter((t) => t.state === 'DONE').length,
       observed: ts.filter((t) => t.state === 'DONE' && t.completionSource && t.completionSource.startsWith('OBSERVED')).length,
       manual: ts.filter((t) => t.state === 'DONE' && t.completionSource === 'MANUAL').length,

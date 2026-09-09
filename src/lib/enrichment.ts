@@ -9,7 +9,13 @@ import type { TwentyClient } from './twenty/client';
 import type { EnrichCompanyInput, EnrichPersonInput, TwentyCompany, TwentyPerson } from './twenty/types';
 
 export type EnrichmentEntity = 'person' | 'company';
-export type EnrichmentField = { key: string; label: string; identity?: boolean };
+export type EnrichmentField = {
+  key: string;
+  label: string;
+  identity?: boolean;
+  /** Writable, but never templated into the export: correcting it is deliberate, not gap-filling. */
+  deliberate?: boolean;
+};
 export const ENRICHMENT_FIELDS: Record<EnrichmentEntity, EnrichmentField[]> = {
   person: [
     { key: 'recordId', label: 'Twenty contact ID', identity: true }, { key: 'matchEmail', label: 'Existing email (match only)', identity: true },
@@ -18,7 +24,7 @@ export const ENRICHMENT_FIELDS: Record<EnrichmentEntity, EnrichmentField[]> = {
   ],
   company: [
     { key: 'recordId', label: 'Twenty account ID', identity: true }, { key: 'matchDomain', label: 'Existing domain (match only)', identity: true },
-    { key: 'name', label: 'Account name' }, { key: 'domain', label: 'Website domain' }, { key: 'industry', label: 'Industry' }, { key: 'employees', label: 'Employees' },
+    { key: 'name', label: 'Account name', deliberate: true }, { key: 'domain', label: 'Website domain' }, { key: 'industry', label: 'Industry' }, { key: 'employees', label: 'Employees' },
     { key: 'aum', label: 'AUM (USD)' }, { key: 'city', label: 'City' }, { key: 'linkedinUrl', label: 'LinkedIn URL' },
   ],
 };
@@ -39,6 +45,12 @@ const CONTACT_CRITICAL = [
   ['companyId', 'Company'],
   ['linkedinUrl', 'LinkedIn'],
 ] as const;
+/**
+ * Gaps the queue names but an import cannot close, because they are relations or assignments
+ * rather than values a vendor returns. They are still worth flagging - somebody has to fix them
+ * in Twenty - so the badge says where.
+ */
+const FIX_IN_TWENTY = new Set(['companyId', 'ownerMemberId']);
 const CONTACT_USEFUL = [
   ['jobTitle', 'Job title'],
   ['city', 'City'],
@@ -199,7 +211,7 @@ export async function enrichmentQueue(user: SessionUser) {
     const gaps: EnrichmentGap[] = [];
     if (!person.email || person.badEmail || person.emailMissing) gaps.push({ field: 'email', label: person.email ? 'Email needs verification' : 'Email missing', priority: 'critical' });
     if (!person.phone || person.badPhone || person.phoneMissing) gaps.push({ field: 'phone', label: person.phone ? 'Phone needs verification' : 'Phone missing', priority: 'critical' });
-    for (const [field, label] of CONTACT_CRITICAL) if (!person[field]) gaps.push({ field, label: `${label} missing`, priority: 'critical' });
+    for (const [field, label] of CONTACT_CRITICAL) if (!person[field]) gaps.push({ field, label: FIX_IN_TWENTY.has(field) ? `${label} missing - set in Twenty` : `${label} missing`, priority: 'critical' });
     for (const [field, label] of CONTACT_USEFUL) if (!person[field]) gaps.push({ field, label: `${label} missing`, priority: 'useful' });
     if (person.tags.some((tag) => enrichmentTags.has(tag) || /enrichment[\s_-]*(required|needed)/i.test(tag))) gaps.push({ field: 'tags', label: 'Flagged in CRM', priority: 'useful' });
     if (gaps.length) items.push({ id: person.id, label: cachedPersonName(person), company: person.companyName, entity: 'person', href: `/people/${person.id}`, gaps });
@@ -207,7 +219,7 @@ export async function enrichmentQueue(user: SessionUser) {
   for (const company of companies) {
     const gaps: EnrichmentGap[] = [];
     for (const [field, label] of ACCOUNT_CRITICAL) if (company[field] === null || company[field] === '') gaps.push({ field, label: `${label} missing`, priority: 'critical' });
-    for (const [field, label] of ACCOUNT_USEFUL) if (company[field] === null || company[field] === '') gaps.push({ field, label: `${label} missing`, priority: 'useful' });
+    for (const [field, label] of ACCOUNT_USEFUL) if (company[field] === null || company[field] === '') gaps.push({ field, label: FIX_IN_TWENTY.has(field) ? `${label} missing - set in Twenty` : `${label} missing`, priority: 'useful' });
     if (gaps.length) items.push({ id: company.id, label: company.name, company: null, entity: 'company', href: `/accounts/${company.id}`, gaps });
   }
   return items.sort((a, b) => Number(b.gaps.some((gap) => gap.priority === 'critical')) - Number(a.gaps.some((gap) => gap.priority === 'critical')) || a.label.localeCompare(b.label));

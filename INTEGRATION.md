@@ -248,7 +248,7 @@ Writes, and only these:
 | An FO completes an action (or Twenty activity completes it) | One **Note** on the person: `[Cadence] Email 2 sent by Alisa`, `[Cadence] Call 1 made by Alisa - Left voicemail`. Body: sequence, step, outcome, the FO's notes, source. |
 | A Cadence task is generated (setting *Mirror open tasks*, on by default) | One **Task**: `Cadence: Email 1 - Dummy One`, assigned to the FO, due on the task day, linked to the person. |
 | That Cadence task is done / skipped / cancelled | The mirrored Task is marked done, or deleted (setting *Delete mirrored task on skip*). |
-| An admin or pod leader applies an Enrichment import | The fields in that import, on the records it matched: `email`, `phone`, `jobTitle`, `linkedinUrl`, `city` on a **Person**; `domain`, `industry`, `employees`, `aum`, `city`, `linkedinUrl` on a **Company**. Each row is matched by Twenty id, email or domain; a row whose CRM value changed since the preview is refused as a conflict; the write is verified against what Twenty returns before the row is marked applied. |
+| An admin or pod leader applies an Enrichment import | The fields in that import, on the records it matched: `email`, `phone`, `jobTitle`, `linkedinUrl`, `city` on a **Person**; `name`, `domain`, `industry`, `employees`, `aum`, `city`, `linkedinUrl` on a **Company**. Each row is matched by Twenty id, email or domain; a row whose CRM value changed since the preview is refused as a conflict; the write is verified against what Twenty returns before the row is marked applied. |
 
 Never on its own initiative: person, company or opportunity fields - not `dnd`, `podOwner`,
 `assignedTo`, `tier`, `listCategory`, `nextAction`, `nextActionDueDate`, `tags`, emails or stages -
