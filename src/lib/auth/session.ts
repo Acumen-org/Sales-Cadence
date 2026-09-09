@@ -4,11 +4,20 @@ import { prisma } from '../db';
 import { env } from '../env';
 
 export const SESSION_COOKIE = 'cadence_session';
-const SESSION_DAYS = 30;
 
-export async function createSession(userId: string): Promise<string> {
+/**
+ * How long a sign-in lasts.
+ *
+ * A day by default: this is a shared workspace holding a CRM's contact data, and a browser left
+ * open on a desk should not stay signed in indefinitely. "Remember me" is the deliberate opt-out,
+ * for a machine one person uses.
+ */
+const SESSION_HOURS = 24;
+const REMEMBERED_DAYS = 30;
+
+export async function createSession(userId: string, remember = false): Promise<string> {
   const token = randomBytes(32).toString('hex');
-  const expiresAt = new Date(Date.now() + SESSION_DAYS * 86_400_000);
+  const expiresAt = new Date(Date.now() + (remember ? REMEMBERED_DAYS * 86_400_000 : SESSION_HOURS * 3_600_000));
   await prisma.session.create({ data: { token, userId, expiresAt } });
   const jar = await cookies();
   jar.set(SESSION_COOKIE, token, {

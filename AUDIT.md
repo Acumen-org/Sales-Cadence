@@ -89,11 +89,13 @@ mentioning that an applied Enrichment import writes exactly those.
 ## Verification
 
 - `pnpm typecheck`, `pnpm lint`: clean.
-- `pnpm test`: 262 tests across 35 files, on an embedded Postgres 18.
-- `pnpm test:e2e`: 43 browser tests, including `e2e/roles.spec.ts`, which drives one full journey per
+- `pnpm test`: 269 tests across 37 files, on an embedded Postgres 18.
+- `pnpm test:e2e`: 45 browser tests, including `e2e/roles.spec.ts`, which drives one full journey per
   role and checks every denial by URL as well as by the missing link — a hidden link is not a
   permission.
-- `pnpm screens`: captures every screen against the full demo workspace for design review.
+- `pnpm test:fresh`: drives the app as a brand-new deployment — one admin, the default sequence,
+  nothing worked yet — on its own database and port.
+- `pnpm screens`: captures every screen against the sample workspace for design review.
 
 ## Known limits
 
@@ -101,5 +103,7 @@ mentioning that an applied Enrichment import writes exactly those.
   implemented; they say so rather than pretending.
 - Click-to-call is real but unconfigured out of the box: with no endpoint in Settings the Call button
   is a `tel:` link. See INTEGRATION.md.
-- The demo workspace is still the default seed and is visible in the chrome. It is meant to be
-  removed before production.
+- The sample workspace is no longer the default. `SEED_PROFILE=core` and `TWENTY_MODE=graphql`
+  are the defaults, the seed refuses to create the first account without a password, and the
+  sample data only builds in mock mode - which is where the test suites live. `pnpm db:reset`
+  empties a workspace back to that state, and `pnpm test:fresh` drives the app as a new install.

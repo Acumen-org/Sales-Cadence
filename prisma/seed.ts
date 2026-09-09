@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { WORKSPACE_TIMEZONE } from '../src/lib/workspace';
 import { prisma } from '../src/lib/db';
 import { env } from '../src/lib/env';
 import { hashPassword } from '../src/lib/auth/password';
@@ -38,7 +39,10 @@ async function seedCore() {
   const e = env();
   const adminEmail = e.ADMIN_EMAIL.toLowerCase();
   if (!(await prisma.user.findUnique({ where: { email: adminEmail } }))) {
-    await prisma.user.create({ data: { email: adminEmail, name: 'Admin', role: 'ADMIN', passwordHash: await hashPassword(e.ADMIN_PASSWORD), timezone: 'Europe/London' } });
+    // Refused rather than defaulted: an account created with a password nobody chose is an
+    // account whose password everybody knows.
+    if (!e.ADMIN_PASSWORD) throw new Error('Set ADMIN_PASSWORD in .env before seeding: it is the password for the first account.');
+    await prisma.user.create({ data: { email: adminEmail, name: 'Admin', role: 'ADMIN', passwordHash: await hashPassword(e.ADMIN_PASSWORD), timezone: WORKSPACE_TIMEZONE } });
     console.log(`  + admin user ${adminEmail}`);
   } else {
     console.log(`  = admin user ${adminEmail} exists`);

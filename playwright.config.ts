@@ -9,6 +9,9 @@ const PORT = Number(process.env.E2E_PORT ?? 3111);
  */
 export default defineConfig({
   testDir: 'e2e',
+  // The fresh-install check needs a workspace seeded with `core` alone, so it runs on its own
+  // through `pnpm test:fresh` rather than against this suite's sample data.
+  testIgnore: process.env.E2E_INCLUDE_FRESH ? [] : ['**/fresh-install.spec.ts'],
   timeout: 90_000,
   expect: { timeout: 15_000 },
   retries: 0,
@@ -33,6 +36,8 @@ export default defineConfig({
       // The lean demo dataset: people, pods and users but no campaigns. Cases that need live work
       // create it themselves, so no case depends on another having run first.
       SEED_PROFILE: process.env.E2E_SEED ?? 'core,demo-basic',
+      ADMIN_EMAIL: 'admin@cadence.local',
+      ADMIN_PASSWORD: 'admin12345',
       TWENTY_MODE: 'mock',
       TWENTY_API_URL: 'http://twenty.local:3000',
       APP_URL: `http://localhost:${PORT}`,

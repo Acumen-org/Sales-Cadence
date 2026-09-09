@@ -155,7 +155,7 @@ async function main() {
   console.log('');
   log('====================================================');
   log(`Cadence is running: ${url}`);
-  log(env.TWENTY_MODE === 'mock' ? 'Demo workspace: use the sign-in buttons on the login page.' : 'Connected to Twenty: sign in with your Cadence account.');
+  log(env.TWENTY_MODE === 'mock' ? 'Built-in sample workspace. Sign in with ADMIN_EMAIL and ADMIN_PASSWORD from .env.' : 'Connected to Twenty. Sign in with your Cadence account.');
   log('Close this window or press Ctrl+C to stop.');
   log('====================================================');
   if (!process.env.CADENCE_NO_BROWSER) openBrowser(url);

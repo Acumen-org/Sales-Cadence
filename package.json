@@ -20,12 +20,14 @@
     "db:migrate": "prisma migrate deploy",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
+    "db:reset": "tsx scripts/reset-data.ts",
     "db:studio": "prisma studio",
     "worker": "tsx src/worker/index.ts",
     "dev:db": "tsx scripts/dev-db.ts",
     "start:local": "tsx scripts/start-local.ts",
     "reconcile": "tsx scripts/reconcile.ts",
     "verify:schema": "tsx scripts/verify-schema.ts",
+    "test:fresh": "pnpm build && tsx scripts/fresh-install-check.ts",
     "screens": "pnpm build && tsx scripts/screens.ts"
   },
   "prisma": {

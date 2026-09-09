@@ -17,6 +17,7 @@ coverage
 tsconfig.tsbuildinfo
 .pgdata-e2e
 .pgdata-screens
+.pgdata-fresh
 .pgdata-measure*
 playwright-report
 test-results
