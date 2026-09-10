@@ -8,6 +8,14 @@
   :root {
     color-scheme: light;
   }
+  strong,
+  b {
+    @apply font-medium text-ink-900;
+  }
+  [contenteditable] strong,
+  [contenteditable] b {
+    font-weight: 700;
+  }
   html,
   body {
     @apply bg-canvas text-ink-900;
@@ -128,13 +136,13 @@
 
   /* ---------- chips, badges, dots ---------- */
   .chip {
-    @apply inline-flex items-center gap-1.5 rounded-lg bg-brand-50 px-3 py-2 text-[12px] font-semibold text-brand-700;
+    @apply inline-flex items-center gap-1.5 rounded-lg bg-brand-50 px-3 py-2 text-[12px] font-medium text-brand-700;
   }
   .chip-muted {
     @apply inline-flex items-center gap-1.5 rounded-lg bg-transparent py-2 px-3 text-[12px] font-medium text-ink-500 transition hover:bg-canvas hover:text-ink-900;
   }
   .badge {
-    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[12px] font-bold leading-5;
+    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[12px] font-semibold leading-5;
   }
   .dot {
     @apply inline-block h-[7px] w-[7px] shrink-0 rounded-full;
@@ -148,7 +156,7 @@
     @apply whitespace-nowrap border-y border-line bg-[#fafbf9] px-5 py-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-500;
   }
   .table td {
-    @apply border-b border-line/80 px-5 py-4 align-middle font-semibold text-ink-900;
+    @apply border-b border-line/80 px-5 py-4 align-middle text-ink-800;
   }
   .table tbody tr {
     @apply transition-colors hover:bg-brand-50/40;
@@ -186,7 +194,7 @@
     @apply text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-500;
   }
   .metric-value {
-    @apply text-[32px] font-bold leading-none tracking-[-0.045em] text-ink-900;
+    @apply text-[32px] font-semibold leading-none tracking-[-0.045em] text-ink-900;
     font-variant-numeric: tabular-nums;
   }
   .focus-art {
@@ -231,13 +239,13 @@
     @apply text-[11px] font-medium uppercase tracking-wide text-ink-400;
   }
   .kv dd {
-    @apply text-[14px] font-semibold text-ink-900;
+    @apply text-[14px] font-medium text-ink-900;
   }
   .data-value {
     @apply text-[13px] font-medium tabular-nums text-ink-900;
   }
   .data-table td {
-    @apply text-[14px] font-semibold tabular-nums text-ink-900;
+    @apply text-[13.5px] tabular-nums text-ink-900;
   }
   .hairline {
     @apply border-line;

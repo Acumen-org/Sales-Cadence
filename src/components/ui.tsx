@@ -17,7 +17,7 @@ export function PageHeader({ title, subtitle, actions }: { title: ReactNode; sub
     <div className="flex flex-wrap items-start justify-between gap-3 px-6 pb-1 pt-2">
       <div className="min-w-0">
         <h2 className="text-[22px] font-semibold tracking-[-0.03em] text-ink-900">{title}</h2>
-        {subtitle ? <div className="mt-1 text-[14px] font-semibold text-ink-800">{subtitle}</div> : null}
+        {subtitle ? <div className="mt-1 text-[14px] text-ink-600">{subtitle}</div> : null}
       </div>
       {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
@@ -144,7 +144,7 @@ export function Avatar({ name, size = 32, shape = 'square', className }: { name:
   return (
     <span
       aria-hidden
-      className={clsx('inline-flex shrink-0 items-center justify-center font-semibold', shape === 'circle' ? 'rounded-full' : 'rounded-[8px]', toneFor(name), className)}
+      className={clsx('inline-flex shrink-0 items-center justify-center font-medium', shape === 'circle' ? 'rounded-full' : 'rounded-[8px]', toneFor(name), className)}
       style={{ width: size, height: size, fontSize: Math.max(10, Math.round(size * 0.36)) }}
     >
       {initialsOf(name)}
@@ -159,13 +159,13 @@ export function IdentityCell({ name, sub, href, shape = 'square', size = 32 }: {
       <Avatar name={name} shape={shape} size={size} />
       <div className="min-w-0">
         {href ? (
-          <Link href={href} className="block truncate text-[14px] font-bold text-ink-900 hover:text-brand-700">
+          <Link href={href} className="block truncate text-[14px] font-medium text-ink-900 hover:text-brand-700">
             {name}
           </Link>
         ) : (
-          <div className="truncate text-[14px] font-bold text-ink-900">{name}</div>
+          <div className="truncate text-[14px] font-medium text-ink-900">{name}</div>
         )}
-        {sub ? <div className="truncate text-[13px] font-semibold text-ink-800">{sub}</div> : null}
+        {sub ? <div className="truncate text-[13px] text-ink-600">{sub}</div> : null}
       </div>
     </div>
   );
@@ -329,7 +329,7 @@ export function EmptyState({ title, hint, action, icon }: { title: string; hint?
   return (
     <div className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">
       {icon ? <div className="mb-1 flex h-11 w-11 items-center justify-center rounded-full bg-brand-50 text-brand-500">{icon}</div> : null}
-      <div className="text-[14px] font-semibold text-ink-900">{title}</div>
+      <h3 className="text-[14px] font-semibold text-ink-900">{title}</h3>
       {hint ? <div className="max-w-md text-[13px] text-ink-500">{hint}</div> : null}
       {action ? <div className="mt-2">{action}</div> : null}
     </div>
@@ -354,7 +354,7 @@ export function Tabs({ tabs, current, inset = true }: { tabs: { key: string; lab
           >
             {t.label}
             {typeof t.count === 'number' ? (
-              <span className={clsx('rounded-full px-1.5 text-[12px] font-bold tabular-nums leading-5 sm:px-2', active ? 'bg-brand-100 text-brand-800' : 'bg-canvas text-ink-900')}>{t.count}</span>
+              <span className={clsx('rounded-full px-1.5 text-[12px] font-medium tabular-nums leading-5 sm:px-2', active ? 'bg-brand-100 text-brand-800' : 'bg-canvas text-ink-900')}>{t.count}</span>
             ) : null}
           </Link>
         );
@@ -370,7 +370,7 @@ export function Stat({ label, value, hint, tone, icon }: { label: string; value:
       <div className="min-w-0">
         <div className="text-[11px] font-medium text-ink-500">{label}</div>
         {/* A colour is a signal, so zero never gets one: a green 0 replies reads as a good result. */}
-        <div className={clsx('mt-3 text-[30px] font-bold leading-tight tracking-[-0.04em] tabular-nums', value === 0 || value === '0' || value === '0%' ? 'text-ink-900' : tone === 'warn' ? 'text-amber-700' : tone === 'good' ? 'text-brand-700' : 'text-ink-900')}>{value}</div>
+        <div className={clsx('mt-3 text-[30px] font-semibold leading-tight tracking-[-0.04em] tabular-nums', value === 0 || value === '0' || value === '0%' ? 'text-ink-900' : tone === 'warn' ? 'text-amber-700' : tone === 'good' ? 'text-brand-700' : 'text-ink-900')}>{value}</div>
         {hint ? <div className="text-[12px] text-ink-500">{hint}</div> : null}
       </div>
     </div>
@@ -466,7 +466,7 @@ export function RecordFields({ items, className }: { items: { label: string; val
       {items.map((item) => (
         <div key={item.label} className="min-w-0 space-y-1.5">
           <dt className="text-[12px] text-ink-500">{item.label}</dt>
-          <dd className="break-words text-[14px] font-semibold text-ink-900">{item.value == null || item.value === '' ? <span className="font-normal text-ink-400">Not recorded</span> : displayValue(item.value)}</dd>
+          <dd className="break-words text-[14px] font-medium text-ink-900">{item.value == null || item.value === '' ? <span className="font-normal text-ink-400">Not recorded</span> : displayValue(item.value)}</dd>
         </div>
       ))}
     </dl>
@@ -474,7 +474,7 @@ export function RecordFields({ items, className }: { items: { label: string; val
 }
 
 export function Pill({ children }: { children: ReactNode }) {
-  return <span className="rounded bg-canvas px-2 py-1 text-[12px] font-bold text-ink-800">{children}</span>;
+  return <span className="rounded bg-canvas px-2 py-1 text-[12px] font-medium text-ink-800">{children}</span>;
 }
 
 /**
@@ -503,7 +503,7 @@ export function RecordHeader({
         {icon ? <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700">{icon}</span> : <Avatar name={name} shape={shape} size={44} />}
         <div className="min-w-0">
           <h2 className="truncate text-[20px] font-semibold tracking-[-0.01em] text-ink-900">{name}</h2>
-          {sub ? <div className="mt-1 text-[14px] font-semibold text-ink-800">{sub}</div> : null}
+          {sub ? <div className="mt-1 text-[14px] text-ink-600">{sub}</div> : null}
           {badges ? <div className="mt-2 flex flex-wrap items-center gap-1.5">{badges}</div> : null}
         </div>
       </div>

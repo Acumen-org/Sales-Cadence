@@ -63,12 +63,12 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
               </h2>
               <ol className="divide-y divide-line">{group.items.map((item) => (
                 <li key={item.id} className="grid grid-cols-[2rem_minmax(0,1fr)] gap-x-3 gap-y-2 px-5 py-4 sm:grid-cols-[3rem_2rem_minmax(0,1fr)_auto]">
-                  <time dateTime={item.at.toISOString()} className="col-span-2 text-[13px] font-bold tabular-nums text-ink-900 sm:col-span-1 sm:pt-1">{formatInstant(item.at, REPORTING_TIMEZONE).split(', ').pop()}</time>
+                  <time dateTime={item.at.toISOString()} className="col-span-2 text-[13px] tabular-nums text-ink-600 sm:col-span-1 sm:pt-1">{formatInstant(item.at, REPORTING_TIMEZONE).split(', ').pop()}</time>
                   <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${item.tone === 'in' ? 'bg-emerald-50 text-emerald-700' : 'bg-brand-50 text-brand-700'}`}>
                     {item.icon === 'MEETING' || item.icon === 'STATE' ? <span className="h-3 w-3 rounded-full border-2 border-current" /> : <ActionIcon action={item.icon} size={17} />}
                   </span>
                   <div className="min-w-0 space-y-2">
-                    <p className="break-words text-[14px] font-semibold text-ink-900">{item.title}</p>
+                    <p className="break-words text-[14px] font-medium text-ink-900">{item.title}</p>
                     {item.subjectName ? <div className="flex flex-wrap items-center gap-x-3 gap-y-1">{item.subjectHref ? <Link href={item.subjectHref} className="text-[14px] font-medium text-brand-700 hover:underline">{item.subjectName}</Link> : <DataValue>{item.subjectName}</DataValue>}{item.companyName ? <DataValue>{item.companyName}</DataValue> : null}</div> : null}
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px]"><span className="inline-flex items-center gap-2 text-ink-500">By <DataValue>{item.actorName ?? 'System'}</DataValue></span><EventDetail fields={item.fields} /></div>
                   </div>

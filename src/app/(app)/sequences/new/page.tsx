@@ -7,5 +7,5 @@ import { Field, PageHeader } from '@/components/ui';
 
 export default async function NewSequencePage() {
   const user = await requireUser(); if (!canEditSequences(user)) redirect('/sequences');
-  return <><PageHeader title="New sequence" /><div className="mx-auto max-w-5xl p-6"><SequenceEditor initialSteps={[{ id: 'step-start', day: 1, actions: [{ id: 'action-start', type: 'EMAIL', label: 'Email', subject: '', template: '', bodyHtml: '<p></p>' }] }]} action={createSequenceAction} submitLabel="Create sequence" header={<div className="surface p-5"><Field label="Sequence name"><input name="name" required className="w-full !font-semibold" /></Field></div>} /></div></>;
+  return <><PageHeader title="New sequence" /><div className="mx-auto max-w-5xl p-6"><SequenceEditor initialSteps={[{ id: 'step-start', day: 1, actions: [{ id: 'action-start', type: 'EMAIL', label: 'Email', subject: '', template: '', bodyHtml: '<p></p>' }] }]} action={createSequenceAction} submitLabel="Create sequence" header={<div className="surface p-5"><Field label="Sequence name"><input name="name" required className="w-full !font-medium" /></Field></div>} /></div></>;
 }

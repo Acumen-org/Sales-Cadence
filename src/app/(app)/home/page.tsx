@@ -99,7 +99,7 @@ export default async function HomePage() {
         <Surface flush>
           <div className="flex items-center justify-between border-b border-line px-5 py-4"><h2 className="text-[14px] font-semibold">Up next</h2><Link href={`/tasks?tab=${focusTab}&${mine}`} className="text-[11px] font-medium text-brand-700">{h.my.todayTotal + h.my.overdueTotal ? <>View all <N>{h.my.todayTotal + h.my.overdueTotal}</N></> : 'Open tasks'} <span aria-hidden>↗</span></Link></div>
           {h.my.nextTasks.length ? <div className="divide-y divide-line/70">{h.my.nextTasks.map((task) => <Link key={task.id} href={`/tasks?task=${task.id}&mode=flow&tab=${task.due < h.today ? 'overdue' : task.due === h.today ? 'today' : 'upcoming'}&${mine}`} className="flex items-center gap-3 px-5 py-4 transition hover:bg-brand-50/50">
-            <Avatar name={task.name} shape="circle" size={34} /><span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold">{task.name}</span><span className="mt-0.5 block truncate text-[10px] text-ink-500">{task.company ?? task.label}</span></span><span className="text-right"><span className={`block text-[10px] font-semibold ${task.due < h.today ? 'text-amber-700' : 'text-ink-700'}`}>{task.due < h.today ? 'Overdue' : task.due === h.today ? 'Today' : formatLocalDate(task.due)}</span><span className="mt-1.5 flex justify-end text-ink-400"><ActionIcon action={task.action} size={13} /></span></span>
+            <Avatar name={task.name} shape="circle" size={34} /><span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-medium">{task.name}</span><span className="mt-0.5 block truncate text-[10px] text-ink-500">{task.company ?? task.label}</span></span><span className="text-right"><span className={`block text-[10px] ${task.due < h.today ? 'text-amber-700' : 'text-ink-500'}`}>{task.due < h.today ? 'Overdue' : task.due === h.today ? 'Today' : formatLocalDate(task.due)}</span><span className="mt-1.5 flex justify-end text-ink-400"><ActionIcon action={task.action} size={13} /></span></span>
           </Link>)}</div> : <EmptyState icon={<IconCheck size={20} />} title="Nothing scheduled" />}
         </Surface>
       </div>
@@ -116,7 +116,7 @@ export default async function HomePage() {
 function Figure({ value, tone }: { value: number; tone?: 'warn' | 'good' | 'brand' }) {
   if (!value) return <span className="text-ink-300">-</span>;
   const colour = tone === 'warn' ? 'text-red-700' : tone === 'good' ? 'text-emerald-700' : tone === 'brand' ? 'text-brand-700' : 'text-ink-900';
-  return <span className={`font-bold ${colour}`}>{value}</span>;
+  return <span className={`font-medium ${colour}`}>{value}</span>;
 }
 
 type TeamRow = { id: string; name: string; today: number; overdue: number; doneWeek: number; replies: number; meetings: number };
@@ -144,7 +144,7 @@ function TeamBoard({ rows, week, title }: { rows: TeamRow[]; week: { from: strin
     <Surface flush>
       <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line px-5 py-5">
         <h2 className="text-[14px] font-semibold text-ink-900">{title}</h2>
-        <p className="text-[11.5px] font-semibold text-ink-700">
+        <p className="text-[11.5px] text-ink-500">
           {formatLocalDate(week.from)} to {formatLocalDate(week.to)}
         </p>
       </div>

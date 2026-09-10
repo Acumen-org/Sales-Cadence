@@ -89,7 +89,7 @@ export async function MeetingAnalysisPanel({
                     <ul className="mt-1 space-y-1.5">
                       {g.points.map((pt, i) => (
                         <li key={i} className="flex gap-2.5 text-sm">
-                          {pt.at !== null ? <span className="shrink-0 font-mono text-xs font-bold text-ink-900">{formatCueTime(pt.at)}</span> : null}
+                          {pt.at !== null ? <span className="shrink-0 font-mono text-xs font-medium text-ink-900">{formatCueTime(pt.at)}</span> : null}
                           <span className="text-ink-700">{pt.text}</span>
                         </li>
                       ))}
@@ -103,7 +103,7 @@ export async function MeetingAnalysisPanel({
           {analysis!.nextSteps.length ? (
             <Section title="Next steps">
               <ul className="space-y-1.5">
-                {analysis!.nextSteps.map((step, index) => <li key={index} className="rounded-lg border border-line p-3"><div className="mb-3 text-sm font-semibold text-ink-900">{step.text}</div><RecordFields items={[{ label: 'Owner', value: step.owner }, { label: 'Due', value: step.due }]} /></li>)}
+                {analysis!.nextSteps.map((step, index) => <li key={index} className="rounded-lg border border-line p-3"><div className="mb-3 text-sm font-medium text-ink-900">{step.text}</div><RecordFields items={[{ label: 'Owner', value: step.owner }, { label: 'Due', value: step.due }]} /></li>)}
               </ul>
             </Section>
           ) : null}
@@ -146,7 +146,7 @@ export async function MeetingAnalysisPanel({
                   <li key={t.speaker}>
                     <div className="flex items-baseline justify-between gap-2 text-sm">
                       <span className="truncate text-ink-700">{t.speaker}</span>
-                      <span className="font-bold text-ink-900">{Math.round(t.share * 100)}%</span>
+                      <span className="font-medium text-ink-900">{Math.round(t.share * 100)}%</span>
                     </div>
                     <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-canvas">
                       <div className="h-full rounded-full bg-brand-500" style={{ width: `${Math.round(t.share * 100)}%` }} />

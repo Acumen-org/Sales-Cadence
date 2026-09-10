@@ -67,7 +67,7 @@ export function TaskComposer({ taskId, subject, body, html, label, channel, revi
     } catch { setError('Clipboard unavailable. Select the message to copy it.'); }
   };
   return <section className="space-y-3" onFocusCapture={() => { touched.current = true; }}>
-    <header className="flex flex-wrap items-center gap-2"><span className="rounded-lg bg-brand-50 p-2 text-brand-700"><ActionIcon action={channel} size={19} /></span><h3 className="text-base font-semibold">{channel === 'CALL' ? 'Call preparation' : label}</h3><span className="ml-auto flex items-center gap-2">{!readOnly && <button type="button" onClick={() => { void flush(); }} aria-live="polite" className={state === 'Saved' ? 'btn-ghost btn-sm' : state === 'Saving' ? 'btn-ghost btn-sm' : 'btn-sm rounded-lg border border-amber-300 bg-amber-50 px-2.5 font-semibold text-amber-800 hover:bg-amber-100'} disabled={state === 'Saved' || state === 'Saving'}>{state === 'Saved' ? <IconCheck size={12} /> : null}<strong>{state === 'Unsaved' ? 'Unsaved - save now' : state}</strong></button>}<button type="button" className="btn-secondary btn-sm" onClick={copy}><IconCopy size={13} />{copied ? 'Copied' : 'Copy message'}</button></span></header>
+    <header className="flex flex-wrap items-center gap-2"><span className="rounded-lg bg-brand-50 p-2 text-brand-700"><ActionIcon action={channel} size={19} /></span><h3 className="text-base font-semibold">{channel === 'CALL' ? 'Call preparation' : label}</h3><span className="ml-auto flex items-center gap-2">{!readOnly && <button type="button" onClick={() => { void flush(); }} aria-live="polite" className={state === 'Saved' ? 'btn-ghost btn-sm' : state === 'Saving' ? 'btn-ghost btn-sm' : 'btn-sm rounded-lg border border-amber-300 bg-amber-50 px-2.5 font-medium text-amber-800 hover:bg-amber-100'} disabled={state === 'Saved' || state === 'Saving'}>{state === 'Saved' ? <IconCheck size={12} /> : null}<strong>{state === 'Unsaved' ? 'Unsaved - save now' : state}</strong></button>}<button type="button" className="btn-secondary btn-sm" onClick={copy}><IconCopy size={13} />{copied ? 'Copied' : 'Copy message'}</button></span></header>
     {channel === 'CALL' && <div className="space-y-3 rounded-xl border border-brand-200 bg-brand-50/40 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><div className="text-xs text-ink-500">Phone</div><strong className="mt-1 block text-lg text-ink-900">{phone || 'No number in Twenty'}</strong></div>
@@ -83,9 +83,9 @@ export function TaskComposer({ taskId, subject, body, html, label, channel, revi
           <button type="button" className="btn-secondary" onClick={async () => { try { await navigator.clipboard.writeText(phone); setPhoneCopied(true); setTimeout(() => setPhoneCopied(false), 1800); } catch { setError('Clipboard unavailable. Select the phone number to copy.'); } }}>{phoneCopied ? 'Copied' : 'Copy number'}</button>
         </div> : null}
       </div>
-      {callNote ? <p role="status" className="text-sm font-semibold text-brand-800">{callNote}</p> : null}
+      {callNote ? <p role="status" className="text-sm font-medium text-brand-800">{callNote}</p> : null}
     </div>}
-    {channel === 'EMAIL' && <label className="block text-xs text-ink-500">Subject<input aria-label="Email subject" value={draft.subject} readOnly={readOnly} className="mt-1 w-full !font-semibold !text-ink-900" onChange={e => change({ subject: e.target.value })} onBlur={() => { void flush(); }} /></label>}
+    {channel === 'EMAIL' && <label className="block text-xs text-ink-500">Subject<input aria-label="Email subject" value={draft.subject} readOnly={readOnly} className="mt-1 w-full !font-medium !text-ink-900" onChange={e => change({ subject: e.target.value })} onBlur={() => { void flush(); }} /></label>}
     <RichTextEditor value={draft.html} label={channel === 'CALL' ? 'Call script' : label + ' message'} disabled={readOnly} onChange={(nextHtml, text) => change({ html: nextHtml, text })} />
     {error && <p role="alert" className="text-sm font-medium text-red-700">{error}</p>}
   </section>;

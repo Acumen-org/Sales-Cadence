@@ -71,7 +71,7 @@ export function PeopleTable({ rows, canEnroll }: Props) {
     <div>
       {canEnroll && selected.size ? (
         <div className="flex flex-wrap items-center gap-3 border-y border-brand-100 bg-brand-50/70 px-4 py-2 text-[12.5px] text-brand-800">
-          <span className="font-bold">{selected.size} selected</span>
+          <span className="font-medium">{selected.size} selected</span>
           <Link href={bulkHref} className="btn-primary btn-sm">
             <IconPlus size={13} /> Create campaign
           </Link>
@@ -134,7 +134,7 @@ export function PeopleTable({ rows, canEnroll }: Props) {
                     <>
                       <div className="max-w-[11rem] truncate text-ink-700">{p.next.action ?? '-'}</div>
                       {p.next.due ? (
-                        <div className={p.next.overdue ? 'font-medium text-red-600' : 'font-semibold text-ink-700'}>
+                        <div className={p.next.overdue ? 'font-medium text-red-600' : ' text-ink-500'}>
                           {p.next.due}
                           {p.next.step ? ` · ${optionLabel(p.next.step)}` : ''}
                         </div>
@@ -148,7 +148,7 @@ export function PeopleTable({ rows, canEnroll }: Props) {
                   {p.enrollment ? (
                     <>
                       <Badge tone={p.enrollment.tone}>{p.enrollment.label}</Badge>
-                      <div className="mt-1 font-semibold text-ink-900">{p.enrollment.campaignId ? <Link href={`/campaigns/${p.enrollment.campaignId}`} className="hover:text-brand-700 hover:underline">{p.enrollment.campaignName}</Link> : 'Direct enrollment'}</div><div className="mt-0.5 text-xs font-semibold text-ink-700">{p.enrollment.sequenceName}</div>
+                      <div className="mt-1 font-medium text-ink-900">{p.enrollment.campaignId ? <Link href={`/campaigns/${p.enrollment.campaignId}`} className="hover:text-brand-700 hover:underline">{p.enrollment.campaignName}</Link> : 'Direct enrollment'}</div><div className="mt-0.5 text-xs text-ink-500">{p.enrollment.sequenceName}</div>
                     </>
                   ) : (
                     <span className="text-[12px] text-ink-300">-</span>
@@ -157,16 +157,16 @@ export function PeopleTable({ rows, canEnroll }: Props) {
                 <td>{p.activity.length ? <DotTimeline points={p.activity} width={130} /> : <span className="text-[12px] text-ink-300">no touches</span>}</td>
                 <td className="whitespace-nowrap text-[12.5px]">
                   {p.podName ?? <span className="text-ink-300">-</span>}
-                  {p.enrollment?.foName ? <div className="text-[11px] font-semibold text-ink-700">{p.enrollment.foName}</div> : null}
+                  {p.enrollment?.foName ? <div className="text-[11px] text-ink-500">{p.enrollment.foName}</div> : null}
                 </td>
                 <td className="text-[12px]">
                   {p.lastTouch ? (
                     <>
                       <div className="flex max-w-[13rem] items-center gap-1.5" title={p.lastTouch.summary}>
                         <span className={p.lastTouch.inbound ? 'shrink-0 text-emerald-700' : 'shrink-0 text-ink-400'}><ActionIcon action={p.lastTouch.channel} size={13} /></span>
-                        <span className="min-w-0 truncate font-semibold text-ink-800">{touchTitle(p.lastTouch.summary)}</span>
+                        <span className="min-w-0 truncate text-ink-600">{touchTitle(p.lastTouch.summary)}</span>
                       </div>
-                      <div className="mt-0.5 font-semibold text-ink-700">{p.lastTouch.at}</div>
+                      <div className="mt-0.5 text-ink-500">{p.lastTouch.at}</div>
                     </>
                   ) : (
                     <span className="text-ink-300">-</span>

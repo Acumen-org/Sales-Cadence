@@ -165,14 +165,14 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                   <ol className="divide-y divide-line">
                     {items.map((it, i) => (
                       <li key={i} className="flex gap-3 px-4 py-2.5 text-sm">
-                        <span className={it.tone === 'in' ? 'mt-0.5 text-emerald-600' : it.tone === 'out' ? 'mt-0.5 text-ink-500' : 'mt-0.5 font-semibold text-ink-700'}>
+                        <span className={it.tone === 'in' ? 'mt-0.5 text-emerald-600' : it.tone === 'out' ? 'mt-0.5 text-ink-500' : 'mt-0.5 text-ink-500'}>
                           {it.icon === 'NOTE' || it.icon === 'STATE' ? <span className="inline-block h-3.5 w-3.5 rounded-full border border-current" /> : <ActionIcon action={it.icon} size={14} />}
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="text-ink-800">{it.title}</span>
                           {it.detail ? <span className="block whitespace-pre-wrap text-sm text-ink-700">{it.detail}</span> : null}
                         </span>
-                        <span className="shrink-0 text-xs font-semibold text-ink-700">{formatInstant(it.at, user.timezone)}</span>
+                        <span className="shrink-0 text-xs text-ink-500">{formatInstant(it.at, user.timezone)}</span>
                       </li>
                     ))}
                   </ol>
@@ -189,14 +189,14 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                   return (
                     <Card
                       key={e.id}
-                      title={<Link href={`/sequences/${e.sequenceId}`} className="font-semibold hover:underline">{e.sequence.name}</Link>}
+                      title={<Link href={`/sequences/${e.sequenceId}`} className="font-medium hover:underline">{e.sequence.name}</Link>}
                       actions={<Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'}>{enrollmentStatusLabel(e)}</Badge>}
                     >
                       <div className="grid gap-4 border-b border-line bg-canvas/50 p-4 sm:grid-cols-2 lg:grid-cols-4">
-                        <div><div className="text-xs text-ink-500">Campaign</div><div className="mt-1 font-semibold text-ink-900">{e.campaign ? <Link href={`/campaigns/${e.campaign.id}`} className="text-brand-700 hover:underline">{e.campaign.name}</Link> : 'Direct enrollment'}</div></div>
-                        <div><div className="text-xs text-ink-500">Assigned to</div><div className="mt-1 font-semibold text-ink-900">{e.fo.name}</div></div>
-                        <div><div className="text-xs text-ink-500">Started</div><div className="mt-1 font-semibold text-ink-900">{formatLocalDate(e.startDate, 'long')}</div></div>
-                        <div><div className="text-xs text-ink-500">Campaign status</div><div className="mt-1 font-semibold capitalize text-ink-900">{e.campaign?.status.toLowerCase() ?? 'Not linked'}</div></div>
+                        <div><div className="text-xs text-ink-500">Campaign</div><div className="mt-1 font-medium text-ink-900">{e.campaign ? <Link href={`/campaigns/${e.campaign.id}`} className="text-brand-700 hover:underline">{e.campaign.name}</Link> : 'Direct enrollment'}</div></div>
+                        <div><div className="text-xs text-ink-500">Assigned to</div><div className="mt-1 font-medium text-ink-900">{e.fo.name}</div></div>
+                        <div><div className="text-xs text-ink-500">Started</div><div className="mt-1 font-medium text-ink-900">{formatLocalDate(e.startDate, 'long')}</div></div>
+                        <div><div className="text-xs text-ink-500">Campaign status</div><div className="mt-1 font-medium capitalize text-ink-900">{e.campaign?.status.toLowerCase() ?? 'Not linked'}</div></div>
                       </div>
                       <ol className="divide-y divide-line">
                         {steps.map((step, i) => {
@@ -213,7 +213,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                                     {t.disposition ? ` (${t.disposition})` : ''}
                                   </Badge>
                                 ))}
-                                {!reached ? <span className="text-xs font-semibold text-ink-700">not reached</span> : null}
+                                {!reached ? <span className="text-xs text-ink-500">not reached</span> : null}
                               </span>
                             </li>
                           );
@@ -230,7 +230,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
               <div className="space-y-3">
                 {twentyWarning ?? liveWarning ? <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">CRM temporarily unavailable. Showing the last synced record.</div> : null}
                 <Card title={currentEnrollments.length || !lastFinished ? 'Current campaigns' : 'Last campaign'} actions={<Link href={`/people/${id}?tab=sequences`} className="btn-ghost btn-sm">View history</Link>}>
-                  {currentEnrollments.length ? <div className="divide-y divide-line">{currentEnrollments.map((e) => <div key={e.id} className="flex flex-wrap items-center justify-between gap-3 p-4"><div><div className="font-semibold text-ink-900">{e.campaign ? <Link href={`/campaigns/${e.campaign.id}`} className="hover:text-brand-700 hover:underline">{e.campaign.name}</Link> : 'Direct enrollment'}</div><Link href={`/sequences/${e.sequenceId}`} className="mt-1 block text-sm font-semibold text-brand-700">{e.sequence.name}</Link></div><Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'}>{enrollmentStatusLabel(e)}</Badge></div>)}</div> : lastFinished ? <div className="flex flex-wrap items-center justify-between gap-3 p-4"><div><div className="font-semibold text-ink-900">{lastFinished.campaign ? <Link href={`/campaigns/${lastFinished.campaign.id}`} className="hover:text-brand-700 hover:underline">{lastFinished.campaign.name}</Link> : 'Direct enrollment'}</div><Link href={`/sequences/${lastFinished.sequenceId}`} className="mt-1 block text-sm font-semibold text-brand-700">{lastFinished.sequence.name}</Link></div><div className="text-right"><Badge tone={ENROLLMENT_TONE[lastFinished.status] ?? 'gray'}>{enrollmentStatusLabel(lastFinished)}</Badge><div className="mt-1 text-xs text-ink-500">Ended <strong className="font-semibold text-ink-800">{formatInstant(lastFinished.repliedAt ?? lastFinished.meetingAt ?? lastFinished.exitedAt ?? lastFinished.completedAt ?? lastFinished.updatedAt, user.timezone)}</strong></div></div></div> : <div className="p-4 text-sm text-ink-500">Never enrolled in a campaign</div>}
+                  {currentEnrollments.length ? <div className="divide-y divide-line">{currentEnrollments.map((e) => <div key={e.id} className="flex flex-wrap items-center justify-between gap-3 p-4"><div><div className="font-medium text-ink-900">{e.campaign ? <Link href={`/campaigns/${e.campaign.id}`} className="hover:text-brand-700 hover:underline">{e.campaign.name}</Link> : 'Direct enrollment'}</div><Link href={`/sequences/${e.sequenceId}`} className="mt-1 block text-sm font-medium text-brand-700">{e.sequence.name}</Link></div><Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'}>{enrollmentStatusLabel(e)}</Badge></div>)}</div> : lastFinished ? <div className="flex flex-wrap items-center justify-between gap-3 p-4"><div><div className="font-medium text-ink-900">{lastFinished.campaign ? <Link href={`/campaigns/${lastFinished.campaign.id}`} className="hover:text-brand-700 hover:underline">{lastFinished.campaign.name}</Link> : 'Direct enrollment'}</div><Link href={`/sequences/${lastFinished.sequenceId}`} className="mt-1 block text-sm font-medium text-brand-700">{lastFinished.sequence.name}</Link></div><div className="text-right"><Badge tone={ENROLLMENT_TONE[lastFinished.status] ?? 'gray'}>{enrollmentStatusLabel(lastFinished)}</Badge><div className="mt-1 text-xs text-ink-500">Ended <strong className=" text-ink-600">{formatInstant(lastFinished.repliedAt ?? lastFinished.meetingAt ?? lastFinished.exitedAt ?? lastFinished.completedAt ?? lastFinished.updatedAt, user.timezone)}</strong></div></div></div> : <div className="p-4 text-sm text-ink-500">Never enrolled in a campaign</div>}
                 </Card>
                 <Card title="Contact details">
                   <div className="p-4">
@@ -384,7 +384,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                         <Avatar name={cachedPersonName(c)} shape="circle" size={24} />
                         <span className="min-w-0 truncate text-ink-800">
                           {cachedPersonName(c)}
-                          {c.jobTitle ? <span className="font-semibold text-ink-700"> · {c.jobTitle}</span> : null}
+                          {c.jobTitle ? <span className=" text-ink-500"> · {c.jobTitle}</span> : null}
                         </span>
                       </Link>
                       <Badge tone={st.tone} dot>

@@ -63,13 +63,13 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
                     <td className="whitespace-nowrap text-[12.5px]">{a.industry ?? <span className="text-ink-300">-</span>}</td>
                     <td className="whitespace-nowrap text-[12.5px]">{a.city ?? <span className="text-ink-300">-</span>}</td>
                     <td className="whitespace-nowrap text-[12.5px]">{a.ownerName ?? <span className="text-ink-300">unassigned</span>}</td>
-                    <td className="font-bold text-ink-900">{a.people}</td>
+                    <td className="tabular-nums text-ink-900">{a.people}</td>
                     <td>
                       <StatusDot tone={a.inSequence ? 'green' : 'gray'}><strong className="text-ink-900">{a.inSequence}</strong></StatusDot>
                     </td>
-                    <td className="font-bold text-ink-900">{a.replied}</td>
-                    <td className="font-bold text-ink-900">{a.meetings}</td>
-                    <td className="whitespace-nowrap text-[12px] font-semibold text-ink-700">{a.lastTouchAt ? formatInstant(a.lastTouchAt, user.timezone) : <span className="font-normal text-ink-300">never</span>}</td>
+                    <td className="tabular-nums text-ink-900">{a.replied}</td>
+                    <td className="tabular-nums text-ink-900">{a.meetings}</td>
+                    <td className="whitespace-nowrap text-[12px] text-ink-500">{a.lastTouchAt ? formatInstant(a.lastTouchAt, user.timezone) : <span className="font-normal text-ink-300">never</span>}</td>
                   </tr>
                 ))}
               </tbody>

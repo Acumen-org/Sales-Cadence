@@ -16,7 +16,7 @@ export function RichTextEditor({ value, onChange, label, disabled = false }: {
     extensions: [StarterKit.configure({ code: false, codeBlock: false, heading: false, horizontalRule: false, link: { openOnClick: false, protocols: ['mailto'] } })],
     content: value,
     editable: !disabled,
-    editorProps: { attributes: { role: 'textbox', 'aria-label': label, 'aria-multiline': 'true', class: 'max-h-[44vh] min-h-40 overflow-y-auto scroll-thin px-4 py-3 text-[14px] leading-7 text-ink-900 outline-none [&_a]:font-semibold [&_a]:text-brand-700 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:mb-2' } },
+    editorProps: { attributes: { role: 'textbox', 'aria-label': label, 'aria-multiline': 'true', class: 'max-h-[44vh] min-h-40 overflow-y-auto scroll-thin px-4 py-3 text-[14px] leading-7 text-ink-900 outline-none [&_a]:font-medium [&_a]:text-brand-700 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:mb-2' } },
     onUpdate: ({ editor: e }) => onChange(e.getHTML(), e.getText()),
   });
   useEffect(() => { editor?.setEditable(!disabled); }, [editor, disabled]);

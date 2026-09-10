@@ -47,7 +47,7 @@ export default async function SequenceDetailPage({ params }: { params: Promise<{
             edit ? (
               <div className="surface flex flex-wrap items-end gap-5 p-5">
                 <Field label="Sequence name">
-                  <input name="name" className="!w-80 max-w-full !font-semibold" defaultValue={sequence.name} required />
+                  <input name="name" className="!w-80 max-w-full !font-medium" defaultValue={sequence.name} required />
                 </Field>
                 <label className="mb-2 flex items-center gap-2 text-sm">
                   <input type="checkbox" name="archived" defaultChecked={sequence.archived} />

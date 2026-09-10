@@ -104,7 +104,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
                 <thead><tr><th>FO</th><th>Email</th><th>Calls</th><th>Answered calls</th><th>LinkedIn</th><th>Replies</th><th>Meetings</th><th>Completed tasks</th></tr></thead>
                 <tbody>{reports.activity.map((row) => (
                   <tr key={row.id}>
-                    <td><div className="flex items-center gap-2.5"><Avatar name={row.name} shape="circle" size={28} /><strong className="whitespace-nowrap">{row.name}</strong></div></td>
+                    <td><div className="flex items-center gap-2.5"><Avatar name={row.name} shape="circle" size={28} /><span className="whitespace-nowrap font-medium text-ink-900">{row.name}</span></div></td>
                     <td>{row.period.emails}</td><td>{row.period.calls}</td><td>{row.period.answered}</td><td>{row.period.linkedin}</td><td>{row.period.replies}</td><td>{row.period.meetings}</td><td>{row.period.total}</td>
                   </tr>
                 ))}</tbody>

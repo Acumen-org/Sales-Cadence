@@ -66,11 +66,11 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
       </div>
 
       <div className="mx-6 mt-3 grid gap-4 rounded-xl border border-line bg-white p-5 sm:grid-cols-2 lg:grid-cols-5">
-        <div><div className="text-xs text-ink-500">Date and time</div><div className="mt-1 font-semibold text-ink-900">{formatInstant(meeting.occurredAt, user.timezone)}</div></div>
-        <div><div className="text-xs text-ink-500">Duration</div><div className="mt-1 font-semibold text-ink-900">{meeting.durationSec !== null ? `${Math.round(meeting.durationSec / 60)} min` : 'Not recorded'}</div></div>
-        <div><div className="text-xs text-ink-500">Platform</div><div className="mt-1 font-semibold text-ink-900">{PROVIDER_LABELS[meeting.provider]}</div></div>
-        <div><div className="text-xs text-ink-500">Account</div><div className="mt-1 font-semibold text-ink-900">{meeting.companyId ? <Link href={`/accounts/${meeting.companyId}`} className="text-brand-700 hover:underline">{meeting.companyName}</Link> : meeting.companyName ?? 'No account'}</div></div>
-        <div><div className="text-xs text-ink-500">Added by</div><div className="mt-1 font-semibold text-ink-900">{meeting.createdBy?.name ?? 'Unknown'}</div></div>
+        <div><div className="text-xs text-ink-500">Date and time</div><div className="mt-1 font-medium text-ink-900">{formatInstant(meeting.occurredAt, user.timezone)}</div></div>
+        <div><div className="text-xs text-ink-500">Duration</div><div className="mt-1 font-medium text-ink-900">{meeting.durationSec !== null ? `${Math.round(meeting.durationSec / 60)} min` : 'Not recorded'}</div></div>
+        <div><div className="text-xs text-ink-500">Platform</div><div className="mt-1 font-medium text-ink-900">{PROVIDER_LABELS[meeting.provider]}</div></div>
+        <div><div className="text-xs text-ink-500">Account</div><div className="mt-1 font-medium text-ink-900">{meeting.companyId ? <Link href={`/accounts/${meeting.companyId}`} className="text-brand-700 hover:underline">{meeting.companyName}</Link> : meeting.companyName ?? 'No account'}</div></div>
+        <div><div className="text-xs text-ink-500">Added by</div><div className="mt-1 font-medium text-ink-900">{meeting.createdBy?.name ?? 'Unknown'}</div></div>
         <div className="sm:col-span-2 lg:col-span-5"><div className="mb-2 text-xs text-ink-500">Products</div><ProductTags meetingId={meeting.id} products={meeting.products} canEdit={mayEdit} /></div>
       </div>
       <div className="grid gap-3 px-6 pb-8 pt-3 xl:grid-cols-[minmax(0,1fr)_380px]">
@@ -133,7 +133,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
                         ) : (
                           <span className="block truncate text-[13px] font-medium text-ink-900">{label}</span>
                         )}
-                        {a.email ? <span className="block truncate text-[11.5px] font-semibold text-ink-700">{a.email}</span> : null}
+                        {a.email ? <span className="block truncate text-[11.5px] text-ink-500">{a.email}</span> : null}
                       </span>
                       <span className="flex shrink-0 gap-1">
                         {a.host ? <Badge tone="blue">host</Badge> : null}

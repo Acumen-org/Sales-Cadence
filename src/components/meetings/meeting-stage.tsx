@@ -59,7 +59,7 @@ export function MeetingStage(p: Props) {
     <div className="space-y-3">
       {mediaFailed ? (
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <span className="text-[13px] font-semibold text-amber-900">Recording unavailable</span>
+          <span className="text-[13px] font-medium text-amber-900">Recording unavailable</span>
           <span className="text-[12.5px] text-amber-800">The link may have expired or need a sign-in.</span>
           <a href={p.sourceUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm ml-auto"><IconExternal size={13} />Open the source</a>
         </div>
@@ -104,7 +104,7 @@ export function MeetingStage(p: Props) {
 
       <div className="surface overflow-hidden">
         <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
-          <span className="text-[13px] font-semibold text-ink-900">
+          <span className="text-[13px] font-medium text-ink-900">
             Transcript
             {cues.length ? <span className="ml-2 font-normal text-ink-600"><span className="font-medium text-ink-900">{cues.length}</span> segments{format ? ` · ${format.toUpperCase()}` : ''}</span> : null}
           </span>
@@ -133,7 +133,7 @@ export function MeetingStage(p: Props) {
                             {formatCueTime(c.start)}
                           </button>
                         ) : (
-                          <span className="shrink-0 font-mono text-[11.5px] font-semibold text-ink-700">{formatCueTime(c.start)}</span>
+                          <span className="shrink-0 font-mono text-[11.5px] text-ink-500">{formatCueTime(c.start)}</span>
                         )
                       ) : null}
                       <span className="min-w-0">

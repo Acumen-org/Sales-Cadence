@@ -121,7 +121,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                   <ul className="divide-y divide-line">
                     {timeline.slice(0, 8).map((it, i) => (
                       <li key={i} className="flex items-start gap-2.5 px-4 py-2.5 text-[13px]">
-                        <span className={it.tone === 'in' ? 'mt-0.5 text-emerald-600' : it.tone === 'out' ? 'mt-0.5 font-semibold text-ink-700' : 'mt-0.5 text-ink-300'}>
+                        <span className={it.tone === 'in' ? 'mt-0.5 text-emerald-600' : it.tone === 'out' ? 'mt-0.5 text-ink-500' : 'mt-0.5 text-ink-300'}>
                           {it.icon === 'MEETING' || it.icon === 'STATE' ? <span className="inline-block h-3.5 w-3.5 rounded-full border border-current" /> : <ActionIcon action={it.icon} size={14} />}
                         </span>
                         <span className="min-w-0 flex-1">
@@ -132,10 +132,10 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                           ) : (
                             <span className="text-ink-800">{it.title}</span>
                           )}
-                          {it.personName ? <span className="block truncate text-[12px] font-semibold text-ink-900">{it.personName}</span> : null}
+                          {it.personName ? <span className="block truncate text-[12px] font-medium text-ink-900">{it.personName}</span> : null}
                           <EventDetail fields={it.fields} className="mt-0.5" />
                         </span>
-                        <span className="shrink-0 text-[11px] font-semibold text-ink-700">{formatInstant(it.at, user.timezone)}</span>
+                        <span className="shrink-0 text-[11px] text-ink-500">{formatInstant(it.at, user.timezone)}</span>
                       </li>
                     ))}
                   </ul>
@@ -188,7 +188,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                           {p.nextAction || p.nextActionDueDate ? (
                             <>
                               <div className="max-w-[10rem] truncate text-ink-700">{p.nextAction ?? '-'}</div>
-                              {p.nextActionDueDate ? <div className="font-semibold text-ink-700">{formatLocalDate(p.nextActionDueDate)}</div> : null}
+                              {p.nextActionDueDate ? <div className=" text-ink-500">{formatLocalDate(p.nextActionDueDate)}</div> : null}
                             </>
                           ) : (
                             <span className="text-ink-300">-</span>
@@ -202,8 +202,8 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                           )}
                         </td>
                         <td className="whitespace-nowrap text-[12.5px]">{p.enrollment?.foName ?? <span className="text-ink-300">-</span>}</td>
-                        <td className="font-bold text-ink-900">{p.touches}</td>
-                        <td className="whitespace-nowrap text-[12px] font-semibold text-ink-700">{p.lastTouchAt ? formatInstant(p.lastTouchAt, user.timezone) : <span className="font-normal text-ink-300">never</span>}</td>
+                        <td className="tabular-nums text-ink-900">{p.touches}</td>
+                        <td className="whitespace-nowrap text-[12px] text-ink-500">{p.lastTouchAt ? formatInstant(p.lastTouchAt, user.timezone) : <span className="font-normal text-ink-300">never</span>}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -221,7 +221,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
               <ol className="divide-y divide-line">
                 {timeline.map((it, i) => (
                   <li key={i} className="flex items-start gap-3 px-4 py-3 text-[13px]">
-                    <span className={it.tone === 'in' ? 'mt-0.5 text-emerald-600' : it.tone === 'out' ? 'mt-0.5 font-semibold text-ink-700' : 'mt-0.5 text-ink-300'}>
+                    <span className={it.tone === 'in' ? 'mt-0.5 text-emerald-600' : it.tone === 'out' ? 'mt-0.5 text-ink-500' : 'mt-0.5 text-ink-300'}>
                       {it.icon === 'MEETING' || it.icon === 'STATE' ? <span className="inline-block h-3.5 w-3.5 rounded-full border border-current" /> : <ActionIcon action={it.icon} size={14} />}
                     </span>
                     <span className="min-w-0 flex-1">
@@ -232,11 +232,11 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                       ) : (
                         <span className="font-medium text-ink-800">{it.title}</span>
                       )}
-                      {it.personName ? <span className="mt-0.5 block text-[12px] font-semibold text-ink-900">{it.personName}</span> : null}
+                      {it.personName ? <span className="mt-0.5 block text-[12px] font-medium text-ink-900">{it.personName}</span> : null}
                       <EventDetail fields={it.fields} className="mt-0.5" />
                     </span>
                     <span className="flex shrink-0 flex-col items-end gap-1.5">
-                      <span className="text-[11px] font-semibold text-ink-700">{formatInstant(it.at, user.timezone)}</span>
+                      <span className="text-[11px] text-ink-500">{formatInstant(it.at, user.timezone)}</span>
                       <Badge tone="gray">{it.kind}</Badge>
                     </span>
                   </li>
@@ -274,8 +274,8 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                         <td>
                           <Badge tone="gray">{c.status.toLowerCase()}</Badge>
                         </td>
-                        <td className="font-bold text-ink-900">{c.people}</td>
-                        <td className="font-bold text-ink-900">{c.replied}</td>
+                        <td className="tabular-nums text-ink-900">{c.people}</td>
+                        <td className="tabular-nums text-ink-900">{c.replied}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -306,7 +306,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                         </td>
                         <td className="text-[12.5px]">
                           <span className="inline-flex items-center gap-1.5">
-                            <ActionIcon action={t.action} size={13} className="font-semibold text-ink-700" />
+                            <ActionIcon action={t.action} size={13} className=" text-ink-500" />
                             {t.label}
                           </span>
                         </td>
@@ -331,7 +331,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                         <Link href={`/meetings/${m.id}`} className="block truncate text-[13px] font-medium text-ink-900 hover:text-brand-700">
                           {m.title}
                         </Link>
-                        <span className="block text-[11.5px] font-semibold text-ink-700">
+                        <span className="block text-[11.5px] text-ink-500">
                           {formatInstant(m.occurredAt, user.timezone)} · {m.attendees.filter((a) => a.external).length} external
                         </span>
                       </span>

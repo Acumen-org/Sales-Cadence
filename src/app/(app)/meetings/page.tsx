@@ -88,10 +88,10 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
             All
           </Link>
           <Link href={href('mine')} className={scope === 'mine' ? 'chip' : 'chip-muted'}>
-            Added by me <span className="ml-0.5 font-bold text-ink-900">{mine}</span>
+            Added by me <span className="ml-0.5 font-medium text-ink-900">{mine}</span>
           </Link>
           <Link href={href('week')} className={scope === 'week' ? 'chip' : 'chip-muted'}>
-            This week <span className="ml-0.5 font-bold text-ink-900">{thisWeek}</span>
+            This week <span className="ml-0.5 font-medium text-ink-900">{thisWeek}</span>
           </Link>
         </Toolbar>
 
@@ -215,7 +215,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                       </td>
                       <td className="text-right">
                         {already ? (
-                          <span className="text-[12px] font-semibold text-ink-700">Already added</span>
+                          <span className="text-[12px] text-ink-500">Already added</span>
                         ) : (
                           <Link href={`/meetings/new?personId=${b.id}`} className="btn-secondary btn-sm">
                             <IconPlus size={12} /> Add with recording
