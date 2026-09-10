@@ -131,6 +131,14 @@ Before pushing, the same thing locally:
 pnpm typecheck && pnpm lint && pnpm test && pnpm test:e2e
 ```
 
+**The `handover` tag** marks the commit the dev team received (`b9b0089`). If the GitHub
+repository contains that commit, histories on both sides share an ancestor and work done in
+parallel merges normally: add the remote, `git fetch`, then rebase or open a pull request. If it
+does not — because the repository was started fresh from the files rather than pushed from this
+one — the two histories are unrelated, and combining them needs a deliberate
+`--allow-unrelated-histories` merge or a replay of one side's commits onto the other. Easier to
+push this history in the first place than to reconcile later.
+
 Two things worth setting up on the repository itself, which cannot live in the code:
 
 - **Protect `main`**: require the CI check to pass before merging. Settings > Branches.
