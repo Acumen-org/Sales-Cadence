@@ -1,0 +1,67 @@
+name: CI
+
+# Every push to main and every pull request runs the whole suite. Nothing here needs a database
+# server, a Twenty instance or any secret: the unit tests start an embedded Postgres, and the
+# browser tests run the app against the built-in fake CRM, which is why they can run on a clean
+# runner with no configuration at all.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  # A newer push to the same branch cancels the older run: the result of the older one is not
+  # something anybody will act on.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate the Prisma client
+        run: pnpm db:generate
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Install the browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      # Builds first, then drives the app: the sample workspace with campaigns and live tasks.
+      - name: Browser tests
+        run: pnpm test:e2e
+
+      # And again as a brand-new deployment: one admin, the default sequence, nothing worked yet.
+      - name: Fresh-install check
+        run: pnpm test:fresh
+
+      - name: Keep the report from a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
