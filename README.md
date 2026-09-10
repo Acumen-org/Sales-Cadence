@@ -117,6 +117,30 @@ pnpm build
 
 The end-to-end suite covers sign-in, campaign creation with the conflict preview, the task flow (done, log a call with an outcome, skip with a bounce, answered call finishing as replied), sequence editing including the refusal to change a step in use, settings, role restrictions checked by URL as well as by the missing link, reports, accounts, meeting forms, enrichment, global search, dialog focus, and mobile navigation. `e2e/roles.spec.ts` drives one full journey per role, and `pnpm test:fresh` drives a brand-new deployment: one admin, the default sequence, nothing worked yet. To use a separate browser-test database without clearing an existing one, build first, then set `E2E_DB_DIR` to a new project subdirectory and run `pnpm exec playwright test`.
 
+## Working on it
+
+`main` is the branch that deploys. Every push to it and every pull request runs the whole suite in
+GitHub Actions (`.github/workflows/ci.yml`): typecheck, lint, 271 unit tests, 45 browser tests and
+the fresh-install check. None of it needs a database server, a Twenty instance or a secret - the
+unit tests start an embedded Postgres and the browser tests run against the built-in fake CRM - so
+a fork or a clean runner builds green with no configuration.
+
+Before pushing, the same thing locally:
+
+```bash
+pnpm typecheck && pnpm lint && pnpm test && pnpm test:e2e
+```
+
+Two things worth setting up on the repository itself, which cannot live in the code:
+
+- **Protect `main`**: require the CI check to pass before merging. Settings > Branches.
+- **Decide about Dependabot.** This app holds a copy of your CRM's contact data, so security
+  updates matter; weekly npm and Actions updates are the usual setting.
+
+**Schema changes** ship as migrations. `prisma/migrations/` is committed, `pnpm db:migrate` applies
+what is missing, and the Docker entrypoint runs it on start - so deploying a schema change is the
+same as deploying anything else. Never edit a migration that has run somewhere; add another.
+
 ## Workspace design and review
 
 Cadence uses a warm canvas, evergreen navigation, lime accents, a custom mark, and a consistent set of cards, tables, controls, and record headers. Home combines personal priorities, a focused task-flow entry point, upcoming touches, and weekly team performance. Sequences have a searchable visual library with real touch plans. Search (`Ctrl+K` / `Cmd+K`) and help are available from every section; the sidebar becomes a keyboard-accessible drawer on mobile.

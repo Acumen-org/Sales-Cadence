@@ -14,7 +14,7 @@ done
 
 if [ "$ROLE" = "web" ]; then
   if [ "${SEED_ON_START:-true}" = "true" ]; then
-    echo "[cadence] seeding (profile: ${SEED_PROFILE:-core,demo})..."
+    echo "[cadence] seeding (profile: ${SEED_PROFILE:-core})..."
     pnpm exec tsx prisma/seed.ts
   fi
   echo "[cadence] starting web on :3000"
