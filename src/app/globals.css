@@ -34,7 +34,7 @@
   input:not([type='checkbox']):not([type='radio']):not([type='file']),
   select,
   textarea {
-    @apply w-full rounded-[10px] border border-line bg-white px-3 py-2 text-[13.5px] font-semibold text-ink-900 shadow-none outline-none transition placeholder:font-normal placeholder:text-ink-400;
+    @apply w-full rounded-[10px] border border-line bg-white px-3 py-2 text-[13.5px] text-ink-900 shadow-none outline-none transition placeholder:text-ink-400;
   }
   input:not([type='checkbox']):not([type='radio']):not([type='file']):focus,
   select:focus,
@@ -142,7 +142,7 @@
     @apply inline-flex items-center gap-1.5 rounded-lg bg-transparent py-2 px-3 text-[12px] font-medium text-ink-500 transition hover:bg-canvas hover:text-ink-900;
   }
   .badge {
-    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[12px] font-semibold leading-5;
+    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[12px] font-medium leading-5;
   }
   .dot {
     @apply inline-block h-[7px] w-[7px] shrink-0 rounded-full;
@@ -167,6 +167,14 @@
   /* Denser variant for wide analytics tables. */
   .table-tight td {
     @apply py-2;
+  }
+  /* A count column: header and cells right-aligned so the digits line up. */
+  .table .num {
+    @apply text-right tabular-nums;
+  }
+  .data-table th:not(:first-child),
+  .data-table td:not(:first-child) {
+    @apply text-right;
   }
 
   /* ---------- sidebar ---------- */

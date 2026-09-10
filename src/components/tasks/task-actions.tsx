@@ -27,6 +27,13 @@ type Props = {
   canManageEnrollment: boolean;
   size?: 'md' | 'lg';
   keyboardEnabled?: boolean;
+  /**
+   * A step with several modules (email + LinkedIn) shows Done and Skip under each module and
+   * one Snooze / Twenty / More / Next row for the step. 'full' is the single-module case.
+   */
+  variant?: 'full' | 'module' | 'step';
+  /** Every open module of the step, so a snooze from the step row moves all of them. */
+  snoozeTaskIds?: string[];
 };
 
 type Panel = 'none' | 'call' | 'skip' | 'snooze' | 'more';
@@ -125,11 +132,19 @@ export function TaskActions(p: Props) {
   }, [note, p.taskId, reasonKey, run]);
 
   const submitSnooze = useCallback(() => {
-    const fd = new FormData();
-    fd.set('taskId', p.taskId);
-    fd.set('toDate', p.canPickSnoozeDate ? snoozeDate : 'next');
-    run(() => snoozeTaskAction(fd));
-  }, [p.canPickSnoozeDate, p.taskId, run, snoozeDate]);
+    const ids = p.snoozeTaskIds?.length ? p.snoozeTaskIds : [p.taskId];
+    run(async () => {
+      let result: ActionResult | null = null;
+      for (const id of ids) {
+        const fd = new FormData();
+        fd.set('taskId', id);
+        fd.set('toDate', p.canPickSnoozeDate ? snoozeDate : 'next');
+        result = await snoozeTaskAction(fd);
+        if (!result.ok) return result;
+      }
+      return result!;
+    });
+  }, [p.canPickSnoozeDate, p.snoozeTaskIds, p.taskId, run, snoozeDate]);
 
   const submitEnd = useCallback(() => {
     const fd = new FormData();
@@ -181,7 +196,11 @@ export function TaskActions(p: Props) {
         return;
       }
       if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
-      switch (e.key.toLowerCase()) {
+      const key = e.key.toLowerCase();
+      // A module row has no snooze/navigation; a step row has no done/skip.
+      if ((key === 'd' || key === 's') && p.variant === 'step') return;
+      if (['z', 'm', 'n', 'arrowright', 'p', 'arrowleft', 'o'].includes(key) && p.variant === 'module') return;
+      switch (key) {
         case 'd':
           e.preventDefault();
           startDone(p.action); // either/or: D takes the primary action, the second button the other
@@ -216,6 +235,7 @@ export function TaskActions(p: Props) {
   }, [panel, disposition, pending, pendingAction, p, router, startDone, submitComplete, submitSkip, submitSnooze]);
 
   const big = p.size === 'lg';
+  const variant = p.variant ?? 'full';
   const primary = clsx('btn-primary', big && 'px-4 py-2 text-[14.5px]');
   const secondary = clsx('btn-secondary', big && 'px-4 py-2 text-[14.5px]');
   const toggle = (x: Panel) => setPanel((v) => (v === x ? 'none' : x));
@@ -226,12 +246,15 @@ export function TaskActions(p: Props) {
       {/* One row of controls, in one place. Its height never changes and nothing above it grows,
           so the buttons are always where the FO last saw them. */}
       <div className="flex flex-wrap items-center gap-2">
+        {variant !== 'step' ? <>
         <button type="button" disabled={pending} className={primary} onClick={() => startDone(p.action)}>
           {p.action === 'CALL' ? <IconPhone size={16} /> : <IconCheck size={16} />} {p.action === 'CALL' ? 'Log call' : 'Done'}
         </button>
         <button type="button" disabled={pending} className={clsx(secondary, panel === 'skip' && 'border-ink-300 bg-canvas')} onClick={() => toggle('skip')}>
           <IconSkip size={16} /> Skip
         </button>
+        </> : null}
+        {variant !== 'module' ? <>
         <button type="button" disabled={pending} className={clsx(secondary, panel === 'snooze' && 'border-ink-300 bg-canvas')} onClick={() => toggle('snooze')}>
           <IconClock size={16} /> Snooze
         </button>
@@ -263,6 +286,7 @@ export function TaskActions(p: Props) {
             </button>
           ) : null}
         </span>
+        </> : null}
       </div>
 
       {/* The one panel slot. Everything opens here, in this order, and nowhere else. */}
@@ -381,7 +405,6 @@ export function TaskActions(p: Props) {
                 }}
               >
                 <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-500">End the sequence</p>
-                <p className="text-[12px] leading-snug text-ink-500">No more tasks are created for this person. Their history stays.</p>
                 <select value={endReason} onChange={(e) => setEndReason(e.target.value)} aria-label="Why are you ending the sequence?" className="w-full">
                   {END_REASONS.map((r) => (
                     <option key={r.key} value={r.key}>
@@ -404,7 +427,6 @@ export function TaskActions(p: Props) {
                   }}
                 >
                   <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-500">Jump to another step</p>
-                  <p className="text-[12px] leading-snug text-ink-500">Cancels the open tasks and starts from the step you pick.</p>
                   {/* One control, not a select sitting next to an unrelated button. */}
                   <div className="flex overflow-hidden rounded-[10px] border border-line bg-white focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100">
                     <select

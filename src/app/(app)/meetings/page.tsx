@@ -7,7 +7,7 @@ import { prisma } from '@/lib/db';
 import { formatInstant, todayIn, weekRange } from '@/lib/dates';
 import { PROVIDER_LABELS } from '@/lib/meetings/providers';
 import { IconCalendar, IconExternal, IconPlus } from '@/components/icons';
-import { Badge, EmptyState, IdentityCell, Surface, Toolbar, ViewHeader } from '@/components/ui';
+import { Badge, Empty, EmptyState, IdentityCell, Surface, Toolbar, ViewHeader } from '@/components/ui';
 
 const PAGE_SIZE = 50;
 
@@ -149,21 +149,21 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                     </td>
                     <td className="text-[12.5px]">
                       <span className="font-medium text-ink-900">{m._count.attendees}</span>
-                      {m.attendees.length ? <Badge tone="green" className="ml-1.5">external</Badge> : null}
+                      {m.attendees.length ? <Badge tone="green" className="ml-1.5">External</Badge> : null}
                     </td>
-                    <td>{m.transcript ? <Badge tone="blue">yes</Badge> : <span className="text-[12px] text-ink-300">-</span>}</td>
+                    <td>{m.transcript ? <Badge tone="blue">Transcript</Badge> : <Empty />}</td>
                     <td>
                       {m.analysisStatus === 'READY' ? (
-                        <Badge tone="green">ready</Badge>
+                        <Badge tone="green">Ready</Badge>
                       ) : m.analysisStatus === 'FAILED' ? (
-                        <Badge tone="red">failed</Badge>
+                        <Badge tone="red">Failed</Badge>
                       ) : m.analysisStatus === 'PENDING' ? (
-                        <Badge tone="amber">running</Badge>
+                        <Badge tone="amber">Running</Badge>
                       ) : (
                         <span className="text-[12px] text-ink-500">Not run</span>
                       )}
                     </td>
-                    <td className="whitespace-nowrap text-[12.5px]">{m.createdBy?.name ?? '-'}</td>
+                    <td className="whitespace-nowrap text-[12.5px]">{m.createdBy?.name ?? <Empty />}</td>
                   </tr>
                 ))}
               </tbody>
@@ -174,7 +174,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
 
       {recordings.length ? (
         <Surface flush>
-          <ViewHeader title="Recordings in Twenty" caret meta={<><span className="font-medium text-ink-900">{recordingTotal}</span> on a person record{recordingTotal > recordings.length ? <> · showing <strong>{recordings.length}</strong></> : null}</>} />
+          <ViewHeader title="Recordings in Twenty" caret meta={<><span className="font-medium text-ink-900">{recordingTotal}</span> on a person record{recordingTotal > recordings.length ? <> · showing <span className="font-medium text-ink-900">{recordings.length}</span></> : null}</>} />
           <div className="overflow-x-auto scroll-thin">
             <table className="table">
               <thead>
@@ -210,7 +210,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                               <IconExternal size={12} /> Join
                             </a>
                           ) : null}
-                          {b.recordingUrl ? <Badge tone="blue">recording</Badge> : null}
+                          {b.recordingUrl ? <Badge tone="blue">Recording</Badge> : null}
                         </div>
                       </td>
                       <td className="text-right">

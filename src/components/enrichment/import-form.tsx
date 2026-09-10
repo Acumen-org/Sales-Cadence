@@ -42,7 +42,7 @@ export function EnrichmentImportForm({ initialEntity = 'person' }: { initialEnti
           <Field label="Record type"><select value={entity} disabled={pending} onChange={(event) => { const selected = event.target.value as EnrichmentEntity; setEntity(selected); setHeaders([]); if (source) inspect(source, selected); }}><option value="person">Contacts</option><option value="company">Accounts</option></select></Field>
           <Field label="Import name"><input value={name} onChange={(event) => setName(event.target.value)} maxLength={200} /></Field>
           <div className="rounded-xl border border-dashed border-brand-200 bg-brand-50/30 p-6 sm:col-span-2">
-            <Field label="CSV or JSON file" hint="Up to 5,000 rows / 4 MB. Blank cells leave existing data unchanged.">
+            <Field label="CSV or JSON file" info="Up to 5,000 rows / 4 MB. Blank cells leave existing data unchanged.">
               <input type="file" accept=".csv,.tsv,.json,text/csv,application/json" disabled={pending} onChange={async (event) => {
                 const file = event.target.files?.[0];
                 if (!file) return;

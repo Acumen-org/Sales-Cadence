@@ -86,7 +86,7 @@ export function MeetingForm({ companies, initial, mode, timezone }: { companies:
             ))}
           </div>
         </Field>
-        <Field label="Transcript (optional)" className="md:col-span-2" hint="Paste the WebVTT or SRT export, or plain text. Format is detected automatically.">
+        <Field label="Transcript (optional)" className="md:col-span-2" info="Paste the WebVTT or SRT export, or plain text. Format is detected automatically.">
           <textarea name="transcript" rows={6} defaultValue={initial.transcript} className="font-mono !text-[12px]" placeholder="Paste the transcript" />
         </Field>
       </div>

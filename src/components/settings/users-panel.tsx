@@ -5,7 +5,7 @@ import type { Role } from '@prisma/client';
 import { ROLE_LABELS } from '@/lib/auth/rbac';
 import { createPodAction, createUserAction, deletePodAction, restorePodAction, setUserAccessAction, updateUserAction } from '@/lib/actions/users';
 import { ActionButton, ActionForm } from '@/components/action-form';
-import { Avatar, Badge, Card, Field } from '@/components/ui';
+import { Avatar, Badge, Card, Count, Field } from '@/components/ui';
 
 export type UserRow = { id: string; email: string; name: string; role: Role; active: boolean; podIds: string[]; openWork: number; openPodIds: string[] };
 export type PodRow = { id: string; name: string; podOwnerValue: string; userCount: number; peopleCount: number; archived: boolean };
@@ -41,7 +41,7 @@ export function UsersPanel({ users, pods }: { users: UserRow[]; pods: PodRow[] }
     </Card>
     <Card title="Pods" actions={<button type="button" className="btn-secondary btn-sm" onClick={() => setAddingPod(!addingPod)}>{addingPod ? 'Close' : 'Add pod'}</button>}>
       {addingPod ? <ActionForm action={createPodAction} onSuccess={() => setAddingPod(false)} className="flex flex-wrap items-end gap-3 border-b border-line bg-canvas p-4"><Field label="Pod name"><input name="name" required maxLength={120} placeholder="Pod name" /></Field><button type="submit" className="btn-primary">Add pod</button></ActionForm> : null}
-      <div className="overflow-x-auto"><table className="table"><thead><tr><th>Pod</th><th>Contacts</th><th>Team members</th><th>Status</th><th aria-label="Actions" /></tr></thead><tbody>{visiblePods.map((pod) => <tr key={pod.id}><td className="font-medium text-ink-900">{pod.name}</td><td className="tabular-nums text-ink-900">{pod.peopleCount}</td><td className="tabular-nums text-ink-900">{pod.userCount}</td><td><Badge tone={pod.archived ? 'gray' : 'green'}>{pod.archived ? 'Removed' : 'Available'}</Badge></td><td className="text-right">{pod.archived ? <ActionButton action={restorePodAction} payload={{ podId: pod.id }} className="btn-secondary btn-sm">Restore</ActionButton> : <ActionButton action={deletePodAction} payload={{ podId: pod.id }} className="btn-ghost btn-sm text-red-700" confirm={`Remove ${pod.name}? Its history will remain available.`}>Remove</ActionButton>}</td></tr>)}</tbody></table>{!visiblePods.length ? <div className="p-4 text-sm text-ink-500">No active pods</div> : null}</div>
+      <div className="overflow-x-auto"><table className="table"><thead><tr><th>Pod</th><th className="num">Contacts</th><th className="num">Team members</th><th>Status</th><th aria-label="Actions" /></tr></thead><tbody>{visiblePods.map((pod) => <tr key={pod.id}><td className="font-medium text-ink-900">{pod.name}</td><td className="num"><Count value={pod.peopleCount} /></td><td className="num"><Count value={pod.userCount} /></td><td><Badge tone={pod.archived ? 'gray' : 'green'}>{pod.archived ? 'Removed' : 'Available'}</Badge></td><td className="text-right">{pod.archived ? <ActionButton action={restorePodAction} payload={{ podId: pod.id }} className="btn-secondary btn-sm">Restore</ActionButton> : <ActionButton action={deletePodAction} payload={{ podId: pod.id }} className="btn-ghost btn-sm text-red-700" confirm={`Remove ${pod.name}? Its history will remain available.`}>Remove</ActionButton>}</td></tr>)}</tbody></table>{!visiblePods.length ? <div className="p-4 text-sm text-ink-500">No active pods</div> : null}</div>
     </Card>
   </div>;
 }

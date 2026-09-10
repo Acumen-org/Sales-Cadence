@@ -26,16 +26,16 @@ export default async function SequenceDetailPage({ params }: { params: Promise<{
         icon={<IconSequences size={20} />}
         badges={
           <Badge tone="green">
-            <strong>{sequence._count.campaigns}</strong> {sequence._count.campaigns === 1 ? 'campaign' : 'campaigns'}
+            {sequence._count.campaigns} {sequence._count.campaigns === 1 ? 'campaign' : 'campaigns'}
           </Badge>
         }
         actions={
-          <Link href="/sequences" className="btn-secondary">
+          <Link href="/sequences" className="btn-ghost btn-sm">
             All sequences
           </Link>
         }
       />
-      <div className="mx-auto max-w-5xl">
+      <div className="max-w-4xl">
         <SequenceEditor
           sequenceId={id}
           initialSteps={steps}

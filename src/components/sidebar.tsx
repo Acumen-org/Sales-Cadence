@@ -67,8 +67,7 @@ function SidebarContent({ user, mode, dryRun, todayCount, close }: Props & { clo
       <div className="shrink-0 px-3 pb-3">
         {user.role === 'ADMIN' ? <Link href="/settings" onClick={close} aria-current={pathname.startsWith('/settings') ? 'page' : undefined} className={clsx('nav-item mb-3', pathname.startsWith('/settings') && 'nav-item-active')}><IconSettings size={18} /> Settings</Link> : null}
         <div className="mx-1 mb-3 rounded-lg border border-white/10 px-3 py-3">
-          <div className="flex items-center gap-2 text-[11px] font-medium text-[#dbe5df]"><span className={clsx('h-1.5 w-1.5 rounded-full', mode === 'mock' ? 'bg-[#d5e9ad]' : 'bg-sky-300')} />{mode === 'mock' ? 'Demo workspace' : 'Twenty workspace'}</div>
-          <p className="mt-1 text-[10px] leading-relaxed text-[#9eb4a9]">{dryRun ? 'Dry run · CRM writes paused' : mode === 'mock' ? 'Explore with sample data' : 'Connected to your CRM'}</p>
+          <div className="flex items-center gap-2 text-[11px] font-medium text-[#dbe5df]"><span className={clsx('h-1.5 w-1.5 rounded-full', mode === 'mock' ? 'bg-[#d5e9ad]' : 'bg-sky-300')} />{mode === 'mock' ? 'Demo workspace' : dryRun ? 'Twenty · dry run' : 'Twenty workspace'}</div>
         </div>
         <div className="flex items-center gap-2.5 border-t border-white/10 px-2 pt-4">
           <Avatar name={user.name} shape="circle" size={33} />

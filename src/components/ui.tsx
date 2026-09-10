@@ -393,7 +393,7 @@ const FORM_CONTROLS = new Set(['input', 'select', 'textarea']);
  * Label + control. A single input/select/textarea child gets an id (unless it has one) and the
  * label points at it with htmlFor, so click-to-focus, screen readers and accessible queries work.
  */
-export function Field({ label, children, hint, className }: { label: ReactNode; children: ReactNode; hint?: ReactNode; className?: string }) {
+export function Field({ label, children, hint, info, className }: { label: ReactNode; children: ReactNode; hint?: ReactNode; info?: string; className?: string }) {
   const autoId = useId();
   const single = isValidElement(children) && typeof children.type === 'string' && FORM_CONTROLS.has(children.type);
   const existingId = single ? (children as ReactElement<{ id?: string }>).props.id : undefined;
@@ -402,12 +402,34 @@ export function Field({ label, children, hint, className }: { label: ReactNode; 
   const control = single ? cloneElement(children as ReactElement<{ id?: string; 'aria-describedby'?: string }>, { id: controlId, 'aria-describedby': [(children as ReactElement<{ 'aria-describedby'?: string }>).props['aria-describedby'], hint ? hintId : undefined].filter(Boolean).join(' ') || undefined }) : children;
   return (
     <div className={clsx('space-y-1.5', className)}>
-      <label htmlFor={controlId} className="block">
-        {label}
-      </label>
+      <div className="flex items-center">
+        <label htmlFor={controlId} className="block">
+          {label}
+        </label>
+        {info ? <Info text={info} /> : null}
+      </div>
       {control}
       {hint ? <p id={hintId} className="text-[11.5px] leading-relaxed text-ink-500">{hint}</p> : null}
     </div>
+  );
+}
+
+/** An absent value. The same quiet dash wherever a field, cell or list has nothing to show. */
+export function Empty({ children = '-' }: { children?: ReactNode }) {
+  return <span className="text-ink-300">{children}</span>;
+}
+
+/** A count in a table. Zero is quiet; anything else is the row's figure. */
+export function Count({ value, className }: { value: number; className?: string }) {
+  return <span className={clsx('tabular-nums', value ? 'font-medium text-ink-900' : 'text-ink-400', className)}>{value}</span>;
+}
+
+/** The explanation behind a field label, shown on hover instead of as a sentence under the control. */
+export function Info({ text }: { text: string }) {
+  return (
+    <span title={text} aria-label={text} className="ml-1.5 inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-line align-[-2px] text-[10px] leading-none text-ink-400">
+      ?
+    </span>
   );
 }
 
@@ -417,7 +439,7 @@ export function KeyValue({ items }: { items: { k: string; v: ReactNode }[] }) {
       {items.map((it) => (
         <div key={it.k} className="contents">
           <dt className="pt-0.5">{it.k}</dt>
-          <dd className="min-w-0 break-words">{it.v == null || it.v === '' ? <span className="text-ink-300">-</span> : displayValue(it.v)}</dd>
+          <dd className="min-w-0 break-words">{it.v == null || it.v === '' ? <Empty /> : displayValue(it.v)}</dd>
         </div>
       ))}
     </dl>
@@ -465,8 +487,8 @@ export function RecordFields({ items, className }: { items: { label: string; val
     <dl className={clsx('grid grid-cols-2 gap-x-6 gap-y-5 md:grid-cols-3', className)}>
       {items.map((item) => (
         <div key={item.label} className="min-w-0 space-y-1.5">
-          <dt className="text-[12px] text-ink-500">{item.label}</dt>
-          <dd className="break-words text-[14px] font-medium text-ink-900">{item.value == null || item.value === '' ? <span className="font-normal text-ink-400">Not recorded</span> : displayValue(item.value)}</dd>
+          <dt className="text-[11px] font-medium uppercase tracking-wide text-ink-400">{item.label}</dt>
+          <dd className="break-words text-[14px] font-medium text-ink-900">{item.value == null || item.value === '' ? <Empty /> : displayValue(item.value)}</dd>
         </div>
       ))}
     </dl>

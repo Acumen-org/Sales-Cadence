@@ -9,6 +9,17 @@ import { Avatar, Badge, contactWarnings, crmStanding, ENROLLMENT_TONE, enrollmen
 function Section({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
   return <section className="border-b border-line px-4 py-4 last:border-b-0"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold text-ink-900">{title}</h3>{right}</div>{children}</section>;
 }
+/** Standing, tier and data-quality flags for the person a task is about: shown once, beside the name. */
+export function PersonBadges({ person }: { person: TaskBrief['person'] }) {
+  const standing = crmStanding(person);
+  const warnings = contactWarnings(person);
+  return <>
+    <Badge tone={standing.tone} dot>{standing.label}</Badge>
+    {person.tier ? <TierBadge tier={person.tier} /> : null}
+    {warnings.map((warning) => <Badge key={warning.label} tone={warning.tone}>{warning.label}</Badge>)}
+  </>;
+}
+
 const filled = (items: { k: string; v: React.ReactNode }[]) => items.filter((i) => i.v !== null && i.v !== undefined && i.v !== '');
 function dueTone(due: LocalDate, today: LocalDate): BadgeTone { const comparison = compareLocalDates(due, today); return comparison < 0 ? 'red' : comparison === 0 ? 'amber' : 'gray'; }
 const KIND_ICON: Record<BriefTimelineItem['kind'], string> = { email: 'EMAIL', call: 'CALL', linkedin: 'LINKEDIN_MESSAGE', note: 'NOTE', meeting: 'MEETING', state: 'STATE' };
@@ -23,15 +34,9 @@ function TimelineRow({ item, timezone }: { item: BriefTimelineItem; timezone: st
 /** The selected contact's CRM context. Full emails and notes follow in CrmHistory. */
 export function TaskBriefPanel({ brief, timezone }: { brief: TaskBrief; timezone: string }) {
   const person = brief.person;
-  const standing = crmStanding(person);
-  const warnings = contactWarnings(person);
   const localActivity = brief.timeline.filter((item) => item.kind !== 'email' && item.kind !== 'note');
   const campaign = brief.task.enrollment.campaign;
   return <Surface flush>
-    <header className="space-y-4 border-b border-line bg-canvas/50 p-4"><div className="flex items-start gap-3"><Avatar name={brief.personName} shape="circle" size={40} /><div className="min-w-0 flex-1"><Link href={`/people/${person.id}`} className="text-base font-medium text-ink-900 hover:text-brand-700">{brief.personName}</Link><div className="mt-1 text-sm text-ink-500">{person.jobTitle ?? 'Title missing'}</div></div>{brief.twentyUrl ? <a href={brief.twentyUrl} target="_blank" rel="noreferrer" className="btn-icon shrink-0" aria-label="Open contact in Twenty"><IconExternal size={15} /></a> : null}</div>
-      {person.companyName ? <Link href={person.companyId ? `/accounts/${person.companyId}` : `/people/${person.id}`} className="block font-medium text-brand-700 hover:underline">{person.companyName}</Link> : null}
-      <div className="flex flex-wrap gap-1.5"><Badge tone={standing.tone} dot>{standing.label}</Badge>{person.tier ? <TierBadge tier={person.tier} /> : null}{warnings.map((warning) => <Badge key={warning.label} tone={warning.tone}>{warning.label}</Badge>)}</div>
-    </header>
     {brief.warnings.length ? <div className="p-4"><Notice tone="warn">Some CRM information is temporarily unavailable. Cached contact data is shown.</Notice></div> : null}
 
     <Section title="Contact details">

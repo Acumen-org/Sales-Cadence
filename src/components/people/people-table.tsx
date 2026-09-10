@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { Badge, DotTimeline, IdentityCell, TierBadge, touchTitle, type BadgeTone, type TimelinePoint } from '@/components/ui';
+import { Badge, DotTimeline, Empty, IdentityCell, TierBadge, touchTitle, type BadgeTone, type TimelinePoint } from '@/components/ui';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
 import { ActionIcon, IconPlus } from '@/components/icons';
 
@@ -44,6 +44,20 @@ type Props = {
  * MISSING_EMAIL - and the badges above are built from the fields. Rendering both put the same
  * word in the cell twice, so anything already said is dropped here.
  */
+const MAX_PILLS = 3;
+
+/** Up to three pills in a row; the rest fold into "+n" with the full list on hover. */
+function Pills({ items }: { items: { label: string; node: React.ReactNode }[] }) {
+  const shown = items.slice(0, MAX_PILLS);
+  const rest = items.slice(MAX_PILLS);
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {shown.map((item) => <span key={item.label}>{item.node}</span>)}
+      {rest.length ? <span title={rest.map((item) => item.label).join(', ')}><Badge tone="gray">+{rest.length}</Badge></span> : null}
+    </div>
+  );
+}
+
 function distinctTags(p: PeopleTableRow): string[] {
   const shown = new Set(
     [p.standing.label, p.listCategory ? optionLabel(p.listCategory) : null, ...p.warnings.map((w) => w.label)]
@@ -67,6 +81,7 @@ export function PeopleTable({ rows, canEnroll }: Props) {
     });
   const bulkHref = `/campaigns/new?ids=${encodeURIComponent([...selected].join(','))}`;
 
+  const showNext = rows.some((p) => p.next?.action || p.next?.due);
   return (
     <div>
       {canEnroll && selected.size ? (
@@ -91,11 +106,11 @@ export function PeopleTable({ rows, canEnroll }: Props) {
               ) : null}
               <th>Name</th>
               <th>In Twenty</th>
-              <th>Next in Twenty</th>
+              {showNext ? <th>Next in Twenty</th> : null}
               <th>Campaign / sequence</th>
               <th>Activity</th>
               <th>Pod</th>
-              <th>Last touch</th>
+              <th className="w-56">Last touch</th>
             </tr>
           </thead>
           <tbody>
@@ -119,17 +134,17 @@ export function PeopleTable({ rows, canEnroll }: Props) {
                     the data-quality flags are derived from fields Twenty also carries as tags, so
                     a tag already shown as a badge is dropped rather than repeated. */}
                 <td title={p.leadSource.length ? `Lead source: ${optionLabels(p.leadSource)}` : undefined}>
-                  <div className="flex flex-wrap items-center gap-1">
-                    <Badge tone={p.standing.tone} dot>
-                      {p.standing.label}
-                    </Badge>
-                    <TierBadge tier={p.tier} />
-                    {p.listCategory ? <Badge tone="gray">{optionLabel(p.listCategory)}</Badge> : null}
-                    {p.warnings.map((w) => <Badge key={w.label} tone={w.tone}>{w.label}</Badge>)}
-                    {distinctTags(p).map((tag) => <Badge key={tag} tone="gray">{optionLabel(tag)}</Badge>)}
-                  </div>
+                  <Pills
+                    items={[
+                      { label: p.standing.label, node: <Badge tone={p.standing.tone} dot>{p.standing.label}</Badge> },
+                      ...(p.tier ? [{ label: p.tier, node: <TierBadge tier={p.tier} /> }] : []),
+                      ...(p.listCategory ? [{ label: optionLabel(p.listCategory), node: <Badge tone="gray">{optionLabel(p.listCategory)}</Badge> }] : []),
+                      ...p.warnings.map((w) => ({ label: w.label, node: <Badge tone={w.tone}>{w.label}</Badge> })),
+                      ...distinctTags(p).map((tag) => ({ label: optionLabel(tag), node: <Badge tone="gray">{optionLabel(tag)}</Badge> })),
+                    ]}
+                  />
                 </td>
-                <td className="text-[12px]">
+                {showNext ? <td className="text-[12px]">
                   {p.next?.action || p.next?.due ? (
                     <>
                       <div className="max-w-[11rem] truncate text-ink-700">{p.next.action ?? '-'}</div>
@@ -143,7 +158,7 @@ export function PeopleTable({ rows, canEnroll }: Props) {
                   ) : (
                     <span className="text-ink-300">-</span>
                   )}
-                </td>
+                </td> : null}
                 <td>
                   {p.enrollment ? (
                     <>
@@ -154,7 +169,7 @@ export function PeopleTable({ rows, canEnroll }: Props) {
                     <span className="text-[12px] text-ink-300">-</span>
                   )}
                 </td>
-                <td>{p.activity.length ? <DotTimeline points={p.activity} width={130} /> : <span className="text-[12px] text-ink-300">no touches</span>}</td>
+                <td>{p.activity.length ? <DotTimeline points={p.activity} width={130} /> : <Empty />}</td>
                 <td className="whitespace-nowrap text-[12.5px]">
                   {p.podName ?? <span className="text-ink-300">-</span>}
                   {p.enrollment?.foName ? <div className="text-[11px] text-ink-500">{p.enrollment.foName}</div> : null}
@@ -162,7 +177,7 @@ export function PeopleTable({ rows, canEnroll }: Props) {
                 <td className="text-[12px]">
                   {p.lastTouch ? (
                     <>
-                      <div className="flex max-w-[13rem] items-center gap-1.5" title={p.lastTouch.summary}>
+                      <div className="flex min-w-0 max-w-[13rem] items-center gap-1.5" title={p.lastTouch.summary}>
                         <span className={p.lastTouch.inbound ? 'shrink-0 text-emerald-700' : 'shrink-0 text-ink-400'}><ActionIcon action={p.lastTouch.channel} size={13} /></span>
                         <span className="min-w-0 truncate text-ink-600">{touchTitle(p.lastTouch.summary)}</span>
                       </div>

@@ -25,7 +25,7 @@ export default async function NewCampaignPage({ searchParams }: { searchParams: 
   return (
     <>
       <PageHeader title="New campaign" />
-      <div className="max-w-4xl p-6">
+      <div className="max-w-4xl px-6 pb-8 pt-2">
         <CampaignForm
           sequences={sequences.map((s) => ({ id: s.id, name: s.name }))}
           pods={pods.map((p) => ({ id: p.id, name: p.name, podOwnerValue: p.podOwnerValue }))}

@@ -149,13 +149,12 @@ test('a meeting plays in the app with its transcript and an empty analysis panel
   // The assistant's panel, named and honest about not being connected.
   await expect(page.getByText('Cadence AI').first()).toBeVisible();
   await expect(page.getByText('Not connected').first()).toBeVisible();
-  await expect(page.getByText(/Connect a model provider to turn it on/)).toBeVisible();
 
   // One external attendee, so it counts as booked this week.
   await page.goto('/meetings?scope=week');
   await expect(page.getByRole('link', { name: /E2E discovery call/ })).toBeVisible();
   // The first table is the list of meetings in Cadence; "Recordings in Twenty" is a second one.
-  await expect(page.locator('table').first()).toContainText('external');
+  await expect(page.locator('table').first()).toContainText('External');
   await logout(page);
 });
 

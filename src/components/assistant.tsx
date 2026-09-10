@@ -34,14 +34,9 @@ export function AssistantHeader({ connected, right }: { connected: boolean; righ
 export function AssistantNotConnected({ does, canConfigure }: { does: string[]; canConfigure: boolean }) {
   return (
     <div className="flex flex-wrap items-center gap-3 p-4">
-      <p className="min-w-0 flex-1 text-sm text-ink-600">
-        {does[0] ?? `${ASSISTANT_NAME} is ready`}. Connect a model provider to turn it on.
-      </p>
-      {canConfigure ? (
-        <Link href={`/settings?tab=${ASSISTANT_SETTINGS_TAB}`} className="btn-secondary btn-sm shrink-0">
-          Connect a provider
-        </Link>
-      ) : null}
+      <p className="min-w-0 flex-1 text-sm text-ink-600">{does[0] ?? `${ASSISTANT_NAME} is ready`}</p>
+      <Badge tone="gray">Not connected</Badge>
+      {canConfigure ? <Link href={`/settings?tab=${ASSISTANT_SETTINGS_TAB}`} className="text-[12px] font-medium text-brand-700 hover:underline">Settings</Link> : null}
     </div>
   );
 }

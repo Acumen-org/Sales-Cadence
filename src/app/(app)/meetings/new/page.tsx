@@ -24,7 +24,7 @@ export default async function NewMeetingPage({ searchParams }: { searchParams: P
   return (
     <>
       <PageHeader title="Add a meeting" />
-      <div className="max-w-3xl px-6 pb-8 pt-3">
+      <div className="max-w-4xl px-6 pb-8 pt-2">
         <Surface>
           <MeetingForm
             mode="create"

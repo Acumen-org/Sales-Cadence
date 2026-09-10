@@ -3,7 +3,7 @@ import { listAccounts } from '@/lib/accounts-query';
 import { formatInstant } from '@/lib/dates';
 import { IconCampaigns } from '@/components/icons';
 import { AccountsToolbar } from '@/components/accounts/accounts-toolbar';
-import { Badge, EmptyState, IdentityCell, Stat, StatusDot, Surface, Toolbar, ViewHeader } from '@/components/ui';
+import { Badge, Count, Empty, EmptyState, IdentityCell, Stat, StatusDot, Surface, Toolbar, ViewHeader } from '@/components/ui';
 
 export default async function AccountsPage({ searchParams }: { searchParams: Promise<{ q?: string; scope?: string }> }) {
   const user = await requireUser();
@@ -43,10 +43,10 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
                   <th>Industry</th>
                   <th>City</th>
                   <th>Owner</th>
-                  <th>People</th>
-                  <th>In sequence</th>
-                  <th>Replied</th>
-                  <th>Meetings</th>
+                  <th className="num">People</th>
+                  <th className="num">In sequence</th>
+                  <th className="num">Replied</th>
+                  <th className="num">Meetings</th>
                   <th>Last touch</th>
                 </tr>
               </thead>
@@ -60,16 +60,16 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
                       </div>
                     </td>
                     {/* Industry and city are fields, not a dotted sentence under the name. */}
-                    <td className="whitespace-nowrap text-[12.5px]">{a.industry ?? <span className="text-ink-300">-</span>}</td>
-                    <td className="whitespace-nowrap text-[12.5px]">{a.city ?? <span className="text-ink-300">-</span>}</td>
-                    <td className="whitespace-nowrap text-[12.5px]">{a.ownerName ?? <span className="text-ink-300">unassigned</span>}</td>
-                    <td className="tabular-nums text-ink-900">{a.people}</td>
-                    <td>
-                      <StatusDot tone={a.inSequence ? 'green' : 'gray'}><strong className="text-ink-900">{a.inSequence}</strong></StatusDot>
+                    <td className="whitespace-nowrap text-[12.5px]">{a.industry ?? <Empty />}</td>
+                    <td className="whitespace-nowrap text-[12.5px]">{a.city ?? <Empty />}</td>
+                    <td className="whitespace-nowrap text-[12.5px]">{a.ownerName ?? <Empty>Unassigned</Empty>}</td>
+                    <td className="num"><Count value={a.people} /></td>
+                    <td className="num">
+                      <StatusDot tone={a.inSequence ? 'green' : 'gray'}><Count value={a.inSequence} /></StatusDot>
                     </td>
-                    <td className="tabular-nums text-ink-900">{a.replied}</td>
-                    <td className="tabular-nums text-ink-900">{a.meetings}</td>
-                    <td className="whitespace-nowrap text-[12px] text-ink-500">{a.lastTouchAt ? formatInstant(a.lastTouchAt, user.timezone) : <span className="font-normal text-ink-300">never</span>}</td>
+                    <td className="num"><Count value={a.replied} /></td>
+                    <td className="num"><Count value={a.meetings} /></td>
+                    <td className="whitespace-nowrap text-[12px] text-ink-500">{a.lastTouchAt ? formatInstant(a.lastTouchAt, user.timezone) : <Empty />}</td>
                   </tr>
                 ))}
               </tbody>

@@ -6,7 +6,7 @@ import { prisma } from '@/lib/db';
 import { todayIn } from '@/lib/dates';
 import { buildReports, reportingRange, REPORTING_TIMEZONE, type GroupRow } from '@/lib/reports-query';
 import { IconReports } from '@/components/icons';
-import { Avatar, EmptyState, Field, Notice, Stat, Surface, Tabs, ViewHeader } from '@/components/ui';
+import { Avatar, Count, EmptyState, Field, Notice, Stat, Surface, Tabs, ViewHeader } from '@/components/ui';
 
 function Rate({ value }: { value: number }) {
   const percent = Math.round(value * 100);
@@ -30,8 +30,8 @@ function GroupTable({ rows, first }: { rows: GroupRow[]; first: string }) {
         <tbody>
           {visible.map((r) => (
             <tr key={r.key}>
-              <td>{r.label}</td><td>{r.enrolled}</td><td>{r.replied}</td><td>{r.meeting}</td><td>{r.completed}</td><td>{r.exited}</td>
-              <td><Rate value={r.replyRate} /></td><td><Rate value={r.meetingRate} /></td><td>{r.tasksDone}</td><td>{r.tasksSkipped}</td>
+              <td>{r.label}</td><td><Count value={r.enrolled} /></td><td><Count value={r.replied} /></td><td><Count value={r.meeting} /></td><td><Count value={r.completed} /></td><td><Count value={r.exited} /></td>
+              <td><Rate value={r.replyRate} /></td><td><Rate value={r.meetingRate} /></td><td><Count value={r.tasksDone} /></td><td><Count value={r.tasksSkipped} /></td>
             </tr>
           ))}
         </tbody>
@@ -105,7 +105,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
                 <tbody>{reports.activity.map((row) => (
                   <tr key={row.id}>
                     <td><div className="flex items-center gap-2.5"><Avatar name={row.name} shape="circle" size={28} /><span className="whitespace-nowrap font-medium text-ink-900">{row.name}</span></div></td>
-                    <td>{row.period.emails}</td><td>{row.period.calls}</td><td>{row.period.answered}</td><td>{row.period.linkedin}</td><td>{row.period.replies}</td><td>{row.period.meetings}</td><td>{row.period.total}</td>
+                    <td><Count value={row.period.emails} /></td><td><Count value={row.period.calls} /></td><td><Count value={row.period.answered} /></td><td><Count value={row.period.linkedin} /></td><td><Count value={row.period.replies} /></td><td><Count value={row.period.meetings} /></td><td><Count value={row.period.total} /></td>
                   </tr>
                 ))}</tbody>
               </table>
@@ -119,7 +119,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         {tab === 'channels' ? (
           <div className="overflow-x-auto scroll-thin"><table className="table data-table">
             <thead><tr><th>Channel</th><th>Scheduled</th><th>Completed</th><th>Confirmed by CRM</th><th>Logged by FO</th><th>Skipped</th><th>Cancelled</th></tr></thead>
-            <tbody>{reports.channels.map((channel) => <tr key={channel.action}><td>{channel.label}</td><td>{channel.pending}</td><td>{channel.done}</td><td>{channel.observed}</td><td>{channel.manual}</td><td>{channel.skipped}</td><td>{channel.cancelled}</td></tr>)}</tbody>
+            <tbody>{reports.channels.map((channel) => <tr key={channel.action}><td>{channel.label}</td><td><Count value={channel.pending} /></td><td><Count value={channel.done} /></td><td><Count value={channel.observed} /></td><td><Count value={channel.manual} /></td><td><Count value={channel.skipped} /></td><td><Count value={channel.cancelled} /></td></tr>)}</tbody>
           </table></div>
         ) : null}
       </Surface>

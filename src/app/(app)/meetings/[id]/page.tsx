@@ -13,7 +13,7 @@ import { MeetingAnalysisPanel } from '@/components/meetings/meeting-analysis';
 import { AttendeeEditor } from '@/components/meetings/attendee-editor';
 import { MeetingStage } from '@/components/meetings/meeting-stage';
 import { IconExternal } from '@/components/icons';
-import { Avatar, Badge, Card, EmptyState, Field, KeyValue, RecordHeader } from '@/components/ui';
+import { Avatar, Badge, Card, EmptyState, Field, KeyValue, RecordFields, RecordHeader } from '@/components/ui';
 
 export default async function MeetingPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
@@ -39,7 +39,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
           badges={
             <>
               {externals.length ? <Badge tone="green" dot>{externals.length} external</Badge> : <Badge tone="gray">{meeting.attendees.length ? 'Internal only' : 'No attendees'}</Badge>}
-              {meeting.transcript ? <Badge tone="blue">transcript</Badge> : null}
+              {meeting.transcript ? <Badge tone="blue">Transcript</Badge> : null}
             </>
           }
           actions={
@@ -65,13 +65,17 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
         />
       </div>
 
-      <div className="mx-6 mt-3 grid gap-4 rounded-xl border border-line bg-white p-5 sm:grid-cols-2 lg:grid-cols-5">
-        <div><div className="text-xs text-ink-500">Date and time</div><div className="mt-1 font-medium text-ink-900">{formatInstant(meeting.occurredAt, user.timezone)}</div></div>
-        <div><div className="text-xs text-ink-500">Duration</div><div className="mt-1 font-medium text-ink-900">{meeting.durationSec !== null ? `${Math.round(meeting.durationSec / 60)} min` : 'Not recorded'}</div></div>
-        <div><div className="text-xs text-ink-500">Platform</div><div className="mt-1 font-medium text-ink-900">{PROVIDER_LABELS[meeting.provider]}</div></div>
-        <div><div className="text-xs text-ink-500">Account</div><div className="mt-1 font-medium text-ink-900">{meeting.companyId ? <Link href={`/accounts/${meeting.companyId}`} className="text-brand-700 hover:underline">{meeting.companyName}</Link> : meeting.companyName ?? 'No account'}</div></div>
-        <div><div className="text-xs text-ink-500">Added by</div><div className="mt-1 font-medium text-ink-900">{meeting.createdBy?.name ?? 'Unknown'}</div></div>
-        <div className="sm:col-span-2 lg:col-span-5"><div className="mb-2 text-xs text-ink-500">Products</div><ProductTags meetingId={meeting.id} products={meeting.products} canEdit={mayEdit} /></div>
+      <div className="px-6 pt-3">
+        <div className="space-y-5 rounded-xl border border-line bg-white p-5">
+          <RecordFields className="lg:grid-cols-5" items={[
+            { label: 'Date and time', value: formatInstant(meeting.occurredAt, user.timezone) },
+            { label: 'Duration', value: meeting.durationSec !== null ? `${Math.round(meeting.durationSec / 60)} min` : null },
+            { label: 'Platform', value: PROVIDER_LABELS[meeting.provider] },
+            { label: 'Account', value: meeting.companyId ? <Link href={`/accounts/${meeting.companyId}`} className="text-brand-700 hover:underline">{meeting.companyName}</Link> : meeting.companyName ?? null },
+            { label: 'Added by', value: meeting.createdBy?.name ?? null },
+          ]} />
+          <div><div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-ink-400">Products</div><ProductTags meetingId={meeting.id} products={meeting.products} canEdit={mayEdit} /></div>
+        </div>
       </div>
       <div className="grid gap-3 px-6 pb-8 pt-3 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="min-w-0 space-y-3">
@@ -136,8 +140,8 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
                         {a.email ? <span className="block truncate text-[11.5px] text-ink-500">{a.email}</span> : null}
                       </span>
                       <span className="flex shrink-0 gap-1">
-                        {a.host ? <Badge tone="blue">host</Badge> : null}
-                        {a.external ? <Badge tone="green">external</Badge> : <Badge tone="gray">internal</Badge>}
+                        {a.host ? <Badge tone="blue">Host</Badge> : null}
+                        {a.external ? <Badge tone="green">External</Badge> : <Badge tone="gray">Internal</Badge>}
                       </span>
                     </li>
                   );

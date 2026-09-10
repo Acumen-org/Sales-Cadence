@@ -144,13 +144,12 @@ test('the person panel carries the CRM record, not a made-up stage', async ({ pa
   await expect(page.locator('main')).toContainText('FU-2');
   await page.goto('/tasks?tab=today');
   // The tier is a badge on the person, reading as a label rather than the stored LEVEL_n.
-  await expect(panel.getByText(/^Tier \d$/).first()).toBeVisible();
+  await expect(page.locator('main').getByText(/^Tier \d$/).first()).toBeVisible();
   // Option constants are never shown raw: LEVEL_2 reads "Tier 2", not "LEVEL_2".
   await expect(panel.getByText(/^[A-Z][A-Z0-9]+_[A-Z0-9_]+$/)).toHaveCount(0);
   // The assistant has a reserved place and says plainly that no model is connected.
   await expect(panel.getByText('Cadence AI').first()).toBeVisible();
   await expect(panel.getByText('Not connected').first()).toBeVisible();
-  await expect(panel.getByText(/Connect a model provider to turn it on/)).toBeVisible();
   await logout(page);
 });
 

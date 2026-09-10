@@ -1,3 +1,4 @@
+import clsx from 'clsx';
 import Link from 'next/link';
 import { requireUser } from '@/lib/auth/current-user';
 import { isAdmin, isPodLeader } from '@/lib/auth/rbac';
@@ -5,7 +6,7 @@ import { formatLocalDate } from '@/lib/dates';
 import { buildHome } from '@/lib/home-query';
 import { TASK_CHANNELS, type TaskChannel } from '@/lib/tasks-query';
 import { ActionIcon, IconBolt, IconCalendar, IconCheck, IconChevronRight, IconCompany, IconPeople } from '@/components/icons';
-import { Avatar, EmptyState, Notice, Surface } from '@/components/ui';
+import { Avatar, EmptyState, Notice, Surface, Count } from '@/components/ui';
 
 const CHANNEL_LABELS: Record<TaskChannel, string> = { CALL: 'Calls', EMAIL: 'Emails', LINKEDIN: 'LinkedIn' };
 
@@ -29,7 +30,7 @@ function Tile({ label, value, hint, href, icon, tone }: { label: string; value: 
  * is in colour, against the muted words around it, rather than a jump to bold mid-sentence.
  */
 function N({ children, tone }: { children: React.ReactNode; tone?: 'warn' }) {
-  return <span className={tone === 'warn' ? 'text-amber-800' : 'text-ink-900'}>{children}</span>;
+  return <span className={clsx('font-medium tabular-nums', tone === 'warn' ? 'text-amber-800' : 'text-ink-900')}>{children}</span>;
 }
 
 export default async function HomePage() {
@@ -46,7 +47,7 @@ export default async function HomePage() {
     <div className="space-y-5 px-6 pb-8 pt-7">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-[30px] font-semibold tracking-[-0.045em] text-ink-900">Good day, {first}<span className="text-brand-500">.</span></h1>
-        <span className="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-[11px] text-ink-600"><IconCalendar size={14} />{formatLocalDate(h.today, 'long')}</span>
+        <span className="inline-flex items-center gap-2 text-[12px] text-ink-500"><IconCalendar size={14} />{formatLocalDate(h.today, 'long')}</span>
       </div>
 
       {h.needsReview ? (
@@ -110,11 +111,11 @@ export default async function HomePage() {
 }
 
 /**
- * One figure in the board. Zero reads as an empty cell, in the rows and in the totals alike, so
- * the eye lands only on people who actually owe work.
+ * One figure in the board. Zero is quiet, in the rows and in the totals alike, so the eye lands
+ * on people who actually owe work.
  */
 function Figure({ value, tone }: { value: number; tone?: 'warn' | 'good' | 'brand' }) {
-  if (!value) return <span className="text-ink-300">-</span>;
+  if (!value) return <Count value={0} />;
   const colour = tone === 'warn' ? 'text-red-700' : tone === 'good' ? 'text-emerald-700' : tone === 'brand' ? 'text-brand-700' : 'text-ink-900';
   return <span className={`font-medium ${colour}`}>{value}</span>;
 }

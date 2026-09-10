@@ -68,7 +68,7 @@ export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, m
       <Card title="1. Campaign">
         <div className="grid gap-4 p-4 md:grid-cols-2">
           <Field label="Name">
-            <input name="name" required className="w-full" placeholder="SaaStr 2026 follow-up" />
+            <input name="name" required className="w-full" placeholder="Campaign name" />
           </Field>
           <Field label="Sequence">
             <select name="sequenceId" required className="w-full">
@@ -79,7 +79,7 @@ export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, m
               ))}
             </select>
           </Field>
-          <Field label="Pod" hint="Reports roll up by pod. FOs are chosen from the pod's members.">
+          <Field label="Pod" info="Reports roll up by pod. FOs are chosen from the pod's members.">
             <select name="podId" required className="w-full">
               {pods.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -94,10 +94,10 @@ export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, m
               <option value="ROUND_ROBIN">Round robin within pod (least loaded)</option>
             </select>
           </Field>
-          <Field label="Start date" hint="Weekends roll to the next working day.">
+          <Field label="Start date" info="Weekends roll to the next working day.">
             <input name="startDate" type="date" required defaultValue={defaultStartDate} />
           </Field>
-          <Field label="Daily ramp per FO" hint="New people started per FO per working day. Blank = all at once.">
+          <Field label="Daily ramp per FO" info="New people started per FO per working day. Blank = all at once.">
             <input name="dailyRampPerFo" type="number" min={0} defaultValue={defaultRamp} className="w-32" />
           </Field>
           <Field label="Notes (optional)" className="md:col-span-2">
@@ -124,12 +124,12 @@ export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, m
             ))}
           </div>
           {sourceType === 'IDS' ? (
-            <Field label="Twenty person ids" hint="One per line, or comma separated. Copy them from Twenty's URL bar or an export.">
+            <Field label="Twenty person ids" info="One per line, or comma separated. Copy them from Twenty's URL bar or an export.">
               <textarea name="personIdsText" rows={8} className="w-full font-mono text-xs" placeholder={'3f6c1c5e-...\n8a1b2c3d-...'} defaultValue={initialIds ?? ''} />
             </Field>
           ) : null}
           {sourceType === 'CSV' ? (
-            <Field label="CSV export from Twenty" hint="Uses the column named id / personId (or the first column). Parsed in your browser, only the ids are sent.">
+            <Field label="CSV export from Twenty" info="Uses the column named id / personId (or the first column). Parsed in your browser, only the ids are sent.">
               <input
                 type="file"
                 accept=".csv,text/csv,text/plain"
@@ -143,7 +143,7 @@ export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, m
             </Field>
           ) : null}
           {sourceType === 'TWENTY_VIEW' ? (
-            <Field label="Saved Twenty view id" hint="From the view's URL in Twenty (Settings > Views also lists them). Simple filters are supported.">
+            <Field label="Saved Twenty view id" info="From the view's URL in Twenty (Settings > Views also lists them). Simple filters are supported.">
               {mockViews?.length ? (
                 <select name="viewId" className="w-full">
                   {mockViews.map((v) => (

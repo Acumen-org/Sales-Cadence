@@ -5,7 +5,8 @@ import { accountDetail } from '@/lib/accounts-query';
 import { formatInstant, formatLocalDate, todayIn } from '@/lib/dates';
 import { OrgTree, type TreePerson } from '@/components/accounts/org-tree';
 import { ActionIcon, IconExternal, IconPlus } from '@/components/icons';
-import { Avatar, Badge, Card, ENROLLMENT_TONE, EmptyState, EventDetail, IdentityCell, KeyValue, RecordHeader, Stat, Surface, Tabs, TierBadge, enrollmentStatusLabel, type BadgeTone } from '@/components/ui';
+import { Avatar, Badge, CAMPAIGN_TONE, Card, Count, ENROLLMENT_TONE, Empty, EmptyState, EventDetail, IdentityCell, KeyValue, RecordHeader, Stat, Surface, Tabs, TierBadge, enrollmentStatusLabel, type BadgeTone } from '@/components/ui';
+import { campaignStatusLabel } from '@/lib/campaign-status';
 import { optionLabels } from '@/lib/twenty/labels';
 
 const TABS = [
@@ -170,7 +171,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                       <th>Next in Twenty</th>
                       <th>Sequence</th>
                       <th>FO</th>
-                      <th>Touches</th>
+                      <th className="num">Touches</th>
                       <th>Last touch</th>
                     </tr>
                   </thead>
@@ -183,7 +184,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                         <td>
                           <TierBadge tier={p.tier} />
                         </td>
-                        <td className="text-[12.5px]">{optionLabels(p.contactType, ' / ') || <span className="text-ink-300">-</span>}</td>
+                        <td className="text-[12.5px]">{optionLabels(p.contactType, ' / ') || <Empty />}</td>
                         <td className="text-[12px]">
                           {p.nextAction || p.nextActionDueDate ? (
                             <>
@@ -191,19 +192,19 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                               {p.nextActionDueDate ? <div className=" text-ink-500">{formatLocalDate(p.nextActionDueDate)}</div> : null}
                             </>
                           ) : (
-                            <span className="text-ink-300">-</span>
+                            <Empty />
                           )}
                         </td>
                         <td>
                           {p.enrollment ? (
                             <Badge tone={ENROLLMENT_TONE[p.enrollment.status] ?? 'gray'}>{enrollmentStatusLabel(p.enrollment)}</Badge>
                           ) : (
-                            <span className="text-[12px] text-ink-300">-</span>
+                            <Empty />
                           )}
                         </td>
-                        <td className="whitespace-nowrap text-[12.5px]">{p.enrollment?.foName ?? <span className="text-ink-300">-</span>}</td>
-                        <td className="tabular-nums text-ink-900">{p.touches}</td>
-                        <td className="whitespace-nowrap text-[12px] text-ink-500">{p.lastTouchAt ? formatInstant(p.lastTouchAt, user.timezone) : <span className="font-normal text-ink-300">never</span>}</td>
+                        <td className="whitespace-nowrap text-[12.5px]">{p.enrollment?.foName ?? <Empty />}</td>
+                        <td className="num"><Count value={p.touches} /></td>
+                        <td className="whitespace-nowrap text-[12px] text-ink-500">{p.lastTouchAt ? formatInstant(p.lastTouchAt, user.timezone) : <Empty />}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -237,7 +238,6 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                     </span>
                     <span className="flex shrink-0 flex-col items-end gap-1.5">
                       <span className="text-[11px] text-ink-500">{formatInstant(it.at, user.timezone)}</span>
-                      <Badge tone="gray">{it.kind}</Badge>
                     </span>
                   </li>
                 ))}
@@ -258,8 +258,8 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                       <th>Campaign</th>
                       <th>Sequence</th>
                       <th>Status</th>
-                      <th>People here</th>
-                      <th>Replied</th>
+                      <th className="num">People here</th>
+                      <th className="num">Replied</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -272,10 +272,10 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                         </td>
                         <td className="text-[12.5px]">{c.sequenceName}</td>
                         <td>
-                          <Badge tone="gray">{c.status.toLowerCase()}</Badge>
+                          <Badge tone={CAMPAIGN_TONE[c.status] ?? 'gray'}>{campaignStatusLabel(c.status)}</Badge>
                         </td>
-                        <td className="tabular-nums text-ink-900">{c.people}</td>
-                        <td className="tabular-nums text-ink-900">{c.replied}</td>
+                        <td className="num"><Count value={c.people} /></td>
+                        <td className="num"><Count value={c.replied} /></td>
                       </tr>
                     ))}
                   </tbody>
