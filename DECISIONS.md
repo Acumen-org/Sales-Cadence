@@ -41,6 +41,27 @@ Every assumption made while building Cadence, grouped by area. Each entry says w
 ## Seed
 
 - **Core profile** creates the default sequence as version 1 exactly as specified and the admin from `ADMIN_EMAIL` / `ADMIN_PASSWORD` (password set only on first creation).
+### The built-in fake CRM, and why it is still here
+
+`TWENTY_MODE=mock` serves a fake Twenty from `src/lib/twenty/` so the suites and local
+development have a CRM to talk to. It is compiled into the app, because the client factory has to
+be able to construct it, and it is therefore refused at runtime unless `CADENCE_ALLOW_MOCK=1` is
+set alongside it - a misconfigured deployment fails at the first CRM call rather than quietly
+running a sales team against invented contacts.
+
+It is not deleted, because the suites cannot run against a real Twenty. They complete tasks, skip
+with bounce reasons and end sequences; against `graphql` each of those writes a `[Cadence]` note
+onto a real prospect's record, creates and deletes mirrored Twenty Tasks, and flags real people as
+bounced or opted out. They also need determinism ("Today shows two touches" has to be true every
+day) and states a live CRM will not supply on demand: a step with open tasks, a paused campaign,
+an address that bounced.
+
+**The option, if the fake CRM in the bundle is not acceptable:** replace it with a stub Twenty
+served over HTTP from `tests/`, and point `TWENTY_API_URL` at it during the suites. `src/` would
+then contain only the GraphQL client and no invented data at all. It costs about a day: the stub
+has to answer every query and mutation the client makes, including the metadata introspection the
+client uses to trim its selections, and all 45 browser tests ride on it.
+
 - **`core` is the only seed a deployment runs**: the default outbound sequence and one admin account from `ADMIN_EMAIL`/`ADMIN_PASSWORD`, which the seed refuses to create without a password rather than defaulting to a known one. No pods and no users beyond that: pods come from Twenty's `podOwner` options, contacts come from Twenty, and the rest of the team is added in Settings.
 - **The `demo` profile is for local work and the test suites** and only runs in mock mode: pods Alisa/Leigh/Andrew, six accounts mapped to the mock workspace members (all `password123`), and the sample contacts. `pnpm db:reset` empties a workspace back to the `core` state without touching Twenty.
 - **Seeding is idempotent** and safe to run on every start.
