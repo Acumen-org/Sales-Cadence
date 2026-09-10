@@ -36,6 +36,7 @@ export async function exitEnrollmentAction(formData: FormData): Promise<ActionRe
 export async function pauseEnrollmentAction(formData: FormData): Promise<ActionResult> {
   const { user, e, error } = await loadEnrollmentForUser(String(formData.get('enrollmentId') ?? ''));
   if (!e) return { ok: false, error: error ?? 'Not found.' };
+  if (e.status !== 'ACTIVE') return { ok: false, error: 'Only a live enrollment can be paused.' };
   await pauseEnrollment(e.id, { reason: String(formData.get('reason') ?? 'manual').trim() || 'manual', actor: userActor(user) });
   revalidateAll(e.campaignId);
   return { ok: true, message: 'Paused.' };

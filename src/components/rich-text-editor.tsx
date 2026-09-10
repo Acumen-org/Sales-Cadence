@@ -31,7 +31,7 @@ export function RichTextEditor({ value, onChange, label, disabled = false }: {
     { label: 'Bulleted list', text: '• List', active: editor.isActive('bulletList'), run: () => editor.chain().focus().toggleBulletList().run() },
     { label: 'Numbered list', text: '1. List', active: editor.isActive('orderedList'), run: () => editor.chain().focus().toggleOrderedList().run() },
   ];
-  return <div className="overflow-hidden rounded-xl border border-line bg-white">
+  return <div className={`overflow-hidden rounded-xl border border-line ${disabled ? 'bg-canvas text-ink-500' : 'bg-white'}`}>
     {!disabled && <div role="toolbar" aria-label={`${label} formatting`} className="flex flex-wrap items-center gap-1 border-b border-line bg-canvas/60 px-2 py-1.5">
       {controls.map(c => <button type="button" key={c.label} title={c.label} aria-label={c.label} aria-pressed={c.active} onMouseDown={e => e.preventDefault()} onClick={c.run} className={`rounded px-2.5 py-1 text-sm ${c.active ? 'bg-brand-100 text-brand-900' : 'text-ink-700 hover:bg-white'}`}>{c.text}</button>)}
       <button type="button" className="btn-ghost btn-sm" onClick={() => { setUrl(editor.getAttributes('link').href ?? ''); setLinkOpen(!linkOpen); }}>Link</button>

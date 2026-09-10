@@ -108,7 +108,7 @@ export function RulesForm({ rules }: { rules: Settings['rules'] }) {
         </div>
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="Reconcile lookback (days)">
-            <input name="reconcileLookbackDays" type="number" min={1} max={90} defaultValue={rules.reconcileLookbackDays} className="w-32" />
+            <input name="reconcileLookbackDays" type="number" min={1} max={90} defaultValue={rules.reconcileLookbackDays} className="!w-32" />
           </Field>
         </div>
         <Field label="Click-to-call endpoint" info="Blank uses the machine's own dialler.">

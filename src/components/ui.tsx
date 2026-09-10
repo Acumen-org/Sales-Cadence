@@ -39,9 +39,9 @@ export function ViewHeader({ title, meta, actions }: { title: ReactNode; meta?: 
       <h2 className="flex items-center gap-2 text-[15px] font-semibold tracking-[-0.015em] text-ink-900">
         {title}
       </h2>
-      <div className="flex items-center gap-2">
-        {actions}
+      <div className="flex items-center gap-3">
         {meta ? <DataValue>{meta}</DataValue> : null}
+        {actions}
       </div>
     </div>
   );
@@ -439,7 +439,7 @@ export function Info({ text }: { text: string }) {
 
 export function KeyValue({ items }: { items: { k: string; v: ReactNode }[] }) {
   return (
-    <dl className="kv grid grid-cols-[minmax(0,7rem)_1fr] gap-x-4 gap-y-2">
+    <dl className="kv grid grid-cols-[minmax(0,8.5rem)_1fr] gap-x-4 gap-y-2">
       {items.map((it) => (
         <div key={it.k} className="contents">
           <dt className="pt-0.5">{it.k}</dt>

@@ -41,10 +41,10 @@
   textarea:focus {
     @apply border-brand-400 ring-4 ring-brand-100/70;
   }
-  input:disabled,
+  input:not([type='checkbox']):not([type='radio']):not([type='file']):disabled,
   select:disabled,
   textarea:disabled {
-    @apply bg-canvas text-ink-400;
+    @apply cursor-not-allowed bg-canvas text-ink-400;
   }
   select {
     @apply cursor-pointer appearance-none bg-no-repeat pr-8;

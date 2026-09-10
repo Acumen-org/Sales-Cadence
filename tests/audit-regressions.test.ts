@@ -73,6 +73,12 @@ describe('scope boundaries', () => {
     await prisma.user.update({ where: { id: b.users.alisa.id }, data: { active: false } });
     await expect(previewEnrollment({ ...request, assignment: { mode: 'FIXED', foUserId: b.users.alisa.id } })).rejects.toThrow('active member');
   });
+  it('refuses a person whose Twenty pod is another pod, by name', async () => {
+    // person-01 is in Alisa's pod in Twenty; Leigh's campaign cannot take them by pasting the id.
+    const preview = await previewEnrollment({ personIds: ['person-01'], sequenceId: b.sequence.id, podId: b.pods.Leigh.id, startDate: '2026-09-08', assignment: { mode: 'ROUND_ROBIN' }, actor: SYSTEM_ACTOR });
+    expect(preview.candidates).toHaveLength(0);
+    expect(preview.conflicts).toMatchObject([{ personId: 'person-01', reason: 'pod_mismatch' }]);
+  });
   it('excludes opted-out people from repeat campaign candidates', async () => {
     const task = await finalTask('EMAIL');
     await completeTask({ taskId: task.id, source: 'MANUAL' }, context);

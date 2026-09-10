@@ -38,6 +38,7 @@ export async function retryFailedWrites(opts: { now?: Date; limit?: number; ids?
     return { retried: rows.length, succeeded: 0, errors: [messageOf(err)] };
   }
   let succeeded = 0;
+  let claimedCount = 0;
   const errors: string[] = [];
   for (const row of rows) {
     // Claim the row first: the worker tick and an admin's Retry can run at the same moment, and a
@@ -47,16 +48,18 @@ export async function retryFailedWrites(opts: { now?: Date; limit?: number; ids?
       data: { status: 'RETRYING', nextAttemptAt: new Date(now.getTime() + CLAIM_LEASE_MS) },
     });
     if (!claimed.count) continue;
+    claimedCount += 1;
     try {
       const twentyId = await replay(client, row);
-      await prisma.twentyWrite.update({ where: { id: row.id }, data: { status: 'OK', error: null, twentyId: twentyId ?? row.twentyId, nextAttemptAt: null, attempts: { increment: 1 } } });
+      // Conditioned on the claim: a Discard made while this replay ran stands.
+      await prisma.twentyWrite.updateMany({ where: { id: row.id, status: 'RETRYING' }, data: { status: 'OK', error: null, twentyId: twentyId ?? row.twentyId, nextAttemptAt: null, attempts: { increment: 1 } } });
       succeeded += 1;
     } catch (err) {
       errors.push(messageOf(err));
       await postpone([row], err, now);
     }
   }
-  return { retried: rows.length, succeeded, errors };
+  return { retried: claimedCount, succeeded, errors };
 }
 
 type NoteInput = Parameters<TwentyClient['createNote']>[0];
@@ -104,6 +107,6 @@ function messageOf(err: unknown): string {
 async function postpone(rows: TwentyWrite[], err: unknown, now: Date) {
   const error = messageOf(err);
   for (const row of rows) {
-    await prisma.twentyWrite.update({ where: { id: row.id }, data: { status: 'FAILED', attempts: { increment: 1 }, error, nextAttemptAt: new Date(now.getTime() + retryDelayMs(row.attempts + 1)) } });
+    await prisma.twentyWrite.updateMany({ where: { id: row.id, status: { in: ['FAILED', 'RETRYING'] } }, data: { status: 'FAILED', attempts: { increment: 1 }, error, nextAttemptAt: new Date(now.getTime() + retryDelayMs(row.attempts + 1)) } });
   }
 }

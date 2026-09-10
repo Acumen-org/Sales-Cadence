@@ -23,7 +23,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
         <Stat label="Engaged accounts" value={rows.filter((a) => a.replied > 0 || a.meetings > 0).length} tone="good" />
       </div>
       <Surface flush>
-        <ViewHeader title={scope === 'mine' ? 'My accounts' : 'All accounts'} caret meta={`${rows.length} account${rows.length === 1 ? '' : 's'}`} />
+        <ViewHeader title={scope === 'mine' ? 'My accounts' : 'All accounts'} caret />
         <Toolbar>
           <AccountsToolbar q={q} scope={scope} mineCount={mineCount} allCount={all.length} />
         </Toolbar>

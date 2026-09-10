@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState, useTransition } from 'react';
+import { ENROLL_CONFLICT_LABELS } from '@/lib/campaign-status';
 import { useRouter } from 'next/navigation';
 import { createCampaignAction, previewCampaignAction, type CampaignPreview } from '@/lib/actions/campaigns';
 import type { ActionResult } from '@/lib/actions/users';
@@ -16,18 +17,7 @@ type Props = {
   initialIds?: string;
 };
 
-const CONFLICT_LABEL: Record<string, string> = {
-  dnd: 'Do not contact',
-  already_active: 'Already in a sequence',
-  pod_mismatch: 'Belongs to another pod in Twenty',
-  not_found: 'Not found in Twenty',
-  deleted: 'Deleted in Twenty',
-  duplicate: 'Duplicate id',
-  no_fo: 'No FO in pod',
-  invalid_start: 'Invalid start date',
-  opted_out: 'Asked not to be contacted',
-  bad_data: 'Contact details are not usable',
-};
+const CONFLICT_LABEL = ENROLL_CONFLICT_LABELS;
 
 /** Create a campaign: choose people (ids, CSV or Twenty view), preview conflicts, confirm. */
 export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, mockViews, initialIds }: Props) {

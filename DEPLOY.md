@@ -76,6 +76,7 @@ docker compose up -d --build                # deploy an update
 - **Backup:** only Postgres holds state. `docker compose exec db pg_dump -U cadence cadence | gzip > backup.sql.gz`, nightly. Everything else is rebuildable from git.
 - **Restart safety:** both processes are stateless; the worker's jobs are idempotent, so a restart mid-job is harmless.
 - **Secrets:** `.env` only. `TWENTY_API_KEY` grants full CRM access, so keep the file `chmod 600`. Sessions are database tokens; there is no signing secret.
+- **Lost admin password:** `docker compose exec web pnpm admin:password -- <email> <new password>` sets a new one and signs that account out everywhere.
 - **Scaling:** one web container handles this workload comfortably. If it ever needs more, run several `web` containers behind the proxy; the worker must stay a **single** instance (it is the scheduler).
 
 ## Gotchas

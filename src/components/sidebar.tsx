@@ -31,7 +31,7 @@ const GROUPS = [
   ] },
 ];
 
-type Props = { user: SessionUser; mode: 'mock' | 'graphql'; dryRun: boolean; todayCount: number };
+type Props = { user: SessionUser; mode: 'mock' | 'graphql'; dryRun: boolean; todayCount: number; overdueCount: number };
 
 export function Sidebar(props: Props) {
   const [open, setOpen] = useState(false);
@@ -42,7 +42,7 @@ export function Sidebar(props: Props) {
   </>;
 }
 
-function SidebarContent({ user, mode, dryRun, todayCount, close }: Props & { close?: () => void }) {
+function SidebarContent({ user, mode, dryRun, todayCount, overdueCount, close }: Props & { close?: () => void }) {
   const pathname = usePathname();
   return (
     <aside className="sidebar-shell">
@@ -59,7 +59,7 @@ function SidebarContent({ user, mode, dryRun, todayCount, close }: Props & { clo
             const Icon = item.icon;
             return <Link key={item.href} href={item.href} onClick={close} aria-current={active ? 'page' : undefined} className={clsx('nav-item', active && 'nav-item-active')}>
               <Icon size={18} /> <span>{item.label}</span>
-              {item.href === '/tasks' && todayCount > 0 ? <span className="ml-auto rounded-md bg-white/10 px-1.5 py-0.5 text-[10px] tabular-nums text-[#dfefc1]">{todayCount}</span> : null}
+              {item.href === '/tasks' && todayCount + overdueCount > 0 ? <span className={clsx('ml-auto rounded-md px-1.5 py-0.5 text-[10px] tabular-nums', overdueCount ? 'bg-red-400/20 text-red-200' : 'bg-white/10 text-[#dfefc1]')} title={overdueCount ? `${overdueCount} overdue` : undefined}>{todayCount + overdueCount}</span> : null}
             </Link>;
           })}</div>
         </div>)}

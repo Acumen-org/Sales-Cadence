@@ -156,7 +156,6 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
               <KeyValue
                 items={[
                   { k: 'Provider', v: link.label },
-                  { k: 'Playback', v: meeting.mediaUrl ? 'Plays here' : meeting.embedUrl ? 'Embedded' : 'Opens in a new tab' },
                   { k: 'Link', v: <span className="break-all font-mono text-[11px]">{meeting.sourceUrl}</span> },
                 ]}
               />
