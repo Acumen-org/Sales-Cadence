@@ -39,6 +39,7 @@ export default defineConfig({
       ADMIN_EMAIL: 'admin@cadence.local',
       ADMIN_PASSWORD: 'admin12345',
       TWENTY_MODE: 'mock',
+      CADENCE_ALLOW_MOCK: '1',
       TWENTY_API_URL: 'http://twenty.local:3000',
       APP_URL: `http://localhost:${PORT}`,
     },

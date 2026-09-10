@@ -15,6 +15,8 @@ const EnvSchema = z.object({
   ADMIN_EMAIL: z.string().default('admin@cadence.local'),
   ADMIN_PASSWORD: z.string().default(''),
   TWENTY_MODE: z.enum(['mock', 'graphql']).default('graphql'),
+  /** Must be 1 for TWENTY_MODE=mock to be honoured. The test runners and the local launcher set it. */
+  CADENCE_ALLOW_MOCK: z.string().optional(),
   TWENTY_API_URL: z.string().optional(),
   TWENTY_API_KEY: z.string().optional(),
   TWENTY_WEBHOOK_SECRET: z.string().optional(),

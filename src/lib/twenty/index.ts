@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { env } from '../env';
 import { prisma } from '../db';
 import { getTwentyConnection, getTwentySchema } from '../settings';
 import type { TwentyClient } from './client';
@@ -85,6 +86,12 @@ export async function getTwentyClient(): Promise<TwentyClient> {
   const conn = await getTwentyConnection();
   let base: TwentyClient;
   if (conn.mode === 'mock') {
+    // The built-in fake CRM only serves development and the test suites. Without the explicit
+    // opt-out a deployment that is misconfigured fails loudly here rather than quietly running
+    // an entire sales team against invented contacts.
+    if (env().CADENCE_ALLOW_MOCK !== '1') {
+      throw new Error('TWENTY_MODE=mock needs CADENCE_ALLOW_MOCK=1. Set TWENTY_MODE=graphql and configure TWENTY_API_URL and TWENTY_API_KEY.');
+    }
     base = getMockTwentyClient();
   } else {
     if (!conn.baseUrl || !conn.apiKey) {
