@@ -10,7 +10,8 @@ import { cachedPersonName } from '@/lib/person-cache';
 import { CampaignControls, CampaignLifecycle } from '@/components/campaigns/campaign-controls';
 import { EnrollmentActions } from '@/components/campaigns/enrollment-actions';
 import { IconCampaigns } from '@/components/icons';
-import { Badge,Card,Count,ENROLLMENT_TONE,RecordFields,RecordHeader,Stat,enrollmentStatusLabel } from '@/components/ui';
+import { Badge,CAMPAIGN_TONE,Card,Count,ENROLLMENT_TONE,RecordFields,RecordHeader,Stat,enrollmentStatusLabel } from '@/components/ui';
+import { campaignStatusLabel } from '@/lib/campaign-status';
 
 export default async function CampaignDetailPage({params}:{params:Promise<{id:string}>}) {
  const user=await requireUser();const {id}=await params;const today=todayIn(user.timezone);const detail=await campaignDetail(id,today);if(!detail) notFound();
@@ -19,7 +20,7 @@ export default async function CampaignDetailPage({params}:{params:Promise<{id:st
  const manager=canManageCampaigns(user,campaign.podId);
  const [sequences,audience]=await Promise.all([prisma.sequence.findMany({where:{archived:false},select:{id:true,name:true},orderBy:{name:'asc'}}), ['PENDING_APPROVAL','SCHEDULED'].includes(campaign.status) ? prisma.personCache.findMany({where:{id:{in:campaign.personIds}},orderBy:{lastName:'asc'}}):Promise.resolve([])]);
  return <div className="space-y-5 px-6 pb-8 pt-2">
-   <RecordHeader name={campaign.name} icon={<IconCampaigns size={20} />} badges={<Badge tone={campaign.status==='ACTIVE'?'green':'gray'}>{campaign.status==='ACTIVE'?'Running':campaign.status.toLowerCase().replace(/_/g,' ')}</Badge>} actions={<>{manager && <CampaignLifecycle campaignId={id} status={campaign.status} canApprove={canApproveCampaign(user,campaign.podId)}/>}<Link href="/campaigns" className="btn-secondary">All campaigns</Link></>}/>
+   <RecordHeader name={campaign.name} icon={<IconCampaigns size={20} />} badges={<Badge tone={CAMPAIGN_TONE[campaign.status]??'gray'}>{campaignStatusLabel(campaign.status)}</Badge>} actions={<>{manager && <CampaignLifecycle campaignId={id} status={campaign.status} canApprove={canApproveCampaign(user,campaign.podId)}/>}<Link href="/campaigns" className="btn-ghost btn-sm">All campaigns</Link></>}/>
    <div className="surface p-5"><RecordFields items={[{label:'Pod',value:campaign.pod.name},{label:'Sequence',value:<Link href={'/sequences/'+campaign.sequenceId}>{campaign.sequence.name}</Link>},{label:'Start date',value:campaign.startDate},{label:'Assignment',value:campaign.assignmentMode==='OWNER'?'Contact owner':'Round robin'},{label:'Run',value:campaign.runNumber},{label:'Note',value:campaign.notes}]}/></div>
    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4"><Stat label="People" value={summary.counts.total}/><Stat label="Replied" value={summary.counts.replied}/><Stat label="Meetings" value={summary.counts.meeting}/><Stat label="Reply rate" value={Math.round(summary.replyRate*100)+'%'}/></div>
    {manager && <CampaignControls campaignId={id} status={campaign.status} sequences={sequences} currentSequenceId={campaign.sequenceId} defaultName={campaign.name+' — follow-up'} today={today}/>}

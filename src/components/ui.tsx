@@ -253,7 +253,7 @@ export function enrollmentStatusLabel(e: { status: string; exitReason?: string |
       return 'Removed';
     }
     default:
-      return e.status.toLowerCase();
+      return e.status.charAt(0) + e.status.slice(1).toLowerCase();
   }
 }
 
@@ -295,7 +295,7 @@ export function TierBadge({ tier }: { tier: string | null }) {
  * bracket is dropped for display rather than eating the width of a truncated cell.
  */
 export function touchTitle(summary: string): string {
-  return summary.replace(/^\[[^\]]{1,24}\]\s*/, '');
+  return summary.replace(/^\[[^\]]{1,24}\]\s*/, '').replace(/\s*\(marked done[^)]*\)\s*$/i, '');
 }
 
 /**
@@ -309,14 +309,18 @@ export function contactWarnings(p: {
   emailMissing: boolean;
   phoneMissing: boolean;
   rotatedTo: string | null;
+  email?: string | null;
+  phone?: string | null;
 }): { label: string; tone: BadgeTone }[] {
   const out: { label: string; tone: BadgeTone }[] = [];
   // A bounce and a blank are different problems: one needs a new address found, the other needs
   // the address we have replaced. Saying "missing" for both sends the FO looking for the wrong thing.
+  // Twenty's "missing" flag can outlive the value being filled in; beside a visible address the
+  // honest word is "needs verification", the same one Enrichment uses.
   if (p.badEmail) out.push({ label: 'Email bounced', tone: 'amber' });
-  else if (p.emailMissing) out.push({ label: 'Email missing', tone: 'amber' });
+  else if (p.emailMissing) out.push({ label: p.email ? 'Email needs verification' : 'Email missing', tone: 'amber' });
   if (p.badPhone) out.push({ label: 'Wrong number', tone: 'amber' });
-  else if (p.phoneMissing) out.push({ label: 'Phone missing', tone: 'amber' });
+  else if (p.phoneMissing) out.push({ label: p.phone ? 'Phone needs verification' : 'Phone missing', tone: 'amber' });
   if (p.rotatedTo) out.push({ label: optionLabel(p.rotatedTo), tone: 'gray' });
   return out;
 }
@@ -370,7 +374,7 @@ export function Stat({ label, value, hint, tone, icon }: { label: string; value:
       <div className="min-w-0">
         <div className="text-[11px] font-medium text-ink-500">{label}</div>
         {/* A colour is a signal, so zero never gets one: a green 0 replies reads as a good result. */}
-        <div className={clsx('mt-3 text-[30px] font-semibold leading-tight tracking-[-0.04em] tabular-nums', value === 0 || value === '0' || value === '0%' ? 'text-ink-900' : tone === 'warn' ? 'text-amber-700' : tone === 'good' ? 'text-brand-700' : 'text-ink-900')}>{value}</div>
+        <div className={clsx('mt-3 text-[30px] font-semibold leading-tight tracking-[-0.04em] tabular-nums', value === 0 || value === '0' || value === '0%' ? 'text-ink-400' : tone === 'warn' ? 'text-amber-700' : tone === 'good' ? 'text-brand-700' : 'text-ink-900')}>{value}</div>
         {hint ? <div className="text-[12px] text-ink-500">{hint}</div> : null}
       </div>
     </div>

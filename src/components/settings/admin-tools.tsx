@@ -9,7 +9,7 @@ export function AdminTools({ defaultDays }: { defaultDays: number }) {
     <Card title="Maintenance">
       <div className="grid gap-4 p-4 md:grid-cols-3">
         <ActionForm action={runReconcileAction} className="space-y-2">
-          <Field label="Reconcile the last N days" hint="Re-scans Twenty notes, messages, opportunities and people; completes anything webhooks missed. Safe to repeat.">
+          <Field label="Reconcile the last N days" info="Re-scans Twenty notes, messages, opportunities and people; completes anything webhooks missed. Safe to repeat.">
             <input name="days" type="number" min={1} max={90} defaultValue={defaultDays} className="w-24" />
           </Field>
           <button type="submit" className="btn-secondary">

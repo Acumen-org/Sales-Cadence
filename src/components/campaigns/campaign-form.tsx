@@ -161,7 +161,6 @@ export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, m
             <button type="button" className="btn-secondary" onClick={runPreview} disabled={pending}>
               {pending ? 'Checking...' : 'Preview conflicts'}
             </button>
-            <span className="text-xs text-ink-500">Nothing is created until you confirm.</span>
           </div>
         </div>
       </Card>

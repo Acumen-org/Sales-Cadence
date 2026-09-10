@@ -27,16 +27,15 @@ export function AssistantHeader({ connected, right }: { connected: boolean; righ
 }
 
 /**
- * What this panel will do once a provider is connected: one line, then the action. `does` still
- * takes the full list because Settings shows it in full, but a panel an FO looks past every day
- * says the state and offers the fix rather than selling the feature.
+ * The body of a panel whose header already says "Not connected": nothing to read, only the way
+ * to Settings for someone who can change that. `does` stays in the signature because Settings
+ * lists the assistant's jobs in full; a panel an FO looks past every day does not.
  */
-export function AssistantNotConnected({ does, canConfigure }: { does: string[]; canConfigure: boolean }) {
+export function AssistantNotConnected({ canConfigure }: { does: string[]; canConfigure: boolean }) {
+  if (!canConfigure) return null;
   return (
-    <div className="flex flex-wrap items-center gap-3 p-4">
-      <p className="min-w-0 flex-1 text-sm text-ink-600">{does[0] ?? `${ASSISTANT_NAME} is ready`}</p>
-      <Badge tone="gray">Not connected</Badge>
-      {canConfigure ? <Link href={`/settings?tab=${ASSISTANT_SETTINGS_TAB}`} className="text-[12px] font-medium text-brand-700 hover:underline">Settings</Link> : null}
+    <div className="flex items-center justify-end px-4 py-2.5">
+      <Link href={`/settings?tab=${ASSISTANT_SETTINGS_TAB}`} className="text-[12px] font-medium text-brand-700 hover:underline">Settings</Link>
     </div>
   );
 }

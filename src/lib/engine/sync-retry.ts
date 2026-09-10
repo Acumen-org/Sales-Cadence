@@ -9,10 +9,14 @@ import { retryDelayMs } from './sync-out';
  * one immediately from Settings. Success marks the row OK and, for a note or mirrored task, stores
  * the Twenty id on the Cadence task the way the first attempt would have.
  */
-export async function retryFailedWrites(opts: { now?: Date; limit?: number; ids?: string[] } = {}) {
+export async function retryFailedWrites(opts: { now?: Date; limit?: number; ids?: string[]; ignoreBackoff?: boolean } = {}) {
   const now = opts.now ?? new Date();
   const rows = await prisma.twentyWrite.findMany({
-    where: opts.ids ? { id: { in: opts.ids }, status: 'FAILED' } : { status: 'FAILED', OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }] },
+    where: opts.ids
+      ? { id: { in: opts.ids }, status: 'FAILED' }
+      : opts.ignoreBackoff
+        ? { status: 'FAILED' }
+        : { status: 'FAILED', OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }] },
     orderBy: { createdAt: 'asc' },
     take: opts.limit ?? 25,
   });
@@ -27,6 +31,10 @@ export async function retryFailedWrites(opts: { now?: Date; limit?: number; ids?
   let succeeded = 0;
   const errors: string[] = [];
   for (const row of rows) {
+    // Claim the row first: the worker tick and an admin's Retry can run at the same moment, and a
+    // note written twice is worse than a note written late.
+    const claimed = await prisma.twentyWrite.updateMany({ where: { id: row.id, status: 'FAILED' }, data: { status: 'RETRYING' } });
+    if (!claimed.count) continue;
     try {
       const twentyId = await replay(client, row);
       await prisma.twentyWrite.update({ where: { id: row.id }, data: { status: 'OK', error: null, twentyId: twentyId ?? row.twentyId, nextAttemptAt: null, attempts: { increment: 1 } } });
@@ -84,6 +92,6 @@ function messageOf(err: unknown): string {
 async function postpone(rows: TwentyWrite[], err: unknown, now: Date) {
   const error = messageOf(err);
   for (const row of rows) {
-    await prisma.twentyWrite.update({ where: { id: row.id }, data: { attempts: { increment: 1 }, error, nextAttemptAt: new Date(now.getTime() + retryDelayMs(row.attempts + 1)) } });
+    await prisma.twentyWrite.update({ where: { id: row.id }, data: { status: 'FAILED', attempts: { increment: 1 }, error, nextAttemptAt: new Date(now.getTime() + retryDelayMs(row.attempts + 1)) } });
   }
 }

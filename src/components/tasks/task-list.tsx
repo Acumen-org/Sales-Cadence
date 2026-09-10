@@ -12,6 +12,8 @@ import { Avatar, Badge } from '@/components/ui';
 import type { DispositionOption, SkipReasonOption } from './task-actions';
 import { flushTaskDrafts } from './draft-registry';
 
+const STATE_LABELS: Record<string, string> = { DONE: 'Done', SKIPPED: 'Skipped', CANCELLED: 'Cancelled' };
+
 /** Serialisable row for the client list. */
 export type TaskListRow = {
   childActions?: Array<{ id: string; action: string; state: string }>;
@@ -156,7 +158,7 @@ export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispos
                   <span className="flex items-baseline justify-between gap-2">
                     <span data-testid="task-person" className="truncate text-[13.5px] font-medium text-ink-900">{t.personName}</span>
                     <span className={clsx('shrink-0 text-[11.5px] font-medium', overdue ? 'text-red-700' : 'text-ink-700')} title={formatLocalDate(t.due, 'long')}>
-                      {t.state === 'PENDING' ? relativeDays(t.due, today) : t.state.toLowerCase()}
+                      {t.state === 'PENDING' ? relativeDays(t.due, today) : STATE_LABELS[t.state] ?? t.state}
                     </span>
                   </span>
                   <span className="mt-0.5 flex items-center gap-1.5 text-[12.5px] text-ink-600">

@@ -63,7 +63,7 @@ export async function createUserAction(formData: FormData): Promise<ActionResult
     // sets everything an enabled account needs rather than sending the admin to Restore and Edit.
     await prisma.user.update({
       where: { id: existing.id },
-      data: { name: d.name, role: d.role, passwordHash: await hashPassword(d.password!), active: true, timezone: WORKSPACE_TIMEZONE, pods: { deleteMany: {}, create: d.podIds.map((podId) => ({ podId })) } },
+      data: { name: d.name, role: d.role, passwordHash: await hashPassword(d.password!), active: true, timezone: WORKSPACE_TIMEZONE, dailyCap: null, twentyMemberId: existing.twentyMemberId ?? await resolveMember(d.email), pods: { deleteMany: {}, create: d.podIds.map((podId) => ({ podId })) } },
     });
     await logAudit({ entityType: 'user', entityId: existing.id, action: 'enabled', actor: userActor(admin), details: { role: d.role, pods: d.podIds } });
     refresh();

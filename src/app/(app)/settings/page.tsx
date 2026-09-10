@@ -12,7 +12,7 @@ import { Badge, Card, KeyValue, Notice, Surface, Tabs, ViewHeader, Empty } from 
 import { UsersPanel } from '@/components/settings/users-panel';
 import { AdminTools } from '@/components/settings/admin-tools';
 import { ReviewButton } from '@/components/settings/review-button';
-import { RetryWriteButton } from '@/components/settings/retry-write-button';
+import { DiscardWriteButton, RetryWriteButton } from '@/components/settings/retry-write-button';
 import { MatchingForm, RulesForm, SyncForm, TwentyConnectionForm } from '@/components/settings/settings-forms';
 import { getMeetingAnalyzer } from '@/lib/meetings/analysis';
 import { ASSISTANT_NAME, ASSISTANT_SETTINGS_TAB } from '@/lib/workspace';
@@ -38,7 +38,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   return (
     <div className="space-y-3 px-6 pb-8 pt-2">
       <Surface flush>
-        <ViewHeader title="Workspace settings" meta="Admin only" />
+        <ViewHeader title="Workspace settings" />
         <Tabs inset={false} current={tab} tabs={TABS.map((t) => ({ ...t, href: `/settings?tab=${t.key}`, count: t.key === 'activity' && reviewCount ? reviewCount : undefined }))} />
       </Surface>
 
@@ -62,10 +62,10 @@ function AssistantTab() {
   const connected = analyzer.name !== 'local-stats';
   return <Card title={<span className="flex items-center gap-2"><IconAssistant size={18} />{ASSISTANT_NAME}</span>}>
     <div className="space-y-4 p-5"><KeyValue items={[
-      { k: 'Model provider', v: connected ? analyzer.name : 'Not connected' },
-      { k: 'Meeting analysis', v: connected ? 'Available where a transcript exists' : 'Waiting on a provider' },
-      { k: 'Suggested approach', v: connected ? 'Available on every task' : 'Waiting on a provider' },
-      { k: 'Talk time', v: 'Computed locally from transcript timestamps' },
+      { k: 'Model provider', v: <Badge tone={connected ? 'green' : 'gray'}>{connected ? analyzer.name : 'Not connected'}</Badge> },
+      { k: 'Meeting analysis', v: <Badge tone={connected ? 'green' : 'gray'}>{connected ? 'Available' : 'Needs a provider'}</Badge> },
+      { k: 'Suggested approach', v: <Badge tone={connected ? 'green' : 'gray'}>{connected ? 'Available' : 'Needs a provider'}</Badge> },
+      { k: 'Talk time', v: <Badge tone="green">Local</Badge> },
     ]} /></div>
   </Card>;
 }
@@ -119,7 +119,6 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
   const baseUrl = settings.twenty.baseUrl || env().TWENTY_API_URL || '';
   return (
     <div className="space-y-3">
-      {mode === 'mock' ? <Notice tone="warn">Running against the built-in demo workspace. Add your Twenty base URL and API key below to connect the real one.</Notice> : null}
       {dryRun ? <Notice tone="info">Dry run is on: Cadence logs what it would write to Twenty and writes nothing.</Notice> : null}
       <Card title="Status">
         <div className="p-4">
@@ -127,6 +126,7 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
             items={[
               { k: 'Mode', v: mode === 'mock' ? 'Demo workspace' : 'Twenty (GraphQL)' },
               { k: 'Connection', v: <Badge tone={ok ? 'green' : 'red'}>{ok ? 'Reachable' : 'Not connected'}</Badge> },
+              { k: 'API key', v: settings.twenty.apiKey ? <Badge tone="green">Stored in settings</Badge> : hasEnvKey ? <Badge tone="green">From environment</Badge> : <Badge tone="amber">Not configured</Badge> },
               { k: 'Base URL', v: baseUrl || null },
               ...(counts.people === undefined ? [] : [{ k: 'People', v: counts.people }]),
               { k: 'Workspace members', v: counts.members ?? null },
@@ -145,7 +145,7 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
           />
         </div>
       </Card>
-      <TwentyConnectionForm twenty={settings.twenty} hasEnvKey={hasEnvKey} defaultSchemaJson={JSON.stringify(schema, null, 2)} />
+      <TwentyConnectionForm twenty={settings.twenty} defaultSchemaJson={JSON.stringify(schema, null, 2)} />
       <AdminTools defaultDays={settings.rules.reconcileLookbackDays} />
     </div>
   );
@@ -155,11 +155,11 @@ async function ActivityTab() {
   const [events, writes, failed] = await Promise.all([
     recentEvents(100),
     prisma.twentyWrite.findMany({ where: { status: 'OK' }, orderBy: { createdAt: 'desc' }, take: 50 }),
-    prisma.twentyWrite.findMany({ where: { status: 'FAILED' }, orderBy: { createdAt: 'asc' }, take: 100 }),
+    prisma.twentyWrite.findMany({ where: { status: { in: ['FAILED', 'RETRYING'] } }, orderBy: { createdAt: 'asc' }, take: 100 }),
   ]);
   return (
     <div className="space-y-3">
-      <Card title={<span className="flex items-center gap-2">Waiting to reach Twenty {failed.length ? <Badge tone="red">{failed.length}</Badge> : <Badge tone="green">0</Badge>}</span>} actions={failed.length ? <RetryWriteButton>Retry all now</RetryWriteButton> : undefined}>
+      <Card title={<span className="flex items-center gap-2">Waiting to reach Twenty {failed.length ? <Badge tone="red">{failed.length}</Badge> : <Badge tone="gray">0</Badge>}</span>} actions={failed.length ? <RetryWriteButton>Retry all now</RetryWriteButton> : undefined}>
         {failed.length === 0 ? (
           <div className="p-4 text-[13px] text-ink-500">Every note and mirrored task has reached Twenty.</div>
         ) : (
@@ -185,7 +185,7 @@ async function ActivityTab() {
                     <td className="max-w-md text-[12px] text-red-700">{w.error}</td>
                     <td className="num text-[12px]">{w.attempts}</td>
                     <td className="whitespace-nowrap text-[12px]">{w.nextAttemptAt ? formatInstant(w.nextAttemptAt, WORKSPACE_TIMEZONE) : <Empty />}</td>
-                    <td className="text-right"><RetryWriteButton writeId={w.id} /></td>
+                    <td className="whitespace-nowrap text-right"><RetryWriteButton writeId={w.id} /> <DiscardWriteButton writeId={w.id} /></td>
                   </tr>
                 ))}
               </tbody>

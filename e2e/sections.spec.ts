@@ -185,7 +185,6 @@ test('an account shows its people, hierarchy and one timeline', async ({ page })
   await expect(page.getByRole('link', { name: 'Dummy One' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Dummy Two' })).toBeVisible();
   // Grouped by the job title the CRM holds, not by a stance nobody could measure.
-  await expect(page.getByText('Grouped from CRM job titles')).toBeVisible();
   await expect(page.getByText(/^(Executive|Leadership|Management|Other) titles$/).first()).toBeVisible();
   for (const invented of ['Champion', 'Supporter', 'Detractor']) {
     await expect(page.getByText(invented, { exact: true }), invented).toHaveCount(0);
@@ -208,7 +207,6 @@ test('the people view is grouped from CRM titles and holds nothing invented', as
   await page.getByRole('link', { name: 'People by title' }).click();
 
   // Derived from what Twenty holds, so there is nothing to edit and nothing to keep in step.
-  await expect(page.getByText('Grouped from CRM job titles')).toBeVisible();
   await expect(page.getByRole('button', { name: /^Edit / })).toHaveCount(0);
   await expect(page.getByLabel('Stance')).toHaveCount(0);
   await expect(page.getByLabel('Reports to')).toHaveCount(0);

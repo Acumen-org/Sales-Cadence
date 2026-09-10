@@ -213,7 +213,7 @@ Rescanning is always safe: `pnpm reconcile 7` replays the last 7 days through th
 Turn dry run off (`CADENCE_DRY_RUN=false`), remove `demo` from `SEED_PROFILE`, restart, and enrol one pod's people. Watch for a week:
 
 - **Tasks page** every morning: caps hold (default 40/day), overdue is visible and shrinking.
-- **Settings > Activity log**: events needing review (unknown actors, failed events). Add aliases or fix mappings, then mark reviewed.
+- **Settings > Activity log**: events needing review (unknown actors, failed events) and writes waiting to reach Twenty. Fix the mapping or the record, retry or discard, then mark reviewed.
 - **Reports > By channel**: the observed vs manual split tells you whether Twenty is seeing the team's emails and calls. A low observed share usually means a mailbox is not connected in Twenty or note titles do not match the patterns in Settings > Rules and matching.
 - **Twenty timelines**: each completed action appears as `[Cadence] Email 2 sent by Alisa`; open tasks appear as `Cadence: Email 1 - <name>` assigned to the FO.
 

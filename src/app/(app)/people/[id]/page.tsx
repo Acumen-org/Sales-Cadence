@@ -15,7 +15,7 @@ import { twentyPersonUrl } from '@/lib/twenty/urls';
 import { CrmHistory } from '@/components/people/crm-history';
 import { ActionIcon, IconExternal } from '@/components/icons';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
-import { Avatar, Badge, Card, contactWarnings, crmStanding, Empty, ENROLLMENT_TONE, enrollmentStatusLabel, KeyValue, RecordFields, RecordHeader, Surface, Tabs, TierBadge } from '@/components/ui';
+import { Avatar, Badge, Card, contactWarnings, crmStanding, ENROLLMENT_TONE, enrollmentStatusLabel, KeyValue, RecordFields, RecordHeader, Surface, Tabs, TierBadge } from '@/components/ui';
 import { campaignStatusLabel } from '@/lib/campaign-status';
 
 type TimelineItem = { at: Date; kind: 'touch' | 'note' | 'task' | 'state'; icon: string; title: string; detail?: string | null; tone?: 'in' | 'out' | 'neutral' };
@@ -27,8 +27,6 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
   const requested = sp.tab;
   const tab = requested === 'activity' || requested === 'sequences' || requested === 'crm' ? requested : 'overview';
   let person = await prisma.personCache.findUnique({ where: { id } });
-  // Outside the reader's pods the record does not exist, the same answer Accounts gives.
-  if (person && !(await canReadPerson(user, id))) notFound();
   // Instant sync: re-read this person from Twenty on every visit so CRM edits show immediately,
   // even between webhooks. Failures fall back to the cache.
   let liveWarning: string | null = null;
@@ -42,7 +40,9 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
   } catch (err) {
     liveWarning = `Showing cached data; Twenty unavailable (${err instanceof Error ? err.message : String(err)}).`;
   }
-  if (!person) notFound();
+  // Outside the reader's pods the record does not exist, the same answer Accounts gives. Checked
+  // after the live re-read, so a person Twenty has and the cache did not is refused as well.
+  if (!person || !(await canReadPerson(user, id))) notFound();
 
   const [enrollments, touches, tasks, audit, conn, pods, colleagues] = await Promise.all([
     prisma.enrollment.findMany({
@@ -217,7 +217,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                                     {t.disposition ? ` (${t.disposition})` : ''}
                                   </Badge>
                                 ))}
-                                {!reached ? <span className="text-xs text-ink-500">not reached</span> : null}
+                                {!reached ? <span className="text-xs text-ink-500">Not reached</span> : null}
                               </span>
                             </li>
                           );
@@ -361,10 +361,8 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
         </div>
 
         <aside className="min-w-0 space-y-3">
-          <Card title="Open opportunities">
-            {opportunities.length === 0 ? (
-              <div className="p-4 text-sm"><Empty /></div>
-            ) : (
+          {opportunities.length ? <Card title="Open opportunities">
+            {(
               <ul className="divide-y divide-line">
                 {opportunities.map((o) => (
                   <li key={o.id} className="flex items-center justify-between px-4 py-2 text-sm">
@@ -374,11 +372,9 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                 ))}
               </ul>
             )}
-          </Card>
-          <Card title={`Colleagues at ${person.companyName ?? 'company'}`}>
-            {colleagues.length === 0 ? (
-              <div className="p-4 text-sm text-ink-500">Nobody else known here.</div>
-            ) : (
+          </Card> : null}
+          {colleagues.length ? <Card title={`Colleagues at ${person.companyName ?? 'company'}`}>
+            {(
               <ul className="divide-y divide-line">
                 {colleagues.map((c) => {
                   const st = crmStanding(c);
@@ -399,7 +395,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                 })}
               </ul>
             )}
-          </Card>
+          </Card> : null}
         </aside>
       </div>
     </>

@@ -131,6 +131,8 @@ test.describe('Senior FO', () => {
     await expect(page.locator('main')).not.toContainText('Dummy Seven');
     await page.goto('/people?q=Seven');
     await expect(page.locator('main')).not.toContainText('Dummy Seven');
+    await page.goto('/people/dummy-07');
+    await expect(page.getByText(/find that record/)).toBeVisible();
     // Nor can she start a campaign in it.
     await page.goto('/campaigns/new');
     const pod = page.getByLabel('Pod', { exact: true });

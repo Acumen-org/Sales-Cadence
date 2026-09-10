@@ -56,7 +56,7 @@ export function MeetingForm({ companies, initial, mode, timezone }: { companies:
           {parsed.note ? <p className="text-sm text-ink-600">{parsed.note}</p> : null}
         </div> : null}
 
-        <Field label="Date and time" hint={timezone === WORKSPACE_TIMEZONE ? WORKSPACE_TIMEZONE_LABEL : timezone}>
+        <Field label="Date and time" info={timezone === WORKSPACE_TIMEZONE ? WORKSPACE_TIMEZONE_LABEL : timezone}>
           <input name="occurredAt" type="datetime-local" required defaultValue={initial.occurredAt} />
         </Field>
         <Field label="Duration (minutes)">

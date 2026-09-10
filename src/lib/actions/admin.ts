@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { prisma } from '@/lib/db';
 import { retryFailedWrites } from '@/lib/engine/sync-retry';
 import { requireAdmin } from '../auth/current-user';
 import { userActor } from '../audit';
@@ -69,11 +70,20 @@ export async function runSchedulerAction(): Promise<ActionResult> {
 export async function retryTwentyWriteAction(formData: FormData): Promise<ActionResult> {
   await requireAdmin();
   const writeId = String(formData.get('writeId') ?? '');
-  const result = await retryFailedWrites(writeId ? { ids: [writeId] } : { limit: 100, now: new Date(8640000000000000) });
+  const result = await retryFailedWrites(writeId ? { ids: [writeId] } : { limit: 100, ignoreBackoff: true });
   revalidatePath('/settings');
   if (!result.retried) return { ok: false, error: 'Nothing is waiting to be retried.' };
   if (result.succeeded === result.retried) return { ok: true, message: result.retried === 1 ? 'Written to Twenty.' : `${result.succeeded} writes reached Twenty.` };
   return { ok: false, error: `${result.retried - result.succeeded} of ${result.retried} still failing: ${result.errors[0] ?? 'unknown error'}` };
+}
+
+/** A write that can never succeed (the Twenty record is gone, the payload is refused) is closed by hand. */
+export async function discardTwentyWriteAction(formData: FormData): Promise<ActionResult> {
+  await requireAdmin();
+  const writeId = String(formData.get('writeId') ?? '');
+  const changed = await prisma.twentyWrite.updateMany({ where: { id: writeId, status: { in: ['FAILED', 'RETRYING'] } }, data: { status: 'DISCARDED', nextAttemptAt: null } });
+  revalidatePath('/settings');
+  return changed.count ? { ok: true, message: 'Discarded. Twenty will not receive this write.' } : { ok: false, error: 'That write is no longer waiting.' };
 }
 
 export async function resolveReviewAction(formData: FormData): Promise<ActionResult> {

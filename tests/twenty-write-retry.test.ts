@@ -56,8 +56,15 @@ describe('writes Twenty did not receive are kept and replayed', () => {
     expect(brokenAfter.nextAttemptAt!.getTime()).toBeGreaterThan(Date.now());
     expect((await prisma.twentyWrite.findUniqueOrThrow({ where: { id: later.id } })).attempts).toBe(1);
 
-    // Asked for by id, the waiting row is replayed regardless of its backoff.
-    const forced = await retryFailedWrites({ ids: [later.id] });
+    // "Retry all now" ignores the backoff for every waiting row, and a row that fails again is
+    // postponed from the real clock, never from a fake one.
+    const forced = await retryFailedWrites({ ignoreBackoff: true });
+    expect(forced.retried).toBe(2);
     expect(forced.succeeded).toBe(1);
+    expect((await prisma.twentyWrite.findUniqueOrThrow({ where: { id: later.id } })).status).toBe('OK');
+    const stillBroken = await prisma.twentyWrite.findUniqueOrThrow({ where: { id: broken.id } });
+    expect(stillBroken.status).toBe('FAILED');
+    expect(stillBroken.attempts).toBe(3);
+    expect(stillBroken.nextAttemptAt!.getTime()).toBeLessThan(Date.now() + 7 * 3600_000);
   });
 });

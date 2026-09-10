@@ -96,7 +96,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
             <Card title="Add a transcript">
               <ActionForm action={saveTranscriptAction} className="space-y-3 p-4">
                 <input type="hidden" name="meetingId" value={meeting.id} />
-                <Field label="Paste WebVTT, SRT or plain text" hint="Teams: Recording > ... > Transcript > Download. Zoom: Recordings > audio transcript. Meet: the transcript file in Drive.">
+                <Field label="Paste WebVTT, SRT or plain text" info="Teams: Recording > ... > Transcript > Download. Zoom: Recordings > audio transcript. Meet: the transcript file in Drive.">
                   <textarea name="transcript" rows={8} className="font-mono !text-[12px]" placeholder="Paste the transcript" />
                 </Field>
                 <button type="submit" className="btn-primary">
@@ -148,9 +148,8 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
                 })}
               </ul>
             )}
+            {mayEdit ? <div className="border-t border-line p-3"><AttendeeEditor meetingId={meeting.id} attendees={meeting.attendees.map((a) => ({ name: a.name, email: a.email, personId: a.personId, userId: a.userId }))} /></div> : null}
           </Card>
-
-          {mayEdit ? <Card title="Manage attendees"><div className="p-4"><AttendeeEditor meetingId={meeting.id} attendees={meeting.attendees.map((a) => ({ name: a.name, email: a.email, personId: a.personId, userId: a.userId }))} /></div></Card> : null}
 
           <Card title="Recording">
             <div className="p-4">

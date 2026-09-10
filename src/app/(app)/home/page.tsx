@@ -88,7 +88,7 @@ export default async function HomePage() {
                 {h.my.overdueTotal && h.my.todayTotal ? <><span className="font-medium text-white">{h.my.todayTotal}</span> more due today across <span className="font-medium text-white">{h.my.peopleToReachToday}</span> {h.my.peopleToReachToday === 1 ? 'person' : 'people'}</> : null}
                 {!h.my.overdueTotal && h.my.todayTotal ? <>across <span className="font-medium text-white">{h.my.peopleToReachToday}</span> {h.my.peopleToReachToday === 1 ? 'person' : 'people'}, <span className="font-medium text-white">{completed}</span> already done</> : null}
                 {!h.my.overdueTotal && !h.my.todayTotal ? <><span className="font-medium text-white">{completed}</span> completed today</> : null}
-                {h.my.overdueTotal && !h.my.todayTotal ? <>nothing else is due today</> : null}
+                {h.my.overdueTotal && !h.my.todayTotal ? <>Nothing else is due today</> : null}
               </p>
               <Link href={`/tasks?tab=${focusTab}&mode=flow&${mine}`} className="inline-flex items-center gap-3 rounded-lg bg-[#d5e9ad] px-4 py-2.5 text-[12px] font-semibold text-[#203e35] transition hover:bg-[#e2f0c6]">{h.my.todayTotal || h.my.overdueTotal ? 'Start task flow' : 'View upcoming tasks'}<IconChevronRight size={15} /></Link>
             </div>

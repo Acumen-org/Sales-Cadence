@@ -51,7 +51,7 @@ TypeScript, Node 20+, Next.js 15 (App Router, server actions), Postgres 18, Pris
 ## Run on Windows with Docker Desktop
 
 1. Install Docker Desktop and make sure it is running.
-2. Copy `.env.example` to `.env` and fill in `TWENTY_API_URL`, `TWENTY_API_KEY`, `SESSION_SECRET`, `ADMIN_EMAIL` and `ADMIN_PASSWORD`. There is no default admin password: the seed refuses to create the first account without one.
+2. Copy `.env.example` to `.env` and fill in `TWENTY_API_URL`, `TWENTY_API_KEY`, `ADMIN_EMAIL` and `ADMIN_PASSWORD`. There is no default admin password: the seed refuses to create the first account without one.
 3. In PowerShell, from this folder:
 
    ```powershell
@@ -81,7 +81,7 @@ Same compose file, unchanged:
 cp .env.example .env
 # edit .env:
 #   TWENTY_MODE=graphql  TWENTY_API_URL=https://twenty.example.com  TWENTY_API_KEY=...
-#   SESSION_SECRET=<long random>  COOKIE_SECURE=true  APP_URL=https://cadence.example.com
+#   COOKIE_SECURE=true  APP_URL=https://cadence.example.com
 #   SEED_PROFILE=core  ADMIN_EMAIL=you@company.com  ADMIN_PASSWORD=<strong>
 #   CADENCE_DRY_RUN=true  (for the pilot)
 #   TWENTY_WEBHOOK_SECRET=... or CADENCE_WEBHOOK_TOKEN=...

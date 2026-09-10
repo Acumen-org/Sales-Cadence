@@ -20,7 +20,7 @@ function Check({ name, label, checked, info }: { name: string; label: string; ch
   );
 }
 
-export function TwentyConnectionForm({ twenty, hasEnvKey, defaultSchemaJson }: { twenty: Settings['twenty']; hasEnvKey: boolean; defaultSchemaJson: string }) {
+export function TwentyConnectionForm({ twenty, defaultSchemaJson }: { twenty: Settings['twenty']; defaultSchemaJson: string }) {
   return (
     <Card title="Connection and schema mapping">
       <ActionForm action={saveTwentySettingsAction} className="space-y-4 p-4">
@@ -28,16 +28,12 @@ export function TwentyConnectionForm({ twenty, hasEnvKey, defaultSchemaJson }: {
           <Field label="Twenty base URL" info="No trailing slash. Also used for the Open in Twenty links.">
             <input name="baseUrl" defaultValue={twenty.baseUrl ?? ''} className="w-full" placeholder="https://twenty.example.com" />
           </Field>
-          <Field label="API key" hint={twenty.apiKey ? 'Stored · blank keeps it' : hasEnvKey ? 'From TWENTY_API_KEY · a key here overrides it' : 'Not configured'}>
+          <Field label="API key" info="Blank keeps the stored key. A key here overrides TWENTY_API_KEY from the environment.">
             <input name="apiKey" type="password" autoComplete="off" className="w-full" placeholder={twenty.apiKey ? '(unchanged)' : ''} />
             {twenty.apiKey ? <Check name="clearApiKey" label="Remove the stored key (fall back to the environment)" checked={false} /> : null}
           </Field>
         </div>
-        <Field label="Field mapping overrides (JSON)" hint={
-            'Only the names that differ from the defaults, e.g. {"person": {"assignedToId": "relationshipOwnerId"}}. ' +
-            'Select option values live under "personValues" and an override replaces that whole list, e.g. {"personValues": {"tier": ["A", "B"]}}. ' +
-            'Defaults are shown below for reference.'
-          }>
+        <Field label="Field mapping overrides (JSON)" info='Only the names that differ from the defaults, e.g. {"person": {"assignedToId": "relationshipOwnerId"}}. A "personValues" entry replaces that whole option list. Defaults are shown below.'>
           <textarea name="schema" rows={6} defaultValue={twenty.schema ? JSON.stringify(twenty.schema, null, 2) : ''} className="w-full font-mono text-xs" />
         </Field>
         <details>

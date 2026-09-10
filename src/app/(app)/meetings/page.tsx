@@ -112,7 +112,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                 <tr>
                   <th>Meeting</th>
                   <th>When</th>
-                  <th>Length</th>
+                  <th className="num">Length</th>
                   <th>Account</th>
                   <th>Products</th>
                   <th>Attendees</th>
@@ -128,7 +128,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                       <IdentityCell name={m.title} href={`/meetings/${m.id}`} sub={PROVIDER_LABELS[m.provider]} />
                     </td>
                     <td className="whitespace-nowrap text-[12.5px]">{formatInstant(m.occurredAt, user.timezone)}</td>
-                    <td className="whitespace-nowrap text-[12.5px]">{m.durationSec ? `${Math.round(m.durationSec / 60)} min` : '-'}</td>
+                    <td className="num whitespace-nowrap text-[12.5px]">{m.durationSec ? `${Math.round(m.durationSec / 60)} min` : '-'}</td>
                     <td className="text-[12.5px]">
                       {m.companyId ? (
                         <Link href={`/accounts/${m.companyId}`} className="text-brand-700 hover:underline">
@@ -160,7 +160,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                       ) : m.analysisStatus === 'PENDING' ? (
                         <Badge tone="amber">Running</Badge>
                       ) : (
-                        <span className="text-[12px] text-ink-500">Not run</span>
+                        <Empty />
                       )}
                     </td>
                     <td className="whitespace-nowrap text-[12.5px]">{m.createdBy?.name ?? <Empty />}</td>

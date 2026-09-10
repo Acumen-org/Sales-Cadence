@@ -60,7 +60,6 @@ export function MeetingStage(p: Props) {
       {mediaFailed ? (
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
           <span className="text-[13px] font-medium text-amber-900">Recording unavailable</span>
-          <span className="text-[12.5px] text-amber-800">The link may have expired or need a sign-in.</span>
           <a href={p.sourceUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm ml-auto"><IconExternal size={13} />Open the source</a>
         </div>
       ) : (

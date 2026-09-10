@@ -51,7 +51,7 @@ Also needs: Docker + Docker Compose, a domain or subdomain, TLS via a reverse pr
 git clone <repo> cadence && cd cadence
 cp .env.example .env
 # edit .env: TWENTY_MODE=graphql, TWENTY_API_URL, TWENTY_API_KEY,
-#            SESSION_SECRET=<long random>, COOKIE_SECURE=true,
+#            COOKIE_SECURE=true,
 #            APP_URL=https://cadence.example.com, SEED_PROFILE=core,
 #            ADMIN_EMAIL/ADMIN_PASSWORD, CADENCE_DRY_RUN=true (for the pilot)
 docker compose up -d --build      # first build ~5 min
@@ -75,7 +75,7 @@ docker compose up -d --build                # deploy an update
 - **Health check:** `GET /api/health` returns `{"ok":true,"db":"up"}`.
 - **Backup:** only Postgres holds state. `docker compose exec db pg_dump -U cadence cadence | gzip > backup.sql.gz`, nightly. Everything else is rebuildable from git.
 - **Restart safety:** both processes are stateless; the worker's jobs are idempotent, so a restart mid-job is harmless.
-- **Secrets:** `.env` only. `SESSION_SECRET` must be long and random; `TWENTY_API_KEY` grants full CRM access, so keep the file `chmod 600`.
+- **Secrets:** `.env` only. `TWENTY_API_KEY` grants full CRM access, so keep the file `chmod 600`. Sessions are database tokens; there is no signing secret.
 - **Scaling:** one web container handles this workload comfortably. If it ever needs more, run several `web` containers behind the proxy; the worker must stay a **single** instance (it is the scheduler).
 
 ## Gotchas

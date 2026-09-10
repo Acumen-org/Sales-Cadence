@@ -407,12 +407,11 @@ export function TaskActions(p: Props) {
                 <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-500">End the sequence</p>
                 <select value={endReason} onChange={(e) => setEndReason(e.target.value)} aria-label="Why are you ending the sequence?" className="w-full">
                   {END_REASONS.map((r) => (
-                    <option key={r.key} value={r.key}>
+                    <option key={r.key} value={r.key} title={r.detail}>
                       {r.label}
                     </option>
                   ))}
                 </select>
-                <p className="min-h-[32px] text-[12px] leading-snug text-ink-400">{END_REASONS.find((r) => r.key === endReason)?.detail}</p>
                 <button type="submit" disabled={pending} className="btn-secondary btn-sm">
                   End sequence
                 </button>
