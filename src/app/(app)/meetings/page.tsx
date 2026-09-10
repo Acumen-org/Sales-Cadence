@@ -47,7 +47,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
         analysisStatus: true,
         createdBy: { select: { name: true } },
         _count: { select: { attendees: true } },
-        attendees: { where: { external: true }, select: { id: true }, take: 1 },
+        attendees: { where: { external: true }, select: { id: true } },
       },
     }),
     prisma.meeting.count({ where }),
@@ -76,10 +76,10 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
         <ViewHeader
           title={scope === 'mine' ? 'My meetings' : scope === 'week' ? 'This week' : 'All meetings'}
           caret
-          meta={`${total} recording${total === 1 ? '' : 's'}`}
+          meta={`${total} meeting${total === 1 ? '' : 's'}`}
           actions={
-            <Link href="/meetings/new" className="btn-secondary btn-sm">
-              <IconPlus size={13} /> Add meeting
+            <Link href="/meetings/new" className="btn-primary">
+              <IconPlus size={14} /> Add meeting
             </Link>
           }
         />
@@ -149,7 +149,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                     </td>
                     <td className="text-[12.5px]">
                       <span className="font-medium text-ink-900">{m._count.attendees}</span>
-                      {m.attendees.length ? <Badge tone="green" className="ml-1.5">External</Badge> : null}
+                      {m.attendees.length ? <Badge tone="green" className="ml-1.5">{m.attendees.length} external</Badge> : null}
                     </td>
                     <td>{m.transcript ? <Badge tone="blue">Transcript</Badge> : <Empty />}</td>
                     <td>

@@ -154,7 +154,7 @@ test('a meeting plays in the app with its transcript and an empty analysis panel
   await page.goto('/meetings?scope=week');
   await expect(page.getByRole('link', { name: /E2E discovery call/ })).toBeVisible();
   // The first table is the list of meetings in Cadence; "Recordings in Twenty" is a second one.
-  await expect(page.locator('table').first()).toContainText('External');
+  await expect(page.locator('table').first()).toContainText(/\d external/);
   await logout(page);
 });
 

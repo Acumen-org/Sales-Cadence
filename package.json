@@ -21,6 +21,7 @@
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "db:reset": "tsx scripts/reset-data.ts",
+    "admin:password": "tsx scripts/reset-admin-password.ts",
     "db:studio": "prisma studio",
     "worker": "tsx src/worker/index.ts",
     "dev:db": "tsx scripts/dev-db.ts",

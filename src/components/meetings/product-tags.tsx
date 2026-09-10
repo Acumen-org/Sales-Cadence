@@ -5,7 +5,7 @@ import clsx from 'clsx';
 import { toggleMeetingProductAction } from '@/lib/actions/meetings';
 import { optionLabel } from '@/lib/twenty/labels';
 import { PRODUCTS } from '@/lib/workspace';
-import { IconCheck } from '@/components/icons';
+import { IconCheck, IconPlus } from '@/components/icons';
 
 /**
  * Which products a meeting was about. A conversation can cover more than one, so these are tags
@@ -65,10 +65,10 @@ export function ProductTags({ meetingId, products, canEdit }: { meetingId: strin
               onClick={() => toggle(product)}
               className={clsx(
                 'inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[12px] font-medium transition disabled:opacity-60',
-                on ? 'border-brand-300 bg-brand-50 text-brand-800' : 'border-line bg-white text-ink-600 hover:border-ink-300',
+                on ? 'border-brand-300 bg-brand-50 text-brand-800' : 'border-dashed border-line bg-transparent text-ink-500 hover:border-ink-300 hover:text-ink-700',
               )}
             >
-              {on ? <IconCheck size={12} /> : null}
+              {on ? <IconCheck size={12} /> : <IconPlus size={11} />}
               {optionLabel(product)}
             </button>
           );

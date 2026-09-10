@@ -9,14 +9,23 @@ import { retryDelayMs } from './sync-out';
  * one immediately from Settings. Success marks the row OK and, for a note or mirrored task, stores
  * the Twenty id on the Cadence task the way the first attempt would have.
  */
+/**
+ * A claim lasts this long. A replay that died between claiming and finishing (process killed,
+ * database gone) leaves the row RETRYING; once the lease has passed it is retryable again rather
+ * than stuck forever.
+ */
+const CLAIM_LEASE_MS = 10 * 60_000;
+
 export async function retryFailedWrites(opts: { now?: Date; limit?: number; ids?: string[]; ignoreBackoff?: boolean } = {}) {
   const now = opts.now ?? new Date();
+  // FAILED and due, or RETRYING with an expired lease.
+  const retryable = { OR: [{ status: 'FAILED' }, { status: 'RETRYING', nextAttemptAt: { lte: now } }] };
   const rows = await prisma.twentyWrite.findMany({
     where: opts.ids
-      ? { id: { in: opts.ids }, status: 'FAILED' }
+      ? { id: { in: opts.ids }, ...retryable }
       : opts.ignoreBackoff
-        ? { status: 'FAILED' }
-        : { status: 'FAILED', OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }] },
+        ? retryable
+        : { AND: [retryable, { OR: [{ status: 'RETRYING' }, { nextAttemptAt: null }, { nextAttemptAt: { lte: now } }] }] },
     orderBy: { createdAt: 'asc' },
     take: opts.limit ?? 25,
   });
@@ -32,8 +41,11 @@ export async function retryFailedWrites(opts: { now?: Date; limit?: number; ids?
   const errors: string[] = [];
   for (const row of rows) {
     // Claim the row first: the worker tick and an admin's Retry can run at the same moment, and a
-    // note written twice is worse than a note written late.
-    const claimed = await prisma.twentyWrite.updateMany({ where: { id: row.id, status: 'FAILED' }, data: { status: 'RETRYING' } });
+    // note written twice is worse than a note written late. The claim carries a lease (above).
+    const claimed = await prisma.twentyWrite.updateMany({
+      where: { id: row.id, OR: [{ status: 'FAILED' }, { status: 'RETRYING', nextAttemptAt: { lte: now } }] },
+      data: { status: 'RETRYING', nextAttemptAt: new Date(now.getTime() + CLAIM_LEASE_MS) },
+    });
     if (!claimed.count) continue;
     try {
       const twentyId = await replay(client, row);

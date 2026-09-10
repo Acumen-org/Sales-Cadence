@@ -180,7 +180,7 @@ async function ActivityTab() {
                 {failed.map((w) => (
                   <tr key={w.id}>
                     <td className="whitespace-nowrap text-[12px]">{formatInstant(w.createdAt, WORKSPACE_TIMEZONE)}</td>
-                    <td className="text-[12px]">{w.operation}</td>
+                    <td className="text-[12px]">{w.operation}{w.status === 'RETRYING' ? <Badge tone="amber" className="ml-1.5">Retrying</Badge> : null}</td>
                     <td className="text-[12px]">{w.objectType}</td>
                     <td className="max-w-md text-[12px] text-red-700">{w.error}</td>
                     <td className="num text-[12px]">{w.attempts}</td>

@@ -67,4 +67,22 @@ describe('writes Twenty did not receive are kept and replayed', () => {
     expect(stillBroken.attempts).toBe(3);
     expect(stillBroken.nextAttemptAt!.getTime()).toBeLessThan(Date.now() + 7 * 3600_000);
   });
+
+  it('retries a claim whose process died, and leaves a live claim alone', async () => {
+    await prisma.twentyWrite.updateMany({ where: { status: 'FAILED' }, data: { status: 'DISCARDED' } });
+    // A replay claimed the row and never finished: its lease has passed.
+    const stale = await prisma.twentyWrite.create({
+      data: { operation: 'createNote', objectType: 'note', payload: note('person-03'), status: 'RETRYING', attempts: 1, nextAttemptAt: new Date(Date.now() - 1000) },
+    });
+    // Another replay holds this one right now.
+    const live = await prisma.twentyWrite.create({
+      data: { operation: 'createNote', objectType: 'note', payload: note('person-04'), status: 'RETRYING', attempts: 1, nextAttemptAt: new Date(Date.now() + 5 * 60_000) },
+    });
+    const result = await retryFailedWrites({ ignoreBackoff: true });
+    expect(result.retried).toBe(1);
+    expect((await prisma.twentyWrite.findUniqueOrThrow({ where: { id: stale.id } })).status).toBe('OK');
+    expect((await prisma.twentyWrite.findUniqueOrThrow({ where: { id: live.id } })).status).toBe('RETRYING');
+    // Asked for by id while the lease holds, it is still left alone.
+    expect((await retryFailedWrites({ ids: [live.id] })).retried).toBe(0);
+  });
 });

@@ -212,7 +212,7 @@ export async function enrichmentQueue(user: SessionUser) {
     if (!person.phone || person.badPhone || person.phoneMissing) gaps.push({ field: 'phone', label: person.phone ? 'Phone needs verification' : 'Phone missing', priority: 'critical' });
     for (const [field, label] of CONTACT_CRITICAL) if (!person[field]) gaps.push({ field, label: FIX_IN_TWENTY.has(field) ? `${label} missing - set in Twenty` : `${label} missing`, priority: 'critical' });
     for (const [field, label] of CONTACT_USEFUL) if (!person[field]) gaps.push({ field, label: `${label} missing`, priority: 'useful' });
-    if (person.tags.some((tag) => enrichmentTags.has(tag) || /enrichment[\s_-]*(required|needed)/i.test(tag))) gaps.push({ field: 'tags', label: 'Flagged in CRM', priority: 'useful' });
+    if (person.tags.some((tag) => enrichmentTags.has(tag) || /enrichment[\s_-]*(required|needed)/i.test(tag))) gaps.push({ field: 'tags', label: 'Flagged in CRM', priority: 'critical' });
     if (gaps.length) items.push({ id: person.id, label: cachedPersonName(person), company: person.companyName, entity: 'person', href: `/people/${person.id}`, gaps });
   }
   for (const company of companies) {

@@ -1,4 +1,5 @@
 import type { Enrollment, EnrollmentStatus } from '@prisma/client';
+import { optionLabel } from '../twenty/labels';
 import { prisma } from '../db';
 import { logAudit, type AuditActor } from '../audit';
 import { diffDays, isLocalDate, localDateToInstant, todayIn, type LocalDate } from '../dates';
@@ -32,7 +33,7 @@ export type EnrollRequest = {
   actor: AuditActor;
 };
 
-export type EnrollConflictReason = 'not_found' | 'deleted' | 'dnd' | 'opted_out' | 'already_active' | 'no_fo' | 'duplicate' | 'invalid_start';
+export type EnrollConflictReason = 'not_found' | 'deleted' | 'dnd' | 'opted_out' | 'already_active' | 'no_fo' | 'duplicate' | 'invalid_start' | 'pod_mismatch';
 
 export type EnrollConflict = { personId: string; name: string; reason: EnrollConflictReason; detail?: string; enrollmentId?: string };
 
@@ -45,7 +46,6 @@ export type EnrollCandidate = {
   assignedBy: 'owner' | 'round_robin' | 'fixed';
   startDate: LocalDate;
   /** The person's Twenty podOwner differs from the campaign pod (warning, not a block). */
-  podMismatch: boolean;
 };
 
 export type EnrollPreview = { candidates: EnrollCandidate[]; conflicts: EnrollConflict[]; warnings: string[] };
@@ -140,6 +140,12 @@ export async function previewEnrollment(req: EnrollRequest, client?: TwentyClien
       conflicts.push({ personId: id, name, reason: 'opted_out', detail: 'Asked not to be contacted (recorded in Cadence)' });
       continue;
     }
+    if (p.podOwner && p.podOwner !== pod.podOwnerValue) {
+      // Pods follow Twenty: a person is worked by the pod Twenty says owns them. Moving them is a
+      // change to make in Twenty, not something a pasted id should do quietly.
+      conflicts.push({ personId: id, name, reason: 'pod_mismatch', detail: `Belongs to ${optionLabel(p.podOwner)} in Twenty` });
+      continue;
+    }
     if (p.badEmail && p.badPhone) warnings.push(`${name}: email and phone are flagged as bad data.`);
     const existing = activeByPerson.get(id);
     if (existing) {
@@ -185,10 +191,8 @@ export async function previewEnrollment(req: EnrollRequest, client?: TwentyClien
       foName: fo.name,
       assignedBy,
       startDate: personStart,
-      podMismatch: Boolean(p.podOwner && p.podOwner !== pod.podOwnerValue),
     });
   }
-  if (candidates.some((c) => c.podMismatch)) warnings.push('Some people belong to a different Twenty podOwner than this pod.');
   return { candidates, conflicts, warnings };
 }
 

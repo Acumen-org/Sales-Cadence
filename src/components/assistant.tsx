@@ -1,7 +1,6 @@
-import Link from 'next/link';
 import { IconAssistant } from '@/components/icons';
 import { Badge } from '@/components/ui';
-import { ASSISTANT_NAME, ASSISTANT_SETTINGS_TAB } from '@/lib/workspace';
+import { ASSISTANT_NAME } from '@/lib/workspace';
 
 /**
  * One presentation for everything the assistant does, so it reads as a single feature rather
@@ -27,15 +26,10 @@ export function AssistantHeader({ connected, right }: { connected: boolean; righ
 }
 
 /**
- * The body of a panel whose header already says "Not connected": nothing to read, only the way
- * to Settings for someone who can change that. `does` stays in the signature because Settings
- * lists the assistant's jobs in full; a panel an FO looks past every day does not.
+ * The body of a panel whose header already says "Not connected". There is nothing to read and,
+ * until a provider can be configured in the app, nothing to do, so it renders nothing; the props
+ * stay so the callers do not change when that day comes.
  */
-export function AssistantNotConnected({ canConfigure }: { does: string[]; canConfigure: boolean }) {
-  if (!canConfigure) return null;
-  return (
-    <div className="flex items-center justify-end px-4 py-2.5">
-      <Link href={`/settings?tab=${ASSISTANT_SETTINGS_TAB}`} className="text-[12px] font-medium text-brand-700 hover:underline">Settings</Link>
-    </div>
-  );
+export function AssistantNotConnected(_props: { does: string[]; canConfigure: boolean }) {
+  return null;
 }

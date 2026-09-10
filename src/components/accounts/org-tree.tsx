@@ -27,7 +27,7 @@ export function OrgTree({ everyone }: { everyone: TreePerson[] }) {
   })).filter((band) => band.people.length);
 
   return <div className="space-y-7">
-    <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-base font-semibold text-ink-900">People by position</h3></div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-base font-semibold text-ink-900">People by title</h3></div>
     {grouped.map((band) => <section key={band.label} className="space-y-3">
       <div className="flex items-center gap-3"><h4 className="text-sm font-medium text-ink-500">{band.label}</h4><strong className="rounded-full bg-brand-50 px-2 py-0.5 text-xs text-brand-800">{band.people.length}</strong><div className="h-px flex-1 bg-line" /></div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{band.people.map((p) => <article key={p.id} className="rounded-xl border border-line bg-white p-4 shadow-surface">

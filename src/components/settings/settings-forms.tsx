@@ -37,7 +37,7 @@ export function TwentyConnectionForm({ twenty, defaultSchemaJson }: { twenty: Se
           <textarea name="schema" rows={6} defaultValue={twenty.schema ? JSON.stringify(twenty.schema, null, 2) : ''} className="w-full font-mono text-xs" />
         </Field>
         <details>
-          <summary className="cursor-pointer text-xs text-ink-500">Default mapping (twenty-schema.ts)</summary>
+          <summary className="cursor-pointer text-xs text-ink-500">Default mapping</summary>
           <pre className="mt-2 max-h-64 overflow-auto rounded bg-canvas p-3 text-[11px] text-ink-700">{defaultSchemaJson}</pre>
         </details>
         <button type="submit" className="btn-primary">

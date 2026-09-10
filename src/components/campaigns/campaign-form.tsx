@@ -19,6 +19,7 @@ type Props = {
 const CONFLICT_LABEL: Record<string, string> = {
   dnd: 'Do not contact',
   already_active: 'Already in a sequence',
+  pod_mismatch: 'Belongs to another pod in Twenty',
   not_found: 'Not found in Twenty',
   deleted: 'Deleted in Twenty',
   duplicate: 'Duplicate id',
@@ -218,7 +219,6 @@ export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, m
                       <tr key={c.personId}>
                         <td>
                           {c.name}
-                          {c.podMismatch ? <Badge tone="amber" className="ml-1">other pod</Badge> : null}
                         </td>
                         <td>{c.companyName}</td>
                         <td>

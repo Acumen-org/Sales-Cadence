@@ -107,3 +107,31 @@ mentioning that an applied Enrichment import writes exactly those.
   are the defaults, the seed refuses to create the first account without a password, and the
   sample data only builds in mock mode - which is where the test suites live. `pnpm db:reset`
   empties a workspace back to that state, and `pnpm test:fresh` drives the app as a new install.
+
+## The owner's requirements, checked
+
+Each of the 21 points from the owner's review, where it lives in the code, and the state on 10 September 2026. "Met" means implemented as asked and covered by a test or a captured screen.
+
+| # | Point | State | Where |
+|---|---|---|---|
+| 1 | Live numbers read as live, static text light | Met | `Count`, `Stat`, `DataValue`, `N` (`src/components/ui.tsx`, `src/app/(app)/home/page.tsx`); labels `text-ink-400/500`; zero is quiet by rule |
+| 2 | Bell is about inbound mail, not tasks | Met | `src/lib/notifications.ts`, `src/components/notifications-bell.tsx` |
+| 3 | Tasks per channel, rich text, calls, CRM at hand | Met | `src/components/tasks/task-composer.tsx`, `rich-text-editor.tsx`, `src/lib/actions/calls.ts`, `task-brief.tsx`, `crm-history.tsx` |
+| 4 | What is written back to Twenty | Met | `INTEGRATION.md` "What Cadence writes", `src/lib/engine/sync-out.ts`, outbox `sync-retry.ts` |
+| 5 | People: no cadence filter, no sync button, campaigns shown, Overview first | Met | `src/components/people/*`, `src/app/(app)/people/[id]/page.tsx` |
+| 6 | Accounts: no stance, titles, details as fields | Met | `src/components/accounts/org-tree.tsx`, `src/app/(app)/accounts/[id]/page.tsx` |
+| 7 | Enrichment queue and import at scale | Met | `src/lib/enrichment.ts`, `src/app/(app)/enrichment/*` |
+| 8 | Meetings: attendees editable, no notes, details as fields | Met | `src/components/meetings/attendee-editor.tsx`, `src/app/(app)/meetings/[id]/page.tsx` |
+| 9 | No explanatory subtext, nothing hardcoded that should be live | Met | help sits behind `Info` glyphs (`ui.tsx`); mode strings render only in mock mode |
+| 10 | Name and AI feature | Met by decision | name kept "Cadence"; "Cadence AI" (`src/lib/workspace.ts`, `src/components/assistant.tsx`) |
+| 11 | Sequences: modular, business days, no versions, locked while in use | Met | `src/components/sequences/sequence-editor.tsx`, `src/lib/engine/clock.ts`, `sequence-plan.ts` (steps drag; modules are added with a button) |
+| 12 | Campaigns: no Active column, pause/stop/restart, re-enrol needs approval | Met | `src/lib/engine/campaigns.ts`, `src/lib/actions/campaigns.ts`, `src/app/(app)/campaigns/page.tsx` |
+| 13 | Every control has logic behind it | Met | every button is a server action or a real link; `tests/`, `e2e/` |
+| 14 | Activity: one type filter incl. LinkedIn, date range, pod dropdown | Met | `src/components/activity/activity-toolbar.tsx` |
+| 15 | Reports: date range, no Overdue/Stalled | Met | `src/app/(app)/reports/page.tsx` |
+| 16 | Settings: team and pods, roles, no timezone/aliases/caps | Met | `src/components/settings/users-panel.tsx`, `src/lib/actions/users.ts` |
+| 17 | Critic loop to 8 | See `DECISIONS.md` and the git log | functional and design reviews, three rounds |
+| 18 | Every point checked | This table | |
+| 19 | Meeting product tags PHH / Acubooth / Glynac | Met | `src/lib/workspace.ts`, `src/components/meetings/product-tags.tsx` |
+| 20 | Enrichment beyond email and phone | Met | `CONTACT_CRITICAL`, `ACCOUNT_USEFUL` incl. AUM (`src/lib/enrichment.ts`) |
+| 21 | No over-bolding | Met | one scale: weight marks the primary element only (`src/app/globals.css`, commit `98e7ed4`) |

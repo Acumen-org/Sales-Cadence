@@ -72,7 +72,7 @@ export async function retryTwentyWriteAction(formData: FormData): Promise<Action
   const writeId = String(formData.get('writeId') ?? '');
   const result = await retryFailedWrites(writeId ? { ids: [writeId] } : { limit: 100, ignoreBackoff: true });
   revalidatePath('/settings');
-  if (!result.retried) return { ok: false, error: 'Nothing is waiting to be retried.' };
+  if (!result.retried) return { ok: false, error: 'Nothing is waiting to be retried, or a retry is already in progress.' };
   if (result.succeeded === result.retried) return { ok: true, message: result.retried === 1 ? 'Written to Twenty.' : `${result.succeeded} writes reached Twenty.` };
   return { ok: false, error: `${result.retried - result.succeeded} of ${result.retried} still failing: ${result.errors[0] ?? 'unknown error'}` };
 }

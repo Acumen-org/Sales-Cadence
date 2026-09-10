@@ -91,7 +91,7 @@ describe('scope boundaries', () => {
   });
   it('does not include another pod’s work in a shared FO’s team totals', async () => {
     await prisma.userPod.create({ data: { userId: b.users.karson.id, podId: b.pods.Leigh.id } });
-    await enrollPeople({ personIds: ['person-01'], sequenceId: b.sequence.id, podId: b.pods.Leigh.id, startDate: '2026-09-08', assignment: { mode: 'FIXED', foUserId: b.users.karson.id }, actor: SYSTEM_ACTOR }, context);
+    await enrollPeople({ personIds: ['person-16'], sequenceId: b.sequence.id, podId: b.pods.Leigh.id, startDate: '2026-09-08', assignment: { mode: 'FIXED', foUserId: b.users.karson.id }, actor: SYSTEM_ACTOR }, context);
     const home = await buildHome(session(b.users.alisa, [b.pods.Alisa.id]), NOW);
     expect(home.team.find((u) => u.id === b.users.karson.id)).toMatchObject({ today: 0, overdue: 0 });
     const admin = await buildHome(session(b.users.ria), NOW);

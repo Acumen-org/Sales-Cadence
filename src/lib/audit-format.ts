@@ -15,7 +15,10 @@ type Details = Record<string, unknown> | null | undefined;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const num = (v: unknown) => (typeof v === 'number' ? v : Number.parseInt(String(v ?? ''), 10));
 const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
-const words = (v: string) => v.replace(/_/g, ' ');
+const words = (v: string) => {
+  const t = v.replace(/_/g, ' ').toLowerCase();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
 
 export type AuditField = { label: string; value: string };
 

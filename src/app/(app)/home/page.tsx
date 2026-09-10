@@ -19,7 +19,7 @@ function Tile({ label, value, hint, href, icon, tone }: { label: string; value: 
   return (
     <Link href={href} className="surface group relative block px-5 py-5 transition hover:border-brand-300 hover:shadow-md">
       <span className="flex items-center justify-between gap-2 text-[12px] font-medium text-ink-500">{label}<span className="text-ink-400 group-hover:text-brand-600">{icon}</span></span>
-      <span className="metric-value mt-4 block">{value}</span>
+      <span className={clsx('metric-value mt-4 block', value === 0 || value === '0' ? 'text-ink-400' : undefined)}>{value}</span>
       {hint ? <span className={`mt-3 block text-[11px] ${tone === 'warn' ? 'text-amber-700' : 'text-ink-600'}`}>{hint}</span> : null}
     </Link>
   );
@@ -94,7 +94,7 @@ export default async function HomePage() {
             </div>
           </div>
           <div className="grid grid-cols-3 divide-x divide-line">{TASK_CHANNELS.map((c) => <Link key={c} href={`/tasks?tab=${h.my.today[c] ? 'today' : h.my.overdue[c] ? 'overdue' : 'upcoming'}&type=${c}&mode=flow&${mine}`} className="group px-3 py-4 transition hover:bg-brand-50/50 sm:px-5">
-            <span className="flex items-center gap-2 text-[11px] font-medium text-ink-500"><ActionIcon action={c} size={14} />{CHANNEL_LABELS[c]} today</span><span className="mt-2 flex items-baseline gap-2"><span className="text-[25px] font-semibold tracking-tight text-ink-900">{h.my.today[c]}</span><span className="text-[11px] text-ink-600">{h.my.overdue[c] ? <><N tone="warn">{h.my.overdue[c]}</N> overdue</> : <><N>{h.my.upcoming[c]}</N> upcoming</>}</span></span>
+            <span className="flex items-center gap-2 text-[11px] font-medium text-ink-500"><ActionIcon action={c} size={14} />{CHANNEL_LABELS[c]} today</span><span className="mt-2 flex items-baseline gap-2"><span className={clsx('text-[25px] font-semibold tracking-tight', h.my.today[c] ? 'text-ink-900' : 'text-ink-400')}>{h.my.today[c]}</span><span className="text-[11px] text-ink-600">{h.my.overdue[c] ? <><N tone="warn">{h.my.overdue[c]}</N> overdue</> : <><N>{h.my.upcoming[c]}</N> upcoming</>}</span></span>
           </Link>)}</div>
         </Surface>
         <Surface flush>
