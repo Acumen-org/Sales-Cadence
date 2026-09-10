@@ -45,6 +45,7 @@ export default async function setup() {
 
   process.env.DATABASE_URL = url;
   process.env.TWENTY_MODE = 'mock';
+  process.env.CADENCE_ALLOW_MOCK = '1';
   fs.writeFileSync(URL_FILE, url);
 
   const prismaBin = path.join(process.cwd(), 'node_modules', '.bin', process.platform === 'win32' ? 'prisma.cmd' : 'prisma');

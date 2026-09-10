@@ -49,6 +49,7 @@ function ensureEnv() {
       '',
       '# The built-in sample workspace, so there is something to look at without touching a CRM.',
       'TWENTY_MODE=mock',
+      'CADENCE_ALLOW_MOCK=1',
       'SEED_PROFILE=core,demo',
       '',
       '# The account to sign in with locally.',
@@ -137,6 +138,8 @@ async function main() {
   const fileEnv = readEnvFile();
   const env: NodeJS.ProcessEnv = { ...fileEnv, ...process.env, DATABASE_URL: databaseUrl, APP_URL: `http://localhost:${port}`, NODE_ENV: 'production', NEXT_TELEMETRY_DISABLED: '1' };
   if (!env.TWENTY_MODE) env.TWENTY_MODE = 'mock';
+  // The launcher is a development tool, so it opts in to the built-in fake CRM on your behalf.
+  if (env.TWENTY_MODE === 'mock') env.CADENCE_ALLOW_MOCK = '1';
 
   // 1. database
   const { databaseDir, fresh } = prepareDatabaseDirectory(root, process.env.DEV_DB_DIR ?? '.pgdata-dev');
