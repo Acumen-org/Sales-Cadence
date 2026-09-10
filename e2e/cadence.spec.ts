@@ -139,7 +139,7 @@ test('task flow: complete an email, log a call with an outcome, skip with a boun
   // Skip with a bounce on another person: the enrollment ends as Bounced
   await page.goto(`/tasks?tab=${tab}&type=EMAIL`);
   const secondLink = page.locator('a[href*="task="]').filter({ hasNot: page.getByText(firstPerson, { exact: true }) }).first();
-  const secondPerson = (await secondLink.locator('span.font-medium').first().textContent())!.trim();
+  const secondPerson = (await secondLink.getByTestId('task-person').textContent())!.trim();
   await secondLink.click();
   await page.getByRole('button', { name: 'Skip', exact: true }).first().click();
   await page.getByLabel('Why?', { exact: true }).selectOption('bounced');
@@ -163,7 +163,7 @@ test('answered call finishes the sequence as replied and shows on Home', async (
   // Take a fresh person still on Email 1 through both step-1 tasks, then answer the call
   await page.goto(`/tasks?tab=${tab}&type=EMAIL`);
   const link = page.locator('a[href*="task="]').first();
-  const person = (await link.locator('span.font-medium').first().textContent())!.trim();
+  const person = (await link.getByTestId('task-person').textContent())!.trim();
   await link.click();
   await page.getByRole('button', { name: 'Done', exact: true }).first().click();
   await expect(page.getByText(/Done\./).first()).toBeVisible();

@@ -209,7 +209,7 @@ test('a task that is not in this view is never silently swapped for another', as
   const first = page.locator('#main-content a[href*="task="]').first();
   const href = (await first.getAttribute('href'))!;
   const taskId = new URL(href, 'http://x').searchParams.get('task')!;
-  const person = (await first.locator('span.font-medium').first().textContent())!.trim();
+  const person = (await first.getByTestId('task-person').textContent())!.trim();
 
   // Asking for that task from a tab it is not in must open that task, not the first row of the tab.
   await page.goto(`/tasks?tab=done&task=${taskId}`);
