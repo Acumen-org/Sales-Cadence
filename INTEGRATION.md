@@ -190,9 +190,8 @@ renamed option is caught before an FO sees an empty filter.
 
 **Settings > Users and pods**: add one pod per `podOwner` value you use, then create or edit users:
 
-- Role: Admin, Senior FO (own pods) or Junior FO (own tasks).
-- Twenty workspace member: pick the member this user is. Outbound emails and calls by that member complete this user's tasks.
-- Aliases: handles that appear in note titles produced by other tools, e.g. `tw_alisa`.
+- Role: Admin, Sales Leader or Senior FO (own pods), or Junior FO (own tasks); a password; the pods they belong to.
+- The Twenty workspace member is matched by login email, so outbound emails and calls by that member complete this user's tasks. The worker also lists every Twenty member it sees as a disabled account; adding one with this form enables it.
 
 Then **Settings > Twenty > Full refresh** to pull people and companies into the cache.
 
@@ -259,6 +258,8 @@ displayed, never rewritten: the pod plans in Twenty and Cadence shows that plan 
 Meetings are Cadence's own and are never written back, because Twenty has no field for them: the recording link, the transcript and any analysis. A meeting links to a Twenty company so it shows against that account here; it is not created in Twenty.
 
 Sync is immediate in both directions: webhooks are processed as Twenty sends them (people, companies, notes, messages, tasks and opportunities), every Cadence write happens right after the action that caused it, and opening a person in Cadence re-reads that person from Twenty. Opening an account re-reads that company and its people, so there is no sync button to press. The nightly reconcile only catches anything a webhook missed.
+
+When Twenty is unreachable or refuses a write, the write is not lost: it stays in Cadence as a failed `TwentyWrite` with its exact payload, the worker replays it once its backoff has passed (a minute, doubling, at most six hours apart), and **Settings > Activity log > Waiting to reach Twenty** lists what is outstanding with *Retry now* and *Retry all now*. A note or mirrored task that lands on a retry is stored on the Cadence task exactly as a first-time success would be.
 
 Tested against **Twenty 1.23** and **Postgres 18**.
 

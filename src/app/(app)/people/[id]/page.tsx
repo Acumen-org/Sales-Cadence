@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { canReadPerson } from '@/lib/people-scope';
 import { accountScopeCompanyIds } from '@/lib/accounts-query';
 import { notFound } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
@@ -14,7 +15,8 @@ import { twentyPersonUrl } from '@/lib/twenty/urls';
 import { CrmHistory } from '@/components/people/crm-history';
 import { ActionIcon, IconExternal } from '@/components/icons';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
-import { Avatar, Badge, Card, contactWarnings, crmStanding, ENROLLMENT_TONE, enrollmentStatusLabel, KeyValue, RecordHeader, Surface, Tabs, TierBadge } from '@/components/ui';
+import { Avatar, Badge, Card, contactWarnings, crmStanding, Empty, ENROLLMENT_TONE, enrollmentStatusLabel, KeyValue, RecordFields, RecordHeader, Surface, Tabs, TierBadge } from '@/components/ui';
+import { campaignStatusLabel } from '@/lib/campaign-status';
 
 type TimelineItem = { at: Date; kind: 'touch' | 'note' | 'task' | 'state'; icon: string; title: string; detail?: string | null; tone?: 'in' | 'out' | 'neutral' };
 
@@ -25,6 +27,8 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
   const requested = sp.tab;
   const tab = requested === 'activity' || requested === 'sequences' || requested === 'crm' ? requested : 'overview';
   let person = await prisma.personCache.findUnique({ where: { id } });
+  // Outside the reader's pods the record does not exist, the same answer Accounts gives.
+  if (person && !(await canReadPerson(user, id))) notFound();
   // Instant sync: re-read this person from Twenty on every visit so CRM edits show immediately,
   // even between webhooks. Failures fall back to the cache.
   let liveWarning: string | null = null;
@@ -192,12 +196,12 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                       title={<Link href={`/sequences/${e.sequenceId}`} className="font-medium hover:underline">{e.sequence.name}</Link>}
                       actions={<Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'}>{enrollmentStatusLabel(e)}</Badge>}
                     >
-                      <div className="grid gap-4 border-b border-line bg-canvas/50 p-4 sm:grid-cols-2 lg:grid-cols-4">
-                        <div><div className="text-xs text-ink-500">Campaign</div><div className="mt-1 font-medium text-ink-900">{e.campaign ? <Link href={`/campaigns/${e.campaign.id}`} className="text-brand-700 hover:underline">{e.campaign.name}</Link> : 'Direct enrollment'}</div></div>
-                        <div><div className="text-xs text-ink-500">Assigned to</div><div className="mt-1 font-medium text-ink-900">{e.fo.name}</div></div>
-                        <div><div className="text-xs text-ink-500">Started</div><div className="mt-1 font-medium text-ink-900">{formatLocalDate(e.startDate, 'long')}</div></div>
-                        <div><div className="text-xs text-ink-500">Campaign status</div><div className="mt-1 font-medium capitalize text-ink-900">{e.campaign?.status.toLowerCase() ?? 'Not linked'}</div></div>
-                      </div>
+                      <div className="border-b border-line bg-canvas/50 p-4"><RecordFields className="lg:grid-cols-4" items={[
+                        { label: 'Campaign', value: e.campaign ? <Link href={`/campaigns/${e.campaign.id}`} className="text-brand-700 hover:underline">{e.campaign.name}</Link> : 'Direct enrollment' },
+                        { label: 'Assigned to', value: e.fo.name },
+                        { label: 'Started', value: formatLocalDate(e.startDate, 'long') },
+                        { label: 'Campaign status', value: e.campaign ? campaignStatusLabel(e.campaign.status) : null },
+                      ]} /></div>
                       <ol className="divide-y divide-line">
                         {steps.map((step, i) => {
                           const st = eTasks.filter((t) => t.stepIndex === i);
@@ -359,13 +363,13 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
         <aside className="min-w-0 space-y-3">
           <Card title="Open opportunities">
             {opportunities.length === 0 ? (
-              <div className="p-4 text-sm text-ink-500">None.</div>
+              <div className="p-4 text-sm"><Empty /></div>
             ) : (
               <ul className="divide-y divide-line">
                 {opportunities.map((o) => (
                   <li key={o.id} className="flex items-center justify-between px-4 py-2 text-sm">
                     <span>{o.name}</span>
-                    <Badge tone="purple">{o.stage ?? 'open'}</Badge>
+                    <Badge tone="purple">{o.stage ? optionLabel(o.stage) : 'Open'}</Badge>
                   </li>
                 ))}
               </ul>

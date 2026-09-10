@@ -48,6 +48,11 @@ export function verifyWebhook(input: WebhookAuthInput): WebhookAuthResult {
     if (!input.queryToken || !safeEqual(token, input.queryToken)) return { ok: false, reason: 'invalid token' };
     return { ok: true, method: 'token' };
   }
+  // No secret and no token is fine on a laptop and a liability in production: anyone who finds the
+  // URL could post forged replies and opt-outs. Refuse unless the operator opts in explicitly.
+  if (process.env.NODE_ENV === 'production' && process.env.CADENCE_WEBHOOK_OPEN !== '1') {
+    return { ok: false, reason: 'webhook has no secret or token; set TWENTY_WEBHOOK_SECRET or CADENCE_WEBHOOK_TOKEN (or CADENCE_WEBHOOK_OPEN=1 to accept unsigned events)' };
+  }
   return { ok: true, method: 'open' };
 }
 

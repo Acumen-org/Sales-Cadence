@@ -11,7 +11,8 @@ import { channelOf, type ActionType } from '../sequences/steps';
  * Rule 7: Twenty sync out. Every completed action becomes an activity note on the person
  * (`[Cadence] Email 2 sent by Alisa`); open tasks are optionally mirrored as Twenty Tasks.
  * Cadence only edits records it created (ids stored on Task.twentyTaskId / twentyNoteId).
- * Failures never block the engine: they are logged and audited for review.
+ * Failures never block the engine: the write is kept as a FAILED TwentyWrite (the outbox) that
+ * the worker retries with backoff and Settings > Activity log shows with a Retry button.
  */
 
 export type SyncTask = Prisma.TaskGetPayload<{
@@ -51,11 +52,23 @@ async function recordWrite(client: TwentyClient, operation: string, objectType: 
   await prisma.twentyWrite.create({ data: { operation, objectType, payload: payload as object, twentyId, taskId, dryRun: false } });
 }
 
-async function reportFailure(task: SyncTask, operation: string, err: unknown) {
+type FailedWrite = { objectType: string; payload: object; twentyId?: string | null };
+
+/** First retry a minute later, doubling each time, never more than six hours apart. */
+export function retryDelayMs(attempts: number): number {
+  return Math.min(6 * 3600_000, 60_000 * 2 ** Math.min(Math.max(attempts - 1, 0), 9));
+}
+
+async function reportFailure(task: SyncTask, operation: string, err: unknown, write?: FailedWrite) {
   const message = err instanceof Error ? err.message : String(err);
   console.warn(`[sync-out] ${operation} failed for task ${task.id}: ${message}`);
   try {
     await logAudit({ entityType: 'task', entityId: task.id, action: 'sync_failed', actor: SYSTEM_ACTOR, details: { operation, message } });
+    if (write) {
+      await prisma.twentyWrite.create({
+        data: { operation, objectType: write.objectType, payload: write.payload, twentyId: write.twentyId ?? null, taskId: task.id, dryRun: false, status: 'FAILED', error: message, attempts: 1, nextAttemptAt: new Date(Date.now() + retryDelayMs(1)) },
+      });
+    }
   } catch {
     /* ignore */
   }
@@ -66,12 +79,12 @@ export async function syncTasksCreated(tasks: SyncTask[]): Promise<void> {
   if (!tasks.length) return;
   const settings = await getSettings();
   if (!settings.sync.mirrorOpenTasks) return;
-  let client: TwentyClient;
+  let client: TwentyClient | null = null;
+  let clientError: unknown = null;
   try {
     client = await getTwentyClient();
   } catch (err) {
-    await reportFailure(tasks[0], 'createTask', err);
-    return;
+    clientError = err;
   }
   for (const task of tasks) {
     if (task.twentyTaskId || task.state !== 'PENDING') continue;
@@ -83,12 +96,16 @@ export async function syncTasksCreated(tasks: SyncTask[]): Promise<void> {
       personId: task.enrollment.personId,
       ...(settings.sync.writeCadenceTaskIdField ? { cadenceTaskId: task.id } : {}),
     };
+    if (!client) {
+      await reportFailure(task, 'createTask', clientError, { objectType: 'task', payload: input });
+      continue;
+    }
     try {
       const { id } = await client.createTask(input);
       await prisma.task.update({ where: { id: task.id }, data: { twentyTaskId: id } });
       await recordWrite(client, 'createTask', 'task', input, id, task.id);
     } catch (err) {
-      await reportFailure(task, 'createTask', err);
+      await reportFailure(task, 'createTask', err, { objectType: 'task', payload: input });
     }
   }
 }
@@ -97,12 +114,12 @@ export async function syncTasksCreated(tasks: SyncTask[]): Promise<void> {
 export async function syncTaskCompleted(task: SyncTask): Promise<void> {
   const settings = await getSettings();
   if (!settings.sync.writeCompletionNotes && !task.twentyTaskId) return;
-  let client: TwentyClient;
+  let client: TwentyClient | null = null;
+  let clientError: unknown = null;
   try {
     client = await getTwentyClient();
   } catch (err) {
-    await reportFailure(task, 'createNote', err);
-    return;
+    clientError = err;
   }
   if (settings.sync.writeCompletionNotes && !task.twentyNoteId) {
     const action = (task.chosenAction ?? task.action) as ActionType;
@@ -120,19 +137,22 @@ export async function syncTaskCompleted(task: SyncTask): Promise<void> {
       companyId: task.enrollment.companyId,
     };
     try {
+      if (!client) throw clientError;
       const { id } = await client.createNote(input);
       await prisma.task.update({ where: { id: task.id }, data: { twentyNoteId: id } });
       await recordWrite(client, 'createNote', 'note', input, id, task.id);
     } catch (err) {
-      await reportFailure(task, 'createNote', err);
+      await reportFailure(task, 'createNote', err, { objectType: 'note', payload: input });
     }
   }
   if (task.twentyTaskId) {
+    const patch = { id: task.twentyTaskId, status: 'DONE' as const };
     try {
+      if (!client) throw clientError;
       await client.updateTask(task.twentyTaskId, { status: 'DONE' });
-      await recordWrite(client, 'updateTask', 'task', { id: task.twentyTaskId, status: 'DONE' }, task.twentyTaskId, task.id);
+      await recordWrite(client, 'updateTask', 'task', patch, task.twentyTaskId, task.id);
     } catch (err) {
-      await reportFailure(task, 'updateTask', err);
+      await reportFailure(task, 'updateTask', err, { objectType: 'task', payload: patch, twentyId: task.twentyTaskId });
     }
   }
 }
@@ -141,42 +161,31 @@ export async function syncTaskCompleted(task: SyncTask): Promise<void> {
 export async function syncTaskResolved(task: SyncTask): Promise<void> {
   if (!task.twentyTaskId) return;
   const settings = await getSettings();
-  let client: TwentyClient;
+  const remove = settings.sync.deleteMirroredTaskOnSkip;
+  const payload = remove
+    ? { id: task.twentyTaskId, reason: task.state }
+    : { id: task.twentyTaskId, status: 'DONE' as const, title: `${mirroredTaskTitle(task)} (${task.state.toLowerCase()})` };
+  const operation = remove ? 'deleteTask' : 'updateTask';
   try {
-    client = await getTwentyClient();
-  } catch (err) {
-    await reportFailure(task, 'deleteTask', err);
-    return;
-  }
-  try {
-    if (settings.sync.deleteMirroredTaskOnSkip) {
-      await client.deleteTask(task.twentyTaskId);
-      await recordWrite(client, 'deleteTask', 'task', { id: task.twentyTaskId, reason: task.state }, task.twentyTaskId, task.id);
-    } else {
-      await client.updateTask(task.twentyTaskId, { status: 'DONE', title: `${mirroredTaskTitle(task)} (${task.state.toLowerCase()})` });
-      await recordWrite(client, 'updateTask', 'task', { id: task.twentyTaskId, status: 'DONE' }, task.twentyTaskId, task.id);
-    }
+    const client = await getTwentyClient();
+    if (remove) await client.deleteTask(task.twentyTaskId);
+    else await client.updateTask(task.twentyTaskId, { status: 'DONE', title: (payload as { title: string }).title });
+    await recordWrite(client, operation, 'task', payload, task.twentyTaskId, task.id);
     await prisma.task.update({ where: { id: task.id }, data: { twentyTaskId: null } });
   } catch (err) {
-    await reportFailure(task, 'deleteTask', err);
+    await reportFailure(task, operation, err, { objectType: 'task', payload, twentyId: task.twentyTaskId });
   }
 }
 
 /** Due date or assignee changed (snooze, reassign, resume). */
 export async function syncTaskRescheduled(task: SyncTask): Promise<void> {
   if (!task.twentyTaskId) return;
-  let client: TwentyClient;
+  const payload = { id: task.twentyTaskId, dueAt: task.dueAt.toISOString(), title: mirroredTaskTitle(task) };
   try {
-    client = await getTwentyClient();
+    const client = await getTwentyClient();
+    await client.updateTask(task.twentyTaskId, { dueAt: payload.dueAt, title: payload.title });
+    await recordWrite(client, 'updateTask', 'task', payload, task.twentyTaskId, task.id);
   } catch (err) {
-    await reportFailure(task, 'updateTask', err);
-    return;
-  }
-  try {
-    const dueAt = task.dueAt.toISOString();
-    await client.updateTask(task.twentyTaskId, { dueAt, title: mirroredTaskTitle(task) });
-    await recordWrite(client, 'updateTask', 'task', { id: task.twentyTaskId, dueAt }, task.twentyTaskId, task.id);
-  } catch (err) {
-    await reportFailure(task, 'updateTask', err);
+    await reportFailure(task, 'updateTask', err, { objectType: 'task', payload, twentyId: task.twentyTaskId });
   }
 }

@@ -66,6 +66,11 @@ export async function activateCampaign(id: string, ctx: EngineContext = { actor:
       const replied = await tx.touch.findMany({ where: { personId: { in: personIds }, direction: 'INBOUND', occurredAt: { gte: campaign.createdAt } }, select: { personId: true } });
       for (const reply of replied) blocked.add(reply.personId);
     }
+    if (current.runNumber > 1) {
+      // A restart does not approach anyone an earlier run already won: they replied or booked.
+      const won = await tx.enrollment.findMany({ where: { campaignId: id, personId: { in: personIds }, status: { in: ['REPLIED', 'MEETING'] } }, select: { personId: true } });
+      for (const w of won) blocked.add(w.personId);
+    }
     const peopleById = new Map(people.map(p => [p.id,p]));
     const proposedFos = [...new Set(preview.candidates.map(c => c.foUserId))].sort();
     for (const userId of proposedFos) await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR SHARE`;

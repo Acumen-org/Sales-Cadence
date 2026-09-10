@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { peopleScopeWhere } from '@/lib/people-scope';
 import type { Prisma } from '@prisma/client';
 import { requireUser } from '@/lib/auth/current-user';
 import { canEnroll, toActor } from '@/lib/auth/rbac';
@@ -33,7 +34,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   const page = Math.max(1, Number.parseInt(sp.page ?? '1', 10) || 1);
   const actor = toActor(user);
 
-  const where: Prisma.PersonCacheWhereInput = { deletedAt: null };
+  const where: Prisma.PersonCacheWhereInput = await peopleScopeWhere(user);
   // "My relationships": owned by me in Twenty, or enrolled with me as the FO.
   if (owner === 'mine') {
     where.AND = [{ OR: [{ ownerMemberId: user.twentyMemberId ?? '__none__' }, { enrollments: { some: { foUserId: user.id } } }] }];

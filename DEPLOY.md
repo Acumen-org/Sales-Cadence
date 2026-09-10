@@ -21,7 +21,7 @@ Browser ──► Next.js (web, :3000) ──► Postgres
                  Worker ──► Postgres + Twenty API
 ```
 
-Integration with Twenty is **read-mostly**: it reads people, notes, messages, tasks and opportunities; it writes back only `[Cadence] ...` activity notes and mirrored tasks. It never edits CRM fields. `CADENCE_DRY_RUN=true` disables all writes.
+Integration with Twenty is **read-mostly**: it reads people, notes, messages, tasks and opportunities; it writes back `[Cadence] ...` activity notes and mirrored tasks, and edits CRM fields only through Enrichment imports an admin reviews and applies. A write Twenty refuses is kept and retried (Settings > Activity log). `CADENCE_DRY_RUN=true` disables all writes.
 
 ## Specs
 

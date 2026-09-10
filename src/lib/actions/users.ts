@@ -55,8 +55,20 @@ export async function createUserAction(formData: FormData): Promise<ActionResult
   const d = parsed.data;
   const weak = validatePasswordStrength(d.password ?? '');
   if (weak) return { ok: false, error: weak };
-  if (await prisma.user.findUnique({ where: { email: d.email } })) return { ok: false, error: 'That email already belongs to a team member. Restore their access if they were removed.' };
+  const existing = await prisma.user.findUnique({ where: { email: d.email } });
+  if (existing?.active) return { ok: false, error: 'That email already belongs to a team member.' };
   if (!(await validPods(d.podIds))) return { ok: false, error: 'Choose existing, active pods.' };
+  if (existing) {
+    // Found in Twenty by the worker, or removed earlier: this form is how they get access, so it
+    // sets everything an enabled account needs rather than sending the admin to Restore and Edit.
+    await prisma.user.update({
+      where: { id: existing.id },
+      data: { name: d.name, role: d.role, passwordHash: await hashPassword(d.password!), active: true, timezone: WORKSPACE_TIMEZONE, pods: { deleteMany: {}, create: d.podIds.map((podId) => ({ podId })) } },
+    });
+    await logAudit({ entityType: 'user', entityId: existing.id, action: 'enabled', actor: userActor(admin), details: { role: d.role, pods: d.podIds } });
+    refresh();
+    return { ok: true, message: 'Team member added.' };
+  }
   const twentyMemberId = await resolveMember(d.email);
   if (twentyMemberId && await prisma.user.findUnique({ where: { twentyMemberId } })) return { ok: false, error: 'That CRM email is already linked to another team member.' };
   const user = await prisma.user.create({ data: { email: d.email, name: d.name, role: d.role, passwordHash: await hashPassword(d.password!), timezone: WORKSPACE_TIMEZONE, twentyMemberId, pods: { create: d.podIds.map((podId) => ({ podId })) } } });
@@ -164,6 +176,9 @@ export async function deletePodAction(formData: FormData): Promise<ActionResult>
     if (!pod) return { ok: false, error: 'Pod not found.' };
     const inUse = await tx.enrollment.count({ where: { podId, status: { in: ['ACTIVE', 'PAUSED'] } } });
     if (inUse) return { ok: false, error: "Stop this pod's campaigns or transfer its live enrollments before removing the pod." };
+    // A scheduled or pending campaign would try to launch into an archived pod every minute, forever.
+    const planned = await tx.campaign.count({ where: { podId, status: { in: ['SCHEDULED', 'PENDING_APPROVAL', 'ACTIVE', 'PAUSED'] } } });
+    if (planned) return { ok: false, error: `${planned === 1 ? 'A campaign is' : `${planned} campaigns are`} scheduled or running in this pod. Stop ${planned === 1 ? 'it' : 'them'} first.` };
     await tx.pod.update({ where: { id: podId }, data: { archived: true } });
     await logAudit({ entityType: 'pod', entityId: podId, action: 'archived', actor: userActor(admin) }, tx);
     return { ok: true, message: 'Pod removed. History retained.' };

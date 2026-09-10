@@ -1,6 +1,8 @@
 'use server';
 
 import { prisma } from '../db';
+import { peopleScopeWhere } from '@/lib/people-scope';
+import { campaignStatusLabel } from '@/lib/campaign-status';
 import { requireUser } from '../auth/current-user';
 import { cachedPersonName } from '../person-cache';
 import { campaignScope } from '../campaigns-query';
@@ -21,7 +23,7 @@ export async function globalSearchAction(query: string): Promise<SearchHit[]> {
   const like = { contains: q, mode: 'insensitive' as const };
   const [people, campaigns, sequences] = await Promise.all([
     prisma.personCache.findMany({
-      where: { deletedAt: null, OR: [{ firstName: like }, { lastName: like }, { companyName: like }, { email: like }, { jobTitle: like }] },
+      where: { AND: [await peopleScopeWhere(user), { OR: [{ firstName: like }, { lastName: like }, { companyName: like }, { email: like }, { jobTitle: like }] }] },
       orderBy: [{ lastName: 'asc' }],
       take: 6,
     }),
@@ -30,7 +32,7 @@ export async function globalSearchAction(query: string): Promise<SearchHit[]> {
   ]);
   return [
     ...people.map<SearchHit>((p) => ({ kind: 'person', id: p.id, title: cachedPersonName(p), sub: [p.jobTitle, p.companyName].filter(Boolean).join(' · ') || null, href: `/people/${p.id}` })),
-    ...campaigns.map<SearchHit>((c) => ({ kind: 'campaign', id: c.id, title: c.name, sub: c.status.toLowerCase(), href: `/campaigns/${c.id}` })),
+    ...campaigns.map<SearchHit>((c) => ({ kind: 'campaign', id: c.id, title: c.name, sub: campaignStatusLabel(c.status), href: `/campaigns/${c.id}` })),
     ...sequences.map<SearchHit>((s) => ({ kind: 'sequence', id: s.id, title: s.name, sub: 'sequence', href: `/sequences/${s.id}` })),
   ];
 }

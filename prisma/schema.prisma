@@ -576,17 +576,23 @@ model ActivityEvent {
 
 /// Every write Cadence makes (or would make, in dry run) to Twenty.
 model TwentyWrite {
-  id         String   @id @default(uuid())
-  operation  String
-  objectType String
-  twentyId   String?
-  taskId     String?
-  payload    Json
-  dryRun     Boolean  @default(false)
-  createdAt  DateTime @default(now())
+  id            String    @id @default(uuid())
+  operation     String
+  objectType    String
+  twentyId      String?
+  taskId        String?
+  payload       Json
+  dryRun        Boolean   @default(false)
+  /// OK once Twenty accepted it; FAILED rows are the outbox the worker retries with backoff.
+  status        String    @default("OK")
+  error         String?
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime?
+  createdAt     DateTime  @default(now())
 
   @@index([taskId])
   @@index([twentyId])
+  @@index([status, nextAttemptAt])
 }
 
 model AuditLog {

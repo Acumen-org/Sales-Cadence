@@ -157,16 +157,16 @@ The project review and its verification scope are recorded in [AUDIT.md](AUDIT.m
 
 ## Roles
 
-| | Admin | Senior FO | Junior FO |
-|---|---|---|---|
-| Own tasks: complete, skip with reason, snooze | yes | yes | yes (snooze to next working day only) |
-| Pod tasks, pod filters | all pods | own pods | no |
-| Enrol, bulk-enrol, pause, exit, reassign within pod | all pods | own pods | no |
-| Campaigns | all | own pods | read-only own enrollments |
-| Reports | all | own pods | no |
-| Sequences (edit the plan) | yes | yes | view |
-| Settings, users, pods | yes | no | no |
-| Accounts, Meetings, Activity | all | own pods' accounts | own work |
+| | Admin | Sales Leader | Senior FO | Junior FO |
+|---|---|---|---|---|
+| Own tasks: complete, skip with reason, snooze | yes | yes | yes | yes (snooze to next working day only) |
+| Pod tasks, pod filters | all pods | own pods | own pods | no |
+| Enrol, bulk-enrol, pause, exit, reassign within pod | all pods | own pods | own pods | no |
+| Campaigns | all | own pods, approves re-enrolment | own pods | read own pod's |
+| Reports | all | own pods | own pods | no |
+| Sequences (edit the plan) | yes | yes | yes | view |
+| Settings, users, pods | yes | no | no | no |
+| People, Accounts, Meetings, Activity | all | own pods | own pods | own work |
 
 Settings is the only admin-only section: it is hidden from the sidebar and refuses direct URLs for anyone else.
 

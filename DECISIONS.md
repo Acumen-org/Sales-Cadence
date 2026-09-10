@@ -26,10 +26,12 @@ Every assumption made while building Cadence, grouped by area. Each entry says w
 
 ## Auth and roles
 
-- **Email + password, bcrypt (10 rounds), database-backed sessions in an httpOnly cookie (`cadence_session`, 30 days).** A sessions table allows revocation (deactivating a user deletes their sessions). No password reset by email: admins reset passwords in Settings > Users.
+- **Email + password, bcrypt (10 rounds), database-backed sessions in an httpOnly cookie (`cadence_session`, 24 hours, or 30 days when "Keep me signed in" is ticked).** A sessions table allows revocation (deactivating a user deletes their sessions). No password reset by email: admins reset passwords in Settings > Users.
 - **Middleware only checks cookie presence** (Edge runtime cannot use Prisma); the real lookup happens in the app layout.
-- **Roles:** Admin (everything), Senior FO (own pods), Junior FO (own tasks). Pod membership is `UserPod`; a Senior FO may belong to several pods. Junior FOs may snooze only to the next working day; Seniors and Admins can pick any date.
+- **Roles:** Admin (everything), Sales Leader (own pods, and approves re-enrolment campaigns), Senior FO (own pods), Junior FO (own tasks). Pod membership is `UserPod`; a Senior FO may belong to several pods. Junior FOs may snooze only to the next working day; Seniors and Admins can pick any date.
 - **A user maps to at most one Twenty workspace member** (`User.twentyMemberId`, unique). `User.aliases` holds extra handles such as `tw_alisa` that appear in note titles produced by telephony tools.
+
+- **People are pod-scoped, the same way Accounts and Meetings are.** A non-admin sees the people in their pods, the people they own in Twenty and the people they are working - in the directory, on the person record, in search and in the meeting attendee picker. Anything else answers "not found". Enrichment already drew this line; drawing it in one place (`src/lib/people-scope.ts`) means the pod boundary cannot be walked around through the directory.
 
 ## Twenty facts and mapping
 
@@ -414,3 +416,8 @@ contact", so repeating it in the warnings line was noise.
 - The new "Booked in Twenty" table made `page.locator('table')` ambiguous in an older Meetings
   test, which is the kind of failure worth having: the assertion was too loose to say which table
   it meant.
+
+## Writing to Twenty when Twenty is down
+
+- **Every write Cadence makes to Twenty is a `TwentyWrite` row; one that fails stays as `FAILED` with its exact payload.** The worker replays failed rows once their backoff has passed (a minute, doubling, never more than six hours apart) and Settings > Activity log lists them with "Retry now" and "Retry all now". A note or mirrored task that finally lands stores its Twenty id on the Cadence task exactly as the first attempt would have, so an outage delays the CRM record but does not lose it.
+- **A production deployment refuses unsigned webhooks.** With neither `TWENTY_WEBHOOK_SECRET` nor `CADENCE_WEBHOOK_TOKEN` set, the endpoint answers 401 unless `CADENCE_WEBHOOK_OPEN=1` says that is intended - the same fail-loud rule as mock mode.

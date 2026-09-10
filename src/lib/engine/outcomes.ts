@@ -109,7 +109,12 @@ export async function moveToStep(enrollmentId: string, targetIndex: number, ctx:
   // The parked step index has no tasks, so advance treats it as "previous step done" only via the
   // first-step rule; force generation by temporarily using hold semantics: generate now.
   const result = await advanceEnrollment(enrollmentId, { ...ctx, forceGenerate: true });
-  return { ok: true, generated: result.outcome === 'generated' ? result.taskIds : [] };
+  if (result.outcome !== 'generated') {
+    // The open tasks are gone and nothing replaced them - usually the campaign was paused in the
+    // same moment. Say so rather than report a move that did not happen.
+    return { ok: false, error: 'The open touches were closed but the new step could not be started (the campaign may have just been paused). Resume the campaign to continue.' };
+  }
+  return { ok: true, generated: result.taskIds };
 }
 
 export { finishEnrollment };

@@ -2,7 +2,8 @@ import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
-import { assertAllowed, isAdmin, isJuniorFo, isPodLeader } from './auth/rbac';
+import { peopleScopeWhere } from './people-scope';
+import { assertAllowed, isAdmin, isPodLeader } from './auth/rbac';
 import { cachedPersonName, upsertCompanyCache, upsertPersonCache } from './person-cache';
 import { getTwentySchema } from './settings';
 import type { TwentyClient } from './twenty/client';
@@ -186,9 +187,7 @@ export function validateEnrichmentValue(field: string, value: string): string | 
 }
 
 export async function enrichmentPeopleScope(user: SessionUser): Promise<Prisma.PersonCacheWhereInput> {
-  if (isAdmin(user)) return { deletedAt: null };
-  const pods = isJuniorFo(user) ? [] : await prisma.pod.findMany({ where: { id: { in: user.podIds } }, select: { podOwnerValue: true } });
-  return { deletedAt: null, OR: [{ ownerMemberId: user.twentyMemberId ?? '__none__' }, { enrollments: { some: { foUserId: user.id } } }, ...(pods.length ? [{ podOwner: { in: pods.map((pod) => pod.podOwnerValue) } }] : [])] };
+  return peopleScopeWhere(user);
 }
 
 async function enrichmentCompanyScope(user: SessionUser): Promise<Prisma.CompanyCacheWhereInput> {

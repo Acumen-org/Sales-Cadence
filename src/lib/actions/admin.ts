@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { retryFailedWrites } from '@/lib/engine/sync-retry';
 import { requireAdmin } from '../auth/current-user';
 import { userActor } from '../audit';
 import { refreshPersonCache, syncPodsFromTwenty } from '../person-cache';
@@ -63,6 +64,16 @@ export async function runSchedulerAction(): Promise<ActionResult> {
   const stats = await runSchedulerTick({ actor: userActor(admin) });
   revalidatePath('/tasks');
   return { ok: true, message: `Scheduler: ${stats.scanned} active enrollments scanned, ${stats.generated} steps generated (${stats.tasks} tasks), ${stats.completed} enrollments completed.` };
+}
+
+export async function retryTwentyWriteAction(formData: FormData): Promise<ActionResult> {
+  await requireAdmin();
+  const writeId = String(formData.get('writeId') ?? '');
+  const result = await retryFailedWrites(writeId ? { ids: [writeId] } : { limit: 100, now: new Date(8640000000000000) });
+  revalidatePath('/settings');
+  if (!result.retried) return { ok: false, error: 'Nothing is waiting to be retried.' };
+  if (result.succeeded === result.retried) return { ok: true, message: result.retried === 1 ? 'Written to Twenty.' : `${result.succeeded} writes reached Twenty.` };
+  return { ok: false, error: `${result.retried - result.succeeded} of ${result.retried} still failing: ${result.errors[0] ?? 'unknown error'}` };
 }
 
 export async function resolveReviewAction(formData: FormData): Promise<ActionResult> {

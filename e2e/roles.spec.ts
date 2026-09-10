@@ -125,9 +125,12 @@ test.describe('Senior FO', () => {
 
   test('cannot touch another pod’s work', async ({ page }) => {
     await signIn(page, 'alisa@cadence.local');
-    // Andrew's pod is not Alisa's: its people are not in her list.
+    // Andrew's pod is not Alisa's: its people are not in her list, and not behind a URL either.
     await page.goto('/people?pod=ANDREW');
     await pageIsSound(page);
+    await expect(page.locator('main')).not.toContainText('Dummy Seven');
+    await page.goto('/people?q=Seven');
+    await expect(page.locator('main')).not.toContainText('Dummy Seven');
     // Nor can she start a campaign in it.
     await page.goto('/campaigns/new');
     const pod = page.getByLabel('Pod', { exact: true });

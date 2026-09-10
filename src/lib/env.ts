@@ -9,7 +9,6 @@ const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   DATABASE_URL: z.string().optional(),
   APP_URL: z.string().default('http://localhost:3100'),
-  SESSION_SECRET: z.string().default('dev-secret-change-me'),
   COOKIE_SECURE: BoolString,
   SEED_PROFILE: z.string().default('core'),
   ADMIN_EMAIL: z.string().default('admin@cadence.local'),
@@ -21,6 +20,8 @@ const EnvSchema = z.object({
   TWENTY_API_KEY: z.string().optional(),
   TWENTY_WEBHOOK_SECRET: z.string().optional(),
   CADENCE_WEBHOOK_TOKEN: z.string().optional(),
+  /** 1 lets a production deployment accept unsigned webhooks. Off unless you mean it. */
+  CADENCE_WEBHOOK_OPEN: z.string().optional(),
   CADENCE_DRY_RUN: BoolString,
   WORKER_TICK_SECONDS: z.coerce.number().int().positive().default(300),
   CRM_SYNC_SECONDS: z.coerce.number().int().min(15).max(300).default(60),

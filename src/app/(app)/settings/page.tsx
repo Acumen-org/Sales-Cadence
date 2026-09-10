@@ -8,10 +8,11 @@ import { env } from '@/lib/env';
 import { getSettings, getTwentySchema } from '@/lib/settings';
 import { getTwentyClient } from '@/lib/twenty';
 import { recentEvents } from '@/lib/engine/ingest';
-import { Badge, Card, KeyValue, Notice, Surface, Tabs, ViewHeader } from '@/components/ui';
+import { Badge, Card, KeyValue, Notice, Surface, Tabs, ViewHeader, Empty } from '@/components/ui';
 import { UsersPanel } from '@/components/settings/users-panel';
 import { AdminTools } from '@/components/settings/admin-tools';
 import { ReviewButton } from '@/components/settings/review-button';
+import { RetryWriteButton } from '@/components/settings/retry-write-button';
 import { MatchingForm, RulesForm, SyncForm, TwentyConnectionForm } from '@/components/settings/settings-forms';
 import { getMeetingAnalyzer } from '@/lib/meetings/analysis';
 import { ASSISTANT_NAME, ASSISTANT_SETTINGS_TAB } from '@/lib/workspace';
@@ -65,7 +66,7 @@ function AssistantTab() {
       { k: 'Meeting analysis', v: connected ? 'Available where a transcript exists' : 'Waiting on a provider' },
       { k: 'Suggested approach', v: connected ? 'Available on every task' : 'Waiting on a provider' },
       { k: 'Talk time', v: 'Computed locally from transcript timestamps' },
-    ]} />{!connected ? <Notice tone="info">Nothing is generated until a provider is connected. Talk time is measured from the transcript itself and works either way.</Notice> : null}</div>
+    ]} /></div>
   </Card>;
 }
 
@@ -151,9 +152,47 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
 }
 
 async function ActivityTab() {
-  const [events, writes] = await Promise.all([recentEvents(100), prisma.twentyWrite.findMany({ orderBy: { createdAt: 'desc' }, take: 50 })]);
+  const [events, writes, failed] = await Promise.all([
+    recentEvents(100),
+    prisma.twentyWrite.findMany({ where: { status: 'OK' }, orderBy: { createdAt: 'desc' }, take: 50 }),
+    prisma.twentyWrite.findMany({ where: { status: 'FAILED' }, orderBy: { createdAt: 'asc' }, take: 100 }),
+  ]);
   return (
     <div className="space-y-3">
+      <Card title={<span className="flex items-center gap-2">Waiting to reach Twenty {failed.length ? <Badge tone="red">{failed.length}</Badge> : <Badge tone="green">0</Badge>}</span>} actions={failed.length ? <RetryWriteButton>Retry all now</RetryWriteButton> : undefined}>
+        {failed.length === 0 ? (
+          <div className="p-4 text-[13px] text-ink-500">Every note and mirrored task has reached Twenty.</div>
+        ) : (
+          <div className="max-h-[26rem] overflow-auto scroll-thin">
+            <table className="table table-tight">
+              <thead>
+                <tr>
+                  <th>Since</th>
+                  <th>Operation</th>
+                  <th>Object</th>
+                  <th>Error</th>
+                  <th className="num">Attempts</th>
+                  <th>Next attempt</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {failed.map((w) => (
+                  <tr key={w.id}>
+                    <td className="whitespace-nowrap text-[12px]">{formatInstant(w.createdAt, WORKSPACE_TIMEZONE)}</td>
+                    <td className="text-[12px]">{w.operation}</td>
+                    <td className="text-[12px]">{w.objectType}</td>
+                    <td className="max-w-md text-[12px] text-red-700">{w.error}</td>
+                    <td className="num text-[12px]">{w.attempts}</td>
+                    <td className="whitespace-nowrap text-[12px]">{w.nextAttemptAt ? formatInstant(w.nextAttemptAt, WORKSPACE_TIMEZONE) : <Empty />}</td>
+                    <td className="text-right"><RetryWriteButton writeId={w.id} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
       <Card title="Inbound events (webhooks and reconcile)">
         {events.length === 0 ? (
           <div className="p-4 text-[13px] text-ink-500">No events yet. Webhooks and reconcile runs appear here.</div>

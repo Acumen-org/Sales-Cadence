@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { retryFailedWrites } from '../lib/engine/sync-retry';
 import { prisma } from '../lib/db';
 import { env } from '../lib/env';
 import { SYSTEM_ACTOR } from '../lib/audit';
@@ -49,6 +50,8 @@ async function tick(){
    await launchScheduledCampaigns({actor:SYSTEM_ACTOR});
    const stats=await runSchedulerTick({actor:SYSTEM_ACTOR});
    if(stats.generated||stats.completed)log('scheduler',stats);
+   const retried=await retryFailedWrites();
+   if(retried.retried)log('twenty write retry',retried);
    if(now-lastPurge>=3600000){await purgeExpiredSessions();lastPurge=now;}
  }catch(error){log('tick failed',error);}finally{running=false;}
 }
