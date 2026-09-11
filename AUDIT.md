@@ -156,3 +156,34 @@ Each of the 21 points from the owner's review, where it lives in the code, and t
 | 14 | Powerful people selection for a campaign | Met | `people-picker.tsx`, `actions/people-picker.ts` |
 | 15 | Product interest filter on People and Accounts | Met | both toolbars |
 | 16 | Quality-of-life pass | Met | suites green: unit, browser, fresh install; screens re-captured |
+
+## Known flake: an intermittent hydration error on /activity (11 September 2026)
+
+`workspace.spec.ts` "mobile navigation and all main sections fit a phone" collects page errors while
+walking every section at a phone viewport, and has twice caught a **React #418** (hydration
+mismatch) attributed to `/activity` on a GitHub runner. It has never reproduced on Windows: the
+suite passes there against a fresh database, under `TZ=UTC`, and with the persisted database
+removed.
+
+Ruled out so far, each by test rather than by argument:
+
+- **Case-sensitive imports** - every relative and aliased import resolves by exact case.
+- **Timezone** - the whole suite passes under `TZ=UTC`, which is what the runner uses.
+- **Stale local state** - passes against a database initialised from scratch.
+- **ICU / CLDR drift** - `formatInstant` uses `en-GB` `month: 'short'`, where CLDR changed September
+  from "Sep" to "Sept", so server (Node) and client (Chromium) could disagree. They agree here
+  (both "Sept"), and an ICU mismatch would fail *every* September run, while run 4 passed this test.
+- **`useSearchParams` without a Suspense boundary** (a Next.js client-render bailout) - none of the
+  components that use it render on `/activity`.
+
+So it is genuinely intermittent and unexplained. `retries: 1` on CI stops one blip blocking a push;
+Playwright still reports the test as **flaky** rather than passed, so it stays visible. The
+underlying hydration error is a real defect and should be chased with a reproduction (a trace from a
+failing run) rather than more speculation.
+
+Fixed at the same time, and a real test bug rather than a flake: `tasks-ui.spec.ts` "the message is
+editable in place" typed into the rich-text editor and then asserted the draft had been kept,
+without first checking the keystrokes had landed. On a slower runner the click had not focused the
+editor yet, the keystrokes were swallowed, and the failure read as "the draft was not saved" when
+nothing had been typed - the subject saved correctly, and the body still held the sequence's own
+copy. The test now asserts the text reached the editor before asserting it survived a reload.

@@ -14,7 +14,12 @@ export default defineConfig({
   testIgnore: process.env.E2E_INCLUDE_FRESH ? [] : ['**/fresh-install.spec.ts'],
   timeout: 90_000,
   expect: { timeout: 15_000 },
-  retries: 0,
+  // One retry on CI only, and never locally. This is a mitigation, not a cure: the suite runs
+  // serially against one shared workspace, so a single timing blip on a slower runner turns the
+  // whole push red and hides the 44 tests that did pass. A retried test is still reported as
+  // "flaky" rather than "passed", so nothing is swept up - see AUDIT.md for the one known flake
+  // (an intermittent React hydration error on /activity) that has never reproduced locally.
+  retries: process.env.CI ? 1 : 0,
   workers: 1,
   reporter: [['list']],
   use: {

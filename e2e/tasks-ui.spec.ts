@@ -119,6 +119,10 @@ test('the message is editable in place and the edit is kept against the task', a
   await body.click();
   await page.keyboard.press('End');
   await page.keyboard.type(' PS one more thing.');
+  // The rich-text editor has to have taken the keystrokes before "was it kept?" means anything:
+  // on a slow machine a click that has not focused the editor yet swallows them, and the failure
+  // then reads as "the draft was not saved" when nothing was ever typed.
+  await expect(body).toContainText('PS one more thing.');
   // Saved on the server against this task, not in this browser.
   await expect(page.getByRole('button', { name: 'Saved', exact: true }).first()).toBeVisible({ timeout: 15_000 });
 
