@@ -40,8 +40,8 @@ test('search contains focus, opens a result, and restores focus on dismissal', a
   await expect(dialog).toHaveCount(0);
   await expect(trigger).toBeFocused();
   await page.keyboard.press('Control+k');
-  await page.getByRole('combobox').fill('Dummy');
-  await expect(page.getByRole('option').first()).toBeVisible();
+  await page.getByRole('combobox', { name: 'Search' }).fill('Dummy');
+  await expect(page.getByRole('dialog', { name: 'Search workspace' }).getByRole('option').first()).toBeVisible();
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/people\//);

@@ -32,6 +32,7 @@ export type SequenceSummary = {
   lastDay: number;
   enrollments: { active: number; paused: number; replied: number; meeting: number; completed: number; exited: number; total: number };
   campaigns: number;
+  repeatEveryDays: number | null;
   preview: { id: string; day: number; actions: string[] }[];
 };
 
@@ -55,6 +56,7 @@ export async function listSequences(): Promise<SequenceSummary[]> {
       lastDay: steps.length ? steps[steps.length - 1].day : 0,
       enrollments: e,
       campaigns: s._count.campaigns,
+      repeatEveryDays: s.repeatEveryDays,
       preview: steps.map((step) => ({ id: step.id, day: step.day, actions: step.actions.map((action) => action.type) })),
     };
   });

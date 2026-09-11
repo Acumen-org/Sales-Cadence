@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { filterParam, sectionDefaults } from '@/lib/default-filters';
 import { requireUser } from '@/lib/auth/current-user';
 import { canManageEnrollment, canSnoozeFreely, isAdmin, isPodLeader, canSeeAllPods, canActOnTask } from '@/lib/auth/rbac';
 import { getTaskBrief } from '@/lib/brief';
@@ -33,11 +34,14 @@ const EMPTY_TITLES: Record<TaskTab, string> = {
 export default async function TasksPage({ searchParams }: { searchParams: Promise<Search> }) {
   const user = await requireUser(); const sp = await searchParams;
   const tab = parseTab(sp.tab); const channel = parseChannel(sp.type); const mode = sp.mode === 'flow' ? 'flow' : 'list';
-  const manager = canSeeAllPods(user) || isPodLeader(user); const podId = manager ? sp.pod || null : null; const foUserId = manager ? sp.fo || null : null;
+  const manager = canSeeAllPods(user) || isPodLeader(user);
+  // Absent filters mean the reader's own pod (and, for a junior, their own name); an empty one means All.
+  const defaults = manager ? await sectionDefaults(user) : { podId: null, podOwnerValue: null, foUserId: null };
+  const podId = manager ? filterParam(sp.pod, defaults.podId) : null; const foUserId = manager ? filterParam(sp.fo, defaults.foUserId) : null;
   const limit = Math.min(2000, Math.max(200, Number(sp.limit) || 200));
   const [{ rows, counts, channelCounts, today, total, held }, options, settings] = await Promise.all([listTaskGroups(user, { tab, podId, foUserId, channel }, new Date(), limit), filterOptions(user), getSettings()]);
   const base = new URLSearchParams({ tab, mode });
-  if (podId) base.set('pod', podId); if (foUserId) base.set('fo', foUserId); if (channel) base.set('type', channel); if (limit > 200) base.set('limit', String(limit));
+  if (manager) { base.set('pod', podId ?? ''); base.set('fo', foUserId ?? ''); } if (channel) base.set('type', channel); if (limit > 200) base.set('limit', String(limit));
   const href = (patch: Record<string, string | null>) => { const next = new URLSearchParams(base); for (const [k,v] of Object.entries(patch)) { if (v === null) next.delete(k); else next.set(k,v); } return '/tasks?' + next.toString(); };
   // A ?task= that is not in this tab used to fall through to the first row, so a link from Home
   // or a bookmark opened somebody else's touch with the composer and the Done button attached to
@@ -64,6 +68,8 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
     return Number(channelOf(b.task.action) === channel) - Number(channelOf(a.task.action) === channel);
   });
   const openModules = modules.filter(m => m.task.state === 'PENDING');
+  // Who a touchpoint in this pod can be handed to: the pod's active people.
+  const delegatesFor = (podId: string | null) => podId ? options.fos.filter(f => f.podIds.includes(podId)).map(f => ({ id: f.id, name: f.name })) : [];
   // The header badge says where this touch stands against today, not a state every open task shares.
   const dueOn = brief ? brief.task.snoozedTo ?? brief.task.dueDate : null;
   const dueState: { tone: BadgeTone; label: string } = !openModules.length ? { tone: 'gray', label: 'Resolved' } : dueOn && dueOn < today ? { tone: 'red', label: 'Overdue' } : dueOn === today ? { tone: 'green', label: 'Due today' } : { tone: 'blue', label: 'Upcoming' };
@@ -91,9 +97,9 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
           <div className="divide-y divide-line">{modules.map(({task,action}) => <div key={task.id} className="space-y-4 p-5">
             {task.action === 'EMAIL' && (!brief.person.email || brief.person.badEmail) && <Notice tone="warn">Email needs verification. <Link href={'/enrichment?q=' + encodeURIComponent(brief.personName)} className="font-medium underline">Review contact data</Link></Notice>}
             <TaskComposer key={task.id} taskId={task.id} label={ACTION_LABELS[task.action]} subject={action.subject} body={action.body} html={action.html} channel={channelOf(task.action)} revision={task.draftRevision} readOnly={task.state !== 'PENDING' || !canActOnTask(user, { foUserId: task.foUserId, podId: task.enrollment.podId })} phone={brief.person.phone} clickToCall={Boolean(settings.rules.clickToCallUrl)} />
-            {task.state === 'PENDING' && canActOnTask(user, { foUserId: task.foUserId, podId: task.enrollment.podId }) ? <TaskActions taskId={task.id} action={task.action} nextUrl={nextUrl} variant={openModules.length > 1 ? 'module' : 'full'} prevUrl={prevUrl} twentyUrl={brief.twentyUrl} nextWorkingDay={nextWorkingDay} canPickSnoozeDate={canSnoozeFreely(user)} dispositions={dispositions} skipReasons={skipReasons} steps={brief.steps} currentStep={brief.currentStep} canManageEnrollment={canManageEnrollment(user, { foUserId: task.foUserId, podId: task.enrollment.podId })} keyboardEnabled={openModules.length === 1} /> : <RecordFields items={[{label:'Result',value:task.state},{label:'Outcome',value:task.disposition ? dispositions.find(d => d.key === task.disposition)?.label ?? task.disposition : task.skipReason ?? task.cancelReason},{label:'Logged note',value:task.note}]} />}
+            {task.state === 'PENDING' && canActOnTask(user, { foUserId: task.foUserId, podId: task.enrollment.podId }) ? <TaskActions taskId={task.id} action={task.action} nextUrl={nextUrl} variant={openModules.length > 1 ? 'module' : 'full'} prevUrl={prevUrl} twentyUrl={brief.twentyUrl} nextWorkingDay={nextWorkingDay} canPickSnoozeDate={canSnoozeFreely(user)} dispositions={dispositions} skipReasons={skipReasons} steps={brief.steps} currentStep={brief.currentStep} canManageEnrollment={canManageEnrollment(user, { foUserId: task.foUserId, podId: task.enrollment.podId })} delegates={delegatesFor(task.enrollment.podId)} currentFoId={task.foUserId} keyboardEnabled={openModules.length === 1} /> : <RecordFields items={[{label:'Result',value:task.state},{label:'Outcome',value:task.disposition ? dispositions.find(d => d.key === task.disposition)?.label ?? task.disposition : task.skipReason ?? task.cancelReason},{label:'Logged note',value:task.note}]} />}
           </div>)}</div>
-          {openModules.length > 1 && canActOnTask(user, { foUserId: openModules[0].task.foUserId, podId: openModules[0].task.enrollment.podId }) ? <div className="border-t border-line p-5"><TaskActions variant="step" taskId={openModules[0].task.id} snoozeTaskIds={openModules.map(m => m.task.id)} action={openModules[0].task.action} nextUrl={nextUrl} prevUrl={prevUrl} twentyUrl={brief.twentyUrl} nextWorkingDay={nextWorkingDay} canPickSnoozeDate={canSnoozeFreely(user)} dispositions={dispositions} skipReasons={skipReasons} steps={brief.steps} currentStep={brief.currentStep} canManageEnrollment={canManageEnrollment(user, { foUserId: openModules[0].task.foUserId, podId: openModules[0].task.enrollment.podId })} keyboardEnabled /></div> : null}
+          {openModules.length > 1 && canActOnTask(user, { foUserId: openModules[0].task.foUserId, podId: openModules[0].task.enrollment.podId }) ? <div className="border-t border-line p-5"><TaskActions variant="step" taskId={openModules[0].task.id} snoozeTaskIds={openModules.map(m => m.task.id)} action={openModules[0].task.action} nextUrl={nextUrl} prevUrl={prevUrl} twentyUrl={brief.twentyUrl} nextWorkingDay={nextWorkingDay} canPickSnoozeDate={canSnoozeFreely(user)} dispositions={dispositions} skipReasons={skipReasons} steps={brief.steps} currentStep={brief.currentStep} canManageEnrollment={canManageEnrollment(user, { foUserId: openModules[0].task.foUserId, podId: openModules[0].task.enrollment.podId })} delegates={delegatesFor(openModules[0].task.enrollment.podId)} currentFoId={openModules[0].task.foUserId} keyboardEnabled /></div> : null}
         </Surface>}</div>
         {brief && <aside className="min-w-0 space-y-4 xl:col-start-2 2xl:col-auto"><TaskBriefPanel brief={brief} timezone={user.timezone} /><SuggestedApproach canConfigure={isAdmin(user)} /><CrmHistory personId={brief.person.id} timezone={user.timezone} baseHref={href({ task: brief.task.id })} notesAfter={sp.crmNotes} emailsAfter={sp.crmEmails} /></aside>}
       </div>

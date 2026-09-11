@@ -1,9 +1,11 @@
 import Link from 'next/link';
+import { personSearchWhere } from '@/lib/search-terms';
+import { filterParam, sectionDefaults } from '@/lib/default-filters';
 import { SyncNowButton } from '@/components/settings/sync-now-button';
 import { peopleScopeWhere } from '@/lib/people-scope';
 import type { Prisma } from '@prisma/client';
 import { requireUser } from '@/lib/auth/current-user';
-import { canEnroll, isAdmin, toActor } from '@/lib/auth/rbac';
+import { canEnroll, isAdmin, toActor, visiblePodIds } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
 import { formatInstant, formatLocalDate } from '@/lib/dates';
 import { cachedPersonName } from '@/lib/person-cache';
@@ -18,13 +20,18 @@ import { contactWarnings, crmStanding, EmptyState, ENROLLMENT_TONE, enrollmentSt
 
 const PAGE_SIZE = 100;
 
-type Search = { q?: string; pod?: string; status?: string; page?: string; owner?: string; tier?: string; type?: string };
+type Search = { q?: string; pod?: string; fo?: string; product?: string; sort?: string; status?: string; page?: string; owner?: string; tier?: string; type?: string };
+const SORTS = ['name', 'company', 'tier', 'recent'] as const;
+type Sort = (typeof SORTS)[number];
 
 export default async function PeoplePage({ searchParams }: { searchParams: Promise<Search> }) {
   const user = await requireUser();
   const sp = await searchParams;
   const q = (sp.q ?? '').trim();
-  const pod = sp.pod ?? '';
+  const defaults = await sectionDefaults(user);
+  const pod = filterParam(sp.pod, defaults.podOwnerValue) ?? '';
+  const fo = (sp.fo ?? '').trim();
+  const sort: Sort = SORTS.includes(sp.sort as Sort) ? (sp.sort as Sort) : 'name';
   const status = sp.status ?? '';
   const owner = sp.owner === 'mine' ? 'mine' : '';
   // Only values the mapping knows are accepted, so a hand-edited URL cannot filter on nonsense.
@@ -32,6 +39,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   const pick = (v: string | undefined, allowed: readonly string[]) => (v && allowed.includes(v) ? v : '');
   const tier = pick(sp.tier, values.tier);
   const contactType = pick(sp.type, values.contactType);
+  const product = pick(sp.product, values.productInterest);
   const page = Math.max(1, Number.parseInt(sp.page ?? '1', 10) || 1);
   const actor = toActor(user);
 
@@ -41,18 +49,11 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     where.AND = [{ OR: [{ ownerMemberId: user.twentyMemberId ?? '__none__' }, { enrollments: { some: { foUserId: user.id } } }] }];
   }
   const and: Prisma.PersonCacheWhereInput[] = (where.AND as Prisma.PersonCacheWhereInput[]) ?? [];
-  if (q) {
-    and.push({
-      OR: [
-        { firstName: { contains: q, mode: 'insensitive' } },
-        { lastName: { contains: q, mode: 'insensitive' } },
-        { companyName: { contains: q, mode: 'insensitive' } },
-        { email: { contains: q, mode: 'insensitive' } },
-        { jobTitle: { contains: q, mode: 'insensitive' } },
-      ],
-    });
-  }
+  const search = personSearchWhere(q);
+  if (search) and.push(search);
   if (pod) where.podOwner = pod;
+  if (fo) and.push({ enrollments: { some: { foUserId: fo, status: { in: ['ACTIVE', 'PAUSED'] } } } });
+  if (product) and.push({ productInterest: { has: product } });
   if (tier) where.tier = tier;
   if (contactType) where.contactType = { has: contactType };
   if (status === 'enrolled' || status === 'approaching') where.enrollments = { some: { status: { in: ['ACTIVE', 'PAUSED'] } } };
@@ -79,7 +80,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   const [people, total, pods, conn] = await Promise.all([
     prisma.personCache.findMany({
       where,
-      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+      orderBy: sort === 'company' ? [{ companyName: 'asc' }, { lastName: 'asc' }] : sort === 'tier' ? [{ tier: 'asc' }, { lastName: 'asc' }] : sort === 'recent' ? [{ syncedAt: 'desc' }] : [{ lastName: 'asc' }, { firstName: 'asc' }],
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
       include: {
@@ -95,7 +96,10 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   const pageHref = (n: number) => {
     const p = new URLSearchParams();
     if (q) p.set('q', q);
-    if (pod) p.set('pod', pod);
+    p.set('pod', pod);
+    if (fo) p.set('fo', fo);
+    if (product) p.set('product', product);
+    if (sort !== 'name') p.set('sort', sort);
     if (status) p.set('status', status);
     if (owner) p.set('owner', owner);
     if (tier) p.set('tier', tier);
@@ -106,6 +110,10 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
 
   const today = todayIn(user.timezone);
   const podByOwner = new Map(pods.map((x) => [x.podOwnerValue, x]));
+  // The filters offer the pods this reader can see and the active people in them.
+  const visible = visiblePodIds(user);
+  const visiblePodRows = pods.filter((x) => visible === null || visible.includes(x.id));
+  const fos = [...new Map(visiblePodRows.flatMap((x) => x.users.filter((up) => up.user.active).map((up) => [up.user.id, { id: up.user.id, name: up.user.name }] as const))).values()].sort((a, b) => a.name.localeCompare(b.name));
 
   const rows: PeopleTableRow[] = people.map((p) => {
     const e = p.enrollments[0] ?? null;
@@ -150,18 +158,23 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     <div className="space-y-3 px-6 pb-8 pt-2">
       <Surface flush>
         <ViewHeader
-          title={owner === 'mine' ? 'My relationships' : q || pod || status ? 'Filtered people' : 'All people'}
+          title={owner === 'mine' ? 'My relationships' : q || pod || status || fo || product ? 'Filtered people' : 'All people'}
           caret
           meta={`${total} result${total === 1 ? '' : 's'}`}
           actions={isAdmin(user) ? <SyncNowButton /> : undefined}
         />
         <Toolbar>
           <PeopleToolbar
-            pods={pods.map((p) => ({ podOwnerValue: p.podOwnerValue, name: p.name }))}
+            pods={visiblePodRows.map((p) => ({ podOwnerValue: p.podOwnerValue, name: p.name }))}
+            fos={fos}
+            products={[...values.productInterest]}
             tiers={[...values.tier]}
             types={[...values.contactType]}
             q={q}
             pod={pod}
+            fo={fo}
+            product={product}
+            sort={sort}
             status={status}
             tier={tier}
             type={contactType}

@@ -21,6 +21,8 @@ export function TaskFilters({ pods, fos, podId, foUserId, mode }: Props) {
     const next = new URLSearchParams(params.toString());
     for (const [k, v] of Object.entries(patch)) {
       if (v) next.set(k, v);
+      // "All pods" / "All FOs" is a choice: kept in the URL as an empty value so it outlives the default.
+      else if (k === 'pod' || k === 'fo') next.set(k, '');
       else next.delete(k);
     }
     next.delete('task');

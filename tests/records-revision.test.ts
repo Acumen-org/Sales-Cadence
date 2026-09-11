@@ -96,7 +96,7 @@ describe('team and pod administration', () => {
     await prisma.session.create({ data: { userId: b.users.alisa.id, token: 'pilot-session', expiresAt: new Date('2030-01-01') } });
     expect((await setUserAccessAction(form({ userId: b.users.alisa.id, active: 'false' }))).ok).toBe(true);
     expect(await prisma.session.count({ where: { userId: b.users.alisa.id } })).toBe(0);
-    const edit = form({ userId: b.users.alisa.id, name: b.users.alisa.name, email: b.users.alisa.email, role: 'SENIOR_FO' });
+    const edit = form({ userId: b.users.alisa.id, name: b.users.alisa.name, email: b.users.alisa.email, role: 'SENIOR_FO' }); edit.append('podIds', b.pods.Alisa.id);
     expect((await updateUserAction(edit)).ok).toBe(true);
     expect((await prisma.user.findUniqueOrThrow({ where: { id: b.users.alisa.id } })).active).toBe(false);
     expect((await setUserAccessAction(form({ userId: b.users.alisa.id, active: 'true' }))).ok).toBe(true);

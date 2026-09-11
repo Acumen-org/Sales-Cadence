@@ -25,9 +25,12 @@ export default async function SequenceDetailPage({ params }: { params: Promise<{
         name={sequence.name}
         icon={<IconSequences size={20} />}
         badges={
-          <Badge tone="green">
-            {sequence._count.campaigns} {sequence._count.campaigns === 1 ? 'campaign' : 'campaigns'}
-          </Badge>
+          <>
+            <Badge tone="green">
+              {sequence._count.campaigns} {sequence._count.campaigns === 1 ? 'campaign' : 'campaigns'}
+            </Badge>
+            {sequence.repeatEveryDays ? <Badge tone="blue">Repeats every {sequence.repeatEveryDays} working days</Badge> : null}
+          </>
         }
         actions={
           <Link href="/sequences" className="btn-ghost btn-sm">
@@ -43,6 +46,7 @@ export default async function SequenceDetailPage({ params }: { params: Promise<{
           submitLabel="Save sequence"
           lockedSteps={Object.fromEntries(open.map((t) => [t.stepId, t._count._all]))}
           readOnly={!edit}
+          repeatEveryDays={sequence.repeatEveryDays}
           header={
             edit ? (
               <div className="surface flex flex-wrap items-end gap-5 p-5">

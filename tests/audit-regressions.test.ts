@@ -110,6 +110,7 @@ describe('account security and validation', () => {
   const userForm = () => {
     const form = new FormData();
     for (const [key, value] of Object.entries({ userId: b.users.alisa.id, name: b.users.alisa.name, email: 'new@cadence.local', role: 'SENIOR_FO', active: 'true', password: 'new-password-123' })) form.set(key, value);
+    form.append('podIds', b.pods.Alisa.id);
     return form;
   };
   it('revokes existing sessions on password reset', async () => {
@@ -126,6 +127,7 @@ describe('account security and validation', () => {
 
     const created = new FormData();
     for (const [k, v] of Object.entries({ name: 'Tz Probe', email: 'tz.probe@cadence.local', role: 'JUNIOR_FO', password: 'tz-probe-password-1', timezone: 'Mars/Olympus' })) created.set(k, v);
+    created.append('podIds', b.pods.Alisa.id);
     expect((await createUserAction(created)).ok).toBe(true);
     expect((await prisma.user.findUniqueOrThrow({ where: { email: 'tz.probe@cadence.local' } })).timezone).toBe(WORKSPACE_TIMEZONE);
   });

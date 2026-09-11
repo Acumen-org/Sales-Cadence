@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { delegateTasks } from '../engine/delegate';
 import { z } from 'zod';
 import { prisma } from '../db';
 import { requireUser, toActor, type SessionUser } from '../auth/current-user';
@@ -156,6 +157,17 @@ export async function removeFromSequenceAction(formData: FormData): Promise<Acti
   await applyExitConsequence(enrollment.personId, reason, userActor(user));
   revalidate();
   return { ok: true, message: reason === 'opted_out' ? 'Sequence ended and this person is opted out of all outreach.' : 'Sequence ended. No more tasks for this person.' };
+}
+
+export async function delegateTaskAction(formData: FormData): Promise<ActionResult> {
+  const user = await requireUser();
+  const taskIds = String(formData.get('taskIds') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const toUserId = String(formData.get('toUserId') ?? '').trim();
+  if (!toUserId) return { ok: false, error: 'Choose who to delegate to.' };
+  const r = await delegateTasks(taskIds, toUserId, user);
+  revalidate();
+  if (!r.ok) return { ok: false, error: r.error };
+  return { ok: true, message: `Delegated to ${r.toName}.` };
 }
 
 export async function moveToStepAction(formData: FormData): Promise<ActionResult> {

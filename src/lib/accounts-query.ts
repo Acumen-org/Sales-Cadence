@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { companySearchWhere } from './search-terms';
 import { meetingReadWhere } from './meetings-query';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
@@ -58,11 +59,46 @@ export async function accountScopeCompanyIds(user: SessionUser): Promise<string[
   return [...new Set([...owned, ...rows.map((r) => r.companyId!).filter(Boolean)])];
 }
 
-export async function listAccounts(user: SessionUser, opts: { q?: string; scope?: 'all' | 'mine' } = {}): Promise<AccountListRow[]> {
+export type AccountSort = 'name' | 'people' | 'inSequence' | 'lastTouch' | 'replied';
+export const ACCOUNT_SORTS: AccountSort[] = ['name', 'people', 'inSequence', 'lastTouch', 'replied'];
+
+export type AccountFilters = {
+  q?: string;
+  scope?: 'all' | 'mine';
+  /** Twenty podOwner value: accounts with a person in that pod. */
+  pod?: string | null;
+  /** Accounts with a person this FO owns in Twenty or works in a sequence, or that they own. */
+  foUserId?: string | null;
+  /** Accounts with a person interested in this product. */
+  product?: string | null;
+  sort?: AccountSort;
+};
+
+/** Company ids reached through their people, for one filter. */
+async function companiesThroughPeople(where: Prisma.PersonCacheWhereInput): Promise<string[]> {
+  const rows = await prisma.personCache.findMany({ where: { ...where, deletedAt: null, companyId: { not: null } }, select: { companyId: true }, distinct: ['companyId'] });
+  return rows.map((r) => r.companyId!);
+}
+
+export async function listAccounts(user: SessionUser, opts: AccountFilters = {}): Promise<AccountListRow[]> {
   const visibleIds = await accountScopeCompanyIds(user);
   const where: Prisma.CompanyCacheWhereInput = { deletedAt: null };
-  if (visibleIds !== null) where.id = { in: visibleIds };
-  if (opts.q) where.OR = [{ name: { contains: opts.q, mode: 'insensitive' } }, { domain: { contains: opts.q, mode: 'insensitive' } }, { industry: { contains: opts.q, mode: 'insensitive' } }];
+  const narrowings: string[][] = [];
+  if (visibleIds !== null) narrowings.push(visibleIds);
+  if (opts.pod) narrowings.push(await companiesThroughPeople({ podOwner: opts.pod }));
+  if (opts.foUserId) {
+    const fo = await prisma.user.findUnique({ where: { id: opts.foUserId }, select: { twentyMemberId: true } });
+    const owned = fo?.twentyMemberId ? (await prisma.companyCache.findMany({ where: { deletedAt: null, ownerMemberId: fo.twentyMemberId }, select: { id: true } })).map((c) => c.id) : [];
+    const worked = await companiesThroughPeople({ OR: [{ ownerMemberId: fo?.twentyMemberId ?? '__none__' }, { enrollments: { some: { foUserId: opts.foUserId, status: { in: ['ACTIVE', 'PAUSED'] } } } }] });
+    narrowings.push([...new Set([...owned, ...worked])]);
+  }
+  if (opts.product) narrowings.push(await companiesThroughPeople({ productInterest: { has: opts.product } }));
+  if (narrowings.length) {
+    const [first, ...rest] = narrowings;
+    where.id = { in: first.filter((id) => rest.every((set) => set.includes(id))) };
+  }
+  const search = companySearchWhere(opts.q ?? '');
+  if (search) where.AND = [search];
 
   const companies = await prisma.companyCache.findMany({ where, orderBy: { name: 'asc' }, take: 500 });
   const ids = companies.map((c) => c.id);
@@ -101,7 +137,7 @@ export async function listAccounts(user: SessionUser, opts: { q?: string; scope?
   });
   const mineIds = new Set(myPeople.map((p) => p.companyId!));
 
-  return companies.map((c) => ({
+  const rows: AccountListRow[] = companies.map((c) => ({
     id: c.id,
     name: c.name,
     domain: c.domain,
@@ -116,6 +152,15 @@ export async function listAccounts(user: SessionUser, opts: { q?: string; scope?
     lastTouchAt: lastBy.get(c.id) ?? null,
     mine: (user.twentyMemberId && c.ownerMemberId === user.twentyMemberId) || mineIds.has(c.id),
   }));
+  const sort = opts.sort ?? 'name';
+  if (sort === 'name') return rows;
+  const desc = (a: number, b: number) => b - a;
+  return rows.sort((a, b) =>
+    sort === 'people' ? desc(a.people, b.people) || a.name.localeCompare(b.name)
+    : sort === 'inSequence' ? desc(a.inSequence, b.inSequence) || a.name.localeCompare(b.name)
+    : sort === 'replied' ? desc(a.replied, b.replied) || a.name.localeCompare(b.name)
+    : desc(a.lastTouchAt?.getTime() ?? 0, b.lastTouchAt?.getTime() ?? 0) || a.name.localeCompare(b.name),
+  );
 }
 
 /**

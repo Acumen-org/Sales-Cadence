@@ -193,7 +193,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                   return (
                     <Card
                       key={e.id}
-                      title={<Link href={`/sequences/${e.sequenceId}`} className="font-medium hover:underline">{e.sequence.name}</Link>}
+                      title={<span className="flex items-center gap-2"><Link href={`/sequences/${e.sequenceId}`} className="font-medium hover:underline">{e.sequence.name}</Link>{e.cycle > 1 ? <Badge tone="blue">Round {e.cycle}</Badge> : null}</span>}
                       actions={<Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'}>{enrollmentStatusLabel(e)}</Badge>}
                     >
                       <div className="border-b border-line bg-canvas/50 p-4"><RecordFields className="lg:grid-cols-4" items={[

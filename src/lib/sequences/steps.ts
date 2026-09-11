@@ -27,8 +27,9 @@ export function isObservable(action: ActionType): boolean {
 /**
  * One module of a step: an email, a call or a LinkedIn touch, with the copy the FO starts from.
  *
- * The copy is literal text. There is no variable syntax: the FO reads the person's record beside
- * the message and writes what fits, so a half-substituted "Hi ," can never reach a prospect.
+ * The copy may carry a handful of tokens ({{firstName}}, {{company}}, ... see personalize.ts). They
+ * are filled in for the person when the task is created, with a fallback where the record is
+ * blank, so a half-substituted "Hi ," never reaches a prospect and a task never shows a token.
  */
 export const StepActionSchema = z.object({
   /** Stable id, kept across edits so a live enrollment stays matched to its module. */

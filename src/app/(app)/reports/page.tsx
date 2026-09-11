@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { filterParam, sectionDefaults } from '@/lib/default-filters';
 import { redirect } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
 import { canViewReports, toActor, visiblePodIds } from '@/lib/auth/rbac';
@@ -58,8 +59,9 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const today = todayIn(REPORTING_TIMEZONE);
   const range = reportingRange(sp.from, sp.to, today);
   const visiblePods = visiblePodIds(user);
-  const podId = sp.pod || null;
-  const foUserId = sp.fo || null;
+  const defaults = await sectionDefaults(user);
+  const podId = filterParam(sp.pod, defaults.podId);
+  const foUserId = filterParam(sp.fo, defaults.foUserId);
   const [pods, users, reports] = await Promise.all([
     prisma.pod.findMany({ where: visiblePods === null ? {} : { id: { in: visiblePods } }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
     prisma.user.findMany({
@@ -70,8 +72,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   ]);
   const tabHref = (key: string) => {
     const params = new URLSearchParams({ tab: key, from: range.from, to: range.to });
-    if (podId) params.set('pod', podId);
-    if (foUserId) params.set('fo', foUserId);
+    params.set('pod', podId ?? '');
+    params.set('fo', foUserId ?? '');
     return `/reports?${params.toString()}`;
   };
   return (

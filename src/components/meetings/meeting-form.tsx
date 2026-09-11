@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { TranscriptInput } from './transcript-input';
 import { optionLabel } from '@/lib/twenty/labels';
 import { PRODUCTS, WORKSPACE_TIMEZONE, WORKSPACE_TIMEZONE_LABEL } from '@/lib/workspace';
 import { useState } from 'react';
@@ -86,8 +87,8 @@ export function MeetingForm({ companies, initial, mode, timezone }: { companies:
             ))}
           </div>
         </Field>
-        <Field label="Transcript (optional)" className="md:col-span-2" info="Paste the WebVTT or SRT export, or plain text. Format is detected automatically.">
-          <textarea name="transcript" rows={6} defaultValue={initial.transcript} className="font-mono !text-[12px]" placeholder="Paste the transcript" />
+        <Field label="Transcript (optional)" className="md:col-span-2" info="WebVTT, SRT, Teams grouped text, a JSON export or plain text; the format is detected. Only the dialogue is kept.">
+          <TranscriptInput name="transcript" label="Transcript (optional)" defaultValue={initial.transcript} />
         </Field>
       </div>
 

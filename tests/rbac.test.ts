@@ -51,6 +51,7 @@ describe('rbac', () => {
     expect(needsPod('BIZ_OPS')).toBe(false);
     expect(defaultFilters(ops)).toEqual({ pod: false, self: false });
     expect(defaultFilters(junior)).toEqual({ pod: true, self: true });
+    expect(defaultFilters(senior)).toEqual({ pod: true, self: false });
     expect(defaultFilters(leader)).toEqual({ pod: true, self: false });
   });
   it('admin can do everything', () => {

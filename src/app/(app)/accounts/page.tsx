@@ -1,18 +1,32 @@
 import { requireUser } from '@/lib/auth/current-user';
-import { isAdmin } from '@/lib/auth/rbac';
+import { filterParam, sectionDefaults } from '@/lib/default-filters';
+import { defaultTwentySchema } from '@/lib/twenty/twenty-schema';
+import { prisma } from '@/lib/db';
+import { isAdmin, visiblePodIds } from '@/lib/auth/rbac';
 import { SyncNowButton } from '@/components/settings/sync-now-button';
-import { listAccounts } from '@/lib/accounts-query';
+import { ACCOUNT_SORTS, listAccounts, type AccountSort } from '@/lib/accounts-query';
 import { formatInstant } from '@/lib/dates';
 import { IconCampaigns } from '@/components/icons';
 import { AccountsToolbar } from '@/components/accounts/accounts-toolbar';
 import { Badge, Count, Empty, EmptyState, IdentityCell, Stat, StatusDot, Surface, Toolbar, ViewHeader } from '@/components/ui';
 
-export default async function AccountsPage({ searchParams }: { searchParams: Promise<{ q?: string; scope?: string }> }) {
+export default async function AccountsPage({ searchParams }: { searchParams: Promise<{ q?: string; scope?: string; pod?: string; fo?: string; product?: string; sort?: string }> }) {
   const user = await requireUser();
   const sp = await searchParams;
   const q = (sp.q ?? '').trim();
   const scope = sp.scope === 'mine' ? 'mine' : 'all';
-  const all = await listAccounts(user, { q });
+  const defaults = await sectionDefaults(user);
+  const pod = filterParam(sp.pod, defaults.podOwnerValue);
+  const foUserId = filterParam(sp.fo, null);
+  const values = defaultTwentySchema.personValues;
+  const product = sp.product && (values.productInterest as readonly string[]).includes(sp.product) ? sp.product : null;
+  const sort: AccountSort = ACCOUNT_SORTS.includes(sp.sort as AccountSort) ? (sp.sort as AccountSort) : 'name';
+  const visible = visiblePodIds(user);
+  const [all, podRows] = await Promise.all([
+    listAccounts(user, { q, pod, foUserId, product, sort }),
+    prisma.pod.findMany({ where: { archived: false, ...(visible === null ? {} : { id: { in: visible } }) }, orderBy: { name: 'asc' }, include: { users: { include: { user: { select: { id: true, name: true, active: true } } } } } }),
+  ]);
+  const fos = [...new Map(podRows.flatMap((x) => x.users.filter((up) => up.user.active).map((up) => [up.user.id, { id: up.user.id, name: up.user.name }] as const))).values()].sort((a, b) => a.name.localeCompare(b.name));
   const rows = scope === 'mine' ? all.filter((a) => a.mine) : all;
   const mineCount = all.filter((a) => a.mine).length;
 
@@ -27,14 +41,14 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
       <Surface flush>
         <ViewHeader title={scope === 'mine' ? 'My accounts' : 'All accounts'} caret actions={isAdmin(user) ? <SyncNowButton /> : undefined} />
         <Toolbar>
-          <AccountsToolbar q={q} scope={scope} mineCount={mineCount} allCount={all.length} />
+          <AccountsToolbar q={q} scope={scope} mineCount={mineCount} allCount={all.length} pods={podRows.map((x) => ({ podOwnerValue: x.podOwnerValue, name: x.name }))} fos={fos} products={[...values.productInterest]} pod={pod ?? ''} fo={foUserId ?? ''} product={product ?? ''} sort={sort} />
         </Toolbar>
 
         {rows.length === 0 ? (
           <EmptyState
             icon={<IconCampaigns size={20} />}
-            title={q ? 'No accounts match' : 'No accounts yet'}
-            hint={q ? 'Try a different search.' : undefined}
+            title={q || pod || foUserId || product ? 'No accounts match' : 'No accounts yet'}
+            hint={q || pod || foUserId || product ? 'Try a different search or filter.' : undefined}
           />
         ) : (
           <div className="overflow-x-auto scroll-thin">

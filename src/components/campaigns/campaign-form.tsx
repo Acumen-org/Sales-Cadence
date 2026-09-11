@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState, useTransition } from 'react';
+import { PeoplePicker } from './people-picker';
 import { ENROLL_CONFLICT_LABELS } from '@/lib/campaign-status';
 import { useRouter } from 'next/navigation';
 import { createCampaignAction, previewCampaignAction, type CampaignPreview } from '@/lib/actions/campaigns';
@@ -24,15 +25,18 @@ export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, m
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const [pending, start] = useTransition();
-  const [sourceType, setSourceType] = useState<'IDS' | 'CSV' | 'TWENTY_VIEW'>('IDS');
+  const [sourceType, setSourceType] = useState<'PICK' | 'IDS' | 'CSV' | 'TWENTY_VIEW'>(initialIds ? 'IDS' : 'PICK');
   const [csvText, setCsvText] = useState('');
+  const [picked, setPicked] = useState<string[]>([]);
   const [preview, setPreview] = useState<CampaignPreview | null>(null);
   const [result, setResult] = useState<ActionResult | null>(null);
 
   const collect = () => {
     const fd = new FormData(formRef.current!);
-    fd.set('sourceType', sourceType);
+    // Picked people travel as ids, the way pasted ids always did; the server does not know the difference.
+    fd.set('sourceType', sourceType === 'PICK' ? 'IDS' : sourceType);
     if (sourceType === 'CSV') fd.set('personIdsText', csvText);
+    if (sourceType === 'PICK') fd.set('personIdsText', picked.join('\n'));
     return fd;
   };
 
@@ -100,7 +104,7 @@ export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, m
       <Card title="2. People">
         <div className="space-y-4 p-4">
           <div className="flex flex-wrap gap-2">
-            {(['IDS', 'CSV', 'TWENTY_VIEW'] as const).map((t) => (
+            {(['PICK', 'IDS', 'CSV', 'TWENTY_VIEW'] as const).map((t) => (
               <button
                 key={t}
                 type="button"
@@ -110,10 +114,11 @@ export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, m
                 }}
                 className={sourceType === t ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'}
               >
-                {t === 'IDS' ? 'Paste person ids' : t === 'CSV' ? 'Upload CSV' : 'Twenty view'}
+                {t === 'PICK' ? 'Pick from People' : t === 'IDS' ? 'Paste person ids' : t === 'CSV' ? 'Upload CSV' : 'Twenty view'}
               </button>
             ))}
           </div>
+          {sourceType === 'PICK' ? <PeoplePicker value={picked} onChange={(ids) => { setPicked(ids); setPreview(null); }} /> : null}
           {sourceType === 'IDS' ? (
             <Field label="Twenty person ids" info="One per line, or comma separated. Copy them from Twenty's URL bar or an export.">
               <textarea name="personIdsText" rows={8} className="w-full font-mono text-xs" placeholder={'3f6c1c5e-...\n8a1b2c3d-...'} defaultValue={initialIds ?? ''} />

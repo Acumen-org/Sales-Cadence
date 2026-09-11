@@ -48,12 +48,12 @@ export function visiblePodIds(a: Actor): string[] | null {
 }
 
 /**
- * What a section shows before any filter is touched. An FO opens their own pod and their own
- * name; a leader opens their pod; admins and Biz Ops open everything.
+ * What a section shows before any filter is touched. A junior opens their pod and their own
+ * name; anyone who leads a pod opens the pod; admins and Biz Ops open everything.
  */
 export function defaultFilters(a: Actor): { pod: boolean; self: boolean } {
-  if (isJuniorFo(a) || isSeniorFo(a)) return { pod: true, self: true };
-  if (isSalesLeader(a) || isPodManager(a)) return { pod: true, self: false };
+  if (isJuniorFo(a)) return { pod: true, self: true };
+  if (isPodLeader(a)) return { pod: true, self: false };
   return { pod: false, self: false };
 }
 

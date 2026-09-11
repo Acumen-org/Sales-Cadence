@@ -111,6 +111,7 @@ test.describe('Senior FO', () => {
     await page.getByLabel('Name', { exact: true }).fill('E2E role campaign');
     await page.getByLabel('Pod', { exact: true }).selectOption({ label: "Alisa's pod" });
     // Thirteen and Fourteen are reserved for this file: earlier specs work dummy-01..06.
+    await page.getByRole('button', { name: 'Paste person ids' }).click();
     await page.getByLabel('Twenty person ids').fill('dummy-13\ndummy-14');
     await page.getByRole('button', { name: /Preview conflicts/ }).click();
     await expect(page.getByRole('button', { name: /Create campaign|Submit/ })).toBeVisible();
@@ -150,6 +151,7 @@ test.describe('Sales Leader', () => {
     await page.goto('/campaigns/new');
     await page.getByLabel('Name', { exact: true }).fill('E2E leader source campaign');
     await page.getByLabel('Pod', { exact: true }).selectOption({ label: "Alisa's pod" });
+    await page.getByRole('button', { name: 'Paste person ids' }).click();
     await page.getByLabel('Twenty person ids').fill('dummy-13\ndummy-14');
     await page.getByRole('button', { name: /Preview conflicts/ }).click();
     await page.getByRole('button', { name: /Create campaign/ }).click();

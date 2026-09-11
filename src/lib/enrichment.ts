@@ -54,7 +54,6 @@ const CONTACT_CRITICAL = [
 const FIX_IN_TWENTY = new Set(['companyId', 'ownerMemberId']);
 const CONTACT_USEFUL = [
   ['jobTitle', 'Job title'],
-  ['city', 'City'],
 ] as const;
 const ACCOUNT_CRITICAL = [
   ['domain', 'Website'],
@@ -63,7 +62,6 @@ const ACCOUNT_CRITICAL = [
 const ACCOUNT_USEFUL = [
   ['industry', 'Industry'],
   ['employees', 'Employees'],
-  ['city', 'City'],
   ['aum', 'AUM'],
   ['ownerMemberId', 'Account owner'],
 ] as const;
@@ -196,7 +194,8 @@ async function enrichmentCompanyScope(user: SessionUser): Promise<Prisma.Company
   return { deletedAt: null, OR: [{ ownerMemberId: user.twentyMemberId ?? '__none__' }, { id: { in: people.map((person) => person.companyId).filter((id): id is string => !!id) } }] };
 }
 
-export type EnrichmentGap = { field: string; label: string; priority: 'critical' | 'useful' };
+/** `fixInTwenty`: a relation or an assignment, which an import cannot write - somebody links it in Twenty. */
+export type EnrichmentGap = { field: string; label: string; priority: 'critical' | 'useful'; fixInTwenty?: boolean };
 export type EnrichmentQueueItem = { id: string; label: string; company: string | null; entity: EnrichmentEntity; href: string; gaps: EnrichmentGap[] };
 export async function enrichmentQueue(user: SessionUser) {
   const [people, companies, schema] = await Promise.all([
@@ -208,9 +207,10 @@ export async function enrichmentQueue(user: SessionUser) {
   const items: EnrichmentQueueItem[] = [];
   for (const person of people) {
     const gaps: EnrichmentGap[] = [];
+    if (!person.firstName?.trim() || !person.lastName?.trim()) gaps.push({ field: 'name', label: 'Name incomplete', priority: 'critical', fixInTwenty: true });
     if (!person.email || person.badEmail || person.emailMissing) gaps.push({ field: 'email', label: person.email ? 'Email needs verification' : 'Email missing', priority: 'critical' });
     if (!person.phone || person.badPhone || person.phoneMissing) gaps.push({ field: 'phone', label: person.phone ? 'Phone needs verification' : 'Phone missing', priority: 'critical' });
-    for (const [field, label] of CONTACT_CRITICAL) if (!person[field]) gaps.push({ field, label: FIX_IN_TWENTY.has(field) ? `${label} missing - set in Twenty` : `${label} missing`, priority: 'critical' });
+    for (const [field, label] of CONTACT_CRITICAL) if (!person[field]) gaps.push({ field, label: `${label} missing`, priority: 'critical', fixInTwenty: FIX_IN_TWENTY.has(field) });
     for (const [field, label] of CONTACT_USEFUL) if (!person[field]) gaps.push({ field, label: `${label} missing`, priority: 'useful' });
     if (person.tags.some((tag) => enrichmentTags.has(tag) || /enrichment[\s_-]*(required|needed)/i.test(tag))) gaps.push({ field: 'tags', label: 'Flagged in CRM', priority: 'critical' });
     if (gaps.length) items.push({ id: person.id, label: cachedPersonName(person), company: person.companyName, entity: 'person', href: `/people/${person.id}`, gaps });
@@ -218,7 +218,7 @@ export async function enrichmentQueue(user: SessionUser) {
   for (const company of companies) {
     const gaps: EnrichmentGap[] = [];
     for (const [field, label] of ACCOUNT_CRITICAL) if (company[field] === null || company[field] === '') gaps.push({ field, label: `${label} missing`, priority: 'critical' });
-    for (const [field, label] of ACCOUNT_USEFUL) if (company[field] === null || company[field] === '') gaps.push({ field, label: FIX_IN_TWENTY.has(field) ? `${label} missing - set in Twenty` : `${label} missing`, priority: 'useful' });
+    for (const [field, label] of ACCOUNT_USEFUL) if (company[field] === null || company[field] === '') gaps.push({ field, label: `${label} missing`, fixInTwenty: FIX_IN_TWENTY.has(field), priority: 'useful' });
     if (gaps.length) items.push({ id: company.id, label: company.name, company: null, entity: 'company', href: `/accounts/${company.id}`, gaps });
   }
   return items.sort((a, b) => Number(b.gaps.some((gap) => gap.priority === 'critical')) - Number(a.gaps.some((gap) => gap.priority === 'critical')) || a.label.localeCompare(b.label));

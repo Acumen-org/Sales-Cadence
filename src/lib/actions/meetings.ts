@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { personSearchWhere } from '@/lib/search-terms';
 import { peopleScopeWhere } from '@/lib/people-scope';
 import { optionLabel } from '../twenty/labels';
 import { PRODUCTS, type Product } from '../workspace';
@@ -84,7 +85,7 @@ export async function searchMeetingAttendeesAction(query: string): Promise<Atten
   const user = await requireUser();
   const q = query.trim().slice(0, 120);
   const [people, users] = await Promise.all([
-    prisma.personCache.findMany({ where: { AND: [await peopleScopeWhere(user)], ...(q ? { OR: [{ firstName: { contains: q, mode: 'insensitive' as const } }, { lastName: { contains: q, mode: 'insensitive' as const } }, { email: { contains: q, mode: 'insensitive' as const } }, { companyName: { contains: q, mode: 'insensitive' as const } }] } : {}) }, orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }], take: 20, select: { id: true, firstName: true, lastName: true, email: true, companyName: true } }),
+    prisma.personCache.findMany({ where: { AND: [await peopleScopeWhere(user), personSearchWhere(q) ?? {}] }, orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }], take: 20, select: { id: true, firstName: true, lastName: true, email: true, companyName: true } }),
     prisma.user.findMany({ where: { active: true, ...(q ? { OR: [{ name: { contains: q, mode: 'insensitive' as const } }, { email: { contains: q, mode: 'insensitive' as const } }] } : {}) }, orderBy: { name: 'asc' }, take: 20, select: { id: true, name: true, email: true } }),
   ]);
   return [...users.map((u): AttendeeOption => ({ key: `user:${u.id}`, userId: u.id, name: u.name, email: u.email, kind: 'team', detail: 'Your team' })), ...people.map((p): AttendeeOption => ({ key: `person:${p.id}`, personId: p.id, name: `${p.firstName} ${p.lastName}`.trim() || p.email, email: p.email, kind: 'contact', detail: p.companyName }))];

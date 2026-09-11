@@ -37,8 +37,9 @@ export function ActivityToolbar({ users, pods, actorId, podId, kinds, channel, q
   const availableUsers = pod ? users.filter((user) => user.podIds.includes(pod)) : users;
   const channelHref = (value: string) => {
     const params = new URLSearchParams({ from, to });
-    if (actorId) params.set('actor', actorId);
-    if (podId) params.set('pod', podId);
+    // Kept even when empty: an empty pod or actor is the reader's choice of All, not the default.
+    params.set('actor', actorId ?? '');
+    params.set('pod', podId ?? '');
     if (q) params.set('q', q);
     if (kinds.length) params.set('kind', kinds.join(','));
     if (value) params.set('channel', value);

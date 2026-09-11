@@ -201,6 +201,8 @@ model Sequence {
   name            String   @unique
   description     String?
   archived        Boolean  @default(false)
+  /// Nurture: start again this many working days after the last step, until the person answers.
+  repeatEveryDays Int?
   /// SequenceStep[] - see src/lib/sequences/steps.ts for the schema.
   steps           Json     @default("[]")
   createdAt       DateTime @default(now())
@@ -257,6 +259,8 @@ model Enrollment {
   pod               Pod?             @relation(fields: [podId], references: [id])
   campaignId        String?
   campaignRun       Int @default(1)
+  /// Which pass of a repeating (nurture) sequence this is. Each pass is its own enrollment.
+  cycle             Int               @default(1)
   campaign          Campaign?        @relation(fields: [campaignId], references: [id])
   sequenceId        String
   sequence          Sequence         @relation(fields: [sequenceId], references: [id])

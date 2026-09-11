@@ -70,6 +70,7 @@ test('a Senior FO creates a campaign with a conflict preview', async ({ page }) 
   await page.getByLabel('Name', { exact: true }).fill('E2E SaaStr follow-up');
   await page.getByLabel('Pod', { exact: true }).selectOption({ label: "Alisa's pod" });
   // Dummy Six is do-not-contact in Twenty: it must be listed as skipped, not enrolled.
+  await page.getByRole('button', { name: 'Paste person ids' }).click();
   await page.getByLabel('Twenty person ids').fill('dummy-01\ndummy-02\ndummy-03\ndummy-04\ndummy-06');
   await page.getByRole('button', { name: 'Preview conflicts' }).click();
   await expect(page.getByText(/4 will be enrolled, 1 skipped/)).toBeVisible();
@@ -88,6 +89,7 @@ test('the same person cannot be enrolled twice', async ({ page }) => {
   await page.goto('/campaigns/new');
   await page.getByLabel('Name', { exact: true }).fill('E2E duplicate check');
   // Dummy One was enrolled by the case above, so a second attempt must refuse.
+  await page.getByRole('button', { name: 'Paste person ids' }).click();
   await page.getByLabel('Twenty person ids').fill('dummy-01');
   await page.getByRole('button', { name: 'Preview conflicts' }).click();
   await expect(page.getByText(/0 will be enrolled, 1 skipped/)).toBeVisible();
@@ -148,7 +150,7 @@ test('task flow: complete an email, log a call with an outcome, skip with a boun
 
   // Person page reflects it
   await page.goto('/people?q=' + encodeURIComponent(secondPerson.split(' ')[1] ?? secondPerson));
-  await page.getByRole('link', { name: secondPerson }).click();
+  await page.getByRole('link', { name: secondPerson, exact: true }).click();
   await expect(page.getByText('Bounced').first()).toBeVisible();
   await expect(page.getByText('Email bounced').first()).toBeVisible();
   // And the address it bounced from is now work waiting in Enrichment.

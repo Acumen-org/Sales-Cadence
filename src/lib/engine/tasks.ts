@@ -1,4 +1,5 @@
 import { Prisma, type CompletionSource, type Task, type TaskState } from '@prisma/client';
+import { personalizeAction } from '../sequences/personalize';
 import { prisma, type Tx } from '../db';
 import { logAudit, type AuditActor } from '../audit';
 import { addDays, isLocalDate, localDateToInstant, todayIn, toLocalDate, type LocalDate } from '../dates';
@@ -75,7 +76,7 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
       await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${identity.sequenceId}))`;
       const e = await tx.enrollment.findUnique({
         where: { id: enrollmentId },
-        include: { fo: true, campaign: true, sequence: true, tasks: true },
+        include: { fo: true, campaign: true, sequence: true, tasks: true, person: true },
       });
       if (!e || e.status !== 'ACTIVE') return { outcome: 'inactive' as const };
       if (e.campaign && e.campaign.status !== 'ACTIVE') return { outcome: 'inactive' as const, reason: 'Campaign is not running' };
@@ -93,7 +94,21 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
       if (nextIndex >= steps.length) {
         if (!stepDone || e.tasks.some(t => t.state === 'PENDING')) return { outcome: 'waiting' as const, reason: 'Required actions are still in progress' };
         await tx.enrollment.update({ where: { id: e.id }, data: { status: 'COMPLETED', completedAt: now, shiftDays } });
-        await logAudit({ entityType: 'enrollment', entityId: e.id, action: 'completed', actor: ctx.actor, details: { steps: steps.length } }, tx);
+        await logAudit({ entityType: 'enrollment', entityId: e.id, action: 'completed', actor: ctx.actor, details: { steps: steps.length, cycle: e.cycle } }, tx);
+        const repeat = e.sequence.repeatEveryDays;
+        if (repeat && repeat > 0 && !e.person.dnd && !e.person.optedOut && !e.person.deletedAt) {
+          // Nurture: the same sequence starts again after the gap, as the next cycle of a new
+          // enrollment - the old one is finished and keeps its history. A reply, a meeting, an
+          // opt-out or a removal ends the loop like any other enrollment.
+          const restart = plannedDateForStep(today, repeat + 1, 0, rules.workingDays);
+          const next = await tx.enrollment.create({
+            data: {
+              personId: e.personId, companyId: e.companyId, foUserId: e.foUserId, podId: e.podId, campaignId: e.campaignId, campaignRun: e.campaignRun,
+              sequenceId: e.sequenceId, startDate: restart, currentStep: -1, shiftDays: 0, status: 'ACTIVE', createdById: e.createdById, cycle: e.cycle + 1,
+            },
+          });
+          await logAudit({ entityType: 'enrollment', entityId: next.id, action: 'repeated', actor: ctx.actor, details: { from: e.id, cycle: e.cycle + 1, startDate: restart, everyDays: repeat } }, tx);
+        }
         return { outcome: 'completed' as const };
       }
 
@@ -127,7 +142,7 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
             stepDay: step.day,
             actionIndex: i,
             actionId: a.id,
-            actionSnapshot: a,
+            actionSnapshot: personalizeAction(a, { person: e.person, fo: e.fo }),
             action: a.type,
             label: a.label,
             dueDate,

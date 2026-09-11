@@ -5,15 +5,15 @@ import { ACTION_LABELS, ACTION_TYPES, newStepId, StepsSchema, type ActionType, t
 import { ActionForm } from '@/components/action-form';
 import type { ActionResult } from '@/lib/actions/users';
 import { ActionIcon, IconArrowDown, IconArrowUp, IconLock, IconPlus, IconTrash } from '@/components/icons';
-import { Field } from '@/components/ui';
+import { Field, Info } from '@/components/ui';
 import { RichTextEditor } from '@/components/rich-text-editor';
 
 function blankAction(type: ActionType): StepAction { return { id: newStepId('act'), type, label: ACTION_LABELS[type], template: '', bodyHtml: '<p></p>' }; }
 function htmlOf(a: StepAction) { return a.bodyHtml ?? '<p>' + (a.template ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') + '</p>'; }
 
-export function SequenceEditor({ sequenceId, initialSteps, action, submitLabel, header, lockedSteps = {}, readOnly = false }: {
+export function SequenceEditor({ sequenceId, initialSteps, action, submitLabel, header, lockedSteps = {}, readOnly = false, repeatEveryDays = null }: {
   sequenceId?: string; initialSteps: SequenceStep[]; action: (data: FormData) => Promise<ActionResult>; submitLabel: string;
-  header?: React.ReactNode; lockedSteps?: Record<string, number>; readOnly?: boolean;
+  header?: React.ReactNode; lockedSteps?: Record<string, number>; readOnly?: boolean; repeatEveryDays?: number | null;
 }) {
   const router = useRouter();
   const [steps, setSteps] = useState(initialSteps);
@@ -58,7 +58,7 @@ export function SequenceEditor({ sequenceId, initialSteps, action, submitLabel, 
     </ol>
     {!readOnly && <><div className="flex flex-wrap items-center justify-center gap-2 rounded-xl border border-dashed border-brand-300 bg-brand-50/40 p-5"><span className="mr-2 text-sm font-medium">New touchpoint</span>{ACTION_TYPES.map(type => <button key={type} type="button" className="btn-secondary" onClick={() => append(type)}><IconPlus size={13} /><ActionIcon action={type} size={14} />{ACTION_LABELS[type]}</button>)}</div>
       {/* The bar floats over the page, so the page reserves its height rather than hiding a card behind it. */}
-      <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-end gap-4 rounded-xl border border-line bg-white p-3 shadow-lg">{validation && <p role="alert" className="mr-auto text-sm font-medium text-red-700">{validation}</p>}<span className="text-[12px] text-ink-500"><span className="font-medium text-ink-900">{steps.length}</span> {steps.length === 1 ? 'touchpoint' : 'touchpoints'} over <span className="font-medium text-ink-900">{(steps.at(-1)?.day ?? 1)}</span> business {(steps.at(-1)?.day ?? 1) === 1 ? 'day' : 'days'}</span><button type="submit" className="btn-primary" disabled={Boolean(validation)}>{submitLabel}</button></div>
+      <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-end gap-4 rounded-xl border border-line bg-white p-3 shadow-lg">{validation && <p role="alert" className="mr-auto text-sm font-medium text-red-700">{validation}</p>}<span className="text-[12px] text-ink-500"><span className="font-medium text-ink-900">{steps.length}</span> {steps.length === 1 ? 'touchpoint' : 'touchpoints'} over <span className="font-medium text-ink-900">{(steps.at(-1)?.day ?? 1)}</span> business {(steps.at(-1)?.day ?? 1) === 1 ? 'day' : 'days'}</span><label className="flex items-center gap-2 text-[12px] text-ink-500">Repeat after<input name="repeatEveryDays" type="number" min={1} max={365} defaultValue={repeatEveryDays ?? ''} disabled={readOnly} aria-label="Repeat after this many working days" className="!w-20 !py-1.5" placeholder="never" />working days<Info text="Blank: the sequence finishes after its last step. A number: it starts again that many working days after the last step, as the next round for the same people, until they reply, book a meeting or are removed. A light-touch nurture without a new campaign." /></label><button type="submit" className="btn-primary" disabled={Boolean(validation)}>{submitLabel}</button></div>
       <div aria-hidden className="h-24" /></>}
   </ActionForm>;
 }

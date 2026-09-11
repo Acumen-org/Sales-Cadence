@@ -16,22 +16,30 @@ import { isJuniorFo, canSeeAllPods } from './auth/rbac';
  * does, through the mailbox sync) is left out of People, search, the attendee picker and
  * enrichment, by login email and by the workspace's own domains.
  */
-async function teamExclusion(): Promise<Prisma.PersonCacheWhereInput[]> {
+async function teamExclusion(): Promise<Prisma.PersonCacheWhereInput> {
   const [users, settings] = await Promise.all([prisma.user.findMany({ select: { email: true } }), getSettings()]);
   const emails = users.map((u) => u.email.toLowerCase()).filter(Boolean);
-  return [
-    ...(emails.length ? [{ email: { in: emails, mode: 'insensitive' as const } }] : []),
-    ...settings.rules.internalDomains.map((domain) => ({ email: { endsWith: `@${domain}`, mode: 'insensitive' as const } })),
-  ];
+  // A person with no email is not a colleague; SQL's NOT IN would have said "unknown" and dropped them.
+  return {
+    OR: [
+      { email: null },
+      {
+        AND: [
+          ...(emails.length ? [{ email: { notIn: emails, mode: 'insensitive' as const } }] : []),
+          ...settings.rules.internalDomains.map((domain) => ({ NOT: { email: { endsWith: `@${domain}`, mode: 'insensitive' as const } } })),
+        ],
+      },
+    ],
+  };
 }
 
 export async function peopleScopeWhere(user: SessionUser): Promise<Prisma.PersonCacheWhereInput> {
   const notTeam = await teamExclusion();
-  if (canSeeAllPods(user)) return { deletedAt: null, NOT: notTeam };
+  if (canSeeAllPods(user)) return { deletedAt: null, AND: [notTeam] };
   const pods = isJuniorFo(user) || !user.podIds.length ? [] : await prisma.pod.findMany({ where: { id: { in: user.podIds } }, select: { podOwnerValue: true } });
   return {
     deletedAt: null,
-    NOT: notTeam,
+    AND: [notTeam],
     OR: [
       { ownerMemberId: user.twentyMemberId ?? '__none__' },
       { enrollments: { some: { foUserId: user.id } } },

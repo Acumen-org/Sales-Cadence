@@ -10,9 +10,9 @@ function validatedSteps(input: unknown) {
   }));
 }
 
-export async function createSequence(input: { name: string; description?: string | null; steps: unknown }, actor: AuditActor) {
+export async function createSequence(input: { name: string; description?: string | null; steps: unknown; repeatEveryDays?: number | null }, actor: AuditActor) {
   const steps = validatedSteps(input.steps);
-  const sequence = await prisma.sequence.create({ data: { name: input.name.trim(), description: input.description ?? null, steps } });
+  const sequence = await prisma.sequence.create({ data: { name: input.name.trim(), description: input.description ?? null, steps, repeatEveryDays: input.repeatEveryDays ?? null } });
   await logAudit({ entityType: 'sequence', entityId: sequence.id, action: 'created', actor, details: { steps: steps.length } });
   return { sequence };
 }
@@ -55,7 +55,7 @@ export async function saveSequenceSteps(sequenceId: string, stepsInput: unknown,
 
 export async function updateSequenceMeta(
   sequenceId: string,
-  patch: { name?: string; description?: string | null; archived?: boolean },
+  patch: { name?: string; description?: string | null; archived?: boolean; repeatEveryDays?: number | null },
   actor: AuditActor,
 ) {
   // An archived sequence is refused by campaign launch, and a scheduled campaign that hits that

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { filterParam, sectionDefaults } from '@/lib/default-filters';
 import { requireUser } from '@/lib/auth/current-user';
 import { isJuniorFo, visiblePodIds } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
@@ -18,8 +19,9 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
   const channel = ['EMAIL', 'CALL', 'LINKEDIN'].includes(sp.channel ?? '') ? sp.channel as 'EMAIL' | 'CALL' | 'LINKEDIN' : null;
   const before = sp.before?.trim() || null;
   const q = (sp.q ?? '').trim().slice(0, 200);
-  const actorId = sp.actor || null;
-  const podId = sp.pod || null;
+  const defaults = await sectionDefaults(user);
+  const actorId = filterParam(sp.actor, defaults.foUserId);
+  const podId = filterParam(sp.pod, defaults.podId);
   const today = todayIn(REPORTING_TIMEZONE);
   const range = reportingRange(sp.from, sp.to, today, 7);
   const visiblePods = visiblePodIds(user);

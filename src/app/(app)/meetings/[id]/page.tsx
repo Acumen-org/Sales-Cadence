@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { TranscriptInput } from '@/components/meetings/transcript-input';
 import { ProductTags } from '@/components/meetings/product-tags';
 import { notFound } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
@@ -96,8 +97,8 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
             <Card title="Add a transcript">
               <ActionForm action={saveTranscriptAction} className="space-y-3 p-4">
                 <input type="hidden" name="meetingId" value={meeting.id} />
-                <Field label="Paste WebVTT, SRT or plain text" info="Teams: Recording > ... > Transcript > Download. Zoom: Recordings > audio transcript. Meet: the transcript file in Drive.">
-                  <textarea name="transcript" rows={8} className="font-mono !text-[12px]" placeholder="Paste the transcript" />
+                <Field label="Transcript" info="WebVTT, SRT, Teams grouped text, a JSON export or plain text. Teams: Recording > ... > Transcript > Download. Zoom: Recordings > audio transcript. Meet: the transcript file in Drive.">
+                  <TranscriptInput name="transcript" label="Transcript" rows={8} />
                 </Field>
                 <button type="submit" className="btn-primary">
                   Save transcript

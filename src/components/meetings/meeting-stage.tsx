@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import type { MeetingProvider } from '@prisma/client';
 import { formatCueTime, parseTranscript, type TranscriptCue } from '@/lib/meetings/transcript';
@@ -29,6 +29,13 @@ export function MeetingStage(p: Props) {
   const [open, setOpen] = useState(true);
   const [q, setQ] = useState('');
   const [active, setActive] = useState<number | null>(null);
+  const [follow, setFollow] = useState(true);
+  const listRef = useRef<HTMLOListElement | null>(null);
+  // Keep the spoken line in view while the recording plays; a reader who scrolls away turns it off.
+  useEffect(() => {
+    if (!follow || active === null) return;
+    listRef.current?.querySelector<HTMLElement>(`[data-cue="${active}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [active, follow]);
   // A recording link that no longer resolves left a black rectangle and a spinner that never
   // finished, with nothing to click. Losing the media falls back to the same panel an
   // un-framable provider gets, which at least offers the source.
@@ -111,25 +118,24 @@ export function MeetingStage(p: Props) {
             Transcript
             {cues.length ? <span className="ml-2 font-normal text-ink-600"><span className="font-medium text-ink-900">{cues.length}</span> segments{format ? ` · ${format.toUpperCase()}` : ''}</span> : null}
           </span>
-          <span className="text-[12px] text-ink-500">{open ? 'Hide' : 'Show'}</span>
+          <span className="flex items-center gap-3 text-[12px] text-ink-500">{canSeek && cues.length ? <span role="button" tabIndex={0} aria-pressed={follow} onClick={(e) => { e.stopPropagation(); setFollow((v) => !v); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setFollow((v) => !v); } }} className={clsx('rounded-md px-2 py-0.5 text-[11.5px] font-medium', follow ? 'bg-brand-100 text-brand-800' : 'bg-canvas text-ink-500')}>{follow ? 'Following playback' : 'Follow playback'}</span> : null}{open ? 'Hide' : 'Show'}</span>
         </button>
 
         {open ? (
           cues.length === 0 ? (
-            <p className="border-t border-line px-4 py-6 text-center text-[13px] text-ink-400">
-              No transcript yet. Export the VTT or SRT from Teams, Zoom or Meet and paste it in Edit, or paste plain text.
-            </p>
+            <p className="border-t border-line px-4 py-6 text-center text-[13px] text-ink-400">No transcript yet</p>
           ) : (
             <div className="border-t border-line">
               <div className="relative border-b border-line px-3 py-2">
                 <IconSearch size={14} className="pointer-events-none absolute left-6 top-1/2 -translate-y-1/2 text-ink-400" />
                 <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search the transcript" aria-label="Search the transcript" className="!pl-8 !py-1.5 !text-[12.5px]" />
               </div>
-              <ol className="max-h-[420px] divide-y divide-line overflow-y-auto scroll-thin">
+              <ol ref={listRef} className="max-h-[420px] divide-y divide-line overflow-y-auto scroll-thin">
                 {filtered.map((c, i) => {
-                  const isActive = active !== null && cues[active] === c;
+                  const cueIndex = cues.indexOf(c);
+                  const isActive = active !== null && cueIndex === active;
                   return (
-                    <li key={`${c.start}-${i}`} className={clsx('flex gap-3 px-4 py-2.5 text-[13px]', isActive && 'bg-brand-50/70')}>
+                    <li key={`${c.start}-${i}`} data-cue={cueIndex} className={clsx('flex gap-3 px-4 py-2.5 text-[13px]', isActive && 'bg-brand-50/70')}>
                       {c.end !== null || c.start > 0 ? (
                         canSeek ? (
                           <button type="button" onClick={() => seek(c.start)} className="shrink-0 font-mono text-[11.5px] text-brand-700 hover:underline" title="Jump to this moment">

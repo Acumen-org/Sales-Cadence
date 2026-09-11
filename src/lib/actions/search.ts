@@ -1,6 +1,7 @@
 'use server';
 
 import { prisma } from '../db';
+import { personSearchWhere } from '@/lib/search-terms';
 import { peopleScopeWhere } from '@/lib/people-scope';
 import { campaignStatusLabel } from '@/lib/campaign-status';
 import { requireUser } from '../auth/current-user';
@@ -23,7 +24,7 @@ export async function globalSearchAction(query: string): Promise<SearchHit[]> {
   const like = { contains: q, mode: 'insensitive' as const };
   const [people, campaigns, sequences] = await Promise.all([
     prisma.personCache.findMany({
-      where: { AND: [await peopleScopeWhere(user), { OR: [{ firstName: like }, { lastName: like }, { companyName: like }, { email: like }, { jobTitle: like }] }] },
+      where: { AND: [await peopleScopeWhere(user), personSearchWhere(q) ?? {}] },
       orderBy: [{ lastName: 'asc' }],
       take: 6,
     }),

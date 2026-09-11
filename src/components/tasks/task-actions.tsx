@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import clsx from 'clsx';
 import { flushTaskDrafts } from './draft-registry';
-import { completeTaskAction, finishFromTaskAction, moveToStepAction, removeFromSequenceAction, skipTaskAction, snoozeTaskAction } from '@/lib/actions/tasks';
+import { completeTaskAction, delegateTaskAction, finishFromTaskAction, moveToStepAction, removeFromSequenceAction, skipTaskAction, snoozeTaskAction } from '@/lib/actions/tasks';
 import type { ActionResult } from '@/lib/actions/users';
 import { type ActionType } from '@/lib/sequences/steps';
 import { IconCheck, IconChevronLeft, IconChevronRight, IconClock, IconExternal, IconPhone, IconSkip } from '@/components/icons';
@@ -34,6 +34,9 @@ type Props = {
   variant?: 'full' | 'module' | 'step';
   /** Every open module of the step, so a snooze from the step row moves all of them. */
   snoozeTaskIds?: string[];
+  /** Pod-mates this touchpoint can be handed to (managers only). */
+  delegates?: { id: string; name: string }[];
+  currentFoId?: string;
 };
 
 type Panel = 'none' | 'call' | 'skip' | 'snooze' | 'more';
@@ -158,6 +161,14 @@ export function TaskActions(p: Props) {
     }
   }, [endReason, p.taskId, run]);
 
+  const [delegateTo, setDelegateTo] = useState('');
+  const submitDelegate = useCallback(() => {
+    const fd = new FormData();
+    fd.set('taskIds', (p.snoozeTaskIds?.length ? p.snoozeTaskIds : [p.taskId]).join(','));
+    fd.set('toUserId', delegateTo);
+    run(() => delegateTaskAction(fd));
+  }, [delegateTo, p.snoozeTaskIds, p.taskId, run]);
+
   const submitMove = useCallback(() => {
     const fd = new FormData();
     fd.set('taskId', p.taskId);
@@ -240,6 +251,8 @@ export function TaskActions(p: Props) {
   const secondary = clsx('btn-secondary', big && 'px-4 py-2 text-[14.5px]');
   const toggle = (x: Panel) => setPanel((v) => (v === x ? 'none' : x));
   const laterSteps = p.steps.filter((s) => s.index > p.currentStep);
+  const delegates = (p.delegates ?? []).filter((d) => d.id !== p.currentFoId);
+  const canDelegate = p.canManageEnrollment && delegates.length > 0;
 
   return (
     <div>
@@ -396,7 +409,7 @@ export function TaskActions(p: Props) {
           ) : null}
 
           {panel === 'more' ? (
-            <div className="grid gap-3 rounded-xl border border-line bg-canvas/70 p-3.5 md:grid-cols-2">
+            <div className={clsx('grid gap-3 rounded-xl border border-line bg-canvas/70 p-3.5', canDelegate ? 'md:grid-cols-3' : 'md:grid-cols-2')}>
               <form
                 className="space-y-2"
                 onSubmit={(e) => {
@@ -416,6 +429,31 @@ export function TaskActions(p: Props) {
                   End sequence
                 </button>
               </form>
+
+              {canDelegate ? (
+                <form
+                  className="space-y-2 md:border-l md:border-line md:pl-3.5"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    submitDelegate();
+                  }}
+                >
+                  <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-500">Delegate this touchpoint</p>
+                  <div className="flex overflow-hidden rounded-[10px] border border-line bg-white focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100">
+                    <select value={delegateTo} onChange={(e) => setDelegateTo(e.target.value)} aria-label="Delegate to" className="min-w-0 flex-1 !rounded-none !border-0 !bg-transparent !ring-0">
+                      <option value="">Choose a pod-mate</option>
+                      {delegates.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button type="submit" disabled={pending || !delegateTo} className="btn-secondary btn-sm !rounded-none !border-0 !border-l !border-line">
+                      Delegate
+                    </button>
+                  </div>
+                </form>
+              ) : null}
 
               {p.canManageEnrollment && laterSteps.length ? (
                 <form
