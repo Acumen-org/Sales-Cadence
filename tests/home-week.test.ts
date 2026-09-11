@@ -36,8 +36,12 @@ describe('home', () => {
     const alisa = sessionUser(b.users.alisa, [b.pods.Alisa.id]);
     const home = await buildHome(alisa, TUESDAY);
     expect(home.today).toBe('2026-09-08');
-    // Day 1 of the default sequence is one email and one LinkedIn connect, both for one person.
-    expect(home.my.overdueTotal + home.my.todayTotal).toBe(2);
+    // Day 1 of the default sequence is one email and one LinkedIn connect, both for one person:
+    // two modules on the channel strip, one touchpoint in the headline - the same unit the Tasks
+    // tabs and the sidebar badge count, so every figure on the way to the list agrees.
+    const sum = (m: Record<string, number>) => Object.values(m).reduce((a, b) => a + b, 0);
+    expect(sum(home.my.today) + sum(home.my.overdue)).toBe(2);
+    expect(home.my.overdueTotal + home.my.todayTotal).toBe(1);
     expect(home.my.peopleToReachToday + (home.my.overdueTotal ? 1 : 0)).toBeGreaterThan(0);
   });
 

@@ -100,7 +100,6 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                 <div className="p-4">
                   <KeyValue
                     items={[
-                      { k: 'Name', v: company.name },
                       { k: 'Domain', v: company.domain },
                       { k: 'Industry', v: company.industry },
                       { k: 'City', v: company.city },

@@ -45,7 +45,6 @@ export async function buildHome(user: SessionUser, now = new Date()) {
   const byChannel = mine;
   const peopleToReachToday = mine.peopleToday;
 
-  const total = (m: Record<TaskChannel, number>) => Object.values(m).reduce((a, b) => a + b, 0);
 
   return {
     today,
@@ -54,8 +53,8 @@ export async function buildHome(user: SessionUser, now = new Date()) {
       today: byChannel.today,
       overdue: byChannel.overdue,
       upcoming: byChannel.upcoming,
-      todayTotal: total(byChannel.today),
-      overdueTotal: total(byChannel.overdue),
+      todayTotal: mine.todayGroups,
+      overdueTotal: mine.overdueGroups,
       peopleToReachToday,
       accounts: ownership.accounts,
       relationships: ownership.relationships,
@@ -84,23 +83,31 @@ function channelOfAction(action: string): TaskChannel {
 async function myOpenTasks(base: Prisma.TaskWhereInput, today: LocalDate) {
   const rows = await prisma.task.findMany({
     where: { AND: [base, WORKABLE, { state: 'PENDING' }] },
-    select: { id: true, action: true, label: true, dueDate: true, snoozedTo: true, enrollment: { select: { personId: true, person: { select: { firstName: true, lastName: true, companyName: true } } } } },
+    select: { id: true, action: true, label: true, dueDate: true, snoozedTo: true, enrollmentId: true, stepId: true, enrollment: { select: { personId: true, person: { select: { firstName: true, lastName: true, companyName: true } } } } },
   });
   const todayC = emptyChannels();
   const overdueC = emptyChannels();
   const upcomingC = emptyChannels();
   const peopleToday = new Set<string>();
+  // The per-channel strip counts modules; the headline, the Tasks tabs and the sidebar badge all
+  // count touchpoints (a step of one enrollment), so an email + LinkedIn step is one, not two.
+  const todayGroups = new Set<string>();
+  const overdueGroups = new Set<string>();
   for (const r of rows) {
     const due = r.snoozedTo ?? r.dueDate;
     const ch = channelOfAction(r.action);
+    const group = `${r.enrollmentId}:${r.stepId}`;
     if (due === today) {
       todayC[ch] += 1;
+      todayGroups.add(group);
       peopleToday.add(r.enrollment.personId);
-    } else if (due < today) overdueC[ch] += 1;
-    else upcomingC[ch] += 1;
+    } else if (due < today) {
+      overdueC[ch] += 1;
+      overdueGroups.add(group);
+    } else upcomingC[ch] += 1;
   }
   const nextTasks = rows.sort((a, b) => (a.snoozedTo ?? a.dueDate).localeCompare(b.snoozedTo ?? b.dueDate) || a.id.localeCompare(b.id)).slice(0, 3).map((r) => ({ id: r.id, action: r.action, label: r.label, due: r.snoozedTo ?? r.dueDate, name: [r.enrollment.person.firstName, r.enrollment.person.lastName].filter(Boolean).join(' ') || 'Unnamed person', company: r.enrollment.person.companyName }));
-  return { today: todayC, overdue: overdueC, upcoming: upcomingC, peopleToday: peopleToday.size, nextTasks };
+  return { today: todayC, overdue: overdueC, upcoming: upcomingC, todayGroups: todayGroups.size, overdueGroups: overdueGroups.size, peopleToday: peopleToday.size, nextTasks };
 }
 
 /**

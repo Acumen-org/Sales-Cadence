@@ -265,7 +265,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                   <div className="p-4">
                     <KeyValue
                       items={[
-                        { k: 'Assigned to', v: ownerName },
+                        { k: 'Owner', v: ownerName },
                         { k: 'Pod', v: podName },
                         { k: 'Rotated', v: person.rotatedTo ? `${optionLabel(person.rotatedTo)}${person.rotationChangedAt ? ` on ${formatInstant(person.rotationChangedAt, user.timezone)}` : ''}` : null },
                         { k: 'Added by', v: person.createdByName ? `${person.createdByName}${person.createdBySource ? ` (${optionLabel(person.createdBySource)})` : ''}` : null },

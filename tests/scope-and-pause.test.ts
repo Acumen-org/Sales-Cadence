@@ -100,13 +100,13 @@ describe('reading scope and a paused campaign', () => {
     // Held, not cancelled: the touch is still there and still pending.
     expect((await prisma.task.findUniqueOrThrow({ where: { id: task.id } })).state).toBe('PENDING');
 
-    // Every figure has to agree with the list, or a badge sends the FO to an empty screen. Home
-    // counts touches and the list counts steps, so the check is that Home lost exactly the touches
-    // that were held - not that the two numbers are equal.
-    const heldTouches = await prisma.task.count({ where: { enrollmentId: enrollment.id, state: 'PENDING' } });
-    expect(heldTouches).toBeGreaterThan(0);
-    expect(homeBefore.my.todayTotal + homeBefore.my.overdueTotal - (homeDuring.my.todayTotal + homeDuring.my.overdueTotal)).toBe(heldTouches);
-    expect(during.held).toBe(1);
+    // Every figure has to agree with the list, or a badge sends the FO to an empty screen. Home,
+    // the Tasks tabs and the sidebar badge all count touchpoints (a step of one enrollment), so
+    // Home lost exactly the touchpoints that were held.
+    const heldTouchpoints = new Set((await prisma.task.findMany({ where: { enrollmentId: enrollment.id, state: 'PENDING' }, select: { stepId: true } })).map((t) => t.stepId)).size;
+    expect(heldTouchpoints).toBeGreaterThan(0);
+    expect(homeBefore.my.todayTotal + homeBefore.my.overdueTotal - (homeDuring.my.todayTotal + homeDuring.my.overdueTotal)).toBe(heldTouchpoints);
+    expect(during.held).toBe(heldTouchpoints);
 
     // Resuming one person inside a campaign that is itself paused must refuse and say why, not
     // report success and leave their work held.

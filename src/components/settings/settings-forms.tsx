@@ -20,13 +20,13 @@ function Check({ name, label, checked, info }: { name: string; label: string; ch
   );
 }
 
-export function TwentyConnectionForm({ twenty, defaultSchemaJson }: { twenty: Settings['twenty']; defaultSchemaJson: string }) {
+export function TwentyConnectionForm({ twenty, envBaseUrl, defaultSchemaJson }: { twenty: Settings['twenty']; envBaseUrl?: string; defaultSchemaJson: string }) {
   return (
     <Card title="Connection and schema mapping">
       <ActionForm action={saveTwentySettingsAction} className="space-y-4 p-4">
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="Twenty base URL" info="No trailing slash. Also used for the Open in Twenty links.">
-            <input name="baseUrl" defaultValue={twenty.baseUrl ?? ''} className="w-full" placeholder="https://twenty.example.com" />
+            <input name="baseUrl" defaultValue={twenty.baseUrl ?? ''} className="w-full" placeholder={envBaseUrl ? `${envBaseUrl} (from the environment)` : 'https://twenty.example.com'} />
           </Field>
           <Field label="API key" info="Blank keeps the stored key. A key here overrides TWENTY_API_KEY from the environment.">
             <input name="apiKey" type="password" autoComplete="off" className="w-full" placeholder={twenty.apiKey ? '(unchanged)' : ''} />

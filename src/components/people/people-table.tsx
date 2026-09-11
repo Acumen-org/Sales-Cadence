@@ -172,7 +172,7 @@ export function PeopleTable({ rows, canEnroll }: Props) {
                 <td>{p.activity.length ? <DotTimeline points={p.activity} width={130} /> : <Empty />}</td>
                 <td className="whitespace-nowrap text-[12.5px]">
                   {p.podName ?? <span className="text-ink-300">-</span>}
-                  {p.enrollment?.foName ? <div className="text-[11px] text-ink-500">{p.enrollment.foName}</div> : null}
+                  {p.enrollment?.foName ? <div className="text-[11px] text-ink-500"><span className="text-ink-400">FO</span> {p.enrollment.foName}</div> : null}
                 </td>
                 <td className="text-[12px]">
                   {p.lastTouch ? (

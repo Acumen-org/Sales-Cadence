@@ -34,7 +34,8 @@ export async function retryFailedWrites(opts: { now?: Date; limit?: number; ids?
   try {
     client = await getTwentyClient();
   } catch (err) {
-    await postpone(rows, err, now);
+    // Nothing was claimed yet: only rows still FAILED are postponed, never one another process holds.
+    await postpone(rows, err, now, ['FAILED']);
     return { retried: rows.length, succeeded: 0, errors: [messageOf(err)] };
   }
   let succeeded = 0;
@@ -52,8 +53,8 @@ export async function retryFailedWrites(opts: { now?: Date; limit?: number; ids?
     try {
       const twentyId = await replay(client, row);
       // Conditioned on the claim: a Discard made while this replay ran stands.
-      await prisma.twentyWrite.updateMany({ where: { id: row.id, status: 'RETRYING' }, data: { status: 'OK', error: null, twentyId: twentyId ?? row.twentyId, nextAttemptAt: null, attempts: { increment: 1 } } });
-      succeeded += 1;
+      const done = await prisma.twentyWrite.updateMany({ where: { id: row.id, status: 'RETRYING' }, data: { status: 'OK', error: null, twentyId: twentyId ?? row.twentyId, nextAttemptAt: null, attempts: { increment: 1 } } });
+      if (done.count) succeeded += 1;
     } catch (err) {
       errors.push(messageOf(err));
       await postpone([row], err, now);
@@ -104,9 +105,9 @@ function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-async function postpone(rows: TwentyWrite[], err: unknown, now: Date) {
+async function postpone(rows: TwentyWrite[], err: unknown, now: Date, statuses: string[] = ['FAILED', 'RETRYING']) {
   const error = messageOf(err);
   for (const row of rows) {
-    await prisma.twentyWrite.updateMany({ where: { id: row.id, status: { in: ['FAILED', 'RETRYING'] } }, data: { status: 'FAILED', attempts: { increment: 1 }, error, nextAttemptAt: new Date(now.getTime() + retryDelayMs(row.attempts + 1)) } });
+    await prisma.twentyWrite.updateMany({ where: { id: row.id, status: { in: statuses } }, data: { status: 'FAILED', attempts: { increment: 1 }, error, nextAttemptAt: new Date(now.getTime() + retryDelayMs(row.attempts + 1)) } });
   }
 }

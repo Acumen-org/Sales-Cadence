@@ -64,7 +64,7 @@ export default async function HomePage() {
         <Tile
           label="To reach today"
           value={h.my.peopleToReachToday}
-          hint={h.my.overdueTotal ? <><N tone="warn">{h.my.overdueTotal}</N> overdue {h.my.overdueTotal === 1 ? 'task' : 'tasks'}</> : <><N>{h.my.todayTotal}</N> scheduled {h.my.todayTotal === 1 ? 'touch' : 'touches'}</>}
+          hint={h.my.overdueTotal ? <><N tone="warn">{h.my.overdueTotal}</N> overdue {h.my.overdueTotal === 1 ? 'touchpoint' : 'touchpoints'}</> : <><N>{h.my.todayTotal}</N> scheduled {h.my.todayTotal === 1 ? 'touchpoint' : 'touchpoints'}</>}
           href={`/tasks?tab=today&mode=flow&${mine}`}
           icon={<IconPeople size={17} />}
           tone={h.my.overdueTotal ? 'warn' : undefined}
@@ -82,7 +82,7 @@ export default async function HomePage() {
               <p className="mb-3 flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-[#d5e9ad]"><IconBolt size={12} /> {h.my.overdueTotal ? 'Overdue first' : h.my.todayTotal ? 'Due today' : 'Nothing due'}</p>
               <h2 className="flex items-baseline gap-3 text-[25px] font-medium leading-[1.25] tracking-[-0.035em]">
                 <span className="text-[46px] font-semibold leading-none tracking-[-0.04em]">{h.my.overdueTotal || h.my.todayTotal || h.my.peopleToReachToday}</span>
-                <span>{h.my.overdueTotal ? `overdue ${h.my.overdueTotal === 1 ? 'touch' : 'touches'}` : h.my.todayTotal ? `${h.my.todayTotal === 1 ? 'touch' : 'touches'} due today` : 'due today'}</span>
+                <span>{h.my.overdueTotal ? `overdue ${h.my.overdueTotal === 1 ? 'touchpoint' : 'touchpoints'}` : h.my.todayTotal ? `${h.my.todayTotal === 1 ? 'touchpoint' : 'touchpoints'} due today` : 'due today'}</span>
               </h2>
               <p className="mb-5 mt-3 text-[12px] text-[#c1d4ca]">
                 {h.my.overdueTotal && h.my.todayTotal ? <><span className="font-medium text-white">{h.my.todayTotal}</span> more due today across <span className="font-medium text-white">{h.my.peopleToReachToday}</span> {h.my.peopleToReachToday === 1 ? 'person' : 'people'}</> : null}
@@ -98,7 +98,7 @@ export default async function HomePage() {
           </Link>)}</div>
         </Surface>
         <Surface flush>
-          <div className="flex items-center justify-between border-b border-line px-5 py-4"><h2 className="text-[14px] font-semibold">Up next</h2><Link href={`/tasks?tab=${focusTab}&${mine}`} className="text-[11px] font-medium text-brand-700">{h.my.todayTotal + h.my.overdueTotal ? <>View all <N>{h.my.todayTotal + h.my.overdueTotal}</N></> : 'Open tasks'} <span aria-hidden>↗</span></Link></div>
+          <div className="flex items-center justify-between border-b border-line px-5 py-4"><h2 className="text-[14px] font-semibold">Up next</h2><Link href={`/tasks?tab=${focusTab}&${mine}`} className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-700">{h.my.todayTotal + h.my.overdueTotal ? <>View all <N>{h.my.todayTotal + h.my.overdueTotal}</N></> : 'Open tasks'} <IconChevronRight size={12} /></Link></div>
           {h.my.nextTasks.length ? <div className="divide-y divide-line/70">{h.my.nextTasks.map((task) => <Link key={task.id} href={`/tasks?task=${task.id}&mode=flow&tab=${task.due < h.today ? 'overdue' : task.due === h.today ? 'today' : 'upcoming'}&${mine}`} className="flex items-center gap-3 px-5 py-4 transition hover:bg-brand-50/50">
             <Avatar name={task.name} shape="circle" size={34} /><span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-medium">{task.name}</span><span className="mt-0.5 block truncate text-[10px] text-ink-500">{task.company ?? task.label}</span></span><span className="text-right"><span className={`block text-[10px] ${task.due < h.today ? 'text-amber-700' : 'text-ink-500'}`}>{task.due < h.today ? 'Overdue' : task.due === h.today ? 'Today' : formatLocalDate(task.due)}</span><span className="mt-1.5 flex justify-end text-ink-400"><ActionIcon action={task.action} size={13} /></span></span>
           </Link>)}</div> : <EmptyState icon={<IconCheck size={20} />} title="Nothing scheduled" />}

@@ -145,7 +145,7 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
           />
         </div>
       </Card>
-      <TwentyConnectionForm twenty={settings.twenty} defaultSchemaJson={JSON.stringify(schema, null, 2)} />
+      <TwentyConnectionForm twenty={settings.twenty} envBaseUrl={env().TWENTY_API_URL} defaultSchemaJson={JSON.stringify(schema, null, 2)} />
       <AdminTools defaultDays={settings.rules.reconcileLookbackDays} />
     </div>
   );

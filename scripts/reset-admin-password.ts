@@ -7,7 +7,7 @@ import { hashPassword, validatePasswordStrength } from '../src/lib/auth/password
  *
  * Passwords are otherwise changed from Settings by an admin; this is the way back in when the
  * only admin has lost theirs. It works for any account, revokes that account's sessions, and
- * prints nothing but the outcome. Nothing else changes.
+ * prints nothing but the outcome. Nothing else changes - a removed account stays removed.
  */
 async function main() {
   const [email, password] = process.argv.slice(2);
@@ -26,7 +26,7 @@ async function main() {
     process.exit(1);
   }
   await prisma.$transaction([
-    prisma.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(password), active: true } }),
+    prisma.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(password) } }),
     prisma.session.deleteMany({ where: { userId: user.id } }),
   ]);
   console.log(`password set for ${user.email}; their sessions were signed out`);
