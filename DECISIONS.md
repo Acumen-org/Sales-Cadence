@@ -421,3 +421,50 @@ contact", so repeating it in the warnings line was noise.
 
 - **Every write Cadence makes to Twenty is a `TwentyWrite` row; one that fails stays as `FAILED` with its exact payload.** The worker replays failed rows once their backoff has passed (a minute, doubling, never more than six hours apart) and Settings > Activity log lists them with "Retry now" and "Retry all now". A note or mirrored task that finally lands stores its Twenty id on the Cadence task exactly as the first attempt would have, so an outage delays the CRM record but does not lose it.
 - **A production deployment refuses unsigned webhooks.** With neither `TWENTY_WEBHOOK_SECRET` nor `CADENCE_WEBHOOK_TOKEN` set, the endpoint answers 401 unless `CADENCE_WEBHOOK_OPEN=1` says that is intended - the same fail-loud rule as mock mode.
+
+## Roles, scope and the people list (round 8)
+
+- **Pod Manager is a Sales Leader for one pod; Biz Ops is a reader.** Both were asked for as "full
+  writes except admin" and "full view except admin". Writes stay pod-scoped (canManagePod), so a Pod
+  Manager approves and runs campaigns in their own pods only. Biz Ops is the first role that reads
+  every pod without writing to any, which is why the scope helpers now ask `canSeeAllPods` and the
+  write gates still ask `isAdmin`: reading is not the same test as being an admin.
+- **Pods are mandatory for the roles that do sales work.** An FO or leader without a pod sees an empty
+  workspace and an unexplained one; the form refuses to create the situation.
+- **Team members are not contacts.** Twenty holds colleagues as people (the mailbox sync creates
+  them). They are excluded from People, search, the attendee picker and enrichment by login email
+  and by the workspace's own domains, in one place (`people-scope.ts`).
+- **Sections open on the reader's pod.** A junior also opens on their own name. "All" is an explicit
+  choice, kept in the URL as an empty value, so it survives the next click; an absent parameter means
+  the default. One helper (`default-filters.ts`) decides, every section reads it.
+
+## Nurture, tokens, delegation (round 8)
+
+- **A repeating sequence is a new enrollment per round, not a rewound one.** Rewinding would have
+  meant a `cycle` on every task and every grouping in the app. A finished round is COMPLETED and
+  keeps its history; the next round is a fresh enrollment (cycle n+1) starting N working days after
+  the last step, under the same campaign and FO. Every exit still ends the loop: reply, meeting,
+  opt-out, removal, campaign stop.
+- **Tokens are filled at task creation, with fallbacks.** The earlier rule (no variables at all) was
+  there to stop "Hi ," reaching a prospect. Tokens with fallbacks ("there", "your firm") keep that
+  guarantee and give the author back the convenience; the task stores the resolved copy, so nothing
+  downstream knows tokens exist.
+- **Delegation is one touchpoint, not the enrollment.** "Please do this one for me" is the common case
+  and reassigning the whole enrollment already existed. The mirrored Twenty task is closed and
+  re-created for the new owner rather than edited, because Twenty's task assignee is not a field
+  Cadence writes.
+- **Enrolling another pod's person is refused by name.** Pods follow Twenty; moving a person is a
+  change to make there.
+
+## Sync that says how it is doing (round 8)
+
+- **One bad record no longer stops the sync.** The live workspace showed a handful of contacts and
+  three accounts because the first refresh aborted on one record and nobody could see why. Each
+  record is cached on its own; failures are counted and shown in Settings > Twenty with the first
+  reason, beside a Sync now button.
+- **Deletions are fetched on purpose.** Twenty does not bump `updatedAt` on a soft delete, so an
+  update scan never saw them. Reconcile and refresh also ask for what was deleted since the
+  watermark.
+- **Transcripts keep the dialogue only.** A JSON export carries ids, confidences and offsets; the
+  parser reduces any array-of-utterances shape to who said what, when, and merges a speaker's
+  consecutive lines. Whole-number offsets with any at 1000 or more are milliseconds.

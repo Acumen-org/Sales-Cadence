@@ -208,6 +208,24 @@ Use this phase to:
 
 Rescanning is always safe: `pnpm reconcile 7` replays the last 7 days through the same pipeline.
 
+## 7b. When contacts, emails or notes do not appear
+
+**Settings > Twenty > Status** is the first stop: *Continuous sync* says healthy or failing with
+the error, *Cached* counts what is here, *Could not cache* names the first record Twenty returned
+that this side refused, and *Last reconcile* says how many notes, messages, opportunities and tasks
+the last pass saw. **Sync now** runs the same pass the worker runs every minute.
+
+- **Few contacts or accounts** - look at *Could not cache*; fix the record or the mapping it names,
+  then Sync now. A full refresh is under Maintenance.
+- **Deleted in Twenty, still here** - deletions are fetched on their own pass since the last
+  watermark; a Sync now brings them across. A `person.deleted` webhook does it instantly.
+- **No emails, no notes, nothing auto-completes** - *Last reconcile* shows 0 messages / 0 notes.
+  Check the API key can read `message`, `messageParticipant`, `note` and `noteTarget`; check the
+  webhook in Twenty is registered for those objects (section 2); run `pnpm verify:schema` for the
+  field names. Auto-completion needs the FO's outbound email to be visible to the key.
+- **"Dry run" in the Status card** - `CADENCE_DRY_RUN=true` in `.env`. Nothing is written to Twenty
+  while it is on. Set it to `false` and restart.
+
 ## 8. Pilot with one pod
 
 Turn dry run off (`CADENCE_DRY_RUN=false`), remove `demo` from `SEED_PROFILE`, restart, and enrol one pod's people. Watch for a week:

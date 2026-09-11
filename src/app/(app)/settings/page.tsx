@@ -123,7 +123,7 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
     prisma.personCache.count({ where: { deletedAt: null } }),
     prisma.companyCache.count({ where: { deletedAt: null } }),
   ]);
-  const last = lastReconcile?.value as { at?: string; stats?: { cacheFailed?: number; cacheError?: string | null } } | null;
+  const last = lastReconcile?.value as { at?: string; stats?: { cacheFailed?: number; cacheError?: string | null; notes?: number; messages?: number; opportunities?: number; tasks?: number; people?: number } } | null;
   const sync = continuous?.value as { lastSuccess?: string | null; lastError?: string | null; attemptedAt?: string | null; watermark?: string | null } | null;
   const baseUrl = settings.twenty.baseUrl || env().TWENTY_API_URL || '';
   return (
@@ -159,7 +159,7 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
                     ? <Badge tone="green">Shared token</Badge>
                     : <Badge tone="amber">Not configured</Badge>,
               },
-              { k: 'Last reconcile', v: last?.at ? formatInstant(new Date(last.at), WORKSPACE_TIMEZONE) : null },
+              { k: 'Last reconcile', v: last?.at ? <span className="flex flex-wrap items-center gap-3"><span>{formatInstant(new Date(last.at), WORKSPACE_TIMEZONE)}</span>{last.stats ? <span className="flex flex-wrap gap-3 text-[12px] text-ink-500"><span><Count value={last.stats.people ?? 0} /> people</span><span><Count value={last.stats.notes ?? 0} /> notes</span><span><Count value={last.stats.messages ?? 0} /> messages</span><span><Count value={last.stats.opportunities ?? 0} /> opportunities</span><span><Count value={last.stats.tasks ?? 0} /> tasks</span></span> : null}</span> : null },
             ]}
           />
         </div>

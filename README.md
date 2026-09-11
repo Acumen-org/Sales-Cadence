@@ -157,18 +157,47 @@ The project review and its verification scope are recorded in [AUDIT.md](AUDIT.m
 
 ## Roles
 
-| | Admin | Sales Leader | Senior FO | Junior FO |
-|---|---|---|---|---|
-| Own tasks: complete, skip with reason, snooze | yes | yes | yes | yes (snooze to next working day only) |
-| Pod tasks, pod filters | all pods | own pods | own pods | no |
-| Enrol, bulk-enrol, pause, exit, reassign within pod | all pods | own pods | own pods | no |
-| Campaigns | all | own pods, approves re-enrolment | own pods | read own pod's |
-| Reports | all | own pods | own pods | no |
-| Sequences (edit the plan) | yes | yes | yes | view |
-| Settings, users, pods | yes | no | no | no |
-| People, Accounts, Meetings, Activity | all | own pods | own pods | own work |
+| | Admin | Sales Leader / Pod Manager | Senior FO | Junior FO | Biz Ops |
+|---|---|---|---|---|---|
+| Own tasks: complete, skip with reason, snooze | yes | yes | yes | yes (snooze to next working day only) | no |
+| Pod tasks, pod filters | all pods | own pods | own pods | no | all pods, read only |
+| Enrol, bulk-enrol, pause, exit, reassign, delegate within pod | all pods | own pods | own pods | no | no |
+| Campaigns | all | own pods, approves re-enrolment | own pods | read own pod's | read all |
+| Reports | all | own pods | own pods | no | all pods |
+| Sequences (edit the plan) | yes | yes | yes | view | view |
+| Settings, users, pods | yes | no | no | no | no |
+| People, Accounts, Meetings, Activity | all | own pods | own pods | own work | all pods |
 
 Settings is the only admin-only section: it is hidden from the sidebar and refuses direct URLs for anyone else.
+
+Every sales role belongs to at least one pod (the form insists); Biz Ops and Admin need none. Team
+members are never listed as contacts, even when Twenty holds them as people.
+
+**What a section opens on.** A junior opens Tasks, Activity and Reports on their pod and their own
+name; anyone who leads a pod opens their pod; admins and Biz Ops open everything. Choosing "All"
+in a filter is remembered in the URL for that visit, so it does not snap back on the next click.
+
+## Sequences that repeat, copy that fills itself in, and handing a touch to a colleague
+
+- **Nurture.** A sequence can *repeat after N working days*. When its last step is worked, the same
+  people start again N working days later as the next round of the same campaign, until they reply,
+  book a meeting, ask not to be contacted or are removed. Build one sequence ("Check in every three
+  weeks"), add people through a campaign, and the follow-up runs itself.
+- **Copy tokens.** Module copy may say `{{firstName}}`, `{{lastName}}`, `{{fullName}}`,
+  `{{company}}`, `{{jobTitle}}`, `{{city}}`, `{{foFirstName}}` or `{{foName}}`. They are filled in
+  for the person when the task is created ("there" and "your firm" stand in for a blank record), so
+  the FO reads a finished message and never a token.
+- **Delegate.** A pod leader or manager can hand one touchpoint - every open module of it - to a
+  pod-mate from the task's *More* panel. The enrollment keeps its FO; the mirrored Twenty task
+  moves with the touchpoint.
+- **Picking people for a campaign.** *Pick from People* on the campaign form is the directory with
+  its filters (pod, FO, product interest, tier, type, sequence state, search) and tick boxes; the
+  ids travel the same way pasted ids always did.
+- **Filters and search.** People and Accounts filter by pod, FO and product interest and sort;
+  search matches every word you type across name, company, email, phone, title and city.
+- **Transcripts.** WebVTT, SRT, Teams' grouped text, a JSON export (Teams, Zoom and the like) or
+  plain text, pasted or uploaded as a file. Only the dialogue is kept, and the transcript follows
+  the recording when it plays here.
 
 ## Layout
 
