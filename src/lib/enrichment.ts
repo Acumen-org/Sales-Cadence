@@ -43,7 +43,7 @@ export const ENRICHMENT_FIELDS: Record<EnrichmentEntity, EnrichmentField[]> = {
  * better aimed with it.
  */
 const CONTACT_CRITICAL = [
-  ['companyId', 'Company'],
+  ['companyId', 'Company not linked'],
   ['linkedinUrl', 'LinkedIn'],
 ] as const;
 /**
@@ -63,7 +63,7 @@ const ACCOUNT_USEFUL = [
   ['industry', 'Industry'],
   ['employees', 'Employees'],
   ['aum', 'AUM'],
-  ['ownerMemberId', 'Account owner'],
+  ['ownerMemberId', 'Account owner not assigned'],
 ] as const;
 
 export const canEnrich = (user: SessionUser) => isAdmin(user) || isPodLeader(user);
@@ -210,7 +210,7 @@ export async function enrichmentQueue(user: SessionUser) {
     if (!person.firstName?.trim() || !person.lastName?.trim()) gaps.push({ field: 'name', label: 'Name incomplete', priority: 'critical', fixInTwenty: true });
     if (!person.email || person.badEmail || person.emailMissing) gaps.push({ field: 'email', label: person.email ? 'Email needs verification' : 'Email missing', priority: 'critical' });
     if (!person.phone || person.badPhone || person.phoneMissing) gaps.push({ field: 'phone', label: person.phone ? 'Phone needs verification' : 'Phone missing', priority: 'critical' });
-    for (const [field, label] of CONTACT_CRITICAL) if (!person[field]) gaps.push({ field, label: `${label} missing`, priority: 'critical', fixInTwenty: FIX_IN_TWENTY.has(field) });
+    for (const [field, label] of CONTACT_CRITICAL) if (!person[field]) gaps.push({ field, label: FIX_IN_TWENTY.has(field) ? label : `${label} missing`, priority: 'critical', fixInTwenty: FIX_IN_TWENTY.has(field) });
     for (const [field, label] of CONTACT_USEFUL) if (!person[field]) gaps.push({ field, label: `${label} missing`, priority: 'useful' });
     if (person.tags.some((tag) => enrichmentTags.has(tag) || /enrichment[\s_-]*(required|needed)/i.test(tag))) gaps.push({ field: 'tags', label: 'Flagged in CRM', priority: 'critical' });
     if (gaps.length) items.push({ id: person.id, label: cachedPersonName(person), company: person.companyName, entity: 'person', href: `/people/${person.id}`, gaps });
@@ -218,7 +218,7 @@ export async function enrichmentQueue(user: SessionUser) {
   for (const company of companies) {
     const gaps: EnrichmentGap[] = [];
     for (const [field, label] of ACCOUNT_CRITICAL) if (company[field] === null || company[field] === '') gaps.push({ field, label: `${label} missing`, priority: 'critical' });
-    for (const [field, label] of ACCOUNT_USEFUL) if (company[field] === null || company[field] === '') gaps.push({ field, label: `${label} missing`, fixInTwenty: FIX_IN_TWENTY.has(field), priority: 'useful' });
+    for (const [field, label] of ACCOUNT_USEFUL) if (company[field] === null || company[field] === '') gaps.push({ field, label: FIX_IN_TWENTY.has(field) ? label : `${label} missing`, fixInTwenty: FIX_IN_TWENTY.has(field), priority: 'useful' });
     if (gaps.length) items.push({ id: company.id, label: company.name, company: null, entity: 'company', href: `/accounts/${company.id}`, gaps });
   }
   return items.sort((a, b) => Number(b.gaps.some((gap) => gap.priority === 'critical')) - Number(a.gaps.some((gap) => gap.priority === 'critical')) || a.label.localeCompare(b.label));

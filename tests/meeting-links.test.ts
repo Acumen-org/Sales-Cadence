@@ -10,31 +10,36 @@ describe('parseMeetingLink', () => {
     expect(r.note).toBeNull();
   });
 
-  it('frames a SharePoint recording, where Teams recordings land', () => {
-    const r = parseMeetingLink('https://acme.sharepoint.com/sites/rec/Shared%20Documents/call.mp4x');
+  it('frames the embed player SharePoint hands out, where Teams recordings land', () => {
+    const r = parseMeetingLink('https://acme.sharepoint.com/sites/rec/_layouts/15/embed.aspx?UniqueId=7f3a&embed=%7B%22af%22%3Atrue%7D');
     expect(r.provider).toBe('SHAREPOINT');
-    expect(r.embedUrl).toContain('embed=true');
-    expect(r.embedUrl).toContain('nav=false');
+    expect(r.embedUrl).toContain('/_layouts/15/embed.aspx');
+    expect(r.embedUrl).toContain('UniqueId=7f3a');
     expect(r.isJoinLink).toBe(false);
+    const stream = parseMeetingLink('https://web.microsoftstream.com/video/0a1b-2c3d');
+    expect(stream.embedUrl).toBe('https://web.microsoftstream.com/embed/video/0a1b-2c3d?autoplay=false');
   });
 
-  it('uses the provider player for a SharePoint or Drive link that ends in .mp4', () => {
-    // These need the viewer's Microsoft or Google session; a <video> element would just break.
-    const sp = parseMeetingLink('https://acme.sharepoint.com/sites/rec/Shared%20Documents/call.mp4');
-    expect(sp.provider).toBe('SHAREPOINT');
-    expect(sp.mediaUrl).toBeNull();
-    expect(sp.embedUrl).toContain('embed=true');
+  it('links out for a SharePoint sharing link, which refuses to be framed, and says what to paste', () => {
+    // The live workspace pasted a "/:v:/s/" sharing link and the frame read "refused to connect".
+    for (const link of [
+      'https://glynac.sharepoint.com/:v:/s/Sales/EaBcDeFgHiJkLmNoP?e=4%3Axyz',
+      'https://acme.sharepoint.com/sites/rec/Shared%20Documents/call.mp4',
+      'https://acme-my.sharepoint.com/personal/x_acme_com/_layouts/15/stream.aspx?id=%2Fpersonal%2Fcall.mp4',
+    ]) {
+      const r = parseMeetingLink(link);
+      expect(r.provider).toBe('SHAREPOINT');
+      expect(r.embedUrl).toBeNull();
+      expect(r.mediaUrl).toBeNull(); // needs the viewer's Microsoft session; a <video> element would just break
+      expect(r.isJoinLink).toBe(false);
+      expect(r.note).toMatch(/Share > Embed/);
+    }
     const drive = parseMeetingLink('https://drive.google.com/file/d/abc/view/recording.mp4');
     expect(drive.provider).toBe('DRIVE');
     expect(drive.mediaUrl).toBeNull();
     const zoom = parseMeetingLink('https://acme.zoom.us/rec/download/thing.mp4');
     expect(zoom.provider).toBe('ZOOM');
     expect(zoom.mediaUrl).toBeNull();
-  });
-
-  it('does not add embed=true twice', () => {
-    const r = parseMeetingLink('https://acme.sharepoint.com/x/y?embed=true');
-    expect(r.embedUrl!.match(/embed=true/g)).toHaveLength(1);
   });
 
   it('turns a Drive share link into a preview embed', () => {

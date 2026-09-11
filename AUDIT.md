@@ -145,11 +145,11 @@ Each of the 21 points from the owner's review, where it lives in the code, and t
 | 3 | Keep non-campaign people in check | Met | a sequence that repeats: `Sequence.repeatEveryDays`, next round in `src/lib/engine/tasks.ts` |
 | 4 | Delegate a task to a team member | Met | `src/lib/engine/delegate.ts`, More panel in `task-actions.tsx` |
 | 5 | Filters already on for the reader; pod mandatory | Met | `src/lib/default-filters.ts`, `defaultFilters` in rbac; `needsPod` in `actions/users.ts` |
-| 6 | Accounts showed three companies | Addressed | one bad record no longer aborts the sync; Settings > Twenty shows what could not be cached (`person-cache.ts`, `settings/page.tsx`) |
+| 6 | Accounts showed three companies | Addressed (11 Sep, second pass) | the sync was all-or-nothing and froze on its first failure; every stage is now independent, pages are Twenty's 60, Settings > Twenty shows Twenty's counts beside the cache with the shortfall in red, and `pnpm sync:diagnose` names the failing listing (`continuous-sync.ts`, `person-cache.ts`, `engine/reconcile.ts`, `scripts/sync-diagnose.ts`) |
 | 7 | Filters and sorting on Accounts and People | Met | `accounts-query.ts`, `accounts-toolbar.tsx`, `people-toolbar.tsx` |
-| 8 | Meetings visible to the team; SharePoint; transcripts in every format, uploadable, following playback | Met | `meetings-query.ts`, `meeting-stage.tsx`, `transcript.ts`, `transcript-input.tsx` |
+| 8 | Meetings visible to the team; SharePoint; transcripts in every format, uploadable, following playback | Met; SharePoint corrected 11 Sep | `meetings-query.ts`, `meeting-stage.tsx`, `transcript.ts`, `transcript-input.tsx`; a SharePoint sharing link refuses to be framed ("refused to connect"), so only the Share > Embed player is framed and a sharing link opens in a new tab with that instruction (`meetings/providers.ts`) |
 | 9 | Enrichment: missing-information filters, no priority filter, no city | Met | `enrichment.ts`, `enrichment/page.tsx` |
-| 10 | Dry run explained; deletions synced; Sync now; strong search | Met | Status card, `reconcile.ts` deleted-since pass, `sync-now-button.tsx`, `search-terms.ts` |
+| 10 | Dry run explained; deletions synced; Sync now; strong search | Met | Status card names the variable (`CADENCE_DRY_RUN`); deletions come across on their own pass every minute and a daily full pass marks anyone Twenty no longer returns as deleted; `sync-now-button.tsx`; `search-terms.ts` |
 | 11 | Auto-close from CRM activity; two modules close separately | Met (needs messages/notes reaching Cadence; Settings shows the counts) | `engine/ingest.ts`, INTEGRATION 7b |
 | 12 | Clean copy from tokens | Met | `src/lib/sequences/personalize.ts` at task creation |
 | 13 | Owner-assigned people to their FO, the rest least-loaded | Already so | `previewEnrollment` OWNER mode, `engine/enrollment.ts` |

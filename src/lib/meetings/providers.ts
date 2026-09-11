@@ -4,9 +4,9 @@ import type { MeetingProvider } from '@prisma/client';
  * Turn a pasted recording link into something the app can play.
  *
  * Reality check on embedding, because it decides what the UI can do:
- *  - **SharePoint / Microsoft Stream** (where Teams recordings land) supports iframe embedding.
- *    Adding `&embed=true` (or using the "Embed" code from the file) renders their player. The
- *    viewer must be signed in to Microsoft 365 in the same browser.
+ *  - **SharePoint / Microsoft Stream** (where Teams recordings land) frames only its own embed
+ *    player: the `_layouts/15/embed.aspx` link from Share > Embed. A sharing link is the full
+ *    SharePoint page and refuses to be framed. The viewer must be signed in to Microsoft 365.
  *  - **Google Drive** (where Meet recordings land) supports `/file/d/<id>/preview` in an iframe.
  *  - **Direct media files** (.mp4/.webm/.m4v/.ogg) play natively in a <video> element.
  *  - **Zoom cloud recordings** refuse to be framed (they send X-Frame-Options/CSP), so Cadence
@@ -88,20 +88,34 @@ export function parseMeetingLink(raw: string): ParsedMeetingLink {
     return { provider: 'GOOGLE_MEET', embedUrl: null, mediaUrl: null, isJoinLink: true, label: 'Google Meet', note: 'This is a join link. Meet recordings land in Google Drive: paste the Drive link to play it here.' };
   }
 
-  // SharePoint / OneDrive / Stream: where Teams recordings live. Framing is allowed.
-  if (host.endsWith('.sharepoint.com') || host.endsWith('-my.sharepoint.com') || host === 'web.microsoftstream.com' || host.endsWith('.svc.ms')) {
-    const embed = new URL(url.toString());
-    // The SharePoint player honours these; harmless when already present.
-    if (!embed.searchParams.has('embed')) embed.searchParams.set('embed', 'true');
-    embed.searchParams.set('nav', 'false');
+  // SharePoint / OneDrive / Stream: where Teams recordings live. Only the player SharePoint
+  // itself hands out for embedding (Share > Embed, a `_layouts/15/embed.aspx` link) can be framed.
+  // A sharing link (`/:v:/s/...`), a `stream.aspx` page or a document-library path is the full
+  // SharePoint page, which refuses to load inside another site - the browser shows "refused to
+  // connect" and nothing else - so those open in a new tab and say what to paste instead.
+  if (host.endsWith('.sharepoint.com') || host === 'web.microsoftstream.com' || host.endsWith('.svc.ms')) {
     const isStream = host === 'web.microsoftstream.com';
+    const streamVideo = isStream ? /^\/(?:embed\/)?video\/([^/?#]+)/.exec(path)?.[1] : null;
+    const embeddable = /\/_layouts\/15\/embed\.aspx/i.test(path) || Boolean(streamVideo);
+    if (embeddable) {
+      const embed = streamVideo ? new URL(`https://web.microsoftstream.com/embed/video/${streamVideo}`) : new URL(url.toString());
+      if (streamVideo) embed.searchParams.set('autoplay', 'false');
+      return {
+        provider: 'SHAREPOINT',
+        embedUrl: embed.toString(),
+        mediaUrl: null,
+        isJoinLink: false,
+        label: isStream ? 'Microsoft Stream recording' : 'SharePoint / OneDrive recording',
+        note: 'Viewers must be signed in to Microsoft 365 in this browser.',
+      };
+    }
     return {
-      provider: isStream ? 'SHAREPOINT' : 'SHAREPOINT',
-      embedUrl: embed.toString(),
+      provider: 'SHAREPOINT',
+      embedUrl: null,
       mediaUrl: null,
       isJoinLink: false,
-      label: isStream ? 'Microsoft Stream recording' : 'SharePoint / OneDrive recording',
-      note: 'Viewers must be signed in to Microsoft 365 in this browser.',
+      label: 'SharePoint / OneDrive recording',
+      note: 'SharePoint refuses to show a sharing link inside another site. Open the video in SharePoint, choose Share > Embed, and paste that link to play it here.',
     };
   }
 
