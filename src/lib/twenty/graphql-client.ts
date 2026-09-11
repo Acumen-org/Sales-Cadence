@@ -47,7 +47,13 @@ export class TwentyApiError extends Error {
 /** A field selection entry: plain field, or composite with a sub-selection. */
 type Sel = string | { field: string; sub: string };
 
+/**
+ * Twenty serves at most 60 records per page and rejects a larger `first`, so every listing asks
+ * for 60 whatever the caller wanted; the pagination helper walks the rest.
+ */
 const PAGE_SIZE = 60;
+/** Twenty allows 100 API requests a minute. A 429 is waited out, not treated as a failure. */
+const MAX_RATE_LIMIT_WAIT_MS = 30_000;
 
 /**
  * Twenty CRM over GraphQL. Every query and mutation Cadence uses lives in this file.
@@ -77,6 +83,7 @@ export class TwentyGraphqlClient implements TwentyClient {
   async request<T = Raw>(query: string, variables: Record<string, unknown> = {}, endpoint: 'graphql' | 'metadata' = 'graphql'): Promise<T> {
     const url = `${this.opts.baseUrl.replace(/\/+$/, '')}/${endpoint}`;
     let lastErr: unknown;
+    let rateLimited = 0;
     for (let attempt = 0; attempt < 2; attempt++) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -88,6 +95,15 @@ export class TwentyGraphqlClient implements TwentyClient {
           signal: controller.signal,
         });
         const text = await res.text();
+        if (res.status === 429 && rateLimited < 3) {
+          // The minute's budget is spent. Wait what Twenty asks for (or a few seconds) and go again;
+          // this attempt does not count against the retry budget.
+          rateLimited += 1;
+          const retryAfter = Number(res.headers.get('retry-after'));
+          await this.sleep(Math.min(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 2_000 * rateLimited, MAX_RATE_LIMIT_WAIT_MS));
+          attempt -= 1;
+          continue;
+        }
         if (!res.ok) {
           const err = new TwentyApiError(`Twenty ${endpoint} responded ${res.status}: ${text.slice(0, 300)}`, res.status);
           if (res.status >= 500 && attempt === 0) {
@@ -117,6 +133,9 @@ export class TwentyGraphqlClient implements TwentyClient {
     }
     throw new TwentyApiError(`Twenty unreachable at ${url}: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
   }
+
+  /** Injectable so a test can run a rate-limit retry without waiting. */
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   /** Fields that exist on a GraphQL type, or null when introspection is unavailable. */
   private availableFields(typeName: string): Promise<Set<string> | null> {
@@ -299,7 +318,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.person.plural, this.s.objects.person.typeName, sel), {
       filter,
       orderBy: [{ [p.updatedAt]: 'AscNullsLast' }],
-      first: Math.min(opts.limit ?? PAGE_SIZE, 200),
+      first: Math.min(opts.limit ?? PAGE_SIZE, PAGE_SIZE),
       after: opts.after ?? null,
     });
     return this.page(data[this.s.objects.person.plural], (n) => normalizePerson(n, this.s));
@@ -359,10 +378,25 @@ export class TwentyGraphqlClient implements TwentyClient {
     const sel = await this.companySelection();
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.company.plural, this.s.objects.company.typeName, sel), {
       filter: this.and(this.sinceFilter(c.updatedAt, opts.updatedSince), opts.ids ? { id: { in: opts.ids } } : null, opts.deletedSince ? { [c.deletedAt]: { gte: opts.deletedSince } } : null),
-      first: Math.min(opts.limit ?? PAGE_SIZE, 200),
+      first: Math.min(opts.limit ?? PAGE_SIZE, PAGE_SIZE),
       after: opts.after ?? null,
     });
     return this.page(data[this.s.objects.company.plural], (n) => normalizeCompany(n, this.s));
+  }
+
+  /**
+   * How many live records Twenty holds, so the cache can be compared with the source instead of
+   * trusted. Null when the workspace does not expose totalCount.
+   */
+  async countRecords(object: 'person' | 'company'): Promise<number | null> {
+    const def = this.s.objects[object];
+    try {
+      const data = await this.request<Record<string, { totalCount?: number }>>(`query Count { ${def.plural}(first: 1) { totalCount } }`);
+      const total = data[def.plural]?.totalCount;
+      return typeof total === 'number' ? total : null;
+    } catch {
+      return null;
+    }
   }
 
   async listWorkspaceMembers(): Promise<TwentyWorkspaceMember[]> {
@@ -407,7 +441,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     for (let i = 0; i < 200; i++) {
       const page: Record<string, Connection> = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.person.plural, this.s.objects.person.typeName, sel), {
         filter: filters.length ? { and: filters } : undefined,
-        first: 100,
+        first: PAGE_SIZE,
         after,
       });
       const p = this.page(page[this.s.objects.person.plural], (n) => normalizePerson(n, this.s));
@@ -433,7 +467,7 @@ export class TwentyGraphqlClient implements TwentyClient {
             pageInfo { hasNextPage endCursor }
           }
         }`,
-        { filter: { [this.s.noteTarget.personId]: { eq: opts.personId } }, first: Math.min(opts.limit ?? PAGE_SIZE, 100), after: opts.after ?? null },
+        { filter: { [this.s.noteTarget.personId]: { eq: opts.personId } }, first: Math.min(opts.limit ?? PAGE_SIZE, PAGE_SIZE), after: opts.after ?? null },
       );
       const conn = data[this.s.objects.noteTarget.plural];
       const notes = (conn?.edges ?? []).map((e) => (e.node?.[this.s.objects.note.singular] as Raw | undefined) ?? null).filter((n): n is Raw => Boolean(n));
@@ -442,7 +476,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.note.plural, this.s.objects.note.typeName, sel), {
       filter: this.sinceFilter(this.s.note.updatedAt, opts.updatedSince) ?? undefined,
       orderBy: [{ [this.s.note.createdAt]: 'DescNullsLast' }],
-      first: Math.min(opts.limit ?? PAGE_SIZE, 200),
+      first: Math.min(opts.limit ?? PAGE_SIZE, PAGE_SIZE),
       after: opts.after ?? null,
     });
     return this.page(data[this.s.objects.note.plural], (n) => normalizeNote(n, this.s));
@@ -464,7 +498,7 @@ export class TwentyGraphqlClient implements TwentyClient {
             pageInfo { hasNextPage endCursor }
           }
         }`,
-        { filter: { [this.s.messageParticipant.personId]: { eq: opts.personId } }, first: Math.min(opts.limit ?? PAGE_SIZE, 100), after: opts.after ?? null },
+        { filter: { [this.s.messageParticipant.personId]: { eq: opts.personId } }, first: Math.min(opts.limit ?? PAGE_SIZE, PAGE_SIZE), after: opts.after ?? null },
       );
       const conn = data[this.s.objects.messageParticipant.plural];
       const seen = new Set<string>();
@@ -483,7 +517,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.message.plural, this.s.objects.message.typeName, sel), {
       filter: since,
       orderBy: [{ [m.receivedAt]: 'DescNullsLast' }],
-      first: Math.min(opts.limit ?? PAGE_SIZE, 200),
+      first: Math.min(opts.limit ?? PAGE_SIZE, PAGE_SIZE),
       after: opts.after ?? null,
     });
     return this.page(data[this.s.objects.message.plural], (n) => normalizeMessage(n, this.s));
@@ -504,7 +538,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.task.plural, this.s.objects.task.typeName, sel), {
       filter,
       orderBy: [{ [this.s.task.updatedAt]: 'DescNullsLast' }],
-      first: Math.min(opts.limit ?? PAGE_SIZE, 200),
+      first: Math.min(opts.limit ?? PAGE_SIZE, PAGE_SIZE),
       after: opts.after ?? null,
     });
     return this.page(data[this.s.objects.task.plural], (n) => normalizeTask(n, this.s));
@@ -523,7 +557,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.opportunity.plural, this.s.objects.opportunity.typeName, sel), {
       filter,
       orderBy: [{ [o.createdAt]: 'DescNullsLast' }],
-      first: Math.min(opts.limit ?? PAGE_SIZE, 200),
+      first: Math.min(opts.limit ?? PAGE_SIZE, PAGE_SIZE),
       after: opts.after ?? null,
     });
     return this.page(data[this.s.objects.opportunity.plural], (n) => normalizeOpportunity(n, this.s));
@@ -705,9 +739,9 @@ export class TwentyGraphqlClient implements TwentyClient {
     }
   }
 
-  async ping(): Promise<{ ok: true; detail: string; members: number }> {
-    const members = await this.listWorkspaceMembers();
-    return { ok: true, detail: `Connected to ${this.opts.baseUrl}`, members: members.length };
+  async ping(): Promise<{ ok: true; detail: string; members: number; people?: number }> {
+    const [members, people] = await Promise.all([this.listWorkspaceMembers(), this.countRecords('person')]);
+    return { ok: true, detail: `Connected to ${this.opts.baseUrl}`, members: members.length, ...(people === null ? {} : { people }) };
   }
 }
 

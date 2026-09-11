@@ -68,6 +68,7 @@ Then follow [INTEGRATION.md](INTEGRATION.md): create the Twenty API key, registe
 ```bash
 docker compose logs -f web worker           # logs
 docker compose exec web pnpm verify:schema  # check the Twenty field mapping
+docker compose exec web pnpm sync:diagnose  # why data is missing: counts, each listing, last sync
 docker compose exec web pnpm reconcile 7    # replay 7 days of Twenty activity (safe, idempotent)
 docker compose up -d --build                # deploy an update
 ```

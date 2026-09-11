@@ -31,6 +31,7 @@ export class DryRunTwentyClient implements TwentyClient {
   getPeopleByIds: TwentyClient['getPeopleByIds'] = (ids) => this.inner.getPeopleByIds(ids);
   listCompanies: TwentyClient['listCompanies'] = (o) => this.inner.listCompanies(o);
   listWorkspaceMembers: TwentyClient['listWorkspaceMembers'] = () => this.inner.listWorkspaceMembers();
+  countRecords: TwentyClient['countRecords'] = (o) => this.inner.countRecords(o);
   getViewPeople: TwentyClient['getViewPeople'] = (id) => this.inner.getViewPeople(id);
   listNotes: TwentyClient['listNotes'] = (o) => this.inner.listNotes(o);
   getNote: TwentyClient['getNote'] = (id) => this.inner.getNote(id);
@@ -42,7 +43,7 @@ export class DryRunTwentyClient implements TwentyClient {
   introspect: TwentyClient['introspect'] = () => this.inner.introspect();
   ping: TwentyClient['ping'] = async () => {
     const r = await this.inner.ping();
-    return { ok: true as const, detail: `${r.detail} (dry run: writes disabled)` };
+    return { ...r, ok: true as const, detail: `${r.detail} (dry run: writes disabled)` };
   };
 
   async createNote(input: CreateNoteInput) {

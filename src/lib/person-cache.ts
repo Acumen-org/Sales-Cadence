@@ -151,51 +151,95 @@ export async function markPersonDeleted(personId: string, tx: Tx | typeof prisma
   await tx.personCache.updateMany({ where: { id: personId }, data: { deletedAt: new Date(), syncedAt: new Date() } });
 }
 
-/**
- * Pull people (and companies) from Twenty into the cache.
- * `since` limits to records updated at/after that ISO instant; omit for a full refresh.
- */
-export type RefreshStats = { people: number; companies: number; deleted: number; failed: number; firstError: string | null };
+export type RefreshStage = 'people' | 'companies' | 'deletedPeople' | 'deletedCompanies';
+
+export type RefreshStats = {
+  people: number;
+  companies: number;
+  deleted: number;
+  /** Cached rows Twenty no longer returned after a full pass, now marked deleted here. */
+  removed: number;
+  /** Records Twenty returned that this side could not store, and the first reason. */
+  failed: number;
+  firstError: string | null;
+  /** A listing that stopped part-way, by stage. The other stages still ran. */
+  stageErrors: Partial<Record<RefreshStage, string>>;
+};
+
+const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /**
  * Pull people and companies from Twenty into the cache. A record Twenty returns that this side
  * cannot store (an option it has never seen, a value the schema refuses) is counted and logged
  * and the run goes on: one odd record used to abort the whole sync and leave the workspace with a
- * handful of contacts and no explanation. With `since`, records soft-deleted in that window are
- * fetched as well - Twenty does not bump updatedAt when it deletes, so an update scan never sees
- * them.
+ * handful of contacts and no explanation. A listing that fails part-way (a rejected filter, a
+ * permission the API key lacks, a timeout) is recorded against its stage and the next stage still
+ * runs, so a problem with companies never costs the people. With `since`, records soft-deleted in
+ * that window are fetched as well - Twenty does not bump updatedAt when it deletes, so an update
+ * scan never sees them. Without `since` the pass is complete, so anything cached that Twenty did
+ * not return no longer exists there and is marked deleted here.
  */
 export async function refreshPersonCache(client: TwentyClient, opts: { since?: string } = {}): Promise<RefreshStats> {
-  const stats: RefreshStats = { people: 0, companies: 0, deleted: 0, failed: 0, firstError: null };
+  const stats: RefreshStats = { people: 0, companies: 0, deleted: 0, removed: 0, failed: 0, firstError: null, stageErrors: {} };
+  const startedAt = new Date();
   const attempt = async (label: string, fn: () => Promise<unknown>) => {
     try {
       await fn();
       return true;
     } catch (err) {
       stats.failed += 1;
-      const message = `${label}: ${err instanceof Error ? err.message : String(err)}`;
+      const message = `${label}: ${errorText(err)}`;
       if (!stats.firstError) stats.firstError = message;
       console.warn(`[cache] ${message}`);
+      return false;
+    }
+  };
+  const stage = async (name: RefreshStage, fn: () => Promise<void>) => {
+    try {
+      await fn();
+      return true;
+    } catch (err) {
+      stats.stageErrors[name] = errorText(err);
+      console.warn(`[cache] ${name} listing stopped: ${stats.stageErrors[name]}`);
       return false;
     }
   };
   try {
     await syncPodsFromTwenty(client);
   } catch (err) {
-    console.warn('[cache] pod sync skipped:', err instanceof Error ? err.message : String(err));
+    console.warn('[cache] pod sync skipped:', errorText(err));
   }
-  for await (const person of paginate((after) => client.listPeople({ updatedSince: opts.since, after, limit: 100, includeDeleted: true }))) {
-    if (await attempt(`person ${person.id}`, () => upsertPersonCache(person))) stats.people += 1;
-  }
-  for await (const company of paginate((after) => client.listCompanies({ updatedSince: opts.since, after, limit: 100 }))) {
-    if (await attempt(`company ${company.id}`, () => upsertCompanyCache(company))) stats.companies += 1;
-  }
-  if (opts.since) {
-    for await (const person of paginate((after) => client.listPeople({ deletedSince: opts.since, after, limit: 100 }))) {
-      if (await attempt(`deleted person ${person.id}`, () => upsertPersonCache(person))) stats.deleted += 1;
+  const peopleComplete = await stage('people', async () => {
+    for await (const person of paginate((after) => client.listPeople({ updatedSince: opts.since, after, limit: 100, includeDeleted: true }))) {
+      if (await attempt(`person ${person.id}`, () => upsertPersonCache(person))) stats.people += 1;
     }
-    for await (const company of paginate((after) => client.listCompanies({ deletedSince: opts.since, after, limit: 100 }))) {
-      if (await attempt(`deleted company ${company.id}`, () => upsertCompanyCache(company))) stats.deleted += 1;
+  });
+  const companiesComplete = await stage('companies', async () => {
+    for await (const company of paginate((after) => client.listCompanies({ updatedSince: opts.since, after, limit: 100 }))) {
+      if (await attempt(`company ${company.id}`, () => upsertCompanyCache(company))) stats.companies += 1;
+    }
+  });
+  if (opts.since) {
+    await stage('deletedPeople', async () => {
+      for await (const person of paginate((after) => client.listPeople({ deletedSince: opts.since, after, limit: 100 }))) {
+        if (await attempt(`deleted person ${person.id}`, () => upsertPersonCache(person))) stats.deleted += 1;
+      }
+    });
+    await stage('deletedCompanies', async () => {
+      for await (const company of paginate((after) => client.listCompanies({ deletedSince: opts.since, after, limit: 100 }))) {
+        if (await attempt(`deleted company ${company.id}`, () => upsertCompanyCache(company))) stats.deleted += 1;
+      }
+    });
+  } else {
+    // A full pass saw everything Twenty has. A row this pass did not touch was deleted there
+    // (or merged away) and would otherwise stay on screen for good.
+    if (peopleComplete) {
+      const gone = await prisma.personCache.updateMany({ where: { deletedAt: null, syncedAt: { lt: startedAt } }, data: { deletedAt: startedAt, syncedAt: startedAt } });
+      stats.removed += gone.count;
+    }
+    if (companiesComplete) {
+      const gone = await prisma.companyCache.updateMany({ where: { deletedAt: null, syncedAt: { lt: startedAt } }, data: { deletedAt: startedAt, syncedAt: startedAt } });
+      stats.removed += gone.count;
     }
   }
   return stats;

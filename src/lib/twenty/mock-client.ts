@@ -240,6 +240,11 @@ export class MockTwentyClient implements TwentyClient {
     return page(clone(since(items, opts)), opts);
   }
 
+  async countRecords(object: 'person' | 'company'): Promise<number | null> {
+    this.maybeFail();
+    return (object === 'person' ? this.people : this.companies).filter((r) => !r.deletedAt).length;
+  }
+
   async listWorkspaceMembers() {
     this.maybeFail();
     return clone(this.members);

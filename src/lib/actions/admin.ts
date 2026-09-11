@@ -20,7 +20,9 @@ export async function syncNowAction(): Promise<ActionResult> {
     const stats = await syncContinuously();
     for (const path of ['/settings', '/people', '/accounts', '/tasks', '/home']) revalidatePath(path);
     const failed = stats.cacheFailed ? ` ${stats.cacheFailed} record${stats.cacheFailed === 1 ? '' : 's'} could not be cached: ${stats.cacheError}.` : '';
-    return { ok: true, message: `Synced. ${stats.people} people, ${stats.notes} notes and ${stats.messages} messages since ${stats.since.slice(0, 16).replace('T', ' ')}.${failed}` };
+    const stages = Object.entries(stats.stageErrors);
+    const stopped = stages.length ? ` Did not finish: ${stages.map(([name, message]) => `${name} (${message})`).join('; ')}.` : '';
+    return { ok: stages.length === 0, ...(stages.length ? { error: `Synced with problems. ${stats.people} people, ${stats.notes} notes and ${stats.messages} messages since ${stats.since.slice(0, 16).replace('T', ' ')}.${failed}${stopped}` } : { message: `Synced. ${stats.people} people, ${stats.notes} notes and ${stats.messages} messages since ${stats.since.slice(0, 16).replace('T', ' ')}.${failed}` }) } as ActionResult;
   } catch (err) {
     return { ok: false, error: `Sync failed: ${err instanceof Error ? err.message : String(err)}` };
   }

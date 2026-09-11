@@ -50,6 +50,8 @@ export interface TwentyClient {
   getPeopleByIds(ids: string[]): Promise<TwentyPerson[]>;
   listCompanies(opts?: ListOptions & { ids?: string[]; deletedSince?: string }): Promise<Page<TwentyCompany>>;
   listWorkspaceMembers(): Promise<TwentyWorkspaceMember[]>;
+  /** Live records in Twenty, to compare the cache against; null when the source cannot say. */
+  countRecords(object: 'person' | 'company'): Promise<number | null>;
   /** Resolve a saved Twenty view of people to the people it contains. */
   getViewPeople(viewId: string): Promise<{ view: TwentyView; people: TwentyPerson[] }>;
 

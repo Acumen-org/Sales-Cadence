@@ -23,6 +23,8 @@ export type ReconcileStats = {
   meetings: number;
   errors: number;
   needsReview: number;
+  /** A pass that stopped part-way, by stage (`people`, `notes`, `cache.companies`...). The other passes still ran. */
+  stageErrors: Record<string, string>;
 };
 
 function tally(stats: ReconcileStats, r: IngestResult) {
@@ -46,43 +48,67 @@ export async function reconcile(opts: { days?: number; since?: string; actor?: A
   const now = opts.now ?? new Date();
   const since = opts.since ?? new Date(now.getTime() - days * 86_400_000).toISOString();
   const actor = opts.actor ?? RECONCILE_ACTOR;
-  const stats: ReconcileStats = { since, people: 0, notes: 0, messages: 0, opportunities: 0, tasks: 0, processed: 0, duplicates: 0, completions: 0, replies: 0, meetings: 0, errors: 0, needsReview: 0, cacheFailed: 0, cacheError: null };
+  const stats: ReconcileStats = { since, people: 0, notes: 0, messages: 0, opportunities: 0, tasks: 0, processed: 0, duplicates: 0, completions: 0, replies: 0, meetings: 0, errors: 0, needsReview: 0, cacheFailed: 0, cacheError: null, stageErrors: {} };
   const common = { source: 'RECONCILE' as const, now, skipSync: opts.skipSync };
+  // Every pass is its own stage: a permission the API key lacks for messages, or an object the
+  // workspace renamed, used to stop the whole reconcile at that point and leave the watermark
+  // where it was, so the same failure repeated every minute and nothing after it ever ran.
+  const stage = async (name: string, fn: () => Promise<void>) => {
+    try {
+      await fn();
+    } catch (err) {
+      stats.stageErrors[name] = err instanceof Error ? err.message : String(err);
+      console.warn(`[reconcile] ${name} stopped: ${stats.stageErrors[name]}`);
+    }
+  };
 
   // People first so dnd flips and new people are known before activity is matched.
   const cache = await refreshPersonCache(c, { since });
   stats.people = cache.people;
   stats.cacheFailed = cache.failed;
   stats.cacheError = cache.firstError;
-  for await (const person of paginate((after) => c.listPeople({ updatedSince: since, after, limit: 100, includeDeleted: true }))) {
-    tally(stats, await ingestEvent({ ...common, objectType: 'person', eventName: person.deletedAt ? 'person.deleted' : 'person.updated', record: (person.raw as Record<string, unknown> | undefined) ?? rawFromPerson(person), recordId: person.id, updatedAt: person.updatedAt }, c));
-  }
+  for (const [name, message] of Object.entries(cache.stageErrors)) if (message) stats.stageErrors[`cache.${name}`] = message;
+  await stage('people', async () => {
+    for await (const person of paginate((after) => c.listPeople({ updatedSince: since, after, limit: 100, includeDeleted: true }))) {
+      tally(stats, await ingestEvent({ ...common, objectType: 'person', eventName: person.deletedAt ? 'person.deleted' : 'person.updated', record: (person.raw as Record<string, unknown> | undefined) ?? rawFromPerson(person), recordId: person.id, updatedAt: person.updatedAt }, c));
+    }
+  });
 
   // Soft deletes do not touch updatedAt, so they need their own pass: a deleted person exits
   // their sequence the same way a webhook would have made them.
-  for await (const person of paginate((after) => c.listPeople({ deletedSince: since, after, limit: 100 }))) {
-    tally(stats, await ingestEvent({ ...common, objectType: 'person', eventName: 'person.deleted', record: (person.raw as Record<string, unknown> | undefined) ?? rawFromPerson(person), recordId: person.id, updatedAt: person.deletedAt ?? person.updatedAt }, c));
-  }
+  await stage('deletedPeople', async () => {
+    for await (const person of paginate((after) => c.listPeople({ deletedSince: since, after, limit: 100 }))) {
+      tally(stats, await ingestEvent({ ...common, objectType: 'person', eventName: 'person.deleted', record: (person.raw as Record<string, unknown> | undefined) ?? rawFromPerson(person), recordId: person.id, updatedAt: person.deletedAt ?? person.updatedAt }, c));
+    }
+  });
 
-  for await (const note of paginate((after) => c.listNotes({ updatedSince: since, after, limit: 100 }))) {
-    stats.notes += 1;
-    tally(stats, await ingestEvent({ ...common, objectType: 'note', eventName: 'note.updated', record: rawFromNote(note), recordId: note.id, updatedAt: note.updatedAt }, c));
-  }
+  await stage('notes', async () => {
+    for await (const note of paginate((after) => c.listNotes({ updatedSince: since, after, limit: 100 }))) {
+      stats.notes += 1;
+      tally(stats, await ingestEvent({ ...common, objectType: 'note', eventName: 'note.updated', record: rawFromNote(note), recordId: note.id, updatedAt: note.updatedAt }, c));
+    }
+  });
 
-  for await (const message of paginate((after) => c.listMessages({ updatedSince: since, after, limit: 100 }))) {
-    stats.messages += 1;
-    tally(stats, await ingestEvent({ ...common, objectType: 'message', eventName: 'message.updated', record: rawFromMessage(message), recordId: message.id, updatedAt: message.updatedAt }, c));
-  }
+  await stage('messages', async () => {
+    for await (const message of paginate((after) => c.listMessages({ updatedSince: since, after, limit: 100 }))) {
+      stats.messages += 1;
+      tally(stats, await ingestEvent({ ...common, objectType: 'message', eventName: 'message.updated', record: rawFromMessage(message), recordId: message.id, updatedAt: message.updatedAt }, c));
+    }
+  });
 
-  for await (const opp of paginate((after) => c.listOpportunities({ updatedSince: since, after, limit: 100 }))) {
-    stats.opportunities += 1;
-    tally(stats, await ingestEvent({ ...common, objectType: 'opportunity', eventName: 'opportunity.updated', record: rawFromOpportunity(opp), recordId: opp.id, updatedAt: opp.updatedAt }, c));
-  }
+  await stage('opportunities', async () => {
+    for await (const opp of paginate((after) => c.listOpportunities({ updatedSince: since, after, limit: 100 }))) {
+      stats.opportunities += 1;
+      tally(stats, await ingestEvent({ ...common, objectType: 'opportunity', eventName: 'opportunity.updated', record: rawFromOpportunity(opp), recordId: opp.id, updatedAt: opp.updatedAt }, c));
+    }
+  });
 
-  for await (const task of paginate((after) => c.listTasks({ updatedSince: since, after, limit: 100 }))) {
-    stats.tasks += 1;
-    tally(stats, await ingestEvent({ ...common, objectType: 'task', eventName: 'task.updated', record: rawFromTask(task), recordId: task.id, updatedAt: task.updatedAt }, c));
-  }
+  await stage('tasks', async () => {
+    for await (const task of paginate((after) => c.listTasks({ updatedSince: since, after, limit: 100 }))) {
+      stats.tasks += 1;
+      tally(stats, await ingestEvent({ ...common, objectType: 'task', eventName: 'task.updated', record: rawFromTask(task), recordId: task.id, updatedAt: task.updatedAt }, c));
+    }
+  });
 
   await prisma.setting.upsert({ where: { key: 'lastReconcile' }, create: { key: 'lastReconcile', value: { at: now.toISOString(), stats } }, update: { value: { at: now.toISOString(), stats } } });
   await logAudit({ entityType: 'settings', entityId: 'reconcile', action: 'reconcile_ran', actor, details: stats });

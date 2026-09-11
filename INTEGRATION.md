@@ -210,15 +210,30 @@ Rescanning is always safe: `pnpm reconcile 7` replays the last 7 days through th
 
 ## 7b. When contacts, emails or notes do not appear
 
-**Settings > Twenty > Status** is the first stop: *Continuous sync* says healthy or failing with
-the error, *Cached* counts what is here, *Could not cache* names the first record Twenty returned
-that this side refused, and *Last reconcile* says how many notes, messages, opportunities and tasks
-the last pass saw. **Sync now** runs the same pass the worker runs every minute.
+**Settings > Twenty > Status** is the first stop. *People* and *Companies* show what is cached
+next to what Twenty reports, with a red **missing** count when the cache is short. *Continuous
+sync* is Healthy, Running with problems (one stage did not finish - each is listed with its
+error), or Failing (people could not be listed at all). *Could not cache* names the first record
+Twenty returned that this side refused. **Sync now** runs the same pass the worker runs every
+minute.
 
-- **Few contacts or accounts** - look at *Could not cache*; fix the record or the mapping it names,
-  then Sync now. A full refresh is under Maintenance.
+On the server, `docker compose exec web pnpm sync:diagnose` prints the same facts plus the first
+page of every listing Cadence depends on, each marked ok or FAIL with Twenty's own error. It is
+read-only, and it is the thing to run before asking why data is missing.
+
+Each stage of a pass is independent: a permission the key lacks for messages, or a company
+listing Twenty refuses, is recorded and the other stages still run. The watermark moves as long
+as people were listed, so one permanent failure never freezes the whole sync. Pages are fetched
+sixty at a time, the most Twenty serves, and a rate-limit answer (100 requests a minute) is waited
+out rather than counted as a failure.
+
+- **Few contacts or accounts** - look at the *missing* counts and any *Stage* rows; fix what the
+  error names (usually the API key's object permissions, or a field the mapping expects), then
+  Sync now. A full refresh runs once a day on its own and is under Maintenance for right now.
 - **Deleted in Twenty, still here** - deletions are fetched on their own pass since the last
-  watermark; a Sync now brings them across. A `person.deleted` webhook does it instantly.
+  watermark; a Sync now brings them across. A `person.deleted` webhook does it instantly. The daily
+  full refresh also marks anyone Twenty no longer returns as deleted, so a missed deletion lasts a
+  day at most.
 - **No emails, no notes, nothing auto-completes** - *Last reconcile* shows 0 messages / 0 notes.
   Check the API key can read `message`, `messageParticipant`, `note` and `noteTarget`; check the
   webhook in Twenty is registered for those objects (section 2); run `pnpm verify:schema` for the

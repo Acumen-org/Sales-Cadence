@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { formatInstant } from '@/lib/dates';
 import { WORKSPACE_TIMEZONE } from '@/lib/workspace';
@@ -13,6 +14,7 @@ import { UsersPanel } from '@/components/settings/users-panel';
 import { AdminTools } from '@/components/settings/admin-tools';
 import { ReviewButton } from '@/components/settings/review-button';
 import { SyncNowButton } from '@/components/settings/sync-now-button';
+import type { ContinuousSyncState } from '@/lib/continuous-sync';
 import { DiscardWriteButton, RetryWriteButton } from '@/components/settings/retry-write-button';
 import { MatchingForm, RulesForm, SyncForm, TwentyConnectionForm } from '@/components/settings/settings-forms';
 import { getMeetingAnalyzer } from '@/lib/meetings/analysis';
@@ -105,12 +107,12 @@ async function UsersTab() {
 async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: boolean; hasEnvKey: boolean }) {
   let ping: string;
   let ok = true;
-  let counts: { people?: number; members?: number } = {};
+  let counts: { people?: number; companies?: number; members?: number } = {};
   try {
     const client = await getTwentyClient();
-    const result = await client.ping();
+    const [result, companies] = await Promise.all([client.ping(), client.countRecords('company')]);
     ping = result.detail;
-    counts = { people: result.people, members: result.members };
+    counts = { people: result.people, companies: companies ?? undefined, members: result.members };
   } catch (err) {
     ok = false;
     ping = err instanceof Error ? err.message : String(err);
@@ -124,7 +126,10 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
     prisma.companyCache.count({ where: { deletedAt: null } }),
   ]);
   const last = lastReconcile?.value as { at?: string; stats?: { cacheFailed?: number; cacheError?: string | null; notes?: number; messages?: number; opportunities?: number; tasks?: number; people?: number } } | null;
-  const sync = continuous?.value as { lastSuccess?: string | null; lastError?: string | null; attemptedAt?: string | null; watermark?: string | null } | null;
+  const sync = continuous?.value as ContinuousSyncState | null;
+  const stageErrors = Object.entries(sync?.stageErrors ?? {});
+  const peopleShort = counts.people !== undefined && cachedPeople < counts.people;
+  const companiesShort = counts.companies !== undefined && cachedCompanies < counts.companies;
   const baseUrl = settings.twenty.baseUrl || env().TWENTY_API_URL || '';
   return (
     <div className="space-y-3">
@@ -133,21 +138,32 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
           <KeyValue
             items={[
               { k: 'Mode', v: mode === 'mock' ? 'Demo workspace' : 'Twenty (GraphQL)' },
-              { k: 'Dry run', v: dryRun ? <Badge tone="amber">On - nothing is written to Twenty</Badge> : <Badge tone="green">Off</Badge> },
+              { k: 'Dry run', v: dryRun ? <span className="flex flex-wrap items-center gap-2"><Badge tone="amber">On</Badge><code className="text-[12px]">CADENCE_DRY_RUN=true</code></span> : <Badge tone="green">Off</Badge> },
               {
                 k: 'Continuous sync',
-                v: sync?.lastError
+                v: sync?.lastError && !sync.lastSuccess
                   ? <span className="flex flex-wrap items-center gap-2"><Badge tone="red">Failing</Badge><span className="text-[12px] text-red-700">{sync.lastError}</span></span>
-                  : sync?.lastSuccess
-                    ? <span className="flex flex-wrap items-center gap-2"><Badge tone="green">Healthy</Badge><span className="text-[12px] text-ink-500">last {formatInstant(new Date(sync.lastSuccess), WORKSPACE_TIMEZONE)}</span></span>
-                    : <Badge tone="gray">Not run yet</Badge>,
+                  : sync?.lastError && sync.attemptedAt && sync.lastSuccess && sync.attemptedAt > sync.lastSuccess
+                    ? <span className="flex flex-wrap items-center gap-2"><Badge tone="red">Failing</Badge><span className="text-[12px] text-red-700">{sync.lastError}</span><span className="text-[12px] text-ink-500">last good {formatInstant(new Date(sync.lastSuccess), WORKSPACE_TIMEZONE)}</span></span>
+                    : sync?.lastSuccess
+                      ? <span className="flex flex-wrap items-center gap-2"><Badge tone={stageErrors.length ? 'amber' : 'green'}>{stageErrors.length ? 'Running with problems' : 'Healthy'}</Badge><span className="text-[12px] text-ink-500">last {formatInstant(new Date(sync.lastSuccess), WORKSPACE_TIMEZONE)}</span></span>
+                      : <Badge tone="gray">Not run yet</Badge>,
               },
-              { k: 'Cached', v: <span className="flex flex-wrap items-center gap-3"><span><Count value={cachedPeople} /> people</span><span><Count value={cachedCompanies} /> companies</span></span> },
+              ...stageErrors.map(([stage, message]) => ({ k: `Stage ${stage}`, v: <span className="text-[12px] text-red-700">{message}</span> })),
+              { k: 'Full refresh', v: sync?.lastFullRefresh ? formatInstant(new Date(sync.lastFullRefresh), WORKSPACE_TIMEZONE) : <Badge tone="gray">Not yet</Badge> },
+              {
+                k: 'People',
+                v: <span className="flex flex-wrap items-center gap-3"><span><Count value={cachedPeople} /> cached</span>{counts.people !== undefined ? <span><Count value={counts.people} /> in Twenty</span> : null}{peopleShort ? <Badge tone="red">{counts.people! - cachedPeople} missing</Badge> : null}</span>,
+              },
+              {
+                k: 'Companies',
+                v: <span className="flex flex-wrap items-center gap-3"><span><Count value={cachedCompanies} /> cached</span>{counts.companies !== undefined ? <span><Count value={counts.companies} /> in Twenty</span> : null}{companiesShort ? <Badge tone="red">{counts.companies! - cachedCompanies} missing</Badge> : null}</span>,
+              },
+              ...(sync?.needsReview ? [{ k: 'Needs review', v: <Link href="/settings?tab=activity" className="text-[12px] text-brand-700 hover:underline"><Count value={sync.needsReview} /> CRM events</Link> }] : []),
               ...(last?.stats?.cacheFailed ? [{ k: 'Could not cache', v: <span className="text-[12px] text-red-700">{last.stats.cacheFailed} record{last.stats.cacheFailed === 1 ? '' : 's'}: {last.stats.cacheError}</span> }] : []),
               { k: 'Connection', v: <Badge tone={ok ? 'green' : 'red'}>{ok ? 'Reachable' : 'Not connected'}</Badge> },
               { k: 'API key', v: settings.twenty.apiKey ? <Badge tone="green">Stored in settings</Badge> : hasEnvKey ? <Badge tone="green">From environment</Badge> : <Badge tone="amber">Not configured</Badge> },
               { k: 'Base URL', v: baseUrl ? <code className="text-[12px]">{baseUrl}</code> : null },
-              ...(counts.people === undefined ? [] : [{ k: 'People', v: counts.people }]),
               { k: 'Workspace members', v: counts.members ?? null },
               ...(ok ? [] : [{ k: 'Last error', v: <span className="text-red-700">{ping}</span> }]),
               { k: 'Webhook URL', v: <code className="text-[12px]">{`${env().APP_URL.replace(/\/+$/, '')}/api/webhooks/twenty${env().CADENCE_WEBHOOK_TOKEN ? '?token=...' : ''}`}</code> },

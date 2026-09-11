@@ -486,3 +486,23 @@ contact", so repeating it in the warnings line was noise.
 - **The test is the guard.** It fails if anyone widens `allowedTags` or `allowedAttributes` far
   enough to make those bypasses reachable, which is the condition under which the pin would stop
   being safe. `pnpm audit` will keep reporting the two advisories; the test says what they mean here.
+
+## A sync that fails in one place keeps going everywhere else (11 September 2026)
+
+- **The live workspace showed a handful of contacts and three accounts, and the code explains
+  how.** The continuous pass was all-or-nothing: any listing that threw, and even a single CRM
+  event that needed review, threw out of the pass, the watermark never moved, and the next minute
+  reran the full refresh and failed at the same spot. Nothing after the failing stage ever ran.
+  Each stage (people, companies, deletions, notes, messages, opportunities, tasks, members) is now
+  guarded on its own; the watermark moves when people were listed; every stage that did not finish
+  is stored and shown in Settings > Twenty with Twenty's own error. Events needing review are a
+  count, not a failure.
+- **Pages are sixty records, because that is what Twenty serves.** The client asked for a hundred.
+  A 429 (Twenty allows 100 requests a minute) is waited out for the time Twenty asks and retried.
+- **The cache is checked against the source, not trusted.** Twenty's `totalCount` for people and
+  companies sits next to the cached counts in Settings, with the shortfall in red, and
+  `pnpm sync:diagnose` prints the same plus the first page of each listing with its error.
+- **A full pass is authoritative about deletions.** Once a day the cache is rebuilt from a complete
+  listing; anything cached that the listing did not return was deleted or merged in Twenty and is
+  marked deleted here. A change scan never does this, because it has not seen everyone.
+

@@ -206,6 +206,41 @@ describe('TwentyGraphqlClient', () => {
     expect(() => translateViewFilter({ name: 'x', type: 'TEXT' }, 'weird', '')).toThrow(/not supported/);
   });
 
+  it('never asks Twenty for more than 60 records a page, whatever the caller wanted', async () => {
+    const { client, calls } = fakeClient(() => ({ data: { people: { edges: [], pageInfo: { hasNextPage: false, endCursor: null } }, companies: { edges: [], pageInfo: { hasNextPage: false, endCursor: null } }, notes: { edges: [], pageInfo: { hasNextPage: false, endCursor: null } } } }));
+    await client.listPeople({ limit: 100 });
+    await client.listCompanies({ limit: 200 });
+    await client.listNotes({ limit: 100 });
+    const firsts = calls.filter((c) => !c.query.includes('__type')).map((c) => c.variables.first);
+    expect(firsts).toEqual([60, 60, 60]);
+  });
+
+  it('waits out a 429 and retries instead of failing the sync', async () => {
+    let attempts = 0;
+    const { client, calls } = fakeClient((call) => {
+      if (!call.query.includes('people(')) throw new Error(`unexpected ${call.query}`);
+      attempts += 1;
+      if (attempts === 1) return new Response('Too Many Requests', { status: 429, headers: { 'retry-after': '7' } });
+      return { data: { people: { edges: [{ node: rawPerson, cursor: 'c1' }], pageInfo: { hasNextPage: false, endCursor: null } } } };
+    });
+    const waits: number[] = [];
+    client.sleep = async (ms) => { waits.push(ms); };
+    const page = await client.listPeople();
+    expect(page.items[0].id).toBe('p-1');
+    expect(waits).toEqual([7000]);
+    expect(calls.filter((c) => c.query.includes('people(')).length).toBe(2);
+  });
+
+  it('reads how many records Twenty holds, and reports unknown when it cannot', async () => {
+    const { client } = fakeClient((call) => {
+      if (call.query.includes('totalCount')) return { data: { people: { totalCount: 934 } } };
+      throw new Error(`unexpected ${call.query}`);
+    });
+    expect(await client.countRecords('person')).toBe(934);
+    const { client: refused } = fakeClient(() => new Response('{"errors":[{"message":"Forbidden"}]}', { status: 200 }));
+    expect(await refused.countRecords('company')).toBeNull();
+  });
+
   it('uses the default schema object names', () => {
     expect(defaultTwentySchema.objects.person.plural).toBe('people');
     expect(defaultTwentySchema.objects.noteTarget.typeName).toBe('NoteTarget');
