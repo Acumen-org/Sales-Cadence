@@ -9,6 +9,9 @@ import { ingestEvent, type IngestResult } from './ingest';
 export type ReconcileStats = {
   since: string;
   people: number;
+  /** Records Twenty returned that could not be cached, and the first reason. */
+  cacheFailed: number;
+  cacheError: string | null;
   notes: number;
   messages: number;
   opportunities: number;
@@ -43,14 +46,22 @@ export async function reconcile(opts: { days?: number; since?: string; actor?: A
   const now = opts.now ?? new Date();
   const since = opts.since ?? new Date(now.getTime() - days * 86_400_000).toISOString();
   const actor = opts.actor ?? RECONCILE_ACTOR;
-  const stats: ReconcileStats = { since, people: 0, notes: 0, messages: 0, opportunities: 0, tasks: 0, processed: 0, duplicates: 0, completions: 0, replies: 0, meetings: 0, errors: 0, needsReview: 0 };
+  const stats: ReconcileStats = { since, people: 0, notes: 0, messages: 0, opportunities: 0, tasks: 0, processed: 0, duplicates: 0, completions: 0, replies: 0, meetings: 0, errors: 0, needsReview: 0, cacheFailed: 0, cacheError: null };
   const common = { source: 'RECONCILE' as const, now, skipSync: opts.skipSync };
 
   // People first so dnd flips and new people are known before activity is matched.
   const cache = await refreshPersonCache(c, { since });
   stats.people = cache.people;
+  stats.cacheFailed = cache.failed;
+  stats.cacheError = cache.firstError;
   for await (const person of paginate((after) => c.listPeople({ updatedSince: since, after, limit: 100, includeDeleted: true }))) {
     tally(stats, await ingestEvent({ ...common, objectType: 'person', eventName: person.deletedAt ? 'person.deleted' : 'person.updated', record: (person.raw as Record<string, unknown> | undefined) ?? rawFromPerson(person), recordId: person.id, updatedAt: person.updatedAt }, c));
+  }
+
+  // Soft deletes do not touch updatedAt, so they need their own pass: a deleted person exits
+  // their sequence the same way a webhook would have made them.
+  for await (const person of paginate((after) => c.listPeople({ deletedSince: since, after, limit: 100 }))) {
+    tally(stats, await ingestEvent({ ...common, objectType: 'person', eventName: 'person.deleted', record: (person.raw as Record<string, unknown> | undefined) ?? rawFromPerson(person), recordId: person.id, updatedAt: person.deletedAt ?? person.updatedAt }, c));
   }
 
   for await (const note of paginate((after) => c.listNotes({ updatedSince: since, after, limit: 100 }))) {

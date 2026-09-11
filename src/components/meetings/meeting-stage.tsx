@@ -86,7 +86,6 @@ export function MeetingStage(p: Props) {
             allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
             allowFullScreen
             referrerPolicy="strict-origin-when-cross-origin"
-            /* Providers that refuse framing render blank; the note below explains the fallback. */
           />
         ) : (
           <div className="flex aspect-video w-full flex-col items-center justify-center gap-3 bg-ink-900 px-6 text-center">
@@ -99,7 +98,12 @@ export function MeetingStage(p: Props) {
         )}
       </div>
       )}
-      {(p.embedUrl || p.mediaUrl) && p.providerNote ? <p className="text-[11.5px] text-ink-600">{p.providerNote}</p> : null}
+      {p.embedUrl && !mediaFailed ? (
+        <div className="flex items-center justify-between gap-3 px-1">
+          <span className="text-[12px] text-ink-500">{p.providerLabel}</span>
+          <a href={p.sourceUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm" title={p.providerNote ?? undefined}><IconExternal size={13} /> Open in {p.providerLabel}</a>
+        </div>
+      ) : null}
 
       <div className="surface overflow-hidden">
         <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">

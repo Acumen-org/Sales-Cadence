@@ -8,9 +8,23 @@ import { userActor } from '../audit';
 import { refreshPersonCache, syncPodsFromTwenty } from '../person-cache';
 import { runSchedulerTick } from '../engine/tasks';
 import { reconcile } from '../engine/reconcile';
+import { syncContinuously } from '../continuous-sync';
 import { resolveReview } from '../engine/ingest';
 import { getTwentyClient } from '../twenty';
 import type { ActionResult } from './users';
+
+/** The same pass the worker runs every minute, now. */
+export async function syncNowAction(): Promise<ActionResult> {
+  await requireAdmin();
+  try {
+    const stats = await syncContinuously();
+    for (const path of ['/settings', '/people', '/accounts', '/tasks', '/home']) revalidatePath(path);
+    const failed = stats.cacheFailed ? ` ${stats.cacheFailed} record${stats.cacheFailed === 1 ? '' : 's'} could not be cached: ${stats.cacheError}.` : '';
+    return { ok: true, message: `Synced. ${stats.people} people, ${stats.notes} notes and ${stats.messages} messages since ${stats.since.slice(0, 16).replace('T', ' ')}.${failed}` };
+  } catch (err) {
+    return { ok: false, error: `Sync failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
+}
 
 export async function runReconcileAction(formData: FormData): Promise<ActionResult> {
   const admin = await requireAdmin();

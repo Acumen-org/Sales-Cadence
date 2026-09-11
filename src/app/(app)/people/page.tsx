@@ -1,8 +1,9 @@
 import Link from 'next/link';
+import { SyncNowButton } from '@/components/settings/sync-now-button';
 import { peopleScopeWhere } from '@/lib/people-scope';
 import type { Prisma } from '@prisma/client';
 import { requireUser } from '@/lib/auth/current-user';
-import { canEnroll, toActor } from '@/lib/auth/rbac';
+import { canEnroll, isAdmin, toActor } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
 import { formatInstant, formatLocalDate } from '@/lib/dates';
 import { cachedPersonName } from '@/lib/person-cache';
@@ -152,6 +153,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
           title={owner === 'mine' ? 'My relationships' : q || pod || status ? 'Filtered people' : 'All people'}
           caret
           meta={`${total} result${total === 1 ? '' : 's'}`}
+          actions={isAdmin(user) ? <SyncNowButton /> : undefined}
         />
         <Toolbar>
           <PeopleToolbar

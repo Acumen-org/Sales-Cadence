@@ -206,7 +206,8 @@ export class MockTwentyClient implements TwentyClient {
 
   async listPeople(opts?: ListPeopleOptions): Promise<Page<TwentyPerson>> {
     this.maybeFail();
-    let items = this.people.filter((p) => opts?.includeDeleted || !p.deletedAt);
+    let items = this.people.filter((p) => opts?.includeDeleted || opts?.deletedSince || !p.deletedAt);
+    if (opts?.deletedSince) items = items.filter((p) => p.deletedAt && p.deletedAt >= opts.deletedSince!);
     if (opts?.ids) {
       const set = new Set(opts.ids);
       items = items.filter((p) => set.has(p.id));
@@ -229,9 +230,9 @@ export class MockTwentyClient implements TwentyClient {
     return clone(this.people.filter((p) => set.has(p.id)));
   }
 
-  async listCompanies(opts?: ListOptions & { ids?: string[] }): Promise<Page<TwentyCompany>> {
+  async listCompanies(opts?: ListOptions & { ids?: string[]; deletedSince?: string }): Promise<Page<TwentyCompany>> {
     this.maybeFail();
-    let items = this.companies;
+    let items = opts?.deletedSince ? this.companies.filter((c) => c.deletedAt && c.deletedAt >= opts.deletedSince!) : this.companies;
     if (opts?.ids) {
       const set = new Set(opts.ids);
       items = items.filter((c) => set.has(c.id));

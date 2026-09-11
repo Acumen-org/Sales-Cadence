@@ -35,8 +35,12 @@ export async function meetingReadWhere(user: SessionUser): Promise<Prisma.Meetin
     OR: [
       { createdById: user.id },
       { attendees: { some: { userId: user.id } } },
+      // Added by someone in one of my pods: the pod's meetings are the pod's business.
+      ...(podIds.length ? [{ createdBy: { pods: { some: { podId: { in: podIds } } } } }] : []),
       { attendees: { some: { person: ownPeople } } },
       ...(companyIds.length ? [{ companyId: { in: companyIds } }] : []),
+      // Tied to no account and no CRM contact: there is nothing in it to keep from anyone.
+      { AND: [{ companyId: null }, { attendees: { none: { personId: { not: null } } } }] },
     ],
   };
 }

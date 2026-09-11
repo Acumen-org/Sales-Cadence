@@ -8,10 +8,11 @@ import { env } from '@/lib/env';
 import { getSettings, getTwentySchema } from '@/lib/settings';
 import { getTwentyClient } from '@/lib/twenty';
 import { recentEvents } from '@/lib/engine/ingest';
-import { Badge, Card, KeyValue, Notice, Surface, Tabs, ViewHeader, Empty } from '@/components/ui';
+import { Badge, Card, KeyValue, Surface, Tabs, ViewHeader, Empty, Count } from '@/components/ui';
 import { UsersPanel } from '@/components/settings/users-panel';
 import { AdminTools } from '@/components/settings/admin-tools';
 import { ReviewButton } from '@/components/settings/review-button';
+import { SyncNowButton } from '@/components/settings/sync-now-button';
 import { DiscardWriteButton, RetryWriteButton } from '@/components/settings/retry-write-button';
 import { MatchingForm, RulesForm, SyncForm, TwentyConnectionForm } from '@/components/settings/settings-forms';
 import { getMeetingAnalyzer } from '@/lib/meetings/analysis';
@@ -114,17 +115,35 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
     ok = false;
     ping = err instanceof Error ? err.message : String(err);
   }
-  const [settings, schema, lastReconcile] = await Promise.all([getSettings(), getTwentySchema(), prisma.setting.findUnique({ where: { key: 'lastReconcile' } })]);
-  const last = lastReconcile?.value as { at?: string } | null;
+  const [settings, schema, lastReconcile, continuous, cachedPeople, cachedCompanies] = await Promise.all([
+    getSettings(),
+    getTwentySchema(),
+    prisma.setting.findUnique({ where: { key: 'lastReconcile' } }),
+    prisma.setting.findUnique({ where: { key: 'continuousSync' } }),
+    prisma.personCache.count({ where: { deletedAt: null } }),
+    prisma.companyCache.count({ where: { deletedAt: null } }),
+  ]);
+  const last = lastReconcile?.value as { at?: string; stats?: { cacheFailed?: number; cacheError?: string | null } } | null;
+  const sync = continuous?.value as { lastSuccess?: string | null; lastError?: string | null; attemptedAt?: string | null; watermark?: string | null } | null;
   const baseUrl = settings.twenty.baseUrl || env().TWENTY_API_URL || '';
   return (
     <div className="space-y-3">
-      {dryRun ? <Notice tone="info">Dry run is on: Cadence logs what it would write to Twenty and writes nothing.</Notice> : null}
-      <Card title="Status">
+      <Card title="Status" actions={<SyncNowButton className="btn-secondary btn-sm" />}>
         <div className="p-4">
           <KeyValue
             items={[
               { k: 'Mode', v: mode === 'mock' ? 'Demo workspace' : 'Twenty (GraphQL)' },
+              { k: 'Dry run', v: dryRun ? <Badge tone="amber">On - nothing is written to Twenty</Badge> : <Badge tone="green">Off</Badge> },
+              {
+                k: 'Continuous sync',
+                v: sync?.lastError
+                  ? <span className="flex flex-wrap items-center gap-2"><Badge tone="red">Failing</Badge><span className="text-[12px] text-red-700">{sync.lastError}</span></span>
+                  : sync?.lastSuccess
+                    ? <span className="flex flex-wrap items-center gap-2"><Badge tone="green">Healthy</Badge><span className="text-[12px] text-ink-500">last {formatInstant(new Date(sync.lastSuccess), WORKSPACE_TIMEZONE)}</span></span>
+                    : <Badge tone="gray">Not run yet</Badge>,
+              },
+              { k: 'Cached', v: <span className="flex flex-wrap items-center gap-3"><span><Count value={cachedPeople} /> people</span><span><Count value={cachedCompanies} /> companies</span></span> },
+              ...(last?.stats?.cacheFailed ? [{ k: 'Could not cache', v: <span className="text-[12px] text-red-700">{last.stats.cacheFailed} record{last.stats.cacheFailed === 1 ? '' : 's'}: {last.stats.cacheError}</span> }] : []),
               { k: 'Connection', v: <Badge tone={ok ? 'green' : 'red'}>{ok ? 'Reachable' : 'Not connected'}</Badge> },
               { k: 'API key', v: settings.twenty.apiKey ? <Badge tone="green">Stored in settings</Badge> : hasEnvKey ? <Badge tone="green">From environment</Badge> : <Badge tone="amber">Not configured</Badge> },
               { k: 'Base URL', v: baseUrl ? <code className="text-[12px]">{baseUrl}</code> : null },

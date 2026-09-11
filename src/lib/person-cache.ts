@@ -155,23 +155,50 @@ export async function markPersonDeleted(personId: string, tx: Tx | typeof prisma
  * Pull people (and companies) from Twenty into the cache.
  * `since` limits to records updated at/after that ISO instant; omit for a full refresh.
  */
-export async function refreshPersonCache(client: TwentyClient, opts: { since?: string } = {}) {
-  let people = 0;
-  let companies = 0;
+export type RefreshStats = { people: number; companies: number; deleted: number; failed: number; firstError: string | null };
+
+/**
+ * Pull people and companies from Twenty into the cache. A record Twenty returns that this side
+ * cannot store (an option it has never seen, a value the schema refuses) is counted and logged
+ * and the run goes on: one odd record used to abort the whole sync and leave the workspace with a
+ * handful of contacts and no explanation. With `since`, records soft-deleted in that window are
+ * fetched as well - Twenty does not bump updatedAt when it deletes, so an update scan never sees
+ * them.
+ */
+export async function refreshPersonCache(client: TwentyClient, opts: { since?: string } = {}): Promise<RefreshStats> {
+  const stats: RefreshStats = { people: 0, companies: 0, deleted: 0, failed: 0, firstError: null };
+  const attempt = async (label: string, fn: () => Promise<unknown>) => {
+    try {
+      await fn();
+      return true;
+    } catch (err) {
+      stats.failed += 1;
+      const message = `${label}: ${err instanceof Error ? err.message : String(err)}`;
+      if (!stats.firstError) stats.firstError = message;
+      console.warn(`[cache] ${message}`);
+      return false;
+    }
+  };
   try {
     await syncPodsFromTwenty(client);
   } catch (err) {
     console.warn('[cache] pod sync skipped:', err instanceof Error ? err.message : String(err));
   }
   for await (const person of paginate((after) => client.listPeople({ updatedSince: opts.since, after, limit: 100, includeDeleted: true }))) {
-    await upsertPersonCache(person);
-    people += 1;
+    if (await attempt(`person ${person.id}`, () => upsertPersonCache(person))) stats.people += 1;
   }
   for await (const company of paginate((after) => client.listCompanies({ updatedSince: opts.since, after, limit: 100 }))) {
-    await upsertCompanyCache(company);
-    companies += 1;
+    if (await attempt(`company ${company.id}`, () => upsertCompanyCache(company))) stats.companies += 1;
   }
-  return { people, companies };
+  if (opts.since) {
+    for await (const person of paginate((after) => client.listPeople({ deletedSince: opts.since, after, limit: 100 }))) {
+      if (await attempt(`deleted person ${person.id}`, () => upsertPersonCache(person))) stats.deleted += 1;
+    }
+    for await (const company of paginate((after) => client.listCompanies({ deletedSince: opts.since, after, limit: 100 }))) {
+      if (await attempt(`deleted company ${company.id}`, () => upsertCompanyCache(company))) stats.deleted += 1;
+    }
+  }
+  return stats;
 }
 
 /** Make sure the given person ids are cached, fetching missing ones from Twenty. */

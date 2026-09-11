@@ -28,6 +28,8 @@ export type ListPeopleOptions = ListOptions & {
   podOwner?: string;
   companyId?: string;
   includeDeleted?: boolean;
+  /** Only records soft-deleted at or after this instant. Twenty does not bump updatedAt on delete. */
+  deletedSince?: string;
 };
 
 /**
@@ -46,7 +48,7 @@ export interface TwentyClient {
   listPeople(opts?: ListPeopleOptions): Promise<Page<TwentyPerson>>;
   getPerson(id: string): Promise<TwentyPerson | null>;
   getPeopleByIds(ids: string[]): Promise<TwentyPerson[]>;
-  listCompanies(opts?: ListOptions & { ids?: string[] }): Promise<Page<TwentyCompany>>;
+  listCompanies(opts?: ListOptions & { ids?: string[]; deletedSince?: string }): Promise<Page<TwentyCompany>>;
   listWorkspaceMembers(): Promise<TwentyWorkspaceMember[]>;
   /** Resolve a saved Twenty view of people to the people it contains. */
   getViewPeople(viewId: string): Promise<{ view: TwentyView; people: TwentyPerson[] }>;

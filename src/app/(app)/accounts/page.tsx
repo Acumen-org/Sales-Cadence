@@ -1,4 +1,6 @@
 import { requireUser } from '@/lib/auth/current-user';
+import { isAdmin } from '@/lib/auth/rbac';
+import { SyncNowButton } from '@/components/settings/sync-now-button';
 import { listAccounts } from '@/lib/accounts-query';
 import { formatInstant } from '@/lib/dates';
 import { IconCampaigns } from '@/components/icons';
@@ -23,7 +25,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
         <Stat label="Engaged accounts" value={rows.filter((a) => a.replied > 0 || a.meetings > 0).length} tone="good" />
       </div>
       <Surface flush>
-        <ViewHeader title={scope === 'mine' ? 'My accounts' : 'All accounts'} caret />
+        <ViewHeader title={scope === 'mine' ? 'My accounts' : 'All accounts'} caret actions={isAdmin(user) ? <SyncNowButton /> : undefined} />
         <Toolbar>
           <AccountsToolbar q={q} scope={scope} mineCount={mineCount} allCount={all.length} />
         </Toolbar>

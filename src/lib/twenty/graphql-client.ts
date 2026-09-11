@@ -294,7 +294,7 @@ export class TwentyGraphqlClient implements TwentyClient {
       opts.ids ? { id: { in: opts.ids } } : null,
       opts.podOwner ? { [p.podOwner]: { eq: opts.podOwner } } : null,
       opts.companyId ? { [p.companyId]: { eq: opts.companyId } } : null,
-      opts.includeDeleted ? { or: [{ [p.deletedAt]: { is: 'NULL' } }, { [p.deletedAt]: { is: 'NOT_NULL' } }] } : null,
+      opts.deletedSince ? { [p.deletedAt]: { gte: opts.deletedSince } } : opts.includeDeleted ? { or: [{ [p.deletedAt]: { is: 'NULL' } }, { [p.deletedAt]: { is: 'NOT_NULL' } }] } : null,
     );
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.person.plural, this.s.objects.person.typeName, sel), {
       filter,
@@ -354,11 +354,11 @@ export class TwentyGraphqlClient implements TwentyClient {
     ]);
   }
 
-  async listCompanies(opts: ListOptions & { ids?: string[] } = {}): Promise<Page<TwentyCompany>> {
+  async listCompanies(opts: ListOptions & { ids?: string[]; deletedSince?: string } = {}): Promise<Page<TwentyCompany>> {
     const c = this.s.company;
     const sel = await this.companySelection();
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.company.plural, this.s.objects.company.typeName, sel), {
-      filter: this.and(this.sinceFilter(c.updatedAt, opts.updatedSince), opts.ids ? { id: { in: opts.ids } } : null),
+      filter: this.and(this.sinceFilter(c.updatedAt, opts.updatedSince), opts.ids ? { id: { in: opts.ids } } : null, opts.deletedSince ? { [c.deletedAt]: { gte: opts.deletedSince } } : null),
       first: Math.min(opts.limit ?? PAGE_SIZE, 200),
       after: opts.after ?? null,
     });
