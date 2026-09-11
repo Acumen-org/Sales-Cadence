@@ -47,7 +47,7 @@ export async function seedBasics() {
     const name = value.charAt(0) + value.slice(1).toLowerCase();
     pods[name] = await prisma.pod.create({ data: { name: `Pod ${name}`, podOwnerValue: value } });
   }
-  const mk = async (memberId: string, role: 'ADMIN' | 'SALES_LEADER' | 'SENIOR_FO' | 'JUNIOR_FO', podNames: string[]) => {
+  const mk = async (memberId: string, role: 'ADMIN' | 'SALES_LEADER' | 'POD_MANAGER' | 'SENIOR_FO' | 'JUNIOR_FO' | 'BIZ_OPS', podNames: string[]) => {
     const m = MOCK_MEMBERS.find((x) => x.id === memberId)!;
     const user = await prisma.user.create({
       data: {

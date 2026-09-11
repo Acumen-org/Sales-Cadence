@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
-import { isAdmin, isPodLeader, visiblePodIds } from './auth/rbac';
+import { isAdmin, isPodLeader, visiblePodIds, canSeeAllPods } from './auth/rbac';
 import { addDays, startOfLocalDay, todayIn, weekRange, type LocalDate } from './dates';
 import { taskScopeWhere, WORKABLE, type TaskChannel } from './tasks-query';
 import { myOwnershipCounts } from './accounts-query';
@@ -13,7 +13,7 @@ export type HomeData = Awaited<ReturnType<typeof buildHome>>;
  * enrolled with them as the FO. Admins see everyone, since they supervise.
  */
 export async function assignedPersonWhere(user: SessionUser): Promise<Prisma.PersonCacheWhereInput> {
-  if (isAdmin(user)) return {};
+  if (canSeeAllPods(user)) return {};
   const or: Prisma.PersonCacheWhereInput[] = [{ enrollments: { some: { foUserId: user.id } } }];
   if (user.twentyMemberId) or.push({ ownerMemberId: user.twentyMemberId });
   if (isPodLeader(user)) {
@@ -115,7 +115,7 @@ async function myOpenTasks(base: Prisma.TaskWhereInput, today: LocalDate) {
  * Four grouped queries for the whole team rather than five per person.
  */
 async function teamThisWeek(user: SessionUser, today: LocalDate, week: { fromInstant: Date; toInstant: Date }) {
-  const leads = isAdmin(user) || isPodLeader(user);
+  const leads = canSeeAllPods(user) || isPodLeader(user);
   const pods = visiblePodIds(user);
   const users = leads
     ? await prisma.user.findMany({

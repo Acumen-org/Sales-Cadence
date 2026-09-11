@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
 import { peopleScopeWhere } from './people-scope';
-import { assertAllowed, isAdmin, isPodLeader } from './auth/rbac';
+import { assertAllowed, isAdmin, isPodLeader, canSeeAllPods } from './auth/rbac';
 import { cachedPersonName, upsertCompanyCache, upsertPersonCache } from './person-cache';
 import { getTwentySchema } from './settings';
 import type { TwentyClient } from './twenty/client';
@@ -191,7 +191,7 @@ export async function enrichmentPeopleScope(user: SessionUser): Promise<Prisma.P
 }
 
 async function enrichmentCompanyScope(user: SessionUser): Promise<Prisma.CompanyCacheWhereInput> {
-  if (isAdmin(user)) return { deletedAt: null };
+  if (canSeeAllPods(user)) return { deletedAt: null };
   const people = await prisma.personCache.findMany({ where: await enrichmentPeopleScope(user), select: { companyId: true }, distinct: ['companyId'] });
   return { deletedAt: null, OR: [{ ownerMemberId: user.twentyMemberId ?? '__none__' }, { id: { in: people.map((person) => person.companyId).filter((id): id is string => !!id) } }] };
 }

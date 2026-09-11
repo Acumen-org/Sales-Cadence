@@ -44,24 +44,26 @@ export async function seedDemo(sequenceId: string, withCampaigns: boolean) {
   console.log(`  + pods synced from Twenty options; ${cache.people} dummy people, ${cache.companies} dummy companies cached`);
 
   const pod = async (value: string) => (await prisma.pod.findUniqueOrThrow({ where: { podOwnerValue: value } })).id;
-  const users: Array<{ memberId: string; email: string; name: string; role: 'ADMIN' | 'SALES_LEADER' | 'SENIOR_FO' | 'JUNIOR_FO'; pods: string[] }> = [
+  const users: Array<{ memberId: string | null; email: string; name: string; role: 'ADMIN' | 'SALES_LEADER' | 'POD_MANAGER' | 'SENIOR_FO' | 'JUNIOR_FO' | 'BIZ_OPS'; pods: string[] }> = [
     { memberId: 'wm-ria', email: 'ria@cadence.local', name: 'Ria Admin', role: 'ADMIN', pods: [] },
     { memberId: 'wm-leigh', email: 'leigh@cadence.local', name: 'Leigh Leader', role: 'SALES_LEADER', pods: ['ALISA', 'ANDREW'] },
     { memberId: 'wm-alisa', email: 'alisa@cadence.local', name: 'Alisa Senior', role: 'SENIOR_FO', pods: ['ALISA'] },
     { memberId: 'wm-andrew', email: 'andrew@cadence.local', name: 'Andrew Senior', role: 'SENIOR_FO', pods: ['ANDREW'] },
     { memberId: 'wm-karson', email: 'karson@cadence.local', name: 'Karson Junior', role: 'JUNIOR_FO', pods: ['ALISA'] },
     { memberId: 'wm-daniel', email: 'daniel@cadence.local', name: 'Daniel Junior', role: 'JUNIOR_FO', pods: ['ANDREW'] },
+    // Not in sales, not in Twenty as a member: reads every pod, writes to none.
+    { memberId: null, email: 'bea@cadence.local', name: 'Bea Ops', role: 'BIZ_OPS', pods: [] },
   ];
   const hash = await hashPassword(DEMO_PASSWORD);
   const byEmail = new Map<string, string>();
   for (const u of users) {
-    const member = DEMO_MEMBERS.find((m) => m.id === u.memberId)!;
+    const member = u.memberId ? DEMO_MEMBERS.find((m) => m.id === u.memberId) ?? null : null;
     // The mailbox alias is how a meeting attendee row is recognised as this colleague.
-    const aliases = [`tw_${member.firstName.toLowerCase()}`, DEMO_USER_MAILBOXES[u.email]].filter(Boolean) as string[];
+    const aliases = [member ? `tw_${member.firstName.toLowerCase()}` : null, DEMO_USER_MAILBOXES[u.email]].filter(Boolean) as string[];
     const user = await prisma.user.upsert({
       where: { email: u.email },
-      create: { email: u.email, name: u.name, role: u.role, passwordHash: hash, twentyMemberId: member.id, aliases, timezone: 'Europe/London' },
-      update: { twentyMemberId: member.id, aliases },
+      create: { email: u.email, name: u.name, role: u.role, passwordHash: hash, twentyMemberId: member?.id ?? null, aliases, timezone: 'Europe/London' },
+      update: { twentyMemberId: member?.id ?? null, aliases },
     });
     byEmail.set(u.email, user.id);
     for (const p of u.pods) {

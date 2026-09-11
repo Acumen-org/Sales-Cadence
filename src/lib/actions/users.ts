@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { needsPod } from '../auth/rbac';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
@@ -14,7 +15,7 @@ import { loadSyncTasks, syncTaskInclude, syncTaskResolved, syncTasksCreated, typ
 
 export type ActionResult = { ok: true; message?: string; redirectTo?: string; data?: unknown } | { ok: false; error: string };
 
-const RoleSchema = z.enum(['ADMIN', 'SALES_LEADER', 'SENIOR_FO', 'JUNIOR_FO']);
+const RoleSchema = z.enum(['ADMIN', 'SALES_LEADER', 'POD_MANAGER', 'SENIOR_FO', 'JUNIOR_FO', 'BIZ_OPS']);
 const UserFields = z.object({
   email: z.string().trim().toLowerCase().email().max(254),
   name: z.string().trim().min(1).max(200),
@@ -55,6 +56,7 @@ export async function createUserAction(formData: FormData): Promise<ActionResult
   const d = parsed.data;
   const weak = validatePasswordStrength(d.password ?? '');
   if (weak) return { ok: false, error: weak };
+  if (needsPod(d.role) && !d.podIds.length) return { ok: false, error: 'This role works in a pod: choose at least one.' };
   const existing = await prisma.user.findUnique({ where: { email: d.email } });
   if (existing?.active) return { ok: false, error: 'That email already belongs to a team member.' };
   if (!(await validPods(d.podIds))) return { ok: false, error: 'Choose existing, active pods.' };
@@ -86,6 +88,7 @@ export async function updateUserAction(formData: FormData): Promise<ActionResult
   if (!parsed.success) return { ok: false, error: parsed.error.issues.map((i) => i.message).join('; ') };
   const d = parsed.data;
   if (existing.id === admin.id && d.role !== 'ADMIN') return { ok: false, error: 'You cannot remove your own administrator access.' };
+  if (needsPod(d.role) && !d.podIds.length) return { ok: false, error: 'This role works in a pod: choose at least one.' };
   if (!(await validPods(d.podIds))) return { ok: false, error: 'Choose existing, active pods.' };
   const duplicate = await prisma.user.findUnique({ where: { email: d.email } });
   if (duplicate && duplicate.id !== userId) return { ok: false, error: 'That email already belongs to another team member.' };

@@ -18,8 +18,10 @@ datasource db {
 enum Role {
   ADMIN
   SALES_LEADER
+  POD_MANAGER
   SENIOR_FO
   JUNIOR_FO
+  BIZ_OPS
 }
 
 enum ActionType {

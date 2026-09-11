@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import type { Role } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import type { SessionUser } from '@/lib/auth/current-user';
 import { buildHome } from '@/lib/home-query';
@@ -42,7 +43,7 @@ async function countQueries(label: string, run: () => Promise<unknown>): Promise
 }
 
 const sessionUser = (
-  u: { id: string; email: string; name: string; role: 'ADMIN' | 'SALES_LEADER' | 'SENIOR_FO' | 'JUNIOR_FO'; timezone: string; twentyMemberId: string | null; dailyCap: number | null },
+  u: { id: string; email: string; name: string; role: Role; timezone: string; twentyMemberId: string | null; dailyCap: number | null },
   podIds: string[],
 ): SessionUser => ({ id: u.id, email: u.email, name: u.name, role: u.role, timezone: u.timezone, twentyMemberId: u.twentyMemberId, dailyCap: u.dailyCap, podIds, pods: podIds.map((id) => ({ id, name: id })) });
 

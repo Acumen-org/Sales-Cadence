@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
-import { isAdmin, isPodLeader } from './auth/rbac';
+import { isPodLeader, canSeeAllPods } from './auth/rbac';
 import { addDays, startOfLocalDay, todayIn, type LocalDate } from './dates';
 import { WORKSPACE_TIMEZONE } from './workspace';
 
@@ -55,7 +55,7 @@ export function effectiveDate(t: { dueDate: string; snoozedTo: string | null }):
 export const WORKABLE: Prisma.TaskWhereInput = { enrollment: { status: { not: 'PAUSED' } } };
 
 export function taskScopeWhere(user: SessionUser): Prisma.TaskWhereInput {
-  if (isAdmin(user)) return {};
+  if (canSeeAllPods(user)) return {};
   if (isPodLeader(user)) {
     return { OR: [{ foUserId: user.id }, { enrollment: { podId: { in: user.podIds } } }] };
   }
@@ -99,8 +99,8 @@ export type TaskListResult = {
 
 /** Pods and FOs the user may filter by. */
 export async function filterOptions(user: SessionUser) {
-  if (!isAdmin(user) && !isPodLeader(user)) return { pods: [], fos: [] };
-  const podWhere = isAdmin(user) ? { archived: false } : { archived: false, id: { in: user.podIds } };
+  if (!canSeeAllPods(user) && !isPodLeader(user)) return { pods: [], fos: [] };
+  const podWhere = canSeeAllPods(user) ? { archived: false } : { archived: false, id: { in: user.podIds } };
   const pods = await prisma.pod.findMany({ where: podWhere, orderBy: { name: 'asc' }, include: { users: { include: { user: { select: { id: true, name: true, active: true } } } } } });
   const fos = new Map<string, { id: string; name: string; podIds: string[] }>();
   for (const pod of pods) {
@@ -111,7 +111,7 @@ export async function filterOptions(user: SessionUser) {
       fos.set(up.user.id, existing);
     }
   }
-  if (isAdmin(user)) {
+  if (canSeeAllPods(user)) {
     const others = await prisma.user.findMany({ where: { active: true, id: { notIn: [...fos.keys()] } }, select: { id: true, name: true } });
     for (const o of others) fos.set(o.id, { id: o.id, name: o.name, podIds: [] });
   }

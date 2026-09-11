@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { formatLocalDate } from '@/lib/dates';
 import { notFound,redirect } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
-import { canManageCampaigns,canApproveCampaign,isAdmin } from '@/lib/auth/rbac';
+import { canManageCampaigns, canApproveCampaign, canSeeAllPods } from '@/lib/auth/rbac';
 import { campaignDetail } from '@/lib/campaigns-query';
 import { prisma } from '@/lib/db';
 import { todayIn } from '@/lib/dates';
@@ -18,7 +18,7 @@ import { userActor } from '@/lib/audit';
 export default async function CampaignDetailPage({params}:{params:Promise<{id:string}>}) {
  const user=await requireUser();const {id}=await params;const today=todayIn(user.timezone);const detail=await campaignDetail(id,today);if(!detail) notFound();
  const {campaign,history,summary,byStep,byFo,podFos}=detail;
- if(!isAdmin(user)&&!user.podIds.includes(campaign.podId)) redirect('/campaigns');
+ if(!canSeeAllPods(user)&&!user.podIds.includes(campaign.podId)) redirect('/campaigns');
  const manager=canManageCampaigns(user,campaign.podId);
  const proposed=['PENDING_APPROVAL','SCHEDULED'].includes(campaign.status);
  const [sequences,audience,preview]=await Promise.all([prisma.sequence.findMany({where:{archived:false},select:{id:true,name:true},orderBy:{name:'asc'}}), proposed ? prisma.personCache.findMany({where:{id:{in:campaign.personIds}},orderBy:{lastName:'asc'}}):Promise.resolve([]),

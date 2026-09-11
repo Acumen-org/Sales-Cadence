@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import type { Role } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { SYSTEM_ACTOR } from '@/lib/audit';
 import type { SessionUser } from '@/lib/auth/current-user';
@@ -13,7 +14,7 @@ import { resetDb, seedBasics, type Basics } from './helpers/db';
 const TUESDAY = new Date('2026-09-08T10:00:00Z');
 
 function sessionUser(
-  u: { id: string; email: string; name: string; role: 'ADMIN' | 'SALES_LEADER' | 'SENIOR_FO' | 'JUNIOR_FO'; timezone: string; twentyMemberId: string | null; dailyCap: number | null },
+  u: { id: string; email: string; name: string; role: Role; timezone: string; twentyMemberId: string | null; dailyCap: number | null },
   podIds: string[],
 ): SessionUser {
   return { id: u.id, email: u.email, name: u.name, role: u.role, timezone: u.timezone, twentyMemberId: u.twentyMemberId, dailyCap: u.dailyCap, podIds, pods: podIds.map((id) => ({ id, name: id })) };

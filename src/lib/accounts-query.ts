@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { meetingReadWhere } from './meetings-query';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
-import { isAdmin, visiblePodIds } from './auth/rbac';
+import { visiblePodIds, canSeeAllPods } from './auth/rbac';
 import { cachedPersonName } from './person-cache';
 import { auditDetailText, describeAudit } from './audit-format';
 
@@ -36,7 +36,7 @@ export type AccountListRow = {
  * they own, which otherwise would not appear until somebody worked a contact there.
  */
 export async function accountScopeCompanyIds(user: SessionUser): Promise<string[] | null> {
-  if (isAdmin(user)) return null;
+  if (canSeeAllPods(user)) return null;
   const pods = visiblePodIds(user) ?? [];
   const podValues = pods.length ? (await prisma.pod.findMany({ where: { id: { in: pods } }, select: { podOwnerValue: true } })).map((p) => p.podOwnerValue) : [];
   const owned = user.twentyMemberId

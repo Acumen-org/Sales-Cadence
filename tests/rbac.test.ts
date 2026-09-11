@@ -11,6 +11,9 @@ import {
   canSnoozeFreely,
   canViewReports,
   visiblePodIds,
+  canSeeAllPods,
+  defaultFilters,
+  needsPod,
   type Actor,
 } from '@/lib/auth/rbac';
 
@@ -18,8 +21,38 @@ const admin: Actor = { id: 'admin', role: 'ADMIN', podIds: [] };
 const leader: Actor = { id: 'leader', role: 'SALES_LEADER', podIds: ['pod-a'] };
 const senior: Actor = { id: 'senior', role: 'SENIOR_FO', podIds: ['pod-a'] };
 const junior: Actor = { id: 'junior', role: 'JUNIOR_FO', podIds: ['pod-a'] };
+const manager: Actor = { id: 'manager', role: 'POD_MANAGER', podIds: ['pod-a'] };
+const ops: Actor = { id: 'ops', role: 'BIZ_OPS', podIds: [] };
 
 describe('rbac', () => {
+  it('a Pod Manager runs their own pod like a Sales Leader, and no other', () => {
+    expect(canManagePod(manager, 'pod-a')).toBe(true);
+    expect(canManagePod(manager, 'pod-z')).toBe(false);
+    expect(canEnroll(manager, 'pod-a')).toBe(true);
+    expect(canApproveCampaign(manager, 'pod-a')).toBe(true);
+    expect(canApproveCampaign(manager, 'pod-z')).toBe(false);
+    expect(canEditSequences(manager)).toBe(true);
+    expect(canViewReports(manager)).toBe(true);
+    expect(canManageSettings(manager)).toBe(false);
+    expect(canManageUsers(manager)).toBe(false);
+    expect(visiblePodIds(manager)).toEqual(['pod-a']);
+    expect(needsPod('POD_MANAGER')).toBe(true);
+  });
+  it('Biz Ops reads every pod and writes to none', () => {
+    expect(canSeeAllPods(ops)).toBe(true);
+    expect(visiblePodIds(ops)).toBeNull();
+    expect(canViewReports(ops)).toBe(true);
+    expect(canManagePod(ops, 'pod-a')).toBe(false);
+    expect(canEnroll(ops)).toBe(false);
+    expect(canEditSequences(ops)).toBe(false);
+    expect(canApproveCampaign(ops, 'pod-a')).toBe(false);
+    expect(canActOnTask(ops, { foUserId: 'someone', podId: 'pod-a' })).toBe(false);
+    expect(canManageSettings(ops)).toBe(false);
+    expect(needsPod('BIZ_OPS')).toBe(false);
+    expect(defaultFilters(ops)).toEqual({ pod: false, self: false });
+    expect(defaultFilters(junior)).toEqual({ pod: true, self: true });
+    expect(defaultFilters(leader)).toEqual({ pod: true, self: false });
+  });
   it('admin can do everything', () => {
     expect(canManagePod(admin, 'pod-z')).toBe(true);
     expect(canEditSequences(admin)).toBe(true);
