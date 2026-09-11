@@ -130,7 +130,7 @@ async function teamThisWeek(user: SessionUser, today: LocalDate, week: { fromIns
   const enrollmentScope: Prisma.EnrollmentWhereInput = pods === null ? {} : { OR: [{ podId: { in: pods } }, { foUserId: user.id }] };
 
   const [pending, doneRows, replyRows, meetingRows] = await Promise.all([
-    prisma.task.findMany({ where: { AND: [taskScope, WORKABLE, { foUserId: { in: ids }, state: 'PENDING' }] }, select: { foUserId: true, dueDate: true, snoozedTo: true } }),
+    prisma.task.findMany({ where: { AND: [taskScope, WORKABLE, { foUserId: { in: ids }, state: 'PENDING' }] }, select: { foUserId: true, dueDate: true, snoozedTo: true, enrollmentId: true, stepId: true } }),
     prisma.task.groupBy({ by: ['foUserId'], where: { AND: [taskScope, { foUserId: { in: ids }, state: 'DONE', completedAt: { gte: week.fromInstant, lt: week.toInstant } }] }, _count: { _all: true } }),
     prisma.enrollment.groupBy({ by: ['foUserId'], where: { AND: [enrollmentScope, { foUserId: { in: ids }, repliedAt: { gte: week.fromInstant, lt: week.toInstant } }] }, _count: { _all: true } }),
     prisma.enrollment.groupBy({ by: ['foUserId'], where: { AND: [enrollmentScope, { foUserId: { in: ids }, meetingAt: { gte: week.fromInstant, lt: week.toInstant } }] }, _count: { _all: true } }),
@@ -139,20 +139,22 @@ async function teamThisWeek(user: SessionUser, today: LocalDate, week: { fromIns
   const doneBy = new Map(doneRows.map((r) => [r.foUserId, r._count._all]));
   const replyBy = new Map(replyRows.map((r) => [r.foUserId, r._count._all]));
   const meetingBy = new Map(meetingRows.map((r) => [r.foUserId, r._count._all]));
-  const dueBy = new Map<string, { today: number; overdue: number }>();
+  // Touchpoints, not modules, so the board agrees with each FO's badge and Tasks tabs.
+  const dueBy = new Map<string, { today: Set<string>; overdue: Set<string> }>();
   for (const t of pending) {
-    const row = dueBy.get(t.foUserId) ?? { today: 0, overdue: 0 };
+    const row = dueBy.get(t.foUserId) ?? { today: new Set<string>(), overdue: new Set<string>() };
     const due = t.snoozedTo ?? t.dueDate;
-    if (due === today) row.today += 1;
-    else if (due < today) row.overdue += 1;
+    const group = `${t.enrollmentId}:${t.stepId}`;
+    if (due === today) row.today.add(group);
+    else if (due < today) row.overdue.add(group);
     dueBy.set(t.foUserId, row);
   }
 
   return users.map((u) => ({
     id: u.id,
     name: u.name,
-    today: dueBy.get(u.id)?.today ?? 0,
-    overdue: dueBy.get(u.id)?.overdue ?? 0,
+    today: dueBy.get(u.id)?.today.size ?? 0,
+    overdue: dueBy.get(u.id)?.overdue.size ?? 0,
     doneWeek: doneBy.get(u.id) ?? 0,
     replies: replyBy.get(u.id) ?? 0,
     meetings: meetingBy.get(u.id) ?? 0,

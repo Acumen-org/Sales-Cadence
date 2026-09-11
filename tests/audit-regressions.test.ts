@@ -100,8 +100,9 @@ describe('scope boundaries', () => {
     await enrollPeople({ personIds: ['person-16'], sequenceId: b.sequence.id, podId: b.pods.Leigh.id, startDate: '2026-09-08', assignment: { mode: 'FIXED', foUserId: b.users.karson.id }, actor: SYSTEM_ACTOR }, context);
     const home = await buildHome(session(b.users.alisa, [b.pods.Alisa.id]), NOW);
     expect(home.team.find((u) => u.id === b.users.karson.id)).toMatchObject({ today: 0, overdue: 0 });
+    // An admin sees Karson's Leigh-pod work: day 1 is email + LinkedIn, one touchpoint on the board.
     const admin = await buildHome(session(b.users.ria), NOW);
-    expect(admin.team.find((u) => u.id === b.users.karson.id)?.today).toBe(2);
+    expect(admin.team.find((u) => u.id === b.users.karson.id)?.today).toBe(1);
   });
 });
 
