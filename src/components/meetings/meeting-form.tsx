@@ -74,7 +74,7 @@ export function MeetingForm({ companies, initial, mode, timezone }: { companies:
           </select>
         </Field>
 
-        <div className="space-y-2 md:col-span-2"><div className="text-sm font-medium text-ink-700">Attendees</div><AttendeePicker initial={initial.attendees} /></div>
+        <div className="space-y-2 md:col-span-2"><div className="text-[12px] font-medium text-ink-500">Attendees</div><AttendeePicker initial={initial.attendees} /></div>
 
         <Field label="Products" className="md:col-span-2">
           <div className="flex flex-wrap gap-2">

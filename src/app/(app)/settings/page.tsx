@@ -127,7 +127,7 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
               { k: 'Mode', v: mode === 'mock' ? 'Demo workspace' : 'Twenty (GraphQL)' },
               { k: 'Connection', v: <Badge tone={ok ? 'green' : 'red'}>{ok ? 'Reachable' : 'Not connected'}</Badge> },
               { k: 'API key', v: settings.twenty.apiKey ? <Badge tone="green">Stored in settings</Badge> : hasEnvKey ? <Badge tone="green">From environment</Badge> : <Badge tone="amber">Not configured</Badge> },
-              { k: 'Base URL', v: baseUrl || null },
+              { k: 'Base URL', v: baseUrl ? <code className="text-[12px]">{baseUrl}</code> : null },
               ...(counts.people === undefined ? [] : [{ k: 'People', v: counts.people }]),
               { k: 'Workspace members', v: counts.members ?? null },
               ...(ok ? [] : [{ k: 'Last error', v: <span className="text-red-700">{ping}</span> }]),

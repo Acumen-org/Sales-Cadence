@@ -41,7 +41,7 @@ function GroupTable({ rows, first }: { rows: GroupRow[]; first: string }) {
 }
 
 const TABS = [
-  { key: 'activity', label: 'Team performance' },
+  { key: 'activity', label: 'By FO and channel' },
   { key: 'pods', label: 'By pod' },
   { key: 'fos', label: 'By FO' },
   { key: 'campaigns', label: 'By campaign' },

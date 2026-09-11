@@ -156,7 +156,6 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
               <KeyValue
                 items={[
                   { k: 'Provider', v: link.label },
-                  { k: 'Link', v: <span className="block max-w-full truncate font-mono text-[11px]" title={meeting.sourceUrl}>{meeting.sourceUrl}</span> },
                 ]}
               />
             </div>

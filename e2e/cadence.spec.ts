@@ -68,7 +68,7 @@ test('a Senior FO creates a campaign with a conflict preview', async ({ page }) 
   await loginAs(page, 'Alisa');
   await page.goto('/campaigns/new');
   await page.getByLabel('Name', { exact: true }).fill('E2E SaaStr follow-up');
-  await page.getByLabel('Pod', { exact: true }).selectOption({ label: "Alisa's pod (ALISA)" });
+  await page.getByLabel('Pod', { exact: true }).selectOption({ label: "Alisa's pod" });
   // Dummy Six is do-not-contact in Twenty: it must be listed as skipped, not enrolled.
   await page.getByLabel('Twenty person ids').fill('dummy-01\ndummy-02\ndummy-03\ndummy-04\ndummy-06');
   await page.getByRole('button', { name: 'Preview conflicts' }).click();

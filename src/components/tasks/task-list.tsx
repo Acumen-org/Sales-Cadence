@@ -172,7 +172,7 @@ export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispos
                     <span className="shrink-0">Day <span className="font-medium text-ink-700">{t.stepDay}</span></span>
                     {t.snoozed ? <Badge tone="sky">snoozed</Badge> : null}
                   </span>
-                  {showFo ? <span className="mt-1 block truncate text-[11px] text-ink-500">Assigned to <span className="font-medium text-ink-700">{t.foName}</span></span> : null}
+                  {showFo ? <span className="mt-1 block truncate text-[11px] text-ink-500">FO <span className="font-medium text-ink-700">{t.foName}</span></span> : null}
                 </span>
               </Link>
             </li>

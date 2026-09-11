@@ -109,7 +109,7 @@ test.describe('Senior FO', () => {
     // Launch a campaign on it, in their own pod.
     await page.goto('/campaigns/new');
     await page.getByLabel('Name', { exact: true }).fill('E2E role campaign');
-    await page.getByLabel('Pod', { exact: true }).selectOption({ label: "Alisa's pod (ALISA)" });
+    await page.getByLabel('Pod', { exact: true }).selectOption({ label: "Alisa's pod" });
     // Thirteen and Fourteen are reserved for this file: earlier specs work dummy-01..06.
     await page.getByLabel('Twenty person ids').fill('dummy-13\ndummy-14');
     await page.getByRole('button', { name: /Preview conflicts/ }).click();
@@ -149,7 +149,7 @@ test.describe('Sales Leader', () => {
     await signIn(page, 'alisa@cadence.local');
     await page.goto('/campaigns/new');
     await page.getByLabel('Name', { exact: true }).fill('E2E leader source campaign');
-    await page.getByLabel('Pod', { exact: true }).selectOption({ label: "Alisa's pod (ALISA)" });
+    await page.getByLabel('Pod', { exact: true }).selectOption({ label: "Alisa's pod" });
     await page.getByLabel('Twenty person ids').fill('dummy-13\ndummy-14');
     await page.getByRole('button', { name: /Preview conflicts/ }).click();
     await page.getByRole('button', { name: /Create campaign/ }).click();

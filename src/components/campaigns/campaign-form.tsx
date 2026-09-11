@@ -74,7 +74,7 @@ export function CampaignForm({ sequences, pods, defaultStartDate, defaultRamp, m
             <select name="podId" required className="w-full">
               {pods.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name} ({p.podOwnerValue})
+                  {p.name}
                 </option>
               ))}
             </select>

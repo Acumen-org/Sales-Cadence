@@ -79,7 +79,7 @@ export function TaskBriefPanel({ brief, timezone }: { brief: TaskBrief; timezone
         { k: 'Campaign', v: campaign ? <Link href={`/campaigns/${campaign.id}`} className="text-brand-700 hover:underline">{campaign.name}</Link> : null },
         { k: 'Step', v: <span className="font-medium">{brief.stepIndex + 1} / {brief.stepCount}</span> },
         { k: 'Channels', v: [...new Set(brief.modules.map((module) => ACTION_LABELS[module.task.action]))].join(' + ') },
-        { k: 'Assigned to', v: brief.enrollment.foName }, { k: 'Started', v: formatLocalDate(brief.enrollment.startDate, 'long') },
+        { k: 'FO', v: brief.enrollment.foName }, { k: 'Started', v: formatLocalDate(brief.enrollment.startDate, 'long') },
       ]} />
       {brief.nextStep ? <div className="mt-4 rounded-xl bg-canvas p-3"><div className="mb-3 text-sm font-medium text-ink-900">Next touchpoint</div><RecordFields items={[{ label: 'Business day', value: brief.nextStep.step.day }, { label: 'Scheduled', value: formatLocalDate(brief.nextStep.plannedDate) }, { label: 'Channels', value: brief.nextStep.description }]} /></div> : <div className="mt-3"><Badge tone="gray">Final touchpoint</Badge></div>}
       <Link href={`/people/${person.id}?tab=sequences`} className="btn-ghost btn-sm mt-3">All campaigns & sequence history</Link>

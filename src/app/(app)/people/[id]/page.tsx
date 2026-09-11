@@ -198,7 +198,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                     >
                       <div className="border-b border-line bg-canvas/50 p-4"><RecordFields className="lg:grid-cols-4" items={[
                         { label: 'Campaign', value: e.campaign ? <Link href={`/campaigns/${e.campaign.id}`} className="text-brand-700 hover:underline">{e.campaign.name}</Link> : 'Direct enrollment' },
-                        { label: 'Assigned to', value: e.fo.name },
+                        { label: 'FO', value: e.fo.name },
                         { label: 'Started', value: formatLocalDate(e.startDate, 'long') },
                         { label: 'Campaign status', value: e.campaign ? campaignStatusLabel(e.campaign.status) : null },
                       ]} /></div>
