@@ -468,3 +468,21 @@ contact", so repeating it in the warnings line was noise.
 - **Transcripts keep the dialogue only.** A JSON export carries ids, confidences and offsets; the
   parser reduces any array-of-utterances shape to who said what, when, and merges a speaker's
   consecutive lines. Whole-number offsets with any at 1000 or more are milliseconds.
+
+## sanitize-html is pinned below the latest release (11 September 2026)
+
+- **`sanitize-html` stays at 2.17.5, and the reason is upstream packaging, not neglect.** 2.17.6 and
+  2.17.7 both require `htmlparser2` v12, which ships ESM only, while `sanitize-html`'s own build is
+  CommonJS; Node refuses the combination outright (`require() of ES Module`), so those releases do
+  not load here at all. Inlining the package for Vitest does not help - the `require` happens inside
+  `sanitize-html` itself. Upgrading will be possible when upstream ships an ESM build or drops back
+  to a CJS-compatible parser.
+- **The two advisories patched after 2.17.5 are not reachable through this configuration**, and that
+  is asserted rather than assumed. `tests/rich-text-security.test.ts` throws the payloads from all
+  three advisories at `cleanRichText`: the `</textarea/>` allow-list bypass (GHSA-jxwj-j7wr-gfrw)
+  and the SVG SMIL scheme bypass (GHSA-g8qq-57p8-ggw5) both need tags this allow-list has never
+  contained (`textarea`, `svg`, `animate`), and the attribute-carried `javascript:` URIs
+  (GHSA-vccv-cmxp-4j9h) are patched in 2.17.5 anyway.
+- **The test is the guard.** It fails if anyone widens `allowedTags` or `allowedAttributes` far
+  enough to make those bypasses reachable, which is the condition under which the pin would stop
+  being safe. `pnpm audit` will keep reporting the two advisories; the test says what they mean here.
