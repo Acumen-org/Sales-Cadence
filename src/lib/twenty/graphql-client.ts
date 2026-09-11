@@ -317,7 +317,11 @@ export class TwentyGraphqlClient implements TwentyClient {
     );
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.person.plural, this.s.objects.person.typeName, sel), {
       filter,
-      orderBy: [{ [p.updatedAt]: 'AscNullsLast' }],
+      // Twenty truncates the result set when ordering by updatedAt on a workspace whose
+      // rows were bulk-imported: ~14 distinct timestamps per 60 rows means the keyset cursor
+      // cannot order ties, so it returns ~530 of 8369 people and reports hasNextPage: false.
+      // Default (id) order paginates the full set correctly; updatedSince still filters.
+      orderBy: undefined,
       first: Math.min(opts.limit ?? PAGE_SIZE, PAGE_SIZE),
       after: opts.after ?? null,
     });
@@ -688,7 +692,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     const data = await this.request<{ objects: Connection }>(
       `query Objects {
         objects(paging: { first: 500 }) {
-          edges { node { id nameSingular namePlural isCustom fields(paging: { first: 500 }) { edges { node { id name type label isCustom options } } } } }
+          edges { node { id nameSingular namePlural isCustom fieldsList { id name type label isCustom options } } }
         }
       }`,
       {},
@@ -698,7 +702,7 @@ export class TwentyGraphqlClient implements TwentyClient {
       id: String(o.id),
       nameSingular: String(o.nameSingular),
       namePlural: String(o.namePlural),
-      fields: connectionToArray(o.fields).map((f) => ({
+      fields: (Array.isArray(o.fieldsList) ? (o.fieldsList as Raw[]) : connectionToArray(o.fields)).map((f) => ({
         id: String(f.id),
         name: String(f.name),
         type: String(f.type ?? ''),
