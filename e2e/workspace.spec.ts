@@ -91,6 +91,16 @@ ${error.stack ?? 'no stack'}`));
     await page.goto(`/${route}`);
     await expect(page.getByLabel('Open navigation')).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), route).toBe(true);
+    // React hydrates in a scheduler task after `load`, and the prefetches that follow hydration are
+    // the last requests a page makes, so idle means hydration has had its say about this route.
+    await page.waitForLoadState('networkidle');
+    if (errors.length) {
+      // The one known error here is a hydration mismatch, which production React reports without
+      // the diff. The server's HTML and the DOM React settled on are what a reproduction needs.
+      const server = await page.request.get(`/${route}`);
+      await test.info().attach(`${route}-server.html`, { body: await server.text(), contentType: 'text/html' });
+      await test.info().attach(`${route}-dom.html`, { body: await page.content(), contentType: 'text/html' });
+    }
     // Named per route, because "something threw" is not a bug report.
     expect(errors, route).toEqual([]);
   }

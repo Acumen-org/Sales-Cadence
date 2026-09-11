@@ -181,6 +181,34 @@ Playwright still reports the test as **flaky** rather than passed, so it stays v
 underlying hydration error is a real defect and should be chased with a reproduction (a trace from a
 failing run) rather than more speculation.
 
+**What the failing run's trace established (11 September 2026, CI run 3, commit `36a0932`).** The
+Playwright report kept by the failed run was downloaded and read rather than reasoned about:
+
+- **The attribution is right.** The `/activity` document finished loading, `goto` resolved, and the
+  error was reported 16 ms later, while `/activity` was the live document. It is not a late error
+  from `/campaigns`.
+- **It is a structural mismatch, not a text one.** React 19 throws error 418 with the argument
+  `text` when a text node differs and `HTML` when an element is missing, unexpected or of another
+  type; this one carries `HTML`. That rules out date and number formatting, which is where the
+  earlier hypotheses (timezone, CLDR "Sept") were looking.
+- **The data was the same as here.** The feed held 53 rows, and the same 53 render locally from the
+  browser-test database.
+- **The markup is valid.** The browser's own parse of the server HTML for `/activity` is identical,
+  node for node, to the DOM React renders on the client. Whatever hydration tripped over is not
+  something the parser rewrote and not something a client render reproduces: the DOM before and
+  after React regenerated the tree differ only by Next's route announcer.
+- **It does not reproduce here.** Eight loads in development mode and twenty-five in a production
+  build, each at 390px under a 6x CPU throttle against that same database, produced no hydration
+  message at all.
+
+What is left is the environment: Linux Chromium and Node 20 on a slow two-vCPU runner, with the
+HTML arriving in chunks. The test now waits for the network to go idle before judging a route, and
+when a page error has been recorded it attaches the server's HTML and the DOM React settled on to
+the report, so the next failure carries the two sides of the comparison instead of only the error.
+The reproduction scripts live in `.review/` (ignored by git): `repro-db.ts` starts the browser-test
+database, `hydration-repro.mjs` loops a route under CPU throttle, `fetch-html.mjs` saves the server
+HTML and compares its parse with the live DOM.
+
 Fixed at the same time, and a real test bug rather than a flake: `tasks-ui.spec.ts` "the message is
 editable in place" typed into the rich-text editor and then asserted the draft had been kept,
 without first checking the keystrokes had landed. On a slower runner the click had not focused the
