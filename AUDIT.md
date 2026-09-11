@@ -135,3 +135,24 @@ Each of the 21 points from the owner's review, where it lives in the code, and t
 | 19 | Meeting product tags PHH / Acubooth / Glynac | Met | `src/lib/workspace.ts`, `src/components/meetings/product-tags.tsx` |
 | 20 | Enrichment beyond email and phone | Met | `CONTACT_CRITICAL`, `ACCOUNT_USEFUL` incl. AUM (`src/lib/enrichment.ts`) |
 | 21 | No over-bolding | Met | one scale: weight marks the primary element only (`src/app/globals.css`, commit `98e7ed4`) |
+
+## The owner's second list, checked (11 September 2026)
+
+| # | Point | State | Where |
+|---|---|---|---|
+| 1 | Team members never appear as people | Met | `src/lib/people-scope.ts` (login emails and the workspace's domains) |
+| 2 | Pod Manager and Biz Ops | Met | `src/lib/auth/rbac.ts` (`isPodManager`, `isBizOps`, `canSeeAllPods`), migration `20260919000000_roles_pod_manager_biz_ops` |
+| 3 | Keep non-campaign people in check | Met | a sequence that repeats: `Sequence.repeatEveryDays`, next round in `src/lib/engine/tasks.ts` |
+| 4 | Delegate a task to a team member | Met | `src/lib/engine/delegate.ts`, More panel in `task-actions.tsx` |
+| 5 | Filters already on for the reader; pod mandatory | Met | `src/lib/default-filters.ts`, `defaultFilters` in rbac; `needsPod` in `actions/users.ts` |
+| 6 | Accounts showed three companies | Addressed | one bad record no longer aborts the sync; Settings > Twenty shows what could not be cached (`person-cache.ts`, `settings/page.tsx`) |
+| 7 | Filters and sorting on Accounts and People | Met | `accounts-query.ts`, `accounts-toolbar.tsx`, `people-toolbar.tsx` |
+| 8 | Meetings visible to the team; SharePoint; transcripts in every format, uploadable, following playback | Met | `meetings-query.ts`, `meeting-stage.tsx`, `transcript.ts`, `transcript-input.tsx` |
+| 9 | Enrichment: missing-information filters, no priority filter, no city | Met | `enrichment.ts`, `enrichment/page.tsx` |
+| 10 | Dry run explained; deletions synced; Sync now; strong search | Met | Status card, `reconcile.ts` deleted-since pass, `sync-now-button.tsx`, `search-terms.ts` |
+| 11 | Auto-close from CRM activity; two modules close separately | Met (needs messages/notes reaching Cadence; Settings shows the counts) | `engine/ingest.ts`, INTEGRATION 7b |
+| 12 | Clean copy from tokens | Met | `src/lib/sequences/personalize.ts` at task creation |
+| 13 | Owner-assigned people to their FO, the rest least-loaded | Already so | `previewEnrollment` OWNER mode, `engine/enrollment.ts` |
+| 14 | Powerful people selection for a campaign | Met | `people-picker.tsx`, `actions/people-picker.ts` |
+| 15 | Product interest filter on People and Accounts | Met | both toolbars |
+| 16 | Quality-of-life pass | Met | suites green: unit, browser, fresh install; screens re-captured |
