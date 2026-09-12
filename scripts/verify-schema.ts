@@ -116,6 +116,9 @@ async function main() {
     const problems: string[] = [];
     for (const c of checks) {
       if (available.includes(c.field)) continue;
+      // Twenty renamed note and task targets: `personId` became `targetPersonId`, and the client
+      // uses whichever the workspace has.
+      if ((c.section === 'noteTarget' || c.section === 'taskTarget') && available.includes(`target${c.field.charAt(0).toUpperCase()}${c.field.slice(1)}`)) continue;
       const hint = suggest(c.field, available);
       const line = `  ${c.required ? '✗' : '!'} ${c.section}.${c.key} -> "${c.field}" missing${hint.length ? ` (similar: ${hint.join(', ')})` : ''}${c.required ? '' : ' [optional]'}`;
       problems.push(line);

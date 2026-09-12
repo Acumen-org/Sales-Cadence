@@ -157,6 +157,34 @@ Each of the 21 points from the owner's review, where it lives in the code, and t
 | 15 | Product interest filter on People and Accounts | Met | both toolbars |
 | 16 | Quality-of-life pass | Met | suites green: unit, browser, fresh install; screens re-captured |
 
+## Seen on the hosted app (12 September 2026)
+
+Signed in to `cadence.pmx.acumen-strategy.com` as an admin the owner created and walked every
+section with `pnpm live:check`, read-only. What the live workspace showed, and what changed:
+
+- **The sync is complete and healthy.** Settings > Twenty: 8,369 of 8,369 people and 4,931 of
+  4,931 companies cached, continuous sync healthy, dry run off. The two fixes that got it there
+  are both on main: stages that survive a failure (this side) and id-ordered pagination (the
+  team's commit; ordering by `updatedAt` had Twenty stop at 530 people).
+- **People opened on eighty pages of "(no name)".** Twenty holds hundreds of imported records
+  (tag "GHL Exported") with a phone or an address and no name, and an empty name sorts first. A
+  `sortName` column, null for the nameless, orders both lists with the nameless last, and a
+  nameless person is shown by email or phone rather than a placeholder.
+- **Accounts showed 500 rows of "?" and nothing else.** The list took the first 500 companies by
+  name, and thousands of companies Twenty created from email domains, nameless and empty, sorted
+  ahead of every real account. The list is now every matching company, ranked by people first,
+  paged at 100, with a nameless company shown by its domain.
+- **Every person record said "CRM temporarily unavailable".** The message hid the cause; the CRM
+  tab still had it: `Object noteTarget doesn't have any "personId" field`. Twenty renamed note and
+  task targets (`personId` became `targetPersonId`). The client now reads the workspace's field
+  names once and uses them for filters, selections and writes, ingestion reads either name, a
+  person's tasks are fetched through their target table rather than a relation filter Twenty does
+  not support, and an admin sees the underlying error under the message. Until this is deployed,
+  no CRM note reaches the person it is about, which is what "nothing auto-completes" looks like.
+- **Everything else rendered without errors**: no page errors, no console errors, no failed
+  requests on any section. Tasks, campaigns and sequences are empty because none have been
+  created yet. `pnpm sync:diagnose` now also runs the person-scoped reads that failed here.
+
 ## Known flake: an intermittent hydration error on /activity (11 September 2026)
 
 `workspace.spec.ts` "mobile navigation and all main sections fit a phone" collects page errors while

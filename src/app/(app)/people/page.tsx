@@ -80,7 +80,9 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   const [people, total, pods, conn] = await Promise.all([
     prisma.personCache.findMany({
       where,
-      orderBy: sort === 'company' ? [{ companyName: 'asc' }, { lastName: 'asc' }] : sort === 'tier' ? [{ tier: 'asc' }, { lastName: 'asc' }] : sort === 'recent' ? [{ syncedAt: 'desc' }] : [{ lastName: 'asc' }, { firstName: 'asc' }],
+      // Nameless records (imports with only an address) sort after everyone with a name; they
+      // used to fill the first pages of the directory.
+      orderBy: sort === 'company' ? [{ companyName: { sort: 'asc', nulls: 'last' } }, { sortName: { sort: 'asc', nulls: 'last' } }] : sort === 'tier' ? [{ tier: { sort: 'asc', nulls: 'last' } }, { sortName: { sort: 'asc', nulls: 'last' } }] : sort === 'recent' ? [{ syncedAt: 'desc' }] : [{ sortName: { sort: 'asc', nulls: 'last' } }, { email: { sort: 'asc', nulls: 'last' } }],
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
       include: {

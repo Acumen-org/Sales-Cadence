@@ -3,6 +3,7 @@ import { canReadPerson } from '@/lib/people-scope';
 import { accountScopeCompanyIds } from '@/lib/accounts-query';
 import { notFound } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
+import { isAdmin } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
 import { formatInstant, formatLocalDate } from '@/lib/dates';
 import { cachedPersonName, upsertPersonCache } from '@/lib/person-cache';
@@ -232,7 +233,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
             {tab === 'overview' ? (
               // Grouped the way the record is grouped in Twenty, so the two read the same.
               <div className="space-y-3">
-                {twentyWarning ?? liveWarning ? <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">CRM temporarily unavailable. Showing the last synced record.</div> : null}
+                {twentyWarning ?? liveWarning ? <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">CRM temporarily unavailable. Showing the last synced record.{isAdmin(user) ? <span className="mt-1 block break-words font-mono text-[11.5px] text-amber-900/80">{twentyWarning ?? liveWarning}</span> : null}</div> : null}
                 <Card title={currentEnrollments.length || !lastFinished ? 'Current campaigns' : 'Last campaign'} actions={<Link href={`/people/${id}?tab=sequences`} className="btn-ghost btn-sm">View history</Link>}>
                   {currentEnrollments.length ? <div className="divide-y divide-line">{currentEnrollments.map((e) => <div key={e.id} className="flex flex-wrap items-center justify-between gap-3 p-4"><div><div className="font-medium text-ink-900">{e.campaign ? <Link href={`/campaigns/${e.campaign.id}`} className="hover:text-brand-700 hover:underline">{e.campaign.name}</Link> : 'Direct enrollment'}</div><Link href={`/sequences/${e.sequenceId}`} className="mt-1 block text-sm font-medium text-brand-700">{e.sequence.name}</Link></div><Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'}>{enrollmentStatusLabel(e)}</Badge></div>)}</div> : lastFinished ? <div className="flex flex-wrap items-center justify-between gap-3 p-4"><div><div className="font-medium text-ink-900">{lastFinished.campaign ? <Link href={`/campaigns/${lastFinished.campaign.id}`} className="hover:text-brand-700 hover:underline">{lastFinished.campaign.name}</Link> : 'Direct enrollment'}</div><Link href={`/sequences/${lastFinished.sequenceId}`} className="mt-1 block text-sm font-medium text-brand-700">{lastFinished.sequence.name}</Link></div><div className="text-right"><Badge tone={ENROLLMENT_TONE[lastFinished.status] ?? 'gray'}>{enrollmentStatusLabel(lastFinished)}</Badge><div className="mt-1 text-xs text-ink-500">Ended <strong className=" text-ink-600">{formatInstant(lastFinished.repliedAt ?? lastFinished.meetingAt ?? lastFinished.exitedAt ?? lastFinished.completedAt ?? lastFinished.updatedAt, user.timezone)}</strong></div></div></div> : <div className="p-4 text-sm text-ink-500">Never enrolled in a campaign</div>}
                 </Card>

@@ -12,14 +12,14 @@ const ALL_FIELDS = [
 ];
 
 /** Build a client whose fetch answers from a handler; records every call. */
-function fakeClient(handler: (call: Call) => unknown, opts: { schema?: ReturnType<typeof mergeTwentySchema>; fieldsWithout?: string[] } = {}) {
+function fakeClient(handler: (call: Call) => unknown, opts: { schema?: ReturnType<typeof mergeTwentySchema>; fieldsWithout?: string[]; fieldsWith?: string[] } = {}) {
   const calls: Call[] = [];
   const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)) as { query: string; variables: Record<string, unknown> };
     const call = { url: String(url), query: body.query, variables: body.variables ?? {} };
     calls.push(call);
     if (call.query.includes('__type')) {
-      const fields = ALL_FIELDS.filter((f) => !(opts.fieldsWithout ?? []).includes(f)).map((name) => ({ name }));
+      const fields = [...ALL_FIELDS, ...(opts.fieldsWith ?? [])].filter((f) => !(opts.fieldsWithout ?? []).includes(f)).map((name) => ({ name }));
       return new Response(JSON.stringify({ data: { __type: { fields } } }), { status: 200 });
     }
     const result = handler(call);
@@ -239,6 +239,37 @@ describe('TwentyGraphqlClient', () => {
     expect(await client.countRecords('person')).toBe(934);
     const { client: refused } = fakeClient(() => new Response('{"errors":[{"message":"Forbidden"}]}', { status: 200 }));
     expect(await refused.countRecords('company')).toBeNull();
+  });
+
+  it('follows the renamed note and task targets (targetPersonId) when the workspace has them', async () => {
+    // The live workspace: NoteTarget has targetPersonId and no personId, and filtering on personId
+    // fails with "Object noteTarget doesn't have any personId field".
+    const { client, calls } = fakeClient((call) => {
+      if (call.query.includes('noteTargets(')) return { data: { noteTargets: { edges: [{ node: { note: { id: 'n-1', title: 'Call notes', bodyV2: { markdown: 'x' }, noteTargets: { edges: [{ node: { targetPersonId: 'p-1', targetCompanyId: null } }] }, createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' } } }], pageInfo: { hasNextPage: false, endCursor: null } } } };
+      if (call.query.includes('taskTargets(')) return { data: { taskTargets: { edges: [], pageInfo: { hasNextPage: false, endCursor: null } } } };
+      if (call.query.startsWith('mutation CreateNote')) return { data: { createNote: { id: 'n-2' } } };
+      if (call.query.startsWith('mutation CreateNoteTarget')) return { data: { createNoteTarget: { id: 'nt-2' } } };
+      throw new Error(`unexpected ${call.query}`);
+    }, { fieldsWith: ['targetPersonId', 'targetCompanyId', 'targetOpportunityId'] });
+    const notes = await client.listNotes({ personId: 'p-1' });
+    const list = calls.find((c) => c.query.includes('noteTargets('))!;
+    expect(list.variables.filter).toEqual({ targetPersonId: { eq: 'p-1' } });
+    expect(list.query).toContain('noteTargets { edges { node { targetPersonId'); // selected under the name the workspace has
+    expect(notes.items[0].personIds).toEqual(['p-1']); // the note reaches its person
+    await client.listTasks({ personId: 'p-1' });
+    expect(calls.find((c) => c.query.includes('taskTargets('))!.variables.filter).toEqual({ targetPersonId: { eq: 'p-1' } });
+    await client.createNote({ personId: 'p-1', title: '[Cadence] Email 1 sent', bodyMarkdown: 'b' });
+    expect((calls.find((c) => c.query.startsWith('mutation CreateNoteTarget'))!.variables.data as Record<string, unknown>).targetPersonId).toBe('p-1');
+  });
+
+  it('keeps personId on a workspace that still has it, and filters tasks through their targets', async () => {
+    const { client, calls } = fakeClient(() => ({ data: { noteTargets: { edges: [], pageInfo: { hasNextPage: false, endCursor: null } }, taskTargets: { edges: [], pageInfo: { hasNextPage: false, endCursor: null } } } }), { fieldsWith: ['personId', 'companyId', 'opportunityId'] });
+    await client.listNotes({ personId: 'p-1' });
+    expect(calls.find((c) => c.query.includes('noteTargets('))!.variables.filter).toEqual({ personId: { eq: 'p-1' } });
+    await client.listTasks({ personId: 'p-1' });
+    const tasks = calls.find((c) => c.query.includes('taskTargets('))!;
+    expect(tasks.variables.filter).toEqual({ personId: { eq: 'p-1' } });
+    expect(tasks.query).not.toContain('some');
   });
 
   it('uses the default schema object names', () => {

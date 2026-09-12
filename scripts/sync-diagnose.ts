@@ -58,14 +58,31 @@ async function main() {
     ['opportunities', () => client.listOpportunities({ updatedSince: since, limit: 100 })],
     ['workspace members', async () => ({ items: await client.listWorkspaceMembers(), hasNextPage: false })],
   ];
+  // The reads a person record makes, against a real person: these are the ones that fail when
+  // Twenty renames a relation (note targets went from personId to targetPersonId).
+  const sample = await prisma.personCache.findFirst({ where: { deletedAt: null, email: { not: null } }, select: { id: true }, orderBy: { syncedAt: 'desc' } });
+  if (sample) {
+    checks.push(
+      ['notes for one person', () => client.listNotes({ personId: sample.id, limit: 20 })],
+      ['messages for one person', () => client.listMessages({ personId: sample.id, limit: 20 })],
+      ['tasks for one person', () => client.listTasks({ personId: sample.id, limit: 20 })],
+      ['opportunities for one person', () => client.listOpportunities({ personId: sample.id, limit: 20 })],
+      ['one person by id', async () => ({ items: [await client.getPerson(sample.id)].filter(Boolean), hasNextPage: false })],
+    );
+  }
   for (const [label, run] of checks) {
     try {
       const page = await run();
-      console.log(`  ok   ${label.padEnd(28)} ${page.items.length} on the first page${page.hasNextPage ? ', more pages follow' : ''}`);
+      console.log(`  ok   ${label.padEnd(30)} ${page.items.length} on the first page${page.hasNextPage ? ', more pages follow' : ''}`);
     } catch (err) {
       problems += 1;
-      console.log(`  FAIL ${label.padEnd(28)} ${errorText(err)}`);
+      console.log(`  FAIL ${label.padEnd(30)} ${errorText(err)}`);
     }
+  }
+  if ('describeTargets' in client && typeof (client as { describeTargets?: unknown }).describeTargets === 'function') {
+    const targets = await (client as unknown as { describeTargets(): Promise<{ noteTarget: { personId: string }; taskTarget: { personId: string } }> }).describeTargets();
+    console.log(`
+Target fields in this workspace: noteTarget.${targets.noteTarget.personId}, taskTarget.${targets.taskTarget.personId}`);
   }
 
   const state = (await prisma.setting.findUnique({ where: { key: 'continuousSync' } }))?.value as ContinuousSyncState | null;

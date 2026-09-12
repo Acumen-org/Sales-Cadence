@@ -149,6 +149,27 @@ export class TwentyGraphqlClient implements TwentyClient {
     return cached;
   }
 
+  /**
+   * Note and task targets changed shape in Twenty: the relation to a person used to be `person`
+   * with a `personId` column and is now `targetPerson` with `targetPersonId` (companies and
+   * opportunities likewise). Filtering on the old name fails with "Object noteTarget doesn't have
+   * any personId field", and selecting it silently returns nothing, so no note ever reaches the
+   * person it is about. The workspace says which it has, once, and everything below uses that.
+   */
+  private targetFieldsCache = new Map<'noteTarget' | 'taskTarget', Promise<{ personId: string; companyId: string; opportunityId: string }>>();
+  private targetFields(kind: 'noteTarget' | 'taskTarget') {
+    let cached = this.targetFieldsCache.get(kind);
+    if (!cached) {
+      const mapped = this.s[kind];
+      cached = this.availableFields(this.s.objects[kind].typeName).then((available) => {
+        const pick = (name: string, alias: string) => (available && !available.has(name) && available.has(alias) ? alias : name);
+        return { personId: pick(mapped.personId, 'targetPersonId'), companyId: pick(mapped.companyId, 'targetCompanyId'), opportunityId: pick(mapped.opportunityId, 'targetOpportunityId') };
+      });
+      this.targetFieldsCache.set(kind, cached);
+    }
+    return cached;
+  }
+
   private async selection(typeName: string, fields: Sel[], required: string[] = ['id']): Promise<string> {
     const available = await this.availableFields(typeName);
     const parts: string[] = [];
@@ -235,9 +256,9 @@ export class TwentyGraphqlClient implements TwentyClient {
     ]);
   }
 
-  private noteSelection() {
+  private async noteSelection() {
     const n = this.s.note;
-    const t = this.s.noteTarget;
+    const t = await this.targetFields('noteTarget');
     return this.selection(this.s.objects.note.typeName, [
       'id',
       n.title,
@@ -263,9 +284,9 @@ export class TwentyGraphqlClient implements TwentyClient {
     ]);
   }
 
-  private taskSelection() {
+  private async taskSelection() {
     const t = this.s.task;
-    const tt = this.s.taskTarget;
+    const tt = await this.targetFields('taskTarget');
     return this.selection(this.s.objects.task.typeName, [
       'id',
       t.title,
@@ -388,6 +409,12 @@ export class TwentyGraphqlClient implements TwentyClient {
     return this.page(data[this.s.objects.company.plural], (n) => normalizeCompany(n, this.s));
   }
 
+  /** The target field names this workspace actually has, for diagnostics. */
+  async describeTargets(): Promise<{ noteTarget: { personId: string }; taskTarget: { personId: string } }> {
+    const [noteTarget, taskTarget] = await Promise.all([this.targetFields('noteTarget'), this.targetFields('taskTarget')]);
+    return { noteTarget, taskTarget };
+  }
+
   /**
    * How many live records Twenty holds, so the cache can be compared with the source instead of
    * trusted. Null when the workspace does not expose totalCount.
@@ -471,7 +498,7 @@ export class TwentyGraphqlClient implements TwentyClient {
             pageInfo { hasNextPage endCursor }
           }
         }`,
-        { filter: { [this.s.noteTarget.personId]: { eq: opts.personId } }, first: Math.min(opts.limit ?? PAGE_SIZE, PAGE_SIZE), after: opts.after ?? null },
+        { filter: { [(await this.targetFields('noteTarget')).personId]: { eq: opts.personId } }, first: Math.min(opts.limit ?? PAGE_SIZE, PAGE_SIZE), after: opts.after ?? null },
       );
       const conn = data[this.s.objects.noteTarget.plural];
       const notes = (conn?.edges ?? []).map((e) => (e.node?.[this.s.objects.note.singular] as Raw | undefined) ?? null).filter((n): n is Raw => Boolean(n));
@@ -535,10 +562,23 @@ export class TwentyGraphqlClient implements TwentyClient {
 
   async listTasks(opts: ListOptions & { personId?: string } = {}): Promise<Page<TwentyTask>> {
     const sel = await this.taskSelection();
-    const filter = this.and(
-      this.sinceFilter(this.s.task.updatedAt, opts.updatedSince),
-      opts.personId ? { [this.s.task.taskTargets]: { some: { [this.s.taskTarget.personId]: { eq: opts.personId } } } } : null,
-    );
+    if (opts.personId) {
+      // Through the target table, the same way notes are: Twenty does not filter a task by a
+      // condition on its targets.
+      const data = await this.request<Record<string, Connection>>(
+        `query TasksFor($filter: ${this.s.objects.taskTarget.typeName}FilterInput, $first: Int, $after: String) {
+          ${this.s.objects.taskTarget.plural}(filter: $filter, first: $first, after: $after, orderBy: [{ createdAt: DescNullsLast }]) {
+            edges { node { ${this.s.objects.task.singular} { ${sel} } } }
+            pageInfo { hasNextPage endCursor }
+          }
+        }`,
+        { filter: { [(await this.targetFields('taskTarget')).personId]: { eq: opts.personId } }, first: Math.min(opts.limit ?? PAGE_SIZE, PAGE_SIZE), after: opts.after ?? null },
+      );
+      const conn = data[this.s.objects.taskTarget.plural];
+      const tasks = (conn?.edges ?? []).map((e) => (e.node?.[this.s.objects.task.singular] as Raw | undefined) ?? null).filter((n): n is Raw => Boolean(n));
+      return { items: tasks.map((n) => normalizeTask(n, this.s)), endCursor: conn?.pageInfo?.endCursor ?? null, hasNextPage: Boolean(conn?.pageInfo?.hasNextPage) };
+    }
+    const filter = this.sinceFilter(this.s.task.updatedAt, opts.updatedSince) ?? undefined;
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.task.plural, this.s.objects.task.typeName, sel), {
       filter,
       orderBy: [{ [this.s.task.updatedAt]: 'DescNullsLast' }],
@@ -586,7 +626,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     const id = created[`create${n.typeName}`].id;
     const nt = this.s.objects.noteTarget;
     await this.request(`mutation CreateNoteTarget($data: ${nt.typeName}CreateInput!) { create${nt.typeName}(data: $data) { id } }`, {
-      data: { [this.s.noteTarget.noteId]: id, [this.s.noteTarget.personId]: input.personId },
+      data: { [this.s.noteTarget.noteId]: id, [(await this.targetFields('noteTarget')).personId]: input.personId },
     });
     return { id };
   }
@@ -605,7 +645,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     const id = created[`create${t.typeName}`].id;
     const tt = this.s.objects.taskTarget;
     await this.request(`mutation CreateTaskTarget($data: ${tt.typeName}CreateInput!) { create${tt.typeName}(data: $data) { id } }`, {
-      data: { [this.s.taskTarget.taskId]: id, [this.s.taskTarget.personId]: input.personId },
+      data: { [this.s.taskTarget.taskId]: id, [(await this.targetFields('taskTarget')).personId]: input.personId },
     });
     return { id };
   }

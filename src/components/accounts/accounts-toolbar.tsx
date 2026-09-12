@@ -100,7 +100,8 @@ export function AccountsToolbar({ q, scope, mineCount, allCount, pods, fos, prod
         <option value="">Any product</option>
         {products.map((p) => <option key={p} value={p}>{optionLabel(p)}</option>)}
       </select>
-      <select value={sort} onChange={(e) => update({ sort: e.target.value === 'name' ? null : e.target.value })} aria-label="Sort accounts" className="!w-auto !py-2 !text-[12.5px]">
+      {/* "Most people" is the default order (DEFAULT_ACCOUNT_SORT), so it leaves the URL clean. */}
+      <select value={sort} onChange={(e) => update({ sort: e.target.value === 'people' ? null : e.target.value })} aria-label="Sort accounts" className="!w-auto !py-2 !text-[12.5px]">
         {SORTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
       </select>
     </div>

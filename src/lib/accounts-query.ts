@@ -61,6 +61,9 @@ export async function accountScopeCompanyIds(user: SessionUser): Promise<string[
 
 export type AccountSort = 'name' | 'people' | 'inSequence' | 'lastTouch' | 'replied';
 export const ACCOUNT_SORTS: AccountSort[] = ['name', 'people', 'inSequence', 'lastTouch', 'replied'];
+/** Accounts with people first: a workspace holds thousands of companies Twenty created from an email domain, with nobody in them. */
+export const DEFAULT_ACCOUNT_SORT: AccountSort = 'people';
+export const ACCOUNTS_PAGE_SIZE = 100;
 
 export type AccountFilters = {
   q?: string;
@@ -72,7 +75,11 @@ export type AccountFilters = {
   /** Accounts with a person interested in this product. */
   product?: string | null;
   sort?: AccountSort;
+  /** 1-based page of ACCOUNTS_PAGE_SIZE rows. Omit for every row (the Home tiles and counts). */
+  page?: number;
 };
+
+export type AccountList = { rows: AccountListRow[]; total: number; mine: number; people: number; inSequence: number; engaged: number };
 
 /** Company ids reached through their people, for one filter. */
 async function companiesThroughPeople(where: Prisma.PersonCacheWhereInput): Promise<string[]> {
@@ -80,7 +87,7 @@ async function companiesThroughPeople(where: Prisma.PersonCacheWhereInput): Prom
   return rows.map((r) => r.companyId!);
 }
 
-export async function listAccounts(user: SessionUser, opts: AccountFilters = {}): Promise<AccountListRow[]> {
+export async function listAccounts(user: SessionUser, opts: AccountFilters = {}): Promise<AccountList> {
   const visibleIds = await accountScopeCompanyIds(user);
   const where: Prisma.CompanyCacheWhereInput = { deletedAt: null };
   const narrowings: string[][] = [];
@@ -100,11 +107,14 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
   const search = companySearchWhere(opts.q ?? '');
   if (search) where.AND = [search];
 
-  const companies = await prisma.companyCache.findMany({ where, orderBy: { name: 'asc' }, take: 500 });
+  // Every matching company, ordered with the nameless last, then aggregated in a handful of
+  // grouped queries so a sort by people or replies can rank the whole set before paging. A few
+  // thousand rows of a few columns is a small result; the 500-row cap this replaced hid every
+  // named company behind the nameless ones that sorted first.
+  const companies = await prisma.companyCache.findMany({ where, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }, { domain: { sort: 'asc', nulls: 'last' } }] });
   const ids = companies.map((c) => c.id);
-  if (!ids.length) return [];
+  if (!ids.length) return { rows: [], total: 0, mine: 0, people: 0, inSequence: 0, engaged: 0 };
 
-  // Aggregate in four grouped queries rather than per-row lookups.
   const [peopleRows, enrollRows, touchRows, meetingRows, members] = await Promise.all([
     prisma.personCache.groupBy({ by: ['companyId'], where: { companyId: { in: ids }, deletedAt: null }, _count: { _all: true } }),
     prisma.enrollment.groupBy({ by: ['companyId', 'status'], where: { companyId: { in: ids } }, _count: { _all: true } }),
@@ -139,7 +149,8 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
 
   const rows: AccountListRow[] = companies.map((c) => ({
     id: c.id,
-    name: c.name,
+    // A company Twenty created from an email domain has the domain and no name.
+    name: c.name.trim() || c.domain || '(no name)',
     domain: c.domain,
     industry: c.industry,
     city: c.city,
@@ -152,15 +163,23 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
     lastTouchAt: lastBy.get(c.id) ?? null,
     mine: (user.twentyMemberId && c.ownerMemberId === user.twentyMemberId) || mineIds.has(c.id),
   }));
-  const sort = opts.sort ?? 'name';
-  if (sort === 'name') return rows;
+  const sort = opts.sort ?? DEFAULT_ACCOUNT_SORT;
   const desc = (a: number, b: number) => b - a;
-  return rows.sort((a, b) =>
-    sort === 'people' ? desc(a.people, b.people) || a.name.localeCompare(b.name)
-    : sort === 'inSequence' ? desc(a.inSequence, b.inSequence) || a.name.localeCompare(b.name)
-    : sort === 'replied' ? desc(a.replied, b.replied) || a.name.localeCompare(b.name)
-    : desc(a.lastTouchAt?.getTime() ?? 0, b.lastTouchAt?.getTime() ?? 0) || a.name.localeCompare(b.name),
-  );
+  // `rows` is already in name order with the nameless last, so every other sort only needs its
+  // own key; ties keep that order.
+  if (sort !== 'name') {
+    rows.sort((a, b) =>
+      sort === 'people' ? desc(a.people, b.people)
+      : sort === 'inSequence' ? desc(a.inSequence, b.inSequence)
+      : sort === 'replied' ? desc(a.replied, b.replied)
+      : desc(a.lastTouchAt?.getTime() ?? 0, b.lastTouchAt?.getTime() ?? 0),
+    );
+  }
+  const scoped = opts.scope === 'mine' ? rows.filter((r) => r.mine) : rows;
+  const summary = { total: scoped.length, mine: rows.filter((r) => r.mine).length, people: scoped.reduce((n, a) => n + a.people, 0), inSequence: scoped.reduce((n, a) => n + a.inSequence, 0), engaged: scoped.filter((a) => a.replied > 0 || a.meetings > 0).length };
+  if (!opts.page) return { rows: scoped, ...summary };
+  const start = (Math.max(1, opts.page) - 1) * ACCOUNTS_PAGE_SIZE;
+  return { rows: scoped.slice(start, start + ACCOUNTS_PAGE_SIZE), ...summary };
 }
 
 /**

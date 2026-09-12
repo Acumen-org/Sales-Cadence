@@ -365,6 +365,9 @@ model PersonCache {
   id              String    @id
   firstName       String    @default("")
   lastName        String    @default("")
+  /// "lastname firstname" lower-cased for ordering; null when the record has no name, so the
+  /// nameless sort last instead of filling the first pages of every list.
+  sortName        String?
   email           String?
   phone           String?
   linkedinUrl     String?
@@ -445,6 +448,7 @@ model PersonCache {
   @@index([lastName, firstName])
   @@index([ownerMemberId])
   @@index([companyId, lastName])
+  @@index([sortName])
   @@index([tier])
   @@index([listCategory])
   @@index([nextActionDueDate])
@@ -453,6 +457,8 @@ model PersonCache {
 model CompanyCache {
   id            String    @id
   name          String
+  /// Lower-cased name for ordering; null when Twenty holds no name, so those sort last.
+  sortName      String?
   domain        String?
   /// Twenty workspace member that owns the account.
   ownerMemberId String?
@@ -470,6 +476,7 @@ model CompanyCache {
 
   @@index([ownerMemberId])
   @@index([name])
+  @@index([sortName])
 }
 
 // ---------------------------------------------------------------------------

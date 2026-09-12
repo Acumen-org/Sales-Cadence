@@ -12,11 +12,18 @@ function date(v: string | null | undefined): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/** An ordering key, or null for a blank name so the nameless sort after everyone with one. */
+export function sortKey(name: string | null | undefined): string | null {
+  const key = (name ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  return key || null;
+}
+
 export function personToCacheData(p: TwentyPerson): Prisma.PersonCacheUncheckedCreateInput {
   return {
     id: p.id,
     firstName: p.firstName ?? '',
     lastName: p.lastName ?? '',
+    sortName: sortKey(`${p.lastName ?? ''} ${p.firstName ?? ''}`),
     email: p.email,
     phone: p.phone,
     linkedinUrl: p.linkedinUrl,
@@ -132,6 +139,7 @@ export async function syncPodsFromTwenty(client: TwentyClient, podOwnerField = '
 export async function upsertCompanyCache(c: TwentyCompany, tx: Tx | typeof prisma = prisma) {
   const data = {
     name: c.name,
+    sortName: sortKey(c.name),
     domain: c.domain,
     ownerMemberId: c.ownerMemberId ?? null,
     industry: c.industry ?? null,
@@ -264,6 +272,11 @@ export async function ensurePeopleCached(client: TwentyClient, ids: string[]): P
   return { found: unique.filter((id) => !missingSet.has(id)), missing };
 }
 
-export function cachedPersonName(p: { firstName: string; lastName: string }): string {
-  return [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || '(no name)';
+/**
+ * A person as a list names them. Twenty holds hundreds of imported records with an email or a
+ * phone and no name; the address is what a reader can recognise, so it stands in before the
+ * placeholder does.
+ */
+export function cachedPersonName(p: { firstName: string; lastName: string; email?: string | null; phone?: string | null }): string {
+  return [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || p.email?.trim() || p.phone?.trim() || '(no name)';
 }

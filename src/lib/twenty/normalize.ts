@@ -194,6 +194,11 @@ export function normalizeWorkspaceMember(raw: Raw, s: TwentySchema): TwentyWorks
   return { id: String(raw.id), firstName: str(name.firstName) ?? '', lastName: str(name.lastName) ?? '', email: str(raw[s.workspaceMember.userEmail]), timeZone: str(raw[s.workspaceMember.timeZone]) };
 }
 
+/** A target's person or company id, under the mapped name or Twenty's newer `target*Id`. */
+function targetId(t: Raw, mapped: string, alias: string): string | null {
+  return str(t[mapped]) ?? str(t[alias]) ?? str(obj(t[alias.replace(/Id$/, '')]).id) ?? str(obj(t[mapped.replace(/Id$/, '')]).id);
+}
+
 export function normalizeNote(raw: Raw, s: TwentySchema): TwentyNote {
   const createdBy = obj(raw[s.note.createdBy]);
   const targets = connectionToArray(raw[s.note.noteTargets]);
@@ -204,8 +209,8 @@ export function normalizeNote(raw: Raw, s: TwentySchema): TwentyNote {
     createdByMemberId: str(createdBy.workspaceMemberId),
     createdByName: str(createdBy.name),
     createdBySource: str(createdBy.source),
-    personIds: targets.map((t) => str(t[s.noteTarget.personId])).filter((x): x is string => Boolean(x)),
-    companyIds: targets.map((t) => str(t[s.noteTarget.companyId])).filter((x): x is string => Boolean(x)),
+    personIds: targets.map((t) => targetId(t, s.noteTarget.personId, 'targetPersonId')).filter((x): x is string => Boolean(x)),
+    companyIds: targets.map((t) => targetId(t, s.noteTarget.companyId, 'targetCompanyId')).filter((x): x is string => Boolean(x)),
     createdAt: iso(raw[s.note.createdAt] ?? raw.createdAt),
     updatedAt: iso(raw[s.note.updatedAt] ?? raw.updatedAt),
   };
@@ -250,7 +255,7 @@ export function normalizeTask(raw: Raw, s: TwentySchema): TwentyTask {
     status: str(raw[s.task.status]) ?? 'TODO',
     dueAt: str(raw[s.task.dueAt]),
     assigneeMemberId: str(raw[s.task.assigneeId]) ?? str(obj(raw[s.task.assignee]).id),
-    personIds: targets.map((t) => str(t[s.taskTarget.personId])).filter((x): x is string => Boolean(x)),
+    personIds: targets.map((t) => targetId(t, s.taskTarget.personId, 'targetPersonId')).filter((x): x is string => Boolean(x)),
     cadenceTaskId: str(raw[s.task.cadenceTaskId]),
     createdByMemberId: str(createdBy.workspaceMemberId),
     createdAt: iso(raw.createdAt),
