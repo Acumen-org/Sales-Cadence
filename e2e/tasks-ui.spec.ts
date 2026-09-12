@@ -52,7 +52,7 @@ async function openTabWithWork(page: Page, extra = '') {
 
 test('the header carries no counts, and no overdue banner interrupts the list', async ({ page }) => {
   await loginAs(page, 'Alisa');
-  await page.goto('/tasks?tab=today');
+  await openTabWithWork(page);
   await expect(page.locator('main')).not.toContainText(/\d+ results? ·/);
   await expect(page.locator('main')).not.toContainText('Overdue work is never dropped');
   // The tab still reports the overdue count, which is where a count belongs.
@@ -95,7 +95,7 @@ test('More becomes Less without moving, and everything opens in one place', asyn
 
 test('the shortcut list is gone from under the buttons', async ({ page }) => {
   await loginAs(page, 'Alisa');
-  await page.goto('/tasks?tab=today');
+  await openTabWithWork(page);
   await expect(page.locator('main')).not.toContainText('next/previous');
   await expect(page.locator('main')).not.toContainText('Shortcuts:');
   // They still work, and the help button still lists them.
@@ -134,7 +134,7 @@ test('the message is editable in place and the edit is kept against the task', a
 
 test('the person panel carries the CRM record, not a made-up stage', async ({ page }) => {
   await loginAs(page, 'Alisa');
-  await page.goto('/tasks?tab=today');
+  await openTabWithWork(page);
   const panel = page.locator('aside');
 
   // "Approaching" was a label Cadence invented; it is gone.
@@ -146,7 +146,7 @@ test('the person panel carries the CRM record, not a made-up stage', async ({ pa
   // The CRM's own next action appears for the people who have one written in Twenty.
   await page.goto('/people/dummy-01?tab=overview');
   await expect(page.locator('main')).toContainText('FU-2');
-  await page.goto('/tasks?tab=today');
+  await openTabWithWork(page);
   // The tier is a badge on the person, reading as a label rather than the stored LEVEL_n.
   await expect(page.locator('main').getByText(/^Tier \d$/).first()).toBeVisible();
   // Option constants are never shown raw: LEVEL_2 reads "Tier 2", not "LEVEL_2".
@@ -159,7 +159,7 @@ test('the person panel carries the CRM record, not a made-up stage', async ({ pa
 
 test('task flow is a different screen from the list', async ({ page }) => {
   await loginAs(page, 'Alisa');
-  await page.goto('/tasks?tab=today');
+  await openTabWithWork(page);
   // List: a table of tasks to pick from.
   await expect(page.getByLabel(/^Select /).first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Task flow', exact: true })).toBeVisible();
@@ -208,7 +208,7 @@ test('ending a sequence asks one question and then stops the person', async ({ p
 test('a task that is not in this view is never silently swapped for another', async ({ page }) => {
   await loginAs(page, 'Alisa');
   // The person on the first row of Today, and their task id.
-  await page.goto('/tasks?tab=today');
+  await openTabWithWork(page);
   const first = page.locator('#main-content a[href*="task="]').first();
   const href = (await first.getAttribute('href'))!;
   const taskId = new URL(href, 'http://x').searchParams.get('task')!;
