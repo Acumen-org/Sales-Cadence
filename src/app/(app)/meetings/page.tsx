@@ -2,7 +2,8 @@ import Link from 'next/link';
 import { optionLabel } from '@/lib/twenty/labels';
 import type { Prisma } from '@prisma/client';
 import { requireUser } from '@/lib/auth/current-user';
-import { meetingReadWhere } from '@/lib/meetings-query';
+import { attendeeIsExternal, meetingReadWhere } from '@/lib/meetings-query';
+import { getSettings } from '@/lib/settings';
 import { prisma } from '@/lib/db';
 import { formatInstant, todayIn, weekRange } from '@/lib/dates';
 import { PROVIDER_LABELS } from '@/lib/meetings/providers';
@@ -28,6 +29,8 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
         ? { AND: [readable, { occurredAt: { gte: week.fromInstant, lt: week.toInstant } }] }
         : readable;
 
+  const { rules } = await getSettings();
+  const externalCount = (attendees: { email: string | null; external: boolean }[]) => attendees.filter((a) => attendeeIsExternal(a, rules.internalDomains)).length;
   const [meetings, total, mine, thisWeek, recordingTotal, recordings] = await Promise.all([
     prisma.meeting.findMany({
       where,
@@ -47,7 +50,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
         analysisStatus: true,
         createdBy: { select: { name: true } },
         _count: { select: { attendees: true } },
-        attendees: { where: { external: true }, select: { id: true } },
+        attendees: { select: { email: true, external: true } },
       },
     }),
     prisma.meeting.count({ where }),
@@ -149,7 +152,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                     </td>
                     <td className="text-[12.5px]">
                       <span className="font-medium text-ink-900">{m._count.attendees}</span>
-                      {m.attendees.length ? <Badge tone="green" className="ml-1.5">{m.attendees.length} external</Badge> : null}
+                      {externalCount(m.attendees) ? <Badge tone="green" className="ml-1.5">{externalCount(m.attendees)} external</Badge> : null}
                     </td>
                     <td>{m.transcript ? <Badge tone="blue">Transcript</Badge> : <Empty />}</td>
                     <td>

@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from './db';
+import { isExternalEmail } from './settings';
 import type { SessionUser } from './auth/current-user';
 import { accountScopeCompanyIds } from './accounts-query';
 
@@ -32,3 +33,13 @@ export async function companiesInScope(user: SessionUser): Promise<{ id: string;
     take: 500,
   });
 }
+
+/**
+ * Whether an attendee is outside the team, decided from the address against the internal domains
+ * whenever there is one, so editing the domain list is retroactive; the stored flag serves only an
+ * attendee recorded by name alone.
+ */
+export function attendeeIsExternal(attendee: { email: string | null; external: boolean }, internalDomains: string[]): boolean {
+  return attendee.email ? isExternalEmail(attendee.email, internalDomains) : attendee.external;
+}
+

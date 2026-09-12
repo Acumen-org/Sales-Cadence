@@ -22,6 +22,16 @@ Andrew Senior: Is Dummy Nine joining?
 Dummy Seven: He is on a flight.
 `;
 
+describe('speakers', () => {
+  it('reads a name with a bracketed affiliation, as Teams writes guests', () => {
+    const cues = parseTranscript(['Lloyd Easters: Alyssa is an entrepreneur.', 'Jeff Pieta (AIS): Thank you, Lloyd.', 'Ryan Brennan: Cool.'].join(String.fromCharCode(10)), 'text').cues;
+    expect(cues.map((c) => c.speaker)).toEqual(['Lloyd Easters', 'Jeff Pieta (AIS)', 'Ryan Brennan']);
+    expect(cues[1].text).toBe('Thank you, Lloyd.');
+    // A sentence with a colon in it is prose, not a speaker.
+    expect(parseTranscript('The plan we discussed at length yesterday afternoon with everyone: ship it.', 'text').cues[0].speaker).toBeNull();
+  });
+});
+
 describe('detectTranscriptFormat', () => {
   it('reads the WEBVTT header, even with a byte-order mark', () => {
     expect(detectTranscriptFormat(VTT)).toBe('vtt');

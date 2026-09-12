@@ -172,7 +172,9 @@ async function resolveAttendees(entries: AttendeeSelection[], hostUserId: string
       email,
       personId: person?.id ?? null,
       userId: user?.id ?? null,
-      external: user ? false : person ? true : isExternalEmail(email, settings.rules.internalDomains),
+      // The domain decides. A colleague is also a person in Twenty (the mailbox sync makes them
+      // one), so "known to the CRM" cannot mean external: Alisa was marked external on her own call.
+      external: user ? false : email ? isExternalEmail(email, settings.rules.internalDomains) : Boolean(person),
       host: Boolean(user && user.id === hostUserId),
     };
   }).filter((entry) => {

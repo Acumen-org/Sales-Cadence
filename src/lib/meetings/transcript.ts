@@ -15,7 +15,9 @@ const RANGE = new RegExp(`${TIME.source}\\s*-->\\s*${TIME.source}`);
 /** WebVTT voice span: `<v Alisa Senior>`, optionally with classes (`<v.loud Alisa>`). */
 const VOICE = /^\s*<v(?:\.[^\s>]+)*\s+([^>]*)>\s*/i;
 /** "Speaker Name: words" at the start of a cue. One letter is a valid name ("A: yes"). */
-const SPEAKER = /^\s*([\p{Lu}][\p{L}\p{N} .''&/-]{0,48}?)\s*:\s+(?=\S)/u;
+// A name may carry a bracketed affiliation or role - "Jeff Pieta (AIS):" - which Teams writes for
+// guests; without the brackets those lines fell to "Unknown" and took most of the talk time.
+const SPEAKER = /^\s*([\p{Lu}][\p{L}\p{N} .''&/(),-]{0,60}?)\s*:\s+(?=\S)/u;
 /** A leading timestamp on a pasted line: `[00:01:02]`, `(1:02)` or `00:01:02`. */
 const LEAD_TIME = /^\s*[[(]?(\d{1,2}):(\d{2})(?::(\d{2}))?(?:[.,](\d{1,3}))?[\])]?[\s-]+/;
 

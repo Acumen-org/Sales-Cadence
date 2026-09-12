@@ -4,12 +4,13 @@ import { ProductTags } from '@/components/meetings/product-tags';
 import { notFound } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
 import { prisma } from '@/lib/db';
+import { getSettings } from '@/lib/settings';
 import { formatInstant } from '@/lib/dates';
 import { parseAnalysis } from '@/lib/meetings/analysis';
 import { parseMeetingLink, PROVIDER_LABELS } from '@/lib/meetings/providers';
 import { canManageMeetingAction, deleteMeetingAction, saveTranscriptAction } from '@/lib/actions/meetings';
 import { ActionButton, ActionForm } from '@/components/action-form';
-import { meetingReadWhere } from '@/lib/meetings-query';
+import { meetingReadWhere, attendeeIsExternal } from '@/lib/meetings-query';
 import { MeetingAnalysisPanel } from '@/components/meetings/meeting-analysis';
 import { AttendeeEditor } from '@/components/meetings/attendee-editor';
 import { MeetingStage } from '@/components/meetings/meeting-stage';
@@ -29,6 +30,9 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
   const link = parseMeetingLink(meeting.sourceUrl);
   const analysis = parseAnalysis(meeting.analysis);
   const mayEdit = await canManageMeetingAction(id);
+  const { rules } = await getSettings();
+  // Externality follows the address and the current domain list, not the flag stored at creation.
+  meeting.attendees = meeting.attendees.map((a) => ({ ...a, external: attendeeIsExternal(a, rules.internalDomains) }));
   const externals = meeting.attendees.filter((a) => a.external);
 
   return (

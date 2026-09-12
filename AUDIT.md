@@ -202,6 +202,11 @@ section with `pnpm live:check`, read-only. What the live workspace showed, and w
 - **Pod Manager walked** with the corrected password: 936 people, 481 accounts, 1 meeting, 46 events,
   no errors, Settings refused by URL. **Sync now** answers with one word. A pasted Share > Embed
   code is accepted as a recording link, its `src` taken and the rest dropped.
+- **On the meeting record**: Alisa was badged External on her own call, because a colleague is
+  also a person in Twenty and "known to the CRM" was read as external; the address against the
+  internal domains decides now, on write and on read. "Jeff Pieta (AIS):" lines were not
+  recognised as a speaker and took 55% of talk time as Unknown; a speaker may carry a bracketed
+  affiliation. The Enrichment queue opened on the nameless too; it orders them last like People.
 - **Everything else rendered without errors**: no page errors, no console errors, no failed
   requests on any section. Tasks, campaigns and sequences are empty because none have been
   created yet. `pnpm sync:diagnose` now also runs the person-scoped reads that failed here.
