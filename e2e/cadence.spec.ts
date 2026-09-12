@@ -36,8 +36,6 @@ async function logout(page: Page) {
   await expect(page).toHaveURL(/\/login/);
 }
 
-const isWeekend = () => [0, 6].includes(new Date().getDay());
-
 test('everyone signs in with an email and a password, and lands on Home', async ({ page }) => {
   await page.goto('/login');
   // One way in. There are no per-person shortcuts, on any deployment.
@@ -100,9 +98,14 @@ test('the same person cannot be enrolled twice', async ({ page }) => {
 
 test('task flow: complete an email, log a call with an outcome, skip with a bounce', async ({ page }) => {
   await loginAs(page, 'Alisa');
-  // Weekend start dates roll to Monday, so the first tasks may be "upcoming" rather than "today".
-  const tab = isWeekend() ? 'upcoming' : 'today';
-  await page.goto(`/tasks?tab=${tab}&fo=`);
+  // A weekend start rolls to Monday, so the first touches sit under Upcoming rather than Today.
+  // Which weekend, though, is the workspace's (US Central), not the runner's: at 00:00 UTC on a
+  // Saturday it is still Friday evening in Chicago and the work is under Today. Look for the
+  // work rather than guessing the calendar.
+  await page.goto('/tasks?tab=today&fo=');
+  const dueToday = await page.locator('main').getByRole('link', { name: /^Dummy \w+/ }).count();
+  const tab = dueToday ? 'today' : 'upcoming';
+  if (!dueToday) await page.goto(`/tasks?tab=${tab}&fo=`);
   // Something is due: the list names at least one person to reach.
   await expect(page.locator('main').getByRole('link', { name: /^Dummy \w+/ }).first()).toBeVisible();
 
@@ -161,7 +164,9 @@ test('task flow: complete an email, log a call with an outcome, skip with a boun
 
 test('answered call finishes the sequence as replied and shows on Home', async ({ page }) => {
   await loginAs(page, 'Alisa');
-  const tab = isWeekend() ? 'upcoming' : 'today';
+  // Today or Upcoming, by the workspace's clock rather than the runner's: see the task-flow case.
+  await page.goto('/tasks?tab=today&type=EMAIL');
+  const tab = (await page.locator('a[href*="task="]').count()) ? 'today' : 'upcoming';
   // Take a fresh person still on Email 1 through both step-1 tasks, then answer the call
   await page.goto(`/tasks?tab=${tab}&type=EMAIL`);
   const link = page.locator('a[href*="task="]').first();
