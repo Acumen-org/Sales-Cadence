@@ -35,7 +35,7 @@ describe('rbac', () => {
     expect(canViewReports(manager)).toBe(true);
     expect(canManageSettings(manager)).toBe(false);
     expect(canManageUsers(manager)).toBe(false);
-    expect(visiblePodIds(manager)).toEqual(['pod-a']);
+    expect(visiblePodIds(manager)).toBeNull(); // reads every pod; runs only pod-a
     expect(needsPod('POD_MANAGER')).toBe(true);
   });
   it('Biz Ops reads every pod and writes to none', () => {
@@ -79,7 +79,7 @@ describe('rbac', () => {
     expect(canManageSettings(senior)).toBe(false);
     expect(canManageUsers(senior)).toBe(false);
     expect(canApproveCampaign(senior, 'pod-a')).toBe(false);
-    expect(visiblePodIds(senior)).toEqual(['pod-a']);
+    expect(visiblePodIds(senior)).toBeNull();
   });
 
   it('a Sales Leader leads their own pods and is the only non-admin who approves a campaign', () => {
@@ -95,7 +95,7 @@ describe('rbac', () => {
     // Still not an administrator.
     expect(canManageSettings(leader)).toBe(false);
     expect(canManageUsers(leader)).toBe(false);
-    expect(visiblePodIds(leader)).toEqual(['pod-a']);
+    expect(visiblePodIds(leader)).toBeNull();
   });
 
   it('junior FO only works own tasks', () => {
@@ -108,6 +108,6 @@ describe('rbac', () => {
     expect(canManageEnrollment(junior, { foUserId: 'junior', podId: 'pod-a' })).toBe(false);
     expect(canSnoozeFreely(junior)).toBe(false);
     expect(canSnoozeFreely(senior)).toBe(true);
-    expect(visiblePodIds(junior)).toEqual(['pod-a']);
+    expect(visiblePodIds(junior)).toBeNull(); // reads everything; works only their own tasks
   });
 });

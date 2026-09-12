@@ -1,7 +1,6 @@
 import clsx from 'clsx';
 import Link from 'next/link';
 import { requireUser } from '@/lib/auth/current-user';
-import { isPodLeader, canSeeAllPods } from '@/lib/auth/rbac';
 import { formatLocalDate } from '@/lib/dates';
 import { buildHome } from '@/lib/home-query';
 import { TASK_CHANNELS, type TaskChannel } from '@/lib/tasks-query';
@@ -105,7 +104,7 @@ export default async function HomePage() {
         </Surface>
       </div>
 
-      {h.team.length ? <TeamBoard rows={h.team} week={{ from: h.week.from, to: h.week.to }} title={canSeeAllPods(user) ? 'The team this week' : isPodLeader(user) ? 'Your pods this week' : 'Your week'} /> : null}
+      {h.team.length ? <TeamBoard rows={h.team} week={{ from: h.week.from, to: h.week.to }} title="The team this week" /> : null}
     </div>
   );
 }

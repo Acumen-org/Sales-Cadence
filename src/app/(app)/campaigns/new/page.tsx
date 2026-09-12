@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
-import { canEnroll, toActor, visiblePodIds } from '@/lib/auth/rbac';
+import { canEnroll, isAdmin, toActor } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
 import { todayIn } from '@/lib/dates';
 import { env } from '@/lib/env';
@@ -14,7 +14,9 @@ export default async function NewCampaignPage({ searchParams }: { searchParams: 
   if (!canEnroll(toActor(user))) redirect('/campaigns');
   const { ids } = await searchParams;
   const initialIds = ids ? ids.split(',').map((s) => s.trim()).filter(Boolean).join('\n') : '';
-  const podIds = visiblePodIds(user);
+  // A campaign is run in a pod, so the choice is the pods this user runs: every pod for an admin,
+  // their own for a leader. Reading other pods is allowed everywhere else; starting work in them is not.
+  const podIds = isAdmin(user) ? null : user.podIds;
   const [sequences, pods, settings] = await Promise.all([
     prisma.sequence.findMany({ where: { archived: false }, orderBy: { name: 'asc' } }),
     // An archived pod cannot take a campaign, so it is never offered as one.

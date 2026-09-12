@@ -41,8 +41,20 @@ function safeUrl(raw: string): URL | null {
   }
 }
 
+/**
+ * What somebody pasted, reduced to the link inside it. SharePoint's Share > Embed hands out a whole
+ * `<iframe src="...">` tag, not a URL, and the form is the wrong place to make anyone dig the address
+ * out of it: the src is taken, HTML entities are undone, and everything else is dropped.
+ */
+export function extractRecordingUrl(raw: string): string {
+  const text = raw.trim();
+  const src = /<iframe[^>]*\ssrc\s*=\s*["']([^"']+)["']/i.exec(text)?.[1] ?? (text.includes('<') ? /https?:\/\/[^\s"'<>]+/i.exec(text)?.[0] : null);
+  const chosen = src ?? text;
+  return chosen.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
+}
+
 export function parseMeetingLink(raw: string): ParsedMeetingLink {
-  const url = safeUrl(raw);
+  const url = safeUrl(extractRecordingUrl(raw));
   if (!url) {
     return { provider: 'OTHER', embedUrl: null, mediaUrl: null, isJoinLink: false, label: 'Link', note: 'That does not look like a URL.' };
   }

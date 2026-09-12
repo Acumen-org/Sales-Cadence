@@ -192,6 +192,16 @@ section with `pnpm live:check`, read-only. What the live workspace showed, and w
   SharePoint refuses to show that page inside another site whatever the viewer's sign-in state; the
   Share > Embed link (`_layouts/15/embed.aspx?UniqueId=...`) is the one that plays. The deployed build
   still frames the sharing link; main links out and says which link to paste.
+- **The owner's rule on reading, applied.** Every role now reads every pod: People, Accounts,
+  Tasks, Activity, Reports, Campaigns, Meetings and the Enrichment queue. The pod and the reader's
+  own name are the filters a section opens on, and they can be cleared. Writing is unchanged:
+  enrolling, approving, editing a sequence, acting on a task, applying an enrichment import and
+  editing a meeting still ask who runs which pod, and the campaign form offers only those pods.
+  Sixteen unit tests and three browser cases that pinned the old boundary were rewritten to the new
+  one; one of them had been comparing an audit id with a task id and never actually checked anything.
+- **Pod Manager walked** with the corrected password: 936 people, 481 accounts, 1 meeting, 46 events,
+  no errors, Settings refused by URL. **Sync now** answers with one word. A pasted Share > Embed
+  code is accepted as a recording link, its `src` taken and the rest dropped.
 - **Everything else rendered without errors**: no page errors, no console errors, no failed
   requests on any section. Tasks, campaigns and sequences are empty because none have been
   created yet. `pnpm sync:diagnose` now also runs the person-scoped reads that failed here.

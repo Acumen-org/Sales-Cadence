@@ -42,7 +42,7 @@ describe('reading scope and a paused campaign', () => {
     );
   });
 
-  it('an account record is refused to anyone outside the pods that work it', async () => {
+  it('an account record opens for anyone on the team, whichever pod works it', async () => {
     // The account is built here rather than borrowed from the fixtures, where most companies have
     // contacts in more than one pod - which is realistic, and would make this assert nothing.
     const companyId = 'acct-alisa-only';
@@ -54,8 +54,9 @@ describe('reading scope and a paused campaign', () => {
     // Alisa's pod works this company, so she reads it; so does an admin.
     expect(await accountDetail(companyId, alisa)).not.toBeNull();
     expect(await accountDetail(companyId, ria)).not.toBeNull();
-    // Andrew leads a different pod and works nobody here, so the record is not his to open.
-    expect(await accountDetail(companyId, andrew)).toBeNull();
+    // Andrew leads a different pod and works nobody here; he still reads it.
+    expect(await accountDetail(companyId, andrew)).not.toBeNull();
+    expect(await accountDetail('no-such-company', andrew)).toBeNull();
   });
 
   it('a meeting is readable by the whole team, whichever pod it belongs to', async () => {

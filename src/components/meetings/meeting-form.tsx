@@ -6,7 +6,7 @@ import { optionLabel } from '@/lib/twenty/labels';
 import { PRODUCTS, WORKSPACE_TIMEZONE, WORKSPACE_TIMEZONE_LABEL } from '@/lib/workspace';
 import { useState } from 'react';
 import { createMeetingAction, updateMeetingAction, type AttendeeSelection } from '@/lib/actions/meetings';
-import { parseMeetingLink } from '@/lib/meetings/providers';
+import { extractRecordingUrl, parseMeetingLink } from '@/lib/meetings/providers';
 import { ActionForm } from '@/components/action-form';
 import { Field, Badge } from '@/components/ui';
 import { AttendeePicker } from './attendee-picker';
@@ -49,7 +49,7 @@ export function MeetingForm({ companies, initial, mode, timezone }: { companies:
           label="Recording or meeting link"
           className="md:col-span-2"
         >
-          <input name="sourceUrl" required value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://" />
+          <input name="sourceUrl" required value={url} onChange={(e) => setUrl(extractRecordingUrl(e.target.value))} placeholder="https://" />
         </Field>
 
         {parsed ? <div className="space-y-2 md:col-span-2">

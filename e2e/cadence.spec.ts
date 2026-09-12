@@ -241,7 +241,8 @@ test('admin saves rules; a junior FO cannot open settings', async ({ page }) => 
   await page.goto('/settings');
   await expect(page).not.toHaveURL(/\/settings/);
   await page.goto('/tasks');
-  await expect(page.getByText('All pods')).toHaveCount(0); // no pod filter for juniors
+  // A junior has the pod and FO filters like everyone, opened on their own pod and name.
+  await expect(page.getByLabel('Filter by pod')).toBeVisible();
   await page.goto('/reports');
   await expect(page).not.toHaveURL(/\/reports/);
   await logout(page);

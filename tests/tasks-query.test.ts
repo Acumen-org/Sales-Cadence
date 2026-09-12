@@ -59,7 +59,7 @@ describe('tasks query and brief', () => {
     expect(tomorrow.rows.some((r) => r.enrollment.personId === 'person-01')).toBe(true);
   });
 
-  it('scopes by role: junior sees own, senior sees pod, admin sees all', async () => {
+  it('every role reads every task list; the FO filter narrows it to one person', async () => {
     const all = (tab: 'today' | 'overdue' | 'upcoming') => tab;
     const junior = sessionUser(b.users.karson, [b.pods.Alisa.id]);
     const senior = sessionUser(b.users.alisa, [b.pods.Alisa.id]);
@@ -67,12 +67,14 @@ describe('tasks query and brief', () => {
     const now = at('2026-09-07');
 
     const j = await listTaskGroups(junior, { tab: all('upcoming') }, now);
-    expect(j.rows.every((r) => r.foUserId === b.users.karson.id)).toBe(true);
-    expect(j.counts.overdue).toBe(0); // Leigh's overdue work is invisible to Karson
+    expect(j.rows.some((r) => r.foUserId !== b.users.karson.id)).toBe(true); // colleagues' work is readable
+    expect(j.counts.overdue).toBe(1); // Leigh's overdue work too
+    const mine = await listTaskGroups(junior, { tab: all('upcoming'), foUserId: b.users.karson.id }, now);
+    expect(mine.rows.every((r) => r.foUserId === b.users.karson.id)).toBe(true); // the filter a junior opens on
 
     const s = await listTaskGroups(senior, { tab: all('upcoming') }, now);
     expect(s.rows.some((r) => r.foUserId === b.users.karson.id)).toBe(true); // pod colleague
-    expect(s.counts.overdue).toBe(0); // other pod
+    expect(s.counts.overdue).toBe(1);
 
     const a = await listTaskGroups(admin, { tab: all('overdue') }, now);
     expect(a.counts.overdue).toBe(1);

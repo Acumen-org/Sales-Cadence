@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
-import { peopleScopeWhere } from './people-scope';
+import { peopleScopeWhere, podPeopleWhere } from './people-scope';
 import { assertAllowed, isAdmin, isPodLeader, canSeeAllPods } from './auth/rbac';
 import { cachedPersonName, upsertCompanyCache, upsertPersonCache } from './person-cache';
 import { getTwentySchema } from './settings';
@@ -184,6 +184,7 @@ export function validateEnrichmentValue(field: string, value: string): string | 
   return text;
 }
 
+/** The queue everyone reads: every person, like the rest of the workspace. */
 export async function enrichmentPeopleScope(user: SessionUser): Promise<Prisma.PersonCacheWhereInput> {
   return peopleScopeWhere(user);
 }
@@ -191,6 +192,21 @@ export async function enrichmentPeopleScope(user: SessionUser): Promise<Prisma.P
 async function enrichmentCompanyScope(user: SessionUser): Promise<Prisma.CompanyCacheWhereInput> {
   if (canSeeAllPods(user)) return { deletedAt: null };
   const people = await prisma.personCache.findMany({ where: await enrichmentPeopleScope(user), select: { companyId: true }, distinct: ['companyId'] });
+  return { deletedAt: null, OR: [{ ownerMemberId: user.twentyMemberId ?? '__none__' }, { id: { in: people.map((person) => person.companyId).filter((id): id is string => !!id) } }] };
+}
+
+/**
+ * The records an import may *write*: an admin's anywhere, a pod leader's inside their pods. A row
+ * that matches a record outside that is refused as out of scope even though the leader can read
+ * the record - reading is universal, changing the CRM is not.
+ */
+async function enrichmentWritePeopleScope(user: SessionUser): Promise<Prisma.PersonCacheWhereInput> {
+  return podPeopleWhere(user);
+}
+
+async function enrichmentWriteCompanyScope(user: SessionUser): Promise<Prisma.CompanyCacheWhereInput> {
+  if (isAdmin(user)) return { deletedAt: null };
+  const people = await prisma.personCache.findMany({ where: await enrichmentWritePeopleScope(user), select: { companyId: true }, distinct: ['companyId'] });
   return { deletedAt: null, OR: [{ ownerMemberId: user.twentyMemberId ?? '__none__' }, { id: { in: people.map((person) => person.companyId).filter((id): id is string => !!id) } }] };
 }
 
@@ -246,7 +262,7 @@ export async function previewEnrichment(user: SessionUser, entity: EnrichmentEnt
   const fields = ENRICHMENT_FIELDS[entity];
   if (!targets.length || targets.some(([, target]) => !fields.some((field) => field.key === target)) || new Set(targets.map(([, target]) => target)).size !== targets.length) throw new Error('Map each destination field once using the available fields.');
   if (!targets.some(([, target]) => ['recordId', entity === 'person' ? 'matchEmail' : 'matchDomain', entity === 'person' ? 'email' : 'domain'].includes(target))) throw new Error('Map a Twenty ID or an existing unique email/domain to identify each record.');
-  const scope = entity === 'person' ? await enrichmentPeopleScope(user) : await enrichmentCompanyScope(user);
+  const scope = entity === 'person' ? await enrichmentWritePeopleScope(user) : await enrichmentWriteCompanyScope(user);
   const records = entity === 'person' ? await prisma.personCache.findMany({ where: scope as Prisma.PersonCacheWhereInput }) : await prisma.companyCache.findMany({ where: scope as Prisma.CompanyCacheWhereInput });
   const byId = new Map(records.map((record) => [record.id, record]));
   // Identity uniqueness is checked across the cache, not only the viewer's visible pod.
@@ -336,7 +352,7 @@ export async function applyEnrichmentChunk(user: SessionUser, batchId: string, c
         const current = batch.entity === 'person' ? await client.getPerson(row.recordId) : (await client.listCompanies({ ids: [row.recordId], limit: 1 })).items[0];
         if (!current || current.deletedAt) throw new Error('The matched record was removed from Twenty.');
         if (batch.entity === 'person') await upsertPersonCache(current as TwentyPerson); else await upsertCompanyCache(current as TwentyCompany);
-        const allowed = batch.entity === 'person' ? await prisma.personCache.count({ where: { AND: [await enrichmentPeopleScope(user), { id: row.recordId }] } }) : await prisma.companyCache.count({ where: { AND: [await enrichmentCompanyScope(user), { id: row.recordId }] } });
+        const allowed = batch.entity === 'person' ? await prisma.personCache.count({ where: { AND: [await enrichmentWritePeopleScope(user), { id: row.recordId }] } }) : await prisma.companyCache.count({ where: { AND: [await enrichmentWriteCompanyScope(user), { id: row.recordId }] } });
         assertAllowed(allowed > 0, 'This record has moved outside your scope.');
         const latest = Object.fromEntries(Object.keys(changes).map((field) => [field, fieldValue(current as unknown as Record<string, unknown>, field)]));
         const alreadyApplied = Object.keys(changes).every((field) => equal(latest[field], changes[field]));

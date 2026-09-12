@@ -82,11 +82,13 @@ describe('scoped activity and performance', () => {
     expect(linkedin.items.map((item) => item.title)).toEqual(['LinkedIn inside']);
   });
 
-  it('scopes task audit records by their pod even when an FO works across pods', async () => {
+  it('shows a leader the task audit of another pod as well, the same as an admin', async () => {
+    // Items carry the audit row's id, not the task's; the only task audit in the range is the foreign one.
     const page = await listActivity({ viewer: leader, from: range.fromInstant, to: range.toInstant, kinds: ['task'] });
-    expect(page.items.some((item) => item.id === `a:${foreignTaskId}`)).toBe(false);
-    expect(page.items).toHaveLength(0);
-    expect((await listActivity({ viewer: admin, from: range.fromInstant, to: range.toInstant, kinds: ['task'] })).items).toHaveLength(1);
+    expect(page.items).toHaveLength(1);
+    const asAdmin = await listActivity({ viewer: admin, from: range.fromInstant, to: range.toInstant, kinds: ['task'] });
+    expect(asAdmin.items.map((item) => item.id)).toEqual(page.items.map((item) => item.id));
+    expect(foreignTaskId).toBeTruthy();
   });
 
   it('pages every record at the same instant without duplicates or dropped rows', async () => {
@@ -111,14 +113,19 @@ describe('scoped activity and performance', () => {
   });
 
   it('counts events in a chosen period even for older enrollments, with no next-day leakage', async () => {
+    // The leader reads every pod now, so Leigh's enrollment and its task count here too.
     const report = await buildReports(leader, '2026-09-09', { range });
-    expect(report.totals.enrollments).toBe(1);
-    expect(report.totals.tasksDone).toBe(2);
+    expect(report.totals.enrollments).toBe(2);
+    expect(report.totals.tasksDone).toBe(3);
     expect(report.totals.replied).toBe(1);
     expect(report.totals.meeting).toBe(0);
-    expect(report.activity[0].period).toMatchObject({ emails: 2, total: 2, replies: 1, meetings: 0 });
-    expect(report.byPod).toHaveLength(1);
-    expect(report.byPod[0].meetingRate).toBe(0);
+    expect(report.activity[0].period).toMatchObject({ emails: 3, total: 3, replies: 1, meetings: 0 });
+    expect(report.byPod).toHaveLength(2);
+    expect(report.byPod.every((pod) => pod.meetingRate === 0)).toBe(true);
+    // Filtered to their own pod, the figures are the pod's alone.
+    const own = await buildReports(leader, '2026-09-09', { range, podId: basics.pods.Alisa.id });
+    expect(own.totals.enrollments).toBe(1);
+    expect(own.totals.tasksDone).toBe(2);
   });
 
   it('combines pod and FO filters inside viewer scope and allows long history', async () => {
@@ -126,9 +133,9 @@ describe('scoped activity and performance', () => {
     const report = await buildReports(admin, '2026-09-09', { range: wide, podId: basics.pods.Alisa.id, foUserId: basics.users.karson.id });
     expect(report.totals.tasksDone).toBe(3);
     expect(report.totals.enrollments).toBe(2);
-    const forbidden = await buildReports(leader, '2026-09-09', { range, podId: basics.pods.Leigh.id });
-    expect(forbidden.totals.tasksDone).toBe(0);
-    const own = await buildReports(junior, '2026-09-09', { range });
+    const other = await buildReports(leader, '2026-09-09', { range, podId: basics.pods.Leigh.id });
+    expect(other.totals.tasksDone).toBe(1);
+    const own = await buildReports(junior, '2026-09-09', { range, foUserId: basics.users.karson.id });
     expect(own.activity.every((item) => item.id === basics.users.karson.id)).toBe(true);
   });
 });

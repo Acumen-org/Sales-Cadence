@@ -12,7 +12,7 @@ import { requireUser, toActor, type SessionUser } from '../auth/current-user';
 import { isAdmin, isPodLeader } from '../auth/rbac';
 import { logAudit, userActor } from '../audit';
 import { getSettings, isExternalEmail } from '../settings';
-import { parseMeetingLink } from '../meetings/providers';
+import { extractRecordingUrl, parseMeetingLink } from '../meetings/providers';
 import { detectTranscriptFormat, parseTranscript } from '../meetings/transcript';
 import { getMeetingAnalyzer, MeetingAnalysisSchema } from '../meetings/analysis';
 import { localDateTimeToInstant } from '../dates';
@@ -116,7 +116,8 @@ function parseAttendees(raw: string): Array<{ name: string | null; email: string
 
 const MeetingSchema = z.object({
   title: z.string().trim().min(1).max(200),
-  sourceUrl: z.string().trim().max(8192).url().refine((url) => /^https?:\/\//i.test(url), 'Use an http or https recording link.'),
+  // A pasted embed code is reduced to its src before validation, so Share > Embed works as pasted.
+  sourceUrl: z.preprocess((v) => (typeof v === 'string' ? extractRecordingUrl(v) : v), z.string().trim().max(8192).url().refine((url) => /^https?:\/\//i.test(url), 'Use an http or https recording link.')),
   occurredAt: z.string().trim().min(1),
   durationSec: z.coerce.number().int().min(0).max(86_400).optional().nullable(),
   companyId: z.string().trim().optional().nullable(),

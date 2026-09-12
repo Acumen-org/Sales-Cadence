@@ -516,3 +516,13 @@ contact", so repeating it in the warnings line was noise.
   in Twenty (174 of the pod's 936), which read as missing data. Reading the pod is not the same as
   working it: the task list and every write still keep a junior to their own work.
 
+## Everyone reads every pod; the pod is where a section opens (12 September 2026)
+
+- **Reading is universal.** The owner's rule, given after the walk as a junior FO: every role sees
+  all the data. An FO in Alisa's pod opens each section with Alisa's pod and their own name already
+  selected, and may clear both. The earlier pod boundary on People, Accounts, Tasks, Activity,
+  Reports and Campaigns was a guess at what the team wanted, and it read as missing data.
+- **Writing is still pod-scoped.** Who may enrol, approve, edit a sequence, act on a task, apply an
+  enrichment or edit a meeting is decided by `canManagePod`, `canActOnTask` and friends, none of
+  which changed. Reports stay with pod leaders, Biz Ops and admins; Settings with admins.
+

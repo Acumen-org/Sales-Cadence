@@ -124,17 +124,15 @@ test.describe('Senior FO', () => {
     await signOut(page);
   });
 
-  test('cannot touch another pod’s work', async ({ page }) => {
+  test('reads another pod’s people but cannot run its work', async ({ page }) => {
     await signIn(page, 'alisa@cadence.local');
-    // Andrew's pod is not Alisa's: its people are not in her list, and not behind a URL either.
+    // Andrew's pod is not Alisa's, and she can still read it: her own pod is only where she opens.
     await page.goto('/people?pod=ANDREW');
     await pageIsSound(page);
-    await expect(page.locator('main')).not.toContainText('Dummy Seven');
-    await page.goto('/people?q=Seven');
-    await expect(page.locator('main')).not.toContainText('Dummy Seven');
+    await expect(page.locator('main')).toContainText('Dummy Seven');
     await page.goto('/people/dummy-07');
-    await expect(page.getByText(/find that record/)).toBeVisible();
-    // Nor can she start a campaign in it.
+    await expect(page.getByRole('heading', { name: 'Dummy Seven' })).toBeVisible();
+    // But she cannot start a campaign in it.
     await page.goto('/campaigns/new');
     const pod = page.getByLabel('Pod', { exact: true });
     const options = await pod.locator('option').allTextContents();

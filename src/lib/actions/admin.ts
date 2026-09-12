@@ -19,10 +19,10 @@ export async function syncNowAction(): Promise<ActionResult> {
   try {
     const stats = await syncContinuously();
     for (const path of ['/settings', '/people', '/accounts', '/tasks', '/home']) revalidatePath(path);
-    const failed = stats.cacheFailed ? ` ${stats.cacheFailed} record${stats.cacheFailed === 1 ? '' : 's'} could not be cached: ${stats.cacheError}.` : '';
-    const stages = Object.entries(stats.stageErrors);
-    const stopped = stages.length ? ` Did not finish: ${stages.map(([name, message]) => `${name} (${message})`).join('; ')}.` : '';
-    return { ok: stages.length === 0, ...(stages.length ? { error: `Synced with problems. ${stats.people} people, ${stats.notes} notes and ${stats.messages} messages since ${stats.since.slice(0, 16).replace('T', ' ')}.${failed}${stopped}` } : { message: `Synced. ${stats.people} people, ${stats.notes} notes and ${stats.messages} messages since ${stats.since.slice(0, 16).replace('T', ' ')}.${failed}` }) } as ActionResult;
+    // One word is the answer wanted here: did it update. Detail lives in Settings > Twenty.
+    const stages = Object.keys(stats.stageErrors);
+    if (stages.length) return { ok: false, error: `Synced, except ${stages.join(', ')}.` };
+    return { ok: true, message: 'Synced.' };
   } catch (err) {
     return { ok: false, error: `Sync failed: ${err instanceof Error ? err.message : String(err)}` };
   }

@@ -46,7 +46,7 @@ test('Home greets the signed-in user and opens personal work from its priorities
   await expect(page.getByRole('heading', { name: 'Up next' })).toBeVisible();
   // Every figure on Home is a value, so nothing that moves is left in muted prose.
   await expect(page.locator('main').getByText(/^\d+ overdue tasks?$/)).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: 'Your pods this week' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'The team this week' })).toBeVisible();
   await logout(page);
 });
 

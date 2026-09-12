@@ -88,18 +88,18 @@ describe('scope boundaries', () => {
     await prisma.personCache.update({ where: { id: 'person-01' }, data: { optedOut: true } });
     expect(await nonReplierCandidates(campaign.id, 0, NOW)).toHaveLength(0);
   });
-  it('search only returns campaigns the user can open', async () => {
+  it('search returns every campaign: reading is not pod-scoped', async () => {
     for (const key of ['Alisa', 'Leigh']) await prisma.campaign.create({ data: { name: `Private ${key}`, sequenceId: b.sequence.id, podId: b.pods[key].id, startDate: '2026-09-08' } });
     auth.requireUser.mockResolvedValue(session(b.users.alisa, [b.pods.Alisa.id]));
-    expect((await globalSearchAction('Private')).filter((h) => h.kind === 'campaign').map((h) => h.title)).toEqual(['Private Alisa']);
+    expect((await globalSearchAction('Private')).filter((h) => h.kind === 'campaign').map((h) => h.title).sort()).toEqual(['Private Alisa', 'Private Leigh']);
     auth.requireUser.mockResolvedValue(session(b.users.ria));
     expect((await globalSearchAction('Private')).filter((h) => h.kind === 'campaign')).toHaveLength(2);
   });
-  it('does not include another pod’s work in a shared FO’s team totals', async () => {
+  it('counts a shared FO’s work in every pod on the board, whoever is reading', async () => {
     await prisma.userPod.create({ data: { userId: b.users.karson.id, podId: b.pods.Leigh.id } });
     await enrollPeople({ personIds: ['person-16'], sequenceId: b.sequence.id, podId: b.pods.Leigh.id, startDate: '2026-09-08', assignment: { mode: 'FIXED', foUserId: b.users.karson.id }, actor: SYSTEM_ACTOR }, context);
     const home = await buildHome(session(b.users.alisa, [b.pods.Alisa.id]), NOW);
-    expect(home.team.find((u) => u.id === b.users.karson.id)).toMatchObject({ today: 0, overdue: 0 });
+    expect(home.team.find((u) => u.id === b.users.karson.id)?.today).toBe(1);
     // An admin sees Karson's Leigh-pod work: day 1 is email + LinkedIn, one touchpoint on the board.
     const admin = await buildHome(session(b.users.ria), NOW);
     expect(admin.team.find((u) => u.id === b.users.karson.id)?.today).toBe(1);

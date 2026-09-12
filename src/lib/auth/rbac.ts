@@ -28,8 +28,13 @@ export const isJuniorFo = (a: Actor) => a.role === 'JUNIOR_FO';
 export const isBizOps = (a: Actor) => a.role === 'BIZ_OPS';
 /** Leads pods: every pod-level write in their own pods. */
 export const isPodLeader = (a: Actor) => isSeniorFo(a) || isSalesLeader(a) || isPodManager(a);
-/** Reads every pod. Admins write too; Biz Ops only look. Reading is never the same test as writing. */
-export const canSeeAllPods = (a: Actor) => isAdmin(a) || isBizOps(a);
+/**
+ * Everyone reads every pod. The owner's rule (12 September 2026): an FO in Alisa's pod opens each
+ * section with Alisa's pod and their own name already selected, and may clear both and see all of
+ * it. Reading was never the same test as writing, and the write gates below still ask who leads
+ * which pod. Biz Ops is the role that only reads.
+ */
+export const canSeeAllPods = (_a: Actor) => true;
 /** Roles that do or run sales work, and so belong to at least one pod. */
 export const ROLES_NEEDING_POD: Role[] = ['JUNIOR_FO', 'SENIOR_FO', 'SALES_LEADER', 'POD_MANAGER'];
 export const needsPod = (role: Role) => ROLES_NEEDING_POD.includes(role);
@@ -41,10 +46,9 @@ export function canManagePod(a: Actor, podId: string | null | undefined): boolea
   return false;
 }
 
-/** Pods whose reports and task lists this user may browse. Null = all pods. */
-export function visiblePodIds(a: Actor): string[] | null {
-  if (canSeeAllPods(a)) return null;
-  return a.podIds;
+/** Pods whose reports and task lists this user may browse. Null = all pods, which is everyone now. */
+export function visiblePodIds(_a: Actor): string[] | null {
+  return null;
 }
 
 /**
@@ -85,7 +89,8 @@ export const canEditSequences = (a: Actor) => isAdmin(a) || isPodLeader(a);
 export const canManageSettings = (a: Actor) => isAdmin(a);
 export const canManageUsers = (a: Actor) => isAdmin(a);
 export const canManageCampaigns = (a: Actor, podId?: string | null) => canEnroll(a, podId);
-export const canViewReports = (a: Actor) => canSeeAllPods(a) || isPodLeader(a);
+/** Reports stay with the roles that run pods and the ones that oversee them. */
+export const canViewReports = (a: Actor) => isAdmin(a) || isBizOps(a) || isPodLeader(a);
 export const canApproveCampaign = (a: Actor, podId: string | null) => isAdmin(a) || ((isSalesLeader(a) || isPodManager(a)) && canManagePod(a, podId));
 
 /** Junior FOs may snooze only to the next working day; others may pick a date. */

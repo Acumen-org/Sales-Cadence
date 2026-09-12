@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { getSettings } from './settings';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
-import { canSeeAllPods } from './auth/rbac';
+import { canSeeAllPods, isAdmin } from './auth/rbac';
 
 /**
  * Which people a user may see: everyone for an admin; otherwise the people in their pods (Twenty's
@@ -41,6 +41,26 @@ export async function peopleScopeWhere(user: SessionUser): Promise<Prisma.Person
   // saw 174 of the pod's 936 people - only the ones assigned to them in Twenty - and read it as
   // missing data.
   const pods = !user.podIds.length ? [] : await prisma.pod.findMany({ where: { id: { in: user.podIds } }, select: { podOwnerValue: true } });
+  return {
+    deletedAt: null,
+    AND: [notTeam],
+    OR: [
+      { ownerMemberId: user.twentyMemberId ?? '__none__' },
+      { enrollments: { some: { foUserId: user.id } } },
+      ...(pods.length ? [{ podOwner: { in: pods.map((pod) => pod.podOwnerValue) } }] : []),
+    ],
+  };
+}
+
+/**
+ * The people a user may *change*: an admin anyone; otherwise the people in their pods, the people
+ * they own in Twenty and the people they are working. Reading is universal now (see
+ * `peopleScopeWhere`); this is the boundary the write paths keep - enrichment imports today.
+ */
+export async function podPeopleWhere(user: SessionUser): Promise<Prisma.PersonCacheWhereInput> {
+  const notTeam = await teamExclusion();
+  if (isAdmin(user)) return { deletedAt: null, AND: [notTeam] };
+  const pods = user.podIds.length ? await prisma.pod.findMany({ where: { id: { in: user.podIds } }, select: { podOwnerValue: true } }) : [];
   return {
     deletedAt: null,
     AND: [notTeam],

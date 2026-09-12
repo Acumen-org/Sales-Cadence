@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseMeetingLink, providerFromAny } from '@/lib/meetings/providers';
+import { extractRecordingUrl, parseMeetingLink, providerFromAny } from '@/lib/meetings/providers';
 
 describe('parseMeetingLink', () => {
   it('plays a direct media file inline', () => {
@@ -40,6 +40,16 @@ describe('parseMeetingLink', () => {
     const zoom = parseMeetingLink('https://acme.zoom.us/rec/download/thing.mp4');
     expect(zoom.provider).toBe('ZOOM');
     expect(zoom.mediaUrl).toBeNull();
+  });
+
+  it('takes the src out of a pasted Share > Embed code, entities and all', () => {
+    const pasted = '<iframe src="https://glynac-my.sharepoint.com/personal/alisa_acumen-strategy_com/_layouts/15/embed.aspx?UniqueId=88a4d11b-3f06-4bff-a726-8576be121d20&amp;embed=%7B%22ust%22%3Afalse%7D&amp;referrer=StreamWebApp" width="640" height="360" frameborder="0" scrolling="no" allowfullscreen title="Alisa and Lloyd-20260811 Meeting Recording.mp4"></iframe>';
+    const url = extractRecordingUrl(pasted);
+    expect(url).toBe('https://glynac-my.sharepoint.com/personal/alisa_acumen-strategy_com/_layouts/15/embed.aspx?UniqueId=88a4d11b-3f06-4bff-a726-8576be121d20&embed=%7B%22ust%22%3Afalse%7D&referrer=StreamWebApp');
+    const r = parseMeetingLink(pasted);
+    expect(r.provider).toBe('SHAREPOINT');
+    expect(r.embedUrl).toContain('/_layouts/15/embed.aspx?UniqueId=88a4d11b');
+    expect(extractRecordingUrl('  https://acme.zoom.us/rec/share/abc ')).toBe('https://acme.zoom.us/rec/share/abc');
   });
 
   it('turns a Drive share link into a preview embed', () => {

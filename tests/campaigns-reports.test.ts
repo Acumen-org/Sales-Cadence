@@ -56,16 +56,16 @@ describe('campaigns and reports', () => {
     }
   });
 
-  it('lists campaigns with counts and rates, scoped by pod', async () => {
+  it('lists campaigns with counts and rates, for every reader', async () => {
     const admin = sessionUser(b.users.ria, []);
     const [c] = await listCampaigns(admin);
     expect(c.name).toBe('SaaStr follow-up');
     expect(c.counts).toMatchObject({ total: 4, replied: 1, completed: 1 });
     expect(c.counts.active).toBe(2);
     expect(c.replyRate).toBeCloseTo(0.25);
-    // Leigh cannot see Alisa's pod campaign
+    // Leigh reads Alisa's pod campaign too: reading is not pod-scoped, running it is.
     const leigh = sessionUser(b.users.leigh, [b.pods.Leigh.id]);
-    expect(await listCampaigns(leigh)).toHaveLength(0);
+    expect(await listCampaigns(leigh)).toHaveLength(1);
   });
 
   it('builds the campaign detail funnel and per-FO table', async () => {
