@@ -1,4 +1,6 @@
 import type { Enrollment, EnrollmentStatus } from '@prisma/client';
+import { needsPod } from '../auth/rbac';
+import { externalPeopleWhere } from '../internal-organizations';
 import { optionLabel } from '../twenty/labels';
 import { prisma } from '../db';
 import { logAudit, type AuditActor } from '../audit';
@@ -33,7 +35,7 @@ export type EnrollRequest = {
   actor: AuditActor;
 };
 
-export type EnrollConflictReason = 'not_found' | 'deleted' | 'dnd' | 'opted_out' | 'already_active' | 'no_fo' | 'duplicate' | 'invalid_start' | 'pod_mismatch';
+export type EnrollConflictReason = 'not_found' | 'deleted' | 'dnd' | 'opted_out' | 'already_active' | 'no_fo' | 'duplicate' | 'invalid_start' | 'pod_mismatch' | 'internal';
 
 export type EnrollConflict = { personId: string; name: string; reason: EnrollConflictReason; detail?: string; enrollmentId?: string };
 
@@ -87,10 +89,11 @@ export async function previewEnrollment(req: EnrollRequest, client?: TwentyClien
   }
   const people = await prisma.personCache.findMany({ where: { id: { in: ids } } });
   const byId = new Map(people.map((p) => [p.id, p]));
+  const externalIds = new Set((await prisma.personCache.findMany({ where: { AND: [{ id: { in: ids } }, await externalPeopleWhere()] }, select: { id: true } })).map((p) => p.id));
 
   const pod = await prisma.pod.findUnique({ where: { id: req.podId }, include: { users: { include: { user: true } } } });
   if (!pod || pod.archived) throw new Error('Pod not found or removed');
-  const podFos = pod.users.map((u) => u.user).filter((u) => u.active);
+  const podFos = pod.users.map((u) => u.user).filter((u) => u.active && needsPod(u.role));
   const assignment = req.assignment;
   const fixedFoId = assignment.mode === 'FIXED' ? assignment.foUserId : null;
   const restrictIds = assignment.mode !== 'FIXED' && assignment.foUserIds?.length ? new Set(assignment.foUserIds) : null;
@@ -121,7 +124,9 @@ export async function previewEnrollment(req: EnrollRequest, client?: TwentyClien
   };
 
   const candidates: EnrollCandidate[] = [];
-  for (const id of ids) {
+  // Reserve known owners' loads first, so input order cannot overload them after balancing.
+  const orderedIds = assignment.mode === 'OWNER' ? [...ids].sort((a, b) => Number(Boolean(byId.get(b)?.ownerMemberId)) - Number(Boolean(byId.get(a)?.ownerMemberId))) : ids;
+  for (const id of orderedIds) {
     const p = byId.get(id);
     if (!p) {
       conflicts.push({ personId: id, name: id, reason: 'not_found' });
@@ -130,6 +135,10 @@ export async function previewEnrollment(req: EnrollRequest, client?: TwentyClien
     const name = cachedPersonName(p);
     if (p.deletedAt) {
       conflicts.push({ personId: id, name, reason: 'deleted' });
+      continue;
+    }
+    if (!externalIds.has(id)) {
+      conflicts.push({ personId: id, name, reason: 'internal', detail: 'Internal team or organisation; excluded from outreach' });
       continue;
     }
     if (p.dnd) {
@@ -163,7 +172,11 @@ export async function previewEnrollment(req: EnrollRequest, client?: TwentyClien
     let assignedBy: EnrollCandidate['assignedBy'] = 'fixed';
     if (!fo && req.assignment.mode === 'OWNER' && p.ownerMemberId) {
       fo = allowed.find((u) => u.twentyMemberId === p.ownerMemberId) ?? null;
-      if (fo) assignedBy = 'owner';
+      if (!fo) {
+        conflicts.push({ personId: id, name, reason: 'no_fo', detail: 'The CRM owner is not an eligible active sales member of this pod. Update ownership or the campaign team before enrolling.' });
+        continue;
+      }
+      assignedBy = 'owner';
     }
     if (!fo) {
       fo = pickLeastLoaded();
@@ -193,6 +206,8 @@ export async function previewEnrollment(req: EnrollRequest, client?: TwentyClien
       startDate: personStart,
     });
   }
+  const inputOrder = new Map(ids.map((id, index) => [id, index]));
+  candidates.sort((a, b) => inputOrder.get(a.personId)! - inputOrder.get(b.personId)!);
   return { candidates, conflicts, warnings };
 }
 
@@ -336,7 +351,7 @@ export async function reassignEnrollment(enrollmentId: string, newFoUserId: stri
   if (!e) throw new Error('Enrollment not found');
   if (e.foUserId === newFoUserId) return e;
   const fo = await prisma.user.findUnique({ where: { id: newFoUserId } });
-  if (!fo || !fo.active) throw new Error('Target FO not found or inactive');
+  if (!fo || !fo.active || !needsPod(fo.role)) throw new Error('Choose an active sales team member as the FO');
   if (e.pod && !e.pod.users.some((u) => u.userId === newFoUserId)) throw new Error(`${fo.name} is not a member of ${e.pod.name}`);
 
   const pendingBefore = await prisma.task.findMany({ where: { enrollmentId, state: 'PENDING' }, include: { enrollment: { include: { person: true, sequence: true } }, fo: true } });

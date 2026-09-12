@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { companySearchWhere } from './search-terms';
 import { getSettings } from './settings';
+import { isInternalCompany } from './internal-organizations';
 import { meetingReadWhere } from './meetings-query';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
@@ -96,7 +97,6 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
   const { rules } = await getSettings();
   const where: Prisma.CompanyCacheWhereInput = {
     deletedAt: null,
-    ...(rules.internalDomains.length ? { NOT: { OR: rules.internalDomains.map((domain) => ({ domain: { contains: domain, mode: 'insensitive' as const } })) } } : {}),
   };
   const narrowings: string[][] = [];
   if (visibleIds !== null) narrowings.push(visibleIds);
@@ -119,7 +119,7 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
   // grouped queries so a sort by people or replies can rank the whole set before paging. A few
   // thousand rows of a few columns is a small result; the 500-row cap this replaced hid every
   // named company behind the nameless ones that sorted first.
-  const companies = await prisma.companyCache.findMany({ where, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }, { domain: { sort: 'asc', nulls: 'last' } }] });
+  const companies = (await prisma.companyCache.findMany({ where, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }, { domain: { sort: 'asc', nulls: 'last' } }] })).filter((company) => !isInternalCompany(company, rules));
   const ids = companies.map((c) => c.id);
   if (!ids.length) return { rows: [], total: 0, mine: 0, people: 0, inSequence: 0, engaged: 0 };
 
@@ -440,4 +440,3 @@ export async function accountDetail(companyId: string, user: SessionUser) {
     mine: Boolean(user.twentyMemberId && company.ownerMemberId === user.twentyMemberId) || accountPeople.some((p) => p.enrollment?.foUserId === user.id),
   };
 }
-

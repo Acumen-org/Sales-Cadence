@@ -3,7 +3,7 @@ import { canReadPerson } from '@/lib/people-scope';
 import { accountScopeCompanyIds } from '@/lib/accounts-query';
 import { notFound } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
-import { isAdmin } from '@/lib/auth/rbac';
+import { isAdmin, canCreateMeeting } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
 import { formatInstant, formatLocalDate } from '@/lib/dates';
 import { cachedPersonName, upsertPersonCache } from '@/lib/person-cache';
@@ -333,7 +333,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                         },
                         {
                           k: 'Recording',
-                          v: person.recordingUrl ? (
+                          v: person.recordingUrl && canCreateMeeting(user) ? (
                             <Link href={`/meetings/new?personId=${person.id}&url=${encodeURIComponent(person.recordingUrl)}`} className="text-brand-700 hover:underline">
                               Add meeting
                             </Link>

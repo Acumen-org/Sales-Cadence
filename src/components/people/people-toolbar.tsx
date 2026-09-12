@@ -52,6 +52,7 @@ export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, p
   const pathname = usePathname();
   const params = useSearchParams();
   const [text, setText] = useState(q);
+  useEffect(() => setText(q), [q]);
 
   const update = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(params.toString());

@@ -1,3 +1,4 @@
+import { needsPod } from '@/lib/auth/rbac';
 import { requireUser } from '@/lib/auth/current-user';
 import { filterParam, sectionDefaults } from '@/lib/default-filters';
 import { defaultTwentySchema } from '@/lib/twenty/twenty-schema';
@@ -15,26 +16,24 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
   const user = await requireUser();
   const sp = await searchParams;
   const q = (sp.q ?? '').trim();
-  const scope = sp.scope === 'mine' ? 'mine' : 'all';
   const defaults = await sectionDefaults(user);
   const pod = filterParam(sp.pod, defaults.podOwnerValue);
-  const foUserId = filterParam(sp.fo, null);
+  const foUserId = filterParam(sp.fo, defaults.foUserId);
   const values = defaultTwentySchema.personValues;
   const product = sp.product && (values.productInterest as readonly string[]).includes(sp.product) ? sp.product : null;
   const sort: AccountSort = ACCOUNT_SORTS.includes(sp.sort as AccountSort) ? (sp.sort as AccountSort) : DEFAULT_ACCOUNT_SORT;
   const page = Math.max(1, Number.parseInt(sp.page ?? '1', 10) || 1);
   const visible = visiblePodIds(user);
   const [list, podRows] = await Promise.all([
-    listAccounts(user, { q, pod, foUserId, product, sort, scope, page }),
-    prisma.pod.findMany({ where: { archived: false, ...(visible === null ? {} : { id: { in: visible } }) }, orderBy: { name: 'asc' }, include: { users: { include: { user: { select: { id: true, name: true, active: true } } } } } }),
+    listAccounts(user, { q, pod, foUserId, product, sort, page }),
+    prisma.pod.findMany({ where: { archived: false, ...(visible === null ? {} : { id: { in: visible } }) }, orderBy: { name: 'asc' }, include: { users: { include: { user: { select: { id: true, name: true, active: true, role: true } } } } } }),
   ]);
-  const fos = [...new Map(podRows.flatMap((x) => x.users.filter((up) => up.user.active).map((up) => [up.user.id, { id: up.user.id, name: up.user.name }] as const))).values()].sort((a, b) => a.name.localeCompare(b.name));
+  const fos = [...new Map(podRows.flatMap((x) => x.users.filter((up) => up.user.active && needsPod(up.user.role)).map((up) => [up.user.id, { id: up.user.id, name: up.user.name }] as const))).values()].sort((a, b) => a.name.localeCompare(b.name));
   const rows = list.rows;
   const pages = Math.max(1, Math.ceil(list.total / ACCOUNTS_PAGE_SIZE));
   const pageHref = (n: number) => {
     const p = new URLSearchParams();
     if (q) p.set('q', q);
-    if (scope === 'mine') p.set('scope', 'mine');
     p.set('pod', pod ?? '');
     if (foUserId) p.set('fo', foUserId);
     if (product) p.set('product', product);

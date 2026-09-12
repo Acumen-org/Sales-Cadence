@@ -1,7 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { detectTranscriptFormat, parseTranscript } from '@/lib/meetings/transcript';
+import { activeCueIndex, detectTranscriptFormat, parseTranscript } from '@/lib/meetings/transcript';
 
 describe('transcripts arrive in every shape the tools export', () => {
+  it('reads short VTT timestamps and UUID cue IDs without including metadata', () => {
+    const { cues } = parseTranscript('WEBVTT\n\nNOTE metadata\n00:00.000 --> 00:02.000\nIgnore this\n\ncue-uuid-abc\n01:02.500 --> 01:04.750\n<v Alisa>Hello</v>');
+    expect(cues).toEqual([{ start: 62.5, end: 64.75, speaker: 'Alisa', text: 'Hello' }]);
+  });
+  it('keeps separate untimed-end turns and follows the later turn during playback', () => {
+    const { cues } = parseTranscript('Alisa   0:02\nHello\n\nAlisa   0:12\nStill here\n\nGuest   0:20\nYes');
+    expect(cues).toHaveLength(3);
+    expect(activeCueIndex(cues, 1)).toBeNull();
+    expect(activeCueIndex(cues, 10)).toBe(0);
+    expect(activeCueIndex(cues, 12)).toBe(1);
+    expect(activeCueIndex(cues, 25)).toBe(2);
+    expect(activeCueIndex([{ start: 0, end: 5, speaker: null, text: 'Hi' }], 6)).toBeNull();
+  });
   it('reads a Teams JSON export and keeps only the dialogue', () => {
     const raw = JSON.stringify({
       version: '1.0',

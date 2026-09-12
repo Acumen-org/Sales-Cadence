@@ -251,12 +251,14 @@ test('per-user views: my accounts and my relationships', async ({ page }) => {
   await loginAs(page, 'Alisa');
   await page.goto('/home');
   await page.getByRole('link', { name: /My accounts/ }).click();
-  await expect(page).toHaveURL(/\/accounts\?scope=mine/);
+  await expect(page).toHaveURL(/\/accounts\?pod=&fo=/);
+  await expect(page.getByLabel('Filter by FO').locator('option:checked')).toHaveText(/Alisa/);
   await expect(page.locator('table tbody tr').first()).toBeVisible();
 
   await page.goto('/home');
   await page.getByRole('link', { name: /My people/ }).click();
-  await expect(page).toHaveURL(/\/people\?owner=mine/);
+  await expect(page).toHaveURL(/\/people\?pod=&fo=/);
+  await expect(page.getByLabel('Filter by FO').locator('option:checked')).toHaveText(/Alisa/);
   await expect(page.locator('table tbody tr').first()).toBeVisible();
   await logout(page);
 });

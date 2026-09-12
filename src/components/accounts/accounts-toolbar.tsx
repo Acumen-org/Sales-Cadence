@@ -32,9 +32,11 @@ export function AccountsToolbar({ q, pods, fos, products, pod, fo, product, sort
   const pathname = usePathname();
   const params = useSearchParams();
   const [text, setText] = useState(q);
+  useEffect(() => setText(q), [q]);
 
   const update = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(params.toString());
+    next.delete('page');
     for (const [k, v] of Object.entries(patch)) {
       if (v) next.set(k, v);
       else if (EXPLICIT.has(k)) next.set(k, '');

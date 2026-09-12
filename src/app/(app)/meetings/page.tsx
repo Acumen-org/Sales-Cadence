@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { optionLabel } from '@/lib/twenty/labels';
 import type { Prisma } from '@prisma/client';
 import { requireUser } from '@/lib/auth/current-user';
+import { canCreateMeeting } from '@/lib/auth/rbac';
 import { attendeeIsExternal, meetingReadWhere } from '@/lib/meetings-query';
 import { getSettings } from '@/lib/settings';
 import { prisma } from '@/lib/db';
@@ -104,7 +105,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
           caret
           meta={`${total} meeting${total === 1 ? '' : 's'}`}
           actions={
-            <Link href="/meetings/new" className="btn-primary">
+            canCreateMeeting(user) && <Link href="/meetings/new" className="btn-primary">
               <IconPlus size={14} /> Add meeting
             </Link>
           }
@@ -118,7 +119,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
             icon={<IconCalendar size={20} />}
             title={filtered ? 'No meetings match' : 'No meetings yet'}
             action={
-              <Link href="/meetings/new" className="btn-primary">
+              canCreateMeeting(user) && <Link href="/meetings/new" className="btn-primary">
                 <IconPlus size={15} /> Add meeting
               </Link>
             }
@@ -237,7 +238,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                         {already ? (
                           <span className="text-[12px] text-ink-500">Already added</span>
                         ) : (
-                          <Link href={`/meetings/new?personId=${b.id}`} className="btn-secondary btn-sm">
+                          canCreateMeeting(user) && <Link href={`/meetings/new?personId=${b.id}`} className="btn-secondary btn-sm">
                             <IconPlus size={12} /> Add with recording
                           </Link>
                         )}

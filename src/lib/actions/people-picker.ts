@@ -1,5 +1,7 @@
 'use server';
 
+import { needsPod } from '@/lib/auth/rbac';
+
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../db';
@@ -22,6 +24,7 @@ const Filters = z.object({
   tier: z.string().trim().max(100).default(''),
   type: z.string().trim().max(100).default(''),
   state: z.enum(['any', 'cold', 'enrolled', 'finished']).default('cold'),
+  page: z.number().int().min(1).max(100000).default(1),
 });
 export type PickerFilters = z.infer<typeof Filters>;
 export type PickerRow = { id: string; name: string; company: string | null; title: string | null; pod: string | null; state: 'In a sequence' | 'Replied' | 'Finished' | 'Never enrolled' | 'Do not contact' };
@@ -53,6 +56,7 @@ export async function pickPeopleAction(input: unknown): Promise<{ ok: true; rows
       where,
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
       take: LIMIT,
+      skip: (f.page - 1) * LIMIT,
       select: { id: true, firstName: true, lastName: true, companyName: true, jobTitle: true, podOwner: true, dnd: true, optedOut: true, enrollments: { orderBy: { createdAt: 'desc' }, take: 1, select: { status: true } } },
     }),
     prisma.personCache.count({ where }),
@@ -73,8 +77,8 @@ export type PickerOptions = { pods: { value: string; name: string }[]; fos: { id
 export async function pickerOptionsAction(): Promise<PickerOptions> {
   const user = await requireUser();
   const visible = visiblePodIds(user);
-  const pods = await prisma.pod.findMany({ where: { archived: false, ...(visible === null ? {} : { id: { in: visible } }) }, orderBy: { name: 'asc' }, include: { users: { include: { user: { select: { id: true, name: true, active: true } } } } } });
-  const fos = [...new Map(pods.flatMap((p) => p.users.filter((u) => u.user.active).map((u) => [u.user.id, { id: u.user.id, name: u.user.name }] as const))).values()].sort((a, b) => a.name.localeCompare(b.name));
+  const pods = await prisma.pod.findMany({ where: { archived: false, ...(visible === null ? {} : { id: { in: visible } }) }, orderBy: { name: 'asc' }, include: { users: { include: { user: { select: { id: true, name: true, active: true, role: true } } } } } });
+  const fos = [...new Map(pods.flatMap((p) => p.users.filter((u) => u.user.active && needsPod(u.user.role)).map((u) => [u.user.id, { id: u.user.id, name: u.user.name }] as const))).values()].sort((a, b) => a.name.localeCompare(b.name));
   const v = defaultTwentySchema.personValues;
   return { pods: pods.map((p) => ({ value: p.podOwnerValue, name: p.name })), fos, tiers: [...v.tier], types: [...v.contactType], products: [...v.productInterest] };
 }

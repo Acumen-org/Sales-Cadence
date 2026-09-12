@@ -80,6 +80,7 @@ export async function saveRulesSettingsAction(formData: FormData): Promise<Actio
     companyReplyPausesColleagues: bool(formData.get('companyReplyPausesColleagues')),
     meetingOnOpportunityCreated: bool(formData.get('meetingOnOpportunityCreated')),
     internalDomains: list(formData.get('internalDomains')).map((d) => d.replace(/^.*@/, '').replace(/^\/+|\/+$/g, '')),
+    internalCompanyNames: formData.has('internalCompanyNames') ? list(formData.get('internalCompanyNames')) : undefined,
     clickToCallUrl: String(formData.get('clickToCallUrl') ?? '').trim(),
     reconcileLookbackDays: Number(formData.get('reconcileLookbackDays')),
     defaultDailyRampPerFo: Number(formData.get('defaultDailyRampPerFo')),

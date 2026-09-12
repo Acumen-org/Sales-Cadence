@@ -20,6 +20,17 @@ const meetingForm = (attendees: unknown[] = []) => form({ title: 'Pilot meeting'
 beforeEach(async () => { await resetDb(); b = await seedBasics(); auth.user.mockResolvedValue(session(b.users.ria)); });
 
 describe('meeting attendees', () => {
+  it('keeps Biz Ops read-only even for meetings they created before a role change', async () => {
+    await createMeetingAction(meetingForm());
+    const meeting = await prisma.meeting.findFirstOrThrow();
+    auth.user.mockResolvedValue({ ...session(b.users.ria), role: 'BIZ_OPS' });
+    expect((await createMeetingAction(meetingForm())).ok).toBe(false);
+    expect(await canManageMeetingAction(meeting.id)).toBe(false);
+    const edit = meetingForm(); edit.set('meetingId', meeting.id);
+    expect((await updateMeetingAction(edit)).ok).toBe(false);
+    expect((await updateMeetingAttendeesAction(form({ meetingId: meeting.id, attendeesJson: '[]' }))).ok).toBe(false);
+    expect(await prisma.meeting.count()).toBe(1);
+  });
   it('resolves contacts without email and internal members by ID, overriding supplied identities', async () => {
     await prisma.personCache.update({ where: { id: 'person-01' }, data: { email: null } });
     expect((await createMeetingAction(meetingForm([{ personId: 'person-01', name: 'Forged name', email: 'forged@example.com' }, { userId: b.users.ria.id, name: 'Wrong', email: b.users.ria.email }]))).ok).toBe(true);

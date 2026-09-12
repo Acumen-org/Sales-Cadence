@@ -22,7 +22,8 @@ const SPEAKER = /^\s*([\p{Lu}][\p{L}\p{N} .''&/(),-]{0,60}?)\s*:\s+(?=\S)/u;
 const LEAD_TIME = /^\s*[[(]?(\d{1,2}):(\d{2})(?::(\d{2}))?(?:[.,](\d{1,3}))?[\])]?[\s-]+/;
 
 function seconds(h: string, m: string, s: string | undefined, ms: string): number {
-  return Number(h) * 3600 + Number(m) * 60 + Number(s ?? 0) + Number(ms.padEnd(3, '0')) / 1000;
+  const whole = s === undefined ? Number(h) * 60 + Number(m) : Number(h) * 3600 + Number(m) * 60 + Number(s);
+  return whole + Number(ms.padEnd(3, '0')) / 1000;
 }
 
 /**
@@ -103,14 +104,13 @@ export function parseTranscript(raw: string, format?: TranscriptFormat): { forma
   for (const block of text.split(/\n{2,}/)) {
     const lines = block.split('\n').filter((l) => l.trim() !== '');
     if (!lines.length) continue;
+    if (/^(NOTE|STYLE|REGION)\b/i.test(lines[0])) continue;
     const rangeLine = lines.find((l) => RANGE.test(l));
     if (!rangeLine) continue;
     const m = RANGE.exec(rangeLine)!;
     const start = seconds(m[1], m[2], m[3], m[4]);
     const end = seconds(m[5], m[6], m[7], m[8]);
-    const body = lines
-      .filter((l) => l !== rangeLine && !/^\s*\d+\s*$/.test(l) && !/^WEBVTT/i.test(l) && !/^(NOTE|STYLE|REGION)\b/i.test(l))
-      .join(' ');
+    const body = lines.slice(lines.indexOf(rangeLine) + 1).join(' ');
     const { speaker, text: spoken } = splitSpeaker(body);
     const cueText = clean(spoken);
     if (cueText) cues.push({ start, end, speaker, text: cueText });
@@ -123,7 +123,7 @@ function mergeSpeakers(cues: TranscriptCue[]): TranscriptCue[] {
   const merged: TranscriptCue[] = [];
   for (const c of cues) {
     const prev = merged[merged.length - 1];
-    if (prev && prev.speaker && prev.speaker === c.speaker && c.start - (prev.end ?? c.start) < 2) {
+    if (prev && prev.speaker && prev.speaker === c.speaker && prev.end !== null && c.start >= prev.start && c.start - prev.end < 2) {
       prev.text = `${prev.text} ${c.text}`.trim();
       prev.end = c.end;
     } else merged.push({ ...c });
@@ -217,6 +217,16 @@ function parseGroupedText(text: string): TranscriptCue[] | null {
   }
   if (current && current.text) cues.push(current);
   return cues.length ? cues : null;
+}
+
+/** A cue without an end lasts until the next turn, rather than capturing the whole recording. */
+export function activeCueIndex(cues: TranscriptCue[], time: number): number | null {
+  for (let i = cues.length - 1; i >= 0; i--) {
+    const cue = cues[i];
+    const end = cue.end ?? cues[i + 1]?.start ?? Infinity;
+    if (time >= cue.start && time < end) return i;
+  }
+  return null;
 }
 
 export function formatCueTime(seconds: number): string {

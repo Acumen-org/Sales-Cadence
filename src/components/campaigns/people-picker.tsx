@@ -28,7 +28,7 @@ const STATE_TONE: Record<PickerRow['state'], 'green' | 'blue' | 'gray' | 'red' |
  */
 export function PeoplePicker({ value, onChange }: { value: string[]; onChange: (ids: string[]) => void }) {
   const [options, setOptions] = useState<PickerOptions | null>(null);
-  const [filters, setFilters] = useState<PickerFilters>({ q: '', pod: '', fo: '', product: '', tier: '', type: '', state: 'cold' });
+  const [filters, setFilters] = useState<PickerFilters>({ q: '', pod: '', fo: '', product: '', tier: '', type: '', state: 'cold', page: 1 });
   const [text, setText] = useState('');
   const [rows, setRows] = useState<PickerRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -42,13 +42,16 @@ export function PeoplePicker({ value, onChange }: { value: string[]; onChange: (
   }, []);
 
   useEffect(() => {
-    const t = setTimeout(() => setFilters((f) => (f.q === text ? f : { ...f, q: text })), 300);
+    const t = setTimeout(() => setFilters((f) => (f.q === text ? f : { ...f, q: text, page: 1 })), 300);
     return () => clearTimeout(t);
   }, [text]);
 
   useEffect(() => {
+    let current = true;
     start(async () => {
+      try {
       const r = await pickPeopleAction(filters);
+      if (!current) return;
       if (!r.ok) {
         setError(r.error);
         return;
@@ -57,12 +60,16 @@ export function PeoplePicker({ value, onChange }: { value: string[]; onChange: (
       setRows(r.rows);
       setTotal(r.total);
       setMatchingIds(r.ids);
+      } catch {
+        if (current) setError('Could not load contacts. Change a filter to retry.');
+      }
     });
+    return () => { current = false; };
   }, [filters]);
 
   const toggle = (id: string) => onChange(selected.has(id) ? value.filter((x) => x !== id) : [...value, id]);
   const allShownSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
-  const set = (patch: Partial<PickerFilters>) => setFilters((f) => ({ ...f, ...patch }));
+  const set = (patch: Partial<PickerFilters>) => setFilters((f) => ({ ...f, page: 1, ...patch }));
   const Select = ({ name, label, all, items }: { name: keyof PickerFilters; label: string; all: string; items: { value: string; label: string }[] }) => (
     <select value={String(filters[name])} onChange={(e) => set({ [name]: e.target.value } as Partial<PickerFilters>)} aria-label={label} className="!w-auto !py-1.5 !text-[12.5px]">
       <option value="">{all}</option>
@@ -88,14 +95,19 @@ export function PeoplePicker({ value, onChange }: { value: string[]; onChange: (
       </div>
 
       <div className="flex flex-wrap items-center gap-3 text-[12.5px] text-ink-600">
-        <span><Count value={total} /> matching{rows.length < total ? <span className="text-ink-400"> · showing the first {rows.length}</span> : null}</span>
-        <button type="button" className="btn-secondary btn-sm" disabled={!matchingIds.length} onClick={() => onChange([...new Set([...value, ...matchingIds])])}>
+        <span><Count value={total} /> matching{rows.length < total ? <span className="text-ink-400"> · showing {(filters.page - 1) * 300 + 1}?{(filters.page - 1) * 300 + rows.length}</span> : null}</span>
+        <button type="button" className="btn-secondary btn-sm" disabled={pending || Boolean(error) || !matchingIds.length} onClick={() => onChange([...new Set([...value, ...matchingIds])])}>
           Select everyone matching{total > matchingIds.length ? ` (first ${matchingIds.length})` : ''}
         </button>
         <span className="ml-auto flex items-center gap-2"><Badge tone={value.length ? 'green' : 'gray'}>{value.length} selected</Badge>{value.length ? <button type="button" className="btn-ghost btn-sm" onClick={() => onChange([])}>Clear</button> : null}</span>
       </div>
 
       {error ? <p role="alert" className="text-[13px] text-red-700">{error}</p> : null}
+      {total > 300 && <div className="flex items-center justify-end gap-3">
+        <button type="button" className="btn-secondary btn-sm" disabled={pending || filters.page === 1} onClick={() => set({ page: filters.page - 1 })}>Previous contacts</button>
+        <strong className="text-sm">Page {filters.page} / {Math.ceil(total / 300)}</strong>
+        <button type="button" className="btn-secondary btn-sm" disabled={pending || filters.page * 300 >= total} onClick={() => set({ page: filters.page + 1 })}>Next contacts</button>
+      </div>}
       <div className={pending ? 'opacity-60 transition' : 'transition'}>
         <div className="max-h-[420px] overflow-auto scroll-thin rounded-xl border border-line">
           <table className="table">

@@ -16,6 +16,7 @@ export function MeetingsToolbar({ who, product, from, to, favourites, products }
   const pathname = usePathname();
   const params = useSearchParams();
   const [text, setText] = useState(who);
+  useEffect(() => setText(who), [who]);
 
   const update = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(params.toString());

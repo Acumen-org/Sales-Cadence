@@ -1,6 +1,6 @@
 import { prisma } from '../db';
 import { logAudit, userActor } from '../audit';
-import { canManageEnrollment } from '../auth/rbac';
+import { canManageEnrollment, needsPod } from '../auth/rbac';
 import type { SessionUser } from '../auth/current-user';
 import { loadSyncTasks, syncTaskInclude, syncTaskResolved, syncTasksCreated, type SyncTask } from './sync-out';
 
@@ -18,17 +18,26 @@ export async function delegateTasks(taskIds: string[], toUserId: string, actor: 
   if (tasks.some((t) => t.state !== 'PENDING')) return { ok: false, error: 'Only open touchpoints can be delegated.' };
   if (tasks.some((t) => !canManageEnrollment(actor, { foUserId: t.foUserId, podId: t.enrollment.podId }))) return { ok: false, error: 'You can delegate work in your own pods only.' };
   const to = await prisma.user.findUnique({ where: { id: toUserId }, include: { pods: { select: { podId: true } } } });
-  if (!to?.active) return { ok: false, error: 'Choose an active team member.' };
+  if (!to?.active || !needsPod(to.role)) return { ok: false, error: 'Choose an active sales team member.' };
   if (tasks.some((t) => t.enrollment.podId && !to.pods.some((p) => p.podId === t.enrollment.podId))) return { ok: false, error: `${to.name} is not in this pod.` };
   if (tasks.every((t) => t.foUserId === to.id)) return { ok: false, error: `${to.name} already has this touchpoint.` };
 
   const mirrored: SyncTask[] = tasks.filter((t) => t.twentyTaskId);
-  await prisma.$transaction(async (tx) => {
-    await tx.task.updateMany({ where: { id: { in: ids }, state: 'PENDING' }, data: { foUserId: to.id, twentyTaskId: null } });
-    for (const t of tasks) {
-      await logAudit({ entityType: 'task', entityId: t.id, action: 'delegated', actor: userActor(actor), details: { from: t.foUserId, to: to.id, toName: to.name, personId: t.enrollment.personId } }, tx);
-    }
-  });
+  class ChangedTask extends Error {}
+  try {
+    await prisma.$transaction(async (tx) => {
+      // A completion or another delegation may have won since the list was opened. Roll back
+      // the whole selection rather than claiming every module moved when only some did.
+      for (const t of [...tasks].sort((a, b) => a.id.localeCompare(b.id))) {
+        const changed = await tx.task.updateMany({ where: { id: t.id, state: 'PENDING', foUserId: t.foUserId, twentyTaskId: t.twentyTaskId }, data: { foUserId: to.id, twentyTaskId: null } });
+        if (changed.count !== 1) throw new ChangedTask();
+        await logAudit({ entityType: 'task', entityId: t.id, action: 'delegated', actor: userActor(actor), details: { from: t.foUserId, to: to.id, toName: to.name, personId: t.enrollment.personId } }, tx);
+      }
+    });
+  } catch (error) {
+    if (error instanceof ChangedTask) return { ok: false, error: 'A selected task changed. Refresh the task list and try again.' };
+    throw error;
+  }
   for (const t of mirrored) await syncTaskResolved(t);
   await syncTasksCreated(await loadSyncTasks(ids));
   return { ok: true, count: ids.length, toName: to.name };

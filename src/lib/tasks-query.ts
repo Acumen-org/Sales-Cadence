@@ -1,3 +1,4 @@
+import { needsPod, ROLES_NEEDING_POD } from '@/lib/auth/rbac';
 import type { Prisma } from '@prisma/client';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
@@ -101,18 +102,18 @@ export type TaskListResult = {
 export async function filterOptions(user: SessionUser) {
   if (!canSeeAllPods(user) && !isPodLeader(user)) return { pods: [], fos: [] };
   const podWhere = canSeeAllPods(user) ? { archived: false } : { archived: false, id: { in: user.podIds } };
-  const pods = await prisma.pod.findMany({ where: podWhere, orderBy: { name: 'asc' }, include: { users: { include: { user: { select: { id: true, name: true, active: true } } } } } });
+  const pods = await prisma.pod.findMany({ where: podWhere, orderBy: { name: 'asc' }, include: { users: { include: { user: { select: { id: true, name: true, active: true, role: true } } } } } });
   const fos = new Map<string, { id: string; name: string; podIds: string[] }>();
   for (const pod of pods) {
     for (const up of pod.users) {
-      if (!up.user.active) continue;
+      if (!up.user.active && needsPod(up.user.role)) continue;
       const existing = fos.get(up.user.id) ?? { id: up.user.id, name: up.user.name, podIds: [] };
       existing.podIds.push(pod.id);
       fos.set(up.user.id, existing);
     }
   }
   if (canSeeAllPods(user)) {
-    const others = await prisma.user.findMany({ where: { active: true, id: { notIn: [...fos.keys()] } }, select: { id: true, name: true } });
+    const others = await prisma.user.findMany({ where: { active: true, role: { in: ROLES_NEEDING_POD }, id: { notIn: [...fos.keys()] } }, select: { id: true, name: true } });
     for (const o of others) fos.set(o.id, { id: o.id, name: o.name, podIds: [] });
   }
   return { pods: pods.map((p) => ({ id: p.id, name: p.name })), fos: [...fos.values()].sort((a, b) => a.name.localeCompare(b.name)) };

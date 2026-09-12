@@ -3,9 +3,10 @@ import { z } from 'zod';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
 import { peopleScopeWhere, podPeopleWhere } from './people-scope';
-import { assertAllowed, isAdmin, isPodLeader, canSeeAllPods } from './auth/rbac';
+import { assertAllowed, isAdmin, isPodLeader, isBizOps, canSeeAllPods } from './auth/rbac';
 import { cachedPersonName, upsertCompanyCache, upsertPersonCache } from './person-cache';
-import { getTwentySchema } from './settings';
+import { getTwentySchema, getSettings } from './settings';
+import { isInternalCompany } from './internal-organizations';
 import type { TwentyClient } from './twenty/client';
 import type { EnrichCompanyInput, EnrichPersonInput, TwentyCompany, TwentyPerson } from './twenty/types';
 
@@ -213,7 +214,13 @@ async function enrichmentWriteCompanyScope(user: SessionUser): Promise<Prisma.Co
 /** `fixInTwenty`: a relation or an assignment, which an import cannot write - somebody links it in Twenty. */
 export type EnrichmentGap = { field: string; label: string; priority: 'critical' | 'useful'; fixInTwenty?: boolean };
 export type EnrichmentQueueItem = { id: string; label: string; company: string | null; entity: EnrichmentEntity; href: string; gaps: EnrichmentGap[] };
+export function filterEnrichmentQueue(items: EnrichmentQueueItem[], q = '', fields: string[] = [], sort = 'name') {
+  const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return items.filter((item) => terms.every((term) => `${item.label} ${item.company ?? ''}`.toLowerCase().includes(term)) && (!fields.length || item.gaps.some((gap) => fields.includes(gap.field))))
+    .sort((a, b) => sort === 'gaps' ? b.gaps.length - a.gaps.length || a.label.localeCompare(b.label) : sort === 'company' ? (a.company ?? '').localeCompare(b.company ?? '') || a.label.localeCompare(b.label) : a.label.localeCompare(b.label));
+}
 export async function enrichmentQueue(user: SessionUser) {
+  const { rules } = await getSettings();
   const [people, companies, schema] = await Promise.all([
     prisma.personCache.findMany({ where: await enrichmentPeopleScope(user), select: { id: true, firstName: true, lastName: true, companyId: true, companyName: true, email: true, phone: true, jobTitle: true, linkedinUrl: true, city: true, tags: true, badEmail: true, badPhone: true, emailMissing: true, phoneMissing: true }, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }, { email: { sort: 'asc', nulls: 'last' } }] }),
     prisma.companyCache.findMany({ where: await enrichmentCompanyScope(user), select: { id: true, name: true, domain: true, industry: true, employees: true, city: true, aum: true, linkedinUrl: true, ownerMemberId: true }, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }, { domain: { sort: 'asc', nulls: 'last' } }] }),
@@ -232,6 +239,7 @@ export async function enrichmentQueue(user: SessionUser) {
     if (gaps.length) items.push({ id: person.id, label: cachedPersonName(person), company: person.companyName, entity: 'person', href: `/people/${person.id}`, gaps });
   }
   for (const company of companies) {
+    if (isInternalCompany(company, rules)) continue;
     const gaps: EnrichmentGap[] = [];
     for (const [field, label] of ACCOUNT_CRITICAL) if (company[field] === null || company[field] === '') gaps.push({ field, label: `${label} missing`, priority: 'critical' });
     for (const [field, label] of ACCOUNT_USEFUL) if (company[field] === null || company[field] === '') gaps.push({ field, label: FIX_IN_TWENTY.has(field) ? label : `${label} missing`, fixInTwenty: FIX_IN_TWENTY.has(field), priority: 'useful' });
@@ -317,7 +325,7 @@ export async function previewEnrichment(user: SessionUser, entity: EnrichmentEnt
 }
 
 export async function getEnrichmentBatch(user: SessionUser, id: string) {
-  return prisma.enrichmentBatch.findFirst({ where: { id, ...(isAdmin(user) ? {} : { createdById: user.id }) }, include: { rows: { orderBy: { rowNumber: 'asc' } } } });
+  return prisma.enrichmentBatch.findFirst({ where: { id, ...(isAdmin(user) || isBizOps(user) ? {} : { createdById: user.id }) }, include: { rows: { orderBy: { rowNumber: 'asc' } } } });
 }
 
 export async function reviewEnrichmentRows(user: SessionUser, batchId: string, ids: string[], decision: 'approve' | 'skip' | 'retry') {

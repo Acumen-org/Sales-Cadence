@@ -57,6 +57,7 @@ export const RulesSettingsSchema = z.object({
   internalDomains: z
     .array(z.string().trim().toLowerCase())
     .default(['acumen-strategy.com', 'prairie-hill.com', 'glynac.ai', 'acubooth.com']),
+  internalCompanyNames: z.array(z.string().trim().min(1)).default(['Acumen Strategy', 'Glynac', 'Prairie Hill', 'Prairie Hill Holdings', 'Acumen Talent']),
   /**
    * Endpoint that places a call, owned by us (a Twilio-backed service, for instance). Cadence
    * posts { to, personId, taskId, userId, userEmail } and reports what comes back. Blank means

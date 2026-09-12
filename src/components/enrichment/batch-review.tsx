@@ -16,7 +16,7 @@ const LABELS: Record<string, string> = {
   name: 'Account name', firstName: 'First name', lastName: 'Last name', email: 'Email', phone: 'Phone', linkedinUrl: 'LinkedIn', jobTitle: 'Job title', city: 'City', domain: 'Website', industry: 'Industry', employees: 'Employees', aum: 'AUM (USD)' };
 const SELECTABLE = new Set(['READY', 'CONFLICT', 'FAILED', 'DRY_RUN', 'APPLYING']);
 
-export function EnrichmentBatchReview({ batchId, entity, rows, dryRun }: { batchId: string; entity: string; rows: ReviewRow[]; dryRun: boolean }) {
+export function EnrichmentBatchReview({ batchId, entity, rows, dryRun, readOnly = false }: { batchId: string; entity: string; rows: ReviewRow[]; dryRun: boolean; readOnly?: boolean }) {
   const router = useRouter();
   const [selected, setSelected] = useState<string[]>([]);
   const [error, setError] = useState('');
@@ -58,7 +58,7 @@ export function EnrichmentBatchReview({ batchId, entity, rows, dryRun }: { batch
       <Surface>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <dl className="flex flex-wrap gap-6">{[['READY', 'Ready'], ['CONFLICT', 'Needs review'], ['APPLIED', 'Verified'], ['FAILED', 'Failed'], ['INVALID', 'Invalid']].map(([status, label]) => <div key={status}><dt className="text-[12px] text-ink-500">{label}</dt><dd className="mt-1 text-2xl font-semibold tabular-nums text-ink-900">{counts[status] ?? 0}</dd></div>)}</dl>
-          {running ? <button type="button" className="btn-secondary" onClick={() => { continueRunning.current = false; }}>Pause after current batch</button> : <button type="button" className="btn-primary" disabled={pending || !counts.READY} onClick={apply}>{dryRun ? 'Simulate ready rows' : 'Apply ready rows'} <strong>{counts.READY ?? 0}</strong></button>}
+          {readOnly ? null : running ? <button type="button" className="btn-secondary" onClick={() => { continueRunning.current = false; }}>Pause after current batch</button> : <button type="button" className="btn-primary" disabled={pending || !counts.READY} onClick={apply}>{dryRun ? 'Simulate ready rows' : 'Apply ready rows'} <strong>{counts.READY ?? 0}</strong></button>}
         </div>
         {running ? <p role="status" className="mt-4 text-[14px] font-medium text-brand-800">Processing the current batch…</p> : null}
       </Surface>
@@ -66,16 +66,16 @@ export function EnrichmentBatchReview({ batchId, entity, rows, dryRun }: { batch
       {error ? <Notice tone="error"><span role="alert">{error}</span></Notice> : null}
       <Surface flush>
         <ViewHeader title="Review records" actions={<select className="!w-auto" aria-label="Filter import status" value={filter} onChange={(event) => { setFilter(event.target.value); setPage(0); }}><option value="">All states</option>{Object.entries(STATES).map(([value, state]) => <option key={value} value={value}>{state.label} ({counts[value] ?? 0})</option>)}</select>} />
-        <div className="flex flex-wrap items-center gap-2 border-y border-line px-5 py-3">
+        {!readOnly && <div className="flex flex-wrap items-center gap-2 border-y border-line px-5 py-3">
           <button type="button" className="btn-secondary btn-sm" disabled={running || pending} onClick={() => setSelected([...new Set([...selected, ...shown.filter((row) => SELECTABLE.has(row.status)).map((row) => row.id)])])}>Select this page</button>
           {selected.length ? <><DataValue>{selected.length} selected</DataValue><button type="button" className="btn-ghost btn-sm" onClick={() => setSelected([])}>Clear selection</button><button type="button" className="btn-secondary btn-sm" disabled={running || pending} onClick={() => review('skip')}>Skip selected</button>{conflictsSelected ? <button type="button" className="btn-secondary btn-sm" disabled={running || pending} onClick={() => review('approve')}>Approve selected replacements</button> : null}{retriesSelected ? <button type="button" className="btn-secondary btn-sm" disabled={running || pending} onClick={() => review('retry')}>Queue selected for retry</button> : null}</> : null}
-        </div>
+        </div>}
         <div className="overflow-x-auto"><table className="table">
           <thead><tr><th><span className="sr-only">Select</span></th><th>Record</th><th>Field changes</th><th>State</th></tr></thead>
           <tbody>{shown.map((row) => {
             const state = STATES[row.status] ?? { label: row.status, tone: 'gray' as const };
             return <tr key={row.id}>
-              <td className="!align-top"><input type="checkbox" aria-label={`Select row ${row.rowNumber}`} checked={selected.includes(row.id)} disabled={running || pending || !SELECTABLE.has(row.status)} onChange={(event) => setSelected(event.target.checked ? [...selected, row.id] : selected.filter((id) => id !== row.id))} /></td>
+              <td className="!align-top"><input type="checkbox" aria-label={`Select row ${row.rowNumber}`} checked={selected.includes(row.id)} disabled={readOnly || running || pending || !SELECTABLE.has(row.status)} onChange={(event) => setSelected(event.target.checked ? [...selected, row.id] : selected.filter((id) => id !== row.id))} /></td>
               <td className="!align-top"><div className="min-w-36 space-y-2"><span className="text-[12px] font-normal text-ink-500">Row <DataValue>{row.rowNumber}</DataValue></span>{row.recordId ? <Link href={`/${entity === 'person' ? 'people' : 'accounts'}/${row.recordId}`} className="block font-medium text-brand-700 hover:underline">{row.recordLabel ?? row.recordId}</Link> : <div className="font-normal text-ink-500">Unmatched</div>}</div></td>
               <td className="!align-top"><div className="min-w-[280px] space-y-3">{Object.entries(row.changes).map(([field, value]) => <div key={field}><div className="mb-1 text-[12px] font-normal text-ink-500">{LABELS[field] ?? field}</div><div className="flex flex-wrap items-center gap-2 text-[13px] font-medium text-ink-900"><span className="break-all">{row.original[field] ?? <span className="font-normal text-ink-400">Empty</span>}</span><span aria-label="changes to" className="font-normal text-ink-400">→</span><span className="break-all text-brand-800">{value}</span></div></div>)}{!Object.keys(row.changes).length ? <span className="font-normal text-ink-400">No field changes</span> : null}</div></td>
               <td className="!align-top"><Badge tone={state.tone}>{state.label}</Badge>{row.error ? <p className="mt-2 max-w-xs text-[13px] font-medium text-ink-800">{row.error}</p> : null}</td>

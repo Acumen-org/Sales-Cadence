@@ -1,4 +1,6 @@
 import { requireUser } from '@/lib/auth/current-user';
+import { canCreateMeeting } from '@/lib/auth/rbac';
+import { redirect } from 'next/navigation';
 import { companiesInScope } from '@/lib/meetings-query';
 import { prisma } from '@/lib/db';
 import { MeetingForm } from '@/components/meetings/meeting-form';
@@ -14,6 +16,7 @@ import { dateTimeInputValue } from '@/lib/dates';
  */
 export default async function NewMeetingPage({ searchParams }: { searchParams: Promise<{ account?: string; personId?: string; url?: string }> }) {
   const user = await requireUser();
+  if (!canCreateMeeting(user)) redirect('/meetings');
   const { account, personId, url } = await searchParams;
   const [companies, person] = await Promise.all([
     companiesInScope(user),

@@ -75,6 +75,7 @@ export function canManageEnrollment(a: Actor, e: { foUserId: string; podId: stri
 
 /** Junior FOs may only work their own tasks; Seniors also tasks in their pods. */
 export function canActOnTask(a: Actor, t: { foUserId: string; podId: string | null }): boolean {
+  if (isBizOps(a)) return false;
   if (t.foUserId === a.id) return true;
   if (isAdmin(a)) return true;
   if (isPodLeader(a) && t.podId) return a.podIds.includes(t.podId);
@@ -86,6 +87,7 @@ export function canViewTasksOf(a: Actor, foUserId: string, podId: string | null)
 }
 
 export const canEditSequences = (a: Actor) => isAdmin(a) || isPodLeader(a);
+export const canCreateMeeting = (a: Actor) => !isBizOps(a);
 export const canManageSettings = (a: Actor) => isAdmin(a);
 export const canManageUsers = (a: Actor) => isAdmin(a);
 export const canManageCampaigns = (a: Actor, podId?: string | null) => canEnroll(a, podId);

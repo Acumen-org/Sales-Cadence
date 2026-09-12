@@ -1,5 +1,7 @@
 # Cadence project review
 
+**Latest review:** [13 September requirement audit](CURRENT-REQUIREMENTS-AUDIT.md). It distinguishes the current source from the older deployed interface and supersedes earlier ?Met? claims for the two latest requirement lists.
+
 Reviewed 9 September 2026, in two rounds. Round one was a broad code, workflow, design and
 local-runtime review. Round two drove the app end to end as each role, then put it in front of three
 independent critics — one reading the code for defects, one reading captured screens for design, one

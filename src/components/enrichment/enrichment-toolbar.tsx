@@ -16,6 +16,7 @@ export function EnrichmentToolbar({ tab, q, fields, wanted, sort, exportHref }: 
   const pathname = usePathname();
   const params = useSearchParams();
   const [text, setText] = useState(q);
+  useEffect(() => setText(q), [q]);
 
   const push = (mutate: (next: URLSearchParams) => void) => {
     const next = new URLSearchParams(params.toString());
@@ -42,12 +43,12 @@ export function EnrichmentToolbar({ tab, q, fields, wanted, sort, exportHref }: 
         <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Name or account" aria-label="Search records to enrich" className="!pl-9" />
       </div>
       <select value="" onChange={(e) => { const field = e.target.value; if (field) push((next) => next.append('field', field)); }} aria-label="Missing information" className="!w-auto !py-2 !text-[12.5px]">
-        <option value="">{wanted.length ? 'Also missing...' : 'Missing information'}</option>
+        <option value="">{wanted.length ? 'Missing any of...' : 'Missing information'}</option>
         {remaining.map(([field, name]) => <option key={field} value={field}>{name}</option>)}
       </select>
       {wanted.map((field) => (
         <button key={field} type="button" className="chip" onClick={() => push((next) => { const keep = next.getAll('field').filter((f) => f !== field); next.delete('field'); for (const f of keep) next.append('field', f); })} title="Remove this filter">
-          {label(field)} missing <span aria-hidden className="text-brand-500">\u2715</span>
+          {label(field)} missing <span aria-hidden className="text-brand-500">×</span>
         </button>
       ))}
       <select value={sort} onChange={(e) => push((next) => { if (e.target.value === 'name') next.delete('sort'); else next.set('sort', e.target.value); })} aria-label="Sort" className="!w-auto !py-2 !text-[12.5px]">

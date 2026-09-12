@@ -1,3 +1,4 @@
+import { needsPod } from '@/lib/auth/rbac';
 import Link from 'next/link';
 import { personSearchWhere } from '@/lib/search-terms';
 import { filterParam, sectionDefaults } from '@/lib/default-filters';
@@ -30,10 +31,9 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   const q = (sp.q ?? '').trim();
   const defaults = await sectionDefaults(user);
   const pod = filterParam(sp.pod, defaults.podOwnerValue) ?? '';
-  const fo = (sp.fo ?? '').trim();
+  const fo = filterParam(sp.fo, defaults.foUserId) ?? '';
   const sort: Sort = SORTS.includes(sp.sort as Sort) ? (sp.sort as Sort) : 'name';
   const status = sp.status ?? '';
-  const owner = sp.owner === 'mine' ? 'mine' : '';
   // Only values the mapping knows are accepted, so a hand-edited URL cannot filter on nonsense.
   const values = defaultTwentySchema.personValues;
   const pick = (v: string | undefined, allowed: readonly string[]) => (v && allowed.includes(v) ? v : '');
@@ -44,15 +44,14 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   const actor = toActor(user);
 
   const where: Prisma.PersonCacheWhereInput = await peopleScopeWhere(user);
-  // "My relationships": owned by me in Twenty, or enrolled with me as the FO.
-  if (owner === 'mine') {
-    where.AND = [{ OR: [{ ownerMemberId: user.twentyMemberId ?? '__none__' }, { enrollments: { some: { foUserId: user.id } } }] }];
-  }
   const and: Prisma.PersonCacheWhereInput[] = (where.AND as Prisma.PersonCacheWhereInput[]) ?? [];
   const search = personSearchWhere(q);
   if (search) and.push(search);
   if (pod) where.podOwner = pod;
-  if (fo) and.push({ enrollments: { some: { foUserId: fo, status: { in: ['ACTIVE', 'PAUSED'] } } } });
+  if (fo) {
+    const member = await prisma.user.findUnique({ where: { id: fo }, select: { twentyMemberId: true } });
+    and.push({ OR: [{ ownerMemberId: member?.twentyMemberId ?? '__none__' }, { enrollments: { some: { foUserId: fo, status: { in: ['ACTIVE', 'PAUSED'] } } } }] });
+  }
   if (product) and.push({ productInterest: { has: product } });
   if (tier) where.tier = tier;
   if (contactType) where.contactType = { has: contactType };
@@ -91,7 +90,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
       },
     }),
     prisma.personCache.count({ where }),
-    prisma.pod.findMany({ orderBy: { name: 'asc' }, include: { users: { include: { user: { select: { id: true, name: true, active: true } } } } } }),
+    prisma.pod.findMany({ orderBy: { name: 'asc' }, include: { users: { include: { user: { select: { id: true, name: true, active: true, role: true } } } } } }),
     getTwentyConnection(),
   ]);
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -103,7 +102,6 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     if (product) p.set('product', product);
     if (sort !== 'name') p.set('sort', sort);
     if (status) p.set('status', status);
-    if (owner) p.set('owner', owner);
     if (tier) p.set('tier', tier);
     if (contactType) p.set('type', contactType);
     p.set('page', String(n));
@@ -115,7 +113,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   // The filters offer the pods this reader can see and the active people in them.
   const visible = visiblePodIds(user);
   const visiblePodRows = pods.filter((x) => visible === null || visible.includes(x.id));
-  const fos = [...new Map(visiblePodRows.flatMap((x) => x.users.filter((up) => up.user.active).map((up) => [up.user.id, { id: up.user.id, name: up.user.name }] as const))).values()].sort((a, b) => a.name.localeCompare(b.name));
+  const fos = [...new Map(visiblePodRows.flatMap((x) => x.users.filter((up) => up.user.active && needsPod(up.user.role)).map((up) => [up.user.id, { id: up.user.id, name: up.user.name }] as const))).values()].sort((a, b) => a.name.localeCompare(b.name));
 
   const rows: PeopleTableRow[] = people.map((p) => {
     const e = p.enrollments[0] ?? null;
@@ -160,7 +158,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     <div className="space-y-3 px-6 pb-8 pt-2">
       <Surface flush>
         <ViewHeader
-          title={owner === 'mine' ? 'My relationships' : q || pod || status || fo || product ? 'Filtered people' : 'All people'}
+          title={q || pod || status || fo || product ? 'Filtered people' : 'All people'}
           caret
           meta={`${total} result${total === 1 ? '' : 's'}`}
           actions={isAdmin(user) ? <SyncNowButton /> : undefined}

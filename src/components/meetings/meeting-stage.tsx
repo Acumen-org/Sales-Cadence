@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import type { MeetingProvider } from '@prisma/client';
-import { formatCueTime, parseTranscript, type TranscriptCue } from '@/lib/meetings/transcript';
+import { activeCueIndex, formatCueTime, parseTranscript, type TranscriptCue, type TranscriptFormat } from '@/lib/meetings/transcript';
 import { IconExternal, IconSearch } from '@/components/icons';
 
 type Props = {
@@ -43,7 +43,7 @@ export function MeetingStage(p: Props) {
 
   const { cues, format } = useMemo(() => {
     if (!p.transcript) return { cues: [] as TranscriptCue[], format: null as string | null };
-    const parsed = parseTranscript(p.transcript, (p.transcriptFormat as 'vtt' | 'srt' | 'text' | null) ?? undefined);
+    const parsed = parseTranscript(p.transcript, (p.transcriptFormat as TranscriptFormat | null) ?? undefined);
     return { cues: parsed.cues, format: parsed.format };
   }, [p.transcript, p.transcriptFormat]);
 
@@ -81,8 +81,8 @@ export function MeetingStage(p: Props) {
             className="aspect-video w-full bg-black"
             onTimeUpdate={(e) => {
               const t = e.currentTarget.currentTime;
-              const i = cues.findIndex((c) => t >= c.start && (c.end === null || t < c.end));
-              if (i !== active) setActive(i >= 0 ? i : null);
+              const i = activeCueIndex(cues, t);
+              if (i !== active) setActive(i);
             }}
           />
         ) : p.embedUrl ? (

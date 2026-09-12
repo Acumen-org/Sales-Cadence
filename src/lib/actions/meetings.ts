@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { requireUser, toActor, type SessionUser } from '../auth/current-user';
-import { isAdmin, isPodLeader } from '../auth/rbac';
+import { isAdmin, isPodLeader, canCreateMeeting } from '../auth/rbac';
 import { logAudit, userActor } from '../audit';
 import { getSettings, isExternalEmail } from '../settings';
 import { extractRecordingUrl, parseMeetingLink } from '../meetings/providers';
@@ -22,6 +22,7 @@ export type AttendeeSelection = { personId?: string | null; userId?: string | nu
 export type AttendeeOption = AttendeeSelection & { key: string; kind: 'contact' | 'team'; detail: string | null };
 
 async function mayManageMeeting(user: SessionUser, meeting: { id: string; createdById: string | null; companyId: string | null }): Promise<boolean> {
+  if (!canCreateMeeting(user)) return false;
   if (meeting.createdById === user.id || isAdmin(toActor(user))) return true;
   if (!isPodLeader(toActor(user)) || !user.podIds.length) return false;
   const [pods, linkedContacts] = await Promise.all([
@@ -188,6 +189,7 @@ async function resolveAttendees(entries: AttendeeSelection[], hostUserId: string
 
 export async function createMeetingAction(formData: FormData): Promise<ActionResult> {
   const user = await requireUser();
+  if (!canCreateMeeting(user)) return { ok: false, error: 'Biz Ops has read-only access to meetings.' };
   const parsed = readForm(formData);
   if (!parsed.success) return { ok: false, error: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') };
   const d = parsed.data;

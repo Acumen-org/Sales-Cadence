@@ -1,3 +1,4 @@
+import { canCreateMeeting } from '@/lib/auth/rbac';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
@@ -67,9 +68,9 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                   <IconExternal size={13} /> Website
                 </a>
               ) : null}
-              <Link href={`/meetings/new?account=${company.id}`} className="btn-secondary btn-sm">
+              {canCreateMeeting(user) && <Link href={`/meetings/new?account=${company.id}`} className="btn-secondary btn-sm">
                 <IconPlus size={13} /> Meeting
-              </Link>
+              </Link>}
               <Link href="/accounts" className="btn-ghost btn-sm">
                 All accounts
               </Link>
@@ -318,7 +319,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
               )}
             </Card>
 
-            <Card title={`Meetings (${meetings.length})`} actions={<Link href={`/meetings/new?account=${company.id}`} className="btn-ghost btn-sm">Add</Link>}>
+            <Card title={`Meetings (${meetings.length})`} actions={canCreateMeeting(user) && <Link href={`/meetings/new?account=${company.id}`} className="btn-ghost btn-sm">Add</Link>}>
               {meetings.length === 0 ? (
                 <EmptyState title="No meetings recorded" hint="Paste a Teams, Zoom or Meet recording link to keep it with the account." />
               ) : (

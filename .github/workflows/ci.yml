@@ -1,15 +1,9 @@
 # ---------------------------------------------------------------------------
 # CI for Sales-Cadence.
 #
-# Four jobs:
-#   1. lint       — eslint + tsc --noEmit. Cheapest signal, runs first.
-#   2. test       — vitest unit suite against a real Postgres 18 service.
-#                   Prisma migrations run first so the tests hit the same
-#                   schema production does.
-#   3. e2e        — Playwright. Builds the app, so it is the slow one; kept
-#                   separate from `test` to avoid blocking the fast feedback.
-#   4. image      — builds and pushes to Harbor. main only, and only after
-#                   the three above pass: a red suite must never ship a tag.
+# Three verification jobs: lint/typecheck, unit tests, and browser tests.
+# Image building and deployment are managed on the hosting server, outside this
+# workflow. A successful run confirms checks, not that the live app was updated.
 #
 # Postgres 18 matches production (db-acumen). Prisma 6 is version-sensitive,
 # so pinning the service image here keeps CI honest about migrations.
