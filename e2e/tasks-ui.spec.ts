@@ -62,7 +62,7 @@ test('the header carries no counts, and no overdue banner interrupts the list', 
 
 test('More becomes Less without moving, and everything opens in one place', async ({ page }) => {
   await loginAs(page, 'Alisa');
-  await page.goto('/tasks?tab=today');
+  await openTabWithWork(page);
 
   // Measured in page coordinates: opening the panel may scroll the viewport, which is not
   // the same thing as the button moving.
