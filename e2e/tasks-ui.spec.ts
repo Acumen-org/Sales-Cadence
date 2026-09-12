@@ -42,12 +42,12 @@ async function logout(page: Page) {
  * a pending task depends on what earlier cases did; the point of these cases is the controls,
  * not which tab the work happens to be in.
  */
-async function openTabWithWork(page: Page) {
+async function openTabWithWork(page: Page, extra = '') {
   for (const tab of ['today', 'overdue', 'upcoming']) {
-    await page.goto(`/tasks?tab=${tab}`);
+    await page.goto(`/tasks?tab=${tab}${extra}`);
     if (await page.getByRole('button', { name: 'More', exact: true }).first().isVisible().catch(() => false)) return;
   }
-  throw new Error('No task tab has pending work; the seed or an earlier case cleared them all.');
+  throw new Error(`No task tab has pending work${extra ? ` for ${extra}` : ''}; the seed or an earlier case cleared them all.`);
 }
 
 test('the header carries no counts, and no overdue banner interrupts the list', async ({ page }) => {
@@ -108,7 +108,7 @@ test('the shortcut list is gone from under the buttons', async ({ page }) => {
 
 test('the message is editable in place and the edit is kept against the task', async ({ page }) => {
   await loginAs(page, 'Alisa');
-  await page.goto('/tasks?tab=today&type=EMAIL');
+  await openTabWithWork(page, '&type=EMAIL');
   const subject = page.getByLabel('Email subject').first();
   await expect(subject).toBeVisible();
   const original = await subject.inputValue();
