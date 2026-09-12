@@ -181,6 +181,17 @@ section with `pnpm live:check`, read-only. What the live workspace showed, and w
   person's tasks are fetched through their target table rather than a relation filter Twenty does
   not support, and an admin sees the underlying error under the message. Until this is deployed,
   no CRM note reaches the person it is about, which is what "nothing auto-completes" looks like.
+- **Walked again as Biz Ops and as a junior FO.** Biz Ops sees everything, as designed. The junior
+  saw 174 people (the ones assigned to them in Twenty) rather than their pod's 936, and no meetings
+  at all: the three meetings belong to the team's own companies, which no pod contact works at, so
+  the pod rule hid them from everyone but admins. Juniors now read their pod, and meetings are
+  readable by the whole team. The Pod Manager account could not be signed into with the password
+  given (the app answers "Email or password is incorrect"); it exists, is enabled and is in the
+  Alisa pod, so a password reset from Settings > Team & pods is all it needs.
+- **The recording that does not play is a Stream sharing link** (`glynac-my.sharepoint.com/:v:/g/...`).
+  SharePoint refuses to show that page inside another site whatever the viewer's sign-in state; the
+  Share > Embed link (`_layouts/15/embed.aspx?UniqueId=...`) is the one that plays. The deployed build
+  still frames the sharing link; main links out and says which link to paste.
 - **Everything else rendered without errors**: no page errors, no console errors, no failed
   requests on any section. Tasks, campaigns and sequences are empty because none have been
   created yet. `pnpm sync:diagnose` now also runs the person-scoped reads that failed here.

@@ -506,3 +506,13 @@ contact", so repeating it in the warnings line was noise.
   listing; anything cached that the listing did not return was deleted or merged in Twenty and is
   marked deleted here. A change scan never does this, because it has not seen everyone.
 
+## What a role can read, checked on the live workspace (12 September 2026)
+
+- **Meetings are visible to the whole team.** They were pod-scoped like people and accounts, so a
+  meeting an admin added against Acubooth or PHH - the team's own companies, with no CRM contact in
+  anyone's pod - was visible to nobody but admins. The owner's rule is that the meetings library is
+  the team's; editing and deleting stay with `mayManageMeeting`.
+- **A junior FO reads their pod.** The directory showed a junior only the people assigned to them
+  in Twenty (174 of the pod's 936), which read as missing data. Reading the pod is not the same as
+  working it: the task list and every write still keep a junior to their own work.
+

@@ -39,12 +39,15 @@ describe('people are scoped the way accounts are', () => {
     expect(await canReadPerson(andrew, theirs.id)).toBe(true);
   });
 
-  it('a junior sees only the people they own or are working', async () => {
+  it('a junior reads their pod, plus the people they own or are working, and nobody else', async () => {
     const seen = await prisma.personCache.findMany({ where: await peopleScopeWhere(karson), include: { enrollments: { select: { foUserId: true } } } });
+    const podValues = (await prisma.pod.findMany({ where: { id: { in: karson.podIds } }, select: { podOwnerValue: true } })).map((p) => p.podOwnerValue);
     expect(seen.length).toBeGreaterThan(0);
-    expect(seen.every((p) => p.ownerMemberId === b.users.karson.twentyMemberId || p.enrollments.some((e) => e.foUserId === b.users.karson.id))).toBe(true);
+    // The whole pod is theirs to read: on the live workspace a junior saw 174 of the pod's 936.
+    expect(seen.length).toBe(await prisma.personCache.count({ where: { deletedAt: null, OR: [{ podOwner: { in: podValues } }, { ownerMemberId: b.users.karson.twentyMemberId }, { enrollments: { some: { foUserId: b.users.karson.id } } }] } }));
+    expect(seen.every((p) => (p.podOwner && podValues.includes(p.podOwner)) || p.ownerMemberId === b.users.karson.twentyMemberId || p.enrollments.some((e) => e.foUserId === b.users.karson.id))).toBe(true);
     const all = await prisma.personCache.count({ where: { deletedAt: null } });
-    expect(seen.length).toBeLessThan(all);
+    expect(seen.length).toBeLessThan(all); // other pods stay out of reach
   });
 
   it('an admin sees everyone', async () => {

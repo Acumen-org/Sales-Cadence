@@ -58,7 +58,7 @@ describe('reading scope and a paused campaign', () => {
     expect(await accountDetail(companyId, andrew)).toBeNull();
   });
 
-  it('a meeting is only readable by the people whose account or contact it belongs to', async () => {
+  it('a meeting is readable by the whole team, whichever pod it belongs to', async () => {
     const meeting = await prisma.meeting.create({
       data: {
         title: 'Intro call',
@@ -71,12 +71,12 @@ describe('reading scope and a paused campaign', () => {
       },
     });
 
-    expect(await canReadMeeting(ria, meeting.id)).toBe(true);
-    expect(await canReadMeeting(karson, meeting.id)).toBe(true);
-    expect(await canReadMeeting(alisa, meeting.id)).toBe(true);
-    expect(await canReadMeeting(andrew, meeting.id)).toBe(false);
+    // Andrew leads a different pod and works nobody here; the meetings library is still his to read.
+    for (const reader of [ria, karson, alisa, andrew]) expect(await canReadMeeting(reader, meeting.id)).toBe(true);
     // And the list where clause agrees with the single-record check.
-    expect(await prisma.meeting.count({ where: { AND: [{ id: meeting.id }, await meetingReadWhere(andrew)] } })).toBe(0);
+    expect(await prisma.meeting.count({ where: { AND: [{ id: meeting.id }, await meetingReadWhere(andrew)] } })).toBe(1);
+    // A meeting that does not exist is not readable, so a stale link still answers not-found.
+    expect(await canReadMeeting(andrew, 'no-such-meeting')).toBe(false);
   });
 
   it('pausing holds every open touch: it leaves the lists and refuses to be worked', async () => {

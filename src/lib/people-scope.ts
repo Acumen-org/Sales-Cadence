@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { getSettings } from './settings';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
-import { isJuniorFo, canSeeAllPods } from './auth/rbac';
+import { canSeeAllPods } from './auth/rbac';
 
 /**
  * Which people a user may see: everyone for an admin; otherwise the people in their pods (Twenty's
@@ -36,7 +36,11 @@ async function teamExclusion(): Promise<Prisma.PersonCacheWhereInput> {
 export async function peopleScopeWhere(user: SessionUser): Promise<Prisma.PersonCacheWhereInput> {
   const notTeam = await teamExclusion();
   if (canSeeAllPods(user)) return { deletedAt: null, AND: [notTeam] };
-  const pods = isJuniorFo(user) || !user.podIds.length ? [] : await prisma.pod.findMany({ where: { id: { in: user.podIds } }, select: { podOwnerValue: true } });
+  // A junior reads their pod like anyone else in it; what a junior may not do is work anyone
+  // else's tasks, and that is decided where tasks are, not here. On the live workspace a junior
+  // saw 174 of the pod's 936 people - only the ones assigned to them in Twenty - and read it as
+  // missing data.
+  const pods = !user.podIds.length ? [] : await prisma.pod.findMany({ where: { id: { in: user.podIds } }, select: { podOwnerValue: true } });
   return {
     deletedAt: null,
     AND: [notTeam],

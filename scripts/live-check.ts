@@ -20,7 +20,7 @@ if (!url || !email || !password) {
   process.exit(2);
 }
 const ROUTES = ['home', 'tasks', 'tasks?tab=upcoming', 'tasks?tab=done', 'accounts', 'people', 'enrichment', 'enrichment?tab=accounts', 'meetings', 'sequences', 'campaigns', 'activity', 'reports', 'settings?tab=twenty', 'settings?tab=users', 'settings?tab=activity'];
-const outDir = path.resolve('.live');
+const outDir = path.resolve(process.env.LIVE_OUT ?? '.live');
 fs.mkdirSync(outDir, { recursive: true });
 
 type RouteReport = { route: string; status: number | null; heading: string | null; rows: number; text: string[]; pageErrors: string[]; consoleErrors: string[]; badResponses: string[] };
