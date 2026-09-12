@@ -29,6 +29,7 @@
     "reconcile": "tsx scripts/reconcile.ts",
     "verify:schema": "tsx scripts/verify-schema.ts",
     "sync:diagnose": "tsx scripts/sync-diagnose.ts",
+    "live:check": "tsx scripts/live-check.ts",
     "test:fresh": "pnpm build && tsx scripts/fresh-install-check.ts",
     "screens": "pnpm build && tsx scripts/screens.ts"
   },

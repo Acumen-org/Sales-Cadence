@@ -25,3 +25,4 @@ test-results
 .next-review/
 .pgdata-review*/
 .review/
+.live
