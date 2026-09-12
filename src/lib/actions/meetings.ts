@@ -300,6 +300,21 @@ export async function updateMeetingAttendeesAction(formData: FormData): Promise<
   return { ok: true, message: 'Attendees updated.' };
 }
 
+/** Star or unstar a meeting for the signed-in user. Everyone can read every meeting, so everyone can star one. */
+export async function toggleMeetingFavouriteAction(formData: FormData): Promise<ActionResult> {
+  const user = await requireUser();
+  const meetingId = String(formData.get('meetingId') ?? '');
+  const meeting = await prisma.meeting.findUnique({ where: { id: meetingId }, select: { id: true } });
+  if (!meeting) return { ok: false, error: 'That meeting no longer exists.' };
+  const key = { userId_meetingId: { userId: user.id, meetingId } };
+  const existing = await prisma.meetingFavourite.findUnique({ where: key });
+  if (existing) await prisma.meetingFavourite.delete({ where: key });
+  else await prisma.meetingFavourite.create({ data: { userId: user.id, meetingId } });
+  revalidatePath('/meetings');
+  revalidatePath(`/meetings/${meetingId}`);
+  return { ok: true, message: existing ? 'Removed from favourites.' : 'Added to favourites.' };
+}
+
 export async function deleteMeetingAction(formData: FormData): Promise<ActionResult> {
   const user = await requireUser();
   const id = String(formData.get('meetingId') ?? '');

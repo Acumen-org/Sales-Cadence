@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { companySearchWhere } from './search-terms';
+import { getSettings } from './settings';
 import { meetingReadWhere } from './meetings-query';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
@@ -89,7 +90,14 @@ async function companiesThroughPeople(where: Prisma.PersonCacheWhereInput): Prom
 
 export async function listAccounts(user: SessionUser, opts: AccountFilters = {}): Promise<AccountList> {
   const visibleIds = await accountScopeCompanyIds(user);
-  const where: Prisma.CompanyCacheWhereInput = { deletedAt: null };
+  // The team's own companies are not accounts. Twenty holds them because colleagues are people
+  // there; an address at one of the workspace's domains still counts as an inbound reply on the
+  // person it reached, so nothing is lost by leaving them out of this list.
+  const { rules } = await getSettings();
+  const where: Prisma.CompanyCacheWhereInput = {
+    deletedAt: null,
+    ...(rules.internalDomains.length ? { NOT: { OR: rules.internalDomains.map((domain) => ({ domain: { contains: domain, mode: 'insensitive' as const } })) } } : {}),
+  };
   const narrowings: string[][] = [];
   if (visibleIds !== null) narrowings.push(visibleIds);
   if (opts.pod) narrowings.push(await companiesThroughPeople({ podOwner: opts.pod }));

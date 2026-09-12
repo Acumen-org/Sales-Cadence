@@ -150,8 +150,14 @@ test('a meeting plays in the app with its transcript and an empty analysis panel
   await expect(page.getByText('Cadence AI').first()).toBeVisible();
   await expect(page.getByText('Not connected').first()).toBeVisible();
 
-  // One external attendee, so it counts as booked this week.
-  await page.goto('/meetings?scope=week');
+  // Found by who was there, and starred for later.
+  await page.goto('/meetings?who=Dummy%20One');
+  await expect(page.getByRole('link', { name: /E2E discovery call/ })).toBeVisible();
+  const row = page.getByRole('row', { name: /E2E discovery call/ });
+  await row.getByRole('button', { name: 'Add to favourites' }).click();
+  // The star is saved by a server action; the button changes once the list has re-rendered.
+  await expect(row.getByRole('button', { name: 'Remove from favourites' })).toBeVisible();
+  await page.goto('/meetings?fav=1');
   await expect(page.getByRole('link', { name: /E2E discovery call/ })).toBeVisible();
   // The first table is the list of meetings in Cadence; "Recordings in Twenty" is a second one.
   await expect(page.locator('table').first()).toContainText(/\d external/);

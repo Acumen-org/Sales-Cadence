@@ -35,6 +35,8 @@ export type PeopleTableRow = {
 type Props = {
   rows: PeopleTableRow[];
   canEnroll: boolean;
+  /** The render's clock, from the server, so the activity window is the same on both sides. */
+  now: number;
 };
 
 /** People list with stages, an activity timeline, row actions and bulk "add to sequence". */
@@ -67,7 +69,7 @@ function distinctTags(p: PeopleTableRow): string[] {
   return p.tags.filter((tag) => !shown.has(optionLabel(tag).toLowerCase()));
 }
 
-export function PeopleTable({ rows, canEnroll }: Props) {
+export function PeopleTable({ rows, canEnroll, now }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const selectable = rows.filter((r) => !r.activeEnrollmentId && !r.dnd && !r.optedOut);
   const allSelected = selectable.length > 0 && selectable.every((r) => selected.has(r.id));
@@ -169,7 +171,7 @@ export function PeopleTable({ rows, canEnroll }: Props) {
                     <span className="text-[12px] text-ink-300">-</span>
                   )}
                 </td>
-                <td>{p.activity.length ? <DotTimeline points={p.activity} width={130} /> : <Empty />}</td>
+                <td>{p.activity.length ? <DotTimeline points={p.activity} now={now} width={130} /> : <Empty />}</td>
                 <td className="whitespace-nowrap text-[12.5px]">
                   {p.podName ?? <span className="text-ink-300">-</span>}
                   {p.enrollment?.foName ? <div className="text-[11px] text-ink-500"><span className="text-ink-400">FO</span> {p.enrollment.foName}</div> : null}

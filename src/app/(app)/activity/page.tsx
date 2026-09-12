@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Suspense } from 'react';
 import { filterParam, sectionDefaults } from '@/lib/default-filters';
 import { requireUser } from '@/lib/auth/current-user';
 import { isJuniorFo, visiblePodIds } from '@/lib/auth/rbac';
@@ -12,7 +13,25 @@ import { Badge, DataValue, EmptyState, EventDetail, Notice, Surface, Toolbar, Vi
 
 type Search = { actor?: string; pod?: string; channel?: string; kind?: string; q?: string; before?: string; from?: string; to?: string };
 
-export default async function ActivityPage({ searchParams }: { searchParams: Promise<Search> }) {
+/**
+ * The page's content sits inside its own Suspense boundary, for hydration rather than loading.
+ * Without one the page hydrates as part of the root, and when its slice of the streamed payload
+ * has not arrived by the time React reaches it, hydration suspends at the page's root element and
+ * resumes one level off - React error 418, and the whole document re-rendered on the client. It
+ * happened about once in ten loads of this page, the largest in the app, on a slow machine.
+ * Inside a boundary the page re-enters hydration through its own markers. The boundary is here
+ * and not in the layout or a loading file: around the router's children it breaks the router's
+ * lazy segment fetch in this Next version, and client navigations hang.
+ */
+export default function ActivityPage(props: { searchParams: Promise<Search> }) {
+  return (
+    <Suspense fallback={<div className="space-y-4 px-6 pb-8 pt-2"><div className="surface h-[52vh]" /></div>}>
+      <ActivityContent {...props} />
+    </Suspense>
+  );
+}
+
+async function ActivityContent({ searchParams }: { searchParams: Promise<Search> }) {
   const user = await requireUser();
   const sp = await searchParams;
   const kinds = (sp.kind ?? '').split(',').map((kind) => kind.trim()).filter((kind): kind is ActivityKind => (ACTIVITY_KINDS as readonly string[]).includes(kind));

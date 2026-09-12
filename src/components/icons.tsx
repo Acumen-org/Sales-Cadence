@@ -175,6 +175,12 @@ export const IconActivity = (p: IconProps) => (
     <path d="M3 12h4l3 8 4-16 3 8h4" />
   </svg>
 );
+export const IconStar = ({ size = 16, className, filled = false }: IconProps & { filled?: boolean }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}>
+    <path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1.1 5.9L12 16.9l-5.3 2.8 1.1-5.9-4.3-4.1 5.9-.8z" />
+  </svg>
+);
+
 export const IconBell = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />

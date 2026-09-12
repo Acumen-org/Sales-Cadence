@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
 import { prisma } from '@/lib/db';
 import { getSettings } from '@/lib/settings';
+import { FavouriteButton } from '@/components/meetings/favourite-button';
 import { formatInstant } from '@/lib/dates';
 import { parseAnalysis } from '@/lib/meetings/analysis';
 import { parseMeetingLink, PROVIDER_LABELS } from '@/lib/meetings/providers';
@@ -23,7 +24,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
   const meeting = await prisma.meeting.findFirst({
     // Scoped, not merely fetched: a transcript is a prospect conversation.
     where: { AND: [{ id }, await meetingReadWhere(user)] },
-    include: { attendees: { orderBy: [{ host: 'desc' }, { external: 'asc' }, { name: 'asc' }] }, createdBy: { select: { name: true } } },
+    include: { attendees: { orderBy: [{ host: 'desc' }, { external: 'asc' }, { name: 'asc' }] }, createdBy: { select: { name: true } }, favourites: { where: { userId: user.id }, select: { userId: true } } },
   });
   if (!meeting) notFound();
 
@@ -49,6 +50,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
           }
           actions={
             <>
+              <FavouriteButton meetingId={meeting.id} favourite={meeting.favourites.length > 0} />
               <a href={meeting.sourceUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm">
                 <IconExternal size={13} /> Open original
               </a>

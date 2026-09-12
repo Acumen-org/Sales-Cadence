@@ -19,6 +19,9 @@ const nextConfig = {
   productionBrowserSourceMaps: false,
   experimental: {
     serverActions: { bodySizeLimit: '5mb' },
+    // NODE_ENV=development next build, for chasing a hydration mismatch that production React
+    // reports without its diff. Never set in a deployment.
+    ...(process.env.ALLOW_DEV_BUILD === '1' ? { allowDevelopmentBuild: true } : {}),
     // Keep the build single-threaded on a 1-vCPU server.
     cpus,
     workerThreads: false,

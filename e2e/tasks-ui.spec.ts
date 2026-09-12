@@ -42,10 +42,12 @@ async function logout(page: Page) {
  * a pending task depends on what earlier cases did; the point of these cases is the controls,
  * not which tab the work happens to be in.
  */
-async function openTabWithWork(page: Page, extra = '') {
+async function openTabWithWork(page: Page, extra = ''): Promise<string> {
+  // Today first; on a weekend in the workspace's clock the first touches roll to Monday and sit
+  // under Upcoming, so the calendar must not decide whether these cases can run.
   for (const tab of ['today', 'overdue', 'upcoming']) {
     await page.goto(`/tasks?tab=${tab}${extra}`);
-    if (await page.getByRole('button', { name: 'More', exact: true }).first().isVisible().catch(() => false)) return;
+    if (await page.getByRole('button', { name: 'More', exact: true }).first().isVisible().catch(() => false)) return tab;
   }
   throw new Error(`No task tab has pending work${extra ? ` for ${extra}` : ''}; the seed or an earlier case cleared them all.`);
 }
@@ -207,8 +209,8 @@ test('ending a sequence asks one question and then stops the person', async ({ p
 
 test('a task that is not in this view is never silently swapped for another', async ({ page }) => {
   await loginAs(page, 'Alisa');
-  // The person on the first row of Today, and their task id.
-  await openTabWithWork(page);
+  // The person on the first row of the tab with work, and their task id.
+  const tab = await openTabWithWork(page);
   const first = page.locator('#main-content a[href*="task="]').first();
   const href = (await first.getAttribute('href'))!;
   const taskId = new URL(href, 'http://x').searchParams.get('task')!;
@@ -220,7 +222,7 @@ test('a task that is not in this view is never silently swapped for another', as
   await expect(page.getByText(/not in/i).first()).toBeVisible();
 
   // And a task that does not exist says so rather than opening somebody else's.
-  await page.goto('/tasks?tab=today&task=00000000-0000-0000-0000-000000000000');
+  await page.goto(`/tasks?tab=${tab}&task=00000000-0000-0000-0000-000000000000`);
   await expect(page.getByText(/not in your list any more/i)).toBeVisible();
   await logout(page);
 });

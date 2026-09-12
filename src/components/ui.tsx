@@ -181,7 +181,12 @@ export type TimelinePoint = { at: number; lane: 'out' | 'in' };
  * The dot timeline Outreach shows in list views: a hairline with outbound touches above it and
  * inbound replies below, positioned by time across the window.
  */
-export function DotTimeline({ points, width = 210, days = 30, now = Date.now() }: { points: TimelinePoint[]; width?: number; days?: number; now?: number }) {
+/**
+ * `now` comes from whoever renders the list, once, on the server: computed here on each side, the
+ * client's later clock moved the window and a touch at its edge appeared on one side only, which
+ * is a hydration mismatch. Positions are whole pixels for the same reason.
+ */
+export function DotTimeline({ points, now, width = 210, days = 30 }: { points: TimelinePoint[]; now: number; width?: number; days?: number }) {
   const span = days * 86_400_000;
   const from = now - span;
   const visible = points.filter((p) => p.at >= from);
@@ -193,7 +198,7 @@ export function DotTimeline({ points, width = 210, days = 30, now = Date.now() }
         <span
           key={i}
           className={clsx('absolute h-[7px] w-[7px] rounded-full', p.lane === 'out' ? 'bg-brand-500' : 'bg-emerald-500')}
-          style={{ left: x(p.at) - 3.5, top: p.lane === 'out' ? 4 : 15 }}
+          style={{ left: Math.round(x(p.at) - 3.5), top: p.lane === 'out' ? 4 : 15 }}
         />
       ))}
     </div>

@@ -5,33 +5,48 @@ import { requireUser } from '@/lib/auth/current-user';
 import { attendeeIsExternal, meetingReadWhere } from '@/lib/meetings-query';
 import { getSettings } from '@/lib/settings';
 import { prisma } from '@/lib/db';
-import { formatInstant, todayIn, weekRange } from '@/lib/dates';
+import { addDays, formatInstant, isLocalDate, startOfLocalDay } from '@/lib/dates';
+import { PRODUCTS } from '@/lib/workspace';
+import { MeetingsToolbar } from '@/components/meetings/meetings-toolbar';
+import { FavouriteButton } from '@/components/meetings/favourite-button';
 import { PROVIDER_LABELS } from '@/lib/meetings/providers';
 import { IconCalendar, IconExternal, IconPlus } from '@/components/icons';
 import { Badge, Empty, EmptyState, IdentityCell, Surface, Toolbar, ViewHeader } from '@/components/ui';
 
 const PAGE_SIZE = 50;
 
-export default async function MeetingsPage({ searchParams }: { searchParams: Promise<{ scope?: string; page?: string }> }) {
+export default async function MeetingsPage({ searchParams }: { searchParams: Promise<{ page?: string; who?: string; product?: string; from?: string; to?: string; fav?: string }> }) {
   const user = await requireUser();
   const sp = await searchParams;
-  const scope = sp.scope === 'mine' ? 'mine' : sp.scope === 'week' ? 'week' : 'all';
   const page = Math.max(1, Number.parseInt(sp.page ?? '1', 10) || 1);
-  const today = todayIn(user.timezone);
-  const week = weekRange(today, user.timezone);
+  const who = (sp.who ?? '').trim().slice(0, 120);
+  const product = (PRODUCTS as readonly string[]).includes(sp.product ?? '') ? sp.product! : '';
+  const from = isLocalDate(sp.from) ? sp.from! : '';
+  const to = isLocalDate(sp.to) ? sp.to! : '';
+  const favourites = sp.fav === '1';
 
-  // A transcript is a prospect conversation, so the list is scoped like the rest of the workspace.
   const readable = await meetingReadWhere(user);
-  const where: Prisma.MeetingWhereInput =
-    scope === 'mine'
-      ? { AND: [readable, { createdById: user.id }] }
-      : scope === 'week'
-        ? { AND: [readable, { occurredAt: { gte: week.fromInstant, lt: week.toInstant } }] }
-        : readable;
+  const filters: Prisma.MeetingWhereInput[] = [readable];
+  // Every word must be found somewhere: the title, the account, or an attendee by the name they
+  // were typed with, their address, or the CRM record they were picked from.
+  for (const term of who.split(/\s+/).filter(Boolean)) {
+    const has = { contains: term, mode: 'insensitive' as const };
+    filters.push({ OR: [
+      { title: has },
+      { companyName: has },
+      { attendees: { some: { OR: [{ name: has }, { email: has }, { person: { OR: [{ firstName: has }, { lastName: has }, { companyName: has }] } }] } } },
+    ] });
+  }
+  if (product) filters.push({ products: { has: product } });
+  if (from) filters.push({ occurredAt: { gte: startOfLocalDay(from, user.timezone) } });
+  if (to) filters.push({ occurredAt: { lt: startOfLocalDay(addDays(to, 1), user.timezone) } });
+  if (favourites) filters.push({ favourites: { some: { userId: user.id } } });
+  const where: Prisma.MeetingWhereInput = { AND: filters };
+  const filtered = Boolean(who || product || from || to || favourites);
 
   const { rules } = await getSettings();
   const externalCount = (attendees: { email: string | null; external: boolean }[]) => attendees.filter((a) => attendeeIsExternal(a, rules.internalDomains)).length;
-  const [meetings, total, mine, thisWeek, recordingTotal, recordings] = await Promise.all([
+  const [meetings, total, recordingTotal, recordings] = await Promise.all([
     prisma.meeting.findMany({
       where,
       orderBy: { occurredAt: 'desc' },
@@ -51,11 +66,10 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
         createdBy: { select: { name: true } },
         _count: { select: { attendees: true } },
         attendees: { select: { email: true, external: true } },
+        favourites: { where: { userId: user.id }, select: { userId: true } },
       },
     }),
     prisma.meeting.count({ where }),
-    prisma.meeting.count({ where: { AND: [readable, { createdById: user.id }] } }),
-    prisma.meeting.count({ where: { AND: [readable, { occurredAt: { gte: week.fromInstant, lt: week.toInstant } }] } }),
     // Recordings Twenty holds on a person record. Cadence does not invent a Meeting row from
     // one, because a meeting here carries attendees and a transcript that only a human can
     // supply - so these are listed for one-click adding instead.
@@ -71,13 +85,22 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
     (await prisma.meeting.findMany({ where: { sourceUrl: { in: recordings.map((r) => r.recordingUrl ?? '').filter(Boolean) } }, select: { sourceUrl: true } })).map((m) => m.sourceUrl),
   );
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const href = (s: string) => `/meetings?scope=${s}`;
+  const pageHref = (n: number) => {
+    const p = new URLSearchParams();
+    if (who) p.set('who', who);
+    if (product) p.set('product', product);
+    if (from) p.set('from', from);
+    if (to) p.set('to', to);
+    if (favourites) p.set('fav', '1');
+    p.set('page', String(n));
+    return `/meetings?${p.toString()}`;
+  };
 
   return (
     <div className="space-y-3 px-6 pb-8 pt-2">
       <Surface flush>
         <ViewHeader
-          title={scope === 'mine' ? 'My meetings' : scope === 'week' ? 'This week' : 'All meetings'}
+          title="All meetings"
           caret
           meta={`${total} meeting${total === 1 ? '' : 's'}`}
           actions={
@@ -87,21 +110,13 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
           }
         />
         <Toolbar>
-          <Link href={href('all')} className={scope === 'all' ? 'chip' : 'chip-muted'}>
-            All
-          </Link>
-          <Link href={href('mine')} className={scope === 'mine' ? 'chip' : 'chip-muted'}>
-            Added by me <span className="ml-0.5 font-medium text-ink-900">{mine}</span>
-          </Link>
-          <Link href={href('week')} className={scope === 'week' ? 'chip' : 'chip-muted'}>
-            This week <span className="ml-0.5 font-medium text-ink-900">{thisWeek}</span>
-          </Link>
+          <MeetingsToolbar who={who} product={product} from={from} to={to} favourites={favourites} products={PRODUCTS} />
         </Toolbar>
 
         {meetings.length === 0 ? (
           <EmptyState
             icon={<IconCalendar size={20} />}
-            title="No meetings yet"
+            title={filtered ? 'No meetings match' : 'No meetings yet'}
             action={
               <Link href="/meetings/new" className="btn-primary">
                 <IconPlus size={15} /> Add meeting
@@ -113,6 +128,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
             <table className="table">
               <thead>
                 <tr>
+                  <th aria-label="Favourite" />
                   <th>Meeting</th>
                   <th>When</th>
                   <th className="num">Length</th>
@@ -127,6 +143,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
               <tbody>
                 {meetings.map((m) => (
                   <tr key={m.id}>
+                    <td className="!pr-0"><FavouriteButton meetingId={m.id} favourite={m.favourites.length > 0} compact /></td>
                     <td>
                       <IdentityCell name={m.title} href={`/meetings/${m.id}`} sub={PROVIDER_LABELS[m.provider]} />
                     </td>
@@ -241,12 +258,12 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
           </span>
           <div className="flex gap-2">
             {page > 1 ? (
-              <Link href={`/meetings?scope=${scope}&page=${page - 1}`} className="btn-secondary btn-sm">
+              <Link href={pageHref(page - 1)} className="btn-secondary btn-sm">
                 Previous
               </Link>
             ) : null}
             {page < pages ? (
-              <Link href={`/meetings?scope=${scope}&page=${page + 1}`} className="btn-secondary btn-sm">
+              <Link href={pageHref(page + 1)} className="btn-secondary btn-sm">
                 Next
               </Link>
             ) : null}

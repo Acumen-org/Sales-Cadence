@@ -185,7 +185,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
         {rows.length === 0 ? (
           <EmptyState icon={<IconPeople size={20} />} title="No people match" hint="Adjust the filters to find a contact." />
         ) : (
-          <PeopleTable rows={rows} canEnroll={canEnroll(actor)} />
+          <PeopleTable rows={rows} canEnroll={canEnroll(actor)} now={Date.now()} />
         )}
       </Surface>
 

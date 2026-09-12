@@ -211,6 +211,98 @@ section with `pnpm live:check`, read-only. What the live workspace showed, and w
   requests on any section. Tasks, campaigns and sequences are empty because none have been
   created yet. `pnpm sync:diagnose` now also runs the person-scoped reads that failed here.
 
+## The hydration error on /activity, found and fixed (12 September 2026)
+
+`workspace.spec.ts` "mobile navigation and all main sections fit a phone" caught a **React #418**
+(hydration mismatch) on `/activity` three times on GitHub runners and once here, never twice in a
+row, never on another route. Production React reports the error without saying where, so the trace
+alone could not settle it; what did:
+
+- **It is the activity document, and it is structural.** The error fires while `/activity` is the
+  live page, 700 ms after load on that page and 10 ms on smaller ones; React's argument is `HTML`
+  (element), not `text`.
+- **It is not the bytes.** The failing response was captured and replayed into the same build 80
+  times - whole, in small network chunks, at phone and desktop width, under an 8x CPU throttle -
+  and hydrated cleanly every time. The test's own sequence (one signed-in tab walking nine routes)
+  reproduced it 7 times in 40.
+- **A probe in the served React chunk named the spot.** The throw site was rewritten in transit to
+  log the fiber and the DOM node it was inspecting: every failure was React trying to hydrate the
+  page's root `div` while its cursor was already inside it, at the first `section`, with the parent
+  fiber holding no DOM node. That is the seam between the layout and the page, where hydration
+  suspends when the page's slice of the streamed payload has not arrived yet, and resumes one level
+  off. It needs the largest payload (Activity: sixty rows, 57 payload scripts) and a slow client.
+- **The fix is a Suspense boundary inside the page**, around its content (Activity and Home, the
+  two pages that failed). Inside a boundary the page re-enters hydration through its own markers:
+  0 in 40 walks after the change, against 7 in 40 before. The boundary must sit *inside* the page:
+  a `loading.tsx` or a `<Suspense>` around the layout's `children` also cured the hydration error,
+  but in this Next version both left client navigations hanging (9 clicks in 10 never changed the
+  URL, the segment fetch aborted) because the router's lazy segment fetch runs under that boundary.
+  The baseline without any boundary navigates 10 in 10; so does the per-page boundary.
+
+Found on the way and fixed too: the People list's dot timeline computed its 30-day window from
+`Date.now()` on each side, so a touch at the window's edge could render on the server and not on
+the client - the same class of error, rarer. The clock now comes from the server render.
+
+The tools stay in `.review/` (ignored): `walk-replay.mjs` walks the routes as the test does and
+tallies errors by route; `stream-proxy.mjs` serves a captured page in chunks and can rewrite the
+React chunk to make the throw site talk; `replay-hydration.mjs` replays one captured response. A
+development build for chasing hydration (`ALLOW_DEV_BUILD=1 NODE_ENV=development next build`) is
+behind a flag in `next.config.mjs`.
+
+## Seen on the hosted app (12 September 2026)
+
+Signed in to `cadence.pmx.acumen-strategy.com` as an admin the owner created and walked every
+section with `pnpm live:check`, read-only. What the live workspace showed, and what changed:
+
+- **The sync is complete and healthy.** Settings > Twenty: 8,369 of 8,369 people and 4,931 of
+  4,931 companies cached, continuous sync healthy, dry run off. The two fixes that got it there
+  are both on main: stages that survive a failure (this side) and id-ordered pagination (the
+  team's commit; ordering by `updatedAt` had Twenty stop at 530 people).
+- **People opened on eighty pages of "(no name)".** Twenty holds hundreds of imported records
+  (tag "GHL Exported") with a phone or an address and no name, and an empty name sorts first. A
+  `sortName` column, null for the nameless, orders both lists with the nameless last, and a
+  nameless person is shown by email or phone rather than a placeholder.
+- **Accounts showed 500 rows of "?" and nothing else.** The list took the first 500 companies by
+  name, and thousands of companies Twenty created from email domains, nameless and empty, sorted
+  ahead of every real account. The list is now every matching company, ranked by people first,
+  paged at 100, with a nameless company shown by its domain.
+- **Every person record said "CRM temporarily unavailable".** The message hid the cause; the CRM
+  tab still had it: `Object noteTarget doesn't have any "personId" field`. Twenty renamed note and
+  task targets (`personId` became `targetPersonId`). The client now reads the workspace's field
+  names once and uses them for filters, selections and writes, ingestion reads either name, a
+  person's tasks are fetched through their target table rather than a relation filter Twenty does
+  not support, and an admin sees the underlying error under the message. Until this is deployed,
+  no CRM note reaches the person it is about, which is what "nothing auto-completes" looks like.
+- **Walked again as Biz Ops and as a junior FO.** Biz Ops sees everything, as designed. The junior
+  saw 174 people (the ones assigned to them in Twenty) rather than their pod's 936, and no meetings
+  at all: the three meetings belong to the team's own companies, which no pod contact works at, so
+  the pod rule hid them from everyone but admins. Juniors now read their pod, and meetings are
+  readable by the whole team. The Pod Manager account could not be signed into with the password
+  given (the app answers "Email or password is incorrect"); it exists, is enabled and is in the
+  Alisa pod, so a password reset from Settings > Team & pods is all it needs.
+- **The recording that does not play is a Stream sharing link** (`glynac-my.sharepoint.com/:v:/g/...`).
+  SharePoint refuses to show that page inside another site whatever the viewer's sign-in state; the
+  Share > Embed link (`_layouts/15/embed.aspx?UniqueId=...`) is the one that plays. The deployed build
+  still frames the sharing link; main links out and says which link to paste.
+- **The owner's rule on reading, applied.** Every role now reads every pod: People, Accounts,
+  Tasks, Activity, Reports, Campaigns, Meetings and the Enrichment queue. The pod and the reader's
+  own name are the filters a section opens on, and they can be cleared. Writing is unchanged:
+  enrolling, approving, editing a sequence, acting on a task, applying an enrichment import and
+  editing a meeting still ask who runs which pod, and the campaign form offers only those pods.
+  Sixteen unit tests and three browser cases that pinned the old boundary were rewritten to the new
+  one; one of them had been comparing an audit id with a task id and never actually checked anything.
+- **Pod Manager walked** with the corrected password: 936 people, 481 accounts, 1 meeting, 46 events,
+  no errors, Settings refused by URL. **Sync now** answers with one word. A pasted Share > Embed
+  code is accepted as a recording link, its `src` taken and the rest dropped.
+- **On the meeting record**: Alisa was badged External on her own call, because a colleague is
+  also a person in Twenty and "known to the CRM" was read as external; the address against the
+  internal domains decides now, on write and on read. "Jeff Pieta (AIS):" lines were not
+  recognised as a speaker and took 55% of talk time as Unknown; a speaker may carry a bracketed
+  affiliation. The Enrichment queue opened on the nameless too; it orders them last like People.
+- **Everything else rendered without errors**: no page errors, no console errors, no failed
+  requests on any section. Tasks, campaigns and sequences are empty because none have been
+  created yet. `pnpm sync:diagnose` now also runs the person-scoped reads that failed here.
+
 ## Known flake: an intermittent hydration error on /activity (11 September 2026)
 
 `workspace.spec.ts` "mobile navigation and all main sections fit a phone" collects page errors while

@@ -97,7 +97,7 @@ function HelpDialog({ onClose, needsReview, isAdmin }: { onClose: () => void; ne
   return <Modal label="Shortcuts and help" onClose={onClose} className="!max-w-sm">
     <div className="p-6"><div className="mb-1 flex items-center justify-between"><h2 className="text-[17px] font-semibold tracking-tight">Task flow shortcuts</h2><button type="button" aria-label="Close help" onClick={onClose} className="btn-icon-ghost"><IconClose size={17} /></button></div><p className="mb-5 text-[12px] leading-relaxed text-ink-500">Keep your focus on the conversation. Shortcuts work when you’re outside a text field.</p>
       <ul className="space-y-3 text-[12px] text-ink-600">{[['D', 'Mark done'], ['S', 'Skip with a reason'], ['Z', 'Snooze'], ['N / P', 'Next / previous task'], ['O', 'Open in Twenty'], ['M', 'More actions'], ['1–9', 'Pick a call outcome'], ['Ctrl+K', 'Search']].map(([k, v]) => <li key={k} className="flex items-center justify-between gap-3"><span>{v}</span><kbd>{k}</kbd></li>)}</ul>
-      {isAdmin && needsReview > 0 ? <Link href="/settings?tab=activity" onClick={onClose} className="mt-5 block rounded-lg bg-amber-50 px-3 py-3 text-[12px] font-medium text-amber-800">{needsReview} event{needsReview === 1 ? '' : 's'} need review <span aria-hidden>→</span></Link> : null}
+      {isAdmin && needsReview > 0 ? <Link href="/settings?tab=activity" onClick={onClose} className="mt-5 block rounded-lg bg-amber-50 px-3 py-3 text-[12px] font-medium text-amber-800">{needsReview} event{needsReview === 1 ? ' needs' : 's need'} review <span aria-hidden>→</span></Link> : null}
     </div>
   </Modal>;
 }

@@ -149,6 +149,7 @@ model User {
   tasks          Task[]       @relation("TaskFo")
   completedTasks Task[]       @relation("TaskCompletedBy")
   meetings       Meeting[]    @relation("MeetingCreatedBy")
+  meetingFavourites MeetingFavourite[]
 }
 
 model Session {
@@ -514,6 +515,7 @@ model Meeting {
   createdById      String?
   createdBy        User?           @relation("MeetingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt        DateTime        @default(now())
+  favourites       MeetingFavourite[]
   updatedAt        DateTime        @updatedAt
 
   attendees MeetingAttendee[]
@@ -522,6 +524,18 @@ model Meeting {
   @@index([companyId, occurredAt])
   @@index([createdById])
   @@index([analysisStatus])
+}
+
+/// A meeting somebody starred. Personal: each user keeps their own list.
+model MeetingFavourite {
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  meetingId String
+  meeting   Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, meetingId])
+  @@index([meetingId])
 }
 
 model MeetingAttendee {

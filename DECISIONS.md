@@ -526,3 +526,16 @@ contact", so repeating it in the warnings line was noise.
   enrichment or edit a meeting is decided by `canManagePod`, `canActOnTask` and friends, none of
   which changed. Reports stay with pod leaders, Biz Ops and admins; Settings with admins.
 
+## Where a Suspense boundary may go (12 September 2026)
+
+- **Around a page's content, inside the page.** That is where the hydration seam between the
+  layout and a large streamed page needs a boundary (the intermittent React 418 on Activity), and
+  it changes nothing about navigation. Activity and Home carry one; any page that grows past a few
+  hundred nodes should take the same wrapper.
+- **Never around the layout's `children`, and no `loading.tsx` in `(app)`.** Both put the router's
+  lazy segment fetch under a boundary, and in Next 15.5 that hangs client navigation once a
+  prefetch has completed: the segment fetch is aborted and the URL never changes. Measured, not
+  inferred: 9 hangs in 10 clicks with either, 0 in 10 without or with the per-page boundary.
+- **The clock a client component renders with comes from the server.** `DotTimeline` computed its
+  window from `Date.now()` on each side; a touch at the edge rendered on one side only. Pass `now`.
+

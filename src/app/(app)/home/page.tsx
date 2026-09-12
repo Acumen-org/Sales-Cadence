@@ -1,11 +1,12 @@
 import clsx from 'clsx';
 import Link from 'next/link';
+import { Suspense } from 'react';
 import { requireUser } from '@/lib/auth/current-user';
 import { formatLocalDate } from '@/lib/dates';
 import { buildHome } from '@/lib/home-query';
 import { TASK_CHANNELS, type TaskChannel } from '@/lib/tasks-query';
 import { ActionIcon, IconBolt, IconCalendar, IconCheck, IconChevronRight, IconCompany, IconPeople } from '@/components/icons';
-import { Avatar, EmptyState, Notice, Surface, Count } from '@/components/ui';
+import { Avatar, EmptyState, Surface, Count } from '@/components/ui';
 
 const CHANNEL_LABELS: Record<TaskChannel, string> = { CALL: 'Calls', EMAIL: 'Emails', LINKEDIN: 'LinkedIn' };
 
@@ -32,7 +33,16 @@ function N({ children, tone }: { children: React.ReactNode; tone?: 'warn' }) {
   return <span className={clsx('font-medium tabular-nums', tone === 'warn' ? 'text-amber-800' : 'text-ink-900')}>{children}</span>;
 }
 
-export default async function HomePage() {
+/** Its own Suspense boundary, for hydration: see the note on the Activity page. Home missed once in thirty walks. */
+export default function HomePage() {
+  return (
+    <Suspense fallback={<div className="space-y-4 px-6 pb-8 pt-2"><div className="surface h-[52vh]" /></div>}>
+      <HomeContent />
+    </Suspense>
+  );
+}
+
+async function HomeContent() {
   const user = await requireUser();
   const h = await buildHome(user);
   const first = user.name.split(/\s+/)[0];
@@ -49,15 +59,6 @@ export default async function HomePage() {
         <span className="inline-flex items-center gap-2 text-[12px] text-ink-500"><IconCalendar size={14} />{formatLocalDate(h.today, 'long')}</span>
       </div>
 
-      {h.needsReview ? (
-        <Notice tone="warn">
-          {h.needsReview} inbound event{h.needsReview === 1 ? '' : 's'} need review (unknown sender or failed processing).{' '}
-          <Link href="/settings?tab=activity" className="underline">
-            Open the activity log
-          </Link>
-          .
-        </Notice>
-      ) : null}
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <Tile

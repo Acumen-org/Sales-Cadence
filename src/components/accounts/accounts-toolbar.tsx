@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { IconSearch } from '@/components/icons';
@@ -8,9 +7,6 @@ import { optionLabel } from '@/lib/twenty/labels';
 
 type Props = {
   q: string;
-  scope: 'all' | 'mine';
-  mineCount: number;
-  allCount: number;
   pods: { podOwnerValue: string; name: string }[];
   fos: { id: string; name: string }[];
   products: string[];
@@ -31,7 +27,7 @@ const SORTS = [
 /** Filters whose "All" is a choice worth keeping in the URL, because the section has a default. */
 const EXPLICIT = new Set(['pod', 'fo']);
 
-export function AccountsToolbar({ q, scope, mineCount, allCount, pods, fos, products, pod, fo, product, sort }: Props) {
+export function AccountsToolbar({ q, pods, fos, products, pod, fo, product, sort }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -55,13 +51,6 @@ export function AccountsToolbar({ q, scope, mineCount, allCount, pods, fos, prod
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text]);
 
-  const withScope = (s: 'all' | 'mine') => {
-    const next = new URLSearchParams(params.toString());
-    if (s === 'mine') next.set('scope', 'mine');
-    else next.delete('scope');
-    return `${pathname}?${next.toString()}`;
-  };
-
   const chips = [
     pod ? { key: 'pod', label: `Pod is ${pods.find((p) => p.podOwnerValue === pod)?.name ?? optionLabel(pod)}` } : null,
     fo ? { key: 'fo', label: `FO is ${fos.find((f) => f.id === fo)?.name ?? fo}` } : null,
@@ -74,12 +63,6 @@ export function AccountsToolbar({ q, scope, mineCount, allCount, pods, fos, prod
         <IconSearch size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
         <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search name, domain, industry, city" aria-label="Search accounts" className="!pl-9" />
       </div>
-      <Link href={withScope('all')} className={scope === 'all' ? 'chip' : 'chip-muted'}>
-        All <span className="ml-0.5 opacity-60">{allCount}</span>
-      </Link>
-      <Link href={withScope('mine')} className={scope === 'mine' ? 'chip' : 'chip-muted'}>
-        Mine <span className="ml-0.5 opacity-60">{mineCount}</span>
-      </Link>
       {chips.map((c) => (
         <button key={c.key} type="button" className="chip" onClick={() => update({ [c.key]: null })} title="Remove this filter">
           {c.label}

@@ -52,9 +52,9 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
         <Stat label="Engaged accounts" value={list.engaged} tone="good" />
       </div>
       <Surface flush>
-        <ViewHeader title={scope === 'mine' ? 'My accounts' : 'All accounts'} caret actions={isAdmin(user) ? <SyncNowButton /> : undefined} />
+        <ViewHeader title="All accounts" caret actions={isAdmin(user) ? <SyncNowButton /> : undefined} />
         <Toolbar>
-          <AccountsToolbar q={q} scope={scope} mineCount={list.mine} allCount={list.total} pods={podRows.map((x) => ({ podOwnerValue: x.podOwnerValue, name: x.name }))} fos={fos} products={[...values.productInterest]} pod={pod ?? ''} fo={foUserId ?? ''} product={product ?? ''} sort={sort} />
+          <AccountsToolbar q={q} pods={podRows.map((x) => ({ podOwnerValue: x.podOwnerValue, name: x.name }))} fos={fos} products={[...values.productInterest]} pod={pod ?? ''} fo={foUserId ?? ''} product={product ?? ''} sort={sort} />
         </Toolbar>
 
         {rows.length === 0 ? (
@@ -84,7 +84,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
                   <tr key={a.id}>
                     <td>
                       <div className="flex items-center gap-2">
-                        <IdentityCell name={a.name} href={`/accounts/${a.id}`} sub={a.domain} />
+                        <IdentityCell name={a.name} href={`/accounts/${a.id}`} />
                         {a.mine ? <Badge tone="blue">mine</Badge> : null}
                       </div>
                     </td>
