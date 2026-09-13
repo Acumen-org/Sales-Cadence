@@ -1,3 +1,4 @@
+import { PageFrame } from '@/components/page-frame';
 import { needsPod } from '@/lib/auth/rbac';
 import { requireUser } from '@/lib/auth/current-user';
 import { filterParam, sectionDefaults } from '@/lib/default-filters';
@@ -43,7 +44,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
   };
 
   return (
-    <div className="space-y-5 px-6 pb-8 pt-2">
+    <PageFrame className="space-y-5 px-6 pb-8 pt-2">
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <Stat label="Accounts in view" value={list.total} />
         <Stat label="People" value={list.people} />
@@ -116,6 +117,6 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
           </div>
         </div>
       ) : null}
-    </div>
+    </PageFrame>
   );
 }

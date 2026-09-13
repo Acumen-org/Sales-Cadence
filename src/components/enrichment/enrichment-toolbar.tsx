@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useFilterNavigation } from '@/components/filter-navigation';
 import { useEffect, useState } from 'react';
 import { IconSearch } from '@/components/icons';
 
@@ -12,18 +12,16 @@ type Props = { tab: string; q: string; fields: [string, string][]; wanted: strin
  * kinds together mean "lacks any of these". Every change applies at once.
  */
 export function EnrichmentToolbar({ tab, q, fields, wanted, sort, exportHref }: Props) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const params = useSearchParams();
+  const navigate = useFilterNavigation();
   const [text, setText] = useState(q);
   useEffect(() => setText(q), [q]);
 
   const push = (mutate: (next: URLSearchParams) => void) => {
-    const next = new URLSearchParams(params.toString());
+    navigate((next) => {
     mutate(next);
     next.set('tab', tab);
     next.delete('page');
-    router.push(`${pathname}?${next.toString()}`);
+    });
   };
 
   useEffect(() => {
@@ -56,7 +54,7 @@ export function EnrichmentToolbar({ tab, q, fields, wanted, sort, exportHref }: 
         <option value="company">Sort: company</option>
         <option value="gaps">Sort: most missing</option>
       </select>
-      {q || wanted.length || sort !== 'name' ? <Link href={`/enrichment?tab=${tab}`} className="btn-ghost btn-sm">Reset</Link> : null}
+      {q || wanted.length || sort !== 'name' ? <Link href={`/enrichment?tab=${tab}`} onClick={() => setText('')} className="btn-ghost btn-sm">Reset</Link> : null}
       <a href={exportHref} className="btn-secondary btn-sm ml-auto">Export to enrich</a>
     </div>
   );

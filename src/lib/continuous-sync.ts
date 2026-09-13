@@ -25,6 +25,8 @@ export async function syncWorkspaceMembers(client: TwentyClient) {
 /** What Settings > Twenty reads: when the sync last worked, what failed, and what the last pass saw. */
 export type ContinuousSyncState = {
   watermark: string | null;
+  /** Each listing advances only after it finishes, so an outage cannot skip older events. */
+  stageWatermarks?: Record<string, string>;
   lastSuccess: string | null;
   lastError: string | null;
   attemptedAt?: string;
@@ -39,18 +41,16 @@ export type ContinuousSyncState = {
 
 /** A full listing of Twenty once a day, on top of the change scans, so the cache cannot drift. */
 const FULL_REFRESH_EVERY_MS = 24 * 3600_000;
+const CURSOR_STAGES = ['cache.people', 'cache.companies', 'cache.deletedPeople', 'cache.deletedCompanies', 'people', 'deletedPeople', 'notes', 'messages', 'opportunities', 'tasks'];
 
 /**
  * The pass the worker runs every CRM_SYNC_SECONDS. People and companies changed since the
  * watermark are cached, deletions are fetched on purpose, and notes, messages, tasks and
  * opportunities in the window go through the same ingestion as webhooks.
  *
- * The watermark moves when the people stage completed. Anything else that failed - messages the
- * API key cannot read, an object the workspace renamed - is recorded against its stage and shown
- * in Settings, and the next pass tries it again from the new watermark. The earlier rule, where
- * any failure anywhere threw and kept the watermark, meant one permanent failure froze the whole
- * sync: the full refresh reran and failed at the same spot every minute, and the workspace showed
- * a handful of contacts with nothing to say why.
+ * Each listing retains its own watermark until it finishes. A failed messages or notes stage
+ * replays its missed window after recovery while healthy stages keep advancing. Stage failures
+ * remain visible in Settings; the shared watermark is retained for compatibility and status.
  */
 export async function syncContinuously(now = new Date(), injected?: TwentyClient) {
   const previous = await prisma.setting.findUnique({ where: { key: 'continuousSync' } });
@@ -71,8 +71,8 @@ export async function syncContinuously(now = new Date(), injected?: TwentyClient
       removed = full.removed;
       companies = full.companies;
       for (const [name, message] of Object.entries(full.stageErrors)) if (message) stageErrors[`full.${name}`] = message;
-      if (!full.stageErrors.people) lastFullRefresh = now.toISOString();
-      else if (!state?.watermark) throw new Error(`People could not be listed from Twenty: ${full.stageErrors.people}`);
+      if (!Object.keys(full.stageErrors).length && !full.failed) lastFullRefresh = now.toISOString();
+      if (full.stageErrors.people && !state?.watermark) throw new Error(`People could not be listed from Twenty: ${full.stageErrors.people}`);
     }
     try {
       await syncWorkspaceMembers(client);
@@ -81,13 +81,17 @@ export async function syncContinuously(now = new Date(), injected?: TwentyClient
     }
     const watermark = state?.watermark ? new Date(state.watermark).getTime() : now.getTime() - 14 * 86400000;
     const since = new Date(watermark - 10 * 60000).toISOString();
-    const result = await reconcile({ since, now, actor: SYSTEM_ACTOR }, client);
+    const stageWatermarks = Object.fromEntries(CURSOR_STAGES.map((stage) => [stage, state?.stageWatermarks?.[stage] ?? new Date(watermark).toISOString()]));
+    const sinceByStage = Object.fromEntries(CURSOR_STAGES.map((stage) => [stage, new Date(new Date(stageWatermarks[stage]).getTime() - 10 * 60000).toISOString()]));
+    const result = await reconcile({ since, sinceByStage, now, actor: SYSTEM_ACTOR }, client);
     Object.assign(stageErrors, result.stageErrors);
     const peopleFailed = stageErrors['cache.people'] ?? stageErrors.people;
     if (peopleFailed) throw new Error(`People could not be listed from Twenty: ${peopleFailed}`);
     const failing = Object.keys(stageErrors);
+    for (const stage of CURSOR_STAGES) if (!stageErrors[stage]) stageWatermarks[stage] = now.toISOString();
     await save({
       watermark: now.toISOString(),
+      stageWatermarks,
       lastSuccess: now.toISOString(),
       lastError: failing.length ? `${failing.join(', ')} did not finish` : null,
       lastFullRefresh,
@@ -98,6 +102,7 @@ export async function syncContinuously(now = new Date(), injected?: TwentyClient
     return result;
   } catch (error) {
     await save({
+      ...(state ?? {}),
       watermark: state?.watermark ?? null,
       lastSuccess: state?.lastSuccess ?? null,
       lastFullRefresh: state?.lastFullRefresh ?? null,

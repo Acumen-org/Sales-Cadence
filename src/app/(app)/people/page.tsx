@@ -1,3 +1,4 @@
+import { PageFrame } from '@/components/page-frame';
 import { needsPod } from '@/lib/auth/rbac';
 import Link from 'next/link';
 import { personSearchWhere } from '@/lib/search-terms';
@@ -155,7 +156,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   });
 
   return (
-    <div className="space-y-3 px-6 pb-8 pt-2">
+    <PageFrame className="space-y-3 px-6 pb-8 pt-2">
       <Surface flush>
         <ViewHeader
           title={q || pod || status || fo || product ? 'Filtered people' : 'All people'}
@@ -206,6 +207,6 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
           </div>
         </div>
       ) : null}
-    </div>
+    </PageFrame>
   );
 }

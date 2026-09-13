@@ -1,6 +1,6 @@
 'use client';
 
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useFilterNavigation } from '@/components/filter-navigation';
 import { useEffect, useState } from 'react';
 import { IconSearch } from '@/components/icons';
 import { optionLabel } from '@/lib/twenty/labels';
@@ -28,21 +28,19 @@ const SORTS = [
 const EXPLICIT = new Set(['pod', 'fo']);
 
 export function AccountsToolbar({ q, pods, fos, products, pod, fo, product, sort }: Props) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const params = useSearchParams();
+  const navigate = useFilterNavigation();
   const [text, setText] = useState(q);
   useEffect(() => setText(q), [q]);
 
   const update = (patch: Record<string, string | null>) => {
-    const next = new URLSearchParams(params.toString());
+    navigate((next) => {
     next.delete('page');
     for (const [k, v] of Object.entries(patch)) {
       if (v) next.set(k, v);
       else if (EXPLICIT.has(k)) next.set(k, '');
       else next.delete(k);
     }
-    router.push(`${pathname}?${next.toString()}`);
+    });
   };
 
   useEffect(() => {

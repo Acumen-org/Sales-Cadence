@@ -1,7 +1,7 @@
 import type { ActivityEvent, EventSource, Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { logAudit, webhookActor, RECONCILE_ACTOR, type AuditActor } from '../audit';
-import { markPersonDeleted, upsertCompanyCache, upsertPersonCache } from '../person-cache';
+import { markCompanyDeleted, markPersonDeleted, upsertCompanyCache, upsertPersonCache } from '../person-cache';
 import { getSettings, getTwentySchema, type MatchingSettings, type Settings } from '../settings';
 import { getTwentyClient, type TwentyClient } from '../twenty';
 import {
@@ -45,6 +45,7 @@ export type IngestResult = {
 export type ProcessOutcome = { result: string; needsReview?: boolean; reviewNote?: string; details?: Record<string, unknown> };
 
 export function dedupeKeyFor(objectType: string, recordId: string, updatedAt: string | null | undefined, eventName: string): string {
+  if (eventName.endsWith('.deleted') || eventName.endsWith('.destroyed')) return `${objectType}:${recordId}:deleted:${updatedAt ?? eventName}`;
   return `${objectType}:${recordId}:${updatedAt ?? eventName}`;
 }
 
@@ -58,7 +59,8 @@ export async function ingestEvent(input: IngestInput, client?: TwentyClient): Pr
   const canonical = canonicalObjectType(input.objectType, schema) ?? (input.objectType as CanonicalObject);
   const recordId = input.recordId ?? (typeof input.record.id === 'string' ? input.record.id : String(input.record.id ?? ''));
   if (!recordId) return { status: 'ignored', result: 'no_record_id' };
-  const updatedAt = input.updatedAt ?? (typeof input.record.updatedAt === 'string' ? input.record.updatedAt : null);
+  const deletionAt = (input.eventName.endsWith('.deleted') || input.eventName.endsWith('.destroyed')) && typeof input.record.deletedAt === 'string' ? input.record.deletedAt : null;
+  const updatedAt = deletionAt ?? input.updatedAt ?? (typeof input.record.updatedAt === 'string' ? input.record.updatedAt : null);
   const dedupeKey = dedupeKeyFor(canonical, recordId, updatedAt, input.eventName);
 
   const existing = await prisma.activityEvent.findUnique({ where: { dedupeKey }, select: { id: true } });
@@ -157,16 +159,16 @@ async function loadUsers(): Promise<UserLike[]> {
  */
 async function handleCompany(company: TwentyCompany, deleted: boolean): Promise<ProcessOutcome> {
   if (deleted) {
-    await prisma.companyCache.updateMany({ where: { id: company.id }, data: { deletedAt: new Date(), syncedAt: new Date() } });
+    await markCompanyDeleted(company.id, company.deletedAt ? new Date(company.deletedAt) : new Date());
     return { result: 'company_deleted' };
   }
   const before = await prisma.companyCache.findUnique({ where: { id: company.id }, select: { name: true, ownerMemberId: true } });
-  await upsertCompanyCache(company);
-  const renamed = before && before.name !== company.name;
-  const reowned = before && before.ownerMemberId !== (company.ownerMemberId ?? null);
+  const current = await upsertCompanyCache(company);
+  const renamed = before && before.name !== current.name;
+  const reowned = before && before.ownerMemberId !== current.ownerMemberId;
   return {
     result: before ? (renamed || reowned ? 'company_updated' : 'company_unchanged') : 'company_cached',
-    details: { name: company.name, ...(renamed ? { renamedFrom: before!.name } : {}), ...(reowned ? { ownerMemberId: company.ownerMemberId ?? null } : {}) },
+    details: { name: current.name, ...(renamed ? { renamedFrom: before!.name } : {}), ...(reowned ? { ownerMemberId: current.ownerMemberId } : {}) },
   };
 }
 
@@ -177,12 +179,14 @@ async function handleCompany(company: TwentyCompany, deleted: boolean): Promise<
  */
 async function handlePerson(person: TwentyPerson, deleted: boolean, ctx: EngineContext): Promise<ProcessOutcome> {
   if (deleted) {
-    await markPersonDeleted(person.id);
-    const { exited } = await applyPersonFlags({ id: person.id, dnd: false, deletedAt: new Date().toISOString() }, ctx);
+    const at = person.deletedAt ? new Date(person.deletedAt) : ctx.now ?? new Date();
+    const marked = await markPersonDeleted(person.id, at);
+    if (!marked.count) return { result: 'person_unchanged' };
+    const { exited } = await applyPersonFlags({ id: person.id, dnd: false, deletedAt: at.toISOString() }, ctx);
     return { result: exited.length ? 'person_deleted_exited' : 'person_deleted', details: { exited } };
   }
-  await upsertPersonCache(person);
-  const { exited } = await applyPersonFlags(person, ctx);
+  const current = await upsertPersonCache(person);
+  const { exited } = await applyPersonFlags({ id: current.id, dnd: current.dnd, deletedAt: current.deletedAt?.toISOString() ?? null }, ctx);
   if (exited.length) return { result: 'dnd_exited', details: { exited } };
   return { result: 'person_cached' };
 }

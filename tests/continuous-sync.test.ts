@@ -24,6 +24,16 @@ describe('continuous sync survives a failing stage', () => {
   beforeEach(async () => {
     await resetDb();
   });
+  it('recovers notes missed during a two-hour outage instead of advancing past them', async () => {
+    const client = new PartlyBrokenTwenty(); client.reset('demo');
+    client.addNote({ id: 'outage-note', title: 'Recovery test', personIds: [], createdAt: '2026-09-11T09:55:00Z', updatedAt: '2026-09-11T09:55:00Z' });
+    client.broken.add('listNotes');
+    await syncContinuously(new Date('2026-09-11T10:00:00Z'), client);
+    await syncContinuously(new Date('2026-09-11T11:00:00Z'), client);
+    client.broken.clear();
+    await syncContinuously(new Date('2026-09-11T12:00:00Z'), client);
+    expect(await prisma.activityEvent.count({ where: { externalId: 'outage-note' } })).toBe(1);
+  });
 
   it('caches people and moves the watermark when messages cannot be read, and says so', async () => {
     const client = new PartlyBrokenTwenty();

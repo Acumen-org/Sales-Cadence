@@ -1,3 +1,4 @@
+import { PageFrame } from '@/components/page-frame';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { formatInstant } from '@/lib/dates';
@@ -39,7 +40,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const reviewCount = await prisma.activityEvent.count({ where: { needsReview: true } });
 
   return (
-    <div className="space-y-3 px-6 pb-8 pt-2">
+    <PageFrame className="space-y-3 px-6 pb-8 pt-2">
       <Surface flush>
         <ViewHeader title="Workspace settings" />
         <Tabs inset={false} current={tab} tabs={TABS.map((t) => ({ ...t, href: `/settings?tab=${t.key}`, count: t.key === 'activity' && reviewCount ? reviewCount : undefined }))} />
@@ -56,7 +57,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       {tab === 'users' ? <UsersTab /> : null}
       {tab === ASSISTANT_SETTINGS_TAB ? <AssistantTab /> : null}
       {tab === 'activity' ? <ActivityTab /> : null}
-    </div>
+    </PageFrame>
   );
 }
 

@@ -71,22 +71,22 @@ export function Card({ children, className, title, actions, flush }: { children:
 /* -------------------------------------------------------------------------- */
 
 const BADGE_TONES = {
-  gray: 'bg-canvas text-ink-800',
-  blue: 'bg-brand-50 text-brand-700',
-  green: 'bg-emerald-50 text-emerald-700',
-  amber: 'bg-amber-50 text-amber-700',
-  red: 'bg-red-50 text-red-700',
-  purple: 'bg-violet-50 text-violet-700',
-  sky: 'bg-sky-50 text-sky-700',
+  gray: 'border-ink-200/70 bg-[#f8faf9] text-ink-600',
+  blue: 'border-brand-200/60 bg-brand-50 text-brand-800',
+  green: 'border-emerald-200/60 bg-emerald-50 text-emerald-800',
+  amber: 'border-amber-200/70 bg-amber-50 text-amber-800',
+  red: 'border-red-200/70 bg-red-50 text-red-700',
+  purple: 'border-violet-200/60 bg-violet-50 text-violet-700',
+  sky: 'border-sky-200/60 bg-sky-50 text-sky-800',
 } as const;
 
 export type BadgeTone = keyof typeof BADGE_TONES;
 
 export function Badge({ children, tone = 'gray', className, dot }: { children: ReactNode; tone?: BadgeTone; className?: string; dot?: boolean }) {
   return (
-    <span className={clsx('badge', BADGE_TONES[tone], className)}>
+    <span title={typeof children === 'string' ? children : undefined} className={clsx('badge', BADGE_TONES[tone], className)}>
       {dot ? <span className={clsx('dot', DOT_TONES[tone])} /> : null}
-      {children}
+      <span className="min-w-0 truncate">{children}</span>
     </span>
   );
 }
@@ -159,13 +159,13 @@ export function IdentityCell({ name, sub, href, shape = 'square', size = 32 }: {
       <Avatar name={name} shape={shape} size={size} />
       <div className="min-w-0">
         {href ? (
-          <Link href={href} className="block truncate text-[14px] font-medium text-ink-900 hover:text-brand-700">
+          <Link href={href} title={name} className="block max-w-[22rem] truncate text-[13px] font-semibold leading-5 text-ink-900 hover:text-brand-700">
             {name}
           </Link>
         ) : (
-          <div className="truncate text-[14px] font-medium text-ink-900">{name}</div>
+          <div title={name} className="max-w-[22rem] truncate text-[13px] font-semibold leading-5 text-ink-900">{name}</div>
         )}
-        {sub ? <div className="truncate text-[13px] text-ink-600">{sub}</div> : null}
+        {sub ? <div title={typeof sub === 'string' ? sub : undefined} className="mt-0.5 max-w-[22rem] truncate text-[12px] leading-5 text-ink-500">{sub}</div> : null}
       </div>
     </div>
   );
@@ -428,9 +428,9 @@ export function Empty({ children = '-' }: { children?: ReactNode }) {
   return <span className="text-ink-300">{children}</span>;
 }
 
-/** A count in a table. Zero is quiet; anything else is the row's figure. */
+/** Counts remain legible and visibly dynamic, including zero. */
 export function Count({ value, className }: { value: number; className?: string }) {
-  return <span className={clsx('tabular-nums', value ? 'font-medium text-ink-900' : 'text-ink-400', className)}>{value}</span>;
+  return <span className={clsx('font-semibold tabular-nums text-ink-900', className)}>{value}</span>;
 }
 
 /** The explanation behind a field label, shown on hover instead of as a sentence under the control. */

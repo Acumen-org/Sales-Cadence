@@ -6,6 +6,8 @@ Cadence never sends email or automates LinkedIn. Humans do every touch.
 
 Current requirement-by-requirement findings and live deployment limitations: [CURRENT-REQUIREMENTS-AUDIT.md](CURRENT-REQUIREMENTS-AUDIT.md).
 
+Latest table refinements, concurrency tests and reliability fixes: [UI-STRESS-REVIEW.md](UI-STRESS-REVIEW.md).
+
 ## What it does
 
 - **Home**: one row of tiles for the signed-in user - people to reach today, calls / emails / LinkedIn due today, accounts owned, relationships owned - and, for managers, the week's board: what each FO owes, a bar for what they have finished, and their replies and meetings (Sunday to Saturday).

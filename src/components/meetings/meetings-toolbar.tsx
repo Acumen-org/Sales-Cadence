@@ -1,6 +1,6 @@
 'use client';
 
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useFilterNavigation } from '@/components/filter-navigation';
 import { useEffect, useState } from 'react';
 import { IconSearch, IconStar } from '@/components/icons';
 import { optionLabel } from '@/lib/twenty/labels';
@@ -12,20 +12,18 @@ type Props = { who: string; product: string; from: string; to: string; favourite
  * Each change applies at once; the URL carries the state so a filtered list can be shared.
  */
 export function MeetingsToolbar({ who, product, from, to, favourites, products }: Props) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const params = useSearchParams();
+  const navigate = useFilterNavigation();
   const [text, setText] = useState(who);
   useEffect(() => setText(who), [who]);
 
   const update = (patch: Record<string, string | null>) => {
-    const next = new URLSearchParams(params.toString());
+    navigate((next) => {
     for (const [k, v] of Object.entries(patch)) {
       if (v) next.set(k, v);
       else next.delete(k);
     }
     next.delete('page');
-    router.push(`${pathname}?${next.toString()}`);
+    });
   };
 
   useEffect(() => {
@@ -52,7 +50,7 @@ export function MeetingsToolbar({ who, product, from, to, favourites, products }
       <button type="button" onClick={() => update({ fav: favourites ? null : '1' })} aria-pressed={favourites} className={favourites ? 'chip' : 'chip-muted'} title="Only the meetings you starred">
         <IconStar size={13} filled={favourites} /> Favourites
       </button>
-      {active ? <button type="button" onClick={() => router.push(pathname)} className="btn-ghost btn-sm">Reset</button> : null}
+      {active ? <button type="button" onClick={() => { setText(''); navigate((next) => { for (const key of [...next.keys()]) next.delete(key); }); }} className="btn-ghost btn-sm">Reset</button> : null}
     </div>
   );
 }

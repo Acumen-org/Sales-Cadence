@@ -1,3 +1,4 @@
+import { PageFrame } from '@/components/page-frame';
 import Link from 'next/link';
 import { filterParam, sectionDefaults } from '@/lib/default-filters';
 import { redirect } from 'next/navigation';
@@ -77,7 +78,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     return `/reports?${params.toString()}`;
   };
   return (
-    <div className="space-y-5 px-6 pb-8 pt-2">
+    <PageFrame className="space-y-5 px-6 pb-8 pt-2">
       <Surface>
         <form method="get" className="flex flex-wrap items-end gap-3">
           <input type="hidden" name="tab" value={tab} />
@@ -125,6 +126,6 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           </table></div>
         ) : null}
       </Surface>
-    </div>
+    </PageFrame>
   );
 }

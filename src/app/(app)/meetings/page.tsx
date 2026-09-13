@@ -1,3 +1,4 @@
+import { PageFrame } from '@/components/page-frame';
 import Link from 'next/link';
 import { optionLabel } from '@/lib/twenty/labels';
 import type { Prisma } from '@prisma/client';
@@ -98,7 +99,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
   };
 
   return (
-    <div className="space-y-3 px-6 pb-8 pt-2">
+    <PageFrame className="space-y-3 px-6 pb-8 pt-2">
       <Surface flush>
         <ViewHeader
           title="All meetings"
@@ -271,6 +272,6 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
           </div>
         </div>
       ) : null}
-    </div>
+    </PageFrame>
   );
 }

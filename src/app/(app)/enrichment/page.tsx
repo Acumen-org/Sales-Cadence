@@ -1,3 +1,4 @@
+import { PageFrame } from '@/components/page-frame';
 import Link from 'next/link';
 import { requireUser } from '@/lib/auth/current-user';
 import { isAdmin, isBizOps } from '@/lib/auth/rbac';
@@ -38,7 +39,7 @@ export default async function EnrichmentPage({ searchParams }: { searchParams: P
   const exportParams = new URLSearchParams({ entity: tab === 'accounts' ? 'company' : 'person', q: sp.q ?? '', sort });
   for (const field of wanted) exportParams.append('field', field);
   return (
-    <div className="space-y-5 px-6 pb-8 pt-2">
+    <PageFrame className="space-y-5 px-6 pb-8 pt-2">
       <div className="grid gap-3 sm:grid-cols-3"><Stat label="Contacts to enrich" value={contacts.length} tone={contacts.length ? 'warn' : 'good'} /><Stat label="Accounts to enrich" value={accounts.length} /><Stat label="Imports" value={batches.length} /></div>
       <Surface flush>
         <ViewHeader title="Data readiness" actions={canEnrich(user) ? <Link href={`/enrichment/import?entity=${tab === 'accounts' ? 'company' : 'person'}`} className="btn-primary">Import enrichment</Link> : undefined} />
@@ -49,6 +50,6 @@ export default async function EnrichmentPage({ searchParams }: { searchParams: P
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-4"><DataValue>{filtered.length} records</DataValue><div className="flex items-center gap-3">{page > 1 ? <Link href={pageHref(page - 1)} className="btn-secondary btn-sm">Previous</Link> : null}<span className="text-[12px] text-ink-500">Page <DataValue>{page}</DataValue> / <DataValue>{pageCount}</DataValue></span>{page < pageCount ? <Link href={pageHref(page + 1)} className="btn-secondary btn-sm">Next</Link> : null}</div></div>
         </>}
       </Surface>
-    </div>
+    </PageFrame>
   );
 }

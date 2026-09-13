@@ -1,6 +1,6 @@
 'use client';
 
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useFilterNavigation } from '@/components/filter-navigation';
 import clsx from 'clsx';
 
 type Props = {
@@ -13,12 +13,10 @@ type Props = {
 
 /** Pod / FO filters and the list-vs-flow toggle. All state lives in the URL. */
 export function TaskFilters({ pods, fos, podId, foUserId, mode }: Props) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const params = useSearchParams();
+  const navigate = useFilterNavigation();
 
   const update = (patch: Record<string, string | null>) => {
-    const next = new URLSearchParams(params.toString());
+    navigate((next) => {
     for (const [k, v] of Object.entries(patch)) {
       if (v) next.set(k, v);
       // "All pods" / "All FOs" is a choice: kept in the URL as an empty value so it outlives the default.
@@ -27,7 +25,7 @@ export function TaskFilters({ pods, fos, podId, foUserId, mode }: Props) {
     }
     next.delete('task');
     next.delete('flash');
-    router.push(`${pathname}?${next.toString()}`);
+    });
   };
 
   const visibleFos = podId ? fos.filter((f) => f.podIds.includes(podId) || f.podIds.length === 0) : fos;

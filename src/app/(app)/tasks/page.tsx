@@ -1,3 +1,4 @@
+import { PageFrame } from '@/components/page-frame';
 import Link from 'next/link';
 import { filterParam, sectionDefaults } from '@/lib/default-filters';
 import { requireUser } from '@/lib/auth/current-user';
@@ -77,7 +78,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const dueOn = brief ? brief.task.snoozedTo ?? brief.task.dueDate : null;
   const dueState: { tone: BadgeTone; label: string } = !openModules.length ? { tone: 'gray', label: 'Resolved' } : dueOn && dueOn < today ? { tone: 'red', label: 'Overdue' } : dueOn === today ? { tone: 'green', label: 'Due today' } : { tone: 'blue', label: 'Upcoming' };
   const listRows = rows.map(t => ({ id: t.id, childActions: t.childActions, personName: cachedPersonName(t.enrollment.person), companyName: t.enrollment.person.companyName, label: [...new Set(t.childActions.map(c => ACTION_LABELS[c.action]))].join(' + '), action: t.action, stepIndex: t.stepIndex, stepDay: t.stepDay, due: t.snoozedTo ?? t.dueDate, snoozed: Boolean(t.snoozedTo), state: t.state, foName: t.fo.name, campaignName: t.enrollment.campaign?.name ?? null }));
-  return <div className="space-y-4 px-6 pb-8 pt-2">
+  return <PageFrame className="space-y-4 px-6 pb-8 pt-2">
     <Surface flush><Tabs inset={false} current={tab} tabs={(['today','overdue','upcoming','done'] as TaskTab[]).map(t => ({ key: t, label: TAB_LABELS[t], href: href({ tab: t, task: null }), count: counts[t] }))} />
       <Toolbar><Link href={href({ type: null, task: null })} className={channel ? 'chip-muted' : 'chip'}>All types</Link>{TASK_CHANNELS.map(c => <Link key={c} href={href({ type: c, task: null })} className={channel === c ? 'chip' : 'chip-muted'}><ActionIcon action={c} size={13} />{CHANNEL_LABELS[c]}<strong className="ml-1">{channelCounts[c]}</strong></Link>)}<span className="w-full sm:ml-auto sm:w-auto"><TaskFilters pods={options.pods} fos={options.fos} podId={podId} foUserId={foUserId} mode={mode} /></span></Toolbar>
     </Surface>
@@ -107,5 +108,5 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
         {brief && <aside className="min-w-0 space-y-4 xl:col-start-2 2xl:col-auto"><TaskBriefPanel brief={brief} timezone={user.timezone} /><SuggestedApproach canConfigure={isAdmin(user)} /><CrmHistory personId={brief.person.id} timezone={user.timezone} baseHref={href({ task: brief.task.id })} notesAfter={sp.crmNotes} emailsAfter={sp.crmEmails} /></aside>}
       </div>
     </>}
-  </div>;
+  </PageFrame>;
 }

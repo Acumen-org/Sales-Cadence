@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 const SESSION_COOKIE = 'cadence_session';
-const PUBLIC_PREFIXES = ['/login', '/api/health', '/api/webhooks', '/_next', '/favicon.ico', '/icon.svg'];
+const PUBLIC_PREFIXES = ['/login', '/api/health', '/api/webhooks', '/_next', '/fonts', '/favicon.ico', '/icon.svg'];
 
 /**
  * Cheap gate: redirect anonymous visitors to /login. The cookie is only checked for

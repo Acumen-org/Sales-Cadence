@@ -2,6 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/InterVariable.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 /* Cadence's shared workspace language: quiet surfaces, purposeful color, clear hierarchy. */
 
 @layer base {
@@ -25,6 +33,7 @@
     font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    font-optical-sizing: auto;
   }
   ::selection {
     @apply bg-brand-100 text-brand-900;
@@ -142,7 +151,8 @@
     @apply inline-flex items-center gap-1.5 rounded-lg bg-transparent py-2 px-3 text-[12px] font-medium text-ink-500 transition hover:bg-canvas hover:text-ink-900;
   }
   .badge {
-    @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[12px] font-medium leading-5;
+    @apply inline-flex max-w-full items-center gap-1.5 whitespace-nowrap rounded-md border px-2 py-0.5 text-[11.5px] font-medium leading-[18px];
+    letter-spacing: 0.005em;
   }
   .dot {
     @apply inline-block h-[7px] w-[7px] shrink-0 rounded-full;
@@ -150,19 +160,23 @@
 
   /* ---------- tables ---------- */
   .table {
-    @apply w-full border-collapse text-left text-[13.5px];
+    @apply w-full border-collapse text-left text-[13px] leading-relaxed;
   }
   .table th {
-    @apply whitespace-nowrap border-y border-line bg-[#fafbf9] px-5 py-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-500;
+    @apply whitespace-nowrap border-y border-line bg-[#f8faf9] px-5 py-3 text-[11.5px] font-medium tracking-[0.01em] text-ink-600;
   }
   .table td {
-    @apply border-b border-line/80 px-5 py-4 align-middle text-ink-800;
+    @apply border-b border-line/70 px-5 py-3.5 align-middle text-ink-800;
   }
   .table tbody tr {
-    @apply transition-colors hover:bg-brand-50/40;
+    @apply transition-colors hover:bg-[#f5f9f7] focus-within:bg-[#f5f9f7];
   }
   .table tbody tr:last-child td {
     @apply border-b-0;
+  }
+  .table-people th,
+  .table-people td {
+    @apply px-3;
   }
   /* Denser variant for wide analytics tables. */
   .table-tight td {
@@ -170,7 +184,7 @@
   }
   /* A count column: header and cells right-aligned so the digits line up. */
   .table .num {
-    @apply text-right tabular-nums;
+    @apply text-right font-semibold tabular-nums text-ink-900;
   }
   .data-table th:not(:first-child),
   .data-table td:not(:first-child) {

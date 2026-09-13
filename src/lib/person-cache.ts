@@ -76,8 +76,8 @@ export function personToCacheData(p: TwentyPerson): Prisma.PersonCacheUncheckedC
     createdByName: p.createdByName,
 
     raw: (p.raw ?? undefined) as Prisma.InputJsonValue | undefined,
-    twentyUpdatedAt: p.updatedAt ? new Date(p.updatedAt) : null,
-    deletedAt: p.deletedAt ? new Date(p.deletedAt) : null,
+    twentyUpdatedAt: date(p.updatedAt),
+    deletedAt: date(p.deletedAt),
     syncedAt: new Date(),
   };
 }
@@ -85,9 +85,22 @@ export function personToCacheData(p: TwentyPerson): Prisma.PersonCacheUncheckedC
 export async function upsertPersonCache(p: TwentyPerson, tx: Tx | typeof prisma = prisma) {
   const data = personToCacheData(p);
   const { id, ...rest } = data;
-  const row = await tx.personCache.upsert({ where: { id }, create: data, update: rest });
-  if (p.podOwner) await ensurePod(p.podOwner, null, tx);
+  // Mark the record as seen even when this listing/webhook carries an older snapshot.
+  await tx.personCache.upsert({ where: { id }, create: data, update: { syncedAt: data.syncedAt } });
+  await tx.personCache.updateMany({ where: { id, ...snapshotOrder(p.updatedAt, p.deletedAt) }, data: rest });
+  const row = await tx.personCache.findUniqueOrThrow({ where: { id } });
+  if (row.podOwner) await ensurePod(row.podOwner, null, tx);
   return row;
+}
+
+/** Deletions have their own clock in Twenty. Compare both clocks in the atomic write. */
+function snapshotOrder(updatedAt?: string | null, deletedAt?: string | null) {
+  const dates = [date(updatedAt), date(deletedAt)].filter((value): value is Date => value !== null);
+  const version = dates.length ? new Date(Math.max(...dates.map((value) => value.getTime()))) : null;
+  return { AND: [
+    { OR: [{ twentyUpdatedAt: null }, ...(version ? [{ twentyUpdatedAt: { lte: version } }] : [])] },
+    { OR: [{ deletedAt: null }, ...(version ? [{ deletedAt: { lte: version } }] : [])] },
+  ] };
 }
 
 /**
@@ -148,15 +161,21 @@ export async function upsertCompanyCache(c: TwentyCompany, tx: Tx | typeof prism
     city: c.city ?? null,
     linkedinUrl: c.linkedinUrl ?? null,
     raw: (c.raw ?? undefined) as Prisma.InputJsonValue | undefined,
-    twentyUpdatedAt: c.updatedAt ? new Date(c.updatedAt) : null,
-    deletedAt: c.deletedAt ? new Date(c.deletedAt) : null,
+    twentyUpdatedAt: date(c.updatedAt),
+    deletedAt: date(c.deletedAt),
     syncedAt: new Date(),
   };
-  return tx.companyCache.upsert({ where: { id: c.id }, create: { id: c.id, ...data }, update: data });
+  await tx.companyCache.upsert({ where: { id: c.id }, create: { id: c.id, ...data }, update: { syncedAt: data.syncedAt } });
+  await tx.companyCache.updateMany({ where: { id: c.id, ...snapshotOrder(c.updatedAt, c.deletedAt) }, data });
+  return tx.companyCache.findUniqueOrThrow({ where: { id: c.id } });
 }
 
-export async function markPersonDeleted(personId: string, tx: Tx | typeof prisma = prisma) {
-  await tx.personCache.updateMany({ where: { id: personId }, data: { deletedAt: new Date(), syncedAt: new Date() } });
+export async function markPersonDeleted(personId: string, at = new Date(), tx: Tx | typeof prisma = prisma) {
+  return tx.personCache.updateMany({ where: { id: personId, ...snapshotOrder(null, at.toISOString()) }, data: { deletedAt: at, syncedAt: new Date() } });
+}
+
+export async function markCompanyDeleted(companyId: string, at = new Date(), tx: Tx | typeof prisma = prisma) {
+  return tx.companyCache.updateMany({ where: { id: companyId, ...snapshotOrder(null, at.toISOString()) }, data: { deletedAt: at, syncedAt: new Date() } });
 }
 
 export type RefreshStage = 'people' | 'companies' | 'deletedPeople' | 'deletedCompanies';
@@ -187,7 +206,7 @@ const errorText = (err: unknown) => (err instanceof Error ? err.message : String
  * scan never sees them. Without `since` the pass is complete, so anything cached that Twenty did
  * not return no longer exists there and is marked deleted here.
  */
-export async function refreshPersonCache(client: TwentyClient, opts: { since?: string } = {}): Promise<RefreshStats> {
+export async function refreshPersonCache(client: TwentyClient, opts: { since?: string; sinceByStage?: Partial<Record<RefreshStage, string>> } = {}): Promise<RefreshStats> {
   const stats: RefreshStats = { people: 0, companies: 0, deleted: 0, removed: 0, failed: 0, firstError: null, stageErrors: {} };
   const startedAt = new Date();
   const attempt = async (label: string, fn: () => Promise<unknown>) => {
@@ -218,23 +237,23 @@ export async function refreshPersonCache(client: TwentyClient, opts: { since?: s
     console.warn('[cache] pod sync skipped:', errorText(err));
   }
   const peopleComplete = await stage('people', async () => {
-    for await (const person of paginate((after) => client.listPeople({ updatedSince: opts.since, after, limit: 100, includeDeleted: true }))) {
+    for await (const person of paginate((after) => client.listPeople({ updatedSince: opts.sinceByStage?.people ?? opts.since, after, limit: 100, includeDeleted: true }))) {
       if (await attempt(`person ${person.id}`, () => upsertPersonCache(person))) stats.people += 1;
     }
   });
   const companiesComplete = await stage('companies', async () => {
-    for await (const company of paginate((after) => client.listCompanies({ updatedSince: opts.since, after, limit: 100 }))) {
+    for await (const company of paginate((after) => client.listCompanies({ updatedSince: opts.sinceByStage?.companies ?? opts.since, after, limit: 100 }))) {
       if (await attempt(`company ${company.id}`, () => upsertCompanyCache(company))) stats.companies += 1;
     }
   });
   if (opts.since) {
     await stage('deletedPeople', async () => {
-      for await (const person of paginate((after) => client.listPeople({ deletedSince: opts.since, after, limit: 100 }))) {
+      for await (const person of paginate((after) => client.listPeople({ deletedSince: opts.sinceByStage?.deletedPeople ?? opts.since, after, limit: 100 }))) {
         if (await attempt(`deleted person ${person.id}`, () => upsertPersonCache(person))) stats.deleted += 1;
       }
     });
     await stage('deletedCompanies', async () => {
-      for await (const company of paginate((after) => client.listCompanies({ deletedSince: opts.since, after, limit: 100 }))) {
+      for await (const company of paginate((after) => client.listCompanies({ deletedSince: opts.sinceByStage?.deletedCompanies ?? opts.since, after, limit: 100 }))) {
         if (await attempt(`deleted company ${company.id}`, () => upsertCompanyCache(company))) stats.deleted += 1;
       }
     });

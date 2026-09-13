@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
-import { Badge, DotTimeline, Empty, IdentityCell, TierBadge, touchTitle, type BadgeTone, type TimelinePoint } from '@/components/ui';
+import { useId, useState } from 'react';
+import { Badge, DotTimeline, IdentityCell, TierBadge, touchTitle, type BadgeTone, type TimelinePoint } from '@/components/ui';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
 import { ActionIcon, IconPlus } from '@/components/icons';
 
@@ -46,16 +46,19 @@ type Props = {
  * MISSING_EMAIL - and the badges above are built from the fields. Rendering both put the same
  * word in the cell twice, so anything already said is dropped here.
  */
-const MAX_PILLS = 3;
+const MAX_PILLS = 2;
 
-/** Up to three pills in a row; the rest fold into "+n" with the full list on hover. */
+/** Tags expand in the row, accessible by keyboard and touch as well as a pointer. */
 function Pills({ items }: { items: { label: string; node: React.ReactNode }[] }) {
-  const shown = items.slice(0, MAX_PILLS);
-  const rest = items.slice(MAX_PILLS);
+  const [expanded, setExpanded] = useState(false);
+  const id = useId();
+  const unique = items.filter((item, index) => items.findIndex((other) => other.label.toLowerCase() === item.label.toLowerCase()) === index);
+  const shown = expanded ? unique : unique.slice(0, MAX_PILLS);
+  const remaining = unique.length - MAX_PILLS;
   return (
-    <div className="flex flex-wrap items-center gap-1">
-      {shown.map((item) => <span key={item.label}>{item.node}</span>)}
-      {rest.length ? <span title={rest.map((item) => item.label).join(', ')}><Badge tone="gray">+{rest.length}</Badge></span> : null}
+    <div id={id} className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
+      {shown.map((item) => <span className="min-w-0 max-w-full" key={item.label}>{item.node}</span>)}
+      {remaining > 0 ? <button type="button" aria-expanded={expanded} aria-controls={id} aria-label={expanded ? 'Show fewer tags' : `Show ${remaining} more tags`} onClick={() => setExpanded(!expanded)} className="rounded-md px-1.5 py-1 text-[11.5px] font-semibold text-ink-600 hover:bg-brand-50 hover:text-brand-800 focus-visible:ring-2 focus-visible:ring-brand-300">{expanded ? 'Less' : `+${remaining}`}</button> : null}
     </div>
   );
 }
@@ -98,7 +101,16 @@ export function PeopleTable({ rows, canEnroll, now }: Props) {
         </div>
       ) : null}
       <div className="overflow-x-auto scroll-thin">
-        <table className="table">
+        <table className="table table-people min-w-[1040px] table-fixed">
+          <colgroup>
+            {canEnroll ? <col className="w-10" /> : null}
+            <col style={{ width: showNext ? '23%' : '26%' }} />
+            <col style={{ width: '20%' }} />
+            {showNext ? <col style={{ width: '12%' }} /> : null}
+            <col style={{ width: showNext ? '16%' : '20%' }} />
+            <col style={{ width: '12%' }} />
+            <col />
+          </colgroup>
           <thead>
             <tr>
               {canEnroll ? (
@@ -110,14 +122,13 @@ export function PeopleTable({ rows, canEnroll, now }: Props) {
               <th>In Twenty</th>
               {showNext ? <th>Next in Twenty</th> : null}
               <th>Campaign / sequence</th>
-              <th>Activity</th>
               <th>Pod</th>
-              <th className="w-56">Last touch</th>
+              <th>Recent activity</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((p) => (
-              <tr key={p.id}>
+              <tr key={p.id} className={selected.has(p.id) ? 'bg-brand-50/70' : undefined}>
                 {canEnroll ? (
                   <td className="pl-4 pr-0">
                     <input
@@ -136,9 +147,9 @@ export function PeopleTable({ rows, canEnroll, now }: Props) {
                     the data-quality flags are derived from fields Twenty also carries as tags, so
                     a tag already shown as a badge is dropped rather than repeated. */}
                 <td title={p.leadSource.length ? `Lead source: ${optionLabels(p.leadSource)}` : undefined}>
+                  <div className="mb-2"><Badge tone={p.standing.tone} dot>{p.standing.label}</Badge></div>
                   <Pills
                     items={[
-                      { label: p.standing.label, node: <Badge tone={p.standing.tone} dot>{p.standing.label}</Badge> },
                       ...(p.tier ? [{ label: p.tier, node: <TierBadge tier={p.tier} /> }] : []),
                       ...(p.listCategory ? [{ label: optionLabel(p.listCategory), node: <Badge tone="gray">{optionLabel(p.listCategory)}</Badge> }] : []),
                       ...p.warnings.map((w) => ({ label: w.label, node: <Badge tone={w.tone}>{w.label}</Badge> })),
@@ -165,14 +176,13 @@ export function PeopleTable({ rows, canEnroll, now }: Props) {
                   {p.enrollment ? (
                     <>
                       <Badge tone={p.enrollment.tone}>{p.enrollment.label}</Badge>
-                      <div className="mt-1 font-medium text-ink-900">{p.enrollment.campaignId ? <Link href={`/campaigns/${p.enrollment.campaignId}`} className="hover:text-brand-700 hover:underline">{p.enrollment.campaignName}</Link> : 'Direct enrollment'}</div><div className="mt-0.5 text-xs text-ink-500">{p.enrollment.sequenceName}</div>
+                      <div title={p.enrollment.campaignName ?? undefined} className="mt-1 truncate font-medium text-ink-900">{p.enrollment.campaignId ? <Link href={`/campaigns/${p.enrollment.campaignId}`} className="hover:text-brand-700 hover:underline">{p.enrollment.campaignName}</Link> : 'Direct enrollment'}</div><div title={p.enrollment.sequenceName} className="mt-0.5 truncate text-xs text-ink-500">{p.enrollment.sequenceName}</div>
                     </>
                   ) : (
                     <span className="text-[12px] text-ink-300">-</span>
                   )}
                 </td>
-                <td>{p.activity.length ? <DotTimeline points={p.activity} now={now} width={130} /> : <Empty />}</td>
-                <td className="whitespace-nowrap text-[12.5px]">
+                <td className="break-words text-[12.5px]">
                   {p.podName ?? <span className="text-ink-300">-</span>}
                   {p.enrollment?.foName ? <div className="text-[11px] text-ink-500"><span className="text-ink-400">FO</span> {p.enrollment.foName}</div> : null}
                 </td>
@@ -183,11 +193,12 @@ export function PeopleTable({ rows, canEnroll, now }: Props) {
                         <span className={p.lastTouch.inbound ? 'shrink-0 text-emerald-700' : 'shrink-0 text-ink-400'}><ActionIcon action={p.lastTouch.channel} size={13} /></span>
                         <span className="min-w-0 truncate text-ink-600">{touchTitle(p.lastTouch.summary)}</span>
                       </div>
-                      <div className="mt-0.5 text-ink-500">{p.lastTouch.at}</div>
+                      <div className="mt-0.5 font-medium text-ink-700">{p.lastTouch.at}</div>
                     </>
                   ) : (
                     <span className="text-ink-300">-</span>
                   )}
+                  {p.activity.length ? <div className="mt-1 overflow-hidden"><DotTimeline points={p.activity} now={now} width={110} /></div> : null}
                 </td>
 
               </tr>
