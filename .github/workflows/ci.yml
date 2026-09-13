@@ -155,3 +155,51 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 7
+
+  # -------------------------------------------------------------------------- image
+  # Runs on AC-Runner-02, which sits on the same network as Harbor. A
+  # GitHub-hosted runner cannot reach the registry at all: docker login times
+  # out waiting for a connection, which is what this job used to fail on.
+  #
+  # Deploying stays manual. Cadence writes to the production CRM, so a person
+  # decides when a tag goes live; CI's part is to have one built and pushed.
+  image:
+    name: build + push image
+    runs-on: self-hosted
+    needs: [lint, test, e2e]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+
+    env:
+      REGISTRY: h4rb0r.pmx.acumen-strategy.com
+      REPO: sales-cadence/app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: short sha
+        id: sha
+        run: echo "short=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: log in to Harbor
+        run: |
+          echo "${{ secrets.HARBOR_PASSWORD }}" \
+            | docker login "$REGISTRY" -u "${{ secrets.HARBOR_USERNAME }}" --password-stdin
+
+      # Types were already checked in `lint`; repeating them inside the build
+      # only raises its memory ceiling on a 4GB runner.
+      - name: build and push
+        run: |
+          TAG="prod-v1.0.0-${{ steps.sha.outputs.short }}"
+          docker build \
+            --build-arg SKIP_TYPE_CHECK=true \
+            --build-arg NEXT_BUILD_CPUS=2 \
+            -t "$REGISTRY/$REPO:$TAG" \
+            -t "$REGISTRY/$REPO:latest" .
+          docker push "$REGISTRY/$REPO:$TAG"
+          docker push "$REGISTRY/$REPO:latest"
+
+      # The runner keeps every layer it has ever built; left alone it fills the
+      # disk and the next build fails with no space.
+      - name: prune old build layers
+        if: always()
+        run: docker image prune -f --filter "until=168h"
