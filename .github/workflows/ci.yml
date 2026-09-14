@@ -191,8 +191,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.HARBOR_USER }}
-          password: ${{ secrets.HARBOR_TOKEN }}
+          username: ${{ secrets.HARBOR_USERNAME }}
+          password: ${{ secrets.HARBOR_PASSWORD }}
 
       # Types were already checked in `lint`; repeating them inside the build
       # only raises its memory ceiling on a 4GB runner.
@@ -234,11 +234,11 @@ jobs:
       # that, and auto_revert catches the case where it never comes up.
       - name: Deploy to Nomad
         env:
-          NOMAD_ADDR: ${{ vars.NOMAD_ADDR }}
+          NOMAD_ADDR: ${{ secrets.NOMAD_ADDR }}
           NOMAD_TOKEN: ${{ secrets.NOMAD_TOKEN }}
         run: |
           nomad job run \
             -var="image_tag=${IMAGE_TAG}" \
-            -var="harbor_username=${{ secrets.HARBOR_USER }}" \
-            -var="harbor_password=${{ secrets.HARBOR_TOKEN }}" \
+            -var="harbor_username=${{ secrets.HARBOR_USERNAME }}" \
+            -var="harbor_password=${{ secrets.HARBOR_PASSWORD }}" \
             nomad/cadence.hcl
