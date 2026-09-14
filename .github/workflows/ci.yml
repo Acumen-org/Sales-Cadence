@@ -242,19 +242,3 @@ jobs:
             -var="harbor_username=${{ secrets.HARBOR_USER }}" \
             -var="harbor_password=${{ secrets.HARBOR_TOKEN }}" \
             nomad/cadence.hcl
-
-  # ------------------------------------------------------------------- notify
-  notify:
-    needs: [build, deploy]
-    if: always()
-    uses: Acumen-org/deploy-notify/.github/workflows/notify.yml@main
-    with:
-      app_name: "Sales Cadence"
-      environment: "prod"
-      status: ${{ needs.deploy.result }}
-      version: ${{ needs.build.outputs.IMAGE_TAG }}
-      actor: ${{ github.actor }}
-      run_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-    secrets:
-      TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
-      MATTERMOST_WEBHOOK_URL: ${{ secrets.MATTERMOST_WEBHOOK_URL }}
