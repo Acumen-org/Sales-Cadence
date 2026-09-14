@@ -1,19 +1,25 @@
 # ---------------------------------------------------------------------------
 # CI for Sales-Cadence.
 #
-# Three verification jobs: lint/typecheck, unit tests, and browser tests.
-# Image building and deployment are managed on the hosting server, outside this
-# workflow. A successful run confirms checks, not that the live app was updated.
+#   lint / test / e2e  — on GitHub's runners, in parallel. The gate.
+#   build              — self-hosted: Harbor is not routable from outside, so a
+#                        hosted runner can only sit on docker login until it
+#                        times out.
+#   deploy             — self-hosted, and only after the suite is green. The
+#                        jobspec sets auto_revert, which is what makes an
+#                        unattended deploy safe: a release that cannot pass its
+#                        health check rolls back instead of staying up broken.
+#   notify             — the shared Acumen-org workflow, to Teams and Mattermost.
 #
-# Postgres 18 matches production (db-acumen). Prisma 6 is version-sensitive,
-# so pinning the service image here keeps CI honest about migrations.
+# Postgres 18 matches production (db-acumen), and Prisma is version-sensitive
+# enough that pinning it here keeps CI honest about migrations.
 # ---------------------------------------------------------------------------
 
 name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ["main"]
   pull_request:
   workflow_dispatch:
 
@@ -23,13 +29,18 @@ concurrency:
 
 permissions:
   contents: read
+  id-token: write
 
 env:
   NODE_VERSION: "22"
   PNPM_VERSION: "9.15.9"
+  ENVIRONMENT: "prod"
+  VERSION: "1.0.0"
+  REGISTRY: h4rb0r.pmx.acumen-strategy.com
+  DOCKER_IMAGE: h4rb0r.pmx.acumen-strategy.com/sales-cadence/app
 
 jobs:
-  # -------------------------------------------------------------------------- lint
+  # -------------------------------------------------------------------- lint
   lint:
     name: lint + typecheck
     runs-on: ubuntu-latest
@@ -56,7 +67,7 @@ jobs:
       - name: tsc --noEmit
         run: pnpm typecheck
 
-  # -------------------------------------------------------------------------- unit tests
+  # --------------------------------------------------------------------- test
   test:
     name: vitest
     runs-on: ubuntu-latest
@@ -78,8 +89,8 @@ jobs:
           --health-retries 5
 
     env:
-      # 127.0.0.1, not localhost: Node 20 resolves localhost to ::1 first and
-      # the service container only listens on IPv4.
+      # 127.0.0.1, not localhost: Node resolves localhost to ::1 first and the
+      # service container only listens on IPv4.
       DATABASE_URL: postgresql://cadence:cadence@127.0.0.1:5432/cadence_test
       SESSION_SECRET: ci-session-secret-not-a-real-one
       TWENTY_MODE: mock
@@ -105,12 +116,12 @@ jobs:
       - name: vitest
         run: pnpm test
 
-  # -------------------------------------------------------------------------- e2e
+  # ---------------------------------------------------------------------- e2e
   e2e:
     name: playwright
     runs-on: ubuntu-latest
-    # A build plus a browser run costs minutes; no point spending them on a
-    # tree that does not typecheck.
+    # A build plus a browser run costs minutes; not worth spending on a tree
+    # that does not typecheck.
     needs: [lint]
 
     env:
@@ -144,9 +155,7 @@ jobs:
         run: pnpm test:fresh
 
       # The trace is the only way to read a failure that does not reproduce
-      # locally, so keep it when (and only when) the run went red. The list
-      # reporter writes traces, screenshots and error context under
-      # test-results/; playwright-report/ only exists with the html reporter.
+      # locally, so keep it when the run went red.
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -156,50 +165,96 @@ jobs:
             test-results/
           retention-days: 7
 
-  # -------------------------------------------------------------------------- image
-  # Runs on AC-Runner-02, which sits on the same network as Harbor. A
-  # GitHub-hosted runner cannot reach the registry at all: docker login times
-  # out waiting for a connection, which is what this job used to fail on.
-  #
-  # Deploying stays manual. Cadence writes to the production CRM, so a person
-  # decides when a tag goes live; CI's part is to have one built and pushed.
-  image:
+  # -------------------------------------------------------------------- build
+  build:
     name: build + push image
     runs-on: self-hosted
     needs: [lint, test, e2e]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
 
-    env:
-      REGISTRY: h4rb0r.pmx.acumen-strategy.com
-      REPO: sales-cadence/app
+    outputs:
+      IMAGE_TAG: ${{ steps.export_tag.outputs.IMAGE_TAG }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: short sha
-        id: sha
-        run: echo "short=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
 
-      - name: log in to Harbor
+      - name: Generate IMAGE_TAG
+        id: export_tag
         run: |
-          echo "${{ secrets.HARBOR_PASSWORD }}" \
-            | docker login "$REGISTRY" -u "${{ secrets.HARBOR_USERNAME }}" --password-stdin
+          IMAGE_TAG="${{ env.ENVIRONMENT }}-v${{ env.VERSION }}-${GITHUB_SHA::7}"
+          echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
+          echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Login to Harbor
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.HARBOR_USER }}
+          password: ${{ secrets.HARBOR_TOKEN }}
 
       # Types were already checked in `lint`; repeating them inside the build
       # only raises its memory ceiling on a 4GB runner.
-      - name: build and push
-        run: |
-          TAG="prod-v1.0.0-${{ steps.sha.outputs.short }}"
-          docker build \
-            --build-arg SKIP_TYPE_CHECK=true \
-            --build-arg NEXT_BUILD_CPUS=2 \
-            -t "$REGISTRY/$REPO:$TAG" \
-            -t "$REGISTRY/$REPO:latest" .
-          docker push "$REGISTRY/$REPO:$TAG"
-          docker push "$REGISTRY/$REPO:latest"
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64
+          build-args: |
+            SKIP_TYPE_CHECK=true
+            NEXT_BUILD_CPUS=2
+          tags: |
+            ${{ env.DOCKER_IMAGE }}:${{ env.IMAGE_TAG }}
+            ${{ env.DOCKER_IMAGE }}:latest
+          cache-from: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache,mode=max
 
-      # The runner keeps every layer it has ever built; left alone it fills the
-      # disk and the next build fails with no space.
-      - name: prune old build layers
-        if: always()
-        run: docker image prune -f --filter "until=168h"
+  # ------------------------------------------------------------------- deploy
+  deploy:
+    name: deploy to Nomad
+    runs-on: self-hosted
+    needs: build
+
+    env:
+      IMAGE_TAG: ${{ needs.build.outputs.IMAGE_TAG }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Nomad
+        uses: hashicorp/setup-nomad@main
+        with:
+          version: latest
+
+      # The web task applies Prisma migrations on start, so a release carrying
+      # one takes longer than a plain restart; the jobspec's deadlines allow for
+      # that, and auto_revert catches the case where it never comes up.
+      - name: Deploy to Nomad
+        env:
+          NOMAD_ADDR: ${{ vars.NOMAD_ADDR }}
+          NOMAD_TOKEN: ${{ secrets.NOMAD_TOKEN }}
+        run: |
+          nomad job run \
+            -var="image_tag=${IMAGE_TAG}" \
+            -var="harbor_username=${{ secrets.HARBOR_USER }}" \
+            -var="harbor_password=${{ secrets.HARBOR_TOKEN }}" \
+            nomad/cadence.hcl
+
+  # ------------------------------------------------------------------- notify
+  notify:
+    needs: [build, deploy]
+    if: always()
+    uses: Acumen-org/deploy-notify/.github/workflows/notify.yml@main
+    with:
+      app_name: "Sales Cadence"
+      environment: "prod"
+      status: ${{ needs.deploy.result }}
+      version: ${{ needs.build.outputs.IMAGE_TAG }}
+      actor: ${{ github.actor }}
+      run_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    secrets:
+      TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+      MATTERMOST_WEBHOOK_URL: ${{ secrets.MATTERMOST_WEBHOOK_URL }}
