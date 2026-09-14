@@ -9,7 +9,7 @@ export async function GET(request: Request) {
   const user = await requireUser();
   const params = new URL(request.url).searchParams;
   const entity: EnrichmentEntity = params.get('entity') === 'company' ? 'company' : 'person';
-  const records = filterEnrichmentQueue((await enrichmentQueue(user)).filter((item) => item.entity === entity), params.get('q') ?? '', params.getAll('field'), params.get('sort') ?? 'name');
+  const records = filterEnrichmentQueue((await enrichmentQueue(user)).filter((item) => item.entity === entity), params.get('q') ?? '', params.getAll('field'), params.get('sort') ?? 'name', params.get('dir') ?? undefined);
   // Identity columns are for matching, and `deliberate` ones are corrections rather than gaps,
   // so neither is offered as a blank cell somebody feels obliged to fill.
   const fillable = ENRICHMENT_FIELDS[entity].filter((field) => !field.identity && !field.deliberate);

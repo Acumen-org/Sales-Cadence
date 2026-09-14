@@ -1,4 +1,5 @@
 'use client';
+import { SortDirection } from '@/components/sort-direction';
 
 import { useFilterNavigation } from '@/components/filter-navigation';
 import { useEffect, useState } from 'react';
@@ -14,20 +15,21 @@ type Props = {
   fo: string;
   product: string;
   sort: string;
+  dir: 'asc' | 'desc';
 };
 
 const SORTS = [
   { value: 'name', label: 'Sort: name' },
-  { value: 'people', label: 'Sort: most people' },
-  { value: 'inSequence', label: 'Sort: most in sequence' },
-  { value: 'replied', label: 'Sort: most replies' },
+  { value: 'people', label: 'Sort: people' },
+  { value: 'inSequence', label: 'Sort: in sequence' },
+  { value: 'replied', label: 'Sort: replies' },
   { value: 'lastTouch', label: 'Sort: last touch' },
 ];
 
 /** Filters whose "All" is a choice worth keeping in the URL, because the section has a default. */
 const EXPLICIT = new Set(['pod', 'fo']);
 
-export function AccountsToolbar({ q, pods, fos, products, pod, fo, product, sort }: Props) {
+export function AccountsToolbar({ q, pods, fos, products, pod, fo, product, sort, dir }: Props) {
   const navigate = useFilterNavigation();
   const [text, setText] = useState(q);
   useEffect(() => setText(q), [q]);
@@ -87,6 +89,7 @@ export function AccountsToolbar({ q, pods, fos, products, pod, fo, product, sort
       <select value={sort} onChange={(e) => update({ sort: e.target.value === 'people' ? null : e.target.value })} aria-label="Sort accounts" className="!w-auto !py-2 !text-[12.5px]">
         {SORTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
       </select>
+      <SortDirection value={dir} />
     </div>
   );
 }

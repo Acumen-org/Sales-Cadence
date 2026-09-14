@@ -1,3 +1,5 @@
+import { sortDirection } from '@/lib/sorting';
+import { tagFilter } from '@/lib/crm-tags';
 import { PageFrame } from '@/components/page-frame';
 import { needsPod } from '@/lib/auth/rbac';
 import Link from 'next/link';
@@ -9,7 +11,7 @@ import type { Prisma } from '@prisma/client';
 import { requireUser } from '@/lib/auth/current-user';
 import { canEnroll, isAdmin, toActor, visiblePodIds } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
-import { formatInstant, formatLocalDate } from '@/lib/dates';
+import { formatLocalDate } from '@/lib/dates';
 import { cachedPersonName } from '@/lib/person-cache';
 import { getTwentyConnection } from '@/lib/settings';
 import { twentyPersonUrl } from '@/lib/twenty/urls';
@@ -22,7 +24,7 @@ import { contactWarnings, crmStanding, EmptyState, ENROLLMENT_TONE, enrollmentSt
 
 const PAGE_SIZE = 100;
 
-type Search = { q?: string; pod?: string; fo?: string; product?: string; sort?: string; status?: string; page?: string; owner?: string; tier?: string; type?: string };
+type Search = { tag?: string; listCategory?: string; dir?: string; q?: string; pod?: string; fo?: string; product?: string; sort?: string; status?: string; page?: string; owner?: string; tier?: string; type?: string };
 const SORTS = ['name', 'company', 'tier', 'recent'] as const;
 type Sort = (typeof SORTS)[number];
 
@@ -35,6 +37,12 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   const fo = filterParam(sp.fo, defaults.foUserId) ?? '';
   const sort: Sort = SORTS.includes(sp.sort as Sort) ? (sp.sort as Sort) : 'name';
   const status = sp.status ?? '';
+  const dir = sortDirection(sp.dir, sort === 'recent' ? 'desc' : 'asc');
+  const tag = sp.tag ?? '';
+  const listCategory = sp.listCategory ?? '';
+  const tagRows = await prisma.personCache.findMany({ where: await peopleScopeWhere(user), select: { tags: true, listCategory: true }, distinct: ['tags', 'listCategory'] });
+  const tags = [...new Set(tagRows.flatMap(row => row.tags).filter(value => tagFilter(value).key === 'tag'))].sort();
+  const listCategories = [...new Set(tagRows.flatMap(row => row.listCategory ? [row.listCategory] : []))].sort();
   // Only values the mapping knows are accepted, so a hand-edited URL cannot filter on nonsense.
   const values = defaultTwentySchema.personValues;
   const pick = (v: string | undefined, allowed: readonly string[]) => (v && allowed.includes(v) ? v : '');
@@ -53,6 +61,8 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     const member = await prisma.user.findUnique({ where: { id: fo }, select: { twentyMemberId: true } });
     and.push({ OR: [{ ownerMemberId: member?.twentyMemberId ?? '__none__' }, { enrollments: { some: { foUserId: fo, status: { in: ['ACTIVE', 'PAUSED'] } } } }] });
   }
+  if (tag) and.push({ tags: { has: tag } });
+  if (listCategory) and.push({ listCategory });
   if (product) and.push({ productInterest: { has: product } });
   if (tier) where.tier = tier;
   if (contactType) where.contactType = { has: contactType };
@@ -82,12 +92,11 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
       where,
       // Nameless records (imports with only an address) sort after everyone with a name; they
       // used to fill the first pages of the directory.
-      orderBy: sort === 'company' ? [{ companyName: { sort: 'asc', nulls: 'last' } }, { sortName: { sort: 'asc', nulls: 'last' } }] : sort === 'tier' ? [{ tier: { sort: 'asc', nulls: 'last' } }, { sortName: { sort: 'asc', nulls: 'last' } }] : sort === 'recent' ? [{ syncedAt: 'desc' }] : [{ sortName: { sort: 'asc', nulls: 'last' } }, { email: { sort: 'asc', nulls: 'last' } }],
+      orderBy: [...(sort === 'company' ? [{ companyName: { sort: dir, nulls: 'last' as const } }] : sort === 'tier' ? [{ tier: { sort: dir, nulls: 'last' as const } }] : sort === 'recent' ? [{ twentyUpdatedAt: { sort: dir, nulls: 'last' as const } }] : []), { sortName: { sort: dir, nulls: 'last' } }, { email: { sort: dir, nulls: 'last' } }, { id: 'asc' }],
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
       include: {
         enrollments: { orderBy: { createdAt: 'desc' }, take: 1, include: { fo: { select: { id: true, name: true } }, pod: { select: { id: true, name: true } }, campaign: { select: { id: true, name: true } }, sequence: { select: { name: true } } } },
-        touches: { orderBy: { occurredAt: 'desc' }, take: 8 },
       },
     }),
     prisma.personCache.count({ where }),
@@ -99,7 +108,10 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     const p = new URLSearchParams();
     if (q) p.set('q', q);
     p.set('pod', pod);
-    if (fo) p.set('fo', fo);
+    p.set('fo', fo);
+    p.set('dir', dir);
+    if (tag) p.set('tag', tag);
+    if (listCategory) p.set('listCategory', listCategory);
     if (product) p.set('product', product);
     if (sort !== 'name') p.set('sort', sort);
     if (status) p.set('status', status);
@@ -119,7 +131,6 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   const rows: PeopleTableRow[] = people.map((p) => {
     const e = p.enrollments[0] ?? null;
     const active = e && (e.status === 'ACTIVE' || e.status === 'PAUSED') ? e : null;
-    const touch = p.touches[0];
     const cadencePod = p.podOwner ? podByOwner.get(p.podOwner) ?? null : null;
     return {
       id: p.id,
@@ -149,8 +160,6 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
         ? { status: e.status, label: enrollmentStatusLabel(e), tone: ENROLLMENT_TONE[e.status] ?? 'gray', campaignName: e.campaign?.name ?? null, campaignId: e.campaign?.id ?? null, sequenceName: e.sequence.name, foName: e.fo.name }
         : null,
       activeEnrollmentId: active?.id ?? null,
-      lastTouch: touch ? { summary: touch.summary, at: formatInstant(touch.occurredAt, user.timezone), channel: touch.channel, inbound: touch.direction === 'INBOUND' } : null,
-      activity: p.touches.map((t) => ({ at: t.occurredAt.getTime(), lane: t.direction === 'INBOUND' ? ('in' as const) : ('out' as const) })),
       twentyUrl: twentyPersonUrl(conn.baseUrl, p.id),
     };
   });
@@ -159,7 +168,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     <PageFrame className="space-y-3 px-6 pb-8 pt-2">
       <Surface flush>
         <ViewHeader
-          title={q || pod || status || fo || product ? 'Filtered people' : 'All people'}
+          title={q || pod || status || fo || product || tag || listCategory || tier || contactType ? 'Filtered people' : 'All people'}
           caret
           meta={`${total} result${total === 1 ? '' : 's'}`}
           actions={isAdmin(user) ? <SyncNowButton /> : undefined}
@@ -175,7 +184,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
             pod={pod}
             fo={fo}
             product={product}
-            sort={sort}
+            sort={sort} dir={dir} tag={tag} tags={tags} listCategory={listCategory} listCategories={listCategories}
             status={status}
             tier={tier}
             type={contactType}
@@ -184,7 +193,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
         {rows.length === 0 ? (
           <EmptyState icon={<IconPeople size={20} />} title="No people match" hint="Adjust the filters to find a contact." />
         ) : (
-          <PeopleTable rows={rows} canEnroll={canEnroll(actor)} now={Date.now()} />
+          <PeopleTable rows={rows} canEnroll={canEnroll(actor)} />
         )}
       </Surface>
 

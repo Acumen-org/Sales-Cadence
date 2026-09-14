@@ -1,10 +1,12 @@
 'use client';
 
+import { tagFilter, tagTone } from '@/lib/crm-tags';
+import { useFilterNavigation } from '@/components/filter-navigation';
 import Link from 'next/link';
 import { useId, useState } from 'react';
-import { Badge, DotTimeline, IdentityCell, TierBadge, touchTitle, type BadgeTone, type TimelinePoint } from '@/components/ui';
+import { Badge, IdentityCell, type BadgeTone } from '@/components/ui';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
-import { ActionIcon, IconPlus } from '@/components/icons';
+import { IconPlus } from '@/components/icons';
 
 export type PeopleTableRow = {
   id: string;
@@ -27,25 +29,15 @@ export type PeopleTableRow = {
   optedOut: boolean;
   enrollment: { status: string; label: string; tone: BadgeTone; campaignName: string | null; campaignId: string | null; sequenceName: string; foName: string } | null;
   activeEnrollmentId: string | null;
-  lastTouch: { summary: string; at: string; channel: 'EMAIL' | 'CALL' | 'LINKEDIN' | 'MEETING'; inbound: boolean } | null;
-  activity: TimelinePoint[];
   twentyUrl: string | null;
 };
 
 type Props = {
   rows: PeopleTableRow[];
   canEnroll: boolean;
-  /** The render's clock, from the server, so the activity window is the same on both sides. */
-  now: number;
 };
 
-/** People list with stages, an activity timeline, row actions and bulk "add to sequence". */
-/**
- * The CRM tags left to show. Twenty carries the same fact as both a field and a tag - a person
- * marked do-not-contact has the flag and the tag, a person with no address has the flag and
- * MISSING_EMAIL - and the badges above are built from the fields. Rendering both put the same
- * word in the cell twice, so anything already said is dropped here.
- */
+/** CRM tags and campaign membership with bulk selection. */
 const MAX_PILLS = 2;
 
 /** Tags expand in the row, accessible by keyboard and touch as well as a pointer. */
@@ -63,16 +55,13 @@ function Pills({ items }: { items: { label: string; node: React.ReactNode }[] })
   );
 }
 
-function distinctTags(p: PeopleTableRow): string[] {
-  const shown = new Set(
-    [p.standing.label, p.listCategory ? optionLabel(p.listCategory) : null, ...p.warnings.map((w) => w.label)]
-      .filter((label): label is string => Boolean(label))
-      .map((label) => label.toLowerCase()),
-  );
-  return p.tags.filter((tag) => !shown.has(optionLabel(tag).toLowerCase()));
+function Tag({ value, field }: { value: string; field?: string }) {
+  const navigate = useFilterNavigation();
+  const filter = field ? { key: field, value } : tagFilter(value);
+  return <button type="button" aria-label={`Filter by ${optionLabel(value)}`} className="rounded-md text-left focus-visible:ring-2 focus-visible:ring-brand-300" onClick={() => navigate(next => { next.set(filter.key, filter.value); next.delete('page'); })}><Badge tone={tagTone(value)}>{optionLabel(value)}</Badge></button>;
 }
 
-export function PeopleTable({ rows, canEnroll, now }: Props) {
+export function PeopleTable({ rows, canEnroll }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const selectable = rows.filter((r) => !r.activeEnrollmentId && !r.dnd && !r.optedOut);
   const allSelected = selectable.length > 0 && selectable.every((r) => selected.has(r.id));
@@ -104,12 +93,11 @@ export function PeopleTable({ rows, canEnroll, now }: Props) {
         <table className="table table-people min-w-[1040px] table-fixed">
           <colgroup>
             {canEnroll ? <col className="w-10" /> : null}
-            <col style={{ width: showNext ? '23%' : '26%' }} />
-            <col style={{ width: '20%' }} />
+            <col style={{ width: showNext ? '28%' : '32%' }} />
+            <col style={{ width: '27%' }} />
             {showNext ? <col style={{ width: '12%' }} /> : null}
-            <col style={{ width: showNext ? '16%' : '20%' }} />
+            <col style={{ width: showNext ? '21%' : '25%' }} />
             <col style={{ width: '12%' }} />
-            <col />
           </colgroup>
           <thead>
             <tr>
@@ -119,11 +107,10 @@ export function PeopleTable({ rows, canEnroll, now }: Props) {
                 </th>
               ) : null}
               <th>Name</th>
-              <th>In Twenty</th>
+              <th>Tags in Twenty</th>
               {showNext ? <th>Next in Twenty</th> : null}
               <th>Campaign / sequence</th>
               <th>Pod</th>
-              <th>Recent activity</th>
             </tr>
           </thead>
           <tbody>
@@ -143,17 +130,12 @@ export function PeopleTable({ rows, canEnroll, now }: Props) {
                 <td>
                   <IdentityCell name={p.name} href={`/people/${p.id}`} shape="circle" sub={[p.jobTitle, p.companyName].filter(Boolean).join(' · ') || null} />
                 </td>
-                {/* Everything Twenty says about the person, each value once. Standing, tier and
-                    the data-quality flags are derived from fields Twenty also carries as tags, so
-                    a tag already shown as a badge is dropped rather than repeated. */}
                 <td title={p.leadSource.length ? `Lead source: ${optionLabels(p.leadSource)}` : undefined}>
-                  <div className="mb-2"><Badge tone={p.standing.tone} dot>{p.standing.label}</Badge></div>
                   <Pills
                     items={[
-                      ...(p.tier ? [{ label: p.tier, node: <TierBadge tier={p.tier} /> }] : []),
-                      ...(p.listCategory ? [{ label: optionLabel(p.listCategory), node: <Badge tone="gray">{optionLabel(p.listCategory)}</Badge> }] : []),
-                      ...p.warnings.map((w) => ({ label: w.label, node: <Badge tone={w.tone}>{w.label}</Badge> })),
-                      ...distinctTags(p).map((tag) => ({ label: optionLabel(tag), node: <Badge tone="gray">{optionLabel(tag)}</Badge> })),
+                      ...(p.tier ? [{ label: optionLabel(p.tier), node: <Tag value={p.tier} field="tier" /> }] : []),
+                      ...(p.listCategory ? [{ label: optionLabel(p.listCategory), node: <Tag value={p.listCategory} field="listCategory" /> }] : []),
+                      ...p.tags.map(tag => ({ label: optionLabel(tag), node: <Tag value={tag} /> })),
                     ]}
                   />
                 </td>
@@ -185,20 +167,6 @@ export function PeopleTable({ rows, canEnroll, now }: Props) {
                 <td className="break-words text-[12.5px]">
                   {p.podName ?? <span className="text-ink-300">-</span>}
                   {p.enrollment?.foName ? <div className="text-[11px] text-ink-500"><span className="text-ink-400">FO</span> {p.enrollment.foName}</div> : null}
-                </td>
-                <td className="text-[12px]">
-                  {p.lastTouch ? (
-                    <>
-                      <div className="flex min-w-0 max-w-[13rem] items-center gap-1.5" title={p.lastTouch.summary}>
-                        <span className={p.lastTouch.inbound ? 'shrink-0 text-emerald-700' : 'shrink-0 text-ink-400'}><ActionIcon action={p.lastTouch.channel} size={13} /></span>
-                        <span className="min-w-0 truncate text-ink-600">{touchTitle(p.lastTouch.summary)}</span>
-                      </div>
-                      <div className="mt-0.5 font-medium text-ink-700">{p.lastTouch.at}</div>
-                    </>
-                  ) : (
-                    <span className="text-ink-300">-</span>
-                  )}
-                  {p.activity.length ? <div className="mt-1 overflow-hidden"><DotTimeline points={p.activity} now={now} width={110} /></div> : null}
                 </td>
 
               </tr>

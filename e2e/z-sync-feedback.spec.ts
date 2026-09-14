@@ -1,0 +1,20 @@
+import { expect, test } from '@playwright/test';
+test('sync feedback is temporary and never moves the directory controls', async ({ page }) => {
+  await page.goto('/login');
+  await page.getByLabel('Email').fill('ria@cadence.local');
+  await page.getByLabel('Password').fill('password123');
+  await page.getByRole('button', { name: /^Sign in/ }).click();
+  await page.waitForURL(/\/home/);
+  await page.goto('/people?pod=&fo=');
+  const sync = page.getByRole('button', { name: 'Sync now', exact: true });
+  const search = page.getByLabel('Search people', { exact: true });
+  await expect(sync).toBeVisible();
+  const buttonBefore = await sync.boundingBox();
+  const searchBefore = await search.boundingBox();
+  await sync.click();
+  const notification = page.getByRole('button', { name: 'Dismiss sync notification' });
+  await expect(notification).toBeVisible({ timeout: 60000 });
+  expect(await sync.boundingBox()).toEqual(buttonBefore);
+  expect(await search.boundingBox()).toEqual(searchBefore);
+  await expect(notification).toHaveCount(0, { timeout: 12000 });
+});

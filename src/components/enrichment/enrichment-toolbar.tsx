@@ -1,17 +1,18 @@
 'use client';
+import { SortDirection } from '@/components/sort-direction';
 
 import Link from 'next/link';
 import { useFilterNavigation } from '@/components/filter-navigation';
 import { useEffect, useState } from 'react';
 import { IconSearch } from '@/components/icons';
 
-type Props = { tab: string; q: string; fields: [string, string][]; wanted: string[]; sort: string; exportHref: string };
+type Props = { tab: string; q: string; fields: [string, string][]; wanted: string[]; sort: string; dir: 'asc' | 'desc'; exportHref: string };
 
 /**
  * What is missing, chosen from a list one kind at a time and shown as removable chips; several
  * kinds together mean "lacks any of these". Every change applies at once.
  */
-export function EnrichmentToolbar({ tab, q, fields, wanted, sort, exportHref }: Props) {
+export function EnrichmentToolbar({ tab, q, fields, wanted, sort, dir, exportHref }: Props) {
   const navigate = useFilterNavigation();
   const [text, setText] = useState(q);
   useEffect(() => setText(q), [q]);
@@ -52,8 +53,9 @@ export function EnrichmentToolbar({ tab, q, fields, wanted, sort, exportHref }: 
       <select value={sort} onChange={(e) => push((next) => { if (e.target.value === 'name') next.delete('sort'); else next.set('sort', e.target.value); })} aria-label="Sort" className="!w-auto !py-2 !text-[12.5px]">
         <option value="name">Sort: name</option>
         <option value="company">Sort: company</option>
-        <option value="gaps">Sort: most missing</option>
+        <option value="gaps">Sort: missing fields</option>
       </select>
+      <SortDirection value={dir} />
       {q || wanted.length || sort !== 'name' ? <Link href={`/enrichment?tab=${tab}`} onClick={() => setText('')} className="btn-ghost btn-sm">Reset</Link> : null}
       <a href={exportHref} className="btn-secondary btn-sm ml-auto">Export to enrich</a>
     </div>

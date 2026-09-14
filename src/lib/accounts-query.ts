@@ -1,3 +1,4 @@
+import { sortDirection, type SortDirection } from './sorting';
 import type { Prisma } from '@prisma/client';
 import { companySearchWhere } from './search-terms';
 import { getSettings } from './settings';
@@ -5,7 +6,7 @@ import { isInternalCompany } from './internal-organizations';
 import { meetingReadWhere } from './meetings-query';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
-import { visiblePodIds, canSeeAllPods } from './auth/rbac';
+import { visiblePodIds, canSeeAllPods, needsPod } from './auth/rbac';
 import { cachedPersonName } from './person-cache';
 import { auditDetailText, describeAudit } from './audit-format';
 
@@ -24,6 +25,9 @@ export type AccountListRow = {
   city: string | null;
   ownerMemberId: string | null;
   ownerName: string | null;
+  pods: string[];
+  fos: string[];
+  products: string[];
   people: number;
   inSequence: number;
   replied: number;
@@ -77,6 +81,7 @@ export type AccountFilters = {
   /** Accounts with a person interested in this product. */
   product?: string | null;
   sort?: AccountSort;
+  dir?: SortDirection;
   /** 1-based page of ACCOUNTS_PAGE_SIZE rows. Omit for every row (the Home tiles and counts). */
   page?: number;
 };
@@ -131,7 +136,7 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
       FROM "Touch" t JOIN "PersonCache" p ON p.id = t."personId"
       WHERE p."companyId" = ANY(${ids}) GROUP BY p."companyId"`,
     prisma.meeting.groupBy({ by: ['companyId'], where: { companyId: { in: ids } }, _count: { _all: true } }),
-    prisma.user.findMany({ where: { twentyMemberId: { not: null } }, select: { name: true, twentyMemberId: true } }),
+    prisma.user.findMany({ where: { twentyMemberId: { not: null } }, select: { name: true, twentyMemberId: true, role: true } }),
   ]);
 
   const peopleBy = new Map(peopleRows.map((r) => [r.companyId, r._count._all]));
@@ -164,6 +169,7 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
     city: c.city,
     ownerMemberId: c.ownerMemberId,
     ownerName: c.ownerMemberId ? memberName.get(c.ownerMemberId) ?? null : null,
+    pods: [], fos: [], products: [],
     people: peopleBy.get(c.id) ?? 0,
     inSequence: enrollBy.get(c.id)?.inSequence ?? 0,
     replied: enrollBy.get(c.id)?.replied ?? 0,
@@ -172,7 +178,16 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
     mine: (user.twentyMemberId && c.ownerMemberId === user.twentyMemberId) || mineIds.has(c.id),
   }));
   const sort = opts.sort ?? DEFAULT_ACCOUNT_SORT;
-  const desc = (a: number, b: number) => b - a;
+  const direction = sortDirection(opts.dir, sort === 'name' ? 'asc' : 'desc');
+  const desc = (a: number, b: number) => direction === 'desc' ? b - a : a - b;
+  if (sort === 'name') {
+    const names = new Map(companies.map(company => [company.id, company.sortName]));
+    rows.sort((a, b) => {
+      const left = names.get(a.id), right = names.get(b.id);
+      if (!left || !right) return left ? -1 : right ? 1 : a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
+      return (direction === 'asc' ? 1 : -1) * left.localeCompare(right) || a.id.localeCompare(b.id);
+    });
+  }
   // `rows` is already in name order with the nameless last, so every other sort only needs its
   // own key; ties keep that order.
   if (sort !== 'name') {
@@ -180,14 +195,36 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
       sort === 'people' ? desc(a.people, b.people)
       : sort === 'inSequence' ? desc(a.inSequence, b.inSequence)
       : sort === 'replied' ? desc(a.replied, b.replied)
-      : desc(a.lastTouchAt?.getTime() ?? 0, b.lastTouchAt?.getTime() ?? 0),
+      : !a.lastTouchAt || !b.lastTouchAt ? a.lastTouchAt ? -1 : b.lastTouchAt ? 1 : 0 : desc(a.lastTouchAt.getTime(), b.lastTouchAt.getTime()),
     );
   }
   const scoped = opts.scope === 'mine' ? rows.filter((r) => r.mine) : rows;
   const summary = { total: scoped.length, mine: rows.filter((r) => r.mine).length, people: scoped.reduce((n, a) => n + a.people, 0), inSequence: scoped.reduce((n, a) => n + a.inSequence, 0), engaged: scoped.filter((a) => a.replied > 0 || a.meetings > 0).length };
-  if (!opts.page) return { rows: scoped, ...summary };
-  const start = (Math.max(1, opts.page) - 1) * ACCOUNTS_PAGE_SIZE;
-  return { rows: scoped.slice(start, start + ACCOUNTS_PAGE_SIZE), ...summary };
+  const start = (Math.max(1, opts.page ?? 1) - 1) * ACCOUNTS_PAGE_SIZE;
+  const pageRows = opts.page ? scoped.slice(start, start + ACCOUNTS_PAGE_SIZE) : scoped;
+  const [associations, pods] = await Promise.all([
+    prisma.personCache.findMany({ where: { deletedAt: null, companyId: { in: pageRows.map(row => row.id) } }, select: { companyId: true, podOwner: true, ownerMemberId: true, productInterest: true, enrollments: { where: { status: { in: ['ACTIVE', 'PAUSED'] } }, select: { fo: { select: { name: true } } } } } }),
+    prisma.pod.findMany({ select: { podOwnerValue: true, name: true } }),
+  ]);
+  const salesMembers = new Set(members.filter(member => needsPod(member.role)).map(member => member.twentyMemberId));
+  const podNames = new Map(pods.map(pod => [pod.podOwnerValue, pod.name]));
+  const byId = new Map(pageRows.map(row => [row.id, row]));
+  for (const person of associations) {
+    const row = byId.get(person.companyId!);
+    if (!row) continue;
+    if (person.podOwner) row.pods.push(podNames.get(person.podOwner) ?? person.podOwner);
+    const owner = person.ownerMemberId ? memberName.get(person.ownerMemberId) : null;
+    if (owner && salesMembers.has(person.ownerMemberId)) row.fos.push(owner);
+    row.fos.push(...person.enrollments.map(enrollment => enrollment.fo.name));
+    row.products.push(...person.productInterest);
+  }
+  for (const row of pageRows) {
+    if (row.ownerName && salesMembers.has(row.ownerMemberId)) row.fos.push(row.ownerName);
+    row.pods = [...new Set(row.pods)].sort();
+    row.fos = [...new Set(row.fos)].sort();
+    row.products = [...new Set(row.products)].sort();
+  }
+  return { rows: pageRows, ...summary };
 }
 
 /**

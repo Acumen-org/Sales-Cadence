@@ -1,3 +1,4 @@
+import { sortDirection } from './sorting';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from './db';
@@ -214,10 +215,10 @@ async function enrichmentWriteCompanyScope(user: SessionUser): Promise<Prisma.Co
 /** `fixInTwenty`: a relation or an assignment, which an import cannot write - somebody links it in Twenty. */
 export type EnrichmentGap = { field: string; label: string; priority: 'critical' | 'useful'; fixInTwenty?: boolean };
 export type EnrichmentQueueItem = { id: string; label: string; company: string | null; entity: EnrichmentEntity; href: string; gaps: EnrichmentGap[] };
-export function filterEnrichmentQueue(items: EnrichmentQueueItem[], q = '', fields: string[] = [], sort = 'name') {
+export function filterEnrichmentQueue(items: EnrichmentQueueItem[], q = '', fields: string[] = [], sort = 'name', dir?: string) {
   const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
   return items.filter((item) => terms.every((term) => `${item.label} ${item.company ?? ''}`.toLowerCase().includes(term)) && (!fields.length || item.gaps.some((gap) => fields.includes(gap.field))))
-    .sort((a, b) => sort === 'gaps' ? b.gaps.length - a.gaps.length || a.label.localeCompare(b.label) : sort === 'company' ? (a.company ?? '').localeCompare(b.company ?? '') || a.label.localeCompare(b.label) : a.label.localeCompare(b.label));
+    .sort((a, b) => (sortDirection(dir, sort === 'gaps' ? 'desc' : 'asc') === 'desc' ? -1 : 1) * (sort === 'gaps' ? a.gaps.length - b.gaps.length || a.label.localeCompare(b.label) : sort === 'company' ? (a.company ?? '').localeCompare(b.company ?? '') || a.label.localeCompare(b.label) : a.label.localeCompare(b.label)) || a.id.localeCompare(b.id));
 }
 export async function enrichmentQueue(user: SessionUser) {
   const { rules } = await getSettings();

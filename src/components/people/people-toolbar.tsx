@@ -1,4 +1,5 @@
 'use client';
+import { SortDirection } from '@/components/sort-direction';
 
 import { useFilterNavigation } from '@/components/filter-navigation';
 import { useEffect, useState } from 'react';
@@ -17,6 +18,8 @@ type Props = {
   fo: string;
   product: string;
   sort: string;
+  dir: 'asc' | 'desc';
+  tag: string; tags: string[]; listCategory: string; listCategories: string[];
   status: string;
   tier: string;
   type: string;
@@ -47,7 +50,7 @@ const SORTS = [
 /** Filters whose "All" is a choice worth keeping in the URL, because the section has a default. */
 const EXPLICIT = new Set(['pod', 'fo']);
 
-export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, product, sort, status, tier, type }: Props) {
+export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, product, sort, status, tier, type, dir, tag, tags, listCategory, listCategories }: Props) {
   const navigate = useFilterNavigation();
   const [text, setText] = useState(q);
   useEffect(() => setText(q), [q]);
@@ -73,6 +76,8 @@ export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, p
   }, [text]);
 
   const activeChips = [
+    tag ? { key: 'tag', label: optionLabel(tag) } : null,
+    listCategory ? { key: 'listCategory', label: optionLabel(listCategory) } : null,
     pod ? { key: 'pod', label: `Pod is ${pods.find((p) => p.podOwnerValue === pod)?.name ?? optionLabel(pod)}` } : null,
     fo ? { key: 'fo', label: `FO is ${fos.find((f) => f.id === fo)?.name ?? fo}` } : null,
     product ? { key: 'product', label: optionLabel(product) } : null,
@@ -129,6 +134,8 @@ export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, p
       <Select name="product" value={product} label="Filter by product interest" options={products} all="Any product" />
       <Select name="tier" value={tier} label="Filter by tier" options={tiers} all="Any tier" />
       <Select name="type" value={type} label="Filter by contact type" options={types} all="Any type" />
+      <Select name="tag" value={tag} label="Filter by Twenty tag" options={tags} all="Any Twenty tag" />
+      <Select name="listCategory" value={listCategory} label="Filter by list category" options={listCategories} all="Any list category" />
       <select value={status} onChange={(e) => update({ status: e.target.value || null })} aria-label="Filter by sequence state" className="!w-auto !py-2 !text-[12.5px]">
         {SEQUENCE_STATES.map((s) => (
           <option key={s.value} value={s.value}>
@@ -143,6 +150,7 @@ export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, p
           </option>
         ))}
       </select>
+      <SortDirection value={dir} />
     </div>
   );
 }

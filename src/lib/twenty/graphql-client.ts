@@ -276,6 +276,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     return this.selection(this.s.objects.message.typeName, [
       'id',
       m.subject,
+      m.text,
       m.receivedAt,
       m.messageThreadId,
       { field: m.messageParticipants, sub: `{ edges { node { id ${p.role} ${p.handle} ${p.displayName} ${p.personId} ${p.workspaceMemberId} } } }` },

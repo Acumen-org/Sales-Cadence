@@ -1,3 +1,5 @@
+import { sortDirection } from '@/lib/sorting';
+import { optionLabel } from '@/lib/twenty/labels';
 import { PageFrame } from '@/components/page-frame';
 import { needsPod } from '@/lib/auth/rbac';
 import { requireUser } from '@/lib/auth/current-user';
@@ -13,7 +15,7 @@ import { IconCampaigns } from '@/components/icons';
 import { AccountsToolbar } from '@/components/accounts/accounts-toolbar';
 import { Badge, Count, Empty, EmptyState, IdentityCell, Stat, StatusDot, Surface, Toolbar, ViewHeader } from '@/components/ui';
 
-export default async function AccountsPage({ searchParams }: { searchParams: Promise<{ q?: string; scope?: string; pod?: string; fo?: string; product?: string; sort?: string; page?: string }> }) {
+export default async function AccountsPage({ searchParams }: { searchParams: Promise<{ q?: string; scope?: string; pod?: string; fo?: string; product?: string; sort?: string; dir?: string; page?: string }> }) {
   const user = await requireUser();
   const sp = await searchParams;
   const q = (sp.q ?? '').trim();
@@ -23,10 +25,11 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
   const values = defaultTwentySchema.personValues;
   const product = sp.product && (values.productInterest as readonly string[]).includes(sp.product) ? sp.product : null;
   const sort: AccountSort = ACCOUNT_SORTS.includes(sp.sort as AccountSort) ? (sp.sort as AccountSort) : DEFAULT_ACCOUNT_SORT;
+  const dir = sortDirection(sp.dir, sort === 'name' ? 'asc' : 'desc');
   const page = Math.max(1, Number.parseInt(sp.page ?? '1', 10) || 1);
   const visible = visiblePodIds(user);
   const [list, podRows] = await Promise.all([
-    listAccounts(user, { q, pod, foUserId, product, sort, page }),
+    listAccounts(user, { q, pod, foUserId, product, sort, dir, page }),
     prisma.pod.findMany({ where: { archived: false, ...(visible === null ? {} : { id: { in: visible } }) }, orderBy: { name: 'asc' }, include: { users: { include: { user: { select: { id: true, name: true, active: true, role: true } } } } } }),
   ]);
   const fos = [...new Map(podRows.flatMap((x) => x.users.filter((up) => up.user.active && needsPod(up.user.role)).map((up) => [up.user.id, { id: up.user.id, name: up.user.name }] as const))).values()].sort((a, b) => a.name.localeCompare(b.name));
@@ -36,7 +39,8 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
     const p = new URLSearchParams();
     if (q) p.set('q', q);
     p.set('pod', pod ?? '');
-    if (foUserId) p.set('fo', foUserId);
+    p.set('fo', foUserId ?? '');
+    p.set('dir', dir);
     if (product) p.set('product', product);
     if (sort !== DEFAULT_ACCOUNT_SORT) p.set('sort', sort);
     p.set('page', String(n));
@@ -47,14 +51,14 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
     <PageFrame className="space-y-5 px-6 pb-8 pt-2">
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <Stat label="Accounts in view" value={list.total} />
-        <Stat label="People" value={list.people} />
+        <Stat label="People at matching accounts" value={list.people} />
         <Stat label="In sequence" value={list.inSequence} />
         <Stat label="Engaged accounts" value={list.engaged} tone="good" />
       </div>
       <Surface flush>
         <ViewHeader title="All accounts" caret actions={isAdmin(user) ? <SyncNowButton /> : undefined} />
         <Toolbar>
-          <AccountsToolbar q={q} pods={podRows.map((x) => ({ podOwnerValue: x.podOwnerValue, name: x.name }))} fos={fos} products={[...values.productInterest]} pod={pod ?? ''} fo={foUserId ?? ''} product={product ?? ''} sort={sort} />
+          <AccountsToolbar q={q} pods={podRows.map((x) => ({ podOwnerValue: x.podOwnerValue, name: x.name }))} fos={fos} products={[...values.productInterest]} pod={pod ?? ''} fo={foUserId ?? ''} product={product ?? ''} sort={sort} dir={dir} />
         </Toolbar>
 
         {rows.length === 0 ? (
@@ -69,10 +73,10 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
               <thead>
                 <tr>
                   <th>Account</th>
-                  <th>Industry</th>
-                  <th>City</th>
-                  <th>Owner</th>
-                  <th className="num">People</th>
+                  <th>PODs</th>
+                  <th>FOs</th>
+                  <th>Product</th>
+                  <th className="num" title="Everyone at this account, across all pods">People at account</th>
                   <th className="num">In sequence</th>
                   <th className="num">Replied</th>
                   <th className="num">Meetings</th>
@@ -88,10 +92,8 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
                         {a.mine ? <Badge tone="blue">mine</Badge> : null}
                       </div>
                     </td>
-                    {/* Industry and city are fields, not a dotted sentence under the name. */}
-                    <td className="whitespace-nowrap text-[12.5px]">{a.industry ?? <Empty />}</td>
-                    <td className="whitespace-nowrap text-[12.5px]">{a.city ?? <Empty />}</td>
-                    <td className="whitespace-nowrap text-[12.5px]">{a.ownerName ?? <Empty>Unassigned</Empty>}</td>
+                    {[a.pods, a.fos, a.products].map((items, index) => <td key={index}><div className="flex max-w-xs flex-wrap gap-1.5">{items.length ? items.map(value => <Badge key={value} tone={index === 0 ? 'purple' : index === 1 ? 'blue' : 'green'}>{optionLabel(value)}</Badge>) : <Empty />}</div></td>)
+                    }
                     <td className="num"><Count value={a.people} /></td>
                     <td className="num">
                       <StatusDot tone={a.inSequence ? 'green' : 'gray'}><Count value={a.inSequence} /></StatusDot>

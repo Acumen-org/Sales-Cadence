@@ -7,7 +7,7 @@ type Call = { url: string; query: string; variables: Record<string, unknown> };
 const ALL_FIELDS = [
   'id', 'name', 'emails', 'phones', 'linkedinLink', 'jobTitle', 'city', 'companyId', 'company', 'dnd', 'podOwner', 'assignedToId', 'tags', 'leadSource',
   'tier', 'contactType', 'listCategory', 'pipelineStageField', 'nextAction', 'nextActionDueDate', 'nextStep', 'lastNote', 'meetingTime',
-  'createdAt', 'updatedAt', 'deletedAt', 'title', 'bodyV2', 'createdBy', 'noteTargets', 'subject', 'receivedAt', 'messageThreadId', 'messageParticipants',
+  'createdAt', 'updatedAt', 'deletedAt', 'title', 'bodyV2', 'createdBy', 'noteTargets', 'text', 'subject', 'receivedAt', 'messageThreadId', 'messageParticipants',
   'status', 'dueAt', 'assigneeId', 'taskTargets', 'stage', 'pointOfContactId', 'userEmail', 'timeZone', 'domainName', 'cadenceTaskId',
 ];
 
@@ -146,18 +146,21 @@ describe('TwentyGraphqlClient', () => {
   it('lifts notes and messages for a person through their target/participant tables', async () => {
     const { client, calls } = fakeClient((call) => {
       if (call.query.includes('noteTargets(')) {
-        return { data: { noteTargets: { edges: [{ node: { note: { id: 'n-1', title: '[CALL] Outbound Call by tw_alisa', createdBy: { workspaceMemberId: 'wm-1', name: 'Alisa' }, noteTargets: { edges: [{ node: { personId: 'p-1' } }] }, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z' } } }], pageInfo: { hasNextPage: false } } } };
+        return { data: { noteTargets: { edges: [{ node: { note: { id: 'n-1', title: '[CALL] Outbound Call by tw_alisa', bodyV2: { markdown: 'Complete note content\nSecond paragraph with **details**.' }, createdBy: { workspaceMemberId: 'wm-1', name: 'Alisa' }, noteTargets: { edges: [{ node: { personId: 'p-1' } }] }, createdAt: '2026-09-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z' } } }], pageInfo: { hasNextPage: false } } } };
       }
       if (call.query.includes('messageParticipants(')) {
-        const message = { id: 'm-1', subject: 'Hi', receivedAt: '2026-09-01T00:00:00Z', messageParticipants: { edges: [{ node: { id: 'x', role: 'from', handle: 'alisa@acumen.example', workspaceMemberId: 'wm-1' } }, { node: { id: 'y', role: 'to', handle: 'nina@acme.example', personId: 'p-1' } }] } };
+        const message = { id: 'm-1', subject: 'Hi', text: 'Full email body\nWith another paragraph and https://example.com', receivedAt: '2026-09-01T00:00:00Z', messageParticipants: { edges: [{ node: { id: 'x', role: 'from', handle: 'alisa@acumen.example', workspaceMemberId: 'wm-1' } }, { node: { id: 'y', role: 'to', handle: 'nina@acme.example', personId: 'p-1' } }] } };
         return { data: { messageParticipants: { edges: [{ node: { message } }, { node: { message } }], pageInfo: { hasNextPage: false } } } };
       }
       throw new Error(`unexpected ${call.query}`);
     });
     const notes = await client.listNotes({ personId: 'p-1', limit: 5 });
+    expect(notes.items[0].bodyMarkdown).toBe('Complete note content\nSecond paragraph with **details**.');
     expect(notes.items[0]).toMatchObject({ id: 'n-1', createdByMemberId: 'wm-1', personIds: ['p-1'] });
     expect(calls.find((c) => c.query.includes('noteTargets('))!.variables.filter).toEqual({ personId: { eq: 'p-1' } });
     const messages = await client.listMessages({ personId: 'p-1' });
+    expect(calls.find(call => call.query.includes('messageParticipants('))?.query).toMatch(/\btext\b/);
+    expect(messages.items[0].text).toBe('Full email body\nWith another paragraph and https://example.com');
     expect(messages.items).toHaveLength(1); // deduplicated across participants
     expect(messages.items[0].participants.map((p) => p.role)).toEqual(['from', 'to']);
   });
