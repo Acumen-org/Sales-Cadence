@@ -168,7 +168,7 @@ jobs:
   # -------------------------------------------------------------------- build
   build:
     name: build + push image
-    runs-on: self-hosted
+    runs-on: [self-hosted, AC-Runner-02]
     needs: [lint, test, e2e]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
 
@@ -215,7 +215,7 @@ jobs:
   # ------------------------------------------------------------------- deploy
   deploy:
     name: deploy to Nomad
-    runs-on: self-hosted
+    runs-on: [self-hosted, AC-Runner-02]
     needs: build
 
     env:
