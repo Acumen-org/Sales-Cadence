@@ -23,3 +23,16 @@ export function cleanRichText(html: string): string {
 export function plainToHtml(text: string): string {
   return `<p>${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')}</p>`;
 }
+
+/** Render imported mail without Outlook spacing, retaining every text block. */
+export function crmEmailHtml(text: string): string {
+  if (!/<(?:p|div|br|html|table|a|blockquote|span)\b/i.test(text)) {
+    return cleanRichText(plainToHtml(text.replace(/\r\n?/g, '\n').replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, '\n\n')));
+  }
+  // Convert layout containers before the strict sanitizer strips their tags, preserving boundaries.
+  const structured = text.replace(/<\/?(?:div|section|article|tr|h[1-6])\b[^>]*>/gi, '<br>')
+    .replace(/<\/(?:td|th)>/gi, ' ');
+  return cleanRichText(structured)
+    .replace(/<p>(?:\s|&nbsp;|&#160;|<br\s*\/?>)*<\/p>/gi, '')
+    .replace(/(?:<br\s*\/?>[\s\u00a0]*){3,}/gi, '<br><br>');
+}

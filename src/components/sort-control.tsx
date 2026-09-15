@@ -20,7 +20,6 @@ export function SortControl({ value, dir, options, defaultValue, label = 'Sort',
       next.delete('page');
       next.delete('before');
     });
-  const reversed: SortDirection = dir === 'asc' ? 'desc' : 'asc';
   return (
     <div className="inline-flex items-stretch overflow-hidden rounded-[10px] border border-line bg-white focus-within:border-brand-400 focus-within:ring-4 focus-within:ring-brand-100/70">
       <select
@@ -45,7 +44,12 @@ export function SortControl({ value, dir, options, defaultValue, label = 'Sort',
         type="button"
         aria-label={`Sort direction: ${dir === 'asc' ? 'ascending' : 'descending'}`}
         title={dir === 'asc' ? 'Ascending - click to reverse' : 'Descending - click to reverse'}
-        onClick={() => apply((next) => next.set('dir', reversed))}
+        onClick={() => apply((next) => {
+          const field = next.get('sort') ?? defaultValue;
+          const fallback = field === value ? dir : ['name', 'company', 'tier'].includes(field) ? 'asc' : 'desc';
+          const current = next.get('dir') ?? fallback;
+          next.set('dir', current === 'asc' ? 'desc' : 'asc');
+        })}
         className="flex items-center border-l border-line px-2 text-ink-600 hover:bg-canvas hover:text-ink-900 focus-visible:bg-canvas"
       >
         {dir === 'asc' ? <IconArrowUp size={14} /> : <IconArrowDown size={14} />}
@@ -61,13 +65,15 @@ export function SortControl({ value, dir, options, defaultValue, label = 'Sort',
 export function SortableHeader({ field, label, sort, dir, defaultValue, defaultDir = 'desc', className }: { field: string; label: string; sort: string; dir: SortDirection; defaultValue: string; defaultDir?: SortDirection; className?: string }) {
   const navigate = useFilterNavigation();
   const active = sort === field;
-  const nextDir: SortDirection = active ? (dir === 'asc' ? 'desc' : 'asc') : defaultDir;
   return (
     <th className={className} aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
       <button
         type="button"
         onClick={() =>
           navigate((next) => {
+            const currentField = next.get('sort') ?? defaultValue;
+            const currentDir = next.get('dir') ?? (currentField === sort ? dir : defaultDir);
+            const nextDir = currentField === field ? (currentDir === 'asc' ? 'desc' : 'asc') : defaultDir;
             if (field === defaultValue) next.delete('sort');
             else next.set('sort', field);
             next.set('dir', nextDir);

@@ -1,3 +1,5 @@
+import { personToCacheData } from '@/lib/person-cache';
+import { getMockTwentyClient } from '@/lib/twenty/mock-client';
 import { beforeEach, expect, it } from 'vitest';
 import { prisma } from '@/lib/db';
 import { listAccounts } from '@/lib/accounts-query';
@@ -43,5 +45,28 @@ it('enrichment reverses every supported sort without changing membership', () =>
   const items: EnrichmentQueueItem[] = ['Alpha', 'Beta', 'Gamma'].map((label, i) => ({ id: label, label, company: label, entity: 'person', href: '/', gaps: Array.from({ length: i + 1 }, () => ({ field: 'email', label: 'Email', priority: 'critical' })) }));
   for (const sort of ['name', 'company', 'gaps']) {
     expect(filterEnrichmentQueue(items, '', [], sort, 'desc').map(row => row.id)).toEqual(filterEnrichmentQueue(items, '', [], sort, 'asc').map(row => row.id).reverse());
+  }
+});
+
+it('unnamed accounts reverse their displayed domain fallback with name direction', async () => {
+  await prisma.companyCache.createMany({ data: [
+    { id: 'domain-a', name: '', domain: 'alpha.example' },
+    { id: 'domain-z', name: '', domain: 'zulu.example' },
+  ] });
+  const user: SessionUser = { ...basics.users.ria, pods: [], podIds: [] };
+  for (const dir of ['asc', 'desc'] as const) {
+    const result = await listAccounts(user, { sort: 'name', dir });
+    expect(result.rows.filter(row => row.id.startsWith('domain-')).map(row => row.id)).toEqual(dir === 'asc' ? ['domain-a', 'domain-z'] : ['domain-z', 'domain-a']);
+  }
+});
+
+it('person cache orders by the visible first-name-first label in both directions', async () => {
+  const person = (await getMockTwentyClient().getPerson('person-01'))!;
+  for (const [id, firstName, lastName] of [['name-a', 'Aaron', 'Zulu'], ['name-z', 'Zoe', 'Alpha']]) {
+    await prisma.personCache.create({ data: personToCacheData({ ...person, id, firstName, lastName }) });
+  }
+  for (const dir of ['asc', 'desc'] as const) {
+    const rows = await prisma.personCache.findMany({ where: { id: { in: ['name-a', 'name-z'] } }, orderBy: { sortName: dir } });
+    expect(rows.map(row => row.id)).toEqual(dir === 'asc' ? ['name-a', 'name-z'] : ['name-z', 'name-a']);
   }
 });

@@ -33,7 +33,28 @@ function iso(v: unknown): string {
 function richText(v: unknown): string | null {
   if (typeof v === 'string') return v || null;
   const o = obj(v);
-  return str(o.markdown) ?? str(o.blocknote) ?? null;
+  const markdown = str(o.markdown);
+  let blocks: unknown = o.blocknote;
+  if (typeof blocks === 'string') {
+    try { blocks = JSON.parse(blocks); } catch { return markdown ?? str(blocks); }
+  }
+  const read = (value: unknown): string => {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value)) return value.map(read).join('');
+    const node = obj(value);
+    if (node.type === 'tableContent') return (Array.isArray(node.rows) ? node.rows : []).map(row => {
+      const cells = obj(row).cells;
+      return (Array.isArray(cells) ? cells : []).map(read).join(' | ');
+    }).join('\n');
+    let content = str(node.text) ?? read(node.content);
+    if (node.type === 'link' && str(node.href)) content += ` (${node.href})`;
+    const children = read(node.children);
+    return content + (children ? '\n' + children : '') + (node.id || node.children ? '\n\n' : '');
+  };
+  const full = str(read(blocks));
+  // Some imports keep only a summary in markdown while the editor holds the whole note.
+  return full && (!markdown || full.trim().length > markdown.trim().length) ? full : markdown;
 }
 
 function composePhone(p: Raw): string | null {

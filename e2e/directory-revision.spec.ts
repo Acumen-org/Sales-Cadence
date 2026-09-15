@@ -53,3 +53,22 @@ test('enrichment export preserves direction', async ({ page }) => {
   await expect(page).toHaveURL(/dir=desc/);
   await expect(page.locator('a[href*="/enrichment/export"]')).toHaveAttribute('href', /dir=desc/);
 });
+
+test('name order matches displayed first names and survives a pending search', async ({ page }) => {
+  await login(page);
+  await page.goto('/people?pod=&fo=');
+  for (const direction of ['asc', 'desc'] as const) {
+    await setDirection(page, direction);
+    const names = await page.locator('tbody a[href^="/people/"]').allTextContents();
+    expect(names.length).toBeGreaterThan(1);
+    expect(names).toEqual([...names].sort((a, b) => (direction === 'asc' ? 1 : -1) * a.trim().toLowerCase().localeCompare(b.trim().toLowerCase())));
+  }
+  await page.getByPlaceholder(/Search/).fill('Nina');
+  await page.getByRole('button', { name: /^Sort direction/ }).click();
+  await expect(page).toHaveURL(/q=Nina/);
+  await expect(page).toHaveURL(/dir=asc/);
+  await expect(page.getByPlaceholder(/Search/)).toHaveValue('Nina');
+  await page.reload();
+  await expect(page.getByPlaceholder(/Search/)).toHaveValue('Nina');
+  await expect(page.getByLabel('Filter by FO', { exact: true })).toHaveValue('');
+});

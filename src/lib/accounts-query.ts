@@ -186,7 +186,7 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
     const names = new Map(companies.map(company => [company.id, company.sortName]));
     rows.sort((a, b) => {
       const left = names.get(a.id), right = names.get(b.id);
-      if (!left || !right) return left ? -1 : right ? 1 : a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
+      if (!left || !right) return left ? -1 : right ? 1 : (direction === 'asc' ? 1 : -1) * a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
       return (direction === 'asc' ? 1 : -1) * left.localeCompare(right) || a.id.localeCompare(b.id);
     });
   }

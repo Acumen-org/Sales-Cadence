@@ -308,7 +308,7 @@ function buildTimeline(input: {
       kind: 'note',
       direction: 'neutral',
       title: n.title || 'Note',
-      detail: (n.bodyMarkdown ?? '').replace(/\s+/g, ' ').trim().slice(0, 180) || null,
+      detail: n.bodyMarkdown || null,
       actor: n.createdByName,
     })),
     ...input.stateEvents.map<BriefTimelineItem>((a) => {

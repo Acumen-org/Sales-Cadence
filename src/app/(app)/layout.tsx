@@ -1,3 +1,4 @@
+import { FilterNavigationProvider } from '@/components/filter-navigation';
 import { requireUser } from '@/lib/auth/current-user';
 import { isAdmin } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
@@ -24,7 +25,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const overdueCount = overdueGroups.length;
 
   return (
-    <div className="flex min-h-screen bg-canvas">
+    <FilterNavigationProvider><div className="flex min-h-screen bg-canvas">
       <a href="#main-content" className="skip-link">Skip to content</a>
       <Sidebar user={user} mode={e.TWENTY_MODE} dryRun={e.CADENCE_DRY_RUN} todayCount={todayCount} overdueCount={overdueCount} />
       <main id="main-content" tabIndex={-1} className="flex min-w-0 flex-1 flex-col outline-none">
@@ -32,6 +33,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <TopBar role={user.role} unread={unread} needsReview={needsReview} />
         <div className="page-content min-w-0 flex-1">{children}</div>
       </main>
-    </div>
+    </div></FilterNavigationProvider>
   );
 }

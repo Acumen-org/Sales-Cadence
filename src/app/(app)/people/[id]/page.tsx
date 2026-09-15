@@ -85,7 +85,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
   const twentyUrl = twentyPersonUrl(conn.baseUrl, id);
   // Unified timeline
   const items: TimelineItem[] = [
-    ...touches.map<TimelineItem>((t) => ({ at: t.occurredAt, kind: 'touch', icon: t.channel, title: t.summary, detail: t.actorLabel, tone: t.direction === 'INBOUND' ? 'in' : 'out' })),
+    ...touches.map<TimelineItem>((t) => ({ at: t.occurredAt, kind: 'touch', icon: t.channel, title: t.summary, detail: notes.find(n => t.externalId.startsWith(`note:${n.id}:`))?.bodyMarkdown || t.actorLabel, tone: t.direction === 'INBOUND' ? 'in' : 'out' })),
     ...notes
       .filter((n) => !touches.some((t) => t.externalId.startsWith(`note:${n.id}:`)))
       .map<TimelineItem>((n) => ({ at: new Date(n.createdAt), kind: 'note', icon: 'NOTE', title: n.title, detail: n.bodyMarkdown ?? n.createdByName, tone: 'neutral' })),

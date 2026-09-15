@@ -262,7 +262,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     return this.selection(this.s.objects.note.typeName, [
       'id',
       n.title,
-      { field: n.body, sub: '{ markdown }' },
+      { field: n.body, sub: '{ markdown blocknote }' },
       { field: n.createdBy, sub: '{ source workspaceMemberId name }' },
       { field: n.noteTargets, sub: `{ edges { node { ${t.personId} ${t.companyId} } } }` },
       n.createdAt,
@@ -291,7 +291,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     return this.selection(this.s.objects.task.typeName, [
       'id',
       t.title,
-      { field: t.body, sub: '{ markdown }' },
+      { field: t.body, sub: '{ markdown blocknote }' },
       t.status,
       t.dueAt,
       t.assigneeId,

@@ -23,7 +23,7 @@ export function personToCacheData(p: TwentyPerson): Prisma.PersonCacheUncheckedC
     id: p.id,
     firstName: p.firstName ?? '',
     lastName: p.lastName ?? '',
-    sortName: sortKey(`${p.lastName ?? ''} ${p.firstName ?? ''}`),
+    sortName: sortKey(`${p.firstName ?? ''} ${p.lastName ?? ''}`),
     email: p.email,
     phone: p.phone,
     linkedinUrl: p.linkedinUrl,
