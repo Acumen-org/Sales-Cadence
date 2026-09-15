@@ -13,6 +13,8 @@ import { ACCOUNT_SORTS, ACCOUNTS_PAGE_SIZE, DEFAULT_ACCOUNT_SORT, listAccounts, 
 import { formatInstant } from '@/lib/dates';
 import { IconCampaigns } from '@/components/icons';
 import { AccountsToolbar } from '@/components/accounts/accounts-toolbar';
+import { PillList } from '@/components/pill-list';
+import { SortableHeader } from '@/components/sort-control';
 import { Badge, Count, Empty, EmptyState, IdentityCell, Stat, StatusDot, Surface, Toolbar, ViewHeader } from '@/components/ui';
 
 export default async function AccountsPage({ searchParams }: { searchParams: Promise<{ q?: string; scope?: string; pod?: string; fo?: string; product?: string; sort?: string; dir?: string; page?: string }> }) {
@@ -69,38 +71,47 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
           />
         ) : (
           <div className="overflow-x-auto scroll-thin">
-            <table className="table">
+            <table className="table table-dense w-full table-fixed">
+              <colgroup>
+                {['20%', '11%', '12.5%', '11%', '10%', '9.5%', '8.5%', '8%', '9.5%'].map((width, index) => <col key={index} style={{ width }} />)}
+              </colgroup>
               <thead>
                 <tr>
-                  <th>Account</th>
+                  <SortableHeader field="name" label="Account" sort={sort} dir={dir} defaultValue={DEFAULT_ACCOUNT_SORT} defaultDir="asc" />
                   <th>PODs</th>
                   <th>FOs</th>
                   <th>Product</th>
-                  <th className="num" title="Everyone at this account, across all pods">People at account</th>
-                  <th className="num">In sequence</th>
-                  <th className="num">Replied</th>
+                  <SortableHeader field="people" label="People at account" sort={sort} dir={dir} defaultValue={DEFAULT_ACCOUNT_SORT} className="num" />
+                  <SortableHeader field="inSequence" label="In sequence" sort={sort} dir={dir} defaultValue={DEFAULT_ACCOUNT_SORT} className="num" />
+                  <SortableHeader field="replied" label="Replied" sort={sort} dir={dir} defaultValue={DEFAULT_ACCOUNT_SORT} className="num" />
                   <th className="num">Meetings</th>
-                  <th>Last touch</th>
+                  <SortableHeader field="lastTouch" label="Last touch" sort={sort} dir={dir} defaultValue={DEFAULT_ACCOUNT_SORT} />
                 </tr>
               </thead>
               <tbody>
                 {rows.map((a) => (
                   <tr key={a.id}>
                     <td>
-                      <div className="flex items-center gap-2">
-                        <IdentityCell name={a.name} href={`/accounts/${a.id}`} />
-                        {a.mine ? <Badge tone="blue">mine</Badge> : null}
-                      </div>
+                      <IdentityCell name={a.name} href={`/accounts/${a.id}`} />
                     </td>
-                    {[a.pods, a.fos, a.products].map((items, index) => <td key={index}><div className="flex max-w-xs flex-wrap gap-1.5">{items.length ? items.map(value => <Badge key={value} tone={index === 0 ? 'purple' : index === 1 ? 'blue' : 'green'}>{optionLabel(value)}</Badge>) : <Empty />}</div></td>)
-                    }
+                    {[a.pods, a.fos, a.products].map((items, index) =>
+                      <td key={index}>
+                        {items.length ? (
+                          <PillList
+                            max={1}
+                            noun={index === 0 ? 'pods' : index === 1 ? 'FOs' : 'products'}
+                            items={items.map((value) => ({ label: optionLabel(value), node: <Badge tone={index === 0 ? 'purple' : index === 1 ? 'blue' : 'green'}>{optionLabel(value)}</Badge> }))}
+                          />
+                        ) : <Empty />}
+                      </td>
+                    )}
                     <td className="num"><Count value={a.people} /></td>
                     <td className="num">
                       <StatusDot tone={a.inSequence ? 'green' : 'gray'}><Count value={a.inSequence} /></StatusDot>
                     </td>
                     <td className="num"><Count value={a.replied} /></td>
                     <td className="num"><Count value={a.meetings} /></td>
-                    <td className="whitespace-nowrap text-[12px] text-ink-500">{a.lastTouchAt ? formatInstant(a.lastTouchAt, user.timezone) : <Empty />}</td>
+                    <td className="text-[12px] text-ink-500">{a.lastTouchAt ? formatInstant(a.lastTouchAt, user.timezone) : <Empty />}</td>
                   </tr>
                 ))}
               </tbody>

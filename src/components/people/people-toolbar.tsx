@@ -1,9 +1,9 @@
 'use client';
-import { SortDirection } from '@/components/sort-direction';
+import { SortControl } from '@/components/sort-control';
 
 import { useFilterNavigation } from '@/components/filter-navigation';
-import { useEffect, useState } from 'react';
-import { IconSearch } from '@/components/icons';
+import { useEffect, useId, useState } from 'react';
+import { IconFilter, IconSearch } from '@/components/icons';
 import { optionLabel } from '@/lib/twenty/labels';
 
 type Props = {
@@ -19,7 +19,7 @@ type Props = {
   product: string;
   sort: string;
   dir: 'asc' | 'desc';
-  tag: string; tags: string[]; listCategory: string; listCategories: string[];
+  tag: string; tags: string[]; listCategory: string;
   status: string;
   tier: string;
   type: string;
@@ -50,10 +50,13 @@ const SORTS = [
 /** Filters whose "All" is a choice worth keeping in the URL, because the section has a default. */
 const EXPLICIT = new Set(['pod', 'fo']);
 
-export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, product, sort, status, tier, type, dir, tag, tags, listCategory, listCategories }: Props) {
+export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, product, sort, status, tier, type, dir, tag, tags, listCategory }: Props) {
   const navigate = useFilterNavigation();
   const [text, setText] = useState(q);
   useEffect(() => setText(q), [q]);
+  const panelId = useId();
+  /** Open on arrival when the URL already carries one of these, so nothing filters invisibly. */
+  const [showMore, setShowMore] = useState(() => Boolean(product || tier || type || tag || status));
 
   const update = (patch: Record<string, string | null>) => {
     navigate((next) => {
@@ -86,6 +89,9 @@ export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, p
     status ? { key: 'status', label: SEQUENCE_STATES.find((s) => s.value === status)?.label ?? status } : null,
   ].filter((x): x is { key: string; label: string } => Boolean(x));
 
+  /** What the CRM says about a person: kept behind one button so the bar stays a single row. */
+  const moreCount = [product, tier, type, tag, status].filter(Boolean).length;
+
   const Select = ({ name, value, label, options, all }: { name: string; value: string; label: string; options: string[]; all: string }) => (
     <select value={value} onChange={(e) => update({ [name]: e.target.value || null })} aria-label={label} className="!w-auto !py-2 !text-[12.5px]">
       <option value="">{all}</option>
@@ -103,15 +109,6 @@ export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, p
         <IconSearch size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
         <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search name, company, email, phone" aria-label="Search people" className="!pl-9" />
       </div>
-
-      {activeChips.map((c) => (
-        <button key={c.key} type="button" className="chip" onClick={() => update({ [c.key]: null })} title="Remove this filter">
-          {c.label}
-          <span aria-hidden className="text-brand-500">
-            ✕
-          </span>
-        </button>
-      ))}
 
       <select value={pod} onChange={(e) => update({ pod: e.target.value || null })} aria-label="Filter by pod" className="!w-auto !py-2 !text-[12.5px]">
         <option value="">All pods</option>
@@ -131,26 +128,34 @@ export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, p
           ))}
         </select>
       ) : null}
-      <Select name="product" value={product} label="Filter by product interest" options={products} all="Any product" />
-      <Select name="tier" value={tier} label="Filter by tier" options={tiers} all="Any tier" />
-      <Select name="type" value={type} label="Filter by contact type" options={types} all="Any type" />
-      <Select name="tag" value={tag} label="Filter by Twenty tag" options={tags} all="Any Twenty tag" />
-      <Select name="listCategory" value={listCategory} label="Filter by list category" options={listCategories} all="Any list category" />
-      <select value={status} onChange={(e) => update({ status: e.target.value || null })} aria-label="Filter by sequence state" className="!w-auto !py-2 !text-[12.5px]">
-        {SEQUENCE_STATES.map((s) => (
-          <option key={s.value} value={s.value}>
-            {s.label}
-          </option>
-        ))}
-      </select>
-      <select value={sort} onChange={(e) => update({ sort: e.target.value === 'name' ? null : e.target.value })} aria-label="Sort people" className="!w-auto !py-2 !text-[12.5px]">
-        {SORTS.map((s) => (
-          <option key={s.value} value={s.value}>
-            {s.label}
-          </option>
-        ))}
-      </select>
-      <SortDirection value={dir} />
+      <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} aria-controls={panelId} className={`btn-secondary btn-sm ${showMore || moreCount ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
+        <IconFilter size={14} /> Filters
+        {moreCount ? <span className="rounded-full bg-brand-600 px-1.5 text-[11px] font-semibold leading-[17px] text-white">{moreCount}</span> : null}
+      </button>
+      <SortControl value={sort} dir={dir} options={SORTS} defaultValue="name" label="Sort people" />
+
+      {activeChips.map((c) => (
+        <button key={c.key} type="button" className="chip" onClick={() => update({ [c.key]: null })} title="Remove this filter">
+          {c.label}
+          <span aria-hidden className="text-brand-500">
+            ✕
+          </span>
+        </button>
+      ))}
+
+      <div id={panelId} className={`${showMore ? 'flex' : 'hidden'} w-full flex-wrap items-center gap-2 rounded-[10px] border border-line bg-canvas/70 p-2`}>
+        <Select name="product" value={product} label="Filter by product interest" options={products} all="Any product" />
+        <Select name="tier" value={tier} label="Filter by tier" options={tiers} all="Any tier" />
+        <Select name="type" value={type} label="Filter by contact type" options={types} all="Any type" />
+        <Select name="tag" value={tag} label="Filter by Twenty tag" options={tags} all="Any Twenty tag" />
+        <select value={status} onChange={(e) => update({ status: e.target.value || null })} aria-label="Filter by sequence state" className="!w-auto !py-2 !text-[12.5px]">
+          {SEQUENCE_STATES.map((s) => (
+            <option key={s.value} value={s.value}>
+              {s.label}
+            </option>
+          ))}
+        </select>
+      </div>
     </div>
   );
 }

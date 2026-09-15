@@ -12,6 +12,8 @@ import { getTwentyClient } from '@/lib/twenty';
 import { recentEvents } from '@/lib/engine/ingest';
 import { Badge, Card, KeyValue, Surface, Tabs, ViewHeader, Empty, Count } from '@/components/ui';
 import { UsersPanel } from '@/components/settings/users-panel';
+import { BlockedAccountsPanel } from '@/components/settings/blocked-accounts-panel';
+import { listBlockedAccounts } from '@/lib/blocked-accounts';
 import { AdminTools } from '@/components/settings/admin-tools';
 import { ReviewButton } from '@/components/settings/review-button';
 import { SyncNowButton } from '@/components/settings/sync-now-button';
@@ -27,6 +29,7 @@ const TABS = [
   { key: 'rules', label: 'Rules and matching' },
   { key: 'sync', label: 'Sync out' },
   { key: 'users', label: 'Team & pods' },
+  { key: 'blocked', label: 'Blocked accounts' },
   { key: ASSISTANT_SETTINGS_TAB, label: ASSISTANT_NAME },
   { key: 'activity', label: 'Activity log' },
 ];
@@ -55,6 +58,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       ) : null}
       {tab === 'sync' ? <SyncForm sync={settings.sync} /> : null}
       {tab === 'users' ? <UsersTab /> : null}
+      {tab === 'blocked' ? <BlockedTab timezone={user.timezone} /> : null}
       {tab === ASSISTANT_SETTINGS_TAB ? <AssistantTab /> : null}
       {tab === 'activity' ? <ActivityTab /> : null}
     </PageFrame>
@@ -72,6 +76,22 @@ function AssistantTab() {
       { k: 'Talk time', v: <Badge tone="green">Local</Badge> },
     ]} /></div>
   </Card>;
+}
+
+async function BlockedTab({ timezone }: { timezone: string }) {
+  const rows = await listBlockedAccounts();
+  return (
+    <BlockedAccountsPanel
+      rows={rows.map((row) => ({
+        companyId: row.companyId,
+        name: row.name,
+        domain: row.domain,
+        reason: row.reason,
+        byName: row.blockedBy?.name ?? null,
+        at: formatInstant(row.createdAt, timezone),
+      }))}
+    />
+  );
 }
 
 async function UsersTab() {

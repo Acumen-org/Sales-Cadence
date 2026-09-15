@@ -1,5 +1,5 @@
 'use client';
-import { SortDirection } from '@/components/sort-direction';
+import { SortControl } from '@/components/sort-control';
 
 import Link from 'next/link';
 import { useFilterNavigation } from '@/components/filter-navigation';
@@ -50,12 +50,18 @@ export function EnrichmentToolbar({ tab, q, fields, wanted, sort, dir, exportHre
           {label(field)} missing <span aria-hidden className="text-brand-500">×</span>
         </button>
       ))}
-      <select value={sort} onChange={(e) => push((next) => { if (e.target.value === 'name') next.delete('sort'); else next.set('sort', e.target.value); })} aria-label="Sort" className="!w-auto !py-2 !text-[12.5px]">
-        <option value="name">Sort: name</option>
-        <option value="company">Sort: company</option>
-        <option value="gaps">Sort: missing fields</option>
-      </select>
-      <SortDirection value={dir} />
+      <SortControl
+        value={sort}
+        dir={dir}
+        defaultValue="name"
+        label="Sort"
+        keep={{ tab }}
+        options={[
+          { value: 'name', label: 'Sort: name' },
+          { value: 'company', label: 'Sort: company' },
+          { value: 'gaps', label: 'Sort: missing fields' },
+        ]}
+      />
       {q || wanted.length || sort !== 'name' ? <Link href={`/enrichment?tab=${tab}`} onClick={() => setText('')} className="btn-ghost btn-sm">Reset</Link> : null}
       <a href={exportHref} className="btn-secondary btn-sm ml-auto">Export to enrich</a>
     </div>

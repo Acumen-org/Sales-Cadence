@@ -1,5 +1,5 @@
 'use client';
-import { SortDirection } from '@/components/sort-direction';
+import { SortControl } from '@/components/sort-control';
 
 import { useFilterNavigation } from '@/components/filter-navigation';
 import { useEffect, useState } from 'react';
@@ -19,8 +19,8 @@ type Props = {
 };
 
 const SORTS = [
-  { value: 'name', label: 'Sort: name' },
   { value: 'people', label: 'Sort: people' },
+  { value: 'name', label: 'Sort: name' },
   { value: 'inSequence', label: 'Sort: in sequence' },
   { value: 'replied', label: 'Sort: replies' },
   { value: 'lastTouch', label: 'Sort: last touch' },
@@ -63,7 +63,7 @@ export function AccountsToolbar({ q, pods, fos, products, pod, fo, product, sort
     <div className="flex flex-1 flex-wrap items-center gap-2">
       <div className="relative w-full max-w-xs">
         <IconSearch size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search name, domain, industry, city" aria-label="Search accounts" className="!pl-9" />
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search name or domain" aria-label="Search accounts" className="!pl-9" />
       </div>
       {chips.map((c) => (
         <button key={c.key} type="button" className="chip" onClick={() => update({ [c.key]: null })} title="Remove this filter">
@@ -86,10 +86,7 @@ export function AccountsToolbar({ q, pods, fos, products, pod, fo, product, sort
         {products.map((p) => <option key={p} value={p}>{optionLabel(p)}</option>)}
       </select>
       {/* "Most people" is the default order (DEFAULT_ACCOUNT_SORT), so it leaves the URL clean. */}
-      <select value={sort} onChange={(e) => update({ sort: e.target.value === 'people' ? null : e.target.value })} aria-label="Sort accounts" className="!w-auto !py-2 !text-[12.5px]">
-        {SORTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-      </select>
-      <SortDirection value={dir} />
+      <SortControl value={sort} dir={dir} options={SORTS} defaultValue="people" label="Sort accounts" />
     </div>
   );
 }

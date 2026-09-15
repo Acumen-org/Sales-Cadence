@@ -3,10 +3,11 @@
 import { tagFilter, tagTone } from '@/lib/crm-tags';
 import { useFilterNavigation } from '@/components/filter-navigation';
 import Link from 'next/link';
-import { useId, useState } from 'react';
+import { useState } from 'react';
 import { Badge, IdentityCell, type BadgeTone } from '@/components/ui';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
 import { IconPlus } from '@/components/icons';
+import { PillList } from '@/components/pill-list';
 
 export type PeopleTableRow = {
   id: string;
@@ -38,22 +39,6 @@ type Props = {
 };
 
 /** CRM tags and campaign membership with bulk selection. */
-const MAX_PILLS = 2;
-
-/** Tags expand in the row, accessible by keyboard and touch as well as a pointer. */
-function Pills({ items }: { items: { label: string; node: React.ReactNode }[] }) {
-  const [expanded, setExpanded] = useState(false);
-  const id = useId();
-  const unique = items.filter((item, index) => items.findIndex((other) => other.label.toLowerCase() === item.label.toLowerCase()) === index);
-  const shown = expanded ? unique : unique.slice(0, MAX_PILLS);
-  const remaining = unique.length - MAX_PILLS;
-  return (
-    <div id={id} className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
-      {shown.map((item) => <span className="min-w-0 max-w-full" key={item.label}>{item.node}</span>)}
-      {remaining > 0 ? <button type="button" aria-expanded={expanded} aria-controls={id} aria-label={expanded ? 'Show fewer tags' : `Show ${remaining} more tags`} onClick={() => setExpanded(!expanded)} className="rounded-md px-1.5 py-1 text-[11.5px] font-semibold text-ink-600 hover:bg-brand-50 hover:text-brand-800 focus-visible:ring-2 focus-visible:ring-brand-300">{expanded ? 'Less' : `+${remaining}`}</button> : null}
-    </div>
-  );
-}
 
 function Tag({ value, field }: { value: string; field?: string }) {
   const navigate = useFilterNavigation();
@@ -90,11 +75,13 @@ export function PeopleTable({ rows, canEnroll }: Props) {
         </div>
       ) : null}
       <div className="overflow-x-auto scroll-thin">
-        <table className="table table-people min-w-[1040px] table-fixed">
+        <table className="table table-people w-full table-fixed">
+          {/* Fixed widths that add up to the table, so the list never scrolls sideways: the
+              select column takes the remaining 4%. */}
           <colgroup>
             {canEnroll ? <col className="w-10" /> : null}
-            <col style={{ width: showNext ? '28%' : '32%' }} />
-            <col style={{ width: '27%' }} />
+            <col style={{ width: showNext ? '26%' : '32%' }} />
+            <col style={{ width: showNext ? '25%' : '27%' }} />
             {showNext ? <col style={{ width: '12%' }} /> : null}
             <col style={{ width: showNext ? '21%' : '25%' }} />
             <col style={{ width: '12%' }} />
@@ -131,7 +118,7 @@ export function PeopleTable({ rows, canEnroll }: Props) {
                   <IdentityCell name={p.name} href={`/people/${p.id}`} shape="circle" sub={[p.jobTitle, p.companyName].filter(Boolean).join(' · ') || null} />
                 </td>
                 <td title={p.leadSource.length ? `Lead source: ${optionLabels(p.leadSource)}` : undefined}>
-                  <Pills
+                  <PillList
                     items={[
                       ...(p.tier ? [{ label: optionLabel(p.tier), node: <Tag value={p.tier} field="tier" /> }] : []),
                       ...(p.listCategory ? [{ label: optionLabel(p.listCategory), node: <Tag value={p.listCategory} field="listCategory" /> }] : []),

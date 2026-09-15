@@ -27,7 +27,7 @@ export const KIND_LABELS: Record<ActivityKind, string> = {
 };
 
 /** Audit rows that are administration rather than outreach work. */
-const ADMIN_ENTITIES = ['settings', 'user', 'pod'];
+const ADMIN_ENTITIES = ['settings', 'user', 'pod', 'account'];
 const ADMIN_ACTIONS = ['login', 'logout'];
 
 export type ActivityItem = {

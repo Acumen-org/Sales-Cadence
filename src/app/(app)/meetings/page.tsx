@@ -170,8 +170,10 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                       )}
                     </td>
                     <td className="text-[12.5px]">
-                      <span className="font-medium text-ink-900">{m._count.attendees}</span>
-                      {externalCount(m.attendees) ? <Badge tone="green" className="ml-1.5">{externalCount(m.attendees)} external</Badge> : null}
+                      <div className="flex items-center gap-2 whitespace-nowrap">
+                        <span className="font-medium tabular-nums text-ink-900">{m._count.attendees}</span>
+                        {externalCount(m.attendees) ? <Badge tone="green">{externalCount(m.attendees)} external</Badge> : null}
+                      </div>
                     </td>
                     <td>{m.transcript ? <Badge tone="blue">Transcript</Badge> : <Empty />}</td>
                     <td>

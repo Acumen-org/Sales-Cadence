@@ -19,6 +19,7 @@ const TABLES = [
   'Session',
   'UserPod',
   'Setting',
+  'BlockedAccount',
   'CompanyCache',
   'PersonCache',
   'Sequence',

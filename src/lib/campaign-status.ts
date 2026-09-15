@@ -19,6 +19,7 @@ export const ENROLL_CONFLICT_LABELS: Record<string, string> = {
   duplicate: 'Duplicate id',
   no_fo: 'No eligible FO',
   internal: 'Internal team or organisation',
+  blocked: 'Account blocked in Cadence',
   invalid_start: 'Invalid start date',
   opted_out: 'Asked not to be contacted',
   bad_data: 'Contact details are not usable',

@@ -67,9 +67,11 @@ export function describeAudit(action: string, details: Details, actorLabel: stri
                   ? 'Removed: bad contact data'
                   : reason === 'person_deleted'
                     ? 'Removed: deleted in Twenty'
-                    : reason?.startsWith('campaign_')
-                      ? 'Removed: campaign stopped'
-                      : `Removed from the sequence${by}`;
+                    : reason === 'account_blocked'
+                      ? 'Removed: account blocked in Cadence'
+                      : reason?.startsWith('campaign_')
+                        ? 'Removed: campaign stopped'
+                        : `Removed from the sequence${by}`;
       return { title: label, fields: closed };
     }
     case 'completed':

@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { isBlockedAccount } from './blocked-accounts';
 import { externalPeopleWhere } from './internal-organizations';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
@@ -48,5 +49,10 @@ export async function podPeopleWhere(user: SessionUser): Promise<Prisma.PersonCa
 }
 
 export async function canReadPerson(user: SessionUser, personId: string): Promise<boolean> {
-  return (await prisma.personCache.count({ where: { AND: [{ id: personId }, await peopleScopeWhere(user)] } })) > 0;
+  if ((await prisma.personCache.count({ where: { AND: [{ id: personId }, await peopleScopeWhere(user)] } })) > 0) return true;
+  // A blocked account stays open to the admin who can unblock it, so the people on that page are
+  // not a set of dead links for them. For everyone else the block is total.
+  if (!isAdmin(user)) return false;
+  const person = await prisma.personCache.findUnique({ where: { id: personId }, select: { companyId: true, deletedAt: true } });
+  return Boolean(person && !person.deletedAt && (await isBlockedAccount(person.companyId)));
 }

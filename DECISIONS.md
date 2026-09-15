@@ -539,3 +539,25 @@ contact", so repeating it in the warnings line was noise.
 - **The clock a client component renders with comes from the server.** `DotTimeline` computed its
   window from `Date.now()` on each side; a touch at the edge rendered on one side only. Pass `now`.
 
+## Blocking an account hides it; it never deletes anything (14 September 2026)
+
+An admin can take a firm out of Cadence from its account page or from Settings > Blocked accounts.
+What that means, exactly:
+
+- **Gone from the prospect surfaces.** The account leaves Accounts; its people leave People,
+  global search, enrichment and campaign audiences; enrollment refuses them with their own reason
+  ("Account blocked in Cadence") rather than the internal-organisation one. The filter lives in
+  `blockedCompanyIds()` and joins the existing team/own-organisation exclusions in
+  `externalPeopleWhere()`, so every surface that already respected those respects this one.
+- **Sequences its people are in end.** Blocking atomically exits every active or paused enrollment there with reason
+  `account_blocked`, which cancels the open tasks
+  through the normal path and mirrors the cancellation to Twenty. Without this an FO would keep
+  tasks for a firm the business had taken off the table.
+- **Nothing is deleted; CRM people and companies are unchanged.** The CompanyCache and PersonCache rows
+  stay, so inbound mailbox and note activity still matches those people and the history is intact.
+  Unblocking restores the account and its people immediately; a sequence that ended stays ended,
+  because re-starting outreach is a decision somebody makes, not a side effect of unblocking.
+- **Only an admin sees it.** The blocked account's own page stays reachable for an admin, with the
+  reason and who blocked it, and returns a 404 for everyone else. Blocking is administration, so
+  it is kept out of the Activity feed like settings, users and pods, and lands in the audit log.
+

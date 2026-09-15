@@ -2,11 +2,12 @@ import { sortDirection, type SortDirection } from './sorting';
 import type { Prisma } from '@prisma/client';
 import { companySearchWhere } from './search-terms';
 import { getSettings } from './settings';
+import { blockedCompanyIds } from './blocked-accounts';
 import { isInternalCompany } from './internal-organizations';
 import { meetingReadWhere } from './meetings-query';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
-import { visiblePodIds, canSeeAllPods, needsPod } from './auth/rbac';
+import { visiblePodIds, canSeeAllPods, isAdmin, needsPod } from './auth/rbac';
 import { cachedPersonName } from './person-cache';
 import { auditDetailText, describeAudit } from './audit-format';
 
@@ -124,7 +125,8 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
   // grouped queries so a sort by people or replies can rank the whole set before paging. A few
   // thousand rows of a few columns is a small result; the 500-row cap this replaced hid every
   // named company behind the nameless ones that sorted first.
-  const companies = (await prisma.companyCache.findMany({ where, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }, { domain: { sort: 'asc', nulls: 'last' } }] })).filter((company) => !isInternalCompany(company, rules));
+  const blocked = new Set(await blockedCompanyIds());
+  const companies = (await prisma.companyCache.findMany({ where, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }, { domain: { sort: 'asc', nulls: 'last' } }] })).filter((company) => !isInternalCompany(company, rules) && !blocked.has(company.id));
   const ids = companies.map((c) => c.id);
   if (!ids.length) return { rows: [], total: 0, mine: 0, people: 0, inSequence: 0, engaged: 0 };
 
@@ -297,6 +299,9 @@ export async function accountDetail(companyId: string, user: SessionUser) {
   if (scope !== null && !scope.includes(companyId)) return null;
   const company = await prisma.companyCache.findUnique({ where: { id: companyId } });
   if (!company) return null;
+  // A blocked account stays reachable for the admin who can unblock it, and for nobody else.
+  const blocked = await prisma.blockedAccount.findUnique({ where: { companyId }, include: { blockedBy: { select: { name: true } } } });
+  if (blocked && !isAdmin(user)) return null;
 
   const [people, members, meetings, campaignRows] = await Promise.all([
     prisma.personCache.findMany({
@@ -452,6 +457,7 @@ export async function accountDetail(companyId: string, user: SessionUser) {
   const openTasks = tasks.filter((t) => t.state === 'PENDING' && t.enrollment.status !== 'PAUSED');
   return {
     company,
+    blocked: blocked ? { reason: blocked.reason, byName: blocked.blockedBy?.name ?? null, at: blocked.createdAt } : null,
     ownerName: company.ownerMemberId ? memberName.get(company.ownerMemberId) ?? null : null,
     people: accountPeople,
     meetings,

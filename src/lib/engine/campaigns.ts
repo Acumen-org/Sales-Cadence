@@ -1,3 +1,4 @@
+import { lockAccounts } from '../account-lock';
 import type { CampaignStatus } from '@prisma/client';
 import { prisma } from '../db';
 import { logAudit, type AuditActor, SYSTEM_ACTOR } from '../audit';
@@ -52,6 +53,8 @@ export async function activateCampaign(id: string, ctx: EngineContext = { actor:
   }
   const preview = await previewEnrollment({ personIds: ids, sequenceId: campaign.sequenceId, podId: campaign.podId, campaignId: id, startDate: campaign.startDate, assignment: { mode: campaign.assignmentMode === 'ROUND_ROBIN' ? 'ROUND_ROBIN' : 'OWNER' }, dailyRampPerFo: campaign.dailyRampPerFo, actor: ctx.actor });
   const created = await prisma.$transaction(async tx => {
+    const candidatePeople = await tx.personCache.findMany({ where: { id: { in: preview.candidates.map(candidate => candidate.personId) } }, select: { companyId: true } });
+    await lockAccounts(tx, candidatePeople.map(person => person.companyId));
     await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`campaign:${id}`}))`;
     const current = await tx.campaign.findUniqueOrThrow({ where: { id }, include: { sequence: true, pod: true } });
     await tx.$queryRaw`SELECT id FROM "Pod" WHERE id = ${current.podId} FOR UPDATE`;
@@ -71,6 +74,8 @@ export async function activateCampaign(id: string, ctx: EngineContext = { actor:
       const won = await tx.enrollment.findMany({ where: { campaignId: id, personId: { in: personIds }, status: { in: ['REPLIED', 'MEETING'] } }, select: { personId: true } });
       for (const w of won) blocked.add(w.personId);
     }
+    const blockedAccounts = new Set((await tx.blockedAccount.findMany({ select: { companyId: true } })).map(account => account.companyId));
+    for (const person of people) if (person.companyId && blockedAccounts.has(person.companyId)) blocked.add(person.id);
     const peopleById = new Map(people.map(p => [p.id,p]));
     const proposedFos = [...new Set(preview.candidates.map(c => c.foUserId))].sort();
     for (const userId of proposedFos) await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR SHARE`;

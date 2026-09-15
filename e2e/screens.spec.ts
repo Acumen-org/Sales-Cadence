@@ -99,6 +99,9 @@ test('capture screens', async ({ page }) => {
   await shot(page, '07c-person-history');
   await page.goto('/people/dummy-01?tab=crm');
   await shot(page, '07d-person-crm');
+  // The other side of the same thread: an email that came in, in the colour that says so.
+  await page.goto('/people/dummy-02?tab=crm');
+  await shot(page, '07d2-person-crm-inbound');
 
   await page.goto('/enrichment');
   await shot(page, '07e-enrichment');
@@ -131,6 +134,10 @@ test('capture screens', async ({ page }) => {
   await shot(page, '13-settings-users');
   await page.goto('/settings?tab=twenty');
   await shot(page, '14-settings-twenty');
+  await page.goto('/settings?tab=blocked');
+  await page.getByLabel('Find an account to block').fill('Dummy');
+  await page.waitForTimeout(600);
+  await shot(page, '14b-settings-blocked');
 
   // Global search is available throughout the workspace.
   await page.goto('/tasks');

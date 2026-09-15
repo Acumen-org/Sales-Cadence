@@ -42,7 +42,6 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   const listCategory = sp.listCategory ?? '';
   const tagRows = await prisma.personCache.findMany({ where: await peopleScopeWhere(user), select: { tags: true, listCategory: true }, distinct: ['tags', 'listCategory'] });
   const tags = [...new Set(tagRows.flatMap(row => row.tags).filter(value => tagFilter(value).key === 'tag'))].sort();
-  const listCategories = [...new Set(tagRows.flatMap(row => row.listCategory ? [row.listCategory] : []))].sort();
   // Only values the mapping knows are accepted, so a hand-edited URL cannot filter on nonsense.
   const values = defaultTwentySchema.personValues;
   const pick = (v: string | undefined, allowed: readonly string[]) => (v && allowed.includes(v) ? v : '');
@@ -184,7 +183,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
             pod={pod}
             fo={fo}
             product={product}
-            sort={sort} dir={dir} tag={tag} tags={tags} listCategory={listCategory} listCategories={listCategories}
+            sort={sort} dir={dir} tag={tag} tags={tags} listCategory={listCategory}
             status={status}
             tier={tier}
             type={contactType}

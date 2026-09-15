@@ -6,14 +6,21 @@ async function login(page: Page) {
   await page.getByRole('button', { name: /^Sign in/ }).click();
   await page.waitForURL(/\/home/);
 }
+/** The direction is the arrow beside the sort menu now, not a dropdown of its own. */
+async function setDirection(page: Page, direction: 'asc' | 'desc') {
+  const toggle = page.getByRole('button', { name: /^Sort direction/ });
+  const wanted = direction === 'asc' ? 'ascending' : 'descending';
+  if (!((await toggle.getAttribute('aria-label')) ?? '').includes(wanted)) await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-label', new RegExp(wanted));
+}
 test('account associations, explicit whole-account count and both sort directions', async ({ page }) => {
   await login(page);
   await page.goto('/accounts?pod=&fo=');
   await expect(page.getByText('People at matching accounts', { exact: true })).toBeVisible();
   for (const column of ['PODs', 'FOs', 'Product']) await expect(page.getByRole('columnheader', { name: column, exact: true })).toBeVisible();
   for (const column of ['Industry', 'City', 'Owner']) await expect(page.getByRole('columnheader', { name: column, exact: true })).toHaveCount(0);
-  for (const direction of ['asc', 'desc']) {
-    await page.getByLabel('Sort direction').selectOption(direction);
+  for (const direction of ['asc', 'desc'] as const) {
+    await setDirection(page, direction);
     await expect(page).toHaveURL(new RegExp(`dir=${direction}`));
     const counts = await page.locator('tbody tr').evaluateAll(rows => rows.map(row => Number(row.children[4].textContent?.replace(/,/g, ''))));
     expect(counts).toEqual([...counts].sort((a, b) => direction === 'asc' ? a - b : b - a));
@@ -33,8 +40,8 @@ test('Twenty tags apply filters, survive reload and can be cleared', async ({ pa
   await expect(page).toHaveURL(url);
   await page.getByTitle('Remove this filter', { exact: true }).first().click();
   await expect(page).not.toHaveURL(/(?:tier|type|product|tag|listCategory)=/);
-  for (const direction of ['desc', 'asc']) {
-    await page.getByLabel('Sort direction').selectOption(direction);
+  for (const direction of ['desc', 'asc'] as const) {
+    await setDirection(page, direction);
     await expect(page).toHaveURL(new RegExp(`dir=${direction}`));
     await expect(page.getByLabel('Filter by FO', { exact: true })).toHaveValue('');
   }
@@ -42,7 +49,7 @@ test('Twenty tags apply filters, survive reload and can be cleared', async ({ pa
 test('enrichment export preserves direction', async ({ page }) => {
   await login(page);
   await page.goto('/enrichment');
-  await page.getByLabel('Sort direction').selectOption('desc');
+  await setDirection(page, 'desc');
   await expect(page).toHaveURL(/dir=desc/);
   await expect(page.locator('a[href*="/enrichment/export"]')).toHaveAttribute('href', /dir=desc/);
 });

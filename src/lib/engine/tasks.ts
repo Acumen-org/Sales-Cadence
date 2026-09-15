@@ -1,3 +1,4 @@
+import { lockAccounts } from '../account-lock';
 import { Prisma, type CompletionSource, type Task, type TaskState } from '@prisma/client';
 import { personalizeAction } from '../sequences/personalize';
 import { prisma, type Tx } from '../db';
@@ -70,8 +71,11 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
   let result: AdvanceResult;
   try {
     result = await prisma.$transaction(async (tx) => {
-      const identity = await tx.enrollment.findUnique({ where: { id: enrollmentId }, select: { sequenceId: true, campaignId: true } });
+      const identity = await tx.enrollment.findUnique({ where: { id: enrollmentId }, select: { sequenceId: true, campaignId: true, companyId: true, person: { select: { companyId: true } } } });
       if (!identity) return { outcome: 'inactive' as const };
+      const accountIds = [identity.companyId, identity.person.companyId].filter((id): id is string => Boolean(id));
+      await lockAccounts(tx, accountIds);
+      if (await tx.blockedAccount.count({ where: { companyId: { in: accountIds } } })) return { outcome: 'inactive' as const, reason: 'Account is blocked' };
       if (identity.campaignId) await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`campaign:${identity.campaignId}`}))`;
       await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${identity.sequenceId}))`;
       const e = await tx.enrollment.findUnique({

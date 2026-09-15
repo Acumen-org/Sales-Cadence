@@ -7,6 +7,7 @@ import { peopleScopeWhere, podPeopleWhere } from './people-scope';
 import { assertAllowed, isAdmin, isPodLeader, isBizOps, canSeeAllPods } from './auth/rbac';
 import { cachedPersonName, upsertCompanyCache, upsertPersonCache } from './person-cache';
 import { getTwentySchema, getSettings } from './settings';
+import { blockedCompanyIds } from './blocked-accounts';
 import { isInternalCompany } from './internal-organizations';
 import type { TwentyClient } from './twenty/client';
 import type { EnrichCompanyInput, EnrichPersonInput, TwentyCompany, TwentyPerson } from './twenty/types';
@@ -221,7 +222,7 @@ export function filterEnrichmentQueue(items: EnrichmentQueueItem[], q = '', fiel
     .sort((a, b) => (sortDirection(dir, sort === 'gaps' ? 'desc' : 'asc') === 'desc' ? -1 : 1) * (sort === 'gaps' ? a.gaps.length - b.gaps.length || a.label.localeCompare(b.label) : sort === 'company' ? (a.company ?? '').localeCompare(b.company ?? '') || a.label.localeCompare(b.label) : a.label.localeCompare(b.label)) || a.id.localeCompare(b.id));
 }
 export async function enrichmentQueue(user: SessionUser) {
-  const { rules } = await getSettings();
+  const [{ rules }, blocked] = await Promise.all([getSettings(), blockedCompanyIds()]);
   const [people, companies, schema] = await Promise.all([
     prisma.personCache.findMany({ where: await enrichmentPeopleScope(user), select: { id: true, firstName: true, lastName: true, companyId: true, companyName: true, email: true, phone: true, jobTitle: true, linkedinUrl: true, city: true, tags: true, badEmail: true, badPhone: true, emailMissing: true, phoneMissing: true }, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }, { email: { sort: 'asc', nulls: 'last' } }] }),
     prisma.companyCache.findMany({ where: await enrichmentCompanyScope(user), select: { id: true, name: true, domain: true, industry: true, employees: true, city: true, aum: true, linkedinUrl: true, ownerMemberId: true }, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }, { domain: { sort: 'asc', nulls: 'last' } }] }),
@@ -239,8 +240,9 @@ export async function enrichmentQueue(user: SessionUser) {
     if (person.tags.some((tag) => enrichmentTags.has(tag) || /enrichment[\s_-]*(required|needed)/i.test(tag))) gaps.push({ field: 'tags', label: 'Flagged in CRM', priority: 'critical' });
     if (gaps.length) items.push({ id: person.id, label: cachedPersonName(person), company: person.companyName, entity: 'person', href: `/people/${person.id}`, gaps });
   }
+  const blockedIds = new Set(blocked);
   for (const company of companies) {
-    if (isInternalCompany(company, rules)) continue;
+    if (isInternalCompany(company, rules) || blockedIds.has(company.id)) continue;
     const gaps: EnrichmentGap[] = [];
     for (const [field, label] of ACCOUNT_CRITICAL) if (company[field] === null || company[field] === '') gaps.push({ field, label: `${label} missing`, priority: 'critical' });
     for (const [field, label] of ACCOUNT_USEFUL) if (company[field] === null || company[field] === '') gaps.push({ field, label: FIX_IN_TWENTY.has(field) ? label : `${label} missing`, fixInTwenty: FIX_IN_TWENTY.has(field), priority: 'useful' });

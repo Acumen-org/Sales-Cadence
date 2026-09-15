@@ -150,6 +150,7 @@ model User {
   completedTasks Task[]       @relation("TaskCompletedBy")
   meetings       Meeting[]    @relation("MeetingCreatedBy")
   meetingFavourites MeetingFavourite[]
+  blockedAccounts BlockedAccount[] @relation("BlockedByUser")
 }
 
 model Session {
@@ -478,6 +479,22 @@ model CompanyCache {
   @@index([ownerMemberId])
   @@index([name])
   @@index([sortName])
+}
+
+/// An account an admin has taken out of the platform: gone from Accounts, People, search,
+/// enrichment and campaign audiences, and refused by enrollment. Nothing is written to Twenty and
+/// no cache row is deleted, so removing it from this list puts the account back as it was.
+model BlockedAccount {
+  companyId   String   @id
+  /// Name and domain as they read when it was blocked, so the list needs no cache row to be legible.
+  name        String
+  domain      String?
+  reason      String?
+  blockedById String?
+  blockedBy   User?    @relation("BlockedByUser", fields: [blockedById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
 }
 
 // ---------------------------------------------------------------------------

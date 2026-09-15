@@ -1,5 +1,7 @@
+import { lockAccounts } from '../account-lock';
 import type { Enrollment, EnrollmentStatus } from '@prisma/client';
 import { needsPod } from '../auth/rbac';
+import { blockedCompanyIds } from '../blocked-accounts';
 import { externalPeopleWhere } from '../internal-organizations';
 import { optionLabel } from '../twenty/labels';
 import { prisma } from '../db';
@@ -35,7 +37,7 @@ export type EnrollRequest = {
   actor: AuditActor;
 };
 
-export type EnrollConflictReason = 'not_found' | 'deleted' | 'dnd' | 'opted_out' | 'already_active' | 'no_fo' | 'duplicate' | 'invalid_start' | 'pod_mismatch' | 'internal';
+export type EnrollConflictReason = 'not_found' | 'deleted' | 'dnd' | 'opted_out' | 'already_active' | 'no_fo' | 'duplicate' | 'invalid_start' | 'pod_mismatch' | 'internal' | 'blocked';
 
 export type EnrollConflict = { personId: string; name: string; reason: EnrollConflictReason; detail?: string; enrollmentId?: string };
 
@@ -90,6 +92,7 @@ export async function previewEnrollment(req: EnrollRequest, client?: TwentyClien
   const people = await prisma.personCache.findMany({ where: { id: { in: ids } } });
   const byId = new Map(people.map((p) => [p.id, p]));
   const externalIds = new Set((await prisma.personCache.findMany({ where: { AND: [{ id: { in: ids } }, await externalPeopleWhere()] }, select: { id: true } })).map((p) => p.id));
+  const blockedIds = new Set(await blockedCompanyIds());
 
   const pod = await prisma.pod.findUnique({ where: { id: req.podId }, include: { users: { include: { user: true } } } });
   if (!pod || pod.archived) throw new Error('Pod not found or removed');
@@ -135,6 +138,10 @@ export async function previewEnrollment(req: EnrollRequest, client?: TwentyClien
     const name = cachedPersonName(p);
     if (p.deletedAt) {
       conflicts.push({ personId: id, name, reason: 'deleted' });
+      continue;
+    }
+    if (p.companyId && blockedIds.has(p.companyId)) {
+      conflicts.push({ personId: id, name, reason: 'blocked', detail: 'Their account is blocked in Cadence' });
       continue;
     }
     if (!externalIds.has(id)) {
@@ -230,6 +237,8 @@ export async function enrollPeople(req: EnrollRequest, ctx: Omit<EngineContext, 
     try {
       const person = await prisma.personCache.findUnique({ where: { id: c.personId }, select: { companyId: true } });
       const e = await prisma.$transaction(async (tx) => {
+        await lockAccounts(tx, [person?.companyId]);
+        if (person?.companyId && await tx.blockedAccount.count({ where: { companyId: person.companyId } })) return null;
         const created = await tx.enrollment.create({
           data: {
             personId: c.personId,
@@ -259,6 +268,10 @@ export async function enrollPeople(req: EnrollRequest, ctx: Omit<EngineContext, 
         );
         return created;
       });
+      if (!e) {
+        conflicts.push({ personId: c.personId, name: c.name, reason: 'blocked', detail: 'Their account was blocked during enrollment' });
+        continue;
+      }
       await advanceEnrollment(e.id, engineCtx);
       enrolled.push({ enrollmentId: e.id, personId: c.personId, foUserId: c.foUserId, startDate: c.startDate });
     } catch (err) {
@@ -314,7 +327,8 @@ export async function resumeEnrollment(enrollmentId: string, opts: { actor: Audi
   const settings = await getSettings();
   const now = opts.now ?? new Date();
   const { updated, movedIds, refused } = await prisma.$transaction(async (tx) => {
-    const identity = await tx.enrollment.findUnique({ where: { id: enrollmentId }, select: { campaignId: true } });
+    const identity = await tx.enrollment.findUnique({ where: { id: enrollmentId }, select: { campaignId: true, companyId: true, person: { select: { companyId: true } } } });
+    await lockAccounts(tx, [identity?.companyId, identity?.person.companyId]);
     if (identity?.campaignId) await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`campaign:${identity.campaignId}`}))`;
     const e = await tx.enrollment.findUnique({ where: { id: enrollmentId }, include: { fo: true } });
     if (!e) throw new Error('Enrollment not found');

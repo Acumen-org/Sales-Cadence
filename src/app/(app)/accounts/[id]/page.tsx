@@ -1,11 +1,13 @@
-import { canCreateMeeting } from '@/lib/auth/rbac';
+import { canCreateMeeting, isAdmin } from '@/lib/auth/rbac';
+import { ActionButton } from '@/components/action-form';
+import { blockAccountAction, unblockAccountAction } from '@/lib/actions/blocked-accounts';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
 import { accountDetail } from '@/lib/accounts-query';
 import { formatInstant, formatLocalDate, todayIn } from '@/lib/dates';
 import { OrgTree, type TreePerson } from '@/components/accounts/org-tree';
-import { ActionIcon, IconExternal, IconPlus } from '@/components/icons';
+import { ActionIcon, IconExternal, IconLock, IconPlus } from '@/components/icons';
 import { Avatar, Badge, CAMPAIGN_TONE, Card, Count, ENROLLMENT_TONE, Empty, EmptyState, EventDetail, IdentityCell, KeyValue, RecordHeader, Stat, Surface, Tabs, TierBadge, enrollmentStatusLabel, type BadgeTone } from '@/components/ui';
 import { campaignStatusLabel } from '@/lib/campaign-status';
 import { optionLabels } from '@/lib/twenty/labels';
@@ -24,7 +26,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
   const { tab = 'overview' } = await searchParams;
   const detail = await accountDetail(id, user);
   if (!detail) notFound();
-  const { company, people, meetings, campaigns, timeline, openTasks, stats, ownerName } = detail;
+  const { company, people, meetings, campaigns, timeline, openTasks, stats, ownerName, blocked } = detail;
   const today = todayIn(user.timezone);
 
   const toTreePerson = (p: (typeof people)[number]): TreePerson => ({
@@ -68,9 +70,25 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                   <IconExternal size={13} /> Website
                 </a>
               ) : null}
-              {canCreateMeeting(user) && <Link href={`/meetings/new?account=${company.id}`} className="btn-secondary btn-sm">
+              {canCreateMeeting(user) && !blocked && <Link href={`/meetings/new?account=${company.id}`} className="btn-secondary btn-sm">
                 <IconPlus size={13} /> Meeting
               </Link>}
+              {isAdmin(user) ? (
+                blocked ? (
+                  <ActionButton action={unblockAccountAction} payload={{ companyId: company.id }} confirm={`Put ${company.name} back in Cadence?`}>
+                    Unblock account
+                  </ActionButton>
+                ) : (
+                  <ActionButton
+                    action={blockAccountAction}
+                    payload={{ companyId: company.id }}
+                    confirm={`Block ${company.name}? It leaves Accounts, People, search and enrichment for everyone, and any sequence its people are in ends.`}
+                    className="btn-secondary btn-sm !border-red-200 !text-red-700 hover:!bg-red-50"
+                  >
+                    <IconLock size={13} /> Block account
+                  </ActionButton>
+                )
+              ) : null}
               <Link href="/accounts" className="btn-ghost btn-sm">
                 All accounts
               </Link>
@@ -78,6 +96,19 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
           }
         />
       </div>
+
+      {blocked ? (
+        <div className="px-6 pt-3">
+          <div role="status" className="flex flex-wrap items-center gap-2 rounded-xl border border-red-200 bg-red-50/70 px-4 py-3 text-[13px] text-red-800">
+            <IconLock size={15} />
+            <span className="font-medium">Blocked account</span>
+            <span className="text-red-700">
+              {blocked.byName ? `${blocked.byName} · ` : ''}{formatInstant(blocked.at, user.timezone)}
+              {blocked.reason ? ` · ${blocked.reason}` : ''}
+            </span>
+          </div>
+        </div>
+      ) : null}
 
       <div className="px-6 pt-3">
         <Surface flush>

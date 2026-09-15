@@ -175,8 +175,14 @@
     @apply border-b-0;
   }
   .table-people th,
-  .table-people td {
+  .table-people td,
+  .table-dense th,
+  .table-dense td {
     @apply px-3;
+  }
+  /* A fixed-width table has no room for a header that refuses to wrap. */
+  .table-dense th {
+    @apply whitespace-normal break-words align-bottom;
   }
   /* Denser variant for wide analytics tables. */
   .table-tight td {
