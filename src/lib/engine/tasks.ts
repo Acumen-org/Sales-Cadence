@@ -128,6 +128,11 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
       // Caps only apply to dates that are still ahead of us; overdue plans stay overdue and visible.
       let dueDate = planned;
       if (planned >= today) {
+        // The load is read and then written, so the FO is locked for the rest of this transaction.
+        // The lock above is the sequence: two plans feeding the same person's FO on the same day
+        // do not meet there, and without this they each saw room for the last slot and both took
+        // it. Taken last, after accounts, campaign and sequence, so the order can never invert.
+        await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`fo:${e.foUserId}`}))`;
         const load = await foLoad(tx, e.foUserId, planned);
         dueDate = findDateWithCapacity(planned, step.actions.length, effectiveDailyCap(e.fo, rules), load, rules.workingDays);
       }

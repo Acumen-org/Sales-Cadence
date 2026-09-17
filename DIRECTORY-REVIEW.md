@@ -135,3 +135,60 @@ CRM note titles and email subjects wrap in full. The brief no longer cuts note b
 Validation: production build and lint passed; 337 unit/integration tests passed in an isolated migrated database. All 62 browser tests passed against the final production build. Browser coverage includes first-name ordering in both directions, a pending search plus sort change, clear/reload filter behavior, task draft editing and completion, call outcomes, mixed steps, sequence editing locks, campaign launch and follow-up approval, and role permissions. Engine stress coverage includes 16 concurrent enrollments, 32 duplicate webhook deliveries, simultaneous child-action completion, sequence-edit/generation races and campaign lifecycle gates. Twelve concurrent account queries over 20,000 people and 6,000 accounts completed in 579 ms locally; this is not a hosted capacity measurement.
 
 Read-only live sampling covered 12 contacts, 109 notes and 121 emails. Many source note bodies appear unusually short; the exact reported truncated note has not been identified or compared with the original CRM record. The code removes known display truncation and reads the alternate editor body, but does not fabricate text absent from both source fields. No live tasks, campaigns or CRM records were modified during testing.
+
+---
+
+# Stress pass on tasks, campaigns and sequences - 17 September 2026
+
+The previous round fixed sorting, shared filters and CRM content but left the workspace CI red and
+did not exercise the three features the owner had not yet inspected. Both are addressed here.
+
+## The failing check
+
+`tests/content-completeness.test.ts` passed the `as const` schema object where `normalizeNote`
+takes the mutable `TwentySchema`, so lint passed and `tsc` failed the push. It now builds its
+schema with `mergeTwentySchema()`, as every other suite does.
+
+## What the stress pass covers
+
+`tests/stress-tasks-campaigns-sequences.test.ts` - 14 cases, each asserting an invariant an FO
+would notice rather than the absence of an exception:
+
+- **Tasks.** Eight clicks on one touchpoint: one completion, one touch, one audit line, no second
+  copy of the step. Done, skip and snooze racing: at most one terminal outcome, the step keeping
+  exactly the modules the plan holds. A delegation racing a completion: the whole selection moves
+  or none of it does. Scheduler ticks beside hand completions across three steps: no duplicated
+  step.
+- **Campaigns.** Six simultaneous launches: each person enrolled once, one `started` audit line,
+  one run. Pausing while its work is completed: no enrollment left active and nothing new
+  generated. Stopping beside a scheduler tick: every open touchpoint cancelled exactly once.
+  Pause and resume clicked together: one state, enrollments active, no duplicated work. A daily
+  ramp under a simultaneous launch: never more than the ramp per FO per day.
+- **Sequences.** A plan edit racing the last completion on that step: the task keeps the frozen
+  copy the FO was reading. A nurture sequence finishing under concurrent ticks: exactly one new
+  cycle. A person who opted out mid-plan: no new cycle. A campaign paused mid-plan: it resumes on
+  the step it stopped on, once.
+
+## The bug it found
+
+**The daily cap could be exceeded.** Task generation reads an FO's load for a day and then writes
+to it, inside one transaction guarded by an advisory lock on the *sequence*. Two plans feeding the
+same FO never meet on that lock, so each could see room for the last slot of a day and take it: a
+cap of two produced three touches on 2026-09-14 in the test. Generation now also locks the FO for
+the rest of the transaction, taken after the account, campaign and sequence locks so the order can
+never invert. The scheduler walks enrollments one at a time, so this adds no contention within a
+tick; it only bites where the race was.
+
+## Also in this pass
+
+- A CRM email no longer opens or closes with the blank line its mail client's wrapper div left
+  behind, and a note in the person timeline wraps to a readable measure and breaks a long address
+  instead of pushing the column sideways.
+
+## Verification
+
+- Production build, TypeScript and lint pass; 352 unit and integration tests across 50 files pass;
+  62 browser tests pass.
+- A realistic Outlook message (nested divs, `&nbsp;` spacers, a table, a quoted reply, four
+  trailing breaks) was rendered through the formatter: figures, table cells and the quoted block
+  all survive, with no `&nbsp;` gaps and no run of three or more breaks.

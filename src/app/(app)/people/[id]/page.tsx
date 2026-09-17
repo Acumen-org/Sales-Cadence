@@ -175,7 +175,9 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="text-ink-800">{it.title}</span>
-                          {it.detail ? <span className="block whitespace-pre-wrap text-sm text-ink-700">{it.detail}</span> : null}
+                          {/* A CRM note arrives whole: it wraps to a readable measure and breaks
+                              a long address rather than pushing the column sideways. */}
+                          {it.detail ? <span className="block max-w-[70ch] whitespace-pre-wrap break-words text-sm leading-6 text-ink-700">{it.detail}</span> : null}
                         </span>
                         <span className="shrink-0 text-xs text-ink-500">{formatInstant(it.at, user.timezone)}</span>
                       </li>

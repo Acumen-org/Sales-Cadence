@@ -34,5 +34,9 @@ export function crmEmailHtml(text: string): string {
     .replace(/<\/(?:td|th)>/gi, ' ');
   return cleanRichText(structured)
     .replace(/<p>(?:\s|&nbsp;|&#160;|<br\s*\/?>)*<\/p>/gi, '')
-    .replace(/(?:<br\s*\/?>[\s\u00a0]*){3,}/gi, '<br><br>');
+    .replace(/(?:<br\s*\/?>[\s\u00a0]*){3,}/gi, '<br><br>')
+    // The wrapper a mail client opens and closes with leaves a blank line at each end of the card.
+    .replace(/^(?:[\s\u00a0]*<br\s*\/?>)+/i, '')
+    .replace(/(?:<br\s*\/?>[\s\u00a0]*)+$/i, '')
+    .trim();
 }
