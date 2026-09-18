@@ -18,8 +18,7 @@ import type {
   TwentyWorkspaceMember,
   UpdateTaskInput,
   EnrichPersonInput,
-  EnrichCompanyInput,
-} from './types';
+  EnrichCompanyInput,TwentyWebhook, CreateWebhookInput } from './types';
 
 export type TwentyGraphqlClientOptions = {
   /** Twenty server base URL, no trailing slash. The API lives at /graphql and /metadata. */
@@ -168,6 +167,51 @@ export class TwentyGraphqlClient implements TwentyClient {
       this.targetFieldsCache.set(kind, cached);
     }
     return cached;
+  }
+
+  // ---------------------------------------------------------------------------
+  // webhooks (REST: /rest/webhooks)
+  // ---------------------------------------------------------------------------
+
+  private async rest<T = Raw>(method: 'GET' | 'POST', resource: string, body?: Raw): Promise<{ status: number; json: T | null; text: string }> {
+    const url = `${this.opts.baseUrl.replace(/\/+$/, '')}/rest/${resource}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const res = await this.fetchImpl(url, { method, headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${this.opts.apiKey}` }, body: body ? JSON.stringify(body) : undefined, signal: controller.signal });
+      const text = await res.text();
+      let json: T | null = null;
+      try { json = text ? (JSON.parse(text) as T) : null; } catch { json = null; }
+      return { status: res.status, json, text };
+    } finally { clearTimeout(timer); }
+  }
+
+  private static webhookOf(raw: Raw): TwentyWebhook {
+    const ops = Array.isArray(raw.operations) ? (raw.operations as string[]) : typeof raw.operation === 'string' ? [raw.operation as string] : [];
+    return { id: String(raw.id ?? ''), targetUrl: String(raw.targetUrl ?? ''), operations: ops, description: (raw.description as string | null | undefined) ?? null, createdAt: (raw.createdAt as string | undefined) ?? null };
+  }
+
+  async listWebhooks(): Promise<TwentyWebhook[]> {
+    const res = await this.rest<Raw>('GET', 'webhooks?limit=60');
+    if (res.status >= 400) throw new TwentyApiError(`Twenty webhooks responded ${res.status}: ${res.text.slice(0, 300)}`, res.status);
+    const data = (res.json?.data ?? res.json ?? {}) as Raw;
+    const list = (Array.isArray(data.webhooks) ? data.webhooks : Array.isArray(data) ? data : []) as Raw[];
+    return list.map(TwentyGraphqlClient.webhookOf);
+  }
+
+  /**
+   * Every operation on every object ("*.*"): people, companies, notes, messages, tasks. Newer
+   * workspaces take `operations` (a list); older ones a single `operation` - the second shape is
+   * tried when the first is refused, so one button works against either.
+   */
+  async createWebhook(input: CreateWebhookInput): Promise<TwentyWebhook> {
+    const base: Raw = { targetUrl: input.targetUrl, description: input.description ?? 'Cadence', ...(input.secret ? { secret: input.secret } : {}) };
+    let res = await this.rest<Raw>('POST', 'webhooks', { ...base, operations: ['*.*'] });
+    if (res.status === 400 || res.status === 422) res = await this.rest<Raw>('POST', 'webhooks', { ...base, operation: '*.*' });
+    if (res.status >= 400) throw new TwentyApiError(`Twenty webhooks responded ${res.status}: ${res.text.slice(0, 300)}`, res.status);
+    const data = (res.json?.data ?? res.json ?? {}) as Raw;
+    const created = (data.createWebhook ?? data.webhook ?? data) as Raw;
+    return TwentyGraphqlClient.webhookOf(created);
   }
 
   private async selection(typeName: string, fields: Sel[], required: string[] = ['id']): Promise<string> {

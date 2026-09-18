@@ -377,3 +377,10 @@ failed responses. The reader's own comparisons (`scripts/live-numbers.ts`, `scri
   minutes after the deploy the hosted build had blocked 14 more accounts (4,924 -> 4,910),
   "Microsoftonline" among them; their 36 people left the directory (8,089 -> 8,053), and the
   Accounts tiles read 3,633 with an account + 4,420 without = 8,053, exactly the People count.
+- Emails and notes for the ten most recently active people (`scripts/live-crm-content.ts`): every
+  Emails and Notes tab loaded, paginated where there were more than 25; bodies present. Two
+  "Untitled note" bodies showed markdown table pipes from Twenty's summary field, which
+  `presentNoteBody` now folds into plain lines. Comparing against Twenty itself needs Twenty
+  access; what Cadence shows agrees with the Twenty status card (counts equal, reconcile flowing).
+- Webhooks: rather than a URL to type into Twenty, Settings > Twenty now has "Register webhook in
+  Twenty", which creates it through Twenty's API with the server's own secret.

@@ -55,8 +55,7 @@ import type {
   TwentyWorkspaceMember,
   UpdateTaskInput,
   EnrichPersonInput,
-  EnrichCompanyInput,
-} from './types';
+  EnrichCompanyInput,TwentyWebhook, CreateWebhookInput } from './types';
 
 export type MockWrite =
   | { op: 'createNote'; id: string; input: CreateNoteInput }
@@ -270,6 +269,14 @@ export class MockTwentyClient implements TwentyClient {
     this.maybeFail();
     const n = this.notes.find((x) => x.id === id);
     return n ? clone(n) : null;
+  }
+
+  private webhooks: TwentyWebhook[] = [];
+  async listWebhooks(): Promise<TwentyWebhook[]> { return [...this.webhooks]; }
+  async createWebhook(input: CreateWebhookInput): Promise<TwentyWebhook> {
+    const hook: TwentyWebhook = { id: `wh-${this.webhooks.length + 1}`, targetUrl: input.targetUrl, operations: ['*.*'], description: input.description ?? null };
+    this.webhooks.push(hook);
+    return hook;
   }
 
   async listMessages(opts?: ListOptions & { personId?: string }): Promise<Page<TwentyMessage>> {

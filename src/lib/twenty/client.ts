@@ -13,8 +13,7 @@ import type {
   TwentyWorkspaceMember,
   UpdateTaskInput,
   EnrichPersonInput,
-  EnrichCompanyInput,
-} from './types';
+  EnrichCompanyInput,TwentyWebhook, CreateWebhookInput } from './types';
 
 export type ListOptions = {
   /** ISO timestamp; only records updated at or after this instant. */
@@ -59,6 +58,10 @@ export interface TwentyClient {
   listNotes(opts?: ListOptions & { personId?: string }): Promise<Page<TwentyNote>>;
   getNote(id: string): Promise<TwentyNote | null>;
   listMessages(opts?: ListOptions & { personId?: string }): Promise<Page<TwentyMessage>>;
+
+  // ---- webhooks: Twenty's instant path into Cadence ----
+  listWebhooks(): Promise<TwentyWebhook[]>;
+  createWebhook(input: CreateWebhookInput): Promise<TwentyWebhook>;
   getMessage(id: string): Promise<TwentyMessage | null>;
   listTasks(opts?: ListOptions & { personId?: string }): Promise<Page<TwentyTask>>;
   getTask(id: string): Promise<TwentyTask | null>;

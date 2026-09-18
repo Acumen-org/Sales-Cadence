@@ -704,3 +704,21 @@ launched campaign reads enrollments, not the list it launched from, so somebody 
 is not shown as "in" it. An FO's campaign filter includes upcoming campaigns that hold anyone the
 FO owns, since nothing is enrolled yet. The account page's stat is "In a campaign", counted the
 same way as the Accounts list column: live enrollments plus a place in an upcoming campaign.
+
+## Cadence registers its own webhook in Twenty (18 September 2026)
+
+The hosted build had received no webhook in 24 hours: nothing in Twenty pointed at it, so every
+change arrived on the minute-by-minute pass instead of at once. Rather than hand somebody a URL
+and a secret to type into Twenty, Settings > Twenty carries "Register webhook in Twenty": Cadence
+creates the webhook itself through Twenty's API - every operation on every object, posted to this
+deployment's `/api/webhooks/twenty`, signed with the secret the server already holds. Pressing it
+twice reports the existing webhook rather than making another. Twenty's webhook resource has had
+two shapes across versions (`operations: ["*.*"]`, earlier a single `operation`); the client tries
+the newer and falls back, so the one button works against either.
+
+## Note text reads as text (18 September 2026)
+
+Twenty's markdown summary of a note can carry table syntax - call-log lines wrapped in pipes with
+`| --- |` separator rows - and runs of blank lines. Wherever Cadence shows a note body it goes
+through `presentNoteBody`: separator rows go, a row's cells become its words joined with " · ",
+and blank runs collapse to one. No word is dropped and nothing is added.

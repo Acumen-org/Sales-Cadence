@@ -1,3 +1,4 @@
+import { presentNoteBody } from '@/lib/crm-text';
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { RecordSync } from '@/components/record-sync';
@@ -84,7 +85,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
     ...touches.map<TimelineItem>((t) => ({ at: t.occurredAt, kind: 'touch', icon: t.channel, title: t.summary, detail: notes.find(n => t.externalId.startsWith(`note:${n.id}:`))?.bodyMarkdown || t.actorLabel, tone: t.direction === 'INBOUND' ? 'in' : 'out' })),
     ...notes
       .filter((n) => !touches.some((t) => t.externalId.startsWith(`note:${n.id}:`)))
-      .map<TimelineItem>((n) => ({ at: new Date(n.createdAt), kind: 'note', icon: 'NOTE', title: n.title, detail: n.bodyMarkdown ?? n.createdByName, tone: 'neutral' })),
+      .map<TimelineItem>((n) => ({ at: new Date(n.createdAt), kind: 'note', icon: 'NOTE', title: n.title, detail: presentNoteBody(n.bodyMarkdown) || n.createdByName, tone: 'neutral' })),
     ...tasks
       .filter((t) => t.state === 'SKIPPED' || (t.state === 'DONE' && !touches.some((x) => x.externalId === `task:${t.id}` || x.externalId === t.evidenceId)))
       .map<TimelineItem>((t) => ({ at: t.completedAt ?? t.updatedAt, kind: 'task', icon: t.action, title: `${t.label} ${t.state === 'DONE' ? 'done' : 'skipped'}${t.disposition ? ` - ${t.disposition}` : ''}${t.skipReason ? `: ${t.skipReason}` : ''}`, detail: t.note ?? t.fo.name, tone: 'out' })),

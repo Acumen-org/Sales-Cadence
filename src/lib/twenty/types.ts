@@ -244,3 +244,7 @@ export type EnrichCompanyInput = Partial<Pick<TwentyCompany, 'name' | 'domain' |
 export function personFullName(p: Pick<TwentyPerson, 'firstName' | 'lastName'>): string {
   return [p.firstName, p.lastName].filter(Boolean).join(' ').trim() || '(no name)';
 }
+
+/** A webhook Twenty posts to. `operations` is the newer shape ("*.*"); older workspaces carry one `operation`. */
+export type TwentyWebhook = { id: string; targetUrl: string; operations: string[]; description: string | null; createdAt?: string | null };
+export type CreateWebhookInput = { targetUrl: string; secret?: string | null; description?: string | null };

@@ -4,7 +4,8 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
 import { retryFailedWrites } from '@/lib/engine/sync-retry';
 import { requireAdmin } from '../auth/current-user';
-import { userActor } from '../audit';
+import { env } from '../env';
+import { logAudit, userActor } from '../audit';
 import { refreshPersonCache, syncPodsFromTwenty } from '../person-cache';
 import { runSchedulerTick } from '../engine/tasks';
 import { reconcile } from '../engine/reconcile';
@@ -109,6 +110,30 @@ export async function resolveReviewAction(formData: FormData): Promise<ActionRes
   await resolveReview(eventId, userActor(admin), String(formData.get('note') ?? '') || undefined);
   revalidatePath('/settings');
   return { ok: true, message: 'Marked as reviewed.' };
+}
+
+/**
+ * Cadence registers its own webhook in Twenty - every operation on every object, posted to this
+ * deployment's /api/webhooks/twenty and signed with the secret the server already holds - so the
+ * instant path needs no hand-typed URL in Twenty's settings. Safe to press twice: an existing
+ * webhook for this URL is reported, not duplicated.
+ */
+export async function registerWebhookAction(): Promise<ActionResult> {
+  const user = await requireAdmin();
+  try {
+    const e = env();
+    if (!e.TWENTY_WEBHOOK_SECRET && !e.CADENCE_WEBHOOK_TOKEN && !e.CADENCE_WEBHOOK_OPEN) return { ok: false, error: 'The server has no webhook secret: set TWENTY_WEBHOOK_SECRET in its environment first.' };
+    const targetUrl = `${e.APP_URL.replace(/\/+$/, '')}/api/webhooks/twenty${!e.TWENTY_WEBHOOK_SECRET && e.CADENCE_WEBHOOK_TOKEN ? `?token=${encodeURIComponent(e.CADENCE_WEBHOOK_TOKEN)}` : ''}`;
+    const client = await getTwentyClient();
+    const existing = (await client.listWebhooks()).filter((w) => w.targetUrl.split('?')[0] === targetUrl.split('?')[0]);
+    if (existing.length) return { ok: true, message: `Twenty already posts to this Cadence (${existing.length} webhook${existing.length === 1 ? '' : 's'}, ${existing.map((w) => w.operations.join(', ') || 'all operations').join('; ')}).` };
+    const hook = await client.createWebhook({ targetUrl, secret: e.TWENTY_WEBHOOK_SECRET ?? null, description: 'Cadence' });
+    await logAudit({ entityType: 'settings', entityId: 'twenty', action: 'webhook_registered', actor: userActor(user), details: { id: hook.id, targetUrl: targetUrl.split('?')[0], operations: hook.operations } });
+    revalidatePath('/settings');
+    return { ok: true, message: client.kind === 'dry-run' ? 'Dry run: the webhook was not created.' : `Registered. Twenty now posts every change to this Cadence (${hook.operations.join(', ') || 'all operations'}).` };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 export async function testTwentyConnectionAction(): Promise<ActionResult> {

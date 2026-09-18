@@ -36,6 +36,8 @@ export class DryRunTwentyClient implements TwentyClient {
   listNotes: TwentyClient['listNotes'] = (o) => this.inner.listNotes(o);
   getNote: TwentyClient['getNote'] = (id) => this.inner.getNote(id);
   listMessages: TwentyClient['listMessages'] = (o) => this.inner.listMessages(o);
+  listWebhooks: TwentyClient['listWebhooks'] = () => this.inner.listWebhooks();
+  createWebhook: TwentyClient['createWebhook'] = async (input) => ({ id: 'dry-run', targetUrl: input.targetUrl, operations: ['*.*'], description: input.description ?? null });
   getMessage: TwentyClient['getMessage'] = (id) => this.inner.getMessage(id);
   listTasks: TwentyClient['listTasks'] = (o) => this.inner.listTasks(o);
   getTask: TwentyClient['getTask'] = (id) => this.inner.getTask(id);

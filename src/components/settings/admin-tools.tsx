@@ -1,6 +1,6 @@
 'use client';
 
-import { refreshCacheAction, runReconcileAction, runSchedulerAction, testTwentyConnectionAction } from '@/lib/actions/admin';
+import { refreshCacheAction, registerWebhookAction, runReconcileAction, runSchedulerAction, testTwentyConnectionAction } from '@/lib/actions/admin';
 import { ActionButton, ActionForm } from '@/components/action-form';
 import { Card, Field } from '@/components/ui';
 
@@ -36,6 +36,9 @@ export function AdminTools({ defaultDays }: { defaultDays: number }) {
             </ActionButton>
             <ActionButton action={() => testTwentyConnectionAction()} payload={{}} className="btn-secondary">
               Test Twenty connection
+            </ActionButton>
+            <ActionButton action={() => registerWebhookAction()} payload={{}} className="btn-secondary">
+              Register webhook in Twenty
             </ActionButton>
           </div>
           <p className="text-xs text-ink-500">The worker container does this automatically every few minutes.</p>
