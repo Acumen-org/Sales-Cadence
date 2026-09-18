@@ -1,21 +1,19 @@
 'use client';
+import { callHref, opensDialpad } from '@/lib/calls';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { saveTaskDraftAction } from '@/lib/actions/tasks';
-import { startCallAction } from '@/lib/actions/calls';
 import { RichTextEditor } from '@/components/rich-text-editor';
 import { ActionIcon, IconCheck, IconCopy, IconPhone } from '@/components/icons';
 import { registerDraftWriter } from './draft-registry';
 
-type Props = { taskId: string; subject: string | null; body: string; html?: string; label: string; channel: 'EMAIL' | 'CALL' | 'LINKEDIN'; revision?: number; readOnly?: boolean; phone?: string | null; clickToCall?: boolean };
-export function TaskComposer({ taskId, subject, body, html, label, channel, revision = 0, readOnly = false, phone, clickToCall = false }: Props) {
+type Props = { taskId: string; subject: string | null; body: string; html?: string; label: string; channel: 'EMAIL' | 'CALL' | 'LINKEDIN'; revision?: number; readOnly?: boolean; phone?: string | null; /** The dialpad address with {phone}; blank means tel:. */ callTemplate?: string | null };
+export function TaskComposer({ taskId, subject, body, html, label, channel, revision = 0, readOnly = false, phone, callTemplate = null }: Props) {
   const initialHtml = html ?? '<p>' + body.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') + '</p>';
   const [draft, setDraft] = useState({ subject: subject ?? '', html: initialHtml, text: body });
   const [state, setState] = useState('Saved');
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
   const [phoneCopied, setPhoneCopied] = useState(false);
-  const [calling, setCalling] = useState(false);
-  const [callNote, setCallNote] = useState('');
   const latest = useRef(draft);
   const saved = useRef({ subject: draft.subject, html: draft.html });
   const rev = useRef(revision);
@@ -72,18 +70,10 @@ export function TaskComposer({ taskId, subject, body, html, label, channel, revi
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><div className="text-xs text-ink-500">Phone</div><strong className="mt-1 block text-lg text-ink-900">{phone || 'No number in Twenty'}</strong></div>
         {phone ? <div className="flex flex-wrap items-center gap-2">
-          {clickToCall
-            ? <button type="button" disabled={calling || readOnly} className="btn-primary" onClick={async () => {
-                setCalling(true); setError(''); setCallNote('');
-                const result = await startCallAction({ taskId });
-                setCalling(false);
-                if (result.ok) setCallNote(result.message); else setError(result.error);
-              }}><IconPhone size={15} />{calling ? 'Connecting' : 'Call'}</button>
-            : <a href={`tel:${phone.replace(/[^\d+]/g, '')}`} className="btn-primary"><IconPhone size={15} />Call</a>}
+          <a href={callHref(phone, callTemplate)} target={opensDialpad(callTemplate) ? '_blank' : undefined} rel={opensDialpad(callTemplate) ? 'noreferrer' : undefined} className="btn-primary"><IconPhone size={15} />Call</a>
           <button type="button" className="btn-secondary" onClick={async () => { try { await navigator.clipboard.writeText(phone); setPhoneCopied(true); setTimeout(() => setPhoneCopied(false), 1800); } catch { setError('Clipboard unavailable. Select the phone number to copy.'); } }}>{phoneCopied ? 'Copied' : 'Copy number'}</button>
         </div> : null}
       </div>
-      {callNote ? <p role="status" className="text-sm font-medium text-brand-800">{callNote}</p> : null}
     </div>}
     {channel === 'EMAIL' && <label className="block text-xs text-ink-500">Subject<input aria-label="Email subject" value={draft.subject} readOnly={readOnly} className="mt-1 w-full !font-medium !text-ink-900" onChange={e => change({ subject: e.target.value })} onBlur={() => { void flush(); }} /></label>}
     <RichTextEditor value={draft.html} label={channel === 'CALL' ? 'Call script' : label + ' message'} disabled={readOnly} onChange={(nextHtml, text) => change({ html: nextHtml, text })} />

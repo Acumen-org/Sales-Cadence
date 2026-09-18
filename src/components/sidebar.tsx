@@ -71,7 +71,7 @@ function SidebarContent({ user, mode, dryRun, todayCount, overdueCount, close }:
         </div>
         <div className="flex items-center gap-2.5 border-t border-white/10 px-2 pt-4">
           <Avatar name={user.name} shape="circle" size={33} />
-          <div className="min-w-0 flex-1"><div className="truncate text-[12px] font-medium text-white">{user.name}</div><div className="mt-0.5 truncate text-[10px] text-[#9eb4a9]">{ROLE_LABELS[user.role]}{user.pods.length ? ` · ${user.pods.map((p) => p.name).join(', ')}` : ''}</div></div>
+          <div className="min-w-0 flex-1"><div className="truncate text-[12px] font-medium text-white">{user.name}</div><div className="mt-0.5 text-[10px] text-[#9eb4a9]">{ROLE_LABELS[user.role]}</div>{user.pods.length ? <div className="truncate text-[10px] text-[#9eb4a9]" title={user.pods.map((p) => p.name).join(', ')}>{user.pods.map((p) => p.name).join(', ')}</div> : null}</div>
           <form action={logoutAction}><button type="submit" title="Sign out" aria-label="Sign out" className="rounded-lg p-2 text-[#9eb4a9] hover:bg-white/10 hover:text-white"><IconLogout size={16} /></button></form>
         </div>
       </div>

@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
 import { visiblePodIds } from './auth/rbac';
+import { foPeopleWhere } from './people-scope';
 import { parseSteps } from './sequences/steps';
 
 export type CampaignSummary = {
@@ -13,10 +14,17 @@ export type CampaignSummary = {
   podName: string;
   podId: string;
   startDate: string;
-  dailyRampPerFo: number | null;
+  startsPerFoPerDay: number | null;
+  endDate: string | null;
+  productInterest: string[];
+  description: string | null;
+  hardStopAtEnd: boolean;
   assignmentMode: string;
   sourceType: string;
   createdAt: Date;
+  /** People on the list before launch; after it, enrollments carry the count. */
+  audience: number;
+  touches: { done: number; open: number; planned: number };
   counts: { total: number; active: number; paused: number; replied: number; meeting: number; completed: number; exited: number };
   replyRate: number;
   meetingRate: number;
@@ -38,9 +46,55 @@ export function campaignScope(user: SessionUser): Prisma.CampaignWhereInput {
   return pods === null ? {} : { podId: { in: pods } };
 }
 
-export async function listCampaigns(user: SessionUser): Promise<CampaignSummary[]> {
-  const campaigns = await prisma.campaign.findMany({ where: campaignScope(user), include: { sequence: { select: { name: true } }, pod: { select: { name: true } } }, orderBy: [{ status: 'asc' }, { createdAt: 'desc' }] });
-  const groups = await prisma.enrollment.groupBy({ by: ['campaignId', 'campaignRun', 'status'], where: { campaignId: { in: campaigns.map((c) => c.id) } }, _count: { _all: true } });
+export type CampaignListFilters = { q?: string; podId?: string | null; sequenceId?: string | null; product?: string | null; foUserId?: string | null; from?: string | null; to?: string | null };
+
+/**
+ * Touches done, still open, and "planned" per campaign. Tasks are generated step by step, so a
+ * count of rows undersells the plan: somebody live still owes every touch of the sequence, and
+ * somebody finished owes the ones that were generated (done or skipped) before they finished.
+ */
+async function touchesByCampaign(ids: string[]): Promise<Map<string, { done: number; open: number; endedPlanned: number }>> {
+  const out = new Map<string, { done: number; open: number; endedPlanned: number }>();
+  if (!ids.length) return out;
+  const rows = await prisma.$queryRaw<Array<{ campaignId: string; state: string; live: boolean; n: bigint }>>`
+    SELECT e."campaignId" AS "campaignId", t.state AS state, (e.status IN ('ACTIVE', 'PAUSED')) AS live, COUNT(*) AS n
+    FROM "Task" t JOIN "Enrollment" e ON e.id = t."enrollmentId"
+    WHERE e."campaignId" = ANY(${ids}) AND e."campaignRun" = (SELECT c."runNumber" FROM "Campaign" c WHERE c.id = e."campaignId")
+    GROUP BY e."campaignId", t.state, (e.status IN ('ACTIVE', 'PAUSED'))`;
+  for (const r of rows) {
+    const row = out.get(r.campaignId) ?? { done: 0, open: 0, endedPlanned: 0 };
+    if (r.state === 'DONE') row.done += Number(r.n);
+    if (r.state === 'PENDING') row.open += Number(r.n);
+    if (!r.live && (r.state === 'DONE' || r.state === 'SKIPPED')) row.endedPlanned += Number(r.n);
+    out.set(r.campaignId, row);
+  }
+  return out;
+}
+
+/** Touches one person owes a sequence: every action of every step. */
+export function touchesPerPerson(steps: unknown): number {
+  try { return parseSteps(steps).reduce((n, s) => n + s.actions.length, 0); } catch { return 0; }
+}
+
+export async function listCampaigns(user: SessionUser, filters: CampaignListFilters = {}): Promise<CampaignSummary[]> {
+  const where: Prisma.CampaignWhereInput = { AND: [campaignScope(user)] };
+  const and = where.AND as Prisma.CampaignWhereInput[];
+  if (filters.q?.trim()) and.push({ OR: filters.q.trim().split(/\s+/).slice(0, 6).map((term) => ({ name: { contains: term, mode: 'insensitive' as const } })) });
+  if (filters.podId) and.push({ podId: filters.podId });
+  if (filters.sequenceId) and.push({ sequenceId: filters.sequenceId });
+  if (filters.product) and.push({ productInterest: { has: filters.product } });
+  // Before launch a campaign has no enrollments: it is the FO's when they own anyone in it.
+  const foPeople = filters.foUserId ? new Set((await prisma.personCache.findMany({ where: foPeopleWhere(filters.foUserId, (await prisma.user.findUnique({ where: { id: filters.foUserId }, select: { twentyMemberId: true } }))?.twentyMemberId), select: { id: true } })).map((p) => p.id)) : null;
+  if (filters.foUserId) and.push({ OR: [{ enrollments: { some: { foUserId: filters.foUserId } } }, { status: { in: ['DRAFT', 'PENDING_APPROVAL', 'SCHEDULED'] } }] });
+  // A date range means the campaign's window overlaps it.
+  if (filters.from) and.push({ OR: [{ endDate: null }, { endDate: { gte: filters.from } }] });
+  if (filters.to) and.push({ startDate: { lte: filters.to } });
+  const campaigns = (await prisma.campaign.findMany({ where, include: { sequence: { select: { name: true, steps: true } }, pod: { select: { name: true } } }, orderBy: [{ status: 'asc' }, { startDate: 'desc' }, { createdAt: 'desc' }] }))
+    .filter((c) => !foPeople || !['DRAFT', 'PENDING_APPROVAL', 'SCHEDULED'].includes(c.status) || c.personIds.some((id) => foPeople.has(id)));
+  const [groups, touches] = await Promise.all([
+    prisma.enrollment.groupBy({ by: ['campaignId', 'campaignRun', 'status'], where: { campaignId: { in: campaigns.map((c) => c.id) } }, _count: { _all: true } }),
+    touchesByCampaign(campaigns.map((c) => c.id)),
+  ]);
   return campaigns.map((c) => ({
     id: c.id,
     name: c.name,
@@ -50,10 +104,22 @@ export async function listCampaigns(user: SessionUser): Promise<CampaignSummary[
     podName: c.pod.name,
     podId: c.podId,
     startDate: c.startDate,
-    dailyRampPerFo: c.dailyRampPerFo,
+    startsPerFoPerDay: c.startsPerFoPerDay,
+    endDate: c.endDate,
+    productInterest: c.productInterest,
+    description: c.description,
+    hardStopAtEnd: c.hardStopAtEnd,
     assignmentMode: c.assignmentMode,
     sourceType: c.sourceType,
     createdAt: c.createdAt,
+    audience: c.personIds.length,
+    touches: (() => {
+      const t = touches.get(c.id) ?? { done: 0, open: 0, endedPlanned: 0 };
+      const perPerson = touchesPerPerson(c.sequence.steps);
+      const live = groups.filter((g) => g.campaignId === c.id && g.campaignRun === c.runNumber && (g.status === 'ACTIVE' || g.status === 'PAUSED')).reduce((n, g) => n + g._count._all, 0);
+      const planned = ['DRAFT', 'PENDING_APPROVAL', 'SCHEDULED'].includes(c.status) ? c.personIds.length * perPerson : live * perPerson + t.endedPlanned;
+      return { done: t.done, open: t.open, planned };
+    })(),
     ...summarise(groups.filter((g) => g.campaignId === c.id && g.campaignRun === c.runNumber)),
   }));
 }

@@ -3,7 +3,8 @@ import { getMockTwentyClient } from '@/lib/twenty/mock-client';
 import { beforeEach, expect, it } from 'vitest';
 import { prisma } from '@/lib/db';
 import { listAccounts } from '@/lib/accounts-query';
-import { filterEnrichmentQueue, type EnrichmentQueueItem } from '@/lib/enrichment';
+import { filterEnrichmentQueue, type EnrichmentQueueItem } from '@/lib/enrichment-work';
+import { queueItem } from './helpers/enrichment';
 import { tagFilter, tagTone } from '@/lib/crm-tags';
 import type { SessionUser } from '@/lib/auth/current-user';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
@@ -42,9 +43,9 @@ it('tag colours are deterministic and existing fields use their existing filter'
   expect(tagTone('MISSING_EMAIL')).toBe('amber');
 });
 it('enrichment reverses every supported sort without changing membership', () => {
-  const items: EnrichmentQueueItem[] = ['Alpha', 'Beta', 'Gamma'].map((label, i) => ({ id: label, label, company: label, entity: 'person', href: '/', gaps: Array.from({ length: i + 1 }, () => ({ field: 'email', label: 'Email', priority: 'critical' })) }));
-  for (const sort of ['name', 'company', 'gaps']) {
-    expect(filterEnrichmentQueue(items, '', [], sort, 'desc').map(row => row.id)).toEqual(filterEnrichmentQueue(items, '', [], sort, 'asc').map(row => row.id).reverse());
+  const items: EnrichmentQueueItem[] = ['Alpha', 'Beta', 'Gamma'].map((label, i) => queueItem({ id: label, label, company: label, syncedAt: new Date(2026, 0, i + 1), gaps: Array.from({ length: i + 1 }, () => ({ field: 'email', label: 'Email', priority: 'critical' as const })) }));
+  for (const sort of ['name', 'company', 'gaps', 'synced']) {
+    expect(filterEnrichmentQueue(items, { sort, dir: 'desc' }).map(row => row.id)).toEqual(filterEnrichmentQueue(items, { sort, dir: 'asc' }).map(row => row.id).reverse());
   }
 });
 

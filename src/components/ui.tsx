@@ -402,7 +402,7 @@ const FORM_CONTROLS = new Set(['input', 'select', 'textarea']);
  * Label + control. A single input/select/textarea child gets an id (unless it has one) and the
  * label points at it with htmlFor, so click-to-focus, screen readers and accessible queries work.
  */
-export function Field({ label, children, hint, info, className }: { label: ReactNode; children: ReactNode; hint?: ReactNode; info?: string; className?: string }) {
+export function Field({ label, children, hint, info, className, required }: { label: ReactNode; children: ReactNode; hint?: ReactNode; info?: string; className?: string; /** Marks the label with a red asterisk. */ required?: boolean }) {
   const autoId = useId();
   const single = isValidElement(children) && typeof children.type === 'string' && FORM_CONTROLS.has(children.type);
   const existingId = single ? (children as ReactElement<{ id?: string }>).props.id : undefined;
@@ -415,6 +415,8 @@ export function Field({ label, children, hint, info, className }: { label: React
         <label htmlFor={controlId} className="block">
           {label}
         </label>
+        {/* Outside the label, so the label's own text stays exactly the field's name. */}
+        {required ? <span className="ml-0.5 text-red-600" aria-hidden>*</span> : null}
         {info ? <Info text={info} /> : null}
       </div>
       {control}
@@ -430,7 +432,7 @@ export function Empty({ children = '-' }: { children?: ReactNode }) {
 
 /** Counts remain legible and visibly dynamic, including zero. */
 export function Count({ value, className }: { value: number; className?: string }) {
-  return <span className={clsx('font-semibold tabular-nums text-ink-900', className)}>{value}</span>;
+  return <span className={clsx('font-medium tabular-nums text-ink-900', className)}>{value}</span>;
 }
 
 /** The explanation behind a field label, shown on hover instead of as a sentence under the control. */
@@ -519,6 +521,7 @@ export function RecordHeader({
   actions,
   shape = 'circle',
   icon,
+  accent,
 }: {
   name: string;
   sub?: ReactNode;
@@ -527,11 +530,14 @@ export function RecordHeader({
   shape?: 'square' | 'circle';
   /** For records that are not people: an icon rather than their initials. */
   icon?: ReactNode;
+  /** The record's own colour (see lib/accent.ts): a soft band behind the header and a ring on the avatar. */
+  accent?: { band: string; ring: string; pattern: string } | null;
 }) {
   return (
-    <div className="surface flex flex-wrap items-start justify-between gap-4 px-5 py-4">
-      <div className="flex min-w-0 items-start gap-3.5">
-        {icon ? <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700">{icon}</span> : <Avatar name={name} shape={shape} size={44} />}
+    <div className={clsx('surface relative flex flex-wrap items-start justify-between gap-4 overflow-hidden px-5 py-4', accent && `bg-gradient-to-r ${accent.band}`)}>
+      {accent ? <span aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.05]" style={{ backgroundImage: `radial-gradient(${accent.pattern} 1px, transparent 1px)`, backgroundSize: '14px 14px' }} /> : null}
+      <div className="relative flex min-w-0 items-start gap-3.5">
+        {icon ? <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700">{icon}</span> : <Avatar name={name} shape={shape} size={44} className={accent ? clsx('ring-2 ring-offset-2 ring-offset-white', accent.ring) : undefined} />}
         <div className="min-w-0">
           <h2 className="truncate text-[20px] font-semibold tracking-[-0.01em] text-ink-900">{name}</h2>
           {sub ? <div className="mt-1 text-[14px] text-ink-600">{sub}</div> : null}

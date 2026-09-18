@@ -13,7 +13,9 @@ import { recentEvents } from '@/lib/engine/ingest';
 import { Badge, Card, KeyValue, Surface, Tabs, ViewHeader, Empty, Count } from '@/components/ui';
 import { UsersPanel } from '@/components/settings/users-panel';
 import { BlockedAccountsPanel } from '@/components/settings/blocked-accounts-panel';
+import { NonProspectRulesForm } from '@/components/settings/non-prospect-rules-form';
 import { listBlockedAccounts } from '@/lib/blocked-accounts';
+import { liveReadHealth } from '@/lib/twenty/live-read';
 import { AdminTools } from '@/components/settings/admin-tools';
 import { ReviewButton } from '@/components/settings/review-button';
 import { SyncNowButton } from '@/components/settings/sync-now-button';
@@ -79,8 +81,11 @@ function AssistantTab() {
 }
 
 async function BlockedTab({ timezone }: { timezone: string }) {
-  const rows = await listBlockedAccounts();
+  const [rows, { rules }] = await Promise.all([listBlockedAccounts(), getSettings()]);
+  const exceptions = rules.neverProspectExceptions.length ? await prisma.companyCache.findMany({ where: { id: { in: rules.neverProspectExceptions } }, select: { id: true, name: true } }) : [];
   return (
+    <div className="space-y-3">
+    <NonProspectRulesForm rules={rules} exceptions={exceptions} />
     <BlockedAccountsPanel
       rows={rows.map((row) => ({
         companyId: row.companyId,
@@ -91,6 +96,7 @@ async function BlockedTab({ timezone }: { timezone: string }) {
         at: formatInstant(row.createdAt, timezone),
       }))}
     />
+    </div>
   );
 }
 
@@ -138,14 +144,16 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
     ok = false;
     ping = err instanceof Error ? err.message : String(err);
   }
-  const [settings, schema, lastReconcile, continuous, cachedPeople, cachedCompanies] = await Promise.all([
+  const [settings, schema, lastReconcile, continuous, cachedPeople, cachedCompanies, webhooks24h] = await Promise.all([
     getSettings(),
     getTwentySchema(),
     prisma.setting.findUnique({ where: { key: 'lastReconcile' } }),
     prisma.setting.findUnique({ where: { key: 'continuousSync' } }),
     prisma.personCache.count({ where: { deletedAt: null } }),
     prisma.companyCache.count({ where: { deletedAt: null } }),
+    prisma.activityEvent.count({ where: { source: 'WEBHOOK', receivedAt: { gte: new Date(Date.now() - 86_400_000) } } }),
   ]);
+  const live = liveReadHealth();
   const last = lastReconcile?.value as { at?: string; stats?: { cacheFailed?: number; cacheError?: string | null; notes?: number; messages?: number; opportunities?: number; tasks?: number; people?: number } } | null;
   const sync = continuous?.value as ContinuousSyncState | null;
   const stageErrors = Object.entries(sync?.stageErrors ?? {});
@@ -160,6 +168,9 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
             items={[
               { k: 'Mode', v: mode === 'mock' ? 'Demo workspace' : 'Twenty (GraphQL)' },
               { k: 'Dry run', v: dryRun ? <span className="flex flex-wrap items-center gap-2"><Badge tone="amber">On</Badge><code className="text-[12px]">CADENCE_DRY_RUN=true</code></span> : <Badge tone="green">Off</Badge> },
+              // Webhooks are the instant path; zero here means only the minute-by-minute pass is syncing.
+              { k: 'Webhooks (24h)', v: webhooks24h ? <span className="flex items-center gap-2"><Badge tone="green">{webhooks24h}</Badge><span className="text-[12px] text-ink-500">inbound events</span></span> : <Badge tone="amber">None received</Badge> },
+              { k: 'Live reads', v: live.pausedUntil ? <span className="flex flex-wrap items-center gap-2"><Badge tone="amber">Paused</Badge><span className="text-[12px] text-ink-500">until {formatInstant(live.pausedUntil, WORKSPACE_TIMEZONE)} after {live.failuresLastHour} failures</span></span> : live.failuresLastHour ? <span className="flex items-center gap-2"><Badge tone="amber">{live.failuresLastHour}</Badge><span className="text-[12px] text-ink-500">failures in the last hour</span></span> : <Badge tone="green">Healthy</Badge> },
               {
                 k: 'Continuous sync',
                 v: sync?.lastError && !sync.lastSuccess

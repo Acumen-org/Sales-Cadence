@@ -111,8 +111,8 @@ export function RulesForm({ rules }: { rules: Settings['rules'] }) {
             <input name="reconcileLookbackDays" type="number" min={1} max={90} defaultValue={rules.reconcileLookbackDays} className="!w-32" />
           </Field>
         </div>
-        <Field label="Click-to-call endpoint" info="Blank uses the machine's own dialler.">
-          <input name="clickToCallUrl" type="url" inputMode="url" defaultValue={rules.clickToCallUrl} placeholder="https://example.com/call" className="w-full" />
+        <Field label="Dialpad link ({phone} is the number)">
+          <input name="clickToCallUrl" inputMode="url" defaultValue={rules.clickToCallUrl} placeholder="https://h00ks.acm.acumen-strategy.com/admin/dialpad?number={phone}" className="w-full" />
         </Field>
         <Field
           label="Our own email domains"

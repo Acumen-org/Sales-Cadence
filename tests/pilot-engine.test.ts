@@ -35,10 +35,10 @@ const STEPS: SequenceStep[] = [
 describe('pilot: sequence days count working days', () => {
   it.each([
     ['2026-09-07', 1, '2026-09-07'],
-    ['2026-09-07', 7, '2026-09-15'],
-    ['2026-09-11', 2, '2026-09-14'],
-    ['2026-09-11', 7, '2026-09-21'],
-    ['2026-09-12', 2, '2026-09-15'],
+    ['2026-09-07', 7, '2026-09-14'], // Sunday the 13th rolls to Monday.
+    ['2026-09-11', 2, '2026-09-14'], // Friday + 1 is Saturday: Monday.
+    ['2026-09-11', 7, '2026-09-17'], // Six calendar days from a Friday is a Thursday.
+    ['2026-09-12', 2, '2026-09-14'],
     ['2026-10-30', 2, '2026-11-02'],
   ] as const)('starting %s, day %i is %s', (start, day, expected) => {
     expect(plannedDateForStep(start, day, 0, WORKING_DAYS)).toBe(expected);
@@ -101,7 +101,7 @@ describe('pilot: modular steps and lifecycle invariants', () => {
     expect((await completeTask({ taskId: email.id, source: 'MANUAL' }, context())).ok).toBe(true);
     expect((await tasks(id, 1)).map((task) => [task.action, task.dueDate])).toEqual([['LINKEDIN_MESSAGE', '2026-09-09']]);
     await finishStep(id, 1, '2026-09-09');
-    expect((await tasks(id, 2)).map((task) => task.dueDate)).toEqual(['2026-09-15']);
+    expect((await tasks(id, 2)).map((task) => task.dueDate)).toEqual(['2026-09-14']);
   });
 
   it('simultaneous completion of child actions creates the next step exactly once', async () => {

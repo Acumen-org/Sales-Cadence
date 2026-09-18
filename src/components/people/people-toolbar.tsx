@@ -2,7 +2,8 @@
 import { SortControl } from '@/components/sort-control';
 
 import { useFilterNavigation } from '@/components/filter-navigation';
-import { useEffect, useId, useState } from 'react';
+import { useId, useState } from 'react';
+import { useSearchBox } from '@/components/search-box';
 import { IconFilter, IconSearch } from '@/components/icons';
 import { optionLabel } from '@/lib/twenty/labels';
 
@@ -23,6 +24,9 @@ type Props = {
   status: string;
   tier: string;
   type: string;
+  /** Upcoming and running campaigns the reader can see, for the campaign filter. */
+  campaigns: { id: string; name: string; kind: 'upcoming' | 'running' }[];
+  campaign: string;
 };
 
 /**
@@ -50,10 +54,8 @@ const SORTS = [
 /** Filters whose "All" is a choice worth keeping in the URL, because the section has a default. */
 const EXPLICIT = new Set(['pod', 'fo']);
 
-export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, product, sort, status, tier, type, dir, tag, tags, listCategory }: Props) {
+export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, product, sort, status, tier, type, dir, tag, tags, listCategory, campaigns, campaign }: Props) {
   const navigate = useFilterNavigation();
-  const [text, setText] = useState(q);
-  useEffect(() => setText(q), [q]);
   const panelId = useId();
   /** Open on arrival when the URL already carries one of these, so nothing filters invisibly. */
   const [showMore, setShowMore] = useState(() => Boolean(product || tier || type || tag || status));
@@ -70,19 +72,14 @@ export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, p
     });
   };
 
-  useEffect(() => {
-    const t = setTimeout(() => {
-      if (text !== q) update({ q: text || null });
-    }, 350);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text]);
+  const { text, setText } = useSearchBox(q, (value) => update({ q: value }));
 
   const activeChips = [
     tag ? { key: 'tag', label: optionLabel(tag) } : null,
     listCategory ? { key: 'listCategory', label: optionLabel(listCategory) } : null,
     pod ? { key: 'pod', label: `Pod is ${pods.find((p) => p.podOwnerValue === pod)?.name ?? optionLabel(pod)}` } : null,
     fo ? { key: 'fo', label: `FO is ${fos.find((f) => f.id === fo)?.name ?? fo}` } : null,
+    campaign ? { key: 'campaign', label: `In ${campaigns.find((c) => c.id === campaign)?.name ?? 'a campaign'}` } : null,
     product ? { key: 'product', label: optionLabel(product) } : null,
     tier ? { key: 'tier', label: optionLabel(tier) } : null,
     type ? { key: 'type', label: optionLabel(type) } : null,
@@ -128,6 +125,12 @@ export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, p
           ))}
         </select>
       ) : null}
+      {/* Always in the first row, even with nothing to choose: the filter is part of the bar, not a surprise. */}
+      <select value={campaign} onChange={(e) => update({ campaign: e.target.value || null })} aria-label="Filter by campaign" className="!w-auto !py-2 !text-[12.5px]" disabled={!campaigns.length}>
+        <option value="">{campaigns.length ? 'Any campaign' : 'No campaigns yet'}</option>
+        {campaigns.some((c) => c.kind === 'running') ? <optgroup label="Active">{campaigns.filter((c) => c.kind === 'running').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup> : null}
+        {campaigns.some((c) => c.kind === 'upcoming') ? <optgroup label="Upcoming">{campaigns.filter((c) => c.kind === 'upcoming').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup> : null}
+      </select>
       <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} aria-controls={panelId} className={`btn-secondary btn-sm ${showMore || moreCount ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
         <IconFilter size={14} /> Filters
         {moreCount ? <span className="rounded-full bg-brand-600 px-1.5 text-[11px] font-semibold leading-[17px] text-white">{moreCount}</span> : null}

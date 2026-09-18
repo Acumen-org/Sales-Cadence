@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectTranscriptFormat, formatCueTime, parseTranscript, talkShare } from '@/lib/meetings/transcript';
+import { detectTranscriptFormat, formatCueTime, normalizeTranscript, parseTranscript, talkShare, UNATTRIBUTED } from '@/lib/meetings/transcript';
 
 const VTT = `WEBVTT
 
@@ -87,7 +87,8 @@ describe('parseTranscript', () => {
     expect(format).toBe('text');
     expect(cues).toHaveLength(3);
     expect(cues[0]).toMatchObject({ speaker: 'Alisa', text: 'hello there', start: 0, end: null });
-    expect(cues[2].speaker).toBeNull();
+    // A line with no name after a named one is that person still talking.
+    expect(cues[2].speaker).toBe('Dummy One');
   });
 
   it('keeps a leading timestamp from a pasted transcript', () => {
@@ -137,8 +138,8 @@ describe('talkShare', () => {
     expect(rows[0].share).toBeCloseTo(0.8);
   });
 
-  it('buckets cues with no speaker as Unknown', () => {
-    expect(talkShare(parseTranscript('just some words').cues)[0].speaker).toBe('Unknown');
+  it('buckets cues before anyone is named as unattributed', () => {
+    expect(talkShare(parseTranscript('just some words').cues)[0].speaker).toBe(UNATTRIBUTED);
   });
 });
 
@@ -148,5 +149,29 @@ describe('formatCueTime', () => {
     expect(formatCueTime(65)).toBe('1:05');
     expect(formatCueTime(3725)).toBe('1:02:05');
     expect(formatCueTime(-5)).toBe('0:00');
+  });
+});
+
+describe('speakers carried forward', () => {
+  it('a continuation line belongs to the last named speaker, in the transcript and in talk time', () => {
+    const vtt = ['WEBVTT', '', '00:00:01.000 --> 00:00:03.000', '<v Alisa Senior>We can start.', '', '00:00:03.500 --> 00:00:09.000', 'Thanks for joining.', '', '00:00:20.000 --> 00:00:25.000', '<v Jeff Pieta (AIS)>Glad to be here.', '', '00:00:25.500 --> 00:00:40.000', 'Let me share the numbers.'].join('\n');
+    const { cues } = parseTranscript(vtt, 'vtt');
+    expect(cues.every((c) => c.speaker !== null)).toBe(true);
+    const share = talkShare(cues);
+    expect(share.map((s) => s.speaker).sort()).toEqual(['Alisa Senior', 'Jeff Pieta (AIS)']);
+    expect(share.find((s) => s.speaker === 'Unknown' || s.speaker === UNATTRIBUTED)).toBeUndefined();
+    // Jeff spoke for 19.5 of 27 seconds.
+    expect(share[0].speaker).toBe('Jeff Pieta (AIS)');
+  });
+
+  it('lines before anyone is named are unattributed, and nothing invents a name for them', () => {
+    const { cues } = parseTranscript(['Recording started.', 'Alisa Senior: Hello.', 'And welcome.'].join('\n'), 'text');
+    expect(cues.map((c) => c.speaker)).toEqual([null, 'Alisa Senior', 'Alisa Senior']);
+    expect(talkShare(cues).map((s) => s.speaker).sort()).toEqual(['Alisa Senior', UNATTRIBUTED]);
+  });
+
+  it('normalises any format to "Speaker: dialogue" with one line per turn', () => {
+    const { cues } = parseTranscript(['[00:00:01] Alisa Senior: Hello.', '[00:00:04] And welcome.', '[00:00:09] Jeff Pieta (AIS): Thanks.'].join('\n'), 'text');
+    expect(normalizeTranscript(cues)).toBe('Alisa Senior: Hello. And welcome.\nJeff Pieta (AIS): Thanks.');
   });
 });

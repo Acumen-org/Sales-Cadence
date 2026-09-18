@@ -392,6 +392,24 @@ export async function runSchedulerTick(ctx: EngineContext): Promise<{ scanned: n
     }
     cursor = batch[batch.length - 1].id;
   }
+  // The end date. By default people mid-sequence finish and the campaign shows how many ran
+  // over; a campaign marked to stop hard ends what is left, through the same exit path as a stop.
+  const today = todayIn(WORKSPACE_TIMEZONE, ctx.now ?? new Date());
+  const hardStops = await prisma.campaign.findMany({ where: { status: 'ACTIVE', hardStopAtEnd: true, endDate: { lt: today } }, select: { id: true } });
+  for (const campaign of hardStops) {
+    const cancelled = await prisma.$transaction(async (tx) => {
+      const open = await tx.enrollment.findMany({ where: { campaignId: campaign.id, status: { in: ['ACTIVE', 'PAUSED'] } }, select: { id: true } });
+      const ids: string[] = [];
+      for (const e of open) {
+        ids.push(...(await cancelOpenTasks(tx, e.id, 'exited:campaign_ended', ctx.actor)).map((t) => t.id));
+        await tx.enrollment.update({ where: { id: e.id }, data: { status: 'EXITED', exitReason: 'campaign_ended', exitedAt: ctx.now ?? new Date() } });
+        await logAudit({ entityType: 'enrollment', entityId: e.id, action: 'exited', actor: ctx.actor, details: { reason: 'campaign_ended' } }, tx);
+      }
+      if (open.length) await logAudit({ entityType: 'campaign', entityId: campaign.id, action: 'ended', actor: ctx.actor, details: { endedEnrollments: open.length } }, tx);
+      return ids;
+    });
+    await syncCancelled(cancelled, ctx);
+  }
   await prisma.campaign.updateMany({ where: { status: 'ACTIVE', enrollments: { some: {}, none: { status: { in: ['ACTIVE','PAUSED'] } } } }, data: { status: 'COMPLETED' } });
   return stats;
 }

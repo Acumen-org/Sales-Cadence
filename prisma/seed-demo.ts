@@ -90,7 +90,7 @@ export async function seedDemo(sequenceId: string, withCampaigns: boolean) {
   const at = (offsetDays: number) => new Date(`${addDays(startDate, offsetDays)}T10:00:00Z`);
 
   const campaignA = await prisma.campaign.create({
-    data: { name: 'Dummy campaign - Alisa\'s pod', sequenceId, podId: await pod('ALISA'), sourceType: 'TWENTY_VIEW', sourceRef: "Alisa's pod - all people (view-alisa-pod)", personIds: ['dummy-01', 'dummy-02', 'dummy-03', 'dummy-04', 'dummy-05'], startDate, status: 'ACTIVE', notes: 'Seeded dummy data' },
+    data: { name: 'Dummy campaign - Alisa\'s pod', sequenceId, podId: await pod('ALISA'), sourceType: 'TWENTY_VIEW', sourceRef: "Alisa's pod - all people (view-alisa-pod)", personIds: ['dummy-01', 'dummy-02', 'dummy-03', 'dummy-04', 'dummy-05'], startDate, status: 'ACTIVE', description: 'Seeded dummy data' },
   });
   const a = await enrollPeople(
     { personIds: ['dummy-01', 'dummy-02', 'dummy-03', 'dummy-04', 'dummy-05', 'dummy-06'], sequenceId, podId: campaignA.podId, campaignId: campaignA.id, startDate, assignment: { mode: 'OWNER' }, actor: SYSTEM_ACTOR },
@@ -99,7 +99,7 @@ export async function seedDemo(sequenceId: string, withCampaigns: boolean) {
   console.log(`  + ${a.enrolled.length} enrolled in "${campaignA.name}" (${a.conflicts.length} skipped: ${a.conflicts.map((c) => `${c.name} ${c.reason}`).join(', ')})`);
 
   const campaignB = await prisma.campaign.create({
-    data: { name: "Dummy campaign - Andrew's pod", sequenceId, podId: await pod('ANDREW'), sourceType: 'IDS', sourceRef: 'pasted ids', personIds: ['dummy-07', 'dummy-08', 'dummy-09', 'dummy-10'], startDate, status: 'ACTIVE', notes: 'Seeded dummy data' },
+    data: { name: "Dummy campaign - Andrew's pod", sequenceId, podId: await pod('ANDREW'), sourceType: 'IDS', sourceRef: 'pasted ids', personIds: ['dummy-07', 'dummy-08', 'dummy-09', 'dummy-10'], startDate, status: 'ACTIVE', description: 'Seeded dummy data' },
   });
   const b = await enrollPeople(
     { personIds: ['dummy-07', 'dummy-08', 'dummy-09', 'dummy-10'], sequenceId, podId: campaignB.podId, campaignId: campaignB.id, startDate, assignment: { mode: 'OWNER' }, actor: SYSTEM_ACTOR },
@@ -122,7 +122,7 @@ export async function seedDemo(sequenceId: string, withCampaigns: boolean) {
         personIds: [...ids],
         startDate: today,
         status: 'ACTIVE',
-        notes: 'Seeded dummy data',
+        description: 'Seeded dummy data',
       },
     });
     const r = await enrollPeople(

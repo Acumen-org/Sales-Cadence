@@ -44,7 +44,7 @@ export function describeAudit(action: string, details: Details, actorLabel: stri
       const step = num(d.stepIndex);
       const day = num(d.day);
       const fields: AuditField[] = [];
-      if (Number.isFinite(day)) fields.push({ label: 'Business day', value: String(day) });
+      if (Number.isFinite(day)) fields.push({ label: 'Day', value: String(day) });
       if (str(d.dueDate)) fields.push({ label: 'Due', value: dateText(str(d.dueDate)) });
       return { title: `Step ${Number.isFinite(step) ? step + 1 : '?'} scheduled`, fields };
     }
@@ -69,6 +69,10 @@ export function describeAudit(action: string, details: Details, actorLabel: stri
                     ? 'Removed: deleted in Twenty'
                     : reason === 'account_blocked'
                       ? 'Removed: account blocked in Cadence'
+                      : reason === 'campaign_ended'
+                        ? 'Removed: the campaign reached its end date'
+                        : reason === 'removed'
+                          ? 'Removed from the campaign by hand'
                       : reason?.startsWith('campaign_')
                         ? 'Removed: campaign stopped'
                         : `Removed from the sequence${by}`;

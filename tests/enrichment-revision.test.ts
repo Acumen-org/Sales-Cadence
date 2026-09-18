@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { User } from '@prisma/client';
 import type { SessionUser } from '@/lib/auth/current-user';
-import { applyEnrichmentChunk, enrichmentQueue, getEnrichmentBatch, parseEnrichmentUpload, previewEnrichment, reviewEnrichmentRows, suggestEnrichmentMapping, validateEnrichmentValue } from '@/lib/enrichment';
+import { applyEnrichmentChunk, getEnrichmentBatch, parseEnrichmentUpload, previewEnrichment, reviewEnrichmentRows, suggestEnrichmentMapping, validateEnrichmentValue } from '@/lib/enrichment';
+import { enrichmentQueue } from '@/lib/enrichment-work';
 import { prisma } from '@/lib/db';
 import { upsertCompanyCache, upsertPersonCache } from '@/lib/person-cache';
 import { DryRunTwentyClient } from '@/lib/twenty';

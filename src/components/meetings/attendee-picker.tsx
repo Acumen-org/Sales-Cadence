@@ -6,8 +6,18 @@ import { Avatar, Badge } from '@/components/ui';
 
 const keyOf = (a: AttendeeSelection) => a.userId ? `user:${a.userId}` : a.personId ? `person:${a.personId}` : a.email?.toLowerCase() ?? a.name?.toLowerCase() ?? '';
 
-export function AttendeePicker({ initial, name = 'attendeesJson' }: { initial: AttendeeSelection[]; name?: string }) {
+export function AttendeePicker({ initial, name = 'attendeesJson', additions }: { initial: AttendeeSelection[]; name?: string; /** Attendees suggested from elsewhere (a transcript's speakers); merged in when they change. */ additions?: AttendeeSelection[] | null }) {
   const [selected, setSelected] = useState(initial);
+  useEffect(() => {
+    if (!additions?.length) return;
+    setSelected((items) => {
+      const next = [...items];
+      for (const a of additions) {
+        if (!next.some((x) => keyOf(x) === keyOf(a) || Boolean(x.email && a.email && x.email.toLowerCase() === a.email.toLowerCase()) || (!a.personId && !a.userId && !a.email && x.name?.toLowerCase() === a.name?.toLowerCase()))) next.push(a);
+      }
+      return next.slice(0, 200);
+    });
+  }, [additions]);
   const [query, setQuery] = useState('');
   const [options, setOptions] = useState<AttendeeOption[]>([]);
   const [open, setOpen] = useState(false);

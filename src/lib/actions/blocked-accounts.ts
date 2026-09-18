@@ -5,6 +5,7 @@ import { prisma } from '../db';
 import { requireAdmin } from '../auth/current-user';
 import { userActor } from '../audit';
 import { blockAccount, unblockAccount } from '../blocked-accounts';
+import { NEVER_PROSPECT_REASON, exceptFromNeverProspectRule } from '../non-prospects';
 import type { ActionResult } from './users';
 
 /** Blocking and unblocking an account is an admin decision; see lib/blocked-accounts.ts for what it does. */
@@ -23,6 +24,8 @@ export async function unblockAccountAction(formData: FormData): Promise<ActionRe
   const companyId = String(formData.get('companyId') ?? '').trim();
   const result = await unblockAccount(companyId, { actor: userActor(admin) });
   if (!result.ok) return result;
+  // Unblocking what the rule blocked means "this one is a prospect": the rule leaves it alone now.
+  if (result.reason === NEVER_PROSPECT_REASON) await exceptFromNeverProspectRule(companyId);
   revalidate(companyId);
   return { ok: true, message: `${result.name} is back in Cadence.` };
 }

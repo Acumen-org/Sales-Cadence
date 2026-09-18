@@ -192,3 +192,129 @@ tick; it only bites where the race was.
 - A realistic Outlook message (nested divs, `&nbsp;` spacers, a table, a quoted reply, four
   trailing breaks) was rendered through the formatter: figures, table cells and the quoted block
   all survive, with no `&nbsp;` gaps and no run of three or more breaks.
+
+---
+
+# The 34-point round - 18 September 2026
+
+Everything in PLAN.md, phases 1 to 4, built and verified in one round. DECISIONS.md carries the
+rules each piece follows; this is what changed and how it was checked.
+
+## Foundations (phase 1)
+
+- Search boxes keep every letter typed while the server is slow: one shared "last sent" rule in
+  `useSearchBox`, used by People, Accounts, Meetings, Enrichment and Campaigns.
+- The sort arrow takes focus with an inset ring; no outline escapes the control.
+- Sequence steps are dragged by their handle (pointer events, not HTML drag), the editor asks for
+  the span in days and shows a day strip; step offsets are calendar days that roll off the weekend
+  (migration `calendar_day_offsets`, the default sequence on days 1, 3, 8, 11, 16, 22, 26, 31).
+- Two kinds of non-prospect: known non-prospects are blocked on sight with the reason recorded;
+  free-mail "companies" are never accounts anywhere. Rules live on Settings > Blocked accounts.
+- Record pages render from the cache and never wait for Twenty; the live read streams after paint
+  behind a circuit breaker (three failures in five minutes pause it for five). Settings > Twenty
+  shows webhooks in the last 24 hours and live-read health.
+- The page refreshes on a cheap version poll, only when something changed, never within two
+  seconds of a navigation. Layout badge counts are one query.
+
+## Campaigns as work between two dates (phase 2)
+
+- A campaign has a start and an end. The planner simulates every step on the committed load per
+  FO and finds the rate that fits; the form shows the capacity line live and refuses a launch
+  that cannot finish, with the end date that would. Weekend stacking is why the worked example
+  gives 5 a day, not 10.
+- Hard stop at the end date ends open enrollments with reason `campaign_ended`.
+- Membership is one idea before and after launch: an upcoming campaign shows on its people, their
+  accounts and the week's Tasks (Starting soon) from the moment it is created. People are added
+  to or removed from a campaign from the People list, a person's page and the campaign page.
+- People list: Campaign and Sequence columns, campaign filter, bulk add/remove. Campaigns list:
+  Upcoming / Active / Finished with per-tab columns; the campaign page has the window bar,
+  in-window replies and meetings, the capacity table and a paginated audience.
+
+## The surfaces (phase 3)
+
+- **Accounts**: "In a campaign" as "3 of 12" with a bar, the campaign filter, and the split of
+  people with and without an account (the second opens People).
+- **Record pages**: person and account pages carry tabs (Overview, Campaigns, Tasks, Activity,
+  Emails, Notes / Meetings), an accent per record, and a dialpad Call link whose target is the
+  `clickToCallUrl` setting.
+- **Meetings**: silent star, no analysis column in the list and no analysis panel on the page
+  until a model is connected, "Fill from link" that resolves direct media and proposes date and
+  attendees from the transcript's speakers, one transcript normalisation for the reader and the
+  talk-time table.
+- **Enrichment**: filters on the record in one row (pod, FO, account, tier, type, product,
+  campaign, Twenty tag, gap kind, priority, open or not-found), sort by name, account, gaps or last
+  sync; By account and Scorecard views; a selection exported exactly, assigned for research, or
+  marked not found (which hides the gap only while it stays empty); email-host suggestions for an
+  unlinked account; imports remember the mapping for a file shape. New tables `EnrichmentMark`,
+  `EnrichmentSnapshot` (nightly, from the worker) and `EnrichmentMapping`.
+- **Reports**: the picture (tiles with deltas and sparklines, funnel, channel bars, leaderboard,
+  weekday heatmap, campaigns running, pods against the period before), the table, and one
+  self-contained HTML export. Charts follow the data-viz method with a validated palette.
+- **Notifications**: a two-note chime on new unread, after the first interaction, with a
+  Sound on/off control.
+
+## Speed (C14)
+
+- Record pages no longer wait for Twenty; live reads are after paint.
+- People's Twenty tag options come from one `unnest` over the tag column, kept for a minute in
+  the server process (`src/lib/people-options.ts`, `src/lib/memo.ts`). Options are the one thing
+  cached; no number the page shows is.
+- The Accounts list reads only the columns it shows; the cached Twenty record (`raw`) was the
+  widest column on the table and was being read for every company on every render. The grouped
+  aggregates stay live rather than cached for 30 seconds as the plan allowed: the summary tiles
+  read them, and the owner's rule is that every number is live.
+- Layout counts are one grouped query; the refresh poll hits `/api/version`.
+
+## Verification
+
+- `pnpm typecheck`, `pnpm lint`, production build pass.
+- 57 unit and integration files, 389 tests pass, including: counts agree across pages, non-prospect
+  rules, blocked accounts, the capacity planner against its own simulation, the campaign window,
+  the fourteen-case stress pass over tasks, campaigns and sequences (which found and fixed the FO
+  daily-cap race), media resolution, transcript normalisation, and the enrichment work surface
+  (every filter, the scorecard's arithmetic against a snapshot, not-found closing and reopening,
+  leader scope on marks, mapping memory), and campaign membership writes (add and remove before
+  and after launch, Biz Ops refused, one person in one upcoming campaign, the FO filter on
+  upcoming campaigns).
+- 66 browser tests pass (`pnpm test:e2e`, serial, one worker), including phase1 (fast typing, sort focus, drag, span, account
+  counts, no CRM banner, non-prospect rules) and phase3 (By account, Scorecard, one row of
+  filters, export/assign/not found/reopen, exact export of a selection).
+
+## Critics (C16)
+
+Both critics ran on the production screenshots and the code after phase 3; both scored 7/10.
+Everything they found that a reader would meet was fixed in the same round; the rest is listed
+with the reason it stays.
+
+**Functional critic - fixed.** Planned touches were "generated" touches (a campaign read "0 of
+4" for two people on an eight-step plan); the FO filter emptied the Upcoming tab because an
+upcoming campaign has no enrollments; the People filter for a launched campaign still read the
+list it launched from, so people skipped at launch showed as members; the account page counted
+"in sequence" while the Accounts list counted "in a campaign"; the task brief still dialled
+`tel:`; the Starting-soon strip ignored the Tasks pod filter and left out campaigns awaiting
+approval; two upcoming campaigns could hold the same person and the second to launch skipped
+them silently (`scheduled_elsewhere`); membership writes had no tests
+(`tests/campaign-membership-writes.test.ts`: add, remove before and after launch, Biz Ops
+refused, the new conflict, the FO filter on upcoming campaigns).
+
+**Functional critic - kept as is.** "Starts per FO per day" stays as an optional ceiling under the
+planner (DECISIONS, "A campaign runs between two dates"); lifecycle actions stay on the campaign
+page rather than the list; the campaign page's preview messages are the engine's own sentences,
+not raw errors.
+
+**Design critic - fixed.** Activity filters were three rows (now one row and a Filters button,
+applied on change); ISO dates leaked into the Reports table view and the campaign form; the
+sidebar footer truncated the pod; the campaigns list truncated names and the State badge; the
+People campaign column truncated (it wraps to two lines); four explanatory sentences (sequence
+editor, reports channel aside, campaign form, login); the heatmap coloured cells without a value
+and printed white in the series colour; the scorecard was a wall of saturated green (tints only,
+values in ink); numbers and count headers were semibold (medium now); product chips on the
+campaign form looked like plain text; "1 days"; the sequence editor's width; a duplicate
+"Campaigns" heading; the campaign picker's filter names collided with the form's Pod field.
+
+**Design critic - kept as is.** Native date inputs render in the browser's locale, which the
+runner sets to en-US; a custom picker is a separate piece of work. Outbound emails are red and
+inbound green because the owner asked for exactly that. The tier and the list category are two
+kinds of tag, each shown once before "+N" for the rest. The record pages keep the section title
+as the page heading with the record's name in its header, as every record page has. Record
+accents were asked for.

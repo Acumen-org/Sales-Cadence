@@ -5,6 +5,8 @@ import { needsPod } from '@/lib/auth/rbac';
 import { requireUser } from '@/lib/auth/current-user';
 import { filterParam, sectionDefaults } from '@/lib/default-filters';
 import { defaultTwentySchema } from '@/lib/twenty/twenty-schema';
+import { foPeopleWhere, peopleScopeWhere } from '@/lib/people-scope';
+import { notAccountCompanyIds } from '@/lib/non-prospects';
 import { prisma } from '@/lib/db';
 import { isAdmin, visiblePodIds } from '@/lib/auth/rbac';
 import { SyncNowButton } from '@/components/settings/sync-now-button';
@@ -15,9 +17,9 @@ import { IconCampaigns } from '@/components/icons';
 import { AccountsToolbar } from '@/components/accounts/accounts-toolbar';
 import { PillList } from '@/components/pill-list';
 import { SortableHeader } from '@/components/sort-control';
-import { Badge, Count, Empty, EmptyState, IdentityCell, Stat, StatusDot, Surface, Toolbar, ViewHeader } from '@/components/ui';
+import { Badge, Count, Empty, EmptyState, IdentityCell, Stat, Surface, Toolbar, ViewHeader } from '@/components/ui';
 
-export default async function AccountsPage({ searchParams }: { searchParams: Promise<{ q?: string; scope?: string; pod?: string; fo?: string; product?: string; sort?: string; dir?: string; page?: string }> }) {
+export default async function AccountsPage({ searchParams }: { searchParams: Promise<{ q?: string; scope?: string; pod?: string; fo?: string; product?: string; campaign?: string; sort?: string; dir?: string; page?: string }> }) {
   const user = await requireUser();
   const sp = await searchParams;
   const q = (sp.q ?? '').trim();
@@ -26,13 +28,17 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
   const foUserId = filterParam(sp.fo, defaults.foUserId);
   const values = defaultTwentySchema.personValues;
   const product = sp.product && (values.productInterest as readonly string[]).includes(sp.product) ? sp.product : null;
+  const campaign = sp.campaign === 'any' || sp.campaign === 'all' || sp.campaign === 'none' ? sp.campaign : null;
   const sort: AccountSort = ACCOUNT_SORTS.includes(sp.sort as AccountSort) ? (sp.sort as AccountSort) : DEFAULT_ACCOUNT_SORT;
   const dir = sortDirection(sp.dir, sort === 'name' ? 'asc' : 'desc');
   const page = Math.max(1, Number.parseInt(sp.page ?? '1', 10) || 1);
   const visible = visiblePodIds(user);
-  const [list, podRows] = await Promise.all([
-    listAccounts(user, { q, pod, foUserId, product, sort, dir, page }),
+  const [list, podRows, withoutAccount] = await Promise.all([
+    listAccounts(user, { q, pod, foUserId, product, campaign, sort, dir, page }),
     prisma.pod.findMany({ where: { archived: false, ...(visible === null ? {} : { id: { in: visible } }) }, orderBy: { name: 'asc' }, include: { users: { include: { user: { select: { id: true, name: true, active: true, role: true } } } } } }),
+    // The other half of the CRM: people Twenty holds with no company at all. Counted here so the
+    // two people figures on Accounts and People add up in the open.
+    prisma.personCache.count({ where: { AND: [await peopleScopeWhere(user), { OR: [{ companyId: null }, { companyId: { in: await notAccountCompanyIds() } }] }, ...(pod ? [{ podOwner: pod }] : []), ...(foUserId ? [foPeopleWhere(foUserId, (await prisma.user.findUnique({ where: { id: foUserId }, select: { twentyMemberId: true } }))?.twentyMemberId)] : [])] } }),
   ]);
   const fos = [...new Map(podRows.flatMap((x) => x.users.filter((up) => up.user.active && needsPod(up.user.role)).map((up) => [up.user.id, { id: up.user.id, name: up.user.name }] as const))).values()].sort((a, b) => a.name.localeCompare(b.name));
   const rows = list.rows;
@@ -44,6 +50,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
     p.set('fo', foUserId ?? '');
     p.set('dir', dir);
     if (product) p.set('product', product);
+    if (campaign) p.set('campaign', campaign);
     if (sort !== DEFAULT_ACCOUNT_SORT) p.set('sort', sort);
     p.set('page', String(n));
     return `/accounts?${p.toString()}`;
@@ -51,23 +58,24 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
 
   return (
     <PageFrame className="space-y-5 px-6 pb-8 pt-2">
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
         <Stat label="Accounts in view" value={list.total} />
-        <Stat label="People at matching accounts" value={list.people} />
-        <Stat label="In sequence" value={list.inSequence} />
+        <Stat label="People with an account" value={list.people} />
+        <Link href={`/people?pod=${encodeURIComponent(pod ?? '')}&fo=${encodeURIComponent(foUserId ?? '')}&account=none`} className="block rounded-[14px] focus-visible:ring-4 focus-visible:ring-brand-100"><Stat label="People without an account" value={withoutAccount} /></Link>
+        <Stat label="Accounts with someone in a campaign" value={list.inCampaign} />
         <Stat label="Engaged accounts" value={list.engaged} tone="good" />
       </div>
       <Surface flush>
         <ViewHeader title="All accounts" caret actions={isAdmin(user) ? <SyncNowButton /> : undefined} />
         <Toolbar>
-          <AccountsToolbar q={q} pods={podRows.map((x) => ({ podOwnerValue: x.podOwnerValue, name: x.name }))} fos={fos} products={[...values.productInterest]} pod={pod ?? ''} fo={foUserId ?? ''} product={product ?? ''} sort={sort} dir={dir} />
+          <AccountsToolbar q={q} pods={podRows.map((x) => ({ podOwnerValue: x.podOwnerValue, name: x.name }))} fos={fos} products={[...values.productInterest]} pod={pod ?? ''} fo={foUserId ?? ''} product={product ?? ''} campaign={campaign ?? ''} sort={sort} dir={dir} />
         </Toolbar>
 
         {rows.length === 0 ? (
           <EmptyState
             icon={<IconCampaigns size={20} />}
-            title={q || pod || foUserId || product ? 'No accounts match' : 'No accounts yet'}
-            hint={q || pod || foUserId || product ? 'Try a different search or filter.' : undefined}
+            title={q || pod || foUserId || product || campaign ? 'No accounts match' : 'No accounts yet'}
+            hint={q || pod || foUserId || product || campaign ? 'Try a different search or filter.' : undefined}
           />
         ) : (
           <div className="overflow-x-auto scroll-thin">
@@ -82,7 +90,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
                   <th>FOs</th>
                   <th>Product</th>
                   <SortableHeader field="people" label="People at account" sort={sort} dir={dir} defaultValue={DEFAULT_ACCOUNT_SORT} className="num" />
-                  <SortableHeader field="inSequence" label="In sequence" sort={sort} dir={dir} defaultValue={DEFAULT_ACCOUNT_SORT} className="num" />
+                  <SortableHeader field="inSequence" label="In a campaign" sort={sort} dir={dir} defaultValue={DEFAULT_ACCOUNT_SORT} />
                   <SortableHeader field="replied" label="Replied" sort={sort} dir={dir} defaultValue={DEFAULT_ACCOUNT_SORT} className="num" />
                   <th className="num">Meetings</th>
                   <SortableHeader field="lastTouch" label="Last touch" sort={sort} dir={dir} defaultValue={DEFAULT_ACCOUNT_SORT} />
@@ -106,8 +114,14 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
                       </td>
                     )}
                     <td className="num"><Count value={a.people} /></td>
-                    <td className="num">
-                      <StatusDot tone={a.inSequence ? 'green' : 'gray'}><Count value={a.inSequence} /></StatusDot>
+                    <td className="text-[12.5px]">
+                      {/* Part of an account can be in a campaign: the count against everyone there, and a bar for the share. */}
+                      {a.people ? (
+                        <div className="min-w-0">
+                          <div className="tabular-nums text-ink-800"><span className={a.inSequence ? 'text-ink-900' : 'text-ink-400'}>{a.inSequence.toLocaleString('en-US')}</span> <span className="text-ink-400">of {a.people.toLocaleString('en-US')}</span></div>
+                          <div className="mt-1 h-1 w-full max-w-[6rem] overflow-hidden rounded-full bg-ink-100"><div className="h-full rounded-full bg-brand-500" style={{ width: `${Math.min(100, Math.round((a.inSequence / a.people) * 100))}%` }} /></div>
+                        </div>
+                      ) : <Empty />}
                     </td>
                     <td className="num"><Count value={a.replied} /></td>
                     <td className="num"><Count value={a.meetings} /></td>

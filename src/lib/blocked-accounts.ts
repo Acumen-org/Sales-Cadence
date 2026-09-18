@@ -60,13 +60,13 @@ export async function blockAccount(companyId: string, opts: { reason?: string | 
   return { ok: true, name, endedEnrollments: result.endedEnrollments };
 }
 
-export async function unblockAccount(companyId: string, opts: { actor: AuditActor }): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+export async function unblockAccount(companyId: string, opts: { actor: AuditActor }): Promise<{ ok: true; name: string; reason: string | null } | { ok: false; error: string }> {
   return prisma.$transaction(async tx => {
     await lockAccounts(tx, [companyId]);
     const blocked = await tx.blockedAccount.findUnique({ where: { companyId } });
     if (!blocked) return { ok: false as const, error: 'That account is not blocked.' };
     await tx.blockedAccount.delete({ where: { companyId } });
     await logAudit({ entityType: 'account', entityId: companyId, action: 'unblocked', actor: opts.actor, details: { name: blocked.name } }, tx);
-    return { ok: true as const, name: blocked.name };
+    return { ok: true as const, name: blocked.name, reason: blocked.reason };
   });
 }

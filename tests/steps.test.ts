@@ -6,16 +6,17 @@ describe('default sequence', () => {
   it('matches the specified plan exactly', () => {
     const steps = parseSteps(DEFAULT_SEQUENCE_STEPS);
     const plan = steps.map((s) => [s.day, s.actions.map((a) => a.type)]);
-    // Working days, and the call steps carry their follow-up as a second module of the same step.
+    // Calendar days from a Monday start (weekends count, work rolls to Monday), and the call steps
+    // carry their follow-up as a second module of the same step.
     expect(plan).toEqual([
       [1, ['EMAIL', 'LINKEDIN_CONNECT']],
       [3, ['CALL', 'EMAIL']],
-      [6, ['EMAIL']],
-      [9, ['LINKEDIN_MESSAGE']],
-      [12, ['CALL', 'LINKEDIN_MESSAGE']],
-      [16, ['LINKEDIN_MESSAGE']],
-      [20, ['CALL', 'EMAIL']],
-      [23, ['EMAIL']],
+      [8, ['EMAIL']],
+      [11, ['LINKEDIN_MESSAGE']],
+      [16, ['CALL', 'LINKEDIN_MESSAGE']],
+      [22, ['LINKEDIN_MESSAGE']],
+      [26, ['CALL', 'EMAIL']],
+      [31, ['EMAIL']],
     ]);
   });
 

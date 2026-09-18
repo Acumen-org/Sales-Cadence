@@ -16,6 +16,7 @@ export function EnrichmentImportForm({ initialEntity = 'person' }: { initialEnti
   const [fields, setFields] = useState<EnrichmentField[]>([]);
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [count, setCount] = useState(0);
+  const [rememberedFrom, setRememberedFrom] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [pending, start] = useTransition();
   const inspect = (text: string, selected: EnrichmentEntity) => start(async () => {
@@ -23,7 +24,7 @@ export function EnrichmentImportForm({ initialEntity = 'person' }: { initialEnti
     try {
     const result = await inspectEnrichmentUploadAction(selected, text);
     if (!result.ok) { setError(result.error); return; }
-    setHeaders(result.headers); setSample(result.sample); setFields(result.fields); setMapping(result.mapping); setCount(result.rowCount);
+    setHeaders(result.headers); setSample(result.sample); setFields(result.fields); setMapping(result.mapping); setCount(result.rowCount); setRememberedFrom(result.rememberedFrom);
     } catch { setError('The file could not be checked. Check your connection and choose it again.'); }
   });
   const preview = () => start(async () => {
@@ -55,7 +56,7 @@ export function EnrichmentImportForm({ initialEntity = 'person' }: { initialEnti
       </Surface>
       {error ? <Notice tone="error"><span role="alert">{error}</span></Notice> : null}
       {headers.length ? <Surface flush>
-        <ViewHeader title="Map columns" meta={<><DataValue>{count}</DataValue> rows</>} />
+        <ViewHeader title="Map columns" meta={<><DataValue>{count}</DataValue> rows{rememberedFrom ? <> · columns as in <span className="text-ink-900">{rememberedFrom}</span></> : null}</>} />
         <div className="overflow-x-auto"><table className="table">
           <thead><tr><th>File column</th><th>Sample data</th><th>Destination</th></tr></thead>
           <tbody>{headers.map((header) => <tr key={header}>

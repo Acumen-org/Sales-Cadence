@@ -96,15 +96,23 @@ test('capture screens', async ({ page }) => {
   await page.goto('/people/dummy-01?tab=overview');
   await shot(page, '07b-person-overview');
   await page.goto('/people/dummy-01?tab=sequences');
-  await shot(page, '07c-person-history');
-  await page.goto('/people/dummy-01?tab=crm');
-  await shot(page, '07d-person-crm');
+  await shot(page, '07c-person-campaigns');
+  await page.goto('/people/dummy-01?tab=tasks');
+  await shot(page, '07c2-person-tasks');
+  await page.goto('/people/dummy-01?tab=emails');
+  await shot(page, '07d-person-emails');
   // The other side of the same thread: an email that came in, in the colour that says so.
-  await page.goto('/people/dummy-02?tab=crm');
-  await shot(page, '07d2-person-crm-inbound');
+  await page.goto('/people/dummy-02?tab=emails');
+  await shot(page, '07d2-person-emails-inbound');
+  await page.goto('/people/dummy-01?tab=notes');
+  await shot(page, '07d3-person-notes');
 
   await page.goto('/enrichment');
   await shot(page, '07e-enrichment');
+  await page.goto('/enrichment?tab=byaccount');
+  await shot(page, '07e2-enrichment-by-account');
+  await page.goto('/enrichment?tab=scorecard');
+  await shot(page, '07e3-enrichment-scorecard');
 
   await page.goto('/sequences');
   await shot(page, '08-sequences');
@@ -116,6 +124,8 @@ test('capture screens', async ({ page }) => {
 
   await page.goto('/campaigns');
   await shot(page, '10-campaigns');
+  await page.goto('/campaigns?tab=upcoming');
+  await shot(page, '10b-campaigns-upcoming');
   const camp = page.getByRole('link', { name: /Dummy campaign/ }).first();
   if (await camp.isVisible().catch(() => false)) {
     await camp.click();
@@ -130,6 +140,8 @@ test('capture screens', async ({ page }) => {
   await page.waitForURL(/\/home/);
   await page.goto('/reports');
   await shot(page, '12-reports');
+  await page.goto('/reports?view=table');
+  await shot(page, '12b-reports-table');
   await page.goto('/settings?tab=users');
   await shot(page, '13-settings-users');
   await page.goto('/settings?tab=twenty');
@@ -174,6 +186,10 @@ test('capture screens', async ({ page }) => {
     await shot(page, '21b-account-people');
     await page.goto(`${url}?tab=timeline`);
     await shot(page, '22-account-timeline');
+    await page.goto(`${url}?tab=tasks`);
+    await shot(page, '22b-account-tasks');
+    await page.goto(`${url}?tab=meetings`);
+    await shot(page, '22c-account-meetings');
   }
 
   await page.goto('/activity');

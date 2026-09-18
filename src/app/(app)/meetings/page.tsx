@@ -64,7 +64,6 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
         companyId: true,
         products: true,
         transcript: true,
-        analysisStatus: true,
         createdBy: { select: { name: true } },
         _count: { select: { attendees: true } },
         attendees: { select: { email: true, external: true } },
@@ -138,7 +137,6 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                   <th>Products</th>
                   <th>Attendees</th>
                   <th>Transcript</th>
-                  <th>Analysis</th>
                   <th>Added by</th>
                 </tr>
               </thead>
@@ -176,17 +174,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                       </div>
                     </td>
                     <td>{m.transcript ? <Badge tone="blue">Transcript</Badge> : <Empty />}</td>
-                    <td>
-                      {m.analysisStatus === 'READY' ? (
-                        <Badge tone="green">Ready</Badge>
-                      ) : m.analysisStatus === 'FAILED' ? (
-                        <Badge tone="red">Failed</Badge>
-                      ) : m.analysisStatus === 'PENDING' ? (
-                        <Badge tone="amber">Running</Badge>
-                      ) : (
-                        <Empty />
-                      )}
-                    </td>
+
                     <td className="whitespace-nowrap text-[12.5px]">{m.createdBy?.name ?? <Empty />}</td>
                   </tr>
                 ))}

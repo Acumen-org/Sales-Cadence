@@ -21,7 +21,7 @@ export function SortControl({ value, dir, options, defaultValue, label = 'Sort',
       next.delete('before');
     });
   return (
-    <div className="inline-flex items-stretch overflow-hidden rounded-[10px] border border-line bg-white focus-within:border-brand-400 focus-within:ring-4 focus-within:ring-brand-100/70">
+    <div className="inline-flex items-stretch rounded-[10px] border border-line bg-white focus-within:border-brand-400 focus-within:ring-4 focus-within:ring-brand-100/70">
       <select
         value={value}
         aria-label={label}
@@ -32,7 +32,7 @@ export function SortControl({ value, dir, options, defaultValue, label = 'Sort',
             next.delete('dir');
           })
         }
-        className="!w-auto !rounded-none !border-0 !bg-transparent !py-2 !text-[12.5px] focus:!border-0 focus:!ring-0"
+        className="!w-auto !rounded-l-[9px] !rounded-r-none !border-0 !bg-transparent !py-2 !text-[12.5px] outline-none focus:!border-0 focus:!ring-0"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>
@@ -50,7 +50,7 @@ export function SortControl({ value, dir, options, defaultValue, label = 'Sort',
           const current = next.get('dir') ?? fallback;
           next.set('dir', current === 'asc' ? 'desc' : 'asc');
         })}
-        className="flex items-center border-l border-line px-2 text-ink-600 hover:bg-canvas hover:text-ink-900 focus-visible:bg-canvas"
+        className="flex items-center rounded-r-[9px] border-l border-line px-2 text-ink-600 outline-none hover:bg-canvas hover:text-ink-900 focus-visible:bg-canvas focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-300"
       >
         {dir === 'asc' ? <IconArrowUp size={14} /> : <IconArrowDown size={14} />}
       </button>

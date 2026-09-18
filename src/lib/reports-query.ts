@@ -3,7 +3,7 @@ import { WORKSPACE_TIMEZONE } from './workspace';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
 import { isJuniorFo, visiblePodIds } from './auth/rbac';
-import { addDays, isLocalDate, startOfLocalDay, type LocalDate } from './dates';
+import { addDays, isLocalDate, startOfLocalDay, toLocalDate, type LocalDate } from './dates';
 import { ACTION_LABELS, type ActionType } from './sequences/steps';
 
 export type GroupRow = {
@@ -162,8 +162,46 @@ export async function buildReports(user: SessionUser, today: LocalDate, filters?
     .filter((row) => !range || row.period.total || row.period.replies || row.period.meetings || enrollments.some((e) => e.foUserId === row.id && e.createdAt >= range.fromInstant && e.createdAt < range.toInstant))
     .sort((a, b) => b.period.total - a.period.total || a.name.localeCompare(b.name));
 
+  // Day by day across the range, for sparklines; the weekday x FO grid; the funnel of the cohort.
+  const dayKey = (d: Date) => toLocalDate(d, REPORTING_TIMEZONE);
+  const from = range?.from ?? toLocalDate(d28, REPORTING_TIMEZONE);
+  const to = range?.to ?? today;
+  const days: LocalDate[] = [];
+  for (let d = from; d <= to && days.length < 400; d = addDays(d, 1)) days.push(d);
+  const daily = days.map((date) => ({
+    date,
+    enrollments: enrollments.filter((e) => dayKey(e.createdAt) === date).length,
+    tasksDone: doneTasks.filter((t) => t.completedAt && dayKey(t.completedAt) === date).length,
+    replies: repliedRows.filter((r) => r.repliedAt && dayKey(r.repliedAt) === date).length,
+    meetings: meetingRows.filter((r) => r.meetingAt && dayKey(r.meetingAt) === date).length,
+    byChannel: {
+      EMAIL: doneTasks.filter((t) => t.completedAt && dayKey(t.completedAt) === date && (t.chosenAction ?? t.action) === 'EMAIL').length,
+      CALL: doneTasks.filter((t) => t.completedAt && dayKey(t.completedAt) === date && (t.chosenAction ?? t.action) === 'CALL').length,
+      LINKEDIN: doneTasks.filter((t) => t.completedAt && dayKey(t.completedAt) === date && (t.chosenAction ?? t.action).startsWith('LINKEDIN')).length,
+    },
+  }));
+  const weekday = (d: Date) => new Date(`${dayKey(d)}T00:00:00Z`).getUTCDay();
+  const heat = activity.map((row) => {
+    const cells = [0, 0, 0, 0, 0, 0, 0];
+    for (const t of doneTasks) if (t.foUserId === row.id && t.completedAt && (!range || (t.completedAt >= range.fromInstant && t.completedAt < range.toInstant))) cells[weekday(t.completedAt)] += 1;
+    return { id: row.id, name: row.name, cells };
+  });
+  const cohort = range ? enrollments.filter((e) => e.createdAt >= range.fromInstant && e.createdAt < range.toInstant) : enrollments;
+  const cohortIds = new Set(cohort.map((e) => e.id));
+  const touched = new Set(tasks.filter((t) => t.state === 'DONE' && cohortIds.has(t.enrollmentId)).map((t) => t.enrollmentId));
+  const funnel = {
+    enrolled: cohort.length,
+    touched: touched.size,
+    replied: cohort.filter((e) => e.repliedAt || e.meetingAt || e.status === 'REPLIED' || e.status === 'MEETING').length,
+    meeting: cohort.filter((e) => e.meetingAt || e.status === 'MEETING').length,
+  };
+
   return {
     today,
+    range: { from, to },
+    daily,
+    heat,
+    funnel,
     activity,
     totals: {
       enrollments: range ? enrollments.filter((e) => e.createdAt >= range.fromInstant && e.createdAt < range.toInstant).length : enrollments.length,

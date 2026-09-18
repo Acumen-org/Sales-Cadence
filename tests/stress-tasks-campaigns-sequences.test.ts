@@ -196,7 +196,7 @@ describe('stress: campaigns', () => {
 
   it('a daily ramp holds under a simultaneous launch', async () => {
     const people = ['person-01', 'person-02', 'person-03', 'person-04', 'person-05', 'person-06'];
-    const campaign = await scheduled(people, { dailyRampPerFo: 2, assignmentMode: 'ROUND_ROBIN' });
+    const campaign = await scheduled(people, { startsPerFoPerDay: 2, assignmentMode: 'ROUND_ROBIN' });
 
     await Promise.allSettled(Array.from({ length: 4 }, () => activateCampaign(campaign.id, ctx)));
 

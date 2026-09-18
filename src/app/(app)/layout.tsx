@@ -4,7 +4,7 @@ import { isAdmin } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
 import { env } from '@/lib/env';
 import { todayIn } from '@/lib/dates';
-import { tabWhere, taskScopeWhere, WORKABLE } from '@/lib/tasks-query';
+import { taskScopeWhere, WORKABLE } from '@/lib/tasks-query';
 import { Sidebar } from '@/components/sidebar';
 import { TopBar } from '@/components/topbar';
 import { unreadNotifications } from '@/lib/notifications';
@@ -15,14 +15,18 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const e = env();
   const today = todayIn(user.timezone);
   const mine = { AND: [taskScopeWhere(user), WORKABLE, { foUserId: user.id }] };
-  const [unread, todayGroups, overdueGroups, needsReview] = await Promise.all([
+  // One read for the badge counts: every open touchpoint of mine up to today, bucketed here. The
+  // layout runs on every navigation, so each query it saves is felt on every click.
+  const [unread, openGroups, needsReview] = await Promise.all([
     unreadNotifications(user),
-    prisma.task.groupBy({ by: ['enrollmentId','stepId'], where: { AND: [mine, tabWhere('today', today)] } }),
-    prisma.task.groupBy({ by: ['enrollmentId','stepId'], where: { AND: [mine, tabWhere('overdue', today)] } }),
+    prisma.task.findMany({ where: { AND: [mine, { state: 'PENDING' }, { OR: [{ snoozedTo: null, dueDate: { lte: today } }, { snoozedTo: { not: null, lte: today } }] }] }, select: { enrollmentId: true, stepId: true, dueDate: true, snoozedTo: true } }),
     isAdmin(user) ? prisma.activityEvent.count({ where: { needsReview: true } }) : Promise.resolve(0),
   ]);
-  const todayCount = todayGroups.length;
-  const overdueCount = overdueGroups.length;
+  const todayGroups = new Set<string>();
+  const overdueGroups = new Set<string>();
+  for (const t of openGroups) ((t.snoozedTo ?? t.dueDate) === today ? todayGroups : overdueGroups).add(`${t.enrollmentId}:${t.stepId}`);
+  const todayCount = todayGroups.size;
+  const overdueCount = overdueGroups.size;
 
   return (
     <FilterNavigationProvider><div className="flex min-h-screen bg-canvas">

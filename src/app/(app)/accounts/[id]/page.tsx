@@ -2,10 +2,14 @@ import { canCreateMeeting, isAdmin } from '@/lib/auth/rbac';
 import { ActionButton } from '@/components/action-form';
 import { blockAccountAction, unblockAccountAction } from '@/lib/actions/blocked-accounts';
 import Link from 'next/link';
+import { Suspense } from 'react';
+import { RecordSync } from '@/components/record-sync';
 import { notFound } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
 import { accountDetail } from '@/lib/accounts-query';
-import { formatInstant, formatLocalDate, todayIn } from '@/lib/dates';
+import { addDays, formatInstant, formatLocalDate, todayIn } from '@/lib/dates';
+import { accentFor } from '@/lib/accent';
+import { membershipFor, membershipLabel, primaryMembership } from '@/lib/campaign-membership';
 import { OrgTree, type TreePerson } from '@/components/accounts/org-tree';
 import { ActionIcon, IconExternal, IconLock, IconPlus } from '@/components/icons';
 import { Avatar, Badge, CAMPAIGN_TONE, Card, Count, ENROLLMENT_TONE, Empty, EmptyState, EventDetail, IdentityCell, KeyValue, RecordHeader, Stat, Surface, Tabs, TierBadge, enrollmentStatusLabel, type BadgeTone } from '@/components/ui';
@@ -17,7 +21,9 @@ const TABS = [
   { key: 'relationships', label: 'People by title' },
   { key: 'people', label: 'People' },
   { key: 'timeline', label: 'Timeline' },
-  { key: 'work', label: 'Campaigns and tasks' },
+  { key: 'work', label: 'Campaigns' },
+  { key: 'meetings', label: 'Meetings' },
+  { key: 'tasks', label: 'Tasks' },
 ];
 
 export default async function AccountPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string }> }) {
@@ -49,18 +55,24 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
     touches: p.touches,
   });
   const everyone = people.map(toTreePerson);
+  const membership = await membershipFor(people.map((p) => p.id));
+  const upcomingHere = [...new Map([...membership.values()].flat().filter((m) => m.kind === 'upcoming').map((m) => [m.campaignId, m])).values()];
+  const accent = accentFor(company.id);
+  const horizon = addDays(today, 30);
 
   return (
     <>
+      <Suspense fallback={null}><RecordSync kind="company" id={company.id} /></Suspense>
       <div className="px-6 pt-2">
         <RecordHeader
           name={company.name}
           shape="square"
+          accent={accent}
           badges={
             <>
               {detail.mine ? <Badge tone="blue">mine</Badge> : null}
               <Badge tone="gray">{stats.people} people</Badge>
-              {stats.inSequence ? <Badge tone="green" dot>{stats.inSequence} in sequence</Badge> : null}
+              {stats.inSequence ? <Badge tone="green" dot>{stats.inSequence} in a campaign</Badge> : null}
             </>
           }
           actions={
@@ -121,7 +133,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
           <>
             <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
               <Stat label="People" value={stats.people} />
-              <Stat label="In sequence" value={stats.inSequence} />
+              <Stat label="In a campaign" value={stats.inSequence} />
               <Stat label="Replied" value={stats.replied} tone="good" />
               <Stat label="Meetings" value={stats.meetings} />
               <Stat label="Touches" value={stats.touches} />
@@ -200,8 +212,8 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                       <th>Tier</th>
                       <th>Type</th>
                       <th>Next in Twenty</th>
+                      <th>Campaign</th>
                       <th>Sequence</th>
-                      <th>FO</th>
                       <th className="num">Touches</th>
                       <th>Last touch</th>
                     </tr>
@@ -226,14 +238,14 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                             <Empty />
                           )}
                         </td>
-                        <td>
-                          {p.enrollment ? (
-                            <Badge tone={ENROLLMENT_TONE[p.enrollment.status] ?? 'gray'}>{enrollmentStatusLabel(p.enrollment)}</Badge>
-                          ) : (
-                            <Empty />
-                          )}
-                        </td>
-                        <td className="whitespace-nowrap text-[12.5px]">{p.enrollment?.foName ?? <Empty />}</td>
+                        {(() => {
+                          const m = primaryMembership(membership.get(p.id));
+                          const label = m ? membershipLabel(m) : null;
+                          return <>
+                            <td className="text-[12.5px]">{m && label ? <><div className="truncate font-medium text-ink-900"><Link href={`/campaigns/${m.campaignId}`} className="hover:text-brand-700">{m.campaignName}</Link></div><Badge tone={label.tone}>{label.label}</Badge></> : <Empty />}</td>
+                            <td className="text-[12.5px]">{m ? <><div className="truncate text-ink-900"><Link href={`/sequences/${m.sequenceId}`} className="hover:text-brand-700">{m.sequenceName}</Link></div><div className="text-[12px] text-ink-500">{m.step === null ? 'Not started' : `Step ${m.step + 1} of ${m.steps}`}{p.enrollment?.foName ? ` · ${p.enrollment.foName}` : ''}</div></> : <Empty />}</td>
+                          </>;
+                        })()}
                         <td className="num"><Count value={p.touches} /></td>
                         <td className="whitespace-nowrap text-[12px] text-ink-500">{p.lastTouchAt ? formatInstant(p.lastTouchAt, user.timezone) : <Empty />}</td>
                       </tr>
@@ -314,41 +326,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
               )}
             </Card>
 
-            <Card title={`Open tasks (${openTasks.length})`}>
-              {openTasks.length === 0 ? (
-                <EmptyState title="No open tasks for this account" />
-              ) : (
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Person</th>
-                      <th>Task</th>
-                      <th>Due</th>
-                      <th>FO</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {openTasks.map((t) => (
-                      <tr key={t.id}>
-                        <td>
-                          <Link href={`/people/${t.personId}`} className="font-medium text-ink-900 hover:text-brand-700">
-                            {t.personName}
-                          </Link>
-                        </td>
-                        <td className="text-[12.5px]">
-                          <span className="inline-flex items-center gap-1.5">
-                            <ActionIcon action={t.action} size={13} className=" text-ink-500" />
-                            {t.label}
-                          </span>
-                        </td>
-                        <td className={t.due < today ? 'font-medium text-red-600' : undefined}>{formatLocalDate(t.due)}</td>
-                        <td className="whitespace-nowrap text-[12.5px]">{t.foName}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </Card>
+
 
             <Card title={`Meetings (${meetings.length})`} actions={canCreateMeeting(user) && <Link href={`/meetings/new?account=${company.id}`} className="btn-ghost btn-sm">Add</Link>}>
               {meetings.length === 0 ? (
@@ -373,6 +351,72 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
               )}
             </Card>
           </div>
+        ) : null}
+        {tab === 'meetings' ? (
+          <Surface flush>
+            {meetings.length === 0 ? (
+              <EmptyState title="No meetings with this account yet" action={canCreateMeeting(user) && !blocked ? <Link href={`/meetings/new?account=${company.id}`} className="btn-primary btn-sm"><IconPlus size={13} /> Meeting</Link> : undefined} />
+            ) : (
+              <div className="overflow-x-auto scroll-thin">
+                <table className="table table-dense w-full table-fixed">
+                  <colgroup>{['40%', '20%', '16%', '12%', '12%'].map((w) => <col key={w} style={{ width: w }} />)}</colgroup>
+                  <thead><tr><th>Meeting</th><th>When</th><th>Attendees</th><th>Transcript</th><th>Length</th></tr></thead>
+                  <tbody>
+                    {meetings.map((m) => <tr key={m.id}>
+                      <td><Link href={`/meetings/${m.id}`} className="block truncate text-[13px] font-medium text-ink-900 hover:text-brand-700">{m.title}</Link></td>
+                      <td className="text-[12.5px]">{formatInstant(m.occurredAt, user.timezone)}</td>
+                      <td className="text-[12.5px]"><span className="flex items-center gap-2 whitespace-nowrap"><span className="tabular-nums text-ink-900">{m.attendees.length}</span>{m.attendees.filter((a) => a.external).length ? <Badge tone="green">{m.attendees.filter((a) => a.external).length} external</Badge> : null}</span></td>
+                      <td>{m.transcript ? <Badge tone="blue">Transcript</Badge> : <Empty />}</td>
+                      <td className="text-[12.5px] tabular-nums">{m.durationSec ? `${Math.round(m.durationSec / 60)} min` : <Empty />}</td>
+                    </tr>)}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Surface>
+        ) : null}
+
+        {tab === 'tasks' ? (
+          <>
+            {upcomingHere.length ? <Card title="Starting soon">
+              <div className="divide-y divide-line">{upcomingHere.map((m) => <div key={m.campaignId} className="flex flex-wrap items-center gap-3 px-4 py-3 text-[13px]"><Badge tone="purple">Upcoming</Badge><Link href={`/campaigns/${m.campaignId}`} className="font-medium text-ink-900 hover:text-brand-700">{m.campaignName}</Link><span className="text-ink-500">starts {formatLocalDate(m.startDate, 'long')} · {[...membership.values()].flat().filter((x) => x.campaignId === m.campaignId).length} here</span></div>)}</div>
+            </Card> : null}
+            <Card title={`Open tasks (${openTasks.filter((t) => t.due <= horizon).length})`}>
+              {openTasks.length === 0 ? (
+                <EmptyState title="No open tasks for this account" />
+              ) : (
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Person</th>
+                      <th>Task</th>
+                      <th>Due</th>
+                      <th>FO</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {openTasks.filter((t) => t.due <= horizon).sort((a, b) => a.due.localeCompare(b.due)).map((t) => (
+                      <tr key={t.id}>
+                        <td>
+                          <Link href={`/people/${t.personId}`} className="font-medium text-ink-900 hover:text-brand-700">
+                            {t.personName}
+                          </Link>
+                        </td>
+                        <td className="text-[12.5px]">
+                          <span className="inline-flex items-center gap-1.5">
+                            <ActionIcon action={t.action} size={13} className=" text-ink-500" />
+                            {t.label}
+                          </span>
+                        </td>
+                        <td className={t.due < today ? 'font-medium text-red-600' : undefined}>{formatLocalDate(t.due)}</td>
+                        <td className="whitespace-nowrap text-[12.5px]">{t.foName}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </Card>
+          </>
         ) : null}
       </div>
     </>

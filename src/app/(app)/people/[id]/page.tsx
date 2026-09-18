@@ -1,15 +1,21 @@
 import Link from 'next/link';
+import { Suspense } from 'react';
+import { RecordSync } from '@/components/record-sync';
 import { canReadPerson } from '@/lib/people-scope';
 import { accountScopeCompanyIds } from '@/lib/accounts-query';
 import { notFound } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
-import { isAdmin, canCreateMeeting } from '@/lib/auth/rbac';
+import { canCreateMeeting, canManageCampaigns } from '@/lib/auth/rbac';
+import { membershipFor, membershipLabel } from '@/lib/campaign-membership';
+import { AddToCampaign, RemoveFromCampaign } from '@/components/campaigns/add-to-campaign';
 import { prisma } from '@/lib/db';
-import { formatInstant, formatLocalDate } from '@/lib/dates';
-import { cachedPersonName, upsertPersonCache } from '@/lib/person-cache';
+import { addDays, formatInstant, formatLocalDate, todayIn } from '@/lib/dates';
+import { accentFor } from '@/lib/accent';
+import { callHref, opensDialpad } from '@/lib/calls';
+import { cachedPersonName } from '@/lib/person-cache';
 import { auditDetailText, describeAudit } from '@/lib/audit-format';
 import { describeStep, parseSteps } from '@/lib/sequences/steps';
-import { getTwentyConnection } from '@/lib/settings';
+import { getSettings, getTwentyConnection } from '@/lib/settings';
 import { getTwentyClient } from '@/lib/twenty';
 import type { TwentyNote, TwentyOpportunity } from '@/lib/twenty/types';
 import { twentyPersonUrl } from '@/lib/twenty/urls';
@@ -26,26 +32,15 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
   const { id } = await params;
   const sp = await searchParams;
   const requested = sp.tab;
-  const tab = requested === 'activity' || requested === 'sequences' || requested === 'crm' ? requested : 'overview';
-  let person = await prisma.personCache.findUnique({ where: { id } });
-  // Instant sync: re-read this person from Twenty on every visit so CRM edits show immediately,
-  // even between webhooks. Failures fall back to the cache.
-  let liveWarning: string | null = null;
-  try {
-    const client = await getTwentyClient();
-    const fresh = await client.getPerson(id);
-    if (fresh) {
-      await upsertPersonCache(fresh);
-      person = await prisma.personCache.findUnique({ where: { id } });
-    }
-  } catch (err) {
-    liveWarning = `Showing cached data; Twenty unavailable (${err instanceof Error ? err.message : String(err)}).`;
-  }
+  const tab = requested === 'activity' || requested === 'sequences' || requested === 'emails' || requested === 'notes' || requested === 'tasks' ? requested : requested === 'crm' ? 'emails' : 'overview';
+  // The record renders from the cache at once. <RecordSync> below re-reads it from Twenty after
+  // the paint and refreshes the page if it moved; a gateway that is down shows nothing here.
+  const person = await prisma.personCache.findUnique({ where: { id } });
   // Outside the reader's pods the record does not exist, the same answer Accounts gives. Checked
   // after the live re-read, so a person Twenty has and the cache did not is refused as well.
   if (!person || !(await canReadPerson(user, id))) notFound();
 
-  const [enrollments, touches, tasks, audit, conn, pods, colleagues] = await Promise.all([
+  const [enrollments, touches, tasks, audit, conn, pods, settings, colleagues] = await Promise.all([
     prisma.enrollment.findMany({
       where: { personId: id },
       include: { fo: { select: { id: true, name: true } }, sequence: true, campaign: { select: { id: true, name: true, status: true } }, pod: { include: { users: { include: { user: { select: { id: true, name: true, active: true } } } } } } },
@@ -56,17 +51,18 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
     prisma.auditLog.findMany({ where: { OR: [{ entityType: 'person', entityId: id }, { entityType: 'enrollment', entityId: { in: (await prisma.enrollment.findMany({ where: { personId: id }, select: { id: true } })).map((e) => e.id) } }] }, orderBy: { createdAt: 'desc' } }),
     getTwentyConnection(),
     prisma.pod.findMany({ include: { users: { include: { user: { select: { id: true, name: true, active: true } } } } }, orderBy: { name: 'asc' } }),
+    getSettings(),
     person.companyId ? prisma.personCache.findMany({ where: { companyId: person.companyId, id: { not: id }, deletedAt: null }, include: { enrollments: { orderBy: { createdAt: 'desc' }, take: 1 } }, take: 30 }) : Promise.resolve([]),
   ]);
 
   let notes: TwentyNote[] = [];
   let opportunities: TwentyOpportunity[] = [];
-  let twentyWarning: string | null = null;
   try {
     const client = await getTwentyClient();
     [notes, opportunities] = await Promise.all([client.listNotes({ personId: id, limit: 20 }).then((p) => p.items), client.listOpportunities({ personId: id }).then((p) => p.items)]);
-  } catch (err) {
-    twentyWarning = `Twenty unavailable: ${err instanceof Error ? err.message : String(err)}`;
+  } catch {
+    // Notes and opportunities come straight from Twenty; when it is unreachable the page shows
+    // what it has. The failure is counted on Settings > Twenty, not printed here.
   }
 
   // Accounts are pod-scoped even though people are not, so the company is only a link when this
@@ -74,10 +70,10 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
   const accountScope = person.companyId ? await accountScopeCompanyIds(user) : null;
   const canOpenAccount = Boolean(person.companyId) && (accountScope === null || accountScope.includes(person.companyId!));
 
-  const currentEnrollments = enrollments.filter((e) => e.status === 'ACTIVE' || e.status === 'PAUSED');
+  const memberships = (await membershipFor([id])).get(id) ?? [];
+  const cadencePodId = person.podOwner ? pods.find((p) => p.podOwnerValue === person.podOwner)?.id ?? null : null;
   // With nothing running, how the last engagement ended is the fact that decides what to do next,
   // so the card carries it rather than reading as if this person had never been worked.
-  const lastFinished = currentEnrollments.length ? null : enrollments.find((e) => e.status !== 'ACTIVE' && e.status !== 'PAUSED') ?? null;
   const standing = crmStanding(person);
   const warnings = contactWarnings(person);
   const podName = person.podOwner ? pods.find((x) => x.podOwnerValue === person.podOwner)?.name ?? optionLabel(person.podOwner) : null;
@@ -100,18 +96,26 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
       }),
   ].sort((a, b) => b.at.getTime() - a.at.getTime());
 
+  const openTasks = tasks.filter((t) => t.state === 'PENDING');
   const tabs = [
     { key: 'overview', label: 'Overview' },
-    { key: 'sequences', label: 'Campaigns & sequences', count: enrollments.length },
+    { key: 'sequences', label: 'Campaigns', count: enrollments.length + memberships.filter((m) => m.kind === 'upcoming').length },
+    { key: 'tasks', label: 'Tasks', count: openTasks.length },
     { key: 'activity', label: 'Activity', count: items.length },
-    { key: 'crm', label: 'CRM emails & notes' },
+    { key: 'emails', label: 'Emails' },
+    { key: 'notes', label: 'Notes' },
   ];
+  const accent = accentFor(id);
+  const today = todayIn(user.timezone);
+  const horizon = addDays(today, 30);
 
   return (
     <>
+      <Suspense fallback={null}><RecordSync kind="person" id={id} /></Suspense>
       <div className="px-6 pt-2">
         <RecordHeader
           name={cachedPersonName(person)}
+          accent={accent}
           badges={
             <>
               <Badge tone={standing.tone} dot>
@@ -133,7 +137,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                 </a>
               ) : null}
               {person.phone ? (
-                <a href={`tel:${person.phone}`} className="btn-secondary btn-sm">
+                <a href={callHref(person.phone, settings.rules.clickToCallUrl)} target={opensDialpad(settings.rules.clickToCallUrl) ? '_blank' : undefined} rel="noreferrer" className="btn-secondary btn-sm">
                   <ActionIcon action="CALL" size={13} /> Call
                 </a>
               ) : null}
@@ -160,10 +164,28 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
             <Tabs inset={false} current={tab} tabs={tabs.map((t) => ({ ...t, href: `/people/${id}?tab=${t.key}` }))} />
           </Surface>
           <div className="pt-3">
-            {tab === 'crm' ? <CrmHistory personId={id} timezone={user.timezone} baseHref={`/people/${id}?tab=crm`} notesAfter={sp.crmNotes} emailsAfter={sp.crmEmails} /> : null}
+            {tab === 'emails' ? <CrmHistory show="emails" personId={id} timezone={user.timezone} baseHref={`/people/${id}?tab=emails`} emailsAfter={sp.crmEmails} /> : null}
+            {tab === 'notes' ? <CrmHistory show="notes" personId={id} timezone={user.timezone} baseHref={`/people/${id}?tab=notes`} notesAfter={sp.crmNotes} /> : null}
+            {tab === 'tasks' ? (
+              <Card title="Tasks">
+                {/* What is due for this person now and in the next month, plus campaigns about to start. */}
+                {(() => {
+                  const due = openTasks.map((t) => ({ ...t, on: t.snoozedTo ?? t.dueDate })).filter((t) => t.on <= horizon).sort((a, b) => a.on.localeCompare(b.on) || a.actionIndex - b.actionIndex);
+                  const upcoming = memberships.filter((m) => m.kind === 'upcoming');
+                  if (!due.length && !upcoming.length) return <div className="p-4 text-sm text-ink-500">Nothing due in the next 30 days</div>;
+                  const days = [...new Set(due.map((t) => t.on))];
+                  return <div className="divide-y divide-line">
+                    {upcoming.map((m) => <div key={m.campaignId} className="flex flex-wrap items-center gap-3 px-4 py-3 text-[13px]"><Badge tone="purple">Upcoming</Badge><Link href={`/campaigns/${m.campaignId}`} className="font-medium text-ink-900 hover:text-brand-700">{m.campaignName}</Link><span className="text-ink-500">starts {formatLocalDate(m.startDate, 'long')} · {m.sequenceName}</span></div>)}
+                    {days.map((day) => <div key={day} className="px-4 py-3">
+                      <div className={`text-[11.5px] font-medium ${day < today ? 'text-red-700' : day === today ? 'text-brand-700' : 'text-ink-500'}`}>{day < today ? `Overdue · ${formatLocalDate(day, 'long')}` : day === today ? 'Today' : formatLocalDate(day, 'long')}</div>
+                      <ul className="mt-2 space-y-1.5">{due.filter((t) => t.on === day).map((t) => <li key={t.id} className="flex flex-wrap items-center gap-3 text-[13px]"><ActionIcon action={t.action} size={14} /><Link href={`/tasks?task=${t.id}&mode=flow&tab=${day < today ? 'overdue' : day === today ? 'today' : 'upcoming'}&pod=&fo=`} className="font-medium text-ink-900 hover:text-brand-700">{t.label}</Link><span className="text-ink-500">step {t.stepIndex + 1} · {t.fo.name}</span></li>)}</ul>
+                    </div>)}
+                  </div>;
+                })()}
+              </Card>
+            ) : null}
             {tab === 'activity' ? (
               <Card title="Activity">
-                {twentyWarning ?? liveWarning ? <div className="px-4 pt-3 text-xs text-amber-700">{twentyWarning ?? liveWarning}</div> : null}
                 {items.length === 0 ? (
                   <div className="p-4 text-sm text-ink-500">No activity yet.</div>
                 ) : (
@@ -235,9 +257,17 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
             {tab === 'overview' ? (
               // Grouped the way the record is grouped in Twenty, so the two read the same.
               <div className="space-y-3">
-                {twentyWarning ?? liveWarning ? <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">CRM temporarily unavailable. Showing the last synced record.{isAdmin(user) ? <span className="mt-1 block break-words font-mono text-[11.5px] text-amber-900/80">{twentyWarning ?? liveWarning}</span> : null}</div> : null}
-                <Card title={currentEnrollments.length || !lastFinished ? 'Current campaigns' : 'Last campaign'} actions={<Link href={`/people/${id}?tab=sequences`} className="btn-ghost btn-sm">View history</Link>}>
-                  {currentEnrollments.length ? <div className="divide-y divide-line">{currentEnrollments.map((e) => <div key={e.id} className="flex flex-wrap items-center justify-between gap-3 p-4"><div><div className="font-medium text-ink-900">{e.campaign ? <Link href={`/campaigns/${e.campaign.id}`} className="hover:text-brand-700 hover:underline">{e.campaign.name}</Link> : 'Direct enrollment'}</div><Link href={`/sequences/${e.sequenceId}`} className="mt-1 block text-sm font-medium text-brand-700">{e.sequence.name}</Link></div><Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'}>{enrollmentStatusLabel(e)}</Badge></div>)}</div> : lastFinished ? <div className="flex flex-wrap items-center justify-between gap-3 p-4"><div><div className="font-medium text-ink-900">{lastFinished.campaign ? <Link href={`/campaigns/${lastFinished.campaign.id}`} className="hover:text-brand-700 hover:underline">{lastFinished.campaign.name}</Link> : 'Direct enrollment'}</div><Link href={`/sequences/${lastFinished.sequenceId}`} className="mt-1 block text-sm font-medium text-brand-700">{lastFinished.sequence.name}</Link></div><div className="text-right"><Badge tone={ENROLLMENT_TONE[lastFinished.status] ?? 'gray'}>{enrollmentStatusLabel(lastFinished)}</Badge><div className="mt-1 text-xs text-ink-500">Ended <strong className=" text-ink-600">{formatInstant(lastFinished.repliedAt ?? lastFinished.meetingAt ?? lastFinished.exitedAt ?? lastFinished.completedAt ?? lastFinished.updatedAt, user.timezone)}</strong></div></div></div> : <div className="p-4 text-sm text-ink-500">Never enrolled in a campaign</div>}
+                <Card title={memberships.some((m) => m.kind !== 'finished') || !memberships.length ? 'Campaigns' : 'Last campaign'} actions={<span className="flex items-center gap-2">{canManageCampaigns(user, cadencePodId) ? <AddToCampaign personIds={[id]} className="btn-secondary btn-sm" /> : null}<Link href={`/people/${id}?tab=sequences`} className="btn-ghost btn-sm">View history</Link></span>}>
+                  {memberships.length ? <div className="divide-y divide-line">{memberships.filter((m) => m.kind !== 'finished').concat(memberships.filter((m) => m.kind === 'finished').slice(0, 1)).map((m) => {
+                    const label = membershipLabel(m);
+                    return <div key={`${m.campaignId}-${m.enrollmentId ?? 'soon'}`} className="flex flex-wrap items-center justify-between gap-3 p-4">
+                      <div className="min-w-0">
+                        <div className="font-medium text-ink-900"><Link href={`/campaigns/${m.campaignId}`} className="hover:text-brand-700 hover:underline">{m.campaignName}</Link></div>
+                        <div className="mt-1 text-[12.5px] text-ink-500"><Link href={`/sequences/${m.sequenceId}`} className="text-brand-700">{m.sequenceName}</Link>{m.step !== null ? ` · step ${m.step + 1} of ${m.steps}` : m.kind === 'upcoming' ? ` · starts ${formatLocalDate(m.startDate)}` : ''}{m.endDate ? ` · ends ${formatLocalDate(m.endDate)}` : ''}</div>
+                      </div>
+                      <div className="flex items-center gap-2"><Badge tone={label.tone}>{label.label}</Badge>{m.kind !== 'finished' && canManageCampaigns(user, m.podId) ? <RemoveFromCampaign campaignId={m.campaignId} campaignName={m.campaignName} personIds={[id]} className="btn-ghost btn-sm" /> : null}</div>
+                    </div>;
+                  })}</div> : <div className="p-4 text-sm text-ink-500">Never in a campaign</div>}
                 </Card>
                 <Card title="Contact details">
                   <div className="p-4">

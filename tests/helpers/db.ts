@@ -1,8 +1,8 @@
 import { prisma } from '@/lib/db';
 import { hashPassword } from '@/lib/auth/password';
 import { DEFAULT_SEQUENCE_NAME, DEFAULT_SEQUENCE_STEPS } from '@/lib/sequences/default-sequence';
-import { MOCK_MEMBERS, MOCK_PEOPLE, MOCK_PODS } from '@/lib/twenty/fixtures';
-import { upsertPersonCache } from '@/lib/person-cache';
+import { MOCK_COMPANIES, MOCK_MEMBERS, MOCK_PEOPLE, MOCK_PODS } from '@/lib/twenty/fixtures';
+import { upsertCompanyCache, upsertPersonCache } from '@/lib/person-cache';
 import { invalidateSettingsCache } from '@/lib/settings';
 import { getMockTwentyClient } from '@/lib/twenty/mock-client';
 
@@ -20,6 +20,11 @@ const TABLES = [
   'UserPod',
   'Setting',
   'BlockedAccount',
+  'EnrichmentMark',
+  'EnrichmentSnapshot',
+  'EnrichmentMapping',
+  'EnrichmentRow',
+  'EnrichmentBatch',
   'CompanyCache',
   'PersonCache',
   'Sequence',
@@ -73,6 +78,8 @@ export async function seedBasics() {
 
   const sequence = await prisma.sequence.create({ data: { name: DEFAULT_SEQUENCE_NAME, steps: DEFAULT_SEQUENCE_STEPS } });
 
+  // Companies first, so every cached person points at an account the directory can show.
+  for (const c of MOCK_COMPANIES) await upsertCompanyCache(c);
   for (const p of MOCK_PEOPLE) await upsertPersonCache(p);
 
   return { pods, users: { alisa, leigh, andrew, karson, daniel, ria }, sequence };

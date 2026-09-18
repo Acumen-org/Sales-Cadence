@@ -43,6 +43,7 @@ async function ActivityContent({ searchParams }: { searchParams: Promise<Search>
   const podId = filterParam(sp.pod, defaults.podId);
   const today = todayIn(REPORTING_TIMEZONE);
   const range = reportingRange(sp.from, sp.to, today, 7);
+  const defaultRange = reportingRange(undefined, undefined, today, 7);
   const visiblePods = visiblePodIds(user);
   const [page, users, pods] = await Promise.all([
     listActivity({ before, actorId, podId, channel, kinds: kinds.length ? kinds : null, q, from: range.fromInstant, to: range.toInstant, viewer: user, limit: 60 }),
@@ -73,7 +74,7 @@ async function ActivityContent({ searchParams }: { searchParams: Promise<Search>
     <div className="space-y-4 px-6 pb-8 pt-2">
       <Surface flush>
         <ViewHeader title="Workspace timeline" meta={<><span className="font-medium text-ink-900">{page.items.length}{page.hasMore ? '+' : ''}</span> <span className="text-ink-500">events</span></>} />
-        <Toolbar><ActivityToolbar key={`${podId}:${actorId}:${range.from}:${range.to}:${channel}:${kinds.join(',')}:${q}`} users={users.map((item) => ({ id: item.id, name: item.name, podIds: item.pods.map((pod) => pod.podId) }))} pods={pods} actorId={actorId} podId={podId} channel={channel} kinds={kinds} q={q} from={range.from} to={range.to} /></Toolbar>
+        <Toolbar><ActivityToolbar key={`${podId}:${actorId}:${range.from}:${range.to}:${channel}:${kinds.join(',')}:${q}`} users={users.map((item) => ({ id: item.id, name: item.name, podIds: item.pods.map((pod) => pod.podId) }))} pods={pods} actorId={actorId} podId={podId} channel={channel} defaultRange={{ from: defaultRange.from, to: defaultRange.to }} kinds={kinds} q={q} from={range.from} to={range.to} /></Toolbar>
         {range.error ? <div className="px-4 pb-4"><Notice tone="error">{range.error}</Notice></div> : null}
         {page.items.length === 0 ? <EmptyState title="No activity in this view" action={<Link href="/activity" className="btn-secondary">Reset filters</Link>} /> : (
           <div>{groups.map((group) => (

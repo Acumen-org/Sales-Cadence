@@ -91,7 +91,7 @@ describe('campaigns and reports', () => {
   it('computes the sequence list and per-step funnel', async () => {
     const [s] = await listSequences();
     expect(s.stepCount).toBe(8);
-    expect(s.lastDay).toBe(23);
+    expect(s.lastDay).toBe(31);
     expect(s.enrollments.total).toBe(4);
     const steps = parseSteps(b.sequence.steps as unknown);
     const funnel = await sequenceFunnel(b.sequence.id, steps, '2026-09-10');

@@ -42,7 +42,29 @@ async function main() {
   };
   line('People', twentyPeople, cachedPeople);
   line('Companies', twentyCompanies, cachedCompanies);
-  console.log(`${'Deleted'.padEnd(10)} ${deletedPeople} people are marked deleted in the cache\n`);
+  console.log(`${'Deleted'.padEnd(10)} ${deletedPeople} people are marked deleted in the cache`);
+  // Accounts counts people with a company; People counts everyone. The gap between them is people
+  // Twenty holds with no company link, which this line makes a number rather than a worry.
+  const [linked, unlinked] = await Promise.all([
+    prisma.personCache.count({ where: { deletedAt: null, companyId: { not: null } } }),
+    prisma.personCache.count({ where: { deletedAt: null, companyId: null } }),
+  ]);
+  console.log(`${'Accounts'.padEnd(10)} ${linked} cached people have a company, ${unlinked} have none`);
+  if (process.argv.includes('--links')) {
+    // Walk Twenty's people and count company links at the source: slow (one page of 100 at a
+    // time), so only on request. A difference here is a sync fault; none means Twenty has no link.
+    let sourceLinked = 0, sourceTotal = 0, after: string | undefined;
+    for (;;) {
+      const page = await client.listPeople({ limit: 100, after });
+      for (const person of page.items) { sourceTotal += 1; if (person.companyId) sourceLinked += 1; }
+      if (!page.hasNextPage || !page.endCursor) break;
+      after = page.endCursor;
+    }
+    const short = sourceLinked > linked;
+    if (short) problems += 1;
+    console.log(`${'Links'.padEnd(10)} Twenty: ${sourceLinked} of ${sourceTotal} people have a company   cached: ${linked}${short ? `   <-- ${sourceLinked - linked} links missing` : ''}`);
+  }
+  console.log('');
 
   console.log('Listings (first page of each):');
   const since = new Date(Date.now() - 7 * 86_400_000).toISOString();

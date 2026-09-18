@@ -13,6 +13,7 @@ export const CAMPAIGN_STATUS_LABELS: Record<string, string> = {
 export const ENROLL_CONFLICT_LABELS: Record<string, string> = {
   dnd: 'Do not contact',
   already_active: 'Already in a sequence',
+  scheduled_elsewhere: 'Already in an upcoming campaign',
   pod_mismatch: 'Belongs to another pod in Twenty',
   not_found: 'Not found in Twenty',
   deleted: 'Deleted in Twenty',
@@ -20,6 +21,7 @@ export const ENROLL_CONFLICT_LABELS: Record<string, string> = {
   no_fo: 'No eligible FO',
   internal: 'Internal team or organisation',
   blocked: 'Account blocked in Cadence',
+  no_room: 'No room before the end date',
   invalid_start: 'Invalid start date',
   opted_out: 'Asked not to be contacted',
   bad_data: 'Contact details are not usable',

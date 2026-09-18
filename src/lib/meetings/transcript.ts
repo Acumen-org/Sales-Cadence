@@ -97,7 +97,7 @@ export function parseTranscript(raw: string, format?: TranscriptFormat): { forma
         const { speaker, text: body } = splitSpeaker(rest);
         return { start, end: null, speaker, text: clean(body) || rest.trim() };
       });
-    return { format: 'text', cues };
+    return { format: 'text', cues: carrySpeakers(cues) };
   }
 
   const cues: TranscriptCue[] = [];
@@ -119,7 +119,35 @@ export function parseTranscript(raw: string, format?: TranscriptFormat): { forma
 }
 
 /** Merge consecutive cues from the same speaker so the panel reads like a conversation. */
-function mergeSpeakers(cues: TranscriptCue[]): TranscriptCue[] {
+/**
+ * A line with no name after a line with one is the same person still talking - Teams and Zoom
+ * both write continuation cues that way. It takes the speaker forward, so the transcript and the
+ * talk-time table agree; only lines before anyone is named stay unattributed.
+ */
+export function carrySpeakers(cues: TranscriptCue[]): TranscriptCue[] {
+  let current: string | null = null;
+  return cues.map((c) => {
+    if (c.speaker) { current = c.speaker; return c; }
+    return current ? { ...c, speaker: current } : c;
+  });
+}
+
+export const UNATTRIBUTED = 'Unattributed';
+
+/** "Speaker: dialogue", one turn per line, consecutive turns by one speaker joined, no timestamps or ids. */
+export function normalizeTranscript(cues: TranscriptCue[]): string {
+  const turns: { speaker: string; text: string }[] = [];
+  for (const c of carrySpeakers(cues)) {
+    const speaker = c.speaker ?? UNATTRIBUTED;
+    const last = turns[turns.length - 1];
+    if (last && last.speaker === speaker) last.text = `${last.text} ${c.text}`.trim();
+    else turns.push({ speaker, text: c.text.trim() });
+  }
+  return turns.map((t) => `${t.speaker}: ${t.text}`).join('\n');
+}
+
+function mergeSpeakers(input: TranscriptCue[]): TranscriptCue[] {
+  const cues = carrySpeakers(input);
   const merged: TranscriptCue[] = [];
   for (const c of cues) {
     const prev = merged[merged.length - 1];
@@ -240,8 +268,8 @@ export function formatCueTime(seconds: number): string {
 /** Speaking share per speaker, by cue duration (or word count when there are no timings). */
 export function talkShare(cues: TranscriptCue[]): Array<{ speaker: string; seconds: number; words: number; share: number }> {
   const by = new Map<string, { seconds: number; words: number }>();
-  for (const c of cues) {
-    const key = c.speaker ?? 'Unknown';
+  for (const c of carrySpeakers(cues)) {
+    const key = c.speaker ?? UNATTRIBUTED;
     const row = by.get(key) ?? { seconds: 0, words: 0 };
     row.seconds += c.end && c.end > c.start ? c.end - c.start : 0;
     row.words += c.text.split(/\s+/).filter(Boolean).length;

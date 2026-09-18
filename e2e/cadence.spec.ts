@@ -62,18 +62,27 @@ test('anonymous visitors are redirected to login', async ({ page }) => {
   await expect(page).toHaveURL(/\/login\?next=/);
 });
 
-test('a Senior FO creates a campaign with a conflict preview', async ({ page }) => {
+/** The new campaign form: pick people from the directory; the review runs by itself. */
+async function pickPeople(page: Page, names: string[]) {
+  await page.getByLabel('Sequence state').selectOption('any');
+  await page.getByLabel('Search people to add').fill('Dummy');
+  for (const name of names) await page.getByLabel(`Select ${name}`, { exact: true }).check();
+}
+
+test('a Senior FO creates a campaign and the review names who is skipped', async ({ page }) => {
   await loginAs(page, 'Alisa');
   await page.goto('/campaigns/new');
   await page.getByLabel('Name', { exact: true }).fill('E2E SaaStr follow-up');
   await page.getByLabel('Pod', { exact: true }).selectOption({ label: "Alisa's pod" });
+  await page.getByRole('button', { name: 'PHH' }).click();
   // Dummy Six is do-not-contact in Twenty: it must be listed as skipped, not enrolled.
-  await page.getByRole('button', { name: 'Paste person ids' }).click();
-  await page.getByLabel('Twenty person ids').fill('dummy-01\ndummy-02\ndummy-03\ndummy-04\ndummy-06');
-  await page.getByRole('button', { name: 'Preview conflicts' }).click();
-  await expect(page.getByText(/4 will be enrolled, 1 skipped/)).toBeVisible();
-  await expect(page.getByText('Do not contact', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: /Create campaign and enrol 4/ }).click();
+  await pickPeople(page, ['Dummy One', 'Dummy Two', 'Dummy Three', 'Dummy Four', 'Dummy Six']);
+  await expect(page.getByText(/Who starts · 4 of 5/)).toBeVisible({ timeout: 20_000 });
+  // The review table names the reason; the picker's tag filter and pills carry the same words.
+  const skipped = page.getByRole('table').filter({ has: page.getByRole('columnheader', { name: 'Skipped', exact: true }) });
+  await expect(skipped.getByRole('cell', { name: 'Do not contact', exact: true })).toBeVisible();
+  await expect(page.getByText(/Fits up to \d+ people/)).toBeVisible();
+  await page.getByRole('button', { name: /Create campaign · 4 start/ }).click();
   await expect(page).toHaveURL(/\/campaigns\/[0-9a-f-]+$/);
   await expect(page.getByRole('heading', { name: 'E2E SaaStr follow-up' })).toBeVisible();
   // The four who were enrolled are on the campaign, and the skipped one is not.
@@ -86,11 +95,10 @@ test('the same person cannot be enrolled twice', async ({ page }) => {
   await loginAs(page, 'Alisa');
   await page.goto('/campaigns/new');
   await page.getByLabel('Name', { exact: true }).fill('E2E duplicate check');
+  await page.getByRole('button', { name: 'PHH' }).click();
   // Dummy One was enrolled by the case above, so a second attempt must refuse.
-  await page.getByRole('button', { name: 'Paste person ids' }).click();
-  await page.getByLabel('Twenty person ids').fill('dummy-01');
-  await page.getByRole('button', { name: 'Preview conflicts' }).click();
-  await expect(page.getByText(/0 will be enrolled, 1 skipped/)).toBeVisible();
+  await pickPeople(page, ['Dummy One']);
+  await expect(page.getByText(/Who starts · 0 of 1/)).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText('Already in a sequence')).toBeVisible();
   await expect(page.getByRole('button', { name: /Create campaign/ })).toBeDisabled();
   await logout(page);
@@ -206,9 +214,9 @@ test('a sequence is one editable plan: a free step saves, a step in use is refus
   await page.getByRole('link', { name: /Default outbound/ }).click();
   await page.waitForURL(/\/sequences\/[0-9a-f-]+/);
 
-  // The plan is modules on business days, and a step people are standing on says so.
+  // The plan is touchpoints on calendar days, and a step people are standing on says so.
   await expect(page.getByLabel('Sequence name')).toHaveValue(/Default outbound/);
-  await expect(page.getByText(/Business day/).first()).toBeVisible();
+  await expect(page.getByLabel(/^Day \d+/).first()).toBeVisible();
   await expect(page.getByText(/Locked\s*\d+ open touch(es)?/).first()).toBeVisible();
 
   // Editing a step nobody is on saves in place. There is no version to choose.
@@ -258,11 +266,11 @@ test('reports and people pages render with data', async ({ page }) => {
   await expect(page.locator('main')).not.toContainText('Last 28 days');
   // A longer history is reachable, and the table no longer reports overdue or stalled.
   await page.getByLabel('From').fill('2026-01-01');
-  await page.getByRole('button', { name: 'Apply filters' }).click();
+  await page.getByRole('button', { name: 'Apply', exact: true }).click();
   await expect(page.getByLabel('From')).toHaveValue('2026-01-01');
   await expect(page.locator('table').first()).not.toContainText('Overdue');
   await expect(page.locator('table').first()).not.toContainText('Stalled');
-  await page.goto('/reports?tab=pods');
+  await page.goto('/reports?view=table&tab=pods');
   // Scoped to the table: the pod filter above it lists every pod as an option.
   await expect(page.locator('table').first().getByRole('cell', { name: "Alisa's pod" })).toBeVisible();
   // The people list is filtered on what Twenty holds, and shows it as Twenty's own labels.
@@ -275,13 +283,10 @@ test('reports and people pages render with data', async ({ page }) => {
   await page.goto('/people?q=One');
   await page.getByRole('link', { name: 'Dummy One' }).click();
   await expect(page.getByRole('heading', { name: 'Dummy One' })).toBeVisible();
-  // The record's own tabs, with Overview first and selected: point 5 renamed Details and made it
-  // the landing tab. Each carries its own live count, so they are matched by prefix.
+  // The record's own tabs, Overview first and selected; each carries its own live count, so
+  // they are matched by prefix.
   const main = page.locator('main');
-  await expect(main.getByRole('link', { name: /^Overview/ })).toBeVisible();
-  await expect(main.getByRole('link', { name: /^Campaigns & sequences/ })).toBeVisible();
-  await expect(main.getByRole('link', { name: /^Activity/ })).toBeVisible();
-  await expect(main.getByRole('link', { name: /^CRM emails & notes/ })).toBeVisible();
+  for (const tab of [/^Overview/, /^Campaigns/, /^Tasks/, /^Activity/, /^Emails/, /^Notes/]) await expect(main.getByRole('link', { name: tab })).toBeVisible();
   await expect(main.getByRole('heading', { name: 'Contact details' })).toBeVisible();
   // Pods are administered here (point 16): the pod table is a real table with live counts.
   await page.goto('/settings?tab=users');

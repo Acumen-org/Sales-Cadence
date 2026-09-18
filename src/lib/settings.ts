@@ -59,15 +59,37 @@ export const RulesSettingsSchema = z.object({
     .default(['acumen-strategy.com', 'prairie-hill.com', 'glynac.ai', 'acubooth.com']),
   internalCompanyNames: z.array(z.string().trim().min(1)).default(['Acumen Strategy', 'Glynac', 'Prairie Hill', 'Prairie Hill Holdings', 'Acumen Talent']),
   /**
-   * Endpoint that places a call, owned by us (a Twilio-backed service, for instance). Cadence
-   * posts { to, personId, taskId, userId, userEmail } and reports what comes back. Blank means
-   * the task screen offers a tel: link instead of a Call button.
+   * Organisations that are never prospects - vendors and platforms Twenty holds because someone
+   * there sent an email. Matched on domain (and its subdomains) or normalised name; each match is
+   * blocked as an account, with its people, and can be unblocked by an admin, which adds an
+   * exception so the next sync leaves it alone.
+   */
+  neverProspectDomains: z
+    .array(z.string().trim().toLowerCase().min(1))
+    .default(['microsoft.com', 'google.com', 'openai.com', 'anthropic.com', 'apple.com', 'amazon.com', 'meta.com', 'facebook.com', 'linkedin.com', 'salesforce.com', 'hubspot.com', 'zoom.us', 'slack.com', 'adobe.com', 'oracle.com', 'ibm.com', 'nvidia.com', 'github.com', 'atlassian.com', 'dropbox.com', 'docusign.com', 'calendly.com']),
+  neverProspectNames: z
+    .array(z.string().trim().min(1))
+    .default(['Microsoft', 'Google', 'Alphabet', 'OpenAI', 'Anthropic', 'Apple', 'Amazon', 'Amazon Web Services', 'Meta', 'Facebook', 'LinkedIn', 'Salesforce', 'HubSpot', 'Zoom', 'Slack', 'Adobe', 'Oracle', 'IBM', 'Nvidia', 'GitHub', 'Atlassian', 'Dropbox', 'DocuSign', 'Calendly']),
+  /** Company ids an admin unblocked by hand; the never-prospect rule leaves these alone. */
+  neverProspectExceptions: z.array(z.string().trim().min(1)).default([]),
+  /**
+   * Free-mail domains. Twenty makes a company out of every email domain it sees, so "gmail.com"
+   * arrives as an account with thousands of people. It is not an account: it is hidden from
+   * Accounts and enrichment, and its people stay in People with no account, because a prospect
+   * writing from a personal address is still a prospect.
+   */
+  notAccountDomains: z
+    .array(z.string().trim().toLowerCase().min(1))
+    .default(['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com', 'yahoo.com', 'yahoo.co.uk', 'ymail.com', 'icloud.com', 'me.com', 'mac.com', 'aol.com', 'protonmail.com', 'proton.me', 'zoho.com', 'mail.com', 'yandex.com', 'yandex.ru', 'qq.com', '163.com', 'gmx.com', 'gmx.de', 'comcast.net', 'att.net', 'verizon.net', 'sbcglobal.net']),
+  /**
+   * Where a Call button goes: the team's dialpad, with `{phone}` standing for the number. It opens
+   * in a new tab. Blank means a tel: link, which hands the number to the machine's own dialler.
    */
   clickToCallUrl: z
     .string()
     .trim()
     .refine((v) => v === '' || /^https?:\/\/\S+$/i.test(v), 'Enter an http(s) URL, or leave it blank.')
-    .default(''),
+    .default('https://h00ks.acm.acumen-strategy.com/admin/dialpad?number={phone}'),
   /** A skip reason flagged as bounce ends the sequence (Outreach: Bounced state). */
   exitOnBounce: z.boolean().default(true),
   /** A call logged with an "answered" disposition counts as a reply and finishes the sequence. */

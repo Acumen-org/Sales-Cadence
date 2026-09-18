@@ -1,10 +1,10 @@
 'use client';
 import { startTransition, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 
 /**
- * Keeps a screen current without a reload: every 30 seconds, and whenever the person comes back
- * to the tab.
+ * Keeps a screen current without a reload: every minute, when something actually changed, and
+ * whenever the person comes back to the tab.
  *
  * Two rules matter. It only refreshes after the window has actually been away, because the browser
  * fires `focus` on arrival too - and a refresh landing while React is still hydrating tears down
@@ -14,8 +14,11 @@ import { useRouter } from 'next/navigation';
  */
 export function LiveRefresh() {
   const router = useRouter();
+  const pathname = usePathname();
   useEffect(() => {
     let away = false;
+    let version: number | null = null;
+    const navigatedAt = Date.now();
     const busy = () =>
       document.visibilityState !== 'visible' ||
       Boolean(document.querySelector('dialog[open]')) ||
@@ -24,9 +27,26 @@ export function LiveRefresh() {
       if (busy()) return;
       startTransition(() => router.refresh());
     };
+    // Ask whether anything changed before re-rendering anything: a refresh that lands on top of a
+    // click is what "laggy" felt like, so the timer now only refreshes when the data moved, and
+    // never within two seconds of a navigation.
+    const check = async () => {
+      if (busy() || Date.now() - navigatedAt < 2000) return;
+      try {
+        const res = await fetch('/api/version', { cache: 'no-store' });
+        if (!res.ok) return;
+        const { version: latest } = (await res.json()) as { version: number | null };
+        if (latest === null) return;
+        if (version !== null && latest !== version) refresh();
+        version = latest;
+      } catch {
+        // Offline or a hiccup: the next tick asks again.
+      }
+    };
     const onBlur = () => { away = true; };
     const onFocus = () => { if (!away) return; away = false; refresh(); };
-    const timer = setInterval(refresh, 30000);
+    const timer = setInterval(() => void check(), 60000);
+    void check();
     window.addEventListener('blur', onBlur);
     window.addEventListener('focus', onFocus);
     return () => {
@@ -34,6 +54,7 @@ export function LiveRefresh() {
       window.removeEventListener('blur', onBlur);
       window.removeEventListener('focus', onFocus);
     };
-  }, [router]);
+    // A new pathname restarts the effect, which is what resets `navigatedAt`.
+  }, [router, pathname]);
   return null;
 }

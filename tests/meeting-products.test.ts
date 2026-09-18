@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { prisma } from '@/lib/db';
 import { SYSTEM_ACTOR } from '@/lib/audit';
-import { enrichmentQueue } from '@/lib/enrichment';
+import { enrichmentQueue } from '@/lib/enrichment-work';
 import type { SessionUser } from '@/lib/auth/current-user';
 import { PRODUCTS } from '@/lib/workspace';
 import { enrollPeople } from '@/lib/engine';

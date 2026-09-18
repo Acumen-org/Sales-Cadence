@@ -48,7 +48,6 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <div className="w-full max-w-[370px]">
           <div className="mb-10 flex items-center gap-3 lg:hidden"><BrandMark /><span className="text-[24px] font-semibold tracking-[-0.06em]">cadence.</span></div>
           <h2 className="text-[32px] font-semibold tracking-[-0.045em] text-ink-900">Sign in</h2>
-          <p className="mb-8 mt-2 text-[13px] leading-relaxed text-ink-500">Use your work email.</p>
           <LoginForm next={next} />
         </div>
       </section>

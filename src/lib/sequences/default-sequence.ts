@@ -7,7 +7,7 @@ export const DEFAULT_SEQUENCE_NAME = 'Default outbound';
  * the person's record on the right of the task screen and rewrites the message before sending it
  * from their own mailbox.
  *
- * Days are business days counted from the enrollment start, so day 1 on a Monday puts day 6 on
+ * Days are calendar days counted from the enrollment start; a step on a weekend rolls to Monday. Day 1 on a Monday puts day 8 on
  * the following Monday. Two steps carry more than one module, which is how a call and its
  * follow-up land in the same task rather than as two pieces of work.
  *
@@ -68,7 +68,7 @@ export const DEFAULT_SEQUENCE_STEPS: SequenceStep[] = [
   },
   {
     id: 'step-d6',
-    day: 6,
+    day: 8,
     title: 'Second email',
     actions: [
       {
@@ -83,7 +83,7 @@ export const DEFAULT_SEQUENCE_STEPS: SequenceStep[] = [
   },
   {
     id: 'step-d9',
-    day: 9,
+    day: 11,
     title: 'LinkedIn touch',
     actions: [
       {
@@ -96,7 +96,7 @@ export const DEFAULT_SEQUENCE_STEPS: SequenceStep[] = [
   },
   {
     id: 'step-d12',
-    day: 12,
+    day: 16,
     title: 'Second call',
     actions: [
       {
@@ -115,7 +115,7 @@ export const DEFAULT_SEQUENCE_STEPS: SequenceStep[] = [
   },
   {
     id: 'step-d16',
-    day: 16,
+    day: 22,
     title: 'LinkedIn touch',
     actions: [
       {
@@ -128,7 +128,7 @@ export const DEFAULT_SEQUENCE_STEPS: SequenceStep[] = [
   },
   {
     id: 'step-d20',
-    day: 20,
+    day: 26,
     title: 'Third call',
     actions: [
       {
@@ -148,7 +148,7 @@ export const DEFAULT_SEQUENCE_STEPS: SequenceStep[] = [
   },
   {
     id: 'step-d23',
-    day: 23,
+    day: 31,
     title: 'Close the loop',
     actions: [
       {

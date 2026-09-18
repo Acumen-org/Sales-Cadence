@@ -16,7 +16,7 @@ async function setDirection(page: Page, direction: 'asc' | 'desc') {
 test('account associations, explicit whole-account count and both sort directions', async ({ page }) => {
   await login(page);
   await page.goto('/accounts?pod=&fo=');
-  await expect(page.getByText('People at matching accounts', { exact: true })).toBeVisible();
+  await expect(page.getByText('People with an account', { exact: true })).toBeVisible();
   for (const column of ['PODs', 'FOs', 'Product']) await expect(page.getByRole('columnheader', { name: column, exact: true })).toBeVisible();
   for (const column of ['Industry', 'City', 'Owner']) await expect(page.getByRole('columnheader', { name: column, exact: true })).toHaveCount(0);
   for (const direction of ['asc', 'desc'] as const) {

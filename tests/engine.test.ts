@@ -119,7 +119,7 @@ describe('enrollment engine', () => {
 
   it('assigns by person owner, falls back to the least loaded FO, and ramps start dates', async () => {
     const campaign = await prisma.campaign.create({
-      data: { name: 'Ramp test', sequenceId: b.sequence.id, podId: b.pods.Alisa.id, startDate: '2026-09-07', dailyRampPerFo: 1, status: 'ACTIVE' },
+      data: { name: 'Ramp test', sequenceId: b.sequence.id, podId: b.pods.Alisa.id, startDate: '2026-09-07', startsPerFoPerDay: 1, status: 'ACTIVE' },
     });
     // person-04 is owned by Karson (wm-karson); person-10 has no owner
     const p = await previewEnrollment({
@@ -231,12 +231,12 @@ describe('enrollment engine', () => {
     const mid = await tasksOf(id);
     expect(mid.filter((t) => t.stepIndex === 1).map((t) => t.label)).toEqual(['Call 1', 'Follow-up email']);
 
-    // The next step generated is the edited one: business day 7 is Tue 15th.
+    // The next step generated is the edited one: day 7 from Monday the 7th is Sunday the 13th, so Monday the 14th.
     await completeStep(id, 1, '2026-09-09');
     const after = await prisma.enrollment.findUniqueOrThrow({ where: { id } });
     expect([after.currentStep, after.currentStepId]).toEqual([2, 'step-d6']);
     const step2 = (await tasksOf(id)).filter((t) => t.stepIndex === 2);
-    expect(step2.map((t) => [t.label, t.dueDate])).toEqual([['Email 2, reworked', '2026-09-15']]);
+    expect(step2.map((t) => [t.label, t.dueDate])).toEqual([['Email 2, reworked', '2026-09-14']]);
 
     // A step people are standing on is refused rather than moved under them.
     const moveLive = JSON.parse(JSON.stringify(steps)) as typeof steps;

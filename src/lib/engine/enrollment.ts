@@ -34,10 +34,14 @@ export type EnrollRequest = {
   assignment: AssignmentSpec;
   /** New enrollments started per FO per working day. Null = no ramp. */
   dailyRampPerFo?: number | null;
+  /** The planner's rate for each FO, which wins over the flat rate where it is set. */
+  dailyRampByFo?: Record<string, number> | null;
+  /** The last day anyone may start and still finish by the campaign's end; later starts are refused. */
+  lastStartDate?: LocalDate | null;
   actor: AuditActor;
 };
 
-export type EnrollConflictReason = 'not_found' | 'deleted' | 'dnd' | 'opted_out' | 'already_active' | 'no_fo' | 'duplicate' | 'invalid_start' | 'pod_mismatch' | 'internal' | 'blocked';
+export type EnrollConflictReason = 'not_found' | 'deleted' | 'dnd' | 'opted_out' | 'already_active' | 'scheduled_elsewhere' | 'no_fo' | 'duplicate' | 'invalid_start' | 'pod_mismatch' | 'internal' | 'blocked' | 'no_room';
 
 export type EnrollConflict = { personId: string; name: string; reason: EnrollConflictReason; detail?: string; enrollmentId?: string };
 
@@ -126,6 +130,13 @@ export async function previewEnrollment(req: EnrollRequest, client?: TwentyClien
     return [...allowed].sort((a, b) => (perFoTotal.get(a.id) ?? 0) - (perFoTotal.get(b.id) ?? 0) || a.name.localeCompare(b.name))[0];
   };
 
+  // Somebody promised to another upcoming campaign is not promised twice: whichever launched
+  // second would otherwise skip them silently as "already in a sequence".
+  const scheduledElsewhere = new Map<string, string>();
+  for (const c of await prisma.campaign.findMany({ where: { status: { in: ['PENDING_APPROVAL', 'SCHEDULED'] }, personIds: { hasSome: ids }, ...(req.campaignId ? { id: { not: req.campaignId } } : {}) }, select: { name: true, personIds: true } })) {
+    for (const pid of c.personIds) if (!scheduledElsewhere.has(pid)) scheduledElsewhere.set(pid, c.name);
+  }
+
   const candidates: EnrollCandidate[] = [];
   // Reserve known owners' loads first, so input order cannot overload them after balancing.
   const orderedIds = assignment.mode === 'OWNER' ? [...ids].sort((a, b) => Number(Boolean(byId.get(b)?.ownerMemberId)) - Number(Boolean(byId.get(a)?.ownerMemberId))) : ids;
@@ -174,6 +185,11 @@ export async function previewEnrollment(req: EnrollRequest, client?: TwentyClien
       });
       continue;
     }
+    const elsewhere = scheduledElsewhere.get(id);
+    if (elsewhere) {
+      conflicts.push({ personId: id, name, reason: 'scheduled_elsewhere', detail: `Scheduled in ${elsewhere}` });
+      continue;
+    }
 
     let fo = fixedFo ?? null;
     let assignedBy: EnrollCandidate['assignedBy'] = 'fixed';
@@ -196,9 +212,16 @@ export async function previewEnrollment(req: EnrollRequest, client?: TwentyClien
     perFoTotal.set(fo.id, (perFoTotal.get(fo.id) ?? 0) + 1);
 
     let personStart = startDate;
-    if (req.dailyRampPerFo && req.dailyRampPerFo > 0) {
+    const rate = req.dailyRampByFo?.[fo.id] ?? req.dailyRampPerFo ?? null;
+    if (rate !== null && rate >= 0) {
       const load = perFoDay.get(fo.id) ?? new Map<string, number>();
-      personStart = findDateWithCapacity(startDate, 1, req.dailyRampPerFo, load, settings.rules.workingDays);
+      // A rate of zero means this FO has no room in the window at all.
+      personStart = rate === 0 ? '9999-12-31' : findDateWithCapacity(startDate, 1, rate, load, settings.rules.workingDays);
+      if (rate === 0 || (req.lastStartDate && personStart > req.lastStartDate)) {
+        perFoTotal.set(fo.id, (perFoTotal.get(fo.id) ?? 0) - 1);
+        conflicts.push({ personId: id, name, reason: 'no_room', detail: req.lastStartDate ? `${fo.name} has no start day left before ${req.lastStartDate}` : 'The window is shorter than the sequence' });
+        continue;
+      }
       reserve(load, personStart, 1);
       perFoDay.set(fo.id, load);
     }

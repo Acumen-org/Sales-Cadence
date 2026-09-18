@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { followingWorkingDay, lateDelayDays, nextWorkingDay, plannedDateForStep, shiftAfterStep, shouldGenerateNow } from '@/lib/engine/clock';
+import { businessDayToCalendar, followingWorkingDay, lateDelayDays, nextWorkingDay, plannedDateForStep, shiftAfterStep, shouldGenerateNow } from '@/lib/engine/clock';
 
 const MON_FRI = [1, 2, 3, 4, 5];
 
@@ -17,11 +17,21 @@ describe('clock', () => {
     expect(nextWorkingDay('2026-09-12', [1, 3, 5])).toBe('2026-09-14');
   });
 
-  it('plans steps from the start date: day 1 is the start itself', () => {
+  it('plans steps in calendar days from the start date, rolling weekends to Monday', () => {
     expect(plannedDateForStep('2026-09-07', 1, 0, MON_FRI)).toBe('2026-09-07');
     expect(plannedDateForStep('2026-09-07', 3, 0, MON_FRI)).toBe('2026-09-09');
-    expect(plannedDateForStep('2026-09-07', 6, 0, MON_FRI)).toBe('2026-09-14'); // Business day 6 is Monday 14th.
-    expect(plannedDateForStep('2026-09-07', 6, 5, MON_FRI)).toBe('2026-09-21'); // Five calendar days late -> Sat 19th -> Mon 21st.
+    expect(plannedDateForStep('2026-09-07', 6, 0, MON_FRI)).toBe('2026-09-14'); // Day 6 is Saturday 12th -> Monday 14th.
+    expect(plannedDateForStep('2026-09-07', 8, 0, MON_FRI)).toBe('2026-09-14'); // Day 8 is the Monday itself.
+    expect(plannedDateForStep('2026-09-10', 3, 0, MON_FRI)).toBe('2026-09-14'); // Thu + 2 days = Sat -> Mon: the weekend counts, the work waits.
+    expect(plannedDateForStep('2026-09-12', 1, 0, MON_FRI)).toBe('2026-09-14'); // A Saturday start begins on Monday.
+    expect(plannedDateForStep('2026-09-07', 6, 5, MON_FRI)).toBe('2026-09-17'); // Five days late on day 6: Thu 17th.
+  });
+
+  it('converts a plan written in business days onto the same dates', () => {
+    // Monday start: business day 6 was the following Monday, calendar day 8; day 23 was Wednesday of week 5.
+    for (const [business, calendar] of [[1, 1], [5, 5], [6, 8], [9, 11], [12, 16], [16, 22], [20, 26], [23, 31]]) {
+      expect(businessDayToCalendar(business)).toBe(calendar);
+    }
   });
 
   it('shift mode accumulates late days, hold mode ignores them', () => {

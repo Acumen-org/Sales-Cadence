@@ -1,7 +1,7 @@
 'use client';
 
 import { useFilterNavigation } from '@/components/filter-navigation';
-import { useEffect, useState } from 'react';
+import { useSearchBox } from '@/components/search-box';
 import { IconSearch, IconStar } from '@/components/icons';
 import { optionLabel } from '@/lib/twenty/labels';
 
@@ -13,8 +13,6 @@ type Props = { who: string; product: string; from: string; to: string; favourite
  */
 export function MeetingsToolbar({ who, product, from, to, favourites, products }: Props) {
   const navigate = useFilterNavigation();
-  const [text, setText] = useState(who);
-  useEffect(() => setText(who), [who]);
 
   const update = (patch: Record<string, string | null>) => {
     navigate((next) => {
@@ -26,13 +24,7 @@ export function MeetingsToolbar({ who, product, from, to, favourites, products }
     });
   };
 
-  useEffect(() => {
-    const t = setTimeout(() => {
-      if (text !== who) update({ who: text || null });
-    }, 250);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text]);
+  const { text, setText, reset } = useSearchBox(who, (value) => update({ who: value }));
 
   const active = Boolean(who || product || from || to || favourites);
   return (
@@ -50,7 +42,7 @@ export function MeetingsToolbar({ who, product, from, to, favourites, products }
       <button type="button" onClick={() => update({ fav: favourites ? null : '1' })} aria-pressed={favourites} className={favourites ? 'chip' : 'chip-muted'} title="Only the meetings you starred">
         <IconStar size={13} filled={favourites} /> Favourites
       </button>
-      {active ? <button type="button" onClick={() => { setText(''); navigate((next) => { for (const key of [...next.keys()]) next.delete(key); }); }} className="btn-ghost btn-sm">Reset</button> : null}
+      {active ? <button type="button" onClick={() => { reset(); navigate((next) => { for (const key of [...next.keys()]) next.delete(key); }); }} className="btn-ghost btn-sm">Reset</button> : null}
     </div>
   );
 }

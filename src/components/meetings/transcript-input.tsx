@@ -6,8 +6,9 @@ import { useState } from 'react';
  * The transcript, pasted or uploaded. A .vtt, .srt, .json or .txt file is read in the browser
  * and lands in the same textarea, so the form submits one field either way.
  */
-export function TranscriptInput({ name, label, defaultValue, rows = 6, placeholder = 'Paste the transcript, or choose a file' }: { name: string; label: string; defaultValue?: string | null; rows?: number; placeholder?: string }) {
-  const [value, setValue] = useState(defaultValue ?? '');
+export function TranscriptInput({ name, label, defaultValue, rows = 6, placeholder = 'Paste the transcript, or choose a file', onChange }: { name: string; label: string; defaultValue?: string | null; rows?: number; placeholder?: string; onChange?: (value: string) => void }) {
+  const [value, setRaw] = useState(defaultValue ?? '');
+  const setValue = (next: string) => { setRaw(next); onChange?.(next); };
   const [fileName, setFileName] = useState<string | null>(null);
   return (
     <div className="space-y-2">

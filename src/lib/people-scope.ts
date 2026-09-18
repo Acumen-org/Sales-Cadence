@@ -48,6 +48,21 @@ export async function podPeopleWhere(user: SessionUser): Promise<Prisma.PersonCa
   };
 }
 
+/**
+ * The people one FO is responsible for: owned in Twenty, or in a running sequence with them.
+ * Finished sequences do not count - the owner's rule (18 September 2026): live enrollments
+ * everywhere. Home, the People and Accounts FO filters and every tile build on this one shape,
+ * so the numbers they show agree.
+ */
+export function foPeopleWhere(foUserId: string, twentyMemberId: string | null | undefined): Prisma.PersonCacheWhereInput {
+  return { OR: [{ ownerMemberId: twentyMemberId ?? '__none__' }, { enrollments: { some: { foUserId, status: { in: ['ACTIVE', 'PAUSED'] } } } }] };
+}
+
+/** "My people": the FO rule above inside the prospect directory - no team, no blocked account. */
+export async function myPeopleWhere(user: SessionUser): Promise<Prisma.PersonCacheWhereInput> {
+  return { AND: [await peopleScopeWhere(user), foPeopleWhere(user.id, user.twentyMemberId)] };
+}
+
 export async function canReadPerson(user: SessionUser, personId: string): Promise<boolean> {
   if ((await prisma.personCache.count({ where: { AND: [{ id: personId }, await peopleScopeWhere(user)] } })) > 0) return true;
   // A blocked account stays open to the admin who can unblock it, so the people on that page are

@@ -7,7 +7,7 @@ import { formatInstant } from '@/lib/dates';
 import { ActionIcon } from '@/components/icons';
 import { Badge, Card, EmptyState } from '@/components/ui';
 
-type Props = { personId: string; timezone: string; baseHref: string; notesAfter?: string; emailsAfter?: string };
+type Props = { personId: string; timezone: string; baseHref: string; notesAfter?: string; emailsAfter?: string; /** Emails and notes are separate tabs on the person page; the task brief shows both. */ show?: 'emails' | 'notes' | 'both' };
 
 /**
  * Received or sent is the first thing to know about an email, so it is what the card is made of:
@@ -22,7 +22,7 @@ const DIRECTION = {
 };
 
 /** Full CRM email and note content, with cursor navigation through older records. */
-export async function CrmHistory({ personId, timezone, baseHref, notesAfter, emailsAfter }: Props) {
+export async function CrmHistory({ personId, timezone, baseHref, notesAfter, emailsAfter, show = 'both' }: Props) {
   const client = await getTwentyClient();
   const [notesResult, emailsResult, users] = await Promise.all([
     client.listNotes({ personId, limit: 25, after: notesAfter }).then((value) => ({ ok: true as const, value }), () => ({ ok: false as const })),
@@ -39,7 +39,7 @@ export async function CrmHistory({ personId, timezone, baseHref, notesAfter, ema
     return `${url.pathname}${url.search}#${key}`;
   };
   return <div className="space-y-3">
-    <div id="crmEmails"><Card title="CRM emails" actions={<Badge tone="blue">Twenty</Badge>}>
+    {show !== 'notes' ? <div id="crmEmails"><Card title="CRM emails" actions={<Badge tone="blue">Twenty</Badge>}>
       {!emails ? <div role="status" className="p-4 text-sm text-amber-800">Email history is temporarily unavailable.</div> : !emails.items.length ? <EmptyState title="No CRM emails" /> : <div className="space-y-3 p-4">{emails.items.map((message) => {
         const direction = DIRECTION[classifyMessage(message, users).direction];
         const senders = message.participants.filter((p) => p.role === 'from');
@@ -71,13 +71,13 @@ export async function CrmHistory({ personId, timezone, baseHref, notesAfter, ema
         </details>;
       })}</div>}
       {emails && (emailsAfter || emails.hasNextPage) ? <div className="flex justify-between gap-2 border-t border-line p-3">{emailsAfter ? <Link href={pageHref('crmEmails')} className="btn-secondary btn-sm">Latest emails</Link> : <span />}{emails.hasNextPage && emails.endCursor ? <Link href={pageHref('crmEmails', emails.endCursor)} className="btn-secondary btn-sm">Older emails</Link> : null}</div> : null}
-    </Card></div>
-    <div id="crmNotes"><Card title="CRM notes" actions={<Badge tone="blue">Twenty</Badge>}>
+    </Card></div> : null}
+    {show !== 'emails' ? <div id="crmNotes"><Card title="CRM notes" actions={<Badge tone="blue">Twenty</Badge>}>
       {!notes ? <div role="status" className="p-4 text-sm text-amber-800">CRM notes are temporarily unavailable.</div> : !notes.items.length ? <EmptyState title="No CRM notes" /> : <div className="space-y-3 p-4">{notes.items.map((note) => <details open key={note.id} className="overflow-hidden rounded-xl border border-line bg-white">
         <summary className="flex cursor-pointer list-none items-start justify-between gap-3 bg-canvas px-4 py-3"><div className="min-w-0 whitespace-pre-wrap break-words font-medium text-ink-900">{note.title || 'Untitled note'}</div><time dateTime={note.createdAt} className="shrink-0 text-xs text-ink-600">{formatInstant(new Date(note.createdAt), timezone)}</time></summary>
         <div className="border-t border-line/70 px-4 pb-4 pt-3"><div className="max-w-[70ch] whitespace-pre-wrap break-words text-[13px] leading-6 text-ink-800">{note.bodyMarkdown || 'No note body'}</div>{note.createdByName ? <div className="mt-3 border-t border-line pt-3 text-xs"><span className="text-ink-500">Author</span><span className="ml-2 font-medium text-ink-900">{note.createdByName}</span></div> : null}</div>
       </details>)}</div>}
       {notes && (notesAfter || notes.hasNextPage) ? <div className="flex justify-between gap-2 border-t border-line p-3">{notesAfter ? <Link href={pageHref('crmNotes')} className="btn-secondary btn-sm">Latest notes</Link> : <span />}{notes.hasNextPage && notes.endCursor ? <Link href={pageHref('crmNotes', notes.endCursor)} className="btn-secondary btn-sm">Older notes</Link> : null}</div> : null}
-    </Card></div>
+    </Card></div> : null}
   </div>;
 }

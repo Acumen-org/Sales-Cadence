@@ -10,7 +10,9 @@ import { completeTask, advanceEnrollment } from '@/lib/engine/tasks';
 import { delegateTasks } from '@/lib/engine/delegate';
 import { SYSTEM_ACTOR } from '@/lib/audit';
 import { canActOnTask } from '@/lib/auth/rbac';
-import { filterEnrichmentQueue, getEnrichmentBatch, reviewEnrichmentRows, type EnrichmentQueueItem } from '@/lib/enrichment';
+import { getEnrichmentBatch, reviewEnrichmentRows } from '@/lib/enrichment';
+import { filterEnrichmentQueue, type EnrichmentQueueItem } from '@/lib/enrichment-work';
+import { queueItem } from './helpers/enrichment';
 let b: Basics;
 beforeEach(async () => { await resetDb(); b = await seedBasics(); });
 const actor = (user: Basics['users']['ria']): SessionUser => ({ ...user, podIds: [], pods: [] });
@@ -85,11 +87,11 @@ describe('current requirements regression audit', () => {
   });
   it('uses the same multi-field and multi-word filters for the enrichment table and export', () => {
     const items: EnrichmentQueueItem[] = [
-      { id: '1', label: 'Jane Smith', company: 'Example Fund', entity: 'person', href: '/people/1', gaps: [{ field: 'email', label: 'Email', priority: 'critical' }] },
-      { id: '2', label: 'John Smith', company: 'Example Fund', entity: 'person', href: '/people/2', gaps: [{ field: 'phone', label: 'Phone', priority: 'critical' }] },
-      { id: '3', label: 'Other', company: null, entity: 'person', href: '/people/3', gaps: [{ field: 'jobTitle', label: 'Title', priority: 'useful' }] },
+      queueItem({ id: '1', label: 'Jane Smith', company: 'Example Fund', gaps: [{ field: 'email', label: 'Email', priority: 'critical' }] }),
+      queueItem({ id: '2', label: 'John Smith', company: 'Example Fund', gaps: [{ field: 'phone', label: 'Phone', priority: 'critical' }] }),
+      queueItem({ id: '3', label: 'Other', company: null, gaps: [{ field: 'jobTitle', label: 'Title', priority: 'useful' }] }),
     ];
-    expect(filterEnrichmentQueue(items, ' Smith   Example ', ['email', 'phone']).map((i) => i.id)).toEqual(['1', '2']);
-    expect(filterEnrichmentQueue(items, '', ['email']).map((i) => i.id)).toEqual(['1']);
+    expect(filterEnrichmentQueue(items, { q: ' Smith   Example ', fields: ['email', 'phone'] }).map((i) => i.id)).toEqual(['1', '2']);
+    expect(filterEnrichmentQueue(items, { fields: ['email'] }).map((i) => i.id)).toEqual(['1']);
   });
 });

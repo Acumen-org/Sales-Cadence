@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { requireAdmin } from '../auth/current-user';
 import { logAudit, userActor } from '../audit';
 import { getSettings, MatchingSettingsSchema, RulesSettingsSchema, saveSettingsSection, SyncSettingsSchema, TwentySettingsSchema } from '../settings';
+import { applyNeverProspectRule } from '../non-prospects';
 import type { ActionResult } from './users';
 
 const bool = (v: FormDataEntryValue | null) => v === 'on' || v === 'true';
@@ -116,4 +117,34 @@ export async function saveSyncSettingsAction(formData: FormData): Promise<Action
   await logAudit({ entityType: 'settings', entityId: 'sync', action: 'updated', actor: userActor(admin), details: parsed.data });
   revalidatePath('/settings');
   return { ok: true, message: 'Sync settings saved.' };
+}
+
+/** The never-prospect and not-account lists. Saved on their own so the Rules tab's form stays whole. */
+export async function saveNonProspectRulesAction(formData: FormData): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  const current = await getSettings();
+  const domains = (v: FormDataEntryValue | null) => list(v).map((d) => d.toLowerCase().replace(/^.*@/, '').replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, ''));
+  const parsed = RulesSettingsSchema.safeParse({
+    ...current.rules,
+    neverProspectDomains: domains(formData.get('neverProspectDomains')),
+    neverProspectNames: list(formData.get('neverProspectNames')),
+    notAccountDomains: domains(formData.get('notAccountDomains')),
+  });
+  if (!parsed.success) return { ok: false, error: issues(parsed.error) };
+  await saveSettingsSection('rules', parsed.data);
+  await logAudit({ entityType: 'settings', entityId: 'rules', action: 'updated', actor: userActor(admin), details: { neverProspectDomains: parsed.data.neverProspectDomains.length, neverProspectNames: parsed.data.neverProspectNames.length, notAccountDomains: parsed.data.notAccountDomains.length } });
+  const applied = await applyNeverProspectRule();
+  revalidatePath('/settings');
+  revalidatePath('/accounts');
+  revalidatePath('/people');
+  return { ok: true, message: applied.blocked.length ? `Rules saved. ${applied.blocked.length} account${applied.blocked.length === 1 ? '' : 's'} blocked.` : 'Rules saved.' };
+}
+
+export async function applyNeverProspectRuleAction(): Promise<ActionResult> {
+  await requireAdmin();
+  const applied = await applyNeverProspectRule();
+  revalidatePath('/settings');
+  revalidatePath('/accounts');
+  revalidatePath('/people');
+  return { ok: true, message: applied.blocked.length ? `${applied.blocked.length} account${applied.blocked.length === 1 ? '' : 's'} blocked.` : 'Nothing new to block.' };
 }

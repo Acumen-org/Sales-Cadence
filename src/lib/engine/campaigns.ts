@@ -1,6 +1,7 @@
 import { lockAccounts } from '../account-lock';
 import type { CampaignStatus } from '@prisma/client';
 import { prisma } from '../db';
+import { planCampaignCapacity } from './capacity';
 import { logAudit, type AuditActor, SYSTEM_ACTOR } from '../audit';
 import { todayIn } from '../dates';
 import { WORKSPACE_TIMEZONE } from '../workspace';
@@ -51,7 +52,21 @@ export async function activateCampaign(id: string, ctx: EngineContext = { actor:
     const eligibleIds = new Set(eligible.map(e => e.personId));
     ids = ids.filter(personId => eligibleIds.has(personId));
   }
-  const preview = await previewEnrollment({ personIds: ids, sequenceId: campaign.sequenceId, podId: campaign.podId, campaignId: id, startDate: campaign.startDate, assignment: { mode: campaign.assignmentMode === 'ROUND_ROBIN' ? 'ROUND_ROBIN' : 'OWNER' }, dailyRampPerFo: campaign.dailyRampPerFo, actor: ctx.actor });
+  // The window decides the pace: each FO starts the planner's rate per day, and nobody starts after
+  // the last day from which the plan still finishes by the end date.
+  const window = campaign.endDate ? await planCampaignCapacity({ sequenceId: campaign.sequenceId, podId: campaign.podId, startDate: campaign.startDate, endDate: campaign.endDate, maxRate: campaign.startsPerFoPerDay, excludeCampaignId: id }) : null;
+  const plan = window && !('error' in window) ? window : null;
+  if (plan?.tooShort) {
+    await logAudit({ entityType: 'campaign', entityId: id, action: 'launch_failed', actor: ctx.actor, details: { error: `The sequence spans ${plan.durationDays} days; the campaign ends ${campaign.endDate}` } });
+    return { enrolled: 0, skipped: campaign.personIds.length };
+  }
+  const preview = await previewEnrollment({ personIds: ids, sequenceId: campaign.sequenceId, podId: campaign.podId, campaignId: id, startDate: campaign.startDate, assignment: { mode: campaign.assignmentMode === 'ROUND_ROBIN' ? 'ROUND_ROBIN' : 'OWNER' }, dailyRampPerFo: campaign.startsPerFoPerDay, dailyRampByFo: plan ? Object.fromEntries(plan.perFo.map((f) => [f.id, f.rate])) : null, lastStartDate: plan?.lastStart ?? null, actor: ctx.actor });
+  // Nobody fits before the last start day: the campaign stays scheduled and says so, rather than
+  // completing with nobody in it.
+  if (!preview.candidates.length && preview.conflicts.some((c) => c.reason === 'no_room')) {
+    await logAudit({ entityType: 'campaign', entityId: id, action: 'launch_failed', actor: ctx.actor, details: { error: `No room before ${plan?.lastStart ?? campaign.endDate}: the window fits ${plan?.total ?? 0} people` } });
+    return { enrolled: 0, skipped: campaign.personIds.length };
+  }
   const created = await prisma.$transaction(async tx => {
     const candidatePeople = await tx.personCache.findMany({ where: { id: { in: preview.candidates.map(candidate => candidate.personId) } }, select: { companyId: true } });
     await lockAccounts(tx, candidatePeople.map(person => person.companyId));

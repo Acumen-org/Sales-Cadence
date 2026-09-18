@@ -9,6 +9,7 @@ import { launchScheduledCampaigns } from '../lib/engine/campaigns';
 import { syncContinuously } from '../lib/continuous-sync';
 import { reconcile } from '../lib/engine/reconcile';
 import { refreshPersonCache } from '../lib/person-cache';
+import { snapshotScorecard } from '../lib/enrichment-work';
 import { getTwentyClient } from '../lib/twenty';
 import { todayIn } from '../lib/dates';
 import { WORKSPACE_TIMEZONE } from '../lib/workspace';
@@ -38,6 +39,7 @@ async function nightly(now:Date){
  lastNightly=today;
  try{const stats=await reconcile({actor:SYSTEM_ACTOR,now});log('nightly reconcile',stats);}catch(error){log('nightly reconcile failed',error);}
  try{const stats=await refreshPersonCache(await getTwentyClient());log('cache refresh',stats);}catch(error){log('cache refresh failed',error);}
+ try{const stats=await snapshotScorecard(now);log('enrichment scorecard snapshot',stats);}catch(error){log('enrichment scorecard snapshot failed',error);}
 }
 async function tick(){
  if(running||stopping)return;running=true;

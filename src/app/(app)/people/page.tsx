@@ -1,15 +1,16 @@
 import { sortDirection } from '@/lib/sorting';
-import { tagFilter } from '@/lib/crm-tags';
+import { personTagOptions } from '@/lib/people-options';
 import { PageFrame } from '@/components/page-frame';
 import { needsPod } from '@/lib/auth/rbac';
 import Link from 'next/link';
 import { personSearchWhere } from '@/lib/search-terms';
 import { filterParam, sectionDefaults } from '@/lib/default-filters';
 import { SyncNowButton } from '@/components/settings/sync-now-button';
-import { peopleScopeWhere } from '@/lib/people-scope';
+import { foPeopleWhere, peopleScopeWhere } from '@/lib/people-scope';
+import { campaignChoices, campaignMemberWhere, membershipFor, membershipLabel, primaryMembership } from '@/lib/campaign-membership';
 import type { Prisma } from '@prisma/client';
 import { requireUser } from '@/lib/auth/current-user';
-import { canEnroll, isAdmin, toActor, visiblePodIds } from '@/lib/auth/rbac';
+import { canEnroll, canManageCampaigns, isAdmin, toActor, visiblePodIds } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
 import { formatLocalDate } from '@/lib/dates';
 import { cachedPersonName } from '@/lib/person-cache';
@@ -20,11 +21,12 @@ import { PeopleTable, type PeopleTableRow } from '@/components/people/people-tab
 import { IconPeople } from '@/components/icons';
 import { defaultTwentySchema } from '@/lib/twenty/twenty-schema';
 import { compareLocalDates, todayIn } from '@/lib/dates';
-import { contactWarnings, crmStanding, EmptyState, ENROLLMENT_TONE, enrollmentStatusLabel, Surface, Toolbar, ViewHeader } from '@/components/ui';
+import { contactWarnings, crmStanding, EmptyState, Surface, Toolbar, ViewHeader } from '@/components/ui';
+import { parseSteps } from '@/lib/sequences/steps';
 
 const PAGE_SIZE = 100;
 
-type Search = { tag?: string; listCategory?: string; dir?: string; q?: string; pod?: string; fo?: string; product?: string; sort?: string; status?: string; page?: string; owner?: string; tier?: string; type?: string };
+type Search = { tag?: string; listCategory?: string; dir?: string; q?: string; pod?: string; fo?: string; product?: string; sort?: string; status?: string; page?: string; owner?: string; tier?: string; type?: string; account?: string; campaign?: string };
 const SORTS = ['name', 'company', 'tier', 'recent'] as const;
 type Sort = (typeof SORTS)[number];
 
@@ -40,8 +42,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   const dir = sortDirection(sp.dir, sort === 'recent' ? 'desc' : 'asc');
   const tag = sp.tag ?? '';
   const listCategory = sp.listCategory ?? '';
-  const tagRows = await prisma.personCache.findMany({ where: await peopleScopeWhere(user), select: { tags: true, listCategory: true }, distinct: ['tags', 'listCategory'] });
-  const tags = [...new Set(tagRows.flatMap(row => row.tags).filter(value => tagFilter(value).key === 'tag'))].sort();
+  const tags = await personTagOptions();
   // Only values the mapping knows are accepted, so a hand-edited URL cannot filter on nonsense.
   const values = defaultTwentySchema.personValues;
   const pick = (v: string | undefined, allowed: readonly string[]) => (v && allowed.includes(v) ? v : '');
@@ -58,8 +59,15 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   if (pod) where.podOwner = pod;
   if (fo) {
     const member = await prisma.user.findUnique({ where: { id: fo }, select: { twentyMemberId: true } });
-    and.push({ OR: [{ ownerMemberId: member?.twentyMemberId ?? '__none__' }, { enrollments: { some: { foUserId: fo, status: { in: ['ACTIVE', 'PAUSED'] } } } }] });
+    and.push(foPeopleWhere(fo, member?.twentyMemberId));
   }
+  // People with no company in Twenty, reached from the Accounts tile that counts them.
+  const account = sp.account === 'none' ? 'none' : '';
+  if (account === 'none') where.companyId = null;
+  // One campaign's people, before or after it launched; the bulk bar can take them out of it.
+  const campaignChoicesList = await campaignChoices(user);
+  const campaign = campaignChoicesList.find((c) => c.id === sp.campaign)?.id ?? '';
+  if (campaign) and.push(await campaignMemberWhere(campaign));
   if (tag) and.push({ tags: { has: tag } });
   if (listCategory) and.push({ listCategory });
   if (product) and.push({ productInterest: { has: product } });
@@ -95,7 +103,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
       include: {
-        enrollments: { orderBy: { createdAt: 'desc' }, take: 1, include: { fo: { select: { id: true, name: true } }, pod: { select: { id: true, name: true } }, campaign: { select: { id: true, name: true } }, sequence: { select: { name: true } } } },
+        enrollments: { orderBy: { createdAt: 'desc' }, take: 1, include: { fo: { select: { id: true, name: true } }, pod: { select: { id: true, name: true } }, campaign: { select: { id: true, name: true } }, sequence: { select: { name: true, steps: true } } } },
       },
     }),
     prisma.personCache.count({ where }),
@@ -111,6 +119,8 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     p.set('dir', dir);
     if (tag) p.set('tag', tag);
     if (listCategory) p.set('listCategory', listCategory);
+    if (account) p.set('account', account);
+    if (campaign) p.set('campaign', campaign);
     if (product) p.set('product', product);
     if (sort !== 'name') p.set('sort', sort);
     if (status) p.set('status', status);
@@ -127,9 +137,12 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   const visiblePodRows = pods.filter((x) => visible === null || visible.includes(x.id));
   const fos = [...new Map(visiblePodRows.flatMap((x) => x.users.filter((up) => up.user.active && needsPod(up.user.role)).map((up) => [up.user.id, { id: up.user.id, name: up.user.name }] as const))).values()].sort((a, b) => a.name.localeCompare(b.name));
 
+  const membership = await membershipFor(people.map((p) => p.id));
   const rows: PeopleTableRow[] = people.map((p) => {
     const e = p.enrollments[0] ?? null;
     const active = e && (e.status === 'ACTIVE' || e.status === 'PAUSED') ? e : null;
+    const shown = primaryMembership(membership.get(p.id));
+    const shownLabel = shown ? membershipLabel(shown) : null;
     const cadencePod = p.podOwner ? podByOwner.get(p.podOwner) ?? null : null;
     return {
       id: p.id,
@@ -155,9 +168,10 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
           : null,
       dnd: p.dnd,
       optedOut: p.optedOut,
-      enrollment: e
-        ? { status: e.status, label: enrollmentStatusLabel(e), tone: ENROLLMENT_TONE[e.status] ?? 'gray', campaignName: e.campaign?.name ?? null, campaignId: e.campaign?.id ?? null, sequenceName: e.sequence.name, foName: e.fo.name }
-        : null,
+      campaign: shown && shownLabel ? { id: shown.campaignId, name: shown.campaignName, label: shownLabel.label, tone: shownLabel.tone } : null,
+      // A sequence without a campaign (a direct enrollment) still shows where the person is in it.
+      sequence: shown ? { id: shown.sequenceId, name: shown.sequenceName, step: shown.step, steps: shown.steps } : e ? { id: e.sequenceId, name: e.sequence.name, step: e.currentStep >= 0 ? e.currentStep : null, steps: parseSteps(e.sequence.steps).length } : null,
+      foName: active?.fo.name ?? null,
       activeEnrollmentId: active?.id ?? null,
       twentyUrl: twentyPersonUrl(conn.baseUrl, p.id),
     };
@@ -167,7 +181,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     <PageFrame className="space-y-3 px-6 pb-8 pt-2">
       <Surface flush>
         <ViewHeader
-          title={q || pod || status || fo || product || tag || listCategory || tier || contactType ? 'Filtered people' : 'All people'}
+          title={q || pod || status || fo || product || tag || listCategory || tier || contactType || account || campaign ? 'Filtered people' : 'All people'}
           caret
           meta={`${total} result${total === 1 ? '' : 's'}`}
           actions={isAdmin(user) ? <SyncNowButton /> : undefined}
@@ -184,6 +198,8 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
             fo={fo}
             product={product}
             sort={sort} dir={dir} tag={tag} tags={tags} listCategory={listCategory}
+            campaigns={campaignChoicesList.map((c) => ({ id: c.id, name: c.name, kind: c.kind }))}
+            campaign={campaign}
             status={status}
             tier={tier}
             type={contactType}
@@ -192,7 +208,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
         {rows.length === 0 ? (
           <EmptyState icon={<IconPeople size={20} />} title="No people match" hint="Adjust the filters to find a contact." />
         ) : (
-          <PeopleTable rows={rows} canEnroll={canEnroll(actor)} />
+          <PeopleTable rows={rows} canEnroll={canEnroll(actor)} campaignFilter={campaign ? { id: campaign, name: campaignChoicesList.find((c) => c.id === campaign)?.name ?? 'this campaign', canManage: canManageCampaigns(actor, campaignChoicesList.find((c) => c.id === campaign)?.podId ?? null) } : null} />
         )}
       </Surface>
 

@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { approveCampaignAction, rejectCampaignAction, pauseCampaignAction, reenrollNonRepliersAction, restartCampaignAction, resumeCampaignAction, stopCampaignAction, type FollowupPreview } from '@/lib/actions/campaigns';
+import { approveCampaignAction, rejectCampaignAction, pauseCampaignAction, reenrollNonRepliersAction, restartCampaignAction, resumeCampaignAction, setHardStopAction, stopCampaignAction, type FollowupPreview } from '@/lib/actions/campaigns';
 import { ActionButton, ActionForm } from '@/components/action-form';
 import { Card, Field } from '@/components/ui';
 
@@ -27,4 +27,9 @@ export function CampaignLifecycle({ campaignId, status, canApprove = false }: { 
    {status === 'PAUSED' && <ActionButton action={resumeCampaignAction} payload={{campaignId}}>Resume campaign</ActionButton>}
    {['ACTIVE','PAUSED','SCHEDULED'].includes(status) && <ActionButton action={stopCampaignAction} payload={{campaignId}} className="btn-ghost text-red-700" confirm="Stop outreach for everyone in this campaign? You can restart it from the beginning later.">Stop campaign</ActionButton>}
  </>;
+}
+
+/** At the end date: let people mid-sequence finish (default), or end what is left. */
+export function HardStopToggle({ campaignId, on }: { campaignId: string; on: boolean }) {
+  return <ActionButton action={setHardStopAction} payload={{ campaignId, on: on ? '0' : '1' }} className="btn-ghost btn-sm" title={on ? 'People mid-sequence will be stopped at the end date' : 'People mid-sequence finish after the end date'}>{on ? 'Let people finish after the end date' : 'Stop what is left at the end date'}</ActionButton>;
 }

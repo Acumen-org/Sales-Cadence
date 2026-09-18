@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { DEFAULT_DIALPAD_URL } from '@/lib/calls';
 import { RulesSettingsSchema } from '@/lib/settings';
 
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
@@ -11,9 +12,10 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 describe('click-to-call endpoint setting', () => {
   const parse = (clickToCallUrl: string) => RulesSettingsSchema.safeParse({ clickToCallUrl });
 
-  it('defaults to blank, so nothing is wired up until an admin says so', () => {
+  it("defaults to the team's dialpad, with the number where the template says", () => {
     const parsed = RulesSettingsSchema.parse({});
-    expect(parsed.clickToCallUrl).toBe('');
+    expect(parsed.clickToCallUrl).toBe(DEFAULT_DIALPAD_URL);
+    expect(parsed.clickToCallUrl).toContain('{phone}');
   });
 
   it('accepts an http(s) endpoint and trims it', () => {

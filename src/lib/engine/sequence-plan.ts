@@ -1,6 +1,6 @@
 import { prisma } from '../db';
 import { logAudit, type AuditActor } from '../audit';
-import { StepsSchema, type SequenceStep } from '../sequences/steps';
+import { lastDay, StepsSchema, type SequenceStep } from '../sequences/steps';
 import { cleanRichText } from '../rich-text';
 
 function validatedSteps(input: unknown) {
@@ -10,9 +10,11 @@ function validatedSteps(input: unknown) {
   }));
 }
 
-export async function createSequence(input: { name: string; description?: string | null; steps: unknown; repeatEveryDays?: number | null }, actor: AuditActor) {
+export async function createSequence(input: { name: string; description?: string | null; steps: unknown; repeatEveryDays?: number | null; durationDays?: number | null }, actor: AuditActor) {
   const steps = validatedSteps(input.steps);
-  const sequence = await prisma.sequence.create({ data: { name: input.name.trim(), description: input.description ?? null, steps, repeatEveryDays: input.repeatEveryDays ?? null } });
+  const durationDays = input.durationDays ?? null;
+  if (durationDays !== null && durationDays < lastDay(steps)) throw new Error(`The plan spans ${durationDays} days but its last step is on day ${lastDay(steps)}.`);
+  const sequence = await prisma.sequence.create({ data: { name: input.name.trim(), description: input.description ?? null, steps, repeatEveryDays: input.repeatEveryDays ?? null, durationDays } });
   await logAudit({ entityType: 'sequence', entityId: sequence.id, action: 'created', actor, details: { steps: steps.length } });
   return { sequence };
 }
@@ -39,6 +41,7 @@ export async function saveSequenceSteps(sequenceId: string, stepsInput: unknown,
     const sequence = await tx.sequence.findUniqueOrThrow({ where: { id: sequenceId } });
     const current = StepsSchema.safeParse(sequence.steps);
     const before = current.success ? current.data : [];
+    if (sequence.durationDays !== null && lastDay(steps) > sequence.durationDays) throw new Error(`Step ${steps.length} is on day ${lastDay(steps)}, past the plan's ${sequence.durationDays} days.`);
     const inUse = await tx.task.groupBy({ by: ['stepId'], where: { state: 'PENDING', enrollment: { sequenceId } }, _count: { _all: true } });
     for (const { stepId, _count } of inUse) {
       const beforeIndex = before.findIndex((s) => s.id === stepId);
@@ -55,9 +58,15 @@ export async function saveSequenceSteps(sequenceId: string, stepsInput: unknown,
 
 export async function updateSequenceMeta(
   sequenceId: string,
-  patch: { name?: string; description?: string | null; archived?: boolean; repeatEveryDays?: number | null },
+  patch: { name?: string; description?: string | null; archived?: boolean; repeatEveryDays?: number | null; durationDays?: number | null },
   actor: AuditActor,
 ) {
+  if (patch.durationDays !== undefined && patch.durationDays !== null) {
+    const current = await prisma.sequence.findUniqueOrThrow({ where: { id: sequenceId }, select: { steps: true } });
+    const parsed = StepsSchema.safeParse(current.steps);
+    const last = parsed.success ? lastDay(parsed.data) : 0;
+    if (patch.durationDays < last) throw new Error(`The plan's last step is on day ${last}; it cannot span fewer than ${last} days.`);
+  }
   // An archived sequence is refused by campaign launch, and a scheduled campaign that hits that
   // refusal sits SCHEDULED forever with nothing on screen to explain it. So the archive is
   // refused here instead, naming the campaigns that would have been stranded.
@@ -78,6 +87,8 @@ export async function updateSequenceMeta(
       ...(patch.name ? { name: patch.name.trim() } : {}),
       ...(patch.description !== undefined ? { description: patch.description } : {}),
       ...(patch.archived !== undefined ? { archived: patch.archived } : {}),
+      ...(patch.repeatEveryDays !== undefined ? { repeatEveryDays: patch.repeatEveryDays } : {}),
+      ...(patch.durationDays !== undefined ? { durationDays: patch.durationDays } : {}),
     },
   });
   await logAudit({ entityType: 'sequence', entityId: sequenceId, action: 'updated', actor, details: patch });

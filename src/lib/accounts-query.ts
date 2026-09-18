@@ -3,9 +3,12 @@ import type { Prisma } from '@prisma/client';
 import { companySearchWhere } from './search-terms';
 import { getSettings } from './settings';
 import { blockedCompanyIds } from './blocked-accounts';
-import { isInternalCompany } from './internal-organizations';
+import { externalPeopleWhere, isInternalCompany } from './internal-organizations';
+import { isNotAccount } from './non-prospects';
+import { foPeopleWhere, myPeopleWhere } from './people-scope';
 import { meetingReadWhere } from './meetings-query';
 import { prisma } from './db';
+import { liveCampaignMemberIds } from './campaign-membership';
 import type { SessionUser } from './auth/current-user';
 import { visiblePodIds, canSeeAllPods, isAdmin, needsPod } from './auth/rbac';
 import { cachedPersonName } from './person-cache';
@@ -30,6 +33,7 @@ export type AccountListRow = {
   fos: string[];
   products: string[];
   people: number;
+  /** People at the account in a running sequence or an upcoming campaign. */
   inSequence: number;
   replied: number;
   meetings: number;
@@ -81,13 +85,15 @@ export type AccountFilters = {
   foUserId?: string | null;
   /** Accounts with a person interested in this product. */
   product?: string | null;
+  /** Whether anyone at the account is in a campaign: someone, everyone, or nobody. */
+  campaign?: 'any' | 'all' | 'none' | null;
   sort?: AccountSort;
   dir?: SortDirection;
   /** 1-based page of ACCOUNTS_PAGE_SIZE rows. Omit for every row (the Home tiles and counts). */
   page?: number;
 };
 
-export type AccountList = { rows: AccountListRow[]; total: number; mine: number; people: number; inSequence: number; engaged: number };
+export type AccountList = { rows: AccountListRow[]; total: number; mine: number; people: number; inSequence: number; /** Accounts with at least one person in a campaign. */ inCampaign: number; engaged: number };
 
 /** Company ids reached through their people, for one filter. */
 async function companiesThroughPeople(where: Prisma.PersonCacheWhereInput): Promise<string[]> {
@@ -110,7 +116,7 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
   if (opts.foUserId) {
     const fo = await prisma.user.findUnique({ where: { id: opts.foUserId }, select: { twentyMemberId: true } });
     const owned = fo?.twentyMemberId ? (await prisma.companyCache.findMany({ where: { deletedAt: null, ownerMemberId: fo.twentyMemberId }, select: { id: true } })).map((c) => c.id) : [];
-    const worked = await companiesThroughPeople({ OR: [{ ownerMemberId: fo?.twentyMemberId ?? '__none__' }, { enrollments: { some: { foUserId: opts.foUserId, status: { in: ['ACTIVE', 'PAUSED'] } } } }] });
+    const worked = await companiesThroughPeople({ AND: [await externalPeopleWhere(), foPeopleWhere(opts.foUserId, fo?.twentyMemberId)] });
     narrowings.push([...new Set([...owned, ...worked])]);
   }
   if (opts.product) narrowings.push(await companiesThroughPeople({ productInterest: { has: opts.product } }));
@@ -126,10 +132,19 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
   // thousand rows of a few columns is a small result; the 500-row cap this replaced hid every
   // named company behind the nameless ones that sorted first.
   const blocked = new Set(await blockedCompanyIds());
-  const companies = (await prisma.companyCache.findMany({ where, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }, { domain: { sort: 'asc', nulls: 'last' } }] })).filter((company) => !isInternalCompany(company, rules) && !blocked.has(company.id));
+  // Only the columns the list reads: the cached Twenty record (`raw`) is the widest column on the
+  // table and nothing here needs it.
+  const companies = (await prisma.companyCache.findMany({ where, select: { id: true, name: true, sortName: true, domain: true, industry: true, city: true, ownerMemberId: true }, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }, { domain: { sort: 'asc', nulls: 'last' } }] })).filter((company) => !isInternalCompany(company, rules) && !blocked.has(company.id) && !isNotAccount(company, rules));
   const ids = companies.map((c) => c.id);
-  if (!ids.length) return { rows: [], total: 0, mine: 0, people: 0, inSequence: 0, engaged: 0 };
+  if (!ids.length) return { rows: [], total: 0, mine: 0, people: 0, inSequence: 0, inCampaign: 0, engaged: 0 };
 
+  const upcoming = await prisma.campaign.findMany({ where: { status: { in: ['DRAFT', 'PENDING_APPROVAL', 'SCHEDULED'] } }, select: { personIds: true } });
+  const upcomingIds = new Set(upcoming.flatMap((c) => c.personIds));
+  const upcomingByCompany = upcomingIds.size ? new Map<string, number>() : null;
+  if (upcomingByCompany) {
+    const rows = await prisma.personCache.findMany({ where: { id: { in: [...upcomingIds] }, companyId: { in: ids }, deletedAt: null, enrollments: { none: { status: { in: ['ACTIVE', 'PAUSED'] } } } }, select: { companyId: true } });
+    for (const r of rows) upcomingByCompany.set(r.companyId!, (upcomingByCompany.get(r.companyId!) ?? 0) + 1);
+  }
   const [peopleRows, enrollRows, touchRows, meetingRows, members] = await Promise.all([
     prisma.personCache.groupBy({ by: ['companyId'], where: { companyId: { in: ids }, deletedAt: null }, _count: { _all: true } }),
     prisma.enrollment.groupBy({ by: ['companyId', 'status'], where: { companyId: { in: ids } }, _count: { _all: true } }),
@@ -173,7 +188,7 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
     ownerName: c.ownerMemberId ? memberName.get(c.ownerMemberId) ?? null : null,
     pods: [], fos: [], products: [],
     people: peopleBy.get(c.id) ?? 0,
-    inSequence: enrollBy.get(c.id)?.inSequence ?? 0,
+    inSequence: (enrollBy.get(c.id)?.inSequence ?? 0) + (upcomingByCompany?.get(c.id) ?? 0),
     replied: enrollBy.get(c.id)?.replied ?? 0,
     meetings: meetingsBy.get(c.id) ?? 0,
     lastTouchAt: lastBy.get(c.id) ?? null,
@@ -200,8 +215,9 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
       : !a.lastTouchAt || !b.lastTouchAt ? a.lastTouchAt ? -1 : b.lastTouchAt ? 1 : 0 : desc(a.lastTouchAt.getTime(), b.lastTouchAt.getTime()),
     );
   }
-  const scoped = opts.scope === 'mine' ? rows.filter((r) => r.mine) : rows;
-  const summary = { total: scoped.length, mine: rows.filter((r) => r.mine).length, people: scoped.reduce((n, a) => n + a.people, 0), inSequence: scoped.reduce((n, a) => n + a.inSequence, 0), engaged: scoped.filter((a) => a.replied > 0 || a.meetings > 0).length };
+  const byCampaign = opts.campaign === 'any' ? rows.filter((r) => r.inSequence > 0) : opts.campaign === 'all' ? rows.filter((r) => r.people > 0 && r.inSequence >= r.people) : opts.campaign === 'none' ? rows.filter((r) => r.inSequence === 0) : rows;
+  const scoped = opts.scope === 'mine' ? byCampaign.filter((r) => r.mine) : byCampaign;
+  const summary = { total: scoped.length, mine: rows.filter((r) => r.mine).length, people: scoped.reduce((n, a) => n + a.people, 0), inSequence: scoped.reduce((n, a) => n + a.inSequence, 0), inCampaign: scoped.filter((a) => a.inSequence > 0).length, engaged: scoped.filter((a) => a.replied > 0 || a.meetings > 0).length };
   const start = (Math.max(1, opts.page ?? 1) - 1) * ACCOUNTS_PAGE_SIZE;
   const pageRows = opts.page ? scoped.slice(start, start + ACCOUNTS_PAGE_SIZE) : scoped;
   const [associations, pods] = await Promise.all([
@@ -238,18 +254,31 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
  * say something that changes rather than carry a fixed sentence describing what the tile means.
  */
 export async function myOwnershipCounts(user: SessionUser): Promise<{ accounts: number; relationships: number; inSequence: number; activeAccounts: number }> {
-  const member = user.twentyMemberId ?? '__none__';
-  const mineWhere: Prisma.PersonCacheWhereInput = { deletedAt: null, OR: [{ ownerMemberId: member }, { enrollments: { some: { foUserId: user.id } } }] };
-  const liveWhere: Prisma.PersonCacheWhereInput = { ...mineWhere, enrollments: { some: { status: { in: ['ACTIVE', 'PAUSED'] } } } };
-  const [owned, viaPeople, relationships, inSequence, liveCompanies] = await Promise.all([
-    prisma.companyCache.findMany({ where: { deletedAt: null, ownerMemberId: member }, select: { id: true } }),
-    prisma.personCache.findMany({ where: { ...mineWhere, companyId: { not: null } }, select: { companyId: true }, distinct: ['companyId'] }),
+  // The same rule the People and Accounts FO filters apply, so the tile and the list it opens agree.
+  const mineWhere = await myPeopleWhere(user);
+  const liveWhere: Prisma.PersonCacheWhereInput = { AND: [mineWhere, { enrollments: { some: { foUserId: user.id, status: { in: ['ACTIVE', 'PAUSED'] } } } }] };
+  const [{ rules }, blocked, owned, viaPeople, relationships, inSequence, liveCompanies] = await Promise.all([
+    getSettings(),
+    blockedCompanyIds(),
+    prisma.companyCache.findMany({ where: { deletedAt: null, ownerMemberId: user.twentyMemberId ?? '__none__' }, select: { id: true, name: true, domain: true } }),
+    prisma.personCache.findMany({ where: { AND: [mineWhere, { companyId: { not: null } }] }, select: { companyId: true }, distinct: ['companyId'] }),
     prisma.personCache.count({ where: mineWhere }),
     prisma.personCache.count({ where: liveWhere }),
-    prisma.personCache.findMany({ where: { ...liveWhere, companyId: { not: null } }, select: { companyId: true }, distinct: ['companyId'] }),
+    prisma.personCache.findMany({ where: { AND: [liveWhere, { companyId: { not: null } }] }, select: { companyId: true }, distinct: ['companyId'] }),
   ]);
-  const accounts = new Set<string>([...owned.map((o) => o.id), ...viaPeople.map((p) => p.companyId!)]);
-  return { accounts: accounts.size, relationships, inSequence, activeAccounts: liveCompanies.length };
+  // Only accounts the Accounts list itself would show: cached, not deleted, not one of ours, not
+  // blocked. A person can point at a company the cache has never seen; that is not an account here.
+  const excluded = new Set(blocked);
+  const listable = async (ids: string[]) => {
+    if (!ids.length) return 0;
+    const rows = await prisma.companyCache.findMany({ where: { id: { in: ids }, deletedAt: null }, select: { id: true, name: true, domain: true } });
+    return rows.filter((c) => !isInternalCompany(c, rules) && !excluded.has(c.id) && !isNotAccount(c, rules)).length;
+  };
+  const [accounts, activeAccounts] = await Promise.all([
+    listable([...new Set([...owned.map((o) => o.id), ...viaPeople.map((p) => p.companyId!)])]),
+    listable([...new Set(liveCompanies.map((p) => p.companyId!))]),
+  ]);
+  return { accounts, relationships, inSequence, activeAccounts };
 }
 
 // ---------------------------------------------------------------------------
@@ -455,6 +484,7 @@ export async function accountDetail(companyId: string, user: SessionUser) {
   // Held work is not open work: a paused enrollment's touches appear in no task list, so
   // counting them here would promise the FO something they cannot open.
   const openTasks = tasks.filter((t) => t.state === 'PENDING' && t.enrollment.status !== 'PAUSED');
+  const inCampaign = await liveCampaignMemberIds();
   return {
     company,
     blocked: blocked ? { reason: blocked.reason, byName: blocked.blockedBy?.name ?? null, at: blocked.createdAt } : null,
@@ -474,7 +504,7 @@ export async function accountDetail(companyId: string, user: SessionUser) {
     })),
     stats: {
       people: accountPeople.length,
-      inSequence: accountPeople.filter((p) => p.enrollment && (p.enrollment.status === 'ACTIVE' || p.enrollment.status === 'PAUSED')).length,
+      inSequence: accountPeople.filter((p) => (p.enrollment && (p.enrollment.status === 'ACTIVE' || p.enrollment.status === 'PAUSED')) || inCampaign.has(p.id)).length,
       replied: accountPeople.filter((p) => p.enrollment && (p.enrollment.status === 'REPLIED' || p.enrollment.status === 'MEETING')).length,
       meetings: meetings.length,
       touches: accountPeople.reduce((sum, person) => sum + person.touches, 0),

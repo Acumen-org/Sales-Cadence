@@ -7,7 +7,7 @@ import { prisma } from '@/lib/db';
 import { getSettings } from '@/lib/settings';
 import { FavouriteButton } from '@/components/meetings/favourite-button';
 import { formatInstant } from '@/lib/dates';
-import { parseAnalysis } from '@/lib/meetings/analysis';
+import { getMeetingAnalyzer, parseAnalysis } from '@/lib/meetings/analysis';
 import { parseMeetingLink, PROVIDER_LABELS } from '@/lib/meetings/providers';
 import { canManageMeetingAction, deleteMeetingAction, saveTranscriptAction } from '@/lib/actions/meetings';
 import { ActionButton, ActionForm } from '@/components/action-form';
@@ -115,7 +115,8 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
         </div>
 
         <aside className="min-w-0 space-y-3">
-          <MeetingAnalysisPanel
+          {/* Analysis appears once Cadence AI holds a model; until then the page says nothing about it. */}
+          {getMeetingAnalyzer().name !== 'local-stats' ? <MeetingAnalysisPanel
             meetingId={meeting.id}
             analysis={analysis}
             status={meeting.analysisStatus}
@@ -124,7 +125,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
             error={meeting.analysisError}
             hasTranscript={Boolean(meeting.transcript)}
             canRun={mayEdit}
-          />
+          /> : null}
 
           <Card title={`Attendees (${meeting.attendees.length})`}>
             {meeting.attendees.length === 0 ? (

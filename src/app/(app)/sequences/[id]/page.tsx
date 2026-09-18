@@ -29,7 +29,7 @@ export default async function SequenceDetailPage({ params }: { params: Promise<{
             <Badge tone="green">
               {sequence._count.campaigns} {sequence._count.campaigns === 1 ? 'campaign' : 'campaigns'}
             </Badge>
-            {sequence.repeatEveryDays ? <Badge tone="blue">Repeats every {sequence.repeatEveryDays} working days</Badge> : null}
+            {sequence.repeatEveryDays ? <Badge tone="blue">Repeats every {sequence.repeatEveryDays} days</Badge> : null}
           </>
         }
         actions={
@@ -38,7 +38,7 @@ export default async function SequenceDetailPage({ params }: { params: Promise<{
           </Link>
         }
       />
-      <div className="max-w-4xl">
+      <div className="max-w-6xl">
         <SequenceEditor
           sequenceId={id}
           initialSteps={steps}
@@ -47,10 +47,11 @@ export default async function SequenceDetailPage({ params }: { params: Promise<{
           lockedSteps={Object.fromEntries(open.map((t) => [t.stepId, t._count._all]))}
           readOnly={!edit}
           repeatEveryDays={sequence.repeatEveryDays}
+          durationDays={sequence.durationDays}
           header={
             edit ? (
               <div className="surface flex flex-wrap items-end gap-5 p-5">
-                <Field label="Sequence name">
+                <Field label="Sequence name" required>
                   <input name="name" className="!w-80 max-w-full !font-medium" defaultValue={sequence.name} required />
                 </Field>
                 <label className="mb-2 flex items-center gap-2 text-sm">

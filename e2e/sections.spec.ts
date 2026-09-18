@@ -96,7 +96,7 @@ test('Settings is admin-only, in the sidebar and by URL', async ({ page }) => {
   await logout(page);
 });
 
-test('a meeting plays in the app with its transcript and an empty analysis panel', async ({ page }) => {
+test('a meeting plays in the app with its transcript and no analysis until a model is connected', async ({ page }) => {
   await loginAs(page, 'Alisa');
   await page.goto('/meetings/new');
   await page.getByLabel('Title').fill('E2E discovery call');
@@ -132,7 +132,7 @@ test('a meeting plays in the app with its transcript and an empty analysis panel
   await page.getByRole('button', { name: 'Remove Outside Guest' }).click();
   await expect(page.getByText('Outside Guest')).toHaveCount(0);
 
-  await page.getByLabel('Transcript (optional)').fill('WEBVTT\n\n00:00:01.000 --> 00:00:06.000\n<v Alisa Senior>Thanks for making the time today.\n\n00:00:07.000 --> 00:00:12.000\n<v Dummy One>Happy to. Tell me about the reporting pack.\n');
+  await page.getByLabel('Transcript', { exact: true }).fill('WEBVTT\n\n00:00:01.000 --> 00:00:06.000\n<v Alisa Senior>Thanks for making the time today.\n\n00:00:07.000 --> 00:00:12.000\n<v Dummy One>Happy to. Tell me about the reporting pack.\n');
   await page.getByRole('button', { name: /Add meeting|Save/ }).click();
   await expect(page).toHaveURL(/\/meetings\/[0-9a-f-]+$/);
 
@@ -146,9 +146,9 @@ test('a meeting plays in the app with its transcript and an empty analysis panel
   // Transcript underneath, with speakers.
   await expect(page.getByText('Thanks for making the time today.')).toBeVisible();
   await expect(page.getByText('Dummy One').first()).toBeVisible();
-  // The assistant's panel, named and honest about not being connected.
-  await expect(page.getByText('Cadence AI').first()).toBeVisible();
-  await expect(page.getByText('Not connected').first()).toBeVisible();
+  // No model is connected, so the page says nothing about analysis at all (B8).
+  await expect(page.locator('main').getByText('Cadence AI')).toHaveCount(0);
+  await expect(page.locator('main').getByText('Not connected')).toHaveCount(0);
 
   // Found by who was there, and starred for later.
   await page.goto('/meetings?who=Dummy%20One');
@@ -239,9 +239,9 @@ test('Activity lists work in time order and hides administration', async ({ page
   // "Settings" only exists in the sidebar, never as a feed row.
   await expect(page.locator('main').getByText(/^Settings/)).toHaveCount(0);
 
-  // Filters are real query state.
+  // Filters are real query state, applied as they change; the event type sits behind Filters.
+  await page.getByRole('button', { name: /^Filters/ }).click();
   await page.getByLabel('Event type').selectOption('touch');
-  await page.getByRole('button', { name: 'Apply filters' }).click();
   await expect(page).toHaveURL(/kind=touch/);
   await expect(page.locator('main')).toContainText(/Email|Call/);
   await logout(page);

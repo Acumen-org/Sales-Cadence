@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { prisma } from './db';
+import { applyNeverProspectRule } from './non-prospects';
 import { hashPassword } from './auth/password';
 import { WORKSPACE_TIMEZONE } from './workspace';
 import { getTwentyClient } from './twenty';
@@ -85,6 +86,11 @@ export async function syncContinuously(now = new Date(), injected?: TwentyClient
     const sinceByStage = Object.fromEntries(CURSOR_STAGES.map((stage) => [stage, new Date(new Date(stageWatermarks[stage]).getTime() - 10 * 60000).toISOString()]));
     const result = await reconcile({ since, sinceByStage, now, actor: SYSTEM_ACTOR }, client);
     Object.assign(stageErrors, result.stageErrors);
+    try {
+      await applyNeverProspectRule();
+    } catch (error) {
+      stageErrors.nonProspects = error instanceof Error ? error.message : String(error);
+    }
     const peopleFailed = stageErrors['cache.people'] ?? stageErrors.people;
     if (peopleFailed) throw new Error(`People could not be listed from Twenty: ${peopleFailed}`);
     const failing = Object.keys(stageErrors);

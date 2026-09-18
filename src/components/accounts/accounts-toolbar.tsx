@@ -2,7 +2,7 @@
 import { SortControl } from '@/components/sort-control';
 
 import { useFilterNavigation } from '@/components/filter-navigation';
-import { useEffect, useState } from 'react';
+import { useSearchBox } from '@/components/search-box';
 import { IconSearch } from '@/components/icons';
 import { optionLabel } from '@/lib/twenty/labels';
 
@@ -14,6 +14,7 @@ type Props = {
   pod: string;
   fo: string;
   product: string;
+  campaign: string;
   sort: string;
   dir: 'asc' | 'desc';
 };
@@ -21,7 +22,7 @@ type Props = {
 const SORTS = [
   { value: 'people', label: 'Sort: people' },
   { value: 'name', label: 'Sort: name' },
-  { value: 'inSequence', label: 'Sort: in sequence' },
+  { value: 'inSequence', label: 'Sort: in a campaign' },
   { value: 'replied', label: 'Sort: replies' },
   { value: 'lastTouch', label: 'Sort: last touch' },
 ];
@@ -29,10 +30,8 @@ const SORTS = [
 /** Filters whose "All" is a choice worth keeping in the URL, because the section has a default. */
 const EXPLICIT = new Set(['pod', 'fo']);
 
-export function AccountsToolbar({ q, pods, fos, products, pod, fo, product, sort, dir }: Props) {
+export function AccountsToolbar({ q, pods, fos, products, pod, fo, product, campaign, sort, dir }: Props) {
   const navigate = useFilterNavigation();
-  const [text, setText] = useState(q);
-  useEffect(() => setText(q), [q]);
 
   const update = (patch: Record<string, string | null>) => {
     navigate((next) => {
@@ -45,18 +44,13 @@ export function AccountsToolbar({ q, pods, fos, products, pod, fo, product, sort
     });
   };
 
-  useEffect(() => {
-    const t = setTimeout(() => {
-      if (text !== q) update({ q: text || null });
-    }, 350);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text]);
+  const { text, setText } = useSearchBox(q, (value) => update({ q: value }));
 
   const chips = [
     pod ? { key: 'pod', label: `Pod is ${pods.find((p) => p.podOwnerValue === pod)?.name ?? optionLabel(pod)}` } : null,
     fo ? { key: 'fo', label: `FO is ${fos.find((f) => f.id === fo)?.name ?? fo}` } : null,
     product ? { key: 'product', label: optionLabel(product) } : null,
+    campaign ? { key: 'campaign', label: campaign === 'any' ? 'Someone in a campaign' : campaign === 'all' ? 'Everyone in a campaign' : 'Nobody in a campaign' } : null,
   ].filter((x): x is { key: string; label: string } => Boolean(x));
 
   return (
@@ -84,6 +78,12 @@ export function AccountsToolbar({ q, pods, fos, products, pod, fo, product, sort
       <select value={product} onChange={(e) => update({ product: e.target.value || null })} aria-label="Filter by product interest" className="!w-auto !py-2 !text-[12.5px]">
         <option value="">Any product</option>
         {products.map((p) => <option key={p} value={p}>{optionLabel(p)}</option>)}
+      </select>
+      <select value={campaign} onChange={(e) => update({ campaign: e.target.value || null })} aria-label="Filter by campaign membership" className="!w-auto !py-2 !text-[12.5px]">
+        <option value="">In a campaign: any</option>
+        <option value="any">Someone in a campaign</option>
+        <option value="all">Everyone in a campaign</option>
+        <option value="none">Nobody in a campaign</option>
       </select>
       {/* "Most people" is the default order (DEFAULT_ACCOUNT_SORT), so it leaves the URL clean. */}
       <SortControl value={sort} dir={dir} options={SORTS} defaultValue="people" label="Sort accounts" />

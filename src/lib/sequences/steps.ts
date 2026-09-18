@@ -46,7 +46,7 @@ export const StepActionSchema = z.object({
 
 export const SequenceStepSchema = z.object({
   id: z.string().min(1),
-  /** Working-day offset from the enrollment start. Day 1 = the start date. */
+  /** Calendar-day offset from the enrollment start. Day 1 = the start date; weekends count, work rolls to the next working day. */
   day: z.number().int().min(1),
   title: z.string().optional(),
   /** One or more modules. A call and its follow-up email belong to one step, not two. */

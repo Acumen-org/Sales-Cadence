@@ -1,4 +1,3 @@
-import { sortDirection } from './sorting';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from './db';
@@ -6,9 +5,6 @@ import type { SessionUser } from './auth/current-user';
 import { peopleScopeWhere, podPeopleWhere } from './people-scope';
 import { assertAllowed, isAdmin, isPodLeader, isBizOps, canSeeAllPods } from './auth/rbac';
 import { cachedPersonName, upsertCompanyCache, upsertPersonCache } from './person-cache';
-import { getTwentySchema, getSettings } from './settings';
-import { blockedCompanyIds } from './blocked-accounts';
-import { isInternalCompany } from './internal-organizations';
 import type { TwentyClient } from './twenty/client';
 import type { EnrichCompanyInput, EnrichPersonInput, TwentyCompany, TwentyPerson } from './twenty/types';
 
@@ -32,48 +28,11 @@ export const ENRICHMENT_FIELDS: Record<EnrichmentEntity, EnrichmentField[]> = {
     { key: 'aum', label: 'AUM (USD)' }, { key: 'city', label: 'City' }, { key: 'linkedinUrl', label: 'LinkedIn URL' },
   ],
 };
-/**
- * What counts as missing, and how badly.
- *
- * **Critical** is what stops the work: without it you cannot reach the person, or you cannot tell
- * who they are. An address and a number are obvious; so are the company they work for and their
- * LinkedIn, because a contact with neither cannot be researched, verified or approached on the
- * one channel that does not need an address.
- *
- * **Useful** is what makes the work better rather than possible: the qualifying detail an FO
- * wants before a first call, and the account facts a pod leader wants before committing a
- * campaign to it. AUM is the clearest example - nothing stops without it, and everything is
- * better aimed with it.
- */
-const CONTACT_CRITICAL = [
-  ['companyId', 'Company not linked'],
-  ['linkedinUrl', 'LinkedIn'],
-] as const;
-/**
- * Gaps the queue names but an import cannot close, because they are relations or assignments
- * rather than values a vendor returns. They are still worth flagging - somebody has to fix them
- * in Twenty - so the badge says where.
- */
-const FIX_IN_TWENTY = new Set(['companyId', 'ownerMemberId']);
-const CONTACT_USEFUL = [
-  ['jobTitle', 'Job title'],
-] as const;
-const ACCOUNT_CRITICAL = [
-  ['domain', 'Website'],
-  ['linkedinUrl', 'LinkedIn'],
-] as const;
-const ACCOUNT_USEFUL = [
-  ['industry', 'Industry'],
-  ['employees', 'Employees'],
-  ['aum', 'AUM'],
-  ['ownerMemberId', 'Account owner not assigned'],
-] as const;
-
 export const canEnrich = (user: SessionUser) => isAdmin(user) || isPodLeader(user);
 const MAX_ROWS = 5_000;
 const MAX_BYTES = 4_000_000;
 export type ParsedEnrichment = { headers: string[]; rows: Record<string, string>[] };
-const normalizedHeader = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+export const normalizedHeader = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 /** CSV with escaped quotes, multiline cells and comma/semicolon/tab delimiters; JSON stays flat. */
 export function parseEnrichmentUpload(text: string): ParsedEnrichment {
@@ -192,7 +151,7 @@ export async function enrichmentPeopleScope(user: SessionUser): Promise<Prisma.P
   return peopleScopeWhere(user);
 }
 
-async function enrichmentCompanyScope(user: SessionUser): Promise<Prisma.CompanyCacheWhereInput> {
+export async function enrichmentCompanyScope(user: SessionUser): Promise<Prisma.CompanyCacheWhereInput> {
   if (canSeeAllPods(user)) return { deletedAt: null };
   const people = await prisma.personCache.findMany({ where: await enrichmentPeopleScope(user), select: { companyId: true }, distinct: ['companyId'] });
   return { deletedAt: null, OR: [{ ownerMemberId: user.twentyMemberId ?? '__none__' }, { id: { in: people.map((person) => person.companyId).filter((id): id is string => !!id) } }] };
@@ -211,44 +170,6 @@ async function enrichmentWriteCompanyScope(user: SessionUser): Promise<Prisma.Co
   if (isAdmin(user)) return { deletedAt: null };
   const people = await prisma.personCache.findMany({ where: await enrichmentWritePeopleScope(user), select: { companyId: true }, distinct: ['companyId'] });
   return { deletedAt: null, OR: [{ ownerMemberId: user.twentyMemberId ?? '__none__' }, { id: { in: people.map((person) => person.companyId).filter((id): id is string => !!id) } }] };
-}
-
-/** `fixInTwenty`: a relation or an assignment, which an import cannot write - somebody links it in Twenty. */
-export type EnrichmentGap = { field: string; label: string; priority: 'critical' | 'useful'; fixInTwenty?: boolean };
-export type EnrichmentQueueItem = { id: string; label: string; company: string | null; entity: EnrichmentEntity; href: string; gaps: EnrichmentGap[] };
-export function filterEnrichmentQueue(items: EnrichmentQueueItem[], q = '', fields: string[] = [], sort = 'name', dir?: string) {
-  const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  return items.filter((item) => terms.every((term) => `${item.label} ${item.company ?? ''}`.toLowerCase().includes(term)) && (!fields.length || item.gaps.some((gap) => fields.includes(gap.field))))
-    .sort((a, b) => (sortDirection(dir, sort === 'gaps' ? 'desc' : 'asc') === 'desc' ? -1 : 1) * (sort === 'gaps' ? a.gaps.length - b.gaps.length || a.label.localeCompare(b.label) : sort === 'company' ? (a.company ?? '').localeCompare(b.company ?? '') || a.label.localeCompare(b.label) : a.label.localeCompare(b.label)) || a.id.localeCompare(b.id));
-}
-export async function enrichmentQueue(user: SessionUser) {
-  const [{ rules }, blocked] = await Promise.all([getSettings(), blockedCompanyIds()]);
-  const [people, companies, schema] = await Promise.all([
-    prisma.personCache.findMany({ where: await enrichmentPeopleScope(user), select: { id: true, firstName: true, lastName: true, companyId: true, companyName: true, email: true, phone: true, jobTitle: true, linkedinUrl: true, city: true, tags: true, badEmail: true, badPhone: true, emailMissing: true, phoneMissing: true }, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }, { email: { sort: 'asc', nulls: 'last' } }] }),
-    prisma.companyCache.findMany({ where: await enrichmentCompanyScope(user), select: { id: true, name: true, domain: true, industry: true, employees: true, city: true, aum: true, linkedinUrl: true, ownerMemberId: true }, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }, { domain: { sort: 'asc', nulls: 'last' } }] }),
-    getTwentySchema(),
-  ]);
-  const enrichmentTags = new Set(schema.personValues.needsEnrichmentTags);
-  const items: EnrichmentQueueItem[] = [];
-  for (const person of people) {
-    const gaps: EnrichmentGap[] = [];
-    if (!person.firstName?.trim() || !person.lastName?.trim()) gaps.push({ field: 'name', label: 'Name incomplete', priority: 'critical', fixInTwenty: true });
-    if (!person.email || person.badEmail || person.emailMissing) gaps.push({ field: 'email', label: person.email ? 'Email needs verification' : 'Email missing', priority: 'critical' });
-    if (!person.phone || person.badPhone || person.phoneMissing) gaps.push({ field: 'phone', label: person.phone ? 'Phone needs verification' : 'Phone missing', priority: 'critical' });
-    for (const [field, label] of CONTACT_CRITICAL) if (!person[field]) gaps.push({ field, label: FIX_IN_TWENTY.has(field) ? label : `${label} missing`, priority: 'critical', fixInTwenty: FIX_IN_TWENTY.has(field) });
-    for (const [field, label] of CONTACT_USEFUL) if (!person[field]) gaps.push({ field, label: `${label} missing`, priority: 'useful' });
-    if (person.tags.some((tag) => enrichmentTags.has(tag) || /enrichment[\s_-]*(required|needed)/i.test(tag))) gaps.push({ field: 'tags', label: 'Flagged in CRM', priority: 'critical' });
-    if (gaps.length) items.push({ id: person.id, label: cachedPersonName(person), company: person.companyName, entity: 'person', href: `/people/${person.id}`, gaps });
-  }
-  const blockedIds = new Set(blocked);
-  for (const company of companies) {
-    if (isInternalCompany(company, rules) || blockedIds.has(company.id)) continue;
-    const gaps: EnrichmentGap[] = [];
-    for (const [field, label] of ACCOUNT_CRITICAL) if (company[field] === null || company[field] === '') gaps.push({ field, label: `${label} missing`, priority: 'critical' });
-    for (const [field, label] of ACCOUNT_USEFUL) if (company[field] === null || company[field] === '') gaps.push({ field, label: FIX_IN_TWENTY.has(field) ? label : `${label} missing`, fixInTwenty: FIX_IN_TWENTY.has(field), priority: 'useful' });
-    if (gaps.length) items.push({ id: company.id, label: company.name, company: null, entity: 'company', href: `/accounts/${company.id}`, gaps });
-  }
-  return items.sort((a, b) => Number(b.gaps.some((gap) => gap.priority === 'critical')) - Number(a.gaps.some((gap) => gap.priority === 'critical')) || a.label.localeCompare(b.label));
 }
 
 type ChangeValue = string | number | null;

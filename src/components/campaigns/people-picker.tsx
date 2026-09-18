@@ -1,45 +1,36 @@
 'use client';
 
-import { useEffect, useMemo, useState, useTransition } from 'react';
-import { pickPeopleAction, pickerOptionsAction, type PickerFilters, type PickerOptions, type PickerRow } from '@/lib/actions/people-picker';
-import { optionLabel } from '@/lib/twenty/labels';
+import { useEffect, useRef, useState, useTransition } from 'react';
+import { pickAllIdsAction, pickPeopleAction, pickerOptionsAction, type PickerFilters, type PickerOptions, type PickerRow } from '@/lib/actions/people-picker';
 import { IconSearch } from '@/components/icons';
-import { Badge, Count, Empty } from '@/components/ui';
+import { Badge, Count, TierBadge } from '@/components/ui';
+import { optionLabel } from '@/lib/twenty/labels';
 
-const STATES: { value: PickerFilters['state']; label: string }[] = [
-  { value: 'cold', label: 'Never enrolled' },
-  { value: 'finished', label: 'Finished a sequence' },
-  { value: 'enrolled', label: 'In a sequence now' },
-  { value: 'any', label: 'Any state' },
-];
+type Props = { value: string[]; onChange: (ids: string[]) => void };
 
-const STATE_TONE: Record<PickerRow['state'], 'green' | 'blue' | 'gray' | 'red' | 'amber'> = {
-  'Never enrolled': 'gray',
-  'In a sequence': 'blue',
-  Replied: 'green',
-  Finished: 'gray',
-  'Do not contact': 'red',
-};
+const STATE_TONE: Record<PickerRow['state'], 'gray' | 'green' | 'blue' | 'amber' | 'red'> = { 'Never enrolled': 'gray', 'In a sequence': 'green', Replied: 'blue', Finished: 'amber', 'Do not contact': 'red' };
 
 /**
- * Choose a campaign's people from the directory: the People filters, a table, tick boxes, and
- * "everyone matching" for the whole list. What is chosen is a set of ids the form submits the way
- * pasted ids always were, so the server side does not change.
+ * Choosing a campaign's people from the directory: the same filters as People, a page of a
+ * hundred at a time, and "select all" that means every person the filters match, however many.
+ * The selection lives in the parent as a list of ids; this keeps the latest copy in a ref so a
+ * late search response can never overwrite a tick made while it was in flight.
  */
-export function PeoplePicker({ value, onChange }: { value: string[]; onChange: (ids: string[]) => void }) {
+export function PeoplePicker({ value, onChange }: Props) {
+  const latest = useRef(value);
+  latest.current = value;
   const [options, setOptions] = useState<PickerOptions | null>(null);
-  const [filters, setFilters] = useState<PickerFilters>({ q: '', pod: '', fo: '', product: '', tier: '', type: '', state: 'cold', page: 1 });
+  const [filters, setFilters] = useState<PickerFilters>({ q: '', pod: '', fo: '', product: '', tier: '', type: '', tag: '', account: '', state: 'cold', page: 1 });
   const [text, setText] = useState('');
   const [rows, setRows] = useState<PickerRow[]>([]);
   const [total, setTotal] = useState(0);
-  const [matchingIds, setMatchingIds] = useState<string[]>([]);
+  const [pageSize, setPageSize] = useState(100);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  const selected = useMemo(() => new Set(value), [value]);
+  const [selectingAll, setSelectingAll] = useState(false);
+  const request = useRef(0);
 
-  useEffect(() => {
-    pickerOptionsAction().then(setOptions).catch(() => setOptions({ pods: [], fos: [], tiers: [], types: [], products: [] }));
-  }, []);
+  useEffect(() => { void pickerOptionsAction().then(setOptions); }, []);
 
   useEffect(() => {
     const t = setTimeout(() => setFilters((f) => (f.q === text ? f : { ...f, q: text, page: 1 })), 300);
@@ -47,29 +38,42 @@ export function PeoplePicker({ value, onChange }: { value: string[]; onChange: (
   }, [text]);
 
   useEffect(() => {
-    let current = true;
+    const id = ++request.current;
     start(async () => {
-      try {
       const r = await pickPeopleAction(filters);
-      if (!current) return;
-      if (!r.ok) {
-        setError(r.error);
-        return;
-      }
-      setError(null);
-      setRows(r.rows);
-      setTotal(r.total);
-      setMatchingIds(r.ids);
-      } catch {
-        if (current) setError('Could not load contacts. Change a filter to retry.');
-      }
+      // An older answer arriving after a newer one is dropped.
+      if (id !== request.current) return;
+      if (r.ok) { setRows(r.rows); setTotal(r.total); setPageSize(r.pageSize); setError(null); }
+      else setError(r.error);
     });
-    return () => { current = false; };
   }, [filters]);
 
-  const toggle = (id: string) => onChange(selected.has(id) ? value.filter((x) => x !== id) : [...value, id]);
-  const allShownSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
-  const set = (patch: Partial<PickerFilters>) => setFilters((f) => ({ ...f, page: 1, ...patch }));
+  const set = (patch: Partial<PickerFilters>) => setFilters((f) => ({ ...f, ...patch, page: patch.page ?? 1 }));
+  const selected = new Set(value);
+  const shownSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
+  const toggle = (id: string) => {
+    const next = new Set(latest.current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    onChange([...next]);
+  };
+  const toggleShown = () => {
+    const next = new Set(latest.current);
+    if (shownSelected) for (const r of rows) next.delete(r.id); else for (const r of rows) next.add(r.id);
+    onChange([...next]);
+  };
+  const selectAll = async () => {
+    setSelectingAll(true);
+    try {
+      const r = await pickAllIdsAction(filters);
+      if (r.ok) onChange([...new Set([...latest.current, ...r.ids])]);
+      else setError(r.error);
+    } finally {
+      setSelectingAll(false);
+    }
+  };
+  const first = (filters.page - 1) * pageSize + 1;
+  const last = Math.min(filters.page * pageSize, total);
+
   const Select = ({ name, label, all, items }: { name: keyof PickerFilters; label: string; all: string; items: { value: string; label: string }[] }) => (
     <select value={String(filters[name])} onChange={(e) => set({ [name]: e.target.value } as Partial<PickerFilters>)} aria-label={label} className="!w-auto !py-1.5 !text-[12.5px]">
       <option value="">{all}</option>
@@ -84,49 +88,60 @@ export function PeoplePicker({ value, onChange }: { value: string[]; onChange: (
           <IconSearch size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
           <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search name, company, email" aria-label="Search people to add" className="!pl-9 !py-1.5" />
         </div>
-        <Select name="pod" label="Pick by pod" all="All pods" items={(options?.pods ?? []).map((p) => ({ value: p.value, label: p.name }))} />
-        <Select name="fo" label="Pick by FO" all="All FOs" items={(options?.fos ?? []).map((f) => ({ value: f.id, label: f.name }))} />
-        <Select name="product" label="Pick by product" all="Any product" items={(options?.products ?? []).map((v) => ({ value: v, label: optionLabel(v) }))} />
-        <Select name="tier" label="Pick by tier" all="Any tier" items={(options?.tiers ?? []).map((v) => ({ value: v, label: optionLabel(v) }))} />
-        <Select name="type" label="Pick by type" all="Any type" items={(options?.types ?? []).map((v) => ({ value: v, label: optionLabel(v) }))} />
-        <select value={filters.state} onChange={(e) => set({ state: e.target.value as PickerFilters['state'] })} aria-label="Pick by sequence state" className="!w-auto !py-1.5 !text-[12.5px]">
-          {STATES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+        {options ? (
+          <>
+            <Select name="pod" label="Filter by pod" all="All pods" items={options.pods.map((p) => ({ value: p.value, label: p.name }))} />
+            <Select name="fo" label="Filter by FO" all="All FOs" items={options.fos.map((f) => ({ value: f.id, label: f.name }))} />
+            <Select name="tier" label="Filter by tier" all="Any tier" items={options.tiers.map((t) => ({ value: t, label: optionLabel(t) }))} />
+            <Select name="type" label="Filter by contact type" all="Any type" items={options.types.map((t) => ({ value: t, label: optionLabel(t) }))} />
+            <Select name="product" label="Filter by product" all="Any product" items={options.products.map((p) => ({ value: p, label: optionLabel(p) }))} />
+            {options.tags.length ? <Select name="tag" label="Filter by Twenty tag" all="Any tag" items={options.tags.map((t) => ({ value: t, label: optionLabel(t) }))} /> : null}
+          </>
+        ) : null}
+        <select value={filters.state} onChange={(e) => set({ state: e.target.value as PickerFilters['state'] })} aria-label="Sequence state" className="!w-auto !py-1.5 !text-[12.5px]">
+          <option value="cold">Never enrolled</option>
+          <option value="finished">Finished a sequence</option>
+          <option value="enrolled">In a sequence</option>
+          <option value="any">Any sequence state</option>
         </select>
       </div>
 
       <div className="flex flex-wrap items-center gap-3 text-[12.5px] text-ink-600">
-        <span><Count value={total} /> matching{rows.length < total ? <span className="text-ink-400"> · showing {(filters.page - 1) * 300 + 1}?{(filters.page - 1) * 300 + rows.length}</span> : null}</span>
-        <button type="button" className="btn-secondary btn-sm" disabled={pending || Boolean(error) || !matchingIds.length} onClick={() => onChange([...new Set([...value, ...matchingIds])])}>
-          Select everyone matching{total > matchingIds.length ? ` (first ${matchingIds.length})` : ''}
+        <span><Count value={total} /> matching{total > 0 ? <span className="text-ink-400"> · {first.toLocaleString('en-US')}–{last.toLocaleString('en-US')}</span> : null}</span>
+        <button type="button" className="btn-secondary btn-sm" disabled={pending || selectingAll || total === 0} onClick={() => void selectAll()}>
+          {selectingAll ? 'Selecting…' : `Select all ${total.toLocaleString('en-US')} matching`}
         </button>
-        <span className="ml-auto flex items-center gap-2"><Badge tone={value.length ? 'green' : 'gray'}>{value.length} selected</Badge>{value.length ? <button type="button" className="btn-ghost btn-sm" onClick={() => onChange([])}>Clear</button> : null}</span>
+        <span className="ml-auto flex items-center gap-2">
+          <span><Count value={value.length} /> selected</span>
+          {value.length ? <button type="button" className="btn-ghost btn-sm" onClick={() => onChange([])}>Clear selection</button> : null}
+        </span>
       </div>
 
-      {error ? <p role="alert" className="text-[13px] text-red-700">{error}</p> : null}
-      {total > 300 && <div className="flex items-center justify-end gap-3">
-        <button type="button" className="btn-secondary btn-sm" disabled={pending || filters.page === 1} onClick={() => set({ page: filters.page - 1 })}>Previous contacts</button>
-        <strong className="text-sm">Page {filters.page} / {Math.ceil(total / 300)}</strong>
-        <button type="button" className="btn-secondary btn-sm" disabled={pending || filters.page * 300 >= total} onClick={() => set({ page: filters.page + 1 })}>Next contacts</button>
-      </div>}
+      {error ? <p role="alert" className="text-sm text-red-700">{error}</p> : null}
+
       <div className={pending ? 'opacity-60 transition' : 'transition'}>
-        <div className="max-h-[420px] overflow-auto scroll-thin rounded-xl border border-line">
-          <table className="table">
+        <div className="overflow-x-auto rounded-xl border border-line">
+          <table className="table table-dense w-full table-fixed">
+            <colgroup><col className="w-9" /><col style={{ width: '44%' }} /><col style={{ width: '18%' }} /><col style={{ width: '14%' }} /><col style={{ width: '20%' }} /></colgroup>
             <thead>
               <tr>
-                <th className="w-9 pl-4 pr-0"><input type="checkbox" aria-label="Select everyone shown" checked={allShownSelected} onChange={() => onChange(allShownSelected ? value.filter((id) => !rows.some((r) => r.id === id)) : [...new Set([...value, ...rows.map((r) => r.id)])])} /></th>
+                <th className="pl-3 pr-0"><input type="checkbox" aria-label="Select everyone shown" checked={shownSelected} onChange={toggleShown} disabled={!rows.length} /></th>
                 <th>Person</th>
-                <th>Company</th>
                 <th>Pod</th>
-                <th>State</th>
+                <th>Tier</th>
+                <th>Sequence</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id} className={selected.has(r.id) ? 'bg-brand-50/40' : undefined}>
-                  <td className="pl-4 pr-0"><input type="checkbox" aria-label={`Select ${r.name}`} checked={selected.has(r.id)} onChange={() => toggle(r.id)} /></td>
-                  <td><span className="font-medium text-ink-900">{r.name}</span>{r.title ? <span className="block text-[12px] text-ink-500">{r.title}</span> : null}</td>
-                  <td className="text-[12.5px]">{r.company ?? <Empty />}</td>
-                  <td className="text-[12.5px]">{r.pod ?? <Empty />}</td>
+                <tr key={r.id} className={selected.has(r.id) ? 'bg-brand-50/60' : undefined}>
+                  <td className="pl-3 pr-0"><input type="checkbox" aria-label={`Select ${r.name}`} checked={selected.has(r.id)} onChange={() => toggle(r.id)} /></td>
+                  <td>
+                    <div className="truncate text-[13px] font-medium text-ink-900">{r.name}</div>
+                    {r.title || r.company ? <div className="truncate text-[12px] text-ink-500">{[r.title, r.company].filter(Boolean).join(' · ')}</div> : null}
+                  </td>
+                  <td className="truncate text-[12.5px] text-ink-700">{r.pod ?? <span className="text-ink-300">-</span>}</td>
+                  <td><TierBadge tier={r.tier} /></td>
                   <td><Badge tone={STATE_TONE[r.state]}>{r.state}</Badge></td>
                 </tr>
               ))}
@@ -134,6 +149,15 @@ export function PeoplePicker({ value, onChange }: { value: string[]; onChange: (
             </tbody>
           </table>
         </div>
+        {total > pageSize ? (
+          <div className="mt-2 flex items-center justify-between text-[12.5px] text-ink-500">
+            <span>Page {filters.page} of {Math.ceil(total / pageSize)}</span>
+            <span className="flex gap-2">
+              <button type="button" className="btn-secondary btn-sm" disabled={pending || filters.page === 1} onClick={() => set({ page: filters.page - 1 })}>Previous page</button>
+              <button type="button" className="btn-secondary btn-sm" disabled={pending || last >= total} onClick={() => set({ page: filters.page + 1 })}>Next page</button>
+            </span>
+          </div>
+        ) : null}
       </div>
     </div>
   );

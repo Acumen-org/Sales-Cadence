@@ -3,7 +3,7 @@ import { beforeEach, expect, it } from 'vitest';
 import { prisma } from '@/lib/db';
 import { accountDetail, listAccounts } from '@/lib/accounts-query';
 import { blockAccount, blockedCompanyIds, isBlockedAccount, unblockAccount } from '@/lib/blocked-accounts';
-import { enrichmentQueue } from '@/lib/enrichment';
+import { enrichmentQueue } from '@/lib/enrichment-work';
 import { canReadPerson, peopleScopeWhere } from '@/lib/people-scope';
 import { enrollPeople, previewEnrollment } from '@/lib/engine/enrollment';
 import { userActor } from '@/lib/audit';

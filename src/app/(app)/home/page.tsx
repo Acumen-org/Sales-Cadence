@@ -4,6 +4,8 @@ import { Suspense } from 'react';
 import { requireUser } from '@/lib/auth/current-user';
 import { formatLocalDate } from '@/lib/dates';
 import { buildHome } from '@/lib/home-query';
+import { startingSoon } from '@/lib/campaign-membership';
+import { StartingSoonStrip } from '@/components/campaigns/starting-soon';
 import { TASK_CHANNELS, type TaskChannel } from '@/lib/tasks-query';
 import { ActionIcon, IconBolt, IconCalendar, IconCheck, IconChevronRight, IconCompany, IconPeople } from '@/components/icons';
 import { Avatar, EmptyState, Surface, Count } from '@/components/ui';
@@ -44,7 +46,7 @@ export default function HomePage() {
 
 async function HomeContent() {
   const user = await requireUser();
-  const h = await buildHome(user);
+  const [h, soon] = await Promise.all([buildHome(user), startingSoon(user)]);
   const first = user.name.split(/\s+/)[0];
   const mine = `fo=${encodeURIComponent(user.id)}`;
   const focusTab = h.my.overdueTotal ? 'overdue' : h.my.todayTotal ? 'today' : 'upcoming';
@@ -73,6 +75,8 @@ async function HomeContent() {
         <Tile label="My accounts" value={h.my.accounts} hint={<><N>{h.my.activeAccounts}</N> with live work</>} href={`/accounts?pod=&fo=${user.id}`} icon={<IconCompany size={17} />} />
         <Tile label="My people" value={h.my.relationships} hint={<><N>{h.my.inSequence}</N> in a sequence</>} href={`/people?pod=&fo=${user.id}`} icon={<IconPeople size={17} />} />
       </div>
+
+      <StartingSoonStrip items={soon} />
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(300px,1fr)]">
         <Surface flush>

@@ -561,3 +561,146 @@ What that means, exactly:
   reason and who blocked it, and returns a 404 for everyone else. Blocking is administration, so
   it is kept out of the Activity feed like settings, users and pods, and lands in the audit log.
 
+
+## Step offsets are calendar days that roll off the weekend (18 September 2026)
+
+"Email three days after the call" means three days, Saturday and Sunday included. A step that
+lands on a day nobody works moves forward to the next working day, so no touch is due on a
+weekend and no wait is silently stretched by the shape of the week. `plannedDateForStep` is one
+line now: start + (day − 1) + shift, rolled. The default plan's days were rewritten from business
+days to the calendar days that put them on the same dates (1, 3, 8, 11, 16, 22, 26, 31), and every
+stored plan was converted the same way by the `calendar_day_offsets` migration: business day *d*
+becomes *d + 2·⌊(d−1)/5⌋*. A plan also carries how many days it spans (`durationDays`, required for
+new plans); no step may fall after it, and the campaign planner will read it.
+
+## Two kinds of company are not prospects (18 September 2026)
+
+Vendors and platforms - Microsoft, Google, OpenAI, Anthropic and the rest of the default list in
+Settings > Blocked accounts > Rules - are blocked as accounts by a rule that runs after every sync
+pass, with their people, exactly as an admin's block does. An admin who unblocks one adds it to the
+rule's exceptions. Free-mail domains - gmail.com and the like - are a different thing: Twenty
+creates a company from every email domain it sees, so "gmail.com" arrives as a firm with thousands
+of people. That firm is not an account and is hidden from Accounts and enrichment, but its people
+stay in People with no account, because a prospect writing from a personal address is still a
+prospect. Both lists are editable; neither deletes or writes anything in Twenty.
+
+## A record page never waits for Twenty and never shows its errors (18 September 2026)
+
+Opening a person or account used to re-read the record from Twenty before rendering, and when the
+gateway failed the page said so in a banner with the raw response. Now the page renders from the
+cache at once; a streamed `RecordSync` re-reads the record after the paint and refreshes the page
+in place only if the record moved. Failures are counted in `live-read.ts`: three inside five
+minutes pause live reads for five minutes, and Settings > Twenty shows the count and the pause,
+beside how many webhook events arrived in the last day - the number that says whether the instant
+path is working at all.
+
+## "My people" means live work, everywhere (18 September 2026)
+
+One rule, `foPeopleWhere`, decides who an FO is responsible for: owned in Twenty, or in a running
+sequence with them. Finished sequences do not count; neither do colleagues, our own organisations
+or blocked accounts. The Home tiles, the People and Accounts FO filters and every count between
+them are built on it, and a test holds them to one number. The tiles used to count any enrollment
+ever and every cached person, which is how Home read 246 while People read 245.
+
+## A campaign runs between two dates, and its size follows from them (18 September 2026)
+
+The owner's problem: start twenty people a day and by the third day each FO is doing twenty first
+steps plus the second steps of the first day's twenty, and so on; near the end nobody has room to
+start, and whoever started late cannot finish. So a campaign now has an end date, and a planner
+(`src/lib/engine/capacity.ts`) works backwards from it. The last day anyone may start is the last
+day from which the whole plan still finishes by the end date. Between the start and that day each
+FO starts a fixed number of people per working day - the largest number whose worst day, with
+every step of every start simulated onto their calendar on top of the work they already hold,
+still fits their daily cap. Capacity is that rate times the starting days, summed over the pod.
+It is simulated rather than divided because weekends stack: with cap 40 and a four-touch plan the
+naive answer is ten a day, but from a Monday start day 14 is a Sunday and from Wednesday to Friday
+day 4 is the weekend, and all of it rolls onto Monday - seven starts' worth of touches on one day.
+Five a day fits; six does not. The planner says five.
+
+The form shows the number live and turns red with the two ways out - the end date that would take
+everyone, or the trim - and creation is refused past capacity. Launch paces starts by the planner's
+per-FO rate and refuses anyone whose start would fall after the last start day (`no_room`). At the
+end date, people mid-sequence finish by default and the campaign shows how many ran over; a
+campaign marked to stop hard ends what is left through the same exit path as a stop. Campaigns are
+listed as Upcoming, Active and Finished because they are three different things.
+
+## Membership is one idea before and after launch (18 September 2026)
+
+An upcoming campaign holds its people as ids; a running one holds enrollments. Every page that
+says which campaign a person is in reads both through `campaign-membership.ts`, so a campaign shows
+on its people, its accounts and the week's Tasks from the moment it is created. People can be added
+to an upcoming or active campaign from the People list or a person's page, within capacity, and
+taken out again; taking someone out of a running campaign ends their sequence with reason
+`removed` and cancels their open touches. The People list names the campaign and the sequence in
+two columns, with the step the person is on; nothing there is a bare number.
+
+## Calls open the dialpad, and the dialpad is a setting (18 September 2026)
+
+A phone number on a task or a person is a link. Where it goes is `clickToCallUrl` in Settings, a
+template with `{phone}` in it, defaulting to the team's dialpad
+(`https://h00ks.acm.acumen-strategy.com/admin/dialpad?number={phone}`); a workspace that wants the
+device's own dialer sets it to `tel:{phone}`. Cadence never dials itself and never assumes a
+softphone is installed; it hands the number to whatever the setting names.
+
+## A meeting is added from its link (18 September 2026)
+
+Pasting a recording link fills the meeting: the direct media URL is resolved at save time
+(Drive, Dropbox, OneDrive and Loom share pages become the file they point at), the date in the
+link or the page title is proposed, and the speakers in the transcript are offered as attendees.
+The transcript is normalised once (speaker carried across continuation lines, unattributed lines
+kept as such) so the reader and the analysis see the same text. The list shows no analysis
+column: analysis belongs on the meeting page, where it can be read.
+
+## A report is a picture first, a table second, and one file to send on (18 September 2026)
+
+Reports open on the picture leadership reads: four headline numbers with their movement against
+the period before and a day-by-day sparkline, the funnel from enrolled to meeting, touches by
+channel in the fixed channel order and colours, the leaderboard, when the work happens by weekday,
+the campaigns running and how far along they are, and pods against the previous period. The
+table view is the same numbers as roll-ups. "Export report" renders the same document to one
+self-contained HTML file with its styles inside and no scripts, so it opens anywhere, prints to
+PDF and can be forwarded. Charts follow the data-viz method: one measure one hue, a validated
+categorical palette in fixed order, values in ink never in the series colour, a table beside every
+chart, and every number live from the same queries the page uses.
+
+## Enrichment is work, not a report (18 September 2026)
+
+One definition of "missing" (`enrichment-work.ts`) feeds the queue, the scorecard and the marks.
+The queue filters on facts about the record - pod, FO, tier, contact type, product, account,
+Twenty tag, whether the person is in a campaign, the kind of gap and its priority - in one row,
+and sorts by name, account, number of gaps or last sync. "By account" folds it under the firm so a
+whole account goes to research in one file. The scorecard is completeness per field for everyone,
+each pod and each FO, beside a nightly snapshot from about a week before, so trend shows; the
+first look of a day writes the snapshot if the worker has not.
+
+A selection can be exported exactly (ids in the file, chosen gap fields only), handed to a person
+("assign research to", shown on the gap) or marked "not found". A mark is a Cadence-side note on a
+field of a record; it lives only while the field is empty. The moment the cache carries a value
+the gap is gone and the mark with it, so a field that empties again comes straight back into the
+queue - "not found" never hides a real gap for good. Marks are made by admins and pod leaders
+inside their pods; reading stays universal.
+
+Suggestions are facts, not guesses: an unlinked person whose email host matches an account's
+website is shown that account. Free-mail hosts are never accounts (see "Two kinds of company").
+An import remembers the mapping last used for a file with the same columns, matched by the
+normalised header set, and says which import it came from.
+
+## "Planned" touches are what people owe, not what has been generated (18 September 2026)
+
+Tasks are created step by step as a sequence runs, so counting task rows undersold every
+campaign ("0 of 4" for two people on an eight-step plan). A campaign's planned touches are:
+every action of the sequence for each person live in it; for each person who has finished,
+the touches generated before they finished (done or skipped); for each person on an upcoming
+campaign's list, the whole sequence. The list, the campaign page and the report read the same
+figure (`touchesPerPerson` in `campaigns-query.ts`).
+
+## One person, one upcoming campaign (18 September 2026)
+
+Somebody on the list of a scheduled or approval-pending campaign is refused by any other with
+reason `scheduled_elsewhere` ("Already in an upcoming campaign"), the way somebody live is
+refused as already in a sequence. Before this, whichever campaign launched second skipped them
+silently. Once a campaign has launched, its people are its enrollments: the People filter for a
+launched campaign reads enrollments, not the list it launched from, so somebody skipped at launch
+is not shown as "in" it. An FO's campaign filter includes upcoming campaigns that hold anyone the
+FO owns, since nothing is enrolled yet. The account page's stat is "In a campaign", counted the
+same way as the Accounts list column: live enrollments plus a place in an upcoming campaign.

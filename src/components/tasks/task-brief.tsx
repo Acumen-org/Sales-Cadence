@@ -1,3 +1,4 @@
+import { callHref } from '@/lib/calls';
 import Link from 'next/link';
 import type { BriefTimelineItem, TaskBrief } from '@/lib/brief';
 import { compareLocalDates, formatInstant, formatLocalDate, type LocalDate } from '@/lib/dates';
@@ -32,7 +33,7 @@ function TimelineRow({ item, timezone }: { item: BriefTimelineItem; timezone: st
 }
 
 /** The selected contact's CRM context. Full emails and notes follow in CrmHistory. */
-export function TaskBriefPanel({ brief, timezone }: { brief: TaskBrief; timezone: string }) {
+export function TaskBriefPanel({ brief, timezone, callTemplate }: { brief: TaskBrief; timezone: string; callTemplate?: string | null }) {
   const person = brief.person;
   const localActivity = brief.timeline.filter((item) => item.kind !== 'email' && item.kind !== 'note');
   const campaign = brief.task.enrollment.campaign;
@@ -45,8 +46,8 @@ export function TaskBriefPanel({ brief, timezone }: { brief: TaskBrief; timezone
         // value on hover instead, and the link still carries all of it.
         { k: 'Email', v: person.email ? <a href={`mailto:${person.email}`} className="block break-words text-brand-700 hover:underline [overflow-wrap:anywhere]">{person.email}</a> : null },
         { k: 'Other emails', v: person.additionalEmails.length ? <span className="space-y-1">{person.additionalEmails.map((email) => <a key={email} href={`mailto:${email}`} className="block break-all text-brand-700 hover:underline">{email}</a>)}</span> : null },
-        { k: 'Phone', v: person.phone ? <a href={`tel:${person.phone}`} className="text-brand-700 hover:underline">{person.phone}</a> : null },
-        { k: 'Other phone', v: person.additionalPhone ? <a href={`tel:${person.additionalPhone}`} className="text-brand-700 hover:underline">{person.additionalPhone}</a> : null },
+        { k: 'Phone', v: person.phone ? <a href={callHref(person.phone, callTemplate)} className="text-brand-700 hover:underline">{person.phone}</a> : null },
+        { k: 'Other phone', v: person.additionalPhone ? <a href={callHref(person.additionalPhone, callTemplate)} className="text-brand-700 hover:underline">{person.additionalPhone}</a> : null },
         { k: 'City', v: person.city }, { k: 'Owner', v: brief.ownerName }, { k: 'Pod', v: brief.podName ?? (person.podOwner ? optionLabel(person.podOwner) : null) },
       ])} />
       <div className="mt-3 flex flex-wrap gap-2">{person.linkedinUrl ? <a href={person.linkedinUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm"><ActionIcon action="LINKEDIN_MESSAGE" size={13} />LinkedIn</a> : null}{person.xUrl ? <a href={person.xUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm">X profile<IconExternal size={12} /></a> : null}<Link href={`/people/${person.id}`} className="btn-ghost btn-sm">Full overview</Link></div>
@@ -81,7 +82,7 @@ export function TaskBriefPanel({ brief, timezone }: { brief: TaskBrief; timezone
         { k: 'Channels', v: [...new Set(brief.modules.map((module) => ACTION_LABELS[module.task.action]))].join(' + ') },
         { k: 'FO', v: brief.enrollment.foName }, { k: 'Started', v: formatLocalDate(brief.enrollment.startDate, 'long') },
       ]} />
-      {brief.nextStep ? <div className="mt-4 rounded-xl bg-canvas p-3"><div className="mb-3 text-sm font-medium text-ink-900">Next touchpoint</div><RecordFields items={[{ label: 'Business day', value: brief.nextStep.step.day }, { label: 'Scheduled', value: formatLocalDate(brief.nextStep.plannedDate) }, { label: 'Channels', value: brief.nextStep.description }]} /></div> : <div className="mt-3"><Badge tone="gray">Final touchpoint</Badge></div>}
+      {brief.nextStep ? <div className="mt-4 rounded-xl bg-canvas p-3"><div className="mb-3 text-sm font-medium text-ink-900">Next touchpoint</div><RecordFields items={[{ label: 'Day', value: brief.nextStep.step.day }, { label: 'Scheduled', value: formatLocalDate(brief.nextStep.plannedDate) }, { label: 'Channels', value: brief.nextStep.description }]} /></div> : <div className="mt-3"><Badge tone="gray">Final touchpoint</Badge></div>}
       <Link href={`/people/${person.id}?tab=sequences`} className="btn-ghost btn-sm mt-3">All campaigns & sequence history</Link>
     </Section>
 

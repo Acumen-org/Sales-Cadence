@@ -23,12 +23,21 @@ export function followingWorkingDay(date: LocalDate, workingDays: number[]): Loc
 }
 
 /**
- * Step days count working days. Shifts remain elapsed calendar days so lateness is preserved.
+ * Step days count calendar days: "three days after the call" includes the weekend. A step that
+ * lands on a day nobody works rolls forward to the next working day, so work never falls on a
+ * Saturday but the wait is never silently stretched by the week's shape either. Shifts remain
+ * elapsed calendar days so lateness is preserved.
  */
 export function plannedDateForStep(startDate: LocalDate, stepDay: number, shiftDays: number, workingDays: number[]): LocalDate {
-  let date = nextWorkingDay(startDate, workingDays);
-  for (let n = 1; n < stepDay; n++) date = followingWorkingDay(date, workingDays);
-  return nextWorkingDay(addDays(date, Math.max(0, shiftDays)), workingDays);
+  return nextWorkingDay(addDays(startDate, Math.max(0, stepDay - 1) + Math.max(0, shiftDays)), workingDays);
+}
+
+/**
+ * Business day `d` (Monday = 1) as a calendar day, for plans written before 18 September 2026:
+ * every complete working week adds its weekend. Day 6 was the following Monday - calendar day 8.
+ */
+export function businessDayToCalendar(day: number): number {
+  return day + 2 * Math.floor((day - 1) / 5);
 }
 
 /** Calendar days a step finished after its planned date (never negative). */

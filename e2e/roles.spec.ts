@@ -111,10 +111,12 @@ test.describe('Senior FO', () => {
     await page.getByLabel('Name', { exact: true }).fill('E2E role campaign');
     await page.getByLabel('Pod', { exact: true }).selectOption({ label: "Alisa's pod" });
     // Thirteen and Fourteen are reserved for this file: earlier specs work dummy-01..06.
-    await page.getByRole('button', { name: 'Paste person ids' }).click();
-    await page.getByLabel('Twenty person ids').fill('dummy-13\ndummy-14');
-    await page.getByRole('button', { name: /Preview conflicts/ }).click();
-    await expect(page.getByRole('button', { name: /Create campaign|Submit/ })).toBeVisible();
+    await page.getByRole('button', { name: 'PHH' }).click();
+    await page.getByLabel('Sequence state').selectOption('any');
+    await page.getByLabel('Search people to add').fill('Dummy');
+    for (const name of ['Dummy Thirteen', 'Dummy Fourteen']) await page.getByLabel(`Select ${name}`, { exact: true }).check();
+    await expect(page.getByText(/Who starts · \d+ of 2/)).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole('button', { name: /Create campaign/ })).toBeVisible();
     await pageIsSound(page);
 
     // A Senior FO reads reports but does not administer the workspace.
@@ -149,10 +151,12 @@ test.describe('Sales Leader', () => {
     await page.goto('/campaigns/new');
     await page.getByLabel('Name', { exact: true }).fill('E2E leader source campaign');
     await page.getByLabel('Pod', { exact: true }).selectOption({ label: "Alisa's pod" });
-    await page.getByRole('button', { name: 'Paste person ids' }).click();
-    await page.getByLabel('Twenty person ids').fill('dummy-13\ndummy-14');
-    await page.getByRole('button', { name: /Preview conflicts/ }).click();
-    await page.getByRole('button', { name: /Create campaign/ }).click();
+    await page.getByRole('button', { name: 'PHH' }).click();
+    await page.getByLabel('Sequence state').selectOption('any');
+    await page.getByLabel('Search people to add').fill('Dummy');
+    for (const name of ['Dummy Thirteen', 'Dummy Fourteen']) await page.getByLabel(`Select ${name}`, { exact: true }).check();
+    await expect(page.getByText(/Who starts · 2 of 2/)).toBeVisible({ timeout: 20_000 });
+    await page.getByRole('button', { name: /Create campaign · 2 start/ }).click();
     await page.waitForURL(/\/campaigns\/[0-9a-f-]+/);
 
     // Requesting a follow-up submits it for approval rather than launching it.

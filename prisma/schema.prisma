@@ -151,6 +151,7 @@ model User {
   meetings       Meeting[]    @relation("MeetingCreatedBy")
   meetingFavourites MeetingFavourite[]
   blockedAccounts BlockedAccount[] @relation("BlockedByUser")
+  enrichmentMarks EnrichmentMark[] @relation("EnrichmentAssignee")
 }
 
 model Session {
@@ -203,8 +204,10 @@ model Sequence {
   name            String   @unique
   description     String?
   archived        Boolean  @default(false)
-  /// Nurture: start again this many working days after the last step, until the person answers.
+  /// Nurture: start again this many days after the last step, until the person answers.
   repeatEveryDays Int?
+  /// How many calendar days the plan spans; no step may fall after it. Required for new plans.
+  durationDays    Int?
   /// SequenceStep[] - see src/lib/sequences/steps.ts for the schema.
   steps           Json     @default("[]")
   createdAt       DateTime @default(now())
@@ -233,10 +236,17 @@ model Campaign {
   assignmentMode AssignmentMode @default(OWNER)
   /// YYYY-MM-DD, first start date for enrollments.
   startDate      String
-  /// Max new enrollments started per FO per working day. Null = unlimited.
-  dailyRampPerFo Int?
+  /// YYYY-MM-DD, the day by which everyone in the campaign has finished the sequence. The planner
+  /// derives how many people each FO may start per day from this and the plan's span.
+  endDate        String?
+  /// New people started per FO per working day: the planner's rate, or a lower one chosen by hand.
+  startsPerFoPerDay Int?
+  /// At the end date: false lets people mid-sequence finish; true ends what is left.
+  hardStopAtEnd  Boolean        @default(false)
+  /// Twenty product-interest option values this campaign is for.
+  productInterest String[]      @default([])
   status         CampaignStatus @default(DRAFT)
-  notes          String?
+  description    String?
   followupSourceId String?
   followupSourceRun Int?
   followupWaitDays Int @default(0)
@@ -661,6 +671,49 @@ model Setting {
   key       String   @id
   value     Json
   updatedAt DateTime @updatedAt
+}
+
+/// A note on one missing field of one record: who is researching it, or that it could not be
+/// found. "Not found" takes the gap out of the queue while the value is still missing; when a value
+/// arrives from Twenty the gap is gone and the mark is history.
+model EnrichmentMark {
+  id         String   @id @default(uuid())
+  entity     String
+  recordId   String
+  field      String
+  kind       String
+  assigneeId String?
+  assignee   User?    @relation("EnrichmentAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  note       String?
+  byId       String?
+  createdAt  DateTime @default(now())
+
+  @@unique([entity, recordId, field])
+  @@index([assigneeId])
+}
+
+/// One field's completeness for one group on one day, written nightly, so the scorecard shows trend.
+model EnrichmentSnapshot {
+  id        String @id @default(uuid())
+  day       String
+  entity    String
+  groupKind String
+  groupId   String
+  field     String
+  total     Int
+  filled    Int
+
+  @@unique([day, entity, groupKind, groupId, field])
+  @@index([day])
+}
+
+/// The column mapping last used for a file with these headers, so the same export maps itself next time.
+model EnrichmentMapping {
+  signature String   @id
+  entity    String
+  mapping   Json
+  name      String
+  usedAt    DateTime @updatedAt
 }
 
 model EnrichmentBatch {
