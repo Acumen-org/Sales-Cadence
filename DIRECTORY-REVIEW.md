@@ -383,4 +383,9 @@ failed responses. The reader's own comparisons (`scripts/live-numbers.ts`, `scri
   `presentNoteBody` now folds into plain lines. Comparing against Twenty itself needs Twenty
   access; what Cadence shows agrees with the Twenty status card (counts equal, reconcile flowing).
 - Webhooks: rather than a URL to type into Twenty, Settings > Twenty now has "Register webhook in
-  Twenty", which creates it through Twenty's API with the server's own secret.
+  Twenty", which creates it through Twenty's API with the server's own secret. Pressed on the
+  hosted build at 13:42: "Registered. Twenty now posts every change to this Cadence (*.*)."
+- The "huge gaps" in emails were signatures laid out as Outlook tables: rows of empty cells and
+  paragraphs holding one non-breaking space each, every one a blank line to the reader. The email
+  formatter now folds them (`tests/email-signature.test.ts` carries the real shape, from a message
+  on the hosted build).

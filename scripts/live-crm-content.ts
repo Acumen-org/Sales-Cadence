@@ -32,9 +32,9 @@ async function readTab(page: Page, href: string, kind: 'emails' | 'notes'): Prom
   for (let i = 0; i < n; i++) {
     const card = cards.nth(i);
     // The body itself: the last block inside the card's content, after the From/To grid.
-    const bodyEl = card.locator('details > div > div').last();
-    const body = await bodyEl.innerText().catch(() => '');
-    const html = await bodyEl.innerHTML().catch(() => '');
+    const bodyEl = card.locator(':scope > div > div').last();
+    const body = await bodyEl.innerText({ timeout: 2_000 }).catch(() => '');
+    const html = await bodyEl.innerHTML({ timeout: 2_000 }).catch(() => '');
     if (!body.trim() || /No note body|Body not available/.test(body)) emptyBodies += 1;
     if (/\n[ \t]*\n[ \t]*\n[ \t]*\n/.test(body)) { blankRuns += 1; if (process.env.LIVE_EXCERPT) console.log(`       excerpt (${kind} #${i + 1}): ${JSON.stringify(body.slice(0, 240))}`); }
     if (/&nbsp;|  /.test(html)) nbsp += 1;

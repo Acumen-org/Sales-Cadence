@@ -32,11 +32,24 @@ export function crmEmailHtml(text: string): string {
   // Convert layout containers before the strict sanitizer strips their tags, preserving boundaries.
   const structured = text.replace(/<\/?(?:div|section|article|tr|h[1-6])\b[^>]*>/gi, '<br>')
     .replace(/<\/(?:td|th)>/gi, ' ');
+  // A signature laid out as a table arrives as rows of empty cells and paragraphs holding one
+  // non-breaking space each. Every one of those is a blank line to the reader, so: empty
+  // paragraphs go (however the emptiness is spelled), runs of breaks - with any spaces or
+  // non-breaking spaces between them - fold to one blank line, and a paragraph boundary is its
+  // own spacing, so breaks around it go too.
+  const GAP = '(?:\\s|\\u00a0|&nbsp;|&#160;)';
+  const BR = '<br\\s*\\/?>';
   return cleanRichText(structured)
-    .replace(/<p>(?:\s|&nbsp;|&#160;|<br\s*\/?>)*<\/p>/gi, '')
-    .replace(/(?:<br\s*\/?>[\s\u00a0]*){3,}/gi, '<br><br>')
+    .replace(new RegExp(`<p>(?:${GAP}|${BR})*<\\/p>`, 'gi'), '')
+    .replace(new RegExp(`(?:${BR}${GAP}*){3,}`, 'gi'), '<br><br>')
+    .replace(new RegExp(`<\\/p>(?:${GAP}|${BR})*<p>`, 'gi'), '</p><p>')
+    .replace(new RegExp(`<p>(?:${GAP}|${BR})+`, 'gi'), '<p>')
+    .replace(new RegExp(`(?:${GAP}|${BR})+<\\/p>`, 'gi'), '</p>')
+    .replace(new RegExp(`<p>(?:${GAP}|${BR})*<\\/p>`, 'gi'), '')
+    // Indentation spelled as a run of non-breaking spaces is one space to the reader.
+    .replace(/(?:\u00a0|&nbsp;|&#160;){2,}/gi, ' ')
     // The wrapper a mail client opens and closes with leaves a blank line at each end of the card.
-    .replace(/^(?:[\s\u00a0]*<br\s*\/?>)+/i, '')
-    .replace(/(?:<br\s*\/?>[\s\u00a0]*)+$/i, '')
+    .replace(new RegExp(`^(?:${GAP}*${BR})+`, 'i'), '')
+    .replace(new RegExp(`(?:${BR}${GAP}*)+$`, 'i'), '')
     .trim();
 }
