@@ -6,12 +6,11 @@ import { requireUser } from '@/lib/auth/current-user';
 import { filterParam, sectionDefaults } from '@/lib/default-filters';
 import { defaultTwentySchema } from '@/lib/twenty/twenty-schema';
 import { foPeopleWhere, peopleScopeWhere } from '@/lib/people-scope';
-import { notAccountCompanyIds } from '@/lib/non-prospects';
 import { prisma } from '@/lib/db';
 import { isAdmin, visiblePodIds } from '@/lib/auth/rbac';
 import { SyncNowButton } from '@/components/settings/sync-now-button';
 import Link from 'next/link';
-import { ACCOUNT_SORTS, ACCOUNTS_PAGE_SIZE, DEFAULT_ACCOUNT_SORT, listAccounts, type AccountSort } from '@/lib/accounts-query';
+import { ACCOUNT_SORTS, ACCOUNTS_PAGE_SIZE, DEFAULT_ACCOUNT_SORT, listAccounts, peopleWithoutAccountWhere, type AccountSort } from '@/lib/accounts-query';
 import { formatInstant } from '@/lib/dates';
 import { IconCampaigns } from '@/components/icons';
 import { AccountsToolbar } from '@/components/accounts/accounts-toolbar';
@@ -36,9 +35,9 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
   const [list, podRows, withoutAccount] = await Promise.all([
     listAccounts(user, { q, pod, foUserId, product, campaign, sort, dir, page }),
     prisma.pod.findMany({ where: { archived: false, ...(visible === null ? {} : { id: { in: visible } }) }, orderBy: { name: 'asc' }, include: { users: { include: { user: { select: { id: true, name: true, active: true, role: true } } } } } }),
-    // The other half of the CRM: people Twenty holds with no company at all. Counted here so the
-    // two people figures on Accounts and People add up in the open.
-    prisma.personCache.count({ where: { AND: [await peopleScopeWhere(user), { OR: [{ companyId: null }, { companyId: { in: await notAccountCompanyIds() } }] }, ...(pod ? [{ podOwner: pod }] : []), ...(foUserId ? [foPeopleWhere(foUserId, (await prisma.user.findUnique({ where: { id: foUserId }, select: { twentyMemberId: true } }))?.twentyMemberId)] : [])] } }),
+    // The other half of the CRM: people under no account here. Counted here so the two people
+    // figures on Accounts and People add up in the open.
+    prisma.personCache.count({ where: { AND: [await peopleScopeWhere(user), await peopleWithoutAccountWhere(), ...(pod ? [{ podOwner: pod }] : []), ...(foUserId ? [foPeopleWhere(foUserId, (await prisma.user.findUnique({ where: { id: foUserId }, select: { twentyMemberId: true } }))?.twentyMemberId)] : [])] } }),
   ]);
   const fos = [...new Map(podRows.flatMap((x) => x.users.filter((up) => up.user.active && needsPod(up.user.role)).map((up) => [up.user.id, { id: up.user.id, name: up.user.name }] as const))).values()].sort((a, b) => a.name.localeCompare(b.name));
   const rows = list.rows;

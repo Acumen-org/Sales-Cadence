@@ -146,7 +146,9 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
     for (const r of rows) upcomingByCompany.set(r.companyId!, (upcomingByCompany.get(r.companyId!) ?? 0) + 1);
   }
   const [peopleRows, enrollRows, touchRows, meetingRows, members] = await Promise.all([
-    prisma.personCache.groupBy({ by: ['companyId'], where: { companyId: { in: ids }, deletedAt: null }, _count: { _all: true } }),
+    // People at an account are the directory's people: a colleague filed under a prospect's company in
+    // Twenty is not one of its prospects, and this is what lets "with an account" and "without" add up.
+    prisma.personCache.groupBy({ by: ['companyId'], where: { AND: [await externalPeopleWhere(), { companyId: { in: ids }, deletedAt: null }] }, _count: { _all: true } }),
     prisma.enrollment.groupBy({ by: ['companyId', 'status'], where: { companyId: { in: ids } }, _count: { _all: true } }),
     prisma.$queryRaw<Array<{ companyId: string; last: Date }>>`
       SELECT p."companyId" AS "companyId", MAX(t."occurredAt") AS last
@@ -279,6 +281,19 @@ export async function myOwnershipCounts(user: SessionUser): Promise<{ accounts: 
     listable([...new Set(liveCompanies.map((p) => p.companyId!))]),
   ]);
   return { accounts, relationships, inSequence, activeAccounts };
+}
+
+/**
+ * People the Accounts list counts under no account: no company at all, or a company that is not
+ * an account here - one of ours, blocked, a free-mail host, or one the cache has never seen. The
+ * Accounts tile and the People list it opens both read this, so "with an account" plus "without"
+ * is everyone.
+ */
+export async function peopleWithoutAccountWhere(): Promise<Prisma.PersonCacheWhereInput> {
+  const [{ rules }, blocked, companies] = await Promise.all([getSettings(), blockedCompanyIds(), prisma.companyCache.findMany({ where: { deletedAt: null }, select: { id: true, name: true, domain: true } })]);
+  const excluded = new Set(blocked);
+  const listable = companies.filter((c) => !isInternalCompany(c, rules) && !excluded.has(c.id) && !isNotAccount(c, rules)).map((c) => c.id);
+  return { OR: [{ companyId: null }, { companyId: { notIn: listable } }] };
 }
 
 // ---------------------------------------------------------------------------

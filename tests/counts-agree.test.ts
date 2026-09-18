@@ -1,7 +1,7 @@
 import { beforeEach, expect, it } from 'vitest';
 import { prisma } from '@/lib/db';
 import { buildHome } from '@/lib/home-query';
-import { listAccounts, myOwnershipCounts } from '@/lib/accounts-query';
+import { listAccounts, myOwnershipCounts, peopleWithoutAccountWhere } from '@/lib/accounts-query';
 import { blockAccount } from '@/lib/blocked-accounts';
 import { foPeopleWhere, myPeopleWhere, peopleScopeWhere } from '@/lib/people-scope';
 import { userActor } from '@/lib/audit';
@@ -92,4 +92,15 @@ it('every seat reads the same number on its tile and in the list it opens', asyn
     expect(home.my.relationships, user.name).toBe(await prisma.personCache.count({ where: await myPeopleWhere(seat) }));
     expect(home.my.accounts, user.name).toBe((await listAccounts(seat, { foUserId: seat.id, pod: null })).total);
   }
+});
+
+it('people with an account and people without add up to the People directory', async () => {
+  const ria = session(b.users.ria, []);
+  const accounts = await listAccounts(ria, {});
+  const scope = await peopleScopeWhere(ria);
+  const everyone = await prisma.personCache.count({ where: scope });
+  const without = await prisma.personCache.count({ where: { AND: [scope, await peopleWithoutAccountWhere()] } });
+  // The colleague filed under a prospect account (p-ours) is in neither figure, like the directory.
+  expect(accounts.people + without).toBe(everyone);
+  expect(without).toBeGreaterThan(0);
 });

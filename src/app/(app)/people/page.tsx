@@ -1,5 +1,6 @@
 import { sortDirection } from '@/lib/sorting';
 import { personTagOptions } from '@/lib/people-options';
+import { peopleWithoutAccountWhere } from '@/lib/accounts-query';
 import { PageFrame } from '@/components/page-frame';
 import { needsPod } from '@/lib/auth/rbac';
 import Link from 'next/link';
@@ -63,7 +64,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   }
   // People with no company in Twenty, reached from the Accounts tile that counts them.
   const account = sp.account === 'none' ? 'none' : '';
-  if (account === 'none') where.companyId = null;
+  if (account === 'none') and.push(await peopleWithoutAccountWhere());
   // One campaign's people, before or after it launched; the bulk bar can take them out of it.
   const campaignChoicesList = await campaignChoices(user);
   const campaign = campaignChoicesList.find((c) => c.id === sp.campaign)?.id ?? '';

@@ -339,3 +339,40 @@ inbound green because the owner asked for exactly that. The tier and the list ca
 kinds of tag, each shown once before "+N" for the rest. The record pages keep the section title
 as the page heading with the record's name in its header, as every record page has. Record
 accents were asked for.
+
+## Live walk of the hosted build - 18 September 2026
+
+With the four seats the owner supplied (Admin, Pod Manager, Biz Ops, Junior FO), `pnpm live:check`
+opened sixteen routes as each: every route answered 200, no page errors, no console errors, no
+failed responses. The reader's own comparisons (`scripts/live-numbers.ts`, `scripts/live-audit.ts`):
+
+- Alyssa's Home tile says **245** people and the People list it opens says **245** (the 246/245
+  disagreement is gone). The admin sees 8,089 people in People.
+- Accounts: 4,924 accounts in view; 3,671 people with an account; 4,420 without - which summed
+  to 8,091 against 8,089 in People. The two were colleagues filed under prospect accounts in
+  Twenty; "people at an account" now reads the directory's people, so the two tiles add up to
+  People exactly (asserted in `counts-agree.test.ts`). "People without an account" is one rule
+  (`peopleWithoutAccountWhere`) shared by the tile and the People filter it opens: no company, or
+  a company that is not an account here.
+- Typing "Acumen strategy" fast into People, Accounts, Meetings and Enrichment left every letter
+  in the box and in the URL.
+- The campaign starting Mon 21 Sept shows on Home and on Tasks (with "181 yours" for Alyssa), in
+  the People campaign column as "Upcoming", and in the Campaigns Upcoming tab, three days before
+  it starts.
+- The first person page opened with no CRM banner; the "Acubooth Meeting with Alisa" talk time has
+  no "Unknown" and no analysis panel shows.
+- Server time (document response) per route as the admin: Home 184 ms, Tasks 147, People 256,
+  Meetings 169, Campaigns 179, Sequences 166, Reports 185, Activity 219, Accounts 487,
+  Enrichment 877. Enrichment builds the whole queue (7,730 contacts, 4,924 accounts) on each
+  request and is the one page over the plan's 300 ms target.
+- Settings > Twenty: 8,469 people and 4,950 companies cached, equal to Twenty; continuous sync
+  healthy (every 60 s); live reads healthy; last reconcile 11:54 with notes and messages flowing.
+  **Webhooks (24 h): none received** - Twenty is not posting to
+  `https://cadence.pmx.acumen-strategy.com/api/webhooks/twenty`, so changes arrive on the
+  minute-by-minute pass rather than instantly. The webhook needs registering in Twenty (Settings >
+  Developers > Webhooks) with the URL above and the HMAC secret.
+- Accounts still listed "Microsoftonline" (a Microsoft login domain) and a free-mail "Mail"
+  account: the default never-prospect and free-mail lists were widened (Microsoft's online, Office
+  and Azure domains; common platforms; mail.ru and other free-mail providers). The rule re-scans
+  every company on each sync, so they block on the next pass after deploy - unless the workspace
+  saved its own lists, in which case the admin adds them on Settings > Blocked accounts.
