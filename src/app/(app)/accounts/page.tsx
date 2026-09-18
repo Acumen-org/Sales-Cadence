@@ -81,7 +81,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
           <div className="overflow-x-auto scroll-thin">
             <table className="table table-dense w-full table-fixed">
               <colgroup>
-                {['20%', '11%', '12.5%', '11%', '10%', '9.5%', '8.5%', '8%', '9.5%'].map((width, index) => <col key={index} style={{ width }} />)}
+                {['19%', '13%', '12.5%', '10.5%', '9%', '9.5%', '8.5%', '8%', '10%'].map((width, index) => <col key={index} style={{ width }} />)}
               </colgroup>
               <thead>
                 <tr>

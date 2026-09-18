@@ -207,7 +207,7 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
                     ? <Badge tone="green">Shared token</Badge>
                     : <Badge tone="amber">Not configured</Badge>,
               },
-              { k: 'Last reconcile', v: last?.at ? <span className="flex flex-wrap items-center gap-3"><span>{formatInstant(new Date(last.at), WORKSPACE_TIMEZONE)}</span>{last.stats ? <span className="flex flex-wrap gap-3 text-[12px] text-ink-500"><span><Count value={last.stats.people ?? 0} /> people</span><span><Count value={last.stats.notes ?? 0} /> notes</span><span><Count value={last.stats.messages ?? 0} /> messages</span><span><Count value={last.stats.opportunities ?? 0} /> opportunities</span><span><Count value={last.stats.tasks ?? 0} /> tasks</span></span> : null}</span> : null },
+              { k: 'Last reconcile', v: last?.at ? <span className="flex flex-wrap items-center gap-3"><span>{formatInstant(new Date(last.at), WORKSPACE_TIMEZONE)}</span>{last.stats ? <span className="flex flex-wrap gap-3 text-[12px] text-ink-500"><span><Count value={last.stats.people ?? 0} /> {(last.stats.people ?? 0) === 1 ? 'person' : 'people'}</span><span><Count value={last.stats.notes ?? 0} /> {(last.stats.notes ?? 0) === 1 ? 'note' : 'notes'}</span><span><Count value={last.stats.messages ?? 0} /> {(last.stats.messages ?? 0) === 1 ? 'message' : 'messages'}</span><span><Count value={last.stats.opportunities ?? 0} /> {(last.stats.opportunities ?? 0) === 1 ? 'opportunity' : 'opportunities'}</span><span><Count value={last.stats.tasks ?? 0} /> {(last.stats.tasks ?? 0) === 1 ? 'task' : 'tasks'}</span></span> : null}</span> : null },
             ]}
           />
         </div>

@@ -415,9 +415,9 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                     <li key={c.id} className="flex items-center justify-between gap-2 px-4 py-2 text-[13px]">
                       <Link href={`/people/${c.id}`} className="flex min-w-0 items-center gap-2 hover:text-brand-700">
                         <Avatar name={cachedPersonName(c)} shape="circle" size={24} />
-                        <span className="min-w-0 truncate text-ink-800">
-                          {cachedPersonName(c)}
-                          {c.jobTitle ? <span className=" text-ink-500"> · {c.jobTitle}</span> : null}
+                        <span className="min-w-0">
+                          <span className="block truncate text-ink-800">{cachedPersonName(c)}</span>
+                          {c.jobTitle ? <span className="block truncate text-[12px] leading-4 text-ink-500" title={c.jobTitle}>{c.jobTitle}</span> : null}
                         </span>
                       </Link>
                       <Badge tone={st.tone} dot>

@@ -276,7 +276,7 @@ rules each piece follows; this is what changed and how it was checked.
   leader scope on marks, mapping memory), and campaign membership writes (add and remove before
   and after launch, Biz Ops refused, one person in one upcoming campaign, the FO filter on
   upcoming campaigns).
-- 66 browser tests pass (`pnpm test:e2e`, serial, one worker), including phase1 (fast typing, sort focus, drag, span, account
+- 72 browser tests pass (`pnpm test:e2e`, serial, one worker), including phase1 (fast typing, sort focus, drag, span, account
   counts, no CRM banner, non-prospect rules) and phase3 (By account, Scorecard, one row of
   filters, export/assign/not found/reopen, exact export of a selection).
 
@@ -297,6 +297,12 @@ them silently (`scheduled_elsewhere`); membership writes had no tests
 (`tests/campaign-membership-writes.test.ts`: add, remove before and after launch, Biz Ops
 refused, the new conflict, the FO filter on upcoming campaigns).
 
+**Functional critic, second pass (8/10) - fixed.** Adding people to an upcoming campaign now
+runs the same preview as launch, so somebody promised elsewhere, do-not-contact or in another pod
+is refused by name instead of skipped silently on the day; the campaign page counts touches for
+the current run only, the way the list does; the brief's phone links open the dialpad beside the
+task.
+
 **Functional critic - kept as is.** "Starts per FO per day" stays as an optional ceiling under the
 planner (DECISIONS, "A campaign runs between two dates"); lifecycle actions stay on the campaign
 page rather than the list; the campaign page's preview messages are the engine's own sentences,
@@ -311,6 +317,14 @@ and printed white in the series colour; the scorecard was a wall of saturated gr
 values in ink); numbers and count headers were semibold (medium now); product chips on the
 campaign form looked like plain text; "1 days"; the sequence editor's width; a duplicate
 "Campaigns" heading; the campaign picker's filter names collided with the form's Pod field.
+
+**Design critic, second pass (7.5/10) - fixed.** Colleague titles on the person page sit under
+the name instead of truncating beside it; the People list and the account people tab use the one
+tier badge; the scorecard's tints tell 100% from 90% from 70%; "1 day" and "1 opportunity"; the
+login page carries the wordmark and the headline only; count headers take the header ink; the
+campaign picker's tier, type, product and tag filters sit behind Filters; the sequence editor is
+as wide as its header band, its day cells keep one width and the week labels sit clear of the
+border; the Accounts PODs column has room for a pod's name beside its "+N".
 
 **Design critic - kept as is.** Native date inputs render in the browser's locale, which the
 runner sets to en-US; a custom picker is a separate piece of work. Outbound emails are red and

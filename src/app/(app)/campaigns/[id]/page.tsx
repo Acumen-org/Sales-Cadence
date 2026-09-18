@@ -70,10 +70,13 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
   const todayDay = dayOf(today);
   const pct = (d: number) => (total ? Math.min(100, Math.max(0, Math.round(((d - 1) / Math.max(1, total - 1)) * 100))) : 0);
   const ranOver = campaign.endDate && campaign.endDate < today ? enrollments.filter((e) => e.status === 'ACTIVE' || e.status === 'PAUSED').length : 0;
-  const touchesDone = history.reduce((n, e) => n + e.tasks.filter((t) => t.state === 'DONE').length, 0);
-  // Somebody live owes the whole sequence; somebody finished owes what was generated before they finished; somebody not yet enrolled owes it all.
+  // This run only, the way the list counts it. Somebody live owes the whole sequence; somebody
+  // finished owes what was generated before they finished; before launch, everyone on the list owes it all.
+  const touchesDone = enrollments.reduce((n, e) => n + e.tasks.filter((t) => t.state === 'DONE').length, 0);
   const perPerson = touchesPerPerson(campaign.sequence.steps);
-  const touchesPlanned = history.reduce((n, e) => n + (e.status === 'ACTIVE' || e.status === 'PAUSED' ? perPerson : e.tasks.filter((t) => t.state === 'DONE' || t.state === 'SKIPPED').length), 0) + Math.max(0, campaign.personIds.length - enrollments.length) * perPerson;
+  const touchesPlanned = proposed
+    ? campaign.personIds.length * perPerson
+    : enrollments.reduce((n, e) => n + (e.status === 'ACTIVE' || e.status === 'PAUSED' ? perPerson : e.tasks.filter((t) => t.state === 'DONE' || t.state === 'SKIPPED').length), 0);
 
   return (
     <div className="space-y-5 px-6 pb-8 pt-2">

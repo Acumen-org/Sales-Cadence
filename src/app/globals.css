@@ -192,6 +192,9 @@
   .table .num {
     @apply text-right font-medium tabular-nums text-ink-900;
   }
+  .table th.num {
+    @apply text-ink-600;
+  }
   .data-table th:not(:first-child),
   .data-table td:not(:first-child) {
     @apply text-right;

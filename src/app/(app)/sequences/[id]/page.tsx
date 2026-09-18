@@ -38,7 +38,7 @@ export default async function SequenceDetailPage({ params }: { params: Promise<{
           </Link>
         }
       />
-      <div className="max-w-6xl">
+      <div>
         <SequenceEditor
           sequenceId={id}
           initialSteps={steps}

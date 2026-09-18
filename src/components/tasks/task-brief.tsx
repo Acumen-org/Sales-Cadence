@@ -1,4 +1,4 @@
-import { callHref } from '@/lib/calls';
+import { callHref, opensDialpad } from '@/lib/calls';
 import Link from 'next/link';
 import type { BriefTimelineItem, TaskBrief } from '@/lib/brief';
 import { compareLocalDates, formatInstant, formatLocalDate, type LocalDate } from '@/lib/dates';
@@ -46,8 +46,8 @@ export function TaskBriefPanel({ brief, timezone, callTemplate }: { brief: TaskB
         // value on hover instead, and the link still carries all of it.
         { k: 'Email', v: person.email ? <a href={`mailto:${person.email}`} className="block break-words text-brand-700 hover:underline [overflow-wrap:anywhere]">{person.email}</a> : null },
         { k: 'Other emails', v: person.additionalEmails.length ? <span className="space-y-1">{person.additionalEmails.map((email) => <a key={email} href={`mailto:${email}`} className="block break-all text-brand-700 hover:underline">{email}</a>)}</span> : null },
-        { k: 'Phone', v: person.phone ? <a href={callHref(person.phone, callTemplate)} className="text-brand-700 hover:underline">{person.phone}</a> : null },
-        { k: 'Other phone', v: person.additionalPhone ? <a href={callHref(person.additionalPhone, callTemplate)} className="text-brand-700 hover:underline">{person.additionalPhone}</a> : null },
+        { k: 'Phone', v: person.phone ? <a href={callHref(person.phone, callTemplate)} target={opensDialpad(callTemplate) ? '_blank' : undefined} rel={opensDialpad(callTemplate) ? 'noreferrer' : undefined} className="text-brand-700 hover:underline">{person.phone}</a> : null },
+        { k: 'Other phone', v: person.additionalPhone ? <a href={callHref(person.additionalPhone, callTemplate)} target={opensDialpad(callTemplate) ? '_blank' : undefined} rel={opensDialpad(callTemplate) ? 'noreferrer' : undefined} className="text-brand-700 hover:underline">{person.additionalPhone}</a> : null },
         { k: 'City', v: person.city }, { k: 'Owner', v: brief.ownerName }, { k: 'Pod', v: brief.podName ?? (person.podOwner ? optionLabel(person.podOwner) : null) },
       ])} />
       <div className="mt-3 flex flex-wrap gap-2">{person.linkedinUrl ? <a href={person.linkedinUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm"><ActionIcon action="LINKEDIN_MESSAGE" size={13} />LinkedIn</a> : null}{person.xUrl ? <a href={person.xUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm">X profile<IconExternal size={12} /></a> : null}<Link href={`/people/${person.id}`} className="btn-ghost btn-sm">Full overview</Link></div>

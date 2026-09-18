@@ -9,7 +9,7 @@ import { GREEN_RAMP } from '@/components/reports/charts';
  */
 const INK = '#1f2a26';
 /** The light half of the ramp only, so a board of complete fields reads calm and the number stays in ink. */
-const shade = (pct: number) => GREEN_RAMP[Math.min(2, Math.floor((pct / 100) * 2.999))];
+const shade = (pct: number) => (pct >= 100 ? GREEN_RAMP[3] : pct >= 90 ? GREEN_RAMP[2] : pct >= 70 ? GREEN_RAMP[1] : GREEN_RAMP[0]);
 const pctOf = (filled: number, total: number) => (total ? Math.round((filled / total) * 100) : 0);
 
 function Section({ title, groups, since }: { title: string; groups: ScorecardGroup[]; since: string | null }) {

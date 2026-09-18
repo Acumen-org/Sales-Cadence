@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { pickAllIdsAction, pickPeopleAction, pickerOptionsAction, type PickerFilters, type PickerOptions, type PickerRow } from '@/lib/actions/people-picker';
-import { IconSearch } from '@/components/icons';
+import { IconFilter, IconSearch } from '@/components/icons';
 import { Badge, Count, TierBadge } from '@/components/ui';
 import { optionLabel } from '@/lib/twenty/labels';
 
@@ -20,7 +20,9 @@ export function PeoplePicker({ value, onChange }: Props) {
   const latest = useRef(value);
   latest.current = value;
   const [options, setOptions] = useState<PickerOptions | null>(null);
+  const [showMore, setShowMore] = useState(false);
   const [filters, setFilters] = useState<PickerFilters>({ q: '', pod: '', fo: '', product: '', tier: '', type: '', tag: '', account: '', state: 'cold', page: 1 });
+  const moreCount = [filters.tier, filters.type, filters.product, filters.tag].filter(Boolean).length;
   const [text, setText] = useState('');
   const [rows, setRows] = useState<PickerRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -92,10 +94,15 @@ export function PeoplePicker({ value, onChange }: Props) {
           <>
             <Select name="pod" label="Filter by pod" all="All pods" items={options.pods.map((p) => ({ value: p.value, label: p.name }))} />
             <Select name="fo" label="Filter by FO" all="All FOs" items={options.fos.map((f) => ({ value: f.id, label: f.name }))} />
-            <Select name="tier" label="Filter by tier" all="Any tier" items={options.tiers.map((t) => ({ value: t, label: optionLabel(t) }))} />
-            <Select name="type" label="Filter by contact type" all="Any type" items={options.types.map((t) => ({ value: t, label: optionLabel(t) }))} />
-            <Select name="product" label="Filter by product" all="Any product" items={options.products.map((p) => ({ value: p, label: optionLabel(p) }))} />
-            {options.tags.length ? <Select name="tag" label="Filter by Twenty tag" all="Any tag" items={options.tags.map((t) => ({ value: t, label: optionLabel(t) }))} /> : null}
+            <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} className={`btn-secondary btn-sm ${showMore || moreCount ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
+              <IconFilter size={14} /> Filters{moreCount ? <span className="ml-1 tabular-nums">{moreCount}</span> : null}
+            </button>
+            {showMore || moreCount ? <>
+              <Select name="tier" label="Filter by tier" all="Any tier" items={options.tiers.map((t) => ({ value: t, label: optionLabel(t) }))} />
+              <Select name="type" label="Filter by contact type" all="Any type" items={options.types.map((t) => ({ value: t, label: optionLabel(t) }))} />
+              <Select name="product" label="Filter by product" all="Any product" items={options.products.map((p) => ({ value: p, label: optionLabel(p) }))} />
+              {options.tags.length ? <Select name="tag" label="Filter by Twenty tag" all="Any tag" items={options.tags.map((t) => ({ value: t, label: optionLabel(t) }))} /> : null}
+            </> : null}
           </>
         ) : null}
         <select value={filters.state} onChange={(e) => set({ state: e.target.value as PickerFilters['state'] })} aria-label="Sequence state" className="!w-auto !py-1.5 !text-[12.5px]">

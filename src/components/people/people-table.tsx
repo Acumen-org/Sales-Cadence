@@ -4,7 +4,7 @@ import { tagFilter, tagTone } from '@/lib/crm-tags';
 import { useFilterNavigation } from '@/components/filter-navigation';
 import Link from 'next/link';
 import { useState } from 'react';
-import { Badge, IdentityCell, type BadgeTone } from '@/components/ui';
+import { Badge, IdentityCell, type BadgeTone, TierBadge } from '@/components/ui';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
 import { PillList } from '@/components/pill-list';
 import { AddToCampaign, RemoveFromCampaign } from '@/components/campaigns/add-to-campaign';
@@ -47,7 +47,7 @@ type Props = {
 function Tag({ value, field }: { value: string; field?: string }) {
   const navigate = useFilterNavigation();
   const filter = field ? { key: field, value } : tagFilter(value);
-  return <button type="button" aria-label={`Filter by ${optionLabel(value)}`} className="rounded-md text-left focus-visible:ring-2 focus-visible:ring-brand-300" onClick={() => navigate(next => { next.set(filter.key, filter.value); next.delete('page'); })}><Badge tone={tagTone(value)}>{optionLabel(value)}</Badge></button>;
+  return <button type="button" aria-label={`Filter by ${optionLabel(value)}`} className="rounded-md text-left focus-visible:ring-2 focus-visible:ring-brand-300" onClick={() => navigate(next => { next.set(filter.key, filter.value); next.delete('page'); })}>{field === 'tier' ? <TierBadge tier={value} /> : <Badge tone={tagTone(value)}>{optionLabel(value)}</Badge>}</button>;
 }
 
 /** The directory: CRM tags, the campaign and the sequence by name, and a selection to add to a campaign. */

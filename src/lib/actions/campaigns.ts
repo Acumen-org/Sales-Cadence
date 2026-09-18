@@ -320,9 +320,17 @@ export async function addPeopleToCampaignAction(formData: FormData): Promise<Act
   if (!canManageCampaigns(user, campaign.podId)) return { ok: false, error: 'You cannot change this campaign.' };
   try {
     if (['DRAFT', 'PENDING_APPROVAL', 'SCHEDULED'].includes(campaign.status)) {
-      const merged = [...new Set([...campaign.personIds, ...ids])];
+      // The same check launch will run, so somebody promised elsewhere, do-not-contact or in
+      // another pod is refused now, by name, rather than skipped silently on the day.
+      const fresh = ids.filter((id) => !campaign.personIds.includes(id));
+      if (!fresh.length) return { ok: true, message: 'Everyone chosen is already in this campaign.' };
+      const check = await previewEnrollment({ personIds: fresh, sequenceId: campaign.sequenceId, podId: campaign.podId, campaignId, startDate: campaign.startDate, assignment: { mode: 'OWNER' }, actor: userActor(user) });
+      if ('error' in check) return { ok: false, error: String(check.error) };
+      const accepted = check.candidates.map((c) => c.personId);
+      const merged = [...new Set([...campaign.personIds, ...accepted])];
       const added = merged.length - campaign.personIds.length;
-      if (!added) return { ok: true, message: 'Everyone chosen is already in this campaign.' };
+      const skippedNote = check.conflicts.length ? `; ${check.conflicts.length} skipped (${[...new Set(check.conflicts.map((c) => enrollConflictLabel(c.reason)))].join(', ')})` : '';
+      if (!added) return { ok: false, error: `Nobody could be added${skippedNote}.` };
       if (campaign.endDate) {
         const plan = await planCampaignCapacity({ sequenceId: campaign.sequenceId, podId: campaign.podId, startDate: campaign.startDate, endDate: campaign.endDate, maxRate: campaign.startsPerFoPerDay });
         if (!('error' in plan) && merged.length > plan.total) {
@@ -331,9 +339,9 @@ export async function addPeopleToCampaignAction(formData: FormData): Promise<Act
         }
       }
       await prisma.campaign.update({ where: { id: campaignId }, data: { personIds: merged } });
-      await logAudit({ entityType: 'campaign', entityId: campaignId, action: 'people_added', actor: userActor(user), details: { added, total: merged.length } });
+      await logAudit({ entityType: 'campaign', entityId: campaignId, action: 'people_added', actor: userActor(user), details: { added, total: merged.length, skipped: check.conflicts.length } });
       refreshCampaign(campaignId);
-      return { ok: true, message: `${added} added to ${campaign.name}.` };
+      return { ok: true, message: `${added} added to ${campaign.name}${skippedNote}.` };
     }
     if (campaign.status !== 'ACTIVE') return { ok: false, error: `${campaign.name} is ${campaign.status.toLowerCase()}; people can be added to upcoming or active campaigns.` };
     // Running: they start now, within what the rest of the window can take.
