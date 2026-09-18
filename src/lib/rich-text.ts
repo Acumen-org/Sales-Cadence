@@ -46,6 +46,11 @@ export function crmEmailHtml(text: string): string {
     .replace(new RegExp(`<p>(?:${GAP}|${BR})+`, 'gi'), '<p>')
     .replace(new RegExp(`(?:${GAP}|${BR})+<\\/p>`, 'gi'), '</p>')
     .replace(new RegExp(`<p>(?:${GAP}|${BR})*<\\/p>`, 'gi'), '')
+    // A block boundary - paragraph, quote, list - is its own spacing: breaks on either side of it
+    // only add to it. "Best,<br>Alisa</p><br><br>Signature" is the signature straight after.
+    .replace(new RegExp(`(<\\/(?:p|blockquote|ul|ol|li)>)(?:${GAP}|${BR})+(?=\\S)`, 'gi'), '$1')
+    .replace(new RegExp(`(?:${BR}${GAP}*)+(<(?:p|blockquote|ul|ol)\\b)`, 'gi'), '$1')
+    .replace(new RegExp(`(<blockquote\\b[^>]*>)(?:${GAP}|${BR})+`, 'gi'), '$1')
     // Indentation spelled as a run of non-breaking spaces is one space to the reader.
     .replace(/(?:\u00a0|&nbsp;|&#160;){2,}/gi, ' ')
     // The wrapper a mail client opens and closes with leaves a blank line at each end of the card.

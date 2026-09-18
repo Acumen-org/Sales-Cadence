@@ -384,7 +384,9 @@ failed responses. The reader's own comparisons (`scripts/live-numbers.ts`, `scri
   access; what Cadence shows agrees with the Twenty status card (counts equal, reconcile flowing).
 - Webhooks: rather than a URL to type into Twenty, Settings > Twenty now has "Register webhook in
   Twenty", which creates it through Twenty's API with the server's own secret. Pressed on the
-  hosted build at 13:42: "Registered. Twenty now posts every change to this Cadence (*.*)."
+  hosted build at 13:42: "Registered. Twenty now posts every change to this Cadence (*.*)." By
+  14:07 the status card read 72 inbound events in 24 hours; changes in Twenty now reach Cadence
+  at once, with the minute-by-minute pass behind them.
 - The "huge gaps" in emails were signatures laid out as Outlook tables: rows of empty cells and
   paragraphs holding one non-breaking space each, every one a blank line to the reader. The email
   formatter now folds them (`tests/email-signature.test.ts` carries the real shape, from a message

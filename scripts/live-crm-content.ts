@@ -36,7 +36,16 @@ async function readTab(page: Page, href: string, kind: 'emails' | 'notes'): Prom
     const body = await bodyEl.innerText({ timeout: 2_000 }).catch(() => '');
     const html = await bodyEl.innerHTML({ timeout: 2_000 }).catch(() => '');
     if (!body.trim() || /No note body|Body not available/.test(body)) emptyBodies += 1;
-    if (/\n[ \t]*\n[ \t]*\n[ \t]*\n/.test(body)) { blankRuns += 1; if (process.env.LIVE_EXCERPT) console.log(`       excerpt (${kind} #${i + 1}): ${JSON.stringify(body.slice(0, 240))}`); }
+    if (/\n[ \t]*\n[ \t]*\n[ \t]*\n/.test(body)) {
+      blankRuns += 1;
+      if (process.env.LIVE_EXCERPT) {
+        // The rendered HTML around the first gap, so the shape that survived the formatter is visible.
+        const at = body.search(/\n[ \t]*\n[ \t]*\n[ \t]*\n/);
+        const words = body.slice(Math.max(0, at - 40), at).trim().split(/\s+/).slice(-3).join(' ');
+        const idx = words ? html.indexOf(words.slice(-12)) : -1;
+        console.log(`       gap (${kind} #${i + 1}) after "${words}": ${JSON.stringify(html.slice(Math.max(0, idx), Math.max(0, idx) + 700).replace(/\s+/g, ' '))}`);
+      }
+    }
     if (/&nbsp;|  /.test(html)) nbsp += 1;
     if (kind === 'notes' && /^\s*\|[\s|:-]*\|?\s*$/m.test(body)) { blankRuns += 0; if (process.env.LIVE_EXCERPT) console.log(`       table pipes (note #${i + 1}): ${JSON.stringify(body.slice(0, 160))}`); }
     if (/No subject/.test(await card.locator('summary').innerText().catch(() => ''))) noSubject += 1;
@@ -56,7 +65,8 @@ async function main() {
   await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 30_000 });
 
   await page.goto(`${url}/people?pod=&fo=&sort=recent&dir=desc`, { waitUntil: 'networkidle' });
-  const hrefs = [...new Set((await page.locator('main tbody a[href^="/people/"]').evaluateAll((as) => as.map((a) => (a as HTMLAnchorElement).getAttribute('href') ?? ''))).filter(Boolean))].slice(0, howMany);
+  // LIVE_PERSON=/people/<id>,/people/<id>: exactly these, instead of the most recently active.
+  const hrefs = process.env.LIVE_PERSON ? process.env.LIVE_PERSON.split(',').map((h) => h.trim()).filter(Boolean) : [...new Set((await page.locator('main tbody a[href^="/people/"]').evaluateAll((as) => as.map((a) => (a as HTMLAnchorElement).getAttribute('href') ?? ''))).filter(Boolean))].slice(0, howMany);
   console.log(`Checking ${hrefs.length} people with the most recent CRM activity\n`);
   let issues = 0;
   for (const href of hrefs) {

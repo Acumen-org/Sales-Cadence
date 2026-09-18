@@ -36,6 +36,20 @@ describe('email signatures laid out as tables', () => {
     expect((between.match(/<br\s*\/?>|<\/p>/gi) ?? []).length).toBeLessThanOrEqual(3);
   });
 
+  it('does not stack breaks onto a paragraph or quote boundary', () => {
+    // Gmail: the closing line is a paragraph, then two breaks, then the signature as loose lines.
+    const gmail = crmEmailHtml('<p>Best regards,<br> Alisa</p><br><br>Alisa Kolodizner&nbsp;CFP&nbsp;®<br><br>Managing Director&nbsp;<br><br>Prairie Hill Holdings<br>Tel. 773-430-3534');
+    expect(gmail).not.toMatch(/<\/p>\s*<br/i);
+    expect(gmail).toContain('Alisa Kolodizner');
+    expect(gmail).toContain('Managing Director');
+    // A quoted reply: breaks before the quote, and inside it before the first line, are the quote's own spacing.
+    const quoted = crmEmailHtml('<p>See below.</p>On Fri, Oct 24, 2025 Alisa wrote:<br><br><blockquote><br><br>Hi Vince,&nbsp;<br><br>Just following up.</blockquote><br><br>');
+    expect(quoted).not.toMatch(/<br[^>]*>\s*<blockquote/i);
+    expect(quoted).not.toMatch(/<blockquote[^>]*>\s*<br/i);
+    expect(quoted).toContain('Hi Vince,');
+    expect(quoted).toContain('Just following up.');
+  });
+
   it('still trims the wrapper breaks at either end', () => {
     expect(crmEmailHtml('<div><br><br><p>Body</p><br><br></div>')).toBe('<p>Body</p>');
   });
