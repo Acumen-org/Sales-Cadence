@@ -86,7 +86,7 @@ export function PeoplePicker({ value, onChange }: Props) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative w-full max-w-xs">
+        <div className="relative w-full max-w-[220px]">
           <IconSearch size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
           <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search name, company, email" aria-label="Search people to add" className="!pl-9 !py-1.5" />
         </div>

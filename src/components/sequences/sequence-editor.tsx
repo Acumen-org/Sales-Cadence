@@ -79,10 +79,10 @@ export function SequenceEditor({ sequenceId, initialSteps, action, submitLabel, 
     {typeof duration === 'number' && duration > 0 ? (
       <div className="surface px-5 py-4">
         <div className="mb-2 flex items-center justify-between text-[12px] text-ink-500">
-          <span><span className="font-medium text-ink-900">{duration}</span> days</span>
+          <span><span className="font-medium text-ink-900">{duration}</span> {Number(duration) === 1 ? 'day' : 'days'}</span>
           {selected !== null ? <span>Step <span className="font-medium text-ink-900">{selected + 1}</span> selected</span> : null}
         </div>
-        <div className="grid gap-1 pt-3" style={{ gridTemplateColumns: `repeat(${Math.min(duration, 14)}, minmax(0, 3.5rem))` }} role="listbox" aria-label="Days of the sequence">
+        <div className="grid gap-x-1 gap-y-4 pt-3" style={{ gridTemplateColumns: `repeat(${Math.min(duration, 14)}, minmax(0, 3.5rem))` }} role="listbox" aria-label="Days of the sequence">
           {Array.from({ length: duration }, (_, d) => d + 1).map((day) => {
             const at = steps.findIndex((st) => st.day === day);
             const weekStart = (day - 1) % 7 === 0;

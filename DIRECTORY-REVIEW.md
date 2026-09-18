@@ -283,8 +283,9 @@ rules each piece follows; this is what changed and how it was checked.
 ## Critics (C16)
 
 Both critics ran on the production screenshots and the code after phase 3; both scored 7/10.
-Everything they found that a reader would meet was fixed in the same round; the rest is listed
-with the reason it stays.
+Everything they found that a reader would meet was fixed in the same round and both were run
+again: the functional critic scored 8/10 on its second pass, the design critic 7.5 and then 8/10
+on its third. The rest is listed with the reason it stays.
 
 **Functional critic - fixed.** Planned touches were "generated" touches (a campaign read "0 of
 4" for two people on an eight-step plan); the FO filter emptied the Upcoming tab because an
@@ -325,6 +326,12 @@ login page carries the wordmark and the headline only; count headers take the he
 campaign picker's tier, type, product and tag filters sit behind Filters; the sequence editor is
 as wide as its header band, its day cells keep one width and the week labels sit clear of the
 border; the Accounts PODs column has room for a pod's name beside its "+N".
+
+**Design critic, third pass (8/10) - fixed.** "1 day" in the editor header; the campaign picker's
+filters fit one row; the day strip's week labels have their own room; the Home tile no longer
+carries a fixed sentence when only overdue work is left. Still open, small: the task "More"
+panel's select widths, the Home team table's uppercase headers, an email address breaking
+mid-domain in the task rail, and the two-line "People at account" header.
 
 **Design critic - kept as is.** Native date inputs render in the browser's locale, which the
 runner sets to en-US; a custom picker is a separate piece of work. Outbound emails are red and
