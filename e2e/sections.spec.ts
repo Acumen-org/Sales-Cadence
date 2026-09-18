@@ -152,13 +152,14 @@ test('a meeting plays in the app with its transcript and no analysis until a mod
 
   // Found by who was there, and starred for later.
   await page.goto('/meetings?who=Dummy%20One');
-  await expect(page.getByRole('link', { name: /E2E discovery call/ })).toBeVisible();
-  const row = page.getByRole('row', { name: /E2E discovery call/ });
+  // `.first()`: a retried run in CI has created this meeting twice.
+  await expect(page.getByRole('link', { name: /E2E discovery call/ }).first()).toBeVisible();
+  const row = page.getByRole('row', { name: /E2E discovery call/ }).first();
   await row.getByRole('button', { name: 'Add to favourites' }).click();
   // The star is saved by a server action; the button changes once the list has re-rendered.
   await expect(row.getByRole('button', { name: 'Remove from favourites' })).toBeVisible();
   await page.goto('/meetings?fav=1');
-  await expect(page.getByRole('link', { name: /E2E discovery call/ })).toBeVisible();
+  await expect(page.getByRole('link', { name: /E2E discovery call/ }).first()).toBeVisible();
   // The first table is the list of meetings in Cadence; "Recordings in Twenty" is a second one.
   await expect(page.locator('table').first()).toContainText(/\d external/);
   await logout(page);

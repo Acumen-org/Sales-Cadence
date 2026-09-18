@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { useId, useState } from 'react';
 import type { ActivityKind } from '@/lib/activity-query';
 import { ActionIcon, IconFilter, IconSearch } from '@/components/icons';
-import { useFilterNavigation } from '@/components/filter-navigation';
 import { useSearchBox } from '@/components/search-box';
 
 const EVENT_TYPES: { value: ActivityKind; label: string }[] = [
@@ -36,12 +35,19 @@ type Props = {
 
 /**
  * One row: the channel, search, pod and team member, then a Filters button for the dates and the
- * event type. Every change applies at once through the shared navigation; an empty pod or member
- * is kept in the URL as the reader's choice of All, not the default.
+ * event type. Every change applies at once, as one request; an empty pod or member is kept in the
+ * URL as the reader's choice of All, not the default.
  */
 export function ActivityToolbar({ users, pods, actorId, podId, kinds, channel, q, from, to, defaultRange }: Props) {
-  const navigate = useFilterNavigation();
   const panelId = useId();
+  // A full navigation, not a client-side push: this page renders inside its own Suspense boundary
+  // (see activity/page.tsx) and a pushed navigation into it hangs on a slow machine. The feed
+  // reloads in one request, as it did when its filters were a form.
+  const navigate = (mutate: (next: URLSearchParams) => void) => {
+    const next = new URLSearchParams(window.location.search);
+    mutate(next);
+    window.location.assign(`${window.location.pathname}?${next.toString()}`);
+  };
   const kind = kinds.length === 1 ? kinds[0] : '';
   const rangeChanged = from !== defaultRange.from || to !== defaultRange.to;
   const more = [rangeChanged ? 'range' : '', kind].filter(Boolean).length;
