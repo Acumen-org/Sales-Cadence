@@ -154,10 +154,17 @@ test('a meeting plays in the app with its transcript and no analysis until a mod
   await page.goto('/meetings?who=Dummy%20One');
   // `.first()`: a retried run in CI has created this meeting twice.
   await expect(page.getByRole('link', { name: /E2E discovery call/ }).first()).toBeVisible();
-  const row = page.getByRole('row', { name: /E2E discovery call/ }).first();
-  await row.getByRole('button', { name: 'Add to favourites' }).click();
-  // The star is saved by a server action; the button changes once the list has re-rendered.
-  await expect(row.getByRole('button', { name: 'Remove from favourites' })).toBeVisible();
+  // A retried run may already have starred one copy: take a row whose star is still off, by index,
+  // so the locator does not lose the row the moment the star turns on.
+  const rows = page.getByRole('row', { name: /E2E discovery call/ });
+  let target = rows.first();
+  for (let i = 0, n = await rows.count(); i < n; i++) if (await rows.nth(i).getByRole('button', { name: 'Add to favourites' }).count()) { target = rows.nth(i); break; }
+  const star = target.getByRole('button', { name: /favourites/ });
+  if ((await star.getAttribute('aria-pressed')) !== 'true') {
+    await star.click();
+    // The star is saved by a server action; the button changes once the list has re-rendered.
+    await expect(star).toHaveAttribute('aria-pressed', 'true');
+  }
   await page.goto('/meetings?fav=1');
   await expect(page.getByRole('link', { name: /E2E discovery call/ }).first()).toBeVisible();
   // The first table is the list of meetings in Cadence; "Recordings in Twenty" is a second one.
@@ -211,7 +218,9 @@ test('the people view is grouped from CRM titles and holds nothing invented', as
   await loginAs(page, 'Admin');
   await page.goto('/accounts');
   await page.getByRole('link', { name: 'Dummy Company B' }).click();
-  await page.getByRole('link', { name: 'People by title' }).click();
+  await page.waitForURL(/\/accounts\//);
+  // A full navigation to the tab: a client-side push into a record page has hung on the CI runner.
+  await page.goto(`${page.url().split('?')[0]}?tab=relationships`);
 
   // Derived from what Twenty holds, so there is nothing to edit and nothing to keep in step.
   await expect(page.getByRole('button', { name: /^Edit / })).toHaveCount(0);
