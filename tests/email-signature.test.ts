@@ -50,6 +50,13 @@ describe('email signatures laid out as tables', () => {
     expect(quoted).toContain('Just following up.');
   });
 
+  it('folds a Zoom invitation whose breaks hide inside empty bold tags', () => {
+    const zoom = crmEmailHtml('<b>Alisa is inviting you to a scheduled Zoom meeting.</b><br> <br> <b><br> </b><br> <br> <b>Topic: ZOOM: 1031 Conversation</b><br> <br> <b>Time: May 5, 2025 01:00 PM Central Time</b><br> <br> <b>Join Zoom Meeting</b>');
+    expect(zoom).not.toMatch(/(?:<br\s*\/?>\s*){3,}/i);
+    expect(zoom).not.toMatch(/<b>\s*(?:<br\s*\/?>\s*)*<\/b>/i);
+    for (const line of ['scheduled Zoom meeting.', 'Topic: ZOOM: 1031 Conversation', 'Time: May 5, 2025 01:00 PM Central Time', 'Join Zoom Meeting']) expect(zoom).toContain(line);
+  });
+
   it('still trims the wrapper breaks at either end', () => {
     expect(crmEmailHtml('<div><br><br><p>Body</p><br><br></div>')).toBe('<p>Body</p>');
   });

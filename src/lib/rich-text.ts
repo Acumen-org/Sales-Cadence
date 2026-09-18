@@ -40,6 +40,9 @@ export function crmEmailHtml(text: string): string {
   const GAP = '(?:\\s|\\u00a0|&nbsp;|&#160;)';
   const BR = '<br\\s*\\/?>';
   return cleanRichText(structured)
+    // A break wrapped in an empty bold or italic ("<b><br> </b>", a Zoom invitation's habit) is a
+    // break; unwrapping it lets the run it sits in fold like any other.
+    .replace(new RegExp(`<(b|strong|i|em|u)>((?:${GAP}|${BR})*)<\\/\\1>`, 'gi'), '$2')
     .replace(new RegExp(`<p>(?:${GAP}|${BR})*<\\/p>`, 'gi'), '')
     .replace(new RegExp(`(?:${BR}${GAP}*){3,}`, 'gi'), '<br><br>')
     .replace(new RegExp(`<\\/p>(?:${GAP}|${BR})*<p>`, 'gi'), '</p><p>')
