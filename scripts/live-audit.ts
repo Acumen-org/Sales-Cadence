@@ -74,8 +74,18 @@ async function main() {
   console.log('\n-- Obvious non-prospects absent from Accounts');
   for (const word of ['microsoft', 'google', 'anthropic', 'openai', 'gmail']) {
     await page.goto(`${url}/accounts?pod=&fo=&q=${word}`, { waitUntil: 'networkidle' });
-    const names = await page.locator('main table tbody a[href^="/accounts/"]').allInnerTexts().catch(() => []);
-    console.log(`   "${word}": ${names.length} account row(s)${names.length ? ' -> ' + names.map((n) => n.trim()).slice(0, 5).join('; ') : ''}`);
+    const rows = await page.locator('main table tbody tr').allInnerTexts().catch(() => []);
+    // The whole row, so a match on the domain rather than the name is visible.
+    console.log(`   "${word}": ${rows.length} account row(s)${rows.length ? ' -> ' + rows.map((r) => r.replace(/\s+/g, ' ').trim().slice(0, 90)).slice(0, 5).join(' || ') : ''}`);
+    // What the match was on: the account page names the domain.
+    const first = page.locator('main table tbody a[href^="/accounts/"]').first();
+    if (rows.length && (await first.count())) {
+      await first.click();
+      await page.waitForURL(/\/accounts\//);
+      await page.waitForLoadState('networkidle').catch(() => {});
+      const dl = (await page.locator('main dl').first().innerText().catch(() => '')).replace(/\s+/g, ' ');
+      console.log(`      ${page.url().replace(url, '')}: ${dl.match(/DOMAIN\s+(\S+)/)?.[1] ?? '(no domain shown)'}`);
+    }
   }
 
   console.log('\n-- Meetings: talk time has no Unknown');

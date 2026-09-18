@@ -371,8 +371,9 @@ failed responses. The reader's own comparisons (`scripts/live-numbers.ts`, `scri
   `https://cadence.pmx.acumen-strategy.com/api/webhooks/twenty`, so changes arrive on the
   minute-by-minute pass rather than instantly. The webhook needs registering in Twenty (Settings >
   Developers > Webhooks) with the URL above and the HMAC secret.
-- Accounts still listed "Microsoftonline" (a Microsoft login domain) and a free-mail "Mail"
-  account: the default never-prospect and free-mail lists were widened (Microsoft's online, Office
-  and Azure domains; common platforms; mail.ru and other free-mail providers). The rule re-scans
-  every company on each sync, so they block on the next pass after deploy - unless the workspace
-  saved its own lists, in which case the admin adds them on Settings > Blocked accounts.
+- Accounts still listed "Microsoftonline" (a Microsoft login domain): the default never-prospect
+  and free-mail lists were widened (Microsoft's online, Office and Azure domains; common platforms;
+  mail.ru and other free-mail providers). The rule re-scans every company on each sync, and three
+  minutes after the deploy the hosted build had blocked 14 more accounts (4,924 -> 4,910),
+  "Microsoftonline" among them; their 36 people left the directory (8,089 -> 8,053), and the
+  Accounts tiles read 3,633 with an account + 4,420 without = 8,053, exactly the People count.
