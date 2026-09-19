@@ -45,7 +45,7 @@ export function TopBar({ role, unread, needsReview, timezone }: Props) {
       <button type="button" title="Search (Ctrl+K)" aria-label="Search" onClick={() => setSearchOpen(true)} className="flex h-9 items-center gap-2 rounded-lg border border-line bg-canvas/60 px-2.5 text-[11px] text-ink-500 transition hover:border-ink-300 sm:w-[245px]"><IconSearch size={15} /><span className="hidden sm:inline">Search your workspace</span><kbd className="ml-auto hidden !bg-white sm:inline">Ctrl K</kbd></button>
       <div className="mx-1 hidden h-5 w-px bg-line sm:block" />
       <NotificationsBell unread={unread} timezone={timezone} />
-      <button type="button" className="btn-ghost btn-sm" title="Shortcuts and help" onClick={() => setHelpOpen(true)}>Help</button>
+      <button type="button" className="btn-ghost btn-sm" title="Shortcuts and help" aria-label="Help" onClick={() => setHelpOpen(true)}>Help</button>
     </header>
     {key !== 'home' ? <div className="px-4 pb-5 pt-7 sm:px-8"><h1 className="text-[28px] font-semibold tracking-[-0.045em] text-ink-900">{title}</h1></div> : null}
     {searchOpen ? <SearchDialog onClose={() => setSearchOpen(false)} /> : null}
