@@ -134,10 +134,10 @@ export async function MeetingAnalysisPanel({
             </Section>
           ) : null}
 
-          {(analysis!.talkShare.length ? analysis!.talkShare : liveTalk).length ? (
+          {(liveTalk.length ? liveTalk : analysis!.talkShare).length ? (
             <Section title="Talk time">
               <ul className="space-y-2">
-                {(analysis!.talkShare.length ? analysis!.talkShare : liveTalk).map((t) => (
+                {(liveTalk.length ? liveTalk : analysis!.talkShare).map((t) => (
                   <li key={t.speaker}>
                     <div className="flex items-baseline justify-between gap-2 text-sm">
                       <span className="truncate text-ink-700">{t.speaker}</span>
@@ -158,7 +158,7 @@ export async function MeetingAnalysisPanel({
             </Section>
           ))}
 
-          <Section title="Analysis details"><RecordFields items={[{ label: statisticsOnly ? 'Method' : 'Model', value: statisticsOnly ? 'Computed from transcript timestamps' : model }, { label: 'Generated', value: analysedAt ? formatInstant(analysedAt, user.timezone) : null }, { label: 'Confidence', value: analysis!.confidence !== null ? `${Math.round(analysis!.confidence * 100)}%` : null }]} /></Section>
+          {statisticsOnly ? null : <Section title="Analysis details"><RecordFields items={[{ label: statisticsOnly ? 'Method' : 'Model', value: statisticsOnly ? 'Computed from transcript timestamps' : model }, { label: 'Generated', value: analysedAt ? formatInstant(analysedAt, user.timezone) : null }, { label: 'Confidence', value: analysis!.confidence !== null ? `${Math.round(analysis!.confidence * 100)}%` : null }]} /></Section>}
         </>
       )}
     </Surface>
