@@ -46,6 +46,16 @@ export function canManagePod(a: Actor, podId: string | null | undefined): boolea
   return false;
 }
 
+/**
+ * Who may put people into a campaign or take them out: everyone who works the pod - a junior as
+ * much as the leader - plus admins. Biz Ops reads; it does not move people (owner, 19 September 2026).
+ */
+export function canChangeCampaignMembers(a: Actor, podId: string | null | undefined): boolean {
+  if (isAdmin(a)) return true;
+  if (!podId) return false;
+  return needsPod(a.role) && a.podIds.includes(podId);
+}
+
 /** Pods whose reports and task lists this user may browse. Null = all pods, which is everyone now. */
 export function visiblePodIds(_a: Actor): string[] | null {
   return null;

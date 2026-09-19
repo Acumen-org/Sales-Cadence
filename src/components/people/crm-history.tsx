@@ -12,13 +12,13 @@ type Props = { personId: string; timezone: string; baseHref: string; notesAfter?
 
 /**
  * Received or sent is the first thing to know about an email, so it is what the card is made of:
- * a green edge for what came in, a red one for what went out, each message in its own frame so
+ * a green edge for what came in, a brand-coloured one for what went out, each message in its own frame so
  * two of them can never read as one. The direction rule is the engine's own (`classifyMessage`),
  * not a second opinion: sent by one of our users is outbound, sent by a person is inbound.
  */
 const DIRECTION = {
   inbound: { label: 'Received', tone: 'green' as const, frame: 'border-emerald-200', edge: 'border-l-emerald-500', head: 'bg-emerald-50/70' },
-  outbound: { label: 'Sent', tone: 'red' as const, frame: 'border-red-200', edge: 'border-l-red-400', head: 'bg-red-50/60' },
+  outbound: { label: 'Sent', tone: 'blue' as const, frame: 'border-brand-200', edge: 'border-l-brand-400', head: 'bg-brand-50/60' },
   unknown: { label: 'Email', tone: 'gray' as const, frame: 'border-line', edge: 'border-l-ink-300', head: 'bg-canvas' },
 };
 

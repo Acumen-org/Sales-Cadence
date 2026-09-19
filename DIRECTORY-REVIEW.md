@@ -391,3 +391,58 @@ failed responses. The reader's own comparisons (`scripts/live-numbers.ts`, `scri
   paragraphs holding one non-breaking space each, every one a blank line to the reader. The email
   formatter now folds them (`tests/email-signature.test.ts` carries the real shape, from a message
   on the hosted build).
+
+## The September list - 19 September 2026
+
+Twenty-six points from the owner, two of them the same ask twice. What changed, and how it was
+checked, in the order of the list.
+
+- Tasks and Home lost the strip of campaigns starting soon; a person's upcoming campaign sits on
+  their Campaigns tab, with its count agreeing with its content.
+- People: the Sequence column is gone; an MIP column shows one to three stars for people carrying
+  Twenty's `MIP` tag, set by that pod or an admin, empty until then; an MIP toggle sits in the
+  first filter row; selection is on for every role, "Add to campaign" is disabled when everyone
+  chosen is already in one, the bulk "Remove from campaign" is red; tags show one and then +N;
+  applied chips sit in their own row.
+- One active campaign per person was already the database's rule (a partial unique index on
+  Enrollment); the campaign-model proposal (`CAMPAIGN-MODEL-PROPOSAL.md`) covers the rest of what
+  the owner asked to discuss first.
+- The workspace clock is Central Time and a setting (Settings > Rules > Timezone); every reader of
+  the old constant now reads the setting.
+- Replies mean inbound messages (emails, calls, LinkedIn touches Twenty holds) minus automatic
+  replies, plus calls the person answered - one rule in `reply-credit.ts`, used by Accounts, the
+  account page, Home and Reports, credited to the enrollment the reply answers and through it to
+  the FO, pod, campaign and sequence. Automatic replies are recognised by subject and leave the
+  sequence running.
+- Person and account headers carry the record's colour: band, filled avatar and an ornament of
+  five motifs seeded by the id; actions on their own row so nothing collides.
+- Sync now for every role, with a toast that slides in from the right.
+- Enrichment: People / Accounts / Scorecard; no priority filter or open/not-found switch (the
+  footer count leads to the not-found list); Address replaces Industry for accounts; scorecard
+  record counts open the matching queue; stat figures in ink; cells no darker than the ramp's
+  third step with fixed column widths.
+- Meetings: Analysis says Ready only for a real model; the Cadence AI panel shows talk time from
+  the transcript (the "Not connected" badge only for admins, who can act on it); a recording link
+  is optional and without one the page shows no recording surface; "Booked by" is required,
+  shown on the record, editable and a filter.
+- Campaign creation: no "?" icons anywhere in the app (the Info component is gone), no
+  "last start" marker or legend; the capacity line reads "Room for N people · X starts a day per
+  FO".
+- Reports never say enrolled or enrollment; every reply figure on the page comes from the same
+  set of inbound messages.
+- The notification bell has "Play chime" beside the sound toggle.
+
+Verification on this machine: typecheck and lint clean; 61 unit files / 407 tests; the browser
+suite (61 tests) green after the reruns of the specs that had to learn the new labels;
+fresh-install 3/3; 46 screenshots regenerated. Live checks against the hosted build follow the
+deploy and are recorded below.
+
+**Critics on this round.** Functional: first pass 7/10 ("Booked by" not on the meeting record;
+Reports mixing two reply definitions) - both fixed, second pass 8/10, and the one remaining
+must-fix (the funnel and reply rate folding meetings into "Replied") is fixed too. Design: first
+pass 6/10 (ornament colliding with the header actions, band fading to white, "?" icons, filled
+red per-row Remove, sort wrapping into the chip row, two tags before +N, tinted stat figures,
+scorecard cells too dark) - all fixed; second pass 7/10 (multi-hue channel chart, sequence
+calendar printing step numbers, Campaigns and Meetings filters not behind Filters, red "Sent"
+cards, asterisk misaligning paired fields) - all fixed; third pass 8/10, with the top-bar help
+icon and the campaign people-picker toolbar fixed after it.

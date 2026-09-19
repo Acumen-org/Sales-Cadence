@@ -84,6 +84,7 @@ export async function saveRulesSettingsAction(formData: FormData): Promise<Actio
     internalCompanyNames: formData.has('internalCompanyNames') ? list(formData.get('internalCompanyNames')) : undefined,
     clickToCallUrl: String(formData.get('clickToCallUrl') ?? '').trim(),
     reconcileLookbackDays: Number(formData.get('reconcileLookbackDays')),
+    workspaceTimezone: String(formData.get('workspaceTimezone') ?? 'America/Chicago'),
     defaultDailyRampPerFo: Number(formData.get('defaultDailyRampPerFo')),
     exitOnBounce: bool(formData.get('exitOnBounce')),
     answeredCallIsReply: bool(formData.get('answeredCallIsReply')),

@@ -4,7 +4,7 @@ import type { Role } from '@prisma/client';
 import { prisma } from '../db';
 import { readSessionToken } from './session';
 import { ForbiddenError, isAdmin, type Actor } from './rbac';
-import { WORKSPACE_TIMEZONE } from '../workspace';
+import { workspaceTimezone } from '../workspace';
 
 export type SessionUser = {
   id: string;
@@ -33,7 +33,7 @@ export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
     email: u.email,
     name: u.name,
     role: u.role,
-    timezone: WORKSPACE_TIMEZONE,
+    timezone: workspaceTimezone(),
     twentyMemberId: u.twentyMemberId,
     dailyCap: u.dailyCap,
     podIds: u.pods.map((p) => p.podId),

@@ -1,5 +1,5 @@
 import { requireUser } from '@/lib/auth/current-user';
-import { canCreateMeeting } from '@/lib/auth/rbac';
+import { canCreateMeeting, needsPod, ROLES_NEEDING_POD } from '@/lib/auth/rbac';
 import { redirect } from 'next/navigation';
 import { companiesInScope } from '@/lib/meetings-query';
 import { prisma } from '@/lib/db';
@@ -18,9 +18,10 @@ export default async function NewMeetingPage({ searchParams }: { searchParams: P
   const user = await requireUser();
   if (!canCreateMeeting(user)) redirect('/meetings');
   const { account, personId, url } = await searchParams;
-  const [companies, person] = await Promise.all([
+  const [companies, person, fos] = await Promise.all([
     companiesInScope(user),
     personId ? prisma.personCache.findUnique({ where: { id: personId } }) : Promise.resolve(null),
+    prisma.user.findMany({ where: { active: true, role: { in: ROLES_NEEDING_POD } }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
   ]);
   const personName = person ? [person.firstName, person.lastName].filter(Boolean).join(' ').trim() : '';
 
@@ -33,7 +34,9 @@ export default async function NewMeetingPage({ searchParams }: { searchParams: P
             mode="create"
             timezone={user.timezone}
             companies={companies}
+            fos={fos}
             initial={{
+              bookedById: needsPod(user.role) ? user.id : '',
               title: person ? `Meeting - ${personName}${person.companyName ? ` (${person.companyName})` : ''}` : '',
               sourceUrl: url ?? person?.recordingUrl ?? person?.meetingUrl ?? '',
               occurredAt: dateTimeInputValue(new Date(), user.timezone),

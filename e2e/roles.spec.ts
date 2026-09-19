@@ -112,7 +112,7 @@ test.describe('Senior FO', () => {
     await page.getByLabel('Pod', { exact: true }).selectOption({ label: "Alisa's pod" });
     // Thirteen and Fourteen are reserved for this file: earlier specs work dummy-01..06.
     await page.getByRole('button', { name: 'PHH' }).click();
-    await page.getByLabel('Sequence state').selectOption('any');
+    await page.getByLabel('Campaign state').selectOption('any');
     await page.getByLabel('Search people to add').fill('Dummy');
     for (const name of ['Dummy Thirteen', 'Dummy Fourteen']) await page.getByLabel(`Select ${name}`, { exact: true }).check();
     await expect(page.getByText(/Who starts · \d+ of 2/)).toBeVisible({ timeout: 20_000 });
@@ -152,7 +152,7 @@ test.describe('Sales Leader', () => {
     await page.getByLabel('Name', { exact: true }).fill('E2E leader source campaign');
     await page.getByLabel('Pod', { exact: true }).selectOption({ label: "Alisa's pod" });
     await page.getByRole('button', { name: 'PHH' }).click();
-    await page.getByLabel('Sequence state').selectOption('any');
+    await page.getByLabel('Campaign state').selectOption('any');
     await page.getByLabel('Search people to add').fill('Dummy');
     for (const name of ['Dummy Thirteen', 'Dummy Fourteen']) await page.getByLabel(`Select ${name}`, { exact: true }).check();
     await expect(page.getByText(/Who starts · 2 of 2/)).toBeVisible({ timeout: 20_000 });

@@ -54,17 +54,12 @@ export function AccountsToolbar({ q, pods, fos, products, pod, fo, product, camp
   ].filter((x): x is { key: string; label: string } => Boolean(x));
 
   return (
-    <div className="flex flex-1 flex-wrap items-center gap-2">
+    <div className="flex-1">
+    <div className="flex flex-wrap items-center gap-2">
       <div className="relative w-full max-w-xs">
         <IconSearch size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
         <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search name or domain" aria-label="Search accounts" className="!pl-9" />
       </div>
-      {chips.map((c) => (
-        <button key={c.key} type="button" className="chip" onClick={() => update({ [c.key]: null })} title="Remove this filter">
-          {c.label}
-          <span aria-hidden className="text-brand-500">✕</span>
-        </button>
-      ))}
       <select value={pod} onChange={(e) => update({ pod: e.target.value || null })} aria-label="Filter by pod" className="!w-auto !py-2 !text-[12.5px]">
         <option value="">All pods</option>
         {pods.map((p) => <option key={p.podOwnerValue} value={p.podOwnerValue}>{p.name}</option>)}
@@ -87,6 +82,17 @@ export function AccountsToolbar({ q, pods, fos, products, pod, fo, product, camp
       </select>
       {/* "Most people" is the default order (DEFAULT_ACCOUNT_SORT), so it leaves the URL clean. */}
       <SortControl value={sort} dir={dir} options={SORTS} defaultValue="people" label="Sort accounts" />
+    </div>
+    {chips.length ? (
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {chips.map((c) => (
+          <button key={c.key} type="button" className="chip" onClick={() => update({ [c.key]: null })} title="Remove this filter">
+            {c.label}
+            <span aria-hidden className="text-brand-500">✕</span>
+          </button>
+        ))}
+      </div>
+    ) : null}
     </div>
   );
 }

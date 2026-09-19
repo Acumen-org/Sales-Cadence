@@ -1,6 +1,10 @@
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from './db';
+import { isNotAccount } from './non-prospects';
+import { isInternalCompany } from './internal-organizations';
+import { blockedCompanyIds } from './blocked-accounts';
+import { getSettings } from './settings';
 import type { SessionUser } from './auth/current-user';
 import { peopleScopeWhere, podPeopleWhere } from './people-scope';
 import { assertAllowed, isAdmin, isPodLeader, isBizOps, canSeeAllPods } from './auth/rbac';
@@ -29,6 +33,13 @@ export const ENRICHMENT_FIELDS: Record<EnrichmentEntity, EnrichmentField[]> = {
   ],
 };
 export const canEnrich = (user: SessionUser) => isAdmin(user) || isPodLeader(user);
+
+/** Accounts in this reader's scope that count as accounts here: cached, not ours, not blocked, not a free-mail host. */
+export async function listableAccountCount(user: SessionUser): Promise<number> {
+  const [{ rules }, blocked, companies] = await Promise.all([getSettings(), blockedCompanyIds(), prisma.companyCache.findMany({ where: await enrichmentCompanyScope(user), select: { id: true, name: true, domain: true } })]);
+  const excluded = new Set(blocked);
+  return companies.filter((c) => !isInternalCompany(c, rules) && !excluded.has(c.id) && !isNotAccount(c, rules)).length;
+}
 const MAX_ROWS = 5_000;
 const MAX_BYTES = 4_000_000;
 export type ParsedEnrichment = { headers: string[]; rows: Record<string, string>[] };

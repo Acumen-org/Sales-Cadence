@@ -8,6 +8,8 @@ import { IconFilter, IconSearch } from '@/components/icons';
 import { optionLabel } from '@/lib/twenty/labels';
 
 type Props = {
+  /** Only most-important people (Twenty's MIP tag). */
+  mip?: boolean;
   pods: { podOwnerValue: string; name: string }[];
   fos: { id: string; name: string }[];
   /** Option values from the Twenty mapping, so the filters offer exactly what the CRM holds. */
@@ -35,9 +37,9 @@ type Props = {
  * into one "stage" dropdown was what made the old list read like a guess.
  */
 const SEQUENCE_STATES = [
-  { value: '', label: 'Any sequence state' },
-  { value: 'cold', label: 'Never enrolled' },
-  { value: 'enrolled', label: 'In a sequence' },
+  { value: '', label: 'Any campaign state' },
+  { value: 'cold', label: 'Never in a campaign' },
+  { value: 'enrolled', label: 'In a campaign' },
   { value: 'replied', label: 'Replied or meeting' },
   { value: 'unresponsive', label: 'Finished, no reply' },
   { value: 'bad_data', label: 'Contact details wrong' },
@@ -54,7 +56,7 @@ const SORTS = [
 /** Filters whose "All" is a choice worth keeping in the URL, because the section has a default. */
 const EXPLICIT = new Set(['pod', 'fo']);
 
-export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, product, sort, status, tier, type, dir, tag, tags, listCategory, campaigns, campaign }: Props) {
+export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, product, sort, status, tier, type, dir, tag, tags, listCategory, campaigns, campaign, mip = false }: Props) {
   const navigate = useFilterNavigation();
   const panelId = useId();
   /** Open on arrival when the URL already carries one of these, so nothing filters invisibly. */
@@ -126,32 +128,37 @@ export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, p
         </select>
       ) : null}
       {/* Always in the first row, even with nothing to choose: the filter is part of the bar, not a surprise. */}
-      <select value={campaign} onChange={(e) => update({ campaign: e.target.value || null })} aria-label="Filter by campaign" className="!w-auto !py-2 !text-[12.5px]" disabled={!campaigns.length}>
+      <select value={campaign} onChange={(e) => update({ campaign: e.target.value || null })} aria-label="Filter by campaign" className="!w-auto !max-w-[200px] !py-2 !text-[12.5px]" disabled={!campaigns.length}>
         <option value="">{campaigns.length ? 'Any campaign' : 'No campaigns yet'}</option>
         {campaigns.some((c) => c.kind === 'running') ? <optgroup label="Active">{campaigns.filter((c) => c.kind === 'running').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup> : null}
         {campaigns.some((c) => c.kind === 'upcoming') ? <optgroup label="Upcoming">{campaigns.filter((c) => c.kind === 'upcoming').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup> : null}
       </select>
+      <button type="button" onClick={() => update({ mip: mip ? null : '1' })} aria-pressed={mip} className={mip ? 'chip' : 'chip-muted !border !border-line'} title="Most-important people">MIP</button>
       <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} aria-controls={panelId} className={`btn-secondary btn-sm ${showMore || moreCount ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
         <IconFilter size={14} /> Filters
         {moreCount ? <span className="rounded-full bg-brand-600 px-1.5 text-[11px] font-semibold leading-[17px] text-white">{moreCount}</span> : null}
       </button>
       <SortControl value={sort} dir={dir} options={SORTS} defaultValue="name" label="Sort people" />
 
-      {activeChips.map((c) => (
-        <button key={c.key} type="button" className="chip" onClick={() => update({ [c.key]: null })} title="Remove this filter">
-          {c.label}
-          <span aria-hidden className="text-brand-500">
-            ✕
-          </span>
-        </button>
-      ))}
+      {activeChips.length ? (
+        <div className="flex w-full flex-wrap items-center gap-2">
+          {activeChips.map((c) => (
+            <button key={c.key} type="button" className="chip" onClick={() => update({ [c.key]: null })} title="Remove this filter">
+              {c.label}
+              <span aria-hidden className="text-brand-500">
+                ✕
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <div id={panelId} className={`${showMore ? 'flex' : 'hidden'} w-full flex-wrap items-center gap-2 rounded-[10px] border border-line bg-canvas/70 p-2`}>
         <Select name="product" value={product} label="Filter by product interest" options={products} all="Any product" />
         <Select name="tier" value={tier} label="Filter by tier" options={tiers} all="Any tier" />
         <Select name="type" value={type} label="Filter by contact type" options={types} all="Any type" />
         <Select name="tag" value={tag} label="Filter by Twenty tag" options={tags} all="Any Twenty tag" />
-        <select value={status} onChange={(e) => update({ status: e.target.value || null })} aria-label="Filter by sequence state" className="!w-auto !py-2 !text-[12.5px]">
+        <select value={status} onChange={(e) => update({ status: e.target.value || null })} aria-label="Filter by campaign state" className="!w-auto !py-2 !text-[12.5px]">
           {SEQUENCE_STATES.map((s) => (
             <option key={s.value} value={s.value}>
               {s.label}

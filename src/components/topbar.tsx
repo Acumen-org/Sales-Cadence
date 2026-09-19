@@ -5,13 +5,13 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { globalSearchAction, type SearchHit } from '@/lib/actions/search';
-import { IconChevronRight, IconClose, IconHelp, IconSearch } from './icons';
+import { IconChevronRight, IconClose, IconSearch } from './icons';
 import { Avatar } from './ui';
 import type { Role } from '@prisma/client';
 import { NotificationsBell } from './notifications-bell';
 import { Modal } from './modal';
 
-type Props = { role: Role; unread: number; needsReview: number };
+type Props = { role: Role; unread: number; needsReview: number; timezone: string };
 const SECTIONS: Record<string, string> = {
   home: 'Home',
   tasks: 'Tasks',
@@ -26,7 +26,7 @@ const SECTIONS: Record<string, string> = {
   settings: 'Settings',
 };
 
-export function TopBar({ role, unread, needsReview }: Props) {
+export function TopBar({ role, unread, needsReview, timezone }: Props) {
   const pathname = usePathname();
   const key = pathname.split('/')[1];
   const title = SECTIONS[key] ?? 'Cadence';
@@ -44,8 +44,8 @@ export function TopBar({ role, unread, needsReview }: Props) {
       <div className="mr-auto flex min-w-0 items-center gap-2 pl-9 text-[12px] lg:pl-0"><span className="hidden text-ink-400 sm:inline">Workspace</span><IconChevronRight size={12} className="hidden text-ink-300 sm:block" /><span className="truncate font-medium text-ink-800">{title}</span></div>
       <button type="button" title="Search (Ctrl+K)" aria-label="Search" onClick={() => setSearchOpen(true)} className="flex h-9 items-center gap-2 rounded-lg border border-line bg-canvas/60 px-2.5 text-[11px] text-ink-500 transition hover:border-ink-300 sm:w-[245px]"><IconSearch size={15} /><span className="hidden sm:inline">Search your workspace</span><kbd className="ml-auto hidden !bg-white sm:inline">Ctrl K</kbd></button>
       <div className="mx-1 hidden h-5 w-px bg-line sm:block" />
-      <NotificationsBell unread={unread} />
-      <button type="button" className="btn-icon-ghost" title="Shortcuts and help" aria-label="Help" onClick={() => setHelpOpen(true)}><IconHelp size={18} /></button>
+      <NotificationsBell unread={unread} timezone={timezone} />
+      <button type="button" className="btn-ghost btn-sm" title="Shortcuts and help" onClick={() => setHelpOpen(true)}>Help</button>
     </header>
     {key !== 'home' ? <div className="px-4 pb-5 pt-7 sm:px-8"><h1 className="text-[28px] font-semibold tracking-[-0.045em] text-ink-900">{title}</h1></div> : null}
     {searchOpen ? <SearchDialog onClose={() => setSearchOpen(false)} /> : null}

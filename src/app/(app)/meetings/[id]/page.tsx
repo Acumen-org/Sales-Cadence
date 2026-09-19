@@ -7,7 +7,8 @@ import { prisma } from '@/lib/db';
 import { getSettings } from '@/lib/settings';
 import { FavouriteButton } from '@/components/meetings/favourite-button';
 import { formatInstant } from '@/lib/dates';
-import { getMeetingAnalyzer, parseAnalysis } from '@/lib/meetings/analysis';
+import { parseAnalysis } from '@/lib/meetings/analysis';
+import { parseTranscript, talkShare } from '@/lib/meetings/transcript';
 import { parseMeetingLink, PROVIDER_LABELS } from '@/lib/meetings/providers';
 import { canManageMeetingAction, deleteMeetingAction, saveTranscriptAction } from '@/lib/actions/meetings';
 import { ActionButton, ActionForm } from '@/components/action-form';
@@ -24,12 +25,14 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
   const meeting = await prisma.meeting.findFirst({
     // Scoped, not merely fetched: a transcript is a prospect conversation.
     where: { AND: [{ id }, await meetingReadWhere(user)] },
-    include: { attendees: { orderBy: [{ host: 'desc' }, { external: 'asc' }, { name: 'asc' }] }, createdBy: { select: { name: true } }, favourites: { where: { userId: user.id }, select: { userId: true } } },
+    include: { attendees: { orderBy: [{ host: 'desc' }, { external: 'asc' }, { name: 'asc' }] }, createdBy: { select: { name: true } }, bookedBy: { select: { name: true } }, favourites: { where: { userId: user.id }, select: { userId: true } } },
   });
   if (!meeting) notFound();
 
   const link = parseMeetingLink(meeting.sourceUrl);
   const analysis = parseAnalysis(meeting.analysis);
+  // Who spoke how much, from the transcript as it stands - the same normalised cues the reader sees.
+  const liveTalk = meeting.transcript ? talkShare(parseTranscript(meeting.transcript, (meeting.transcriptFormat as never) ?? undefined).cues) : [];
   const mayEdit = await canManageMeetingAction(id);
   const { rules } = await getSettings();
   // Externality follows the address and the current domain list, not the flag stored at creation.
@@ -74,11 +77,12 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
 
       <div className="px-6 pt-3">
         <div className="space-y-5 rounded-xl border border-line bg-white p-5">
-          <RecordFields className="lg:grid-cols-5" items={[
+          <RecordFields className="lg:grid-cols-6" items={[
             { label: 'Date and time', value: formatInstant(meeting.occurredAt, user.timezone) },
             { label: 'Duration', value: meeting.durationSec !== null ? `${Math.round(meeting.durationSec / 60)} min` : null },
-            { label: 'Platform', value: PROVIDER_LABELS[meeting.provider] },
+            { label: 'Platform', value: meeting.sourceUrl ? PROVIDER_LABELS[meeting.provider] : null },
             { label: 'Account', value: meeting.companyId ? <Link href={`/accounts/${meeting.companyId}`} className="text-brand-700 hover:underline">{meeting.companyName}</Link> : meeting.companyName ?? null },
+            { label: 'Booked by', value: meeting.bookedBy?.name ?? null },
             { label: 'Added by', value: meeting.createdBy?.name ?? null },
           ]} />
           <div><div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-ink-400">Products</div><ProductTags meetingId={meeting.id} products={meeting.products} canEdit={mayEdit} /></div>
@@ -103,7 +107,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
             <Card title="Add a transcript">
               <ActionForm action={saveTranscriptAction} className="space-y-3 p-4">
                 <input type="hidden" name="meetingId" value={meeting.id} />
-                <Field label="Transcript" info="WebVTT, SRT, Teams grouped text, a JSON export or plain text. Teams: Recording > ... > Transcript > Download. Zoom: Recordings > audio transcript. Meet: the transcript file in Drive.">
+                <Field label="Transcript">
                   <TranscriptInput name="transcript" label="Transcript" rows={8} />
                 </Field>
                 <button type="submit" className="btn-primary">
@@ -115,8 +119,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
         </div>
 
         <aside className="min-w-0 space-y-3">
-          {/* Analysis appears once Cadence AI holds a model; until then the page says nothing about it. */}
-          {getMeetingAnalyzer().name !== 'local-stats' ? <MeetingAnalysisPanel
+          <MeetingAnalysisPanel
             meetingId={meeting.id}
             analysis={analysis}
             status={meeting.analysisStatus}
@@ -125,7 +128,8 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
             error={meeting.analysisError}
             hasTranscript={Boolean(meeting.transcript)}
             canRun={mayEdit}
-          /> : null}
+            talkShare={liveTalk}
+          />
 
           <Card title={`Attendees (${meeting.attendees.length})`}>
             {meeting.attendees.length === 0 ? (

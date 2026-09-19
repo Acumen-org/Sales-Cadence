@@ -109,8 +109,8 @@ test('capture screens', async ({ page }) => {
 
   await page.goto('/enrichment');
   await shot(page, '07e-enrichment');
-  await page.goto('/enrichment?tab=byaccount');
-  await shot(page, '07e2-enrichment-by-account');
+  await page.goto('/enrichment?tab=accounts');
+  await shot(page, '07e2-enrichment-accounts');
   await page.goto('/enrichment?tab=scorecard');
   await shot(page, '07e3-enrichment-scorecard');
 

@@ -4,6 +4,7 @@ import { getSettings, type RulesSettings } from '../settings';
 import { exitEnrollment, finishEnrollment, markReplied, setPersonFlags } from './enrollment';
 import { advanceEnrollment, cancelOpenTasks, completeTask, skipTask, syncCancelled, type EngineContext, type ResolveResult } from './tasks';
 import { parseSteps } from '../sequences/steps';
+import { ANSWERED_CALL_PREFIX } from '../reply-credit';
 
 /**
  * Outreach-style outcomes layered on the primitive task operations:
@@ -37,6 +38,8 @@ export async function completeCall(input: CallOutcomeInput, ctx: EngineContext):
   if (disposition.badPhone) await setPersonFlags(task.enrollment.personId, { badPhone: true }, ctx.actor);
   let replied = false;
   if (shouldReply) {
+    // The call's touch says the person answered, so every Replies figure counts it as one.
+    await prisma.touch.updateMany({ where: { externalId: `task:${task.id}` }, data: { summary: `${ANSWERED_CALL_PREFIX} ${disposition.label}` } });
     const res = await markReplied(r.task.enrollmentId, { at: ctx.now ?? new Date(), evidenceId: `task:${task.id}:answered`, actor: ctx.actor, skipSync: ctx.skipSync });
     replied = res.changed;
   }

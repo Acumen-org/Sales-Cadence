@@ -10,7 +10,7 @@ import { findDateWithCapacity, loadFromRows, type DayLoad } from './caps';
 import { followingWorkingDay, nextWorkingDay, plannedDateForStep, shiftAfterStep, shouldGenerateNow } from './clock';
 import { loadSyncTask, loadSyncTasks, syncTaskCompleted, syncTaskResolved, syncTaskRescheduled, syncTasksCreated } from './sync-out';
 import { resolveNextStep } from './sequence-plan';
-import { WORKSPACE_TIMEZONE } from '../workspace';
+import { workspaceTimezone } from '../workspace';
 
 /** Who is acting, what time it is (tests), and whether to skip Twenty writes. */
 export type EngineContext = {
@@ -84,14 +84,14 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
       });
       if (!e || e.status !== 'ACTIVE') return { outcome: 'inactive' as const };
       if (e.campaign && e.campaign.status !== 'ACTIVE') return { outcome: 'inactive' as const, reason: 'Campaign is not running' };
-      const today = todayIn(WORKSPACE_TIMEZONE, now);
+      const today = todayIn(workspaceTimezone(), now);
       const steps = parseSteps(e.sequence.steps);
       const currentTasks = e.tasks.filter((t) => t.stepIndex === e.currentStep);
       const stepDone = e.currentStep >= 0 && currentTasks.length > 0 && currentTasks.every((t) => t.state !== 'PENDING');
 
       let shiftDays = e.shiftDays;
       if (stepDone && rules.clockMode === 'shift') {
-        shiftDays = shiftAfterStep(shiftDays, currentTasks[0].plannedDate, latestResolutionDate(currentTasks, WORKSPACE_TIMEZONE), 'shift');
+        shiftDays = shiftAfterStep(shiftDays, currentTasks[0].plannedDate, latestResolutionDate(currentTasks, workspaceTimezone()), 'shift');
       }
 
       const { nextIndex } = resolveNextStep({ currentStep: e.currentStep, currentStepId: e.currentStepId, steps });
@@ -137,7 +137,7 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
         dueDate = findDateWithCapacity(planned, step.actions.length, effectiveDailyCap(e.fo, rules), load, rules.workingDays);
       }
       const startDate = e.currentStep < 0 ? dueDate : e.startDate;
-      const dueAt = localDateToInstant(dueDate, WORKSPACE_TIMEZONE, 9);
+      const dueAt = localDateToInstant(dueDate, workspaceTimezone(), 9);
 
       const taskIds: string[] = [];
       for (let i = 0; i < step.actions.length; i++) {
@@ -328,10 +328,10 @@ export async function snoozeTask(input: { taskId: string; toDate: LocalDate }, c
     if (!task) return { ok: false as const, reason: 'not_found' as const };
     if (task.state !== 'PENDING') return { ok: false as const, reason: 'already_resolved' as const };
     if (task.enrollment.status === 'PAUSED') return HELD;
-    const today = todayIn(task.fo.timezone, ctx.now ?? new Date());
+    const today = todayIn(workspaceTimezone(), ctx.now ?? new Date());
     if (input.toDate <= today) return { ok: false as const, reason: 'invalid' as const, detail: 'Snooze to a future date.' };
     const toDate = nextWorkingDay(input.toDate, settings.rules.workingDays);
-    const claimed = await tx.task.updateMany({ where: { id: task.id, state: 'PENDING' }, data: { snoozedTo: toDate, dueAt: localDateToInstant(toDate, task.fo.timezone, 9) } });
+    const claimed = await tx.task.updateMany({ where: { id: task.id, state: 'PENDING' }, data: { snoozedTo: toDate, dueAt: localDateToInstant(toDate, workspaceTimezone(), 9) } });
     if (claimed.count === 0) return { ok: false as const, reason: 'already_resolved' as const };
     const updated = await tx.task.findUniqueOrThrow({ where: { id: task.id } });
     await logAudit({ entityType: 'task', entityId: task.id, action: 'snoozed', actor: ctx.actor, details: { from: task.snoozedTo ?? task.dueDate, to: toDate } }, tx);
@@ -394,7 +394,7 @@ export async function runSchedulerTick(ctx: EngineContext): Promise<{ scanned: n
   }
   // The end date. By default people mid-sequence finish and the campaign shows how many ran
   // over; a campaign marked to stop hard ends what is left, through the same exit path as a stop.
-  const today = todayIn(WORKSPACE_TIMEZONE, ctx.now ?? new Date());
+  const today = todayIn(workspaceTimezone(), ctx.now ?? new Date());
   const hardStops = await prisma.campaign.findMany({ where: { status: 'ACTIVE', hardStopAtEnd: true, endDate: { lt: today } }, select: { id: true } });
   for (const campaign of hardStops) {
     const cancelled = await prisma.$transaction(async (tx) => {

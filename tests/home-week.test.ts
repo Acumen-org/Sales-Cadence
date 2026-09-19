@@ -89,6 +89,7 @@ describe('home', () => {
       where: { id: enrollment.id },
       data: { repliedAt: new Date('2026-09-09T09:00:00Z'), meetingAt: new Date('2026-09-10T14:00:00Z'), status: 'MEETING' },
     });
+    await prisma.touch.create({ data: { personId: 'person-01', channel: 'EMAIL', direction: 'INBOUND', occurredAt: new Date('2026-09-09T09:00:00Z'), summary: 'Reply: Re: intro', externalId: 'message:home-week:person:person-01' } });
     const admin = sessionUser(b.users.ria, []);
     const home = await buildHome(admin, TUESDAY);
     const mine = home.team.find((t) => t.id === b.users.alisa.id)!;

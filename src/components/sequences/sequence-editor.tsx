@@ -5,7 +5,7 @@ import { ACTION_LABELS, ACTION_TYPES, newStepId, StepsSchema, type ActionType, t
 import { ActionForm } from '@/components/action-form';
 import type { ActionResult } from '@/lib/actions/users';
 import { ActionIcon, IconArrowDown, IconArrowUp, IconLock, IconPlus, IconTrash } from '@/components/icons';
-import { Field, Info } from '@/components/ui';
+import { Field } from '@/components/ui';
 import { RichTextEditor } from '@/components/rich-text-editor';
 
 function blankAction(type: ActionType): StepAction { return { id: newStepId('act'), type, label: ACTION_LABELS[type], template: '', bodyHtml: '<p></p>' }; }
@@ -96,11 +96,11 @@ export function SequenceEditor({ sequenceId, initialSteps, action, submitLabel, 
                 aria-selected={busy && at === selected}
                 aria-label={busy ? `Day ${day}: step ${at + 1}` : `Day ${day}`}
                 disabled={!busy && !canPlace}
-                title={busy ? steps[at].actions.map((a) => ACTION_LABELS[a.type]).join(' + ') : canPlace ? `Move step ${selected! + 1} to day ${day}` : undefined}
+                title={busy ? `Step ${at + 1}: ${steps[at].actions.map((a) => ACTION_LABELS[a.type]).join(' + ')}` : canPlace ? `Move step ${selected! + 1} to day ${day}` : undefined}
                 onClick={() => { if (busy) setSelected(at); else if (canPlace) update(selected!, { day }); }}
                 className={`relative flex h-9 flex-col items-center justify-center rounded-md border text-[11px] tabular-nums transition ${busy ? (at === selected ? 'border-brand-600 bg-brand-600 text-white' : 'border-brand-200 bg-brand-50 text-brand-800') : canPlace ? 'border-dashed border-line text-ink-400 hover:border-brand-300 hover:bg-brand-50/50' : 'border-line/60 text-ink-300'} ${weekStart ? 'ml-1' : ''}`}
               >
-                {busy ? <span className="text-[12px] font-semibold">{at + 1}</span> : <span>{day}</span>}
+                <span className={busy ? 'font-medium' : undefined}>{day}</span>
                 {weekStart ? <span className="absolute -top-3.5 left-0 text-[9px] uppercase tracking-wide text-ink-400">W{Math.floor((day - 1) / 7) + 1}</span> : null}
               </button>
             );
@@ -134,7 +134,7 @@ export function SequenceEditor({ sequenceId, initialSteps, action, submitLabel, 
     </ol>
     {!readOnly && <><div className="flex flex-wrap items-center justify-center gap-2 rounded-xl border border-dashed border-brand-300 bg-brand-50/40 p-5"><span className="mr-2 text-sm font-medium">New touchpoint</span>{ACTION_TYPES.map(type => <button key={type} type="button" className="btn-secondary" onClick={() => append(type)}><IconPlus size={13} /><ActionIcon action={type} size={14} />{ACTION_LABELS[type]}</button>)}</div>
       {/* The bar floats over the page, so the page reserves its height rather than hiding a card behind it. */}
-      <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-end gap-4 rounded-xl border border-line bg-white p-3 shadow-lg">{validation && <p role="alert" className="mr-auto text-sm font-medium text-red-700">{validation}</p>}<span className="text-[12px] text-ink-500"><span className="font-medium text-ink-900">{steps.length}</span> {steps.length === 1 ? 'touchpoint' : 'touchpoints'}, last on day <span className="font-medium text-ink-900">{(steps.at(-1)?.day ?? 1)}</span></span><label className="flex items-center gap-2 text-[12px] text-ink-500">Spans<span className="text-red-600" aria-hidden>*</span><input name="durationDays" type="number" min={steps.at(-1)?.day ?? 1} max={365} required value={duration} onChange={e => setDuration(e.target.value === '' ? '' : Number(e.target.value))} disabled={readOnly} aria-label="Days the sequence spans" className="!w-20 !py-1.5" />{Number(duration) === 1 ? 'day' : 'days'}</label><label className="flex items-center gap-2 text-[12px] text-ink-500">Repeat after<input name="repeatEveryDays" type="number" min={1} max={365} defaultValue={repeatEveryDays ?? ''} disabled={readOnly} aria-label="Repeat after this many days" className="!w-20 !py-1.5" placeholder="never" />days<Info text="Blank: the sequence finishes after its last step. A number: it starts again that many days after the last step, as the next round for the same people, until they reply, book a meeting or are removed. A light-touch nurture without a new campaign." /></label><button type="submit" className="btn-primary" disabled={Boolean(validation)}>{submitLabel}</button></div>
+      <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-end gap-4 rounded-xl border border-line bg-white p-3 shadow-lg">{validation && <p role="alert" className="mr-auto text-sm font-medium text-red-700">{validation}</p>}<span className="text-[12px] text-ink-500"><span className="font-medium text-ink-900">{steps.length}</span> {steps.length === 1 ? 'touchpoint' : 'touchpoints'}, last on day <span className="font-medium text-ink-900">{(steps.at(-1)?.day ?? 1)}</span></span><label className="flex items-center gap-2 text-[12px] text-ink-500">Spans<span className="text-red-600" aria-hidden>*</span><input name="durationDays" type="number" min={steps.at(-1)?.day ?? 1} max={365} required value={duration} onChange={e => setDuration(e.target.value === '' ? '' : Number(e.target.value))} disabled={readOnly} aria-label="Days the sequence spans" className="!w-20 !py-1.5" />{Number(duration) === 1 ? 'day' : 'days'}</label><label className="flex items-center gap-2 text-[12px] text-ink-500">Repeat after<input name="repeatEveryDays" type="number" min={1} max={365} defaultValue={repeatEveryDays ?? ''} disabled={readOnly} aria-label="Repeat after this many days" className="!w-20 !py-1.5" placeholder="never" />days</label><button type="submit" className="btn-primary" disabled={Boolean(validation)}>{submitLabel}</button></div>
       <div aria-hidden className="h-24" /></>}
   </ActionForm>;
 }

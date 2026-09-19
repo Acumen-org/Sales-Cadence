@@ -6,7 +6,7 @@ import { canReadPerson } from '@/lib/people-scope';
 import { accountScopeCompanyIds } from '@/lib/accounts-query';
 import { notFound } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
-import { canCreateMeeting, canManageCampaigns } from '@/lib/auth/rbac';
+import { canChangeCampaignMembers, canCreateMeeting } from '@/lib/auth/rbac';
 import { membershipFor, membershipLabel } from '@/lib/campaign-membership';
 import { AddToCampaign, RemoveFromCampaign } from '@/components/campaigns/add-to-campaign';
 import { prisma } from '@/lib/db';
@@ -58,9 +58,13 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
 
   let notes: TwentyNote[] = [];
   let opportunities: TwentyOpportunity[] = [];
+  // Only the tabs that show them ask Twenty; a tab of tasks or emails does not wait on that round trip.
+  const wantsTwenty = tab === 'overview' || tab === 'activity';
   try {
-    const client = await getTwentyClient();
-    [notes, opportunities] = await Promise.all([client.listNotes({ personId: id, limit: 20 }).then((p) => p.items), client.listOpportunities({ personId: id }).then((p) => p.items)]);
+    if (wantsTwenty) {
+      const client = await getTwentyClient();
+      [notes, opportunities] = await Promise.all([client.listNotes({ personId: id, limit: 20 }).then((p) => p.items), client.listOpportunities({ personId: id }).then((p) => p.items)]);
+    }
   } catch {
     // Notes and opportunities come straight from Twenty; when it is unreachable the page shows
     // what it has. The failure is counted on Settings > Twenty, not printed here.
@@ -117,6 +121,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
         <RecordHeader
           name={cachedPersonName(person)}
           accent={accent}
+          seed={id}
           badges={
             <>
               <Badge tone={standing.tone} dot>
@@ -165,18 +170,16 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
             <Tabs inset={false} current={tab} tabs={tabs.map((t) => ({ ...t, href: `/people/${id}?tab=${t.key}` }))} />
           </Surface>
           <div className="pt-3">
-            {tab === 'emails' ? <CrmHistory show="emails" personId={id} timezone={user.timezone} baseHref={`/people/${id}?tab=emails`} emailsAfter={sp.crmEmails} /> : null}
-            {tab === 'notes' ? <CrmHistory show="notes" personId={id} timezone={user.timezone} baseHref={`/people/${id}?tab=notes`} notesAfter={sp.crmNotes} /> : null}
+            {tab === 'emails' ? <Suspense fallback={<div className="surface h-40" />}><CrmHistory show="emails" personId={id} timezone={user.timezone} baseHref={`/people/${id}?tab=emails`} emailsAfter={sp.crmEmails} /></Suspense> : null}
+            {tab === 'notes' ? <Suspense fallback={<div className="surface h-40" />}><CrmHistory show="notes" personId={id} timezone={user.timezone} baseHref={`/people/${id}?tab=notes`} notesAfter={sp.crmNotes} /></Suspense> : null}
             {tab === 'tasks' ? (
               <Card title="Tasks">
                 {/* What is due for this person now and in the next month, plus campaigns about to start. */}
                 {(() => {
                   const due = openTasks.map((t) => ({ ...t, on: t.snoozedTo ?? t.dueDate })).filter((t) => t.on <= horizon).sort((a, b) => a.on.localeCompare(b.on) || a.actionIndex - b.actionIndex);
-                  const upcoming = memberships.filter((m) => m.kind === 'upcoming');
-                  if (!due.length && !upcoming.length) return <div className="p-4 text-sm text-ink-500">Nothing due in the next 30 days</div>;
+                  if (!due.length) return <div className="p-4 text-sm text-ink-500">Nothing due in the next 30 days</div>;
                   const days = [...new Set(due.map((t) => t.on))];
                   return <div className="divide-y divide-line">
-                    {upcoming.map((m) => <div key={m.campaignId} className="flex flex-wrap items-center gap-3 px-4 py-3 text-[13px]"><Badge tone="purple">Upcoming</Badge><Link href={`/campaigns/${m.campaignId}`} className="font-medium text-ink-900 hover:text-brand-700">{m.campaignName}</Link><span className="text-ink-500">starts {formatLocalDate(m.startDate, 'long')} · {m.sequenceName}</span></div>)}
                     {days.map((day) => <div key={day} className="px-4 py-3">
                       <div className={`text-[11.5px] font-medium ${day < today ? 'text-red-700' : day === today ? 'text-brand-700' : 'text-ink-500'}`}>{day < today ? `Overdue · ${formatLocalDate(day, 'long')}` : day === today ? 'Today' : formatLocalDate(day, 'long')}</div>
                       <ul className="mt-2 space-y-1.5">{due.filter((t) => t.on === day).map((t) => <li key={t.id} className="flex flex-wrap items-center gap-3 text-[13px]"><ActionIcon action={t.action} size={14} /><Link href={`/tasks?task=${t.id}&mode=flow&tab=${day < today ? 'overdue' : day === today ? 'today' : 'upcoming'}&pod=&fo=`} className="font-medium text-ink-900 hover:text-brand-700">{t.label}</Link><span className="text-ink-500">step {t.stepIndex + 1} · {t.fo.name}</span></li>)}</ul>
@@ -212,7 +215,17 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
 
             {tab === 'sequences' ? (
               <div className="space-y-4">
-                {enrollments.length === 0 ? <Card><div className="p-4 text-sm text-ink-500">Never enrolled.</div></Card> : null}
+                {memberships.filter((m) => m.kind === 'upcoming').map((m) => (
+                  <Card key={m.campaignId} title={<Link href={`/campaigns/${m.campaignId}`} className="font-medium hover:underline">{m.campaignName}</Link>} actions={<Badge tone="purple">{m.campaignStatus === 'PENDING_APPROVAL' ? 'Awaiting approval' : 'Upcoming'}</Badge>}>
+                    <div className="p-4"><RecordFields className="lg:grid-cols-4" items={[
+                      { label: 'Sequence', value: <Link href={`/sequences/${m.sequenceId}`} className="text-brand-700 hover:underline">{m.sequenceName}</Link> },
+                      { label: 'Starts', value: formatLocalDate(m.startDate, 'long') },
+                      { label: 'Ends', value: m.endDate ? formatLocalDate(m.endDate, 'long') : null },
+                      { label: 'Steps', value: m.steps },
+                    ]} /></div>
+                  </Card>
+                ))}
+                {enrollments.length === 0 && !memberships.some((m) => m.kind === 'upcoming') ? <Card><div className="p-4 text-sm text-ink-500">Not in a campaign</div></Card> : null}
                 {enrollments.map((e) => {
                   const steps = parseSteps(e.sequence.steps);
                   const eTasks = tasks.filter((t) => t.enrollmentId === e.id);
@@ -258,7 +271,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
             {tab === 'overview' ? (
               // Grouped the way the record is grouped in Twenty, so the two read the same.
               <div className="space-y-3">
-                <Card title={memberships.some((m) => m.kind !== 'finished') || !memberships.length ? 'Campaigns' : 'Last campaign'} actions={<span className="flex items-center gap-2">{canManageCampaigns(user, cadencePodId) ? <AddToCampaign personIds={[id]} className="btn-secondary btn-sm" /> : null}<Link href={`/people/${id}?tab=sequences`} className="btn-ghost btn-sm">View history</Link></span>}>
+                <Card title={memberships.some((m) => m.kind !== 'finished') || !memberships.length ? 'Campaigns' : 'Last campaign'} actions={<span className="flex items-center gap-2">{canChangeCampaignMembers(user, cadencePodId) ? <AddToCampaign personIds={[id]} className="btn-secondary btn-sm" /> : null}<Link href={`/people/${id}?tab=sequences`} className="btn-ghost btn-sm">View history</Link></span>}>
                   {memberships.length ? <div className="divide-y divide-line">{memberships.filter((m) => m.kind !== 'finished').concat(memberships.filter((m) => m.kind === 'finished').slice(0, 1)).map((m) => {
                     const label = membershipLabel(m);
                     return <div key={`${m.campaignId}-${m.enrollmentId ?? 'soon'}`} className="flex flex-wrap items-center justify-between gap-3 p-4">
@@ -266,7 +279,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                         <div className="font-medium text-ink-900"><Link href={`/campaigns/${m.campaignId}`} className="hover:text-brand-700 hover:underline">{m.campaignName}</Link></div>
                         <div className="mt-1 text-[12.5px] text-ink-500"><Link href={`/sequences/${m.sequenceId}`} className="text-brand-700">{m.sequenceName}</Link>{m.step !== null ? ` · step ${m.step + 1} of ${m.steps}` : m.kind === 'upcoming' ? ` · starts ${formatLocalDate(m.startDate)}` : ''}{m.endDate ? ` · ends ${formatLocalDate(m.endDate)}` : ''}</div>
                       </div>
-                      <div className="flex items-center gap-2"><Badge tone={label.tone}>{label.label}</Badge>{m.kind !== 'finished' && canManageCampaigns(user, m.podId) ? <RemoveFromCampaign campaignId={m.campaignId} campaignName={m.campaignName} personIds={[id]} className="btn-ghost btn-sm" /> : null}</div>
+                      <div className="flex items-center gap-2"><Badge tone={label.tone}>{label.label}</Badge>{m.kind !== 'finished' && canChangeCampaignMembers(user, m.podId) ? <RemoveFromCampaign campaignId={m.campaignId} campaignName={m.campaignName} personIds={[id]} className="btn-ghost btn-sm" /> : null}</div>
                     </div>;
                   })}</div> : <div className="p-4 text-sm text-ink-500">Never in a campaign</div>}
                 </Card>

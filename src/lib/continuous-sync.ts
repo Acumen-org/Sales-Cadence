@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { prisma } from './db';
 import { applyNeverProspectRule } from './non-prospects';
 import { hashPassword } from './auth/password';
-import { WORKSPACE_TIMEZONE } from './workspace';
+import { workspaceTimezone } from './workspace';
 import { getTwentyClient } from './twenty';
 import { refreshPersonCache } from './person-cache';
 import { reconcile } from './engine/reconcile';
@@ -16,9 +16,9 @@ export async function syncWorkspaceMembers(client: TwentyClient) {
     const email = member.email?.trim().toLowerCase(); if (!email) continue;
     const existing = await prisma.user.findFirst({ where: { OR: [{ twentyMemberId: member.id }, { email }] } });
     if (existing) {
-      if (!existing.twentyMemberId) await prisma.user.updateMany({ where: { id: existing.id, twentyMemberId: null }, data: { twentyMemberId: member.id, timezone: WORKSPACE_TIMEZONE } });
+      if (!existing.twentyMemberId) await prisma.user.updateMany({ where: { id: existing.id, twentyMemberId: null }, data: { twentyMemberId: member.id, timezone: workspaceTimezone() } });
     } else {
-      await prisma.user.upsert({ where: { email }, create: { email, name: [member.firstName,member.lastName].filter(Boolean).join(' ') || email, twentyMemberId: member.id, timezone: WORKSPACE_TIMEZONE, role: 'JUNIOR_FO', active: false, passwordHash: await hashPassword(randomBytes(32).toString('hex')) }, update: {} });
+      await prisma.user.upsert({ where: { email }, create: { email, name: [member.firstName,member.lastName].filter(Boolean).join(' ') || email, twentyMemberId: member.id, timezone: workspaceTimezone(), role: 'JUNIOR_FO', active: false, passwordHash: await hashPassword(randomBytes(32).toString('hex')) }, update: {} });
     }
   }
 }

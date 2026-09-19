@@ -1,10 +1,10 @@
 import type { CampaignStatus, EnrollmentStatus } from '@prisma/client';
 import { prisma } from './db';
 import { addDays, todayIn, type LocalDate } from './dates';
-import { WORKSPACE_TIMEZONE } from './workspace';
+import { workspaceTimezone } from './workspace';
 import { safeParseSteps } from './sequences/steps';
 import type { SessionUser } from './auth/current-user';
-import { canManageCampaigns, visiblePodIds } from './auth/rbac';
+import { canChangeCampaignMembers, visiblePodIds } from './auth/rbac';
 
 /**
  * Who is in which campaign - before it starts as well as after.
@@ -105,7 +105,7 @@ export async function campaignChoices(user: SessionUser, opts: { manageOnly?: bo
     select: { id: true, name: true, status: true, startDate: true, endDate: true, podId: true, personIds: true, pod: { select: { name: true } }, _count: { select: { enrollments: { where: { status: { in: ['ACTIVE', 'PAUSED'] } } } } } },
   });
   return campaigns
-    .filter((c) => !opts.manageOnly || canManageCampaigns(user, c.podId))
+    .filter((c) => !opts.manageOnly || canChangeCampaignMembers(user, c.podId))
     .map((c) => ({ id: c.id, name: c.name, status: c.status, kind: UPCOMING.includes(c.status) ? 'upcoming' as const : 'running' as const, startDate: c.startDate, endDate: c.endDate, podId: c.podId, podName: c.pod.name, members: UPCOMING.includes(c.status) ? c.personIds.length : c._count.enrollments }));
 }
 
@@ -116,7 +116,7 @@ export type StartingSoon = { id: string; name: string; startDate: LocalDate; end
  * Tasks, Home and the record pages show them so a campaign exists on screen before its first task.
  */
 export async function startingSoon(user: SessionUser, opts: { days?: number; personIds?: string[]; now?: Date; podId?: string | null } = {}): Promise<StartingSoon[]> {
-  const today = todayIn(WORKSPACE_TIMEZONE, opts.now ?? new Date());
+  const today = todayIn(workspaceTimezone(), opts.now ?? new Date());
   const until = addDays(today, opts.days ?? 7);
   const pods = visiblePodIds(user);
   const campaigns = await prisma.campaign.findMany({

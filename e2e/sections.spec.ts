@@ -116,7 +116,7 @@ test('a meeting plays in the app with its transcript and no analysis until a mod
     await results.getByRole('button', { name }).first().click({ timeout: 20_000 });
   };
   // The organiser is already on the meeting, so they are not offered again.
-  await expect(page.locator('#main-content').getByText('Alisa Senior')).toBeVisible();
+  await expect(page.locator('#main-content').getByRole('listitem').getByText('Alisa Senior')).toBeVisible();
   await finder.click();
   await finder.fill('Alisa');
   await expect(results).toContainText('No matching people');
@@ -146,8 +146,11 @@ test('a meeting plays in the app with its transcript and no analysis until a mod
   // Transcript underneath, with speakers.
   await expect(page.getByText('Thanks for making the time today.')).toBeVisible();
   await expect(page.getByText('Dummy One').first()).toBeVisible();
-  // No model is connected, so the page says nothing about analysis at all (B8).
-  await expect(page.locator('main').getByText('Cadence AI')).toHaveCount(0);
+  // No model is connected: the Cadence AI panel shows what the transcript itself says - who spoke
+  // how much - and nothing that would need a model.
+  await expect(page.locator('main').getByRole('heading', { name: 'Talk time' })).toBeVisible();
+  await expect(page.locator('main').getByText('Analysis details')).toHaveCount(0);
+  await expect(page.locator('main').getByText('Ready', { exact: true })).toHaveCount(0);
   await expect(page.locator('main').getByText('Not connected')).toHaveCount(0);
 
   // Found by who was there, and starred for later.

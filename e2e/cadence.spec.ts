@@ -64,7 +64,7 @@ test('anonymous visitors are redirected to login', async ({ page }) => {
 
 /** The new campaign form: pick people from the directory; the review runs by itself. */
 async function pickPeople(page: Page, names: string[]) {
-  await page.getByLabel('Sequence state').selectOption('any');
+  await page.getByLabel('Campaign state').selectOption('any');
   await page.getByLabel('Search people to add').fill('Dummy');
   for (const name of names) await page.getByLabel(`Select ${name}`, { exact: true }).check();
 }
@@ -81,7 +81,7 @@ test('a Senior FO creates a campaign and the review names who is skipped', async
   // The review table names the reason; the picker's tag filter and pills carry the same words.
   const skipped = page.getByRole('table').filter({ has: page.getByRole('columnheader', { name: 'Skipped', exact: true }) });
   await expect(skipped.getByRole('cell', { name: 'Do not contact', exact: true })).toBeVisible();
-  await expect(page.getByText(/Fits up to \d+ people/)).toBeVisible();
+  await expect(page.getByText(/Room for \d+ people/)).toBeVisible();
   await page.getByRole('button', { name: /Create campaign · 4 start/ }).click();
   await expect(page).toHaveURL(/\/campaigns\/[0-9a-f-]+$/);
   await expect(page.getByRole('heading', { name: 'E2E SaaStr follow-up' })).toBeVisible();
@@ -277,6 +277,9 @@ test('reports and people pages render with data', async ({ page }) => {
   await page.goto('/people?tier=LEVEL_1');
   await expect(page.locator('table').getByText('Tier 1', { exact: true }).first()).toBeVisible();
   await page.goto('/people?list=COLD_BD');
+  // Tags show one and then +N; the rest open in place.
+  const more = page.locator('table').getByRole('button', { name: /Show \d+ more tags/ });
+  for (let i = 0; i < 50 && (await more.count()) > 0; i++) await more.first().click();
   await expect(page.locator('table').getByText('Cold BD', { exact: true }).first()).toBeVisible();
   // No option constant ever reaches the screen.
   await expect(page.locator('table').getByText(/^[A-Z][A-Z0-9]+_[A-Z0-9_]+$/)).toHaveCount(0);

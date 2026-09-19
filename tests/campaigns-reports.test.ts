@@ -47,6 +47,7 @@ describe('campaigns and reports', () => {
     // person-01 replies; person-02 completes email 1; person-03 untouched (will be overdue); person-04 completes whole sequence quickly
     const e1 = await prisma.enrollment.findFirstOrThrow({ where: { personId: 'person-01' } });
     await markReplied(e1.id, { at: at('2026-09-08'), actor: SYSTEM_ACTOR });
+    await prisma.touch.create({ data: { personId: 'person-01', channel: 'EMAIL', direction: 'INBOUND', occurredAt: at('2026-09-08'), summary: 'Reply: Re: SaaStr', externalId: 'message:cr:person:person-01' } });
     const t2 = await prisma.task.findFirstOrThrow({ where: { enrollment: { personId: 'person-02' }, label: 'Email 1' } });
     await completeTask({ taskId: t2.id, source: 'MANUAL' }, { actor: SYSTEM_ACTOR, now: at('2026-09-07') });
     const e4 = await prisma.enrollment.findFirstOrThrow({ where: { personId: 'person-04' } });

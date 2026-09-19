@@ -68,6 +68,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
           name={company.name}
           shape="square"
           accent={accent}
+          seed={company.id}
           badges={
             <>
               {detail.mine ? <Badge tone="blue">mine</Badge> : null}
@@ -134,10 +135,10 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
             <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
               <Stat label="People" value={stats.people} />
               <Stat label="In a campaign" value={stats.inSequence} />
-              <Stat label="Replied" value={stats.replied} tone="good" />
+              <Stat label="Replies" value={stats.replied} />
               <Stat label="Meetings" value={stats.meetings} />
               <Stat label="Touches" value={stats.touches} />
-              <Stat label="Open tasks" value={stats.openTasks} tone={stats.openTasks ? 'warn' : 'default'} />
+              <Stat label="Open tasks" value={stats.openTasks} />
             </div>
             <div className="grid gap-3 lg:grid-cols-2">
               <Card title="Account details">

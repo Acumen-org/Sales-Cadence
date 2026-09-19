@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { TranscriptInput } from './transcript-input';
 import { optionLabel } from '@/lib/twenty/labels';
-import { PRODUCTS, WORKSPACE_TIMEZONE, WORKSPACE_TIMEZONE_LABEL } from '@/lib/workspace';
+import { PRODUCTS, timezoneLabel } from '@/lib/workspace';
 import { useState, useTransition } from 'react';
 import { attendeesFromTranscriptAction, createMeetingAction, inspectMeetingLinkAction, updateMeetingAction, type AttendeeSelection, type LinkSuggestion } from '@/lib/actions/meetings';
 import { extractRecordingUrl, parseMeetingLink } from '@/lib/meetings/providers';
@@ -15,6 +15,8 @@ export type MeetingFormValues = {
   id?: string;
   title: string;
   sourceUrl: string;
+  /** The FO who booked it. */
+  bookedById: string;
   occurredAt: string; // datetime-local value
   durationMin: number | '';
   companyId: string;
@@ -28,13 +30,14 @@ export type MeetingFormValues = {
  * fills the title, the date and the account it names, and says whether the recording will play
  * here. Paste a transcript and the speakers become attendees. Everything filled in stays editable.
  */
-export function MeetingForm({ companies, initial, mode, timezone }: { companies: { id: string; name: string }[]; initial: MeetingFormValues; mode: 'create' | 'edit'; timezone: string }) {
+export function MeetingForm({ companies, fos, initial, mode, timezone }: { companies: { id: string; name: string }[]; fos: { id: string; name: string }[]; initial: MeetingFormValues; mode: 'create' | 'edit'; timezone: string }) {
   const router = useRouter();
   const [url, setUrl] = useState(initial.sourceUrl);
   const [title, setTitle] = useState(initial.title);
   const [occurredAt, setOccurredAt] = useState(initial.occurredAt);
   const [durationMin, setDurationMin] = useState<number | ''>(initial.durationMin);
   const [companyId, setCompanyId] = useState(initial.companyId);
+  const [bookedById, setBookedById] = useState(initial.bookedById);
   const [suggestion, setSuggestion] = useState<LinkSuggestion | null>(null);
   const [additions, setAdditions] = useState<AttendeeSelection[] | null>(null);
   const [transcript, setTranscript] = useState(initial.transcript);
@@ -77,9 +80,9 @@ export function MeetingForm({ companies, initial, mode, timezone }: { companies:
       {initial.id ? <input type="hidden" name="meetingId" value={initial.id} /> : null}
 
       <div className="grid gap-4 md:grid-cols-2">
-        <Field label="Recording or meeting link" required className="md:col-span-2">
+        <Field label="Recording or meeting link" className="md:col-span-2">
           <div className="flex flex-wrap items-center gap-2">
-            <input name="sourceUrl" aria-label="Recording or meeting link" required value={url} onChange={(e) => setUrl(extractRecordingUrl(e.target.value))} placeholder="https://" className="!w-auto min-w-0 flex-1" />
+            <input name="sourceUrl" aria-label="Recording or meeting link" value={url} onChange={(e) => setUrl(extractRecordingUrl(e.target.value))} placeholder="https://" className="!w-auto min-w-0 flex-1" />
             <button type="button" className="btn-secondary" disabled={pending || !parsed || Boolean(parsed.note?.includes('does not look like a URL'))} onClick={fillFromLink}>{pending ? 'Reading…' : 'Fill from link'}</button>
           </div>
         </Field>
@@ -94,14 +97,20 @@ export function MeetingForm({ companies, initial, mode, timezone }: { companies:
           <input name="title" required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Meeting title" />
         </Field>
 
-        <Field label="Date and time" required hint={timezone === WORKSPACE_TIMEZONE ? WORKSPACE_TIMEZONE_LABEL : timezone}>
+        <Field label="Date and time" required hint={timezoneLabel(timezone)}>
           <input name="occurredAt" type="datetime-local" required value={occurredAt} onChange={(e) => setOccurredAt(e.target.value)} />
         </Field>
         <Field label="Duration (minutes)">
           <input name="durationMin" type="number" min={0} max={1440} value={durationMin} onChange={(e) => setDurationMin(e.target.value === '' ? '' : Number(e.target.value))} />
         </Field>
 
-        <Field label="Account" className="md:col-span-2">
+        <Field label="Booked by" required>
+          <select name="bookedById" required value={bookedById} onChange={(e) => setBookedById(e.target.value)}>
+            <option value="">Choose the FO</option>
+            {fos.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Account">
           <select name="companyId" value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
             <option value="">No account</option>
             {companies.map((c) => (

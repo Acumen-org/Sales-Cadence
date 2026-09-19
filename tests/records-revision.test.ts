@@ -15,7 +15,7 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 let b: Basics;
 const form = (values: Record<string, string>) => { const fd = new FormData(); for (const [key, value] of Object.entries(values)) fd.set(key, value); return fd; };
 const session = (user: Basics['users']['alisa'], podIds: string[] = []): SessionUser => ({ ...user, timezone: WORKSPACE_TIMEZONE, podIds, pods: podIds.map((id) => ({ id, name: id })) });
-const meetingForm = (attendees: unknown[] = []) => form({ title: 'Pilot meeting', sourceUrl: 'https://video.example.com/recording.mp4', occurredAt: '2026-09-09T10:30', attendeesJson: JSON.stringify(attendees) });
+const meetingForm = (attendees: unknown[] = []) => form({ title: 'Pilot meeting', sourceUrl: 'https://video.example.com/recording.mp4', occurredAt: '2026-09-09T10:30', bookedById: b.users.alisa.id, attendeesJson: JSON.stringify(attendees) });
 
 beforeEach(async () => { await resetDb(); b = await seedBasics(); auth.user.mockResolvedValue(session(b.users.ria)); });
 

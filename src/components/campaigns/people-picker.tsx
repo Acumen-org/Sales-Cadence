@@ -8,7 +8,7 @@ import { optionLabel } from '@/lib/twenty/labels';
 
 type Props = { value: string[]; onChange: (ids: string[]) => void };
 
-const STATE_TONE: Record<PickerRow['state'], 'gray' | 'green' | 'blue' | 'amber' | 'red'> = { 'Never enrolled': 'gray', 'In a sequence': 'green', Replied: 'blue', Finished: 'amber', 'Do not contact': 'red' };
+const STATE_TONE: Record<PickerRow['state'], 'gray' | 'green' | 'blue' | 'amber' | 'red'> = { 'Never in a campaign': 'gray', 'In a campaign': 'green', Replied: 'blue', Finished: 'amber', 'Do not contact': 'red' };
 
 /**
  * Choosing a campaign's people from the directory: the same filters as People, a page of a
@@ -88,29 +88,29 @@ export function PeoplePicker({ value, onChange }: Props) {
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative w-full max-w-[220px]">
           <IconSearch size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
-          <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search name, company, email" aria-label="Search people to add" className="!pl-9 !py-1.5" />
+          <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search people" aria-label="Search people to add" className="!pl-9 !py-1.5" />
         </div>
         {options ? (
           <>
             <Select name="pod" label="Filter by pod" all="All pods" items={options.pods.map((p) => ({ value: p.value, label: p.name }))} />
             <Select name="fo" label="Filter by FO" all="All FOs" items={options.fos.map((f) => ({ value: f.id, label: f.name }))} />
+            <select value={filters.state} onChange={(e) => set({ state: e.target.value as PickerFilters['state'] })} aria-label="Campaign state" className="!w-auto !max-w-[190px] !py-1.5 !text-[12.5px]">
+              <option value="cold">Never in a campaign</option>
+              <option value="finished">Finished a sequence</option>
+              <option value="enrolled">In a campaign</option>
+              <option value="any">Any campaign state</option>
+            </select>
             <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} className={`btn-secondary btn-sm ${showMore || moreCount ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
               <IconFilter size={14} /> Filters{moreCount ? <span className="ml-1 tabular-nums">{moreCount}</span> : null}
             </button>
-            {showMore || moreCount ? <>
+            {showMore || moreCount ? <div className="flex w-full flex-wrap items-center gap-2 rounded-[10px] border border-line bg-canvas/70 p-2">
               <Select name="tier" label="Filter by tier" all="Any tier" items={options.tiers.map((t) => ({ value: t, label: optionLabel(t) }))} />
               <Select name="type" label="Filter by contact type" all="Any type" items={options.types.map((t) => ({ value: t, label: optionLabel(t) }))} />
               <Select name="product" label="Filter by product" all="Any product" items={options.products.map((p) => ({ value: p, label: optionLabel(p) }))} />
               {options.tags.length ? <Select name="tag" label="Filter by Twenty tag" all="Any tag" items={options.tags.map((t) => ({ value: t, label: optionLabel(t) }))} /> : null}
-            </> : null}
+            </div> : null}
           </>
         ) : null}
-        <select value={filters.state} onChange={(e) => set({ state: e.target.value as PickerFilters['state'] })} aria-label="Sequence state" className="!w-auto !py-1.5 !text-[12.5px]">
-          <option value="cold">Never enrolled</option>
-          <option value="finished">Finished a sequence</option>
-          <option value="enrolled">In a sequence</option>
-          <option value="any">Any sequence state</option>
-        </select>
       </div>
 
       <div className="flex flex-wrap items-center gap-3 text-[12.5px] text-ink-600">
@@ -136,7 +136,7 @@ export function PeoplePicker({ value, onChange }: Props) {
                 <th>Person</th>
                 <th>Pod</th>
                 <th>Tier</th>
-                <th>Sequence</th>
+                <th>Campaign</th>
               </tr>
             </thead>
             <tbody>

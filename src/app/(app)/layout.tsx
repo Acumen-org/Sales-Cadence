@@ -9,6 +9,7 @@ import { Sidebar } from '@/components/sidebar';
 import { TopBar } from '@/components/topbar';
 import { unreadNotifications } from '@/lib/notifications';
 import { LiveRefresh } from '@/components/live-refresh';
+import { workspaceTimezone } from '@/lib/workspace';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
@@ -34,7 +35,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <Sidebar user={user} mode={e.TWENTY_MODE} dryRun={e.CADENCE_DRY_RUN} todayCount={todayCount} overdueCount={overdueCount} />
       <main id="main-content" tabIndex={-1} className="flex min-w-0 flex-1 flex-col outline-none">
         <LiveRefresh />
-        <TopBar role={user.role} unread={unread} needsReview={needsReview} />
+        <TopBar role={user.role} unread={unread} needsReview={needsReview} timezone={workspaceTimezone()} />
         <div className="page-content min-w-0 flex-1">{children}</div>
       </main>
     </div></FilterNavigationProvider>

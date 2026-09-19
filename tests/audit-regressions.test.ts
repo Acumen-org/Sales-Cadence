@@ -62,7 +62,7 @@ describe('terminal outcomes and concurrent task actions', () => {
   it('keeps the ordering instant aligned with a snoozed date', async () => {
     const task = await finalTask('EMAIL');
     const result = await snoozeTask({ taskId: task.id, toDate: '2026-09-10' }, context);
-    expect(result.ok && dateTimeInputValue(result.task.dueAt, 'Europe/London')).toBe('2026-09-10T09:00');
+    expect(result.ok && dateTimeInputValue(result.task.dueAt, 'America/Chicago')).toBe('2026-09-10T09:00');
   });
 });
 
@@ -145,7 +145,7 @@ describe('account security and validation', () => {
 
 describe('meeting forms', () => {
   const form = (url = 'https://files.example.com/call.mp4') => {
-    const fd = new FormData(); fd.set('title', 'Timezone review'); fd.set('sourceUrl', url); fd.set('occurredAt', '2026-09-08T14:30'); return fd;
+    const fd = new FormData(); fd.set('title', 'Timezone review'); fd.set('sourceUrl', url); fd.set('occurredAt', '2026-09-08T14:30'); fd.set('bookedById', b.users.alisa.id); return fd;
   };
   it('creates and edits meetings using the viewer timezone', async () => {
     auth.requireUser.mockResolvedValue({ ...session(b.users.ria), timezone: 'America/New_York' });

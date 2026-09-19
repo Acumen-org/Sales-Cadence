@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@/lib/db';
 import { retryFailedWrites } from '@/lib/engine/sync-retry';
-import { requireAdmin } from '../auth/current-user';
+import { requireAdmin, requireUser } from '../auth/current-user';
 import { env } from '../env';
 import { logAudit, userActor } from '../audit';
 import { refreshPersonCache, syncPodsFromTwenty } from '../person-cache';
@@ -16,7 +16,7 @@ import type { ActionResult } from './users';
 
 /** The same pass the worker runs every minute, now. */
 export async function syncNowAction(): Promise<ActionResult> {
-  await requireAdmin();
+  await requireUser();
   try {
     const stats = await syncContinuously();
     for (const path of ['/settings', '/people', '/accounts', '/tasks', '/home']) revalidatePath(path);

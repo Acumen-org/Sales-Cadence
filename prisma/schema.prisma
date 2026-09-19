@@ -152,6 +152,8 @@ model User {
   meetingFavourites MeetingFavourite[]
   blockedAccounts BlockedAccount[] @relation("BlockedByUser")
   enrichmentMarks EnrichmentMark[] @relation("EnrichmentAssignee")
+  mipStars        MipStars[]       @relation("MipStarsBy")
+  bookedMeetings  Meeting[]        @relation("MeetingBookedBy")
 }
 
 model Session {
@@ -541,6 +543,9 @@ model Meeting {
   analysedAt       DateTime?
   createdById      String?
   createdBy        User?           @relation("MeetingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  /// The FO who booked it: mandatory on a new meeting, set on older ones when someone edits them.
+  bookedById String?
+  bookedBy User? @relation("MeetingBookedBy", fields: [bookedById], references: [id], onDelete: SetNull)
   createdAt        DateTime        @default(now())
   favourites       MeetingFavourite[]
   updatedAt        DateTime        @updatedAt
@@ -676,6 +681,16 @@ model Setting {
 /// A note on one missing field of one record: who is researching it, or that it could not be
 /// found. "Not found" takes the gap out of the queue while the value is still missing; when a value
 /// arrives from Twenty the gap is gone and the mark is history.
+/// How much a most-important person matters to the pod: one to three stars, set by the pod itself.
+/// Empty until somebody in the pod says; a Cadence judgement, never written back to Twenty.
+model MipStars {
+  personId    String   @id
+  stars       Int
+  updatedById String?
+  updatedBy   User?    @relation("MipStarsBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedAt   DateTime @updatedAt
+}
+
 model EnrichmentMark {
   id         String   @id @default(uuid())
   entity     String

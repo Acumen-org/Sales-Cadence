@@ -17,7 +17,7 @@ test('account associations, explicit whole-account count and both sort direction
   await login(page);
   await page.goto('/accounts?pod=&fo=');
   await expect(page.getByText('People with an account', { exact: true })).toBeVisible();
-  for (const column of ['PODs', 'FOs', 'Product']) await expect(page.getByRole('columnheader', { name: column, exact: true })).toBeVisible();
+  for (const column of ['Pods', 'FOs', 'Product']) await expect(page.getByRole('columnheader', { name: column, exact: true })).toBeVisible();
   for (const column of ['Industry', 'City', 'Owner']) await expect(page.getByRole('columnheader', { name: column, exact: true })).toHaveCount(0);
   for (const direction of ['asc', 'desc'] as const) {
     await setDirection(page, direction);

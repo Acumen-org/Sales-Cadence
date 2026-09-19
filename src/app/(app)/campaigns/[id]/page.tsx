@@ -97,11 +97,10 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
         {total ? (
           <div className="relative mt-3 h-2 w-full rounded-full bg-ink-100">
             <div className="absolute inset-y-0 left-0 rounded-full bg-brand-500" style={{ width: `${pct(Math.min(todayDay, total))}%` }} />
-            {capacity?.lastStart ? <div className="absolute -top-1 h-4 w-0.5 bg-violet-500" style={{ left: `${pct(dayOf(capacity.lastStart))}%` }} title={`Last start ${formatLocalDate(capacity.lastStart)}`} /> : null}
             {todayDay >= 1 && todayDay <= total ? <div className="absolute -top-1.5 h-5 w-0.5 bg-ink-900" style={{ left: `${pct(todayDay)}%` }} title="Today" /> : null}
           </div>
         ) : null}
-        {total ? <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-ink-500"><span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-brand-500" />elapsed</span>{capacity?.lastStart ? <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-violet-500" />last start {formatLocalDate(capacity.lastStart)}</span> : null}<span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-ink-900" />today</span></div> : null}
+        {total ? <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-ink-500"><span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-brand-500" />elapsed</span><span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-ink-900" />today</span></div> : null}
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">

@@ -9,40 +9,44 @@ async function login(page: Page, email = 'admin@cadence.local', password = 'admi
 }
 
 /**
- * Enrichment as work: the queue folds under the account, scores by field, filters on facts about
- * the record in one row, and a selection can be exported, handed to somebody or marked not found -
- * which hides the gap until it is reopened.
+ * Enrichment as work: three views - People, Accounts, Scorecard - with the record filters in one
+ * row behind Filters, a scorecard whose record counts open the matching queue, and a selection
+ * that can be exported, handed to somebody or marked not found, which hides the gap until it is
+ * reopened from the footer.
  */
-test('enrichment folds by account, scores by field and carries the record filters in one row', async ({ page }) => {
+test('enrichment has three views, scores by field and carries the record filters in one row', async ({ page }) => {
   await login(page);
-  await page.goto('/enrichment?tab=byaccount');
-  await expect(page.getByRole('columnheader', { name: 'Account needs' })).toBeVisible();
-  await expect(page.getByRole('columnheader', { name: 'Most missing' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Export', exact: true }).first()).toBeVisible();
-
   await page.goto('/enrichment?tab=scorecard');
+  for (const gone of ['By account', 'Imports']) await expect(page.getByRole('link', { name: gone, exact: true })).toHaveCount(0);
+  await expect(page.getByText('Contacts', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('People', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('Everyone', { exact: true }).first()).toBeVisible();
-  await expect(page.getByRole('columnheader', { name: 'Email' })).toBeVisible();
-  await expect(page.getByRole('columnheader', { name: 'AUM' })).toBeVisible();
+  await expect(page.getByText('By pod', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('By FO', { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'Email' }).first()).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'AUM' }).first()).toBeVisible();
+  // A group's record count opens that group's queue with the pod already chosen.
+  await page.locator('a[href*="tab=contacts"][href*="pod="]').first().click();
+  await expect(page).toHaveURL(/tab=contacts.*pod=/);
+  await expect(page.getByLabel('Filter by pod', { exact: true })).not.toHaveValue('');
 
   await page.goto('/enrichment?tab=contacts');
+  await expect(page.getByRole('columnheader', { name: 'Person', exact: true })).toBeVisible();
   // One row: search, pod, FO, what is missing, sort; the rest behind Filters.
   for (const label of ['Search records to enrich', 'Filter by pod', 'Filter by FO', 'Missing information', 'Sort']) await expect(page.getByLabel(label, { exact: true })).toBeVisible();
   await expect(page.getByLabel('Filter by tier', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: /^Filters/ }).click();
-  for (const label of ['Filter by account', 'Filter by tier', 'Filter by contact type', 'Filter by product', 'Filter by campaign', 'Filter by Twenty tag', 'Filter by priority', 'Show open or not-found gaps']) {
+  for (const label of ['Filter by account', 'Filter by tier', 'Filter by contact type', 'Filter by product', 'Filter by campaign', 'Filter by Twenty tag']) {
     await expect(page.getByLabel(label, { exact: true })).toBeVisible();
   }
-  await page.getByLabel('Filter by priority', { exact: true }).selectOption('critical');
-  await expect(page).toHaveURL(/priority=critical/);
-  await expect(page.locator('tbody td:nth-child(4)').filter({ hasText: 'Useful' })).toHaveCount(0);
+  for (const label of ['Filter by priority', 'Show open or not-found gaps']) await expect(page.getByLabel(label, { exact: true })).toHaveCount(0);
   const href = await page.getByRole('link', { name: 'Export to enrich' }).getAttribute('href');
-  expect(href).toContain('priority=critical');
   expect(href).toContain('entity=person');
+
   await page.goto('/enrichment?tab=accounts');
+  await expect(page.getByRole('columnheader', { name: 'Account', exact: true })).toBeVisible();
   await page.getByRole('button', { name: /^Filters/ }).click();
   await expect(page.getByLabel('Filter by tier', { exact: true })).toHaveCount(0);
-  await expect(page.getByLabel('Filter by priority', { exact: true })).toBeVisible();
   await expect(page.getByLabel('Filter by pod', { exact: true })).toBeVisible();
 });
 
@@ -60,14 +64,12 @@ test('a selection is exported, assigned for research, marked not found and reope
   const who = await assignee.locator('option:checked').innerText();
   await page.getByRole('button', { name: 'Assign', exact: true }).click();
   await expect(page.getByRole('row', { name: new RegExp(name) }).first()).toContainText(`· ${who}`);
-  await expect(page.getByText('Being researched', { exact: true }).locator('..')).not.toContainText(/\b0\b/);
 
-  // Nothing found: the record leaves the queue and waits under "Marked not found".
+  // Nothing found: the record leaves the queue and waits behind the footer's count.
   await page.getByLabel(`Select ${name}`).check();
   await page.getByRole('button', { name: 'Not found', exact: true }).click();
   await expect(page.getByRole('link', { name, exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: /^Filters/ }).click();
-  await page.getByLabel('Show open or not-found gaps', { exact: true }).selectOption('notfound');
+  await page.getByRole('link', { name: /marked not found$/ }).click();
   await expect(page).toHaveURL(/marks=notfound/);
   await expect(page.getByRole('link', { name, exact: true })).toBeVisible();
   await expect(page.getByRole('columnheader', { name: 'Marked not found' })).toBeVisible();
@@ -76,7 +78,8 @@ test('a selection is exported, assigned for research, marked not found and reope
   await page.getByLabel(`Select ${name}`).check();
   await page.getByRole('button', { name: 'Reopen', exact: true }).click();
   await expect(page.getByRole('link', { name, exact: true })).toHaveCount(0);
-  await page.goto('/enrichment?tab=contacts');
+  await page.getByRole('link', { name: 'Open gaps', exact: true }).click();
+  await expect(page).toHaveURL(/tab=contacts/);
   await expect(page.getByRole('link', { name, exact: true })).toBeVisible();
 });
 

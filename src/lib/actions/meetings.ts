@@ -119,7 +119,8 @@ function parseAttendees(raw: string): Array<{ name: string | null; email: string
 const MeetingSchema = z.object({
   title: z.string().trim().min(1).max(200),
   // A pasted embed code is reduced to its src before validation, so Share > Embed works as pasted.
-  sourceUrl: z.preprocess((v) => (typeof v === 'string' ? extractRecordingUrl(v) : v), z.string().trim().max(8192).url().refine((url) => /^https?:\/\//i.test(url), 'Use an http or https recording link.')),
+  sourceUrl: z.preprocess((v) => (typeof v === 'string' && v.trim() ? extractRecordingUrl(v) : ''), z.string().trim().max(8192).refine((url) => url === '' || /^https?:\/\/\S+$/i.test(url), 'Use an http or https recording link, or leave it blank.')),
+  bookedById: z.string().trim().min(1, 'Choose who booked the meeting.'),
   occurredAt: z.string().trim().min(1),
   durationSec: z.coerce.number().int().min(0).max(86_400).optional().nullable(),
   companyId: z.string().trim().optional().nullable(),
@@ -133,7 +134,8 @@ const MeetingSchema = z.object({
 function readForm(formData: FormData) {
   return MeetingSchema.safeParse({
     title: formData.get('title'),
-    sourceUrl: formData.get('sourceUrl'),
+    sourceUrl: formData.get('sourceUrl') ?? '',
+    bookedById: formData.get('bookedById'),
     occurredAt: formData.get('occurredAt'),
     durationSec: formData.get('durationMin') ? Number(formData.get('durationMin')) * 60 : null,
     companyId: formData.get('companyId') || null,
@@ -194,13 +196,14 @@ export async function createMeetingAction(formData: FormData): Promise<ActionRes
   const parsed = readForm(formData);
   if (!parsed.success) return { ok: false, error: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') };
   const d = parsed.data;
+  if (!(await prisma.user.findFirst({ where: { id: d.bookedById, active: true }, select: { id: true } }))) return { ok: false, error: 'Choose who booked the meeting.' };
   const occurredAt = localDateTimeToInstant(d.occurredAt, user.timezone);
   if (!occurredAt) return { ok: false, error: `Pick a valid date and time in ${user.timezone}.` };
-  const link = parseMeetingLink(d.sourceUrl);
-  // A SharePoint, OneDrive or Drive link often hands out the file itself when asked; when it does,
-  // the recording plays natively and the transcript can follow it.
-  const mediaUrl = link.mediaUrl ?? (link.isJoinLink ? null : await resolveDirectMedia(d.sourceUrl));
-  if (link.provider === 'OTHER' && link.note?.includes('does not look like a URL')) return { ok: false, error: link.note };
+  // No link is a meeting without a recording; a SharePoint, OneDrive or Drive link often hands out
+  // the file itself when asked, and then the recording plays natively and the transcript follows it.
+  const link = d.sourceUrl ? parseMeetingLink(d.sourceUrl) : null;
+  const mediaUrl = link ? link.mediaUrl ?? (link.isJoinLink ? null : await resolveDirectMedia(d.sourceUrl)) : null;
+  if (link && link.provider === 'OTHER' && link.note?.includes('does not look like a URL')) return { ok: false, error: link.note };
 
   const company = d.companyId ? await prisma.companyCache.findFirst({ where: { id: d.companyId, deletedAt: null }, select: { id: true, name: true } }) : null;
   if (d.companyId && !company) return { ok: false, error: 'The selected account no longer exists.' };
@@ -212,9 +215,10 @@ export async function createMeetingAction(formData: FormData): Promise<ActionRes
   const meeting = await prisma.meeting.create({
     data: {
       title: d.title,
-      provider: link.provider,
+      bookedById: d.bookedById,
+      provider: link?.provider ?? 'OTHER',
       sourceUrl: d.sourceUrl.trim(),
-      embedUrl: link.embedUrl,
+      embedUrl: link?.embedUrl ?? null,
       mediaUrl,
       occurredAt,
       durationSec: d.durationSec ?? null,
@@ -243,12 +247,13 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
   const parsed = readForm(formData);
   if (!parsed.success) return { ok: false, error: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') };
   const d = parsed.data;
+  if (!(await prisma.user.findFirst({ where: { id: d.bookedById, active: true }, select: { id: true } }))) return { ok: false, error: 'Choose who booked the meeting.' };
   const occurredAt = localDateTimeToInstant(d.occurredAt, user.timezone);
   if (!occurredAt) return { ok: false, error: `Pick a valid date and time in ${user.timezone}.` };
-  const link = parseMeetingLink(d.sourceUrl);
-  // A SharePoint, OneDrive or Drive link often hands out the file itself when asked; when it does,
-  // the recording plays natively and the transcript can follow it.
-  const mediaUrl = link.mediaUrl ?? (link.isJoinLink ? null : await resolveDirectMedia(d.sourceUrl));
+  // No link is a meeting without a recording; a SharePoint, OneDrive or Drive link often hands out
+  // the file itself when asked, and then the recording plays natively and the transcript follows it.
+  const link = d.sourceUrl ? parseMeetingLink(d.sourceUrl) : null;
+  const mediaUrl = link ? link.mediaUrl ?? (link.isJoinLink ? null : await resolveDirectMedia(d.sourceUrl)) : null;
   const company = d.companyId ? await prisma.companyCache.findFirst({ where: { id: d.companyId, deletedAt: null }, select: { id: true, name: true } }) : null;
   if (d.companyId && !company) return { ok: false, error: 'The selected account no longer exists.' };
   let attendees: Awaited<ReturnType<typeof resolveAttendees>>;
@@ -262,9 +267,10 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
       where: { id },
       data: {
         title: d.title,
-        provider: link.provider,
+      bookedById: d.bookedById,
+        provider: link?.provider ?? 'OTHER',
         sourceUrl: d.sourceUrl.trim(),
-        embedUrl: link.embedUrl,
+        embedUrl: link?.embedUrl ?? null,
         mediaUrl,
         occurredAt,
         durationSec: d.durationSec ?? null,

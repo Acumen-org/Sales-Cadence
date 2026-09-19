@@ -1,6 +1,5 @@
 'use client';
 
-import { formatLocalDate } from '@/lib/dates';
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { PeoplePicker } from './people-picker';
@@ -90,7 +89,7 @@ export function CampaignForm({ sequences, pods, products, defaultStartDate, defa
   const overCapacity = plan ? audience > plan.total : false;
   const canCreate = Boolean(preview && preview.candidates.length > 0 && noRoom === 0 && plan && !plan.tooShort && chosenProducts.length > 0 && fields.name.trim());
   const rates = plan ? [...new Set(plan.perFo.map((f) => f.rate))] : [];
-  const rateText = rates.length === 1 ? `${rates[0]} a day per FO` : rates.length ? `${Math.min(...rates)}–${Math.max(...rates)} a day per FO` : null;
+  const rateText = rates.length === 1 ? `${rates[0]} starts a day per FO` : rates.length ? `${Math.min(...rates)}–${Math.max(...rates)} starts a day per FO` : null;
 
   return (
     <form ref={formRef} onSubmit={(e) => e.preventDefault()} className="space-y-5">
@@ -139,7 +138,7 @@ export function CampaignForm({ sequences, pods, products, defaultStartDate, defa
                 <>This sequence spans <span className="font-medium">{plan.durationDays}</span> days; the campaign runs {fields.startDate} to {fields.endDate}.{plan.endDateThatFits ? <> Ending on <button type="button" className="font-medium underline" onClick={() => set({ endDate: plan.endDateThatFits! })}>{plan.endDateThatFits}</button> would fit.</> : null}</>
               ) : (
                 <>
-                  Fits up to <span className="font-medium">{plan.total.toLocaleString('en-US')}</span> people{rateText ? <> · {rateText}</> : null}{plan.lastStart ? <> · last start {formatLocalDate(plan.lastStart)}</> : null}
+                  Room for <span className="font-medium">{plan.total.toLocaleString('en-US')}</span> people{rateText ? <> · {rateText}</> : null}
                   {overCapacity ? <span className="block pt-1">You chose {audience.toLocaleString('en-US')}.{plan.endDateThatFits ? <> Ending on <button type="button" className="font-medium underline" onClick={() => set({ endDate: plan.endDateThatFits! })}>{plan.endDateThatFits}</button> would take them all, or</> : ' Even a year would not take them all;'} trim the audience by {(audience - plan.total).toLocaleString('en-US')}.</span> : null}
                 </>
               )}

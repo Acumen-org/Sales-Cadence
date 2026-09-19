@@ -14,7 +14,7 @@ Every assumption made while building Cadence, grouped by area. Each entry says w
 
 ## Data and dates
 
-- **Calendar dates are strings (`YYYY-MM-DD`) in the FO's timezone.** `Enrollment.startDate`, `Task.dueDate`, `Task.plannedDate`, `Task.snoozedTo`. Prisma `@db.Date` returns UTC-midnight `Date` objects that are easy to shift by a day accidentally. `Task.dueAt` is also stored (09:00 local on the due date) for ordering and for Twenty's `dueAt`.
+- **Calendar dates are strings (`YYYY-MM-DD`) in the workspace timezone (Settings > Rules).** `Enrollment.startDate`, `Task.dueDate`, `Task.plannedDate`, `Task.snoozedTo`. Prisma `@db.Date` returns UTC-midnight `Date` objects that are easy to shift by a day accidentally. `Task.dueAt` is also stored (09:00 local on the due date) for ordering and for Twenty's `dueAt`.
 - **One active enrollment per person is enforced twice:** in application logic (with a friendly conflict preview) and by a partial unique index `Enrollment_one_active_per_person` added by hand to the initial migration (Prisma cannot express partial indexes). `ACTIVE` and `PAUSED` both occupy the slot; `REPLIED`, `MEETING`, `COMPLETED`, `EXITED` free it.
 - **`Enrollment.currentStep` starts at -1** (nothing generated yet) and equals the index of the latest step whose tasks exist.
 - **`Enrollment.currentStepId` is the id of the most recently generated step.** The plan is edited in place, so an index is not a stable identity: resolving the next step by id means inserting or deleting a step elsewhere in the plan moves nobody.
@@ -722,3 +722,68 @@ Twenty's markdown summary of a note can carry table syntax - call-log lines wrap
 `| --- |` separator rows - and runs of blank lines. Wherever Cadence shows a note body it goes
 through `presentNoteBody`: separator rows go, a row's cells become its words joined with " · ",
 and blank runs collapse to one. No word is dropped and nothing is added.
+
+## Tasks hold tasks; campaigns live under Campaigns (19 September 2026)
+
+The strip of campaigns starting soon left Tasks and Home. A person's place in an upcoming campaign
+shows on their Campaigns tab - campaign, sequence, start, end, steps - beside the enrollments that
+have run, so the tab's count and its content agree.
+
+## Most-important people (19 September 2026)
+
+Twenty says who matters: the `MIP` tag. Cadence adds how much - one to three stars per person,
+kept in Cadence and never written back - and only that person's pod, or an admin, may set them.
+Nobody is starred until somebody says so. People carries an MIP toggle in its first filter row and
+an MIP column where the Sequence column was; the Campaign column already said what Sequence did.
+
+## Replies are inbound messages (19 September 2026)
+
+Outside a campaign, "Replies" counts what came in: inbound emails, calls and LinkedIn touches,
+minus automatic replies, plus calls we made that the person answered (the call's touch is
+rewritten `Answered call: ...`). The rule lives once, in `reply-credit.ts`. Accounts, the account
+page, the week on Home and Reports all count that way, so the column no longer reads 0 while
+responses sit on the record. A reply is credited to the person's most recent enrollment - the
+outreach it answers - and through it to the FO, pod, campaign and sequence; Home falls back to the
+Twenty owner for someone never enrolled, Reports counts only replies to outreach. Campaign pages keep the
+sequence's own outcome (replied, meeting booked) because they describe the sequence. An automatic
+reply - out-of-office, undeliverable, read receipts, calendar responses, by subject - is stored as
+`Auto-reply:` and leaves the sequence running.
+
+## The workspace clock is a setting (19 September 2026)
+
+Central Time unless an admin changes Settings > Rules > Timezone. Every place that used the
+constant reads the setting through the settings cache; client components receive it as a prop.
+Everyone reads and works in the workspace clock; a person's own zone is not used.
+
+## Meetings: who booked it, a link only when there is one (19 September 2026)
+
+"Booked by" is a required FO on every meeting, editable afterwards and a filter on the list. A
+recording link is optional: without one the meeting page shows no recording surface and no
+platform. The Analysis column says Ready only when a model produced the analysis; talk time comes
+from the transcript whenever there is one.
+
+## Campaign membership and Sync now for every role (19 September 2026)
+
+Everyone can select people in People. "Add to campaign" is disabled when everyone chosen is
+already in one; "Remove from campaign" is red and asks once per campaign. "Sync now" shows for
+every role; its toast slides in from the right.
+
+## Enrichment: three views (19 September 2026)
+
+People, Accounts, Scorecard. The priority filter and the open/not-found switch are gone; the
+not-found list is reached from the footer's count, and "Open gaps" leads back. Address replaces
+Industry for accounts. The scorecard has People and Accounts sections, each with Everyone, By pod
+and By FO, and a group's record count opens that group's queue.
+
+## Record pages wear their colour (19 September 2026)
+
+A person or account header takes its band, its avatar fill and an ornament - one of six motifs,
+sized by the record's own hash - from the record's accent. Deterministic: the same record looks
+the same on every visit, to everyone.
+
+## Campaign creation without hints (19 September 2026)
+
+The "?" icons and the "last start" marker and legend are gone. One active campaign per person is
+already enforced by the database (a partial unique index on Enrollment for ACTIVE and PAUSED);
+several sequences per campaign, the per-FO daily starts, the step cap and FO selection are the
+subject of the proposal that goes with this round, and wait for that discussion.

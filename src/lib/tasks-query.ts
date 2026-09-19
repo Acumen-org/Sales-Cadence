@@ -4,7 +4,7 @@ import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
 import { isPodLeader, canSeeAllPods } from './auth/rbac';
 import { addDays, startOfLocalDay, todayIn, type LocalDate } from './dates';
-import { WORKSPACE_TIMEZONE } from './workspace';
+import { workspaceTimezone } from './workspace';
 
 /** How far back the Done tab looks. Older work lives on the person record and in Activity. */
 export const DONE_TAB_DAYS = 30;
@@ -79,7 +79,7 @@ export function tabWhere(tab: TaskTab, today: LocalDate): Prisma.TaskWhereInput 
     case 'done':
       // Recently resolved work, not the whole history: an unbounded tab makes its own count
       // meaningless and grows without limit. Older work lives on the person and in Activity.
-      return { state: { in: ['DONE', 'SKIPPED'] }, updatedAt: { gte: startOfLocalDay(addDays(today, -DONE_TAB_DAYS), WORKSPACE_TIMEZONE) } };
+      return { state: { in: ['DONE', 'SKIPPED'] }, updatedAt: { gte: startOfLocalDay(addDays(today, -DONE_TAB_DAYS), workspaceTimezone()) } };
   }
 }
 
@@ -126,7 +126,7 @@ export function parseTab(v: string | undefined): TaskTab {
 /** One workspace item per contact and touchpoint; each required action retains its own result. */
 export async function listTaskGroups(user: SessionUser, filters: TaskFilters, now = new Date(), limit = 200) {
   const today = todayIn(user.timezone, now);
-  const recent = startOfLocalDay(addDays(today, -DONE_TAB_DAYS), WORKSPACE_TIMEZONE);
+  const recent = startOfLocalDay(addDays(today, -DONE_TAB_DAYS), workspaceTimezone());
   const records = await prisma.task.findMany({ where: { AND: [taskScopeWhere(user), filtersWhere(filters), { OR: [{ state: 'PENDING' }, { state: { in: ['DONE', 'SKIPPED'] }, updatedAt: { gte: recent } }] }] }, select: { id: true, enrollmentId: true, stepId: true, state: true, action: true, dueDate: true, snoozedTo: true, completedAt: true, updatedAt: true, enrollment: { select: { status: true } } }, orderBy: [{ dueAt: 'asc' }, { actionIndex: 'asc' }] });
   const grouped = new Map<string, typeof records>();
   for (const t of records) { const key = `${t.enrollmentId}:${t.stepId}`; const group = grouped.get(key) ?? []; group.push(t); grouped.set(key, group); }

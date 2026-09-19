@@ -20,7 +20,8 @@ export function SyncNowButton({ className = 'btn-ghost btn-sm' }: { className?: 
         setNotice({ text: result.ok ? result.message || 'Synced.' : result.error, error: !result.ok });
       } catch { setNotice({ text: 'Sync failed. Please try again.', error: true }); }
     })}><IconRefresh size={14} className={pending ? 'animate-spin' : undefined} /> Sync now</button>
-    {notice ? createPortal(<div role={notice.error ? 'alert' : 'status'} className="fixed bottom-6 right-6 z-50 flex max-w-sm items-start gap-4 rounded-xl border border-line bg-white p-4 text-sm font-medium text-ink-900 shadow-lg">
+    {notice ? createPortal(<div role={notice.error ? 'alert' : 'status'} className={`toast-in fixed bottom-6 right-6 z-50 flex max-w-sm items-center gap-3 rounded-xl px-4 py-3 text-sm shadow-lg ${notice.error ? 'border border-red-200 bg-red-50 text-red-800' : 'bg-ink-900 text-white'}`}>
+      <IconRefresh size={15} className={notice.error ? 'text-red-600' : 'text-[#d5e9ad]'} />
       <span>{notice.text}</span><button type="button" aria-label="Dismiss sync notification" onClick={() => setNotice(null)}>&times;</button>
     </div>, document.body) : null}
   </>;

@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '../db';
 import { requireUser, toActor } from '../auth/current-user';
-import { canApproveCampaign, canManageCampaigns } from '../auth/rbac';
+import { canApproveCampaign, canChangeCampaignMembers, canManageCampaigns } from '../auth/rbac';
 import { logAudit, userActor } from '../audit';
 import { parsePersonIds } from '../csv';
 import { isLocalDate, todayIn } from '../dates';
@@ -317,7 +317,7 @@ export async function addPeopleToCampaignAction(formData: FormData): Promise<Act
   if (!ids.length) return { ok: false, error: 'Choose at least one person.' };
   const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
   if (!campaign) return { ok: false, error: 'Campaign not found.' };
-  if (!canManageCampaigns(user, campaign.podId)) return { ok: false, error: 'You cannot change this campaign.' };
+  if (!canChangeCampaignMembers(user, campaign.podId)) return { ok: false, error: 'You cannot change who is in this campaign.' };
   try {
     if (['DRAFT', 'PENDING_APPROVAL', 'SCHEDULED'].includes(campaign.status)) {
       // The same check launch will run, so somebody promised elsewhere, do-not-contact or in
@@ -365,7 +365,7 @@ export async function removePeopleFromCampaignAction(formData: FormData): Promis
   if (!ids.length) return { ok: false, error: 'Choose at least one person.' };
   const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
   if (!campaign) return { ok: false, error: 'Campaign not found.' };
-  if (!canManageCampaigns(user, campaign.podId)) return { ok: false, error: 'You cannot change this campaign.' };
+  if (!canChangeCampaignMembers(user, campaign.podId)) return { ok: false, error: 'You cannot change who is in this campaign.' };
   try {
     const wanted = new Set(ids);
     const remaining = campaign.personIds.filter((id) => !wanted.has(id));

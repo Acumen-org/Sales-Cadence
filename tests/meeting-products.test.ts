@@ -67,7 +67,7 @@ describe('meeting products and what counts as missing', () => {
     expect(byPriority.domain).toBe('critical');
     expect(byPriority.linkedinUrl).toBe('critical');
     expect(byPriority.aum).toBe('useful');
-    expect(byPriority.industry).toBe('useful');
+    expect(byPriority.city).toBe('useful');
     expect(byPriority.employees).toBe('useful');
   });
 

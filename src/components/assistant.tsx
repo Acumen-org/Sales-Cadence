@@ -10,7 +10,8 @@ import { ASSISTANT_NAME } from '@/lib/workspace';
  * The badge is the honest part. Until a model provider is configured the panel says so and
  * lists what will appear, rather than showing an empty box or a fabricated summary.
  */
-export function AssistantHeader({ connected, right }: { connected: boolean; right?: React.ReactNode }) {
+/** `connected` null: no badge at all - for readers who cannot connect a model, its absence is not their news. */
+export function AssistantHeader({ connected, right }: { connected: boolean | null; right?: React.ReactNode }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
       <div className="flex items-center gap-2">
@@ -18,7 +19,7 @@ export function AssistantHeader({ connected, right }: { connected: boolean; righ
           <IconAssistant size={15} />
         </span>
         <h2 className="text-[14px] font-semibold text-ink-900">{ASSISTANT_NAME}</h2>
-        <Badge tone={connected ? 'green' : 'gray'}>{connected ? 'Connected' : 'Not connected'}</Badge>
+        {connected === null ? null : <Badge tone={connected ? 'green' : 'gray'}>{connected ? 'Connected' : 'Not connected'}</Badge>}
       </div>
       {right}
     </div>

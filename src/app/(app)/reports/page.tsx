@@ -83,7 +83,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         <>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {[
-              ['New enrollments', reports.totals.enrollments, previous.totals.enrollments],
+              ['People started', reports.totals.enrollments, previous.totals.enrollments],
               ['Touches completed', reports.totals.tasksDone, previous.totals.tasksDone],
               ['Replies', reports.totals.replied, previous.totals.replied],
               ['Meetings', reports.totals.meeting, previous.totals.meeting],

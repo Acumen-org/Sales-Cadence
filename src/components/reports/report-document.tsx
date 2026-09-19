@@ -37,7 +37,7 @@ export function ReportDocument({ reports, previous, range, scope, campaigns, gen
   const r = reports;
   const p = previous;
   const funnel = [
-    { label: 'Enrolled', value: r.funnel.enrolled },
+    { label: 'Started', value: r.funnel.enrolled },
     { label: 'Touched', value: r.funnel.touched },
     { label: 'Replied', value: r.funnel.replied },
     { label: 'Meeting', value: r.funnel.meeting },
@@ -55,14 +55,14 @@ export function ReportDocument({ reports, previous, range, scope, campaigns, gen
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Tile label="New enrollments" value={r.totals.enrollments} previous={p?.totals.enrollments ?? null} series={r.daily.map((d) => d.enrollments)} />
+        <Tile label="People started" value={r.totals.enrollments} previous={p?.totals.enrollments ?? null} series={r.daily.map((d) => d.enrollments)} />
         <Tile label="Touches completed" value={r.totals.tasksDone} previous={p?.totals.tasksDone ?? null} series={r.daily.map((d) => d.tasksDone)} />
         <Tile label="Replies" value={r.totals.replied} previous={p?.totals.replied ?? null} series={r.daily.map((d) => d.replies)} />
         <Tile label="Meetings" value={r.totals.meeting} previous={p?.totals.meeting ?? null} series={r.daily.map((d) => d.meetings)} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <Figure title="From enrolled to meeting" aside={r.funnel.enrolled ? `${Math.round((r.funnel.meeting / r.funnel.enrolled) * 100)}% end in a meeting` : undefined}>
+        <Figure title="From first touch to meeting" aside={r.funnel.enrolled ? `${Math.round((r.funnel.meeting / r.funnel.enrolled) * 100)}% end in a meeting` : undefined}>
           <Funnel stages={funnel} />
         </Figure>
         <Figure title="Touches by channel">
@@ -113,7 +113,7 @@ export function GroupCompare({ rows, previous, first }: { rows: GroupRow[]; prev
   return (
     <div className="overflow-x-auto">
       <table className="table table-dense">
-        <thead><tr><th>{first}</th><th className="num">Enrolled</th><th className="num">Touches</th><th className="num">Replies</th><th className="num">Meetings</th><th className="num">Reply rate</th><th className="num">Meeting rate</th></tr></thead>
+        <thead><tr><th>{first}</th><th className="num">Started</th><th className="num">Touches</th><th className="num">Replies</th><th className="num">Meetings</th><th className="num">Reply rate</th><th className="num">Meeting rate</th></tr></thead>
         <tbody>
           {rows.map((r) => {
             const b = prev.get(r.key);

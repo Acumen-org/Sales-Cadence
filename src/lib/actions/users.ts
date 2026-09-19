@@ -9,7 +9,7 @@ import { requireAdmin } from '../auth/current-user';
 import { hashPassword, validatePasswordStrength } from '../auth/password';
 import { logAudit, userActor } from '../audit';
 import { getTwentyClient } from '../twenty';
-import { WORKSPACE_TIMEZONE } from '../workspace';
+import { workspaceTimezone } from '../workspace';
 import { localDateToInstant } from '../dates';
 import { loadSyncTasks, syncTaskInclude, syncTaskResolved, syncTasksCreated, type SyncTask } from '../engine/sync-out';
 
@@ -65,7 +65,7 @@ export async function createUserAction(formData: FormData): Promise<ActionResult
     // sets everything an enabled account needs rather than sending the admin to Restore and Edit.
     await prisma.user.update({
       where: { id: existing.id },
-      data: { name: d.name, role: d.role, passwordHash: await hashPassword(d.password!), active: true, timezone: WORKSPACE_TIMEZONE, dailyCap: null, twentyMemberId: existing.twentyMemberId ?? await resolveMember(d.email), pods: { deleteMany: {}, create: d.podIds.map((podId) => ({ podId })) } },
+      data: { name: d.name, role: d.role, passwordHash: await hashPassword(d.password!), active: true, timezone: workspaceTimezone(), dailyCap: null, twentyMemberId: existing.twentyMemberId ?? await resolveMember(d.email), pods: { deleteMany: {}, create: d.podIds.map((podId) => ({ podId })) } },
     });
     await logAudit({ entityType: 'user', entityId: existing.id, action: 'enabled', actor: userActor(admin), details: { role: d.role, pods: d.podIds } });
     refresh();
@@ -73,7 +73,7 @@ export async function createUserAction(formData: FormData): Promise<ActionResult
   }
   const twentyMemberId = await resolveMember(d.email);
   if (twentyMemberId && await prisma.user.findUnique({ where: { twentyMemberId } })) return { ok: false, error: 'That CRM email is already linked to another team member.' };
-  const user = await prisma.user.create({ data: { email: d.email, name: d.name, role: d.role, passwordHash: await hashPassword(d.password!), timezone: WORKSPACE_TIMEZONE, twentyMemberId, pods: { create: d.podIds.map((podId) => ({ podId })) } } });
+  const user = await prisma.user.create({ data: { email: d.email, name: d.name, role: d.role, passwordHash: await hashPassword(d.password!), timezone: workspaceTimezone(), twentyMemberId, pods: { create: d.podIds.map((podId) => ({ podId })) } } });
   await logAudit({ entityType: 'user', entityId: user.id, action: 'created', actor: userActor(admin), details: { role: d.role, pods: d.podIds } });
   refresh();
   return { ok: true, message: 'Team member added.' };
@@ -107,7 +107,7 @@ export async function updateUserAction(formData: FormData): Promise<ActionResult
     if (!(await validPods(d.podIds, tx))) return { ok: false, error: 'Choose existing, active pods.' };
     const stranded = await tx.enrollment.count({ where: { foUserId: userId, status: { in: ['ACTIVE', 'PAUSED'] }, podId: { not: null, notIn: d.podIds } } });
     if (stranded) return { ok: false, error: 'Transfer live enrollments before removing this team member from their pod.' };
-    await tx.user.update({ where: { id: userId }, data: { email: d.email, name: d.name, role: d.role, timezone: WORKSPACE_TIMEZONE, twentyMemberId, dailyCap: null, ...(passwordHash ? { passwordHash } : {}) } });
+    await tx.user.update({ where: { id: userId }, data: { email: d.email, name: d.name, role: d.role, timezone: workspaceTimezone(), twentyMemberId, dailyCap: null, ...(passwordHash ? { passwordHash } : {}) } });
     await tx.userPod.deleteMany({ where: { userId } });
     if (d.podIds.length) await tx.userPod.createMany({ data: d.podIds.map((podId) => ({ userId, podId })) });
     if (passwordHash || current.role !== d.role || current.email !== d.email) await tx.session.deleteMany({ where: { userId } });
@@ -139,10 +139,10 @@ export async function setUserAccessAction(formData: FormData): Promise<ActionRes
       const enrollmentIds = open.map((enrollment) => enrollment.id);
       pending.push(...await tx.task.findMany({ where: { enrollmentId: { in: enrollmentIds }, state: 'PENDING' }, include: syncTaskInclude }));
       await tx.enrollment.updateMany({ where: { id: { in: enrollmentIds }, foUserId: userId, status: { in: ['ACTIVE', 'PAUSED'] } }, data: { foUserId: replacementId } });
-      for (const task of pending) await tx.task.updateMany({ where: { id: task.id, state: 'PENDING' }, data: { foUserId: replacementId, dueAt: localDateToInstant(task.snoozedTo ?? task.dueDate, WORKSPACE_TIMEZONE, 9), twentyTaskId: null } });
+      for (const task of pending) await tx.task.updateMany({ where: { id: task.id, state: 'PENDING' }, data: { foUserId: replacementId, dueAt: localDateToInstant(task.snoozedTo ?? task.dueDate, workspaceTimezone(), 9), twentyTaskId: null } });
       for (const enrollment of open) await logAudit({ entityType: 'enrollment', entityId: enrollment.id, action: 'reassigned', actor: userActor(admin), details: { from: userId, to: replacementId, reason: 'team_access_removed' } }, tx);
     }
-    await tx.user.update({ where: { id: userId }, data: { active: restore, timezone: WORKSPACE_TIMEZONE } });
+    await tx.user.update({ where: { id: userId }, data: { active: restore, timezone: workspaceTimezone() } });
     if (!restore) await tx.session.deleteMany({ where: { userId } });
     await logAudit({ entityType: 'user', entityId: userId, action: restore ? 'restored' : 'removed', actor: userActor(admin), details: { replacementId: replacementId || null, transferredEnrollments: restore ? 0 : open.length } }, tx);
     return { error: null, tasks: pending };

@@ -2,7 +2,7 @@ import { PageFrame } from '@/components/page-frame';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { formatInstant } from '@/lib/dates';
-import { WORKSPACE_TIMEZONE } from '@/lib/workspace';
+import { workspaceTimezone } from '@/lib/workspace';
 import { requireUser } from '@/lib/auth/current-user';
 import { isAdmin } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
@@ -170,19 +170,19 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
               { k: 'Dry run', v: dryRun ? <span className="flex flex-wrap items-center gap-2"><Badge tone="amber">On</Badge><code className="text-[12px]">CADENCE_DRY_RUN=true</code></span> : <Badge tone="green">Off</Badge> },
               // Webhooks are the instant path; zero here means only the minute-by-minute pass is syncing.
               { k: 'Webhooks (24h)', v: webhooks24h ? <span className="flex items-center gap-2"><Badge tone="green">{webhooks24h}</Badge><span className="text-[12px] text-ink-500">inbound events</span></span> : <Badge tone="amber">None received</Badge> },
-              { k: 'Live reads', v: live.pausedUntil ? <span className="flex flex-wrap items-center gap-2"><Badge tone="amber">Paused</Badge><span className="text-[12px] text-ink-500">until {formatInstant(live.pausedUntil, WORKSPACE_TIMEZONE)} after {live.failuresLastHour} failures</span></span> : live.failuresLastHour ? <span className="flex items-center gap-2"><Badge tone="amber">{live.failuresLastHour}</Badge><span className="text-[12px] text-ink-500">failures in the last hour</span></span> : <Badge tone="green">Healthy</Badge> },
+              { k: 'Live reads', v: live.pausedUntil ? <span className="flex flex-wrap items-center gap-2"><Badge tone="amber">Paused</Badge><span className="text-[12px] text-ink-500">until {formatInstant(live.pausedUntil, workspaceTimezone())} after {live.failuresLastHour} failures</span></span> : live.failuresLastHour ? <span className="flex items-center gap-2"><Badge tone="amber">{live.failuresLastHour}</Badge><span className="text-[12px] text-ink-500">failures in the last hour</span></span> : <Badge tone="green">Healthy</Badge> },
               {
                 k: 'Continuous sync',
                 v: sync?.lastError && !sync.lastSuccess
                   ? <span className="flex flex-wrap items-center gap-2"><Badge tone="red">Failing</Badge><span className="text-[12px] text-red-700">{sync.lastError}</span></span>
                   : sync?.lastError && sync.attemptedAt && sync.lastSuccess && sync.attemptedAt > sync.lastSuccess
-                    ? <span className="flex flex-wrap items-center gap-2"><Badge tone="red">Failing</Badge><span className="text-[12px] text-red-700">{sync.lastError}</span><span className="text-[12px] text-ink-500">last good {formatInstant(new Date(sync.lastSuccess), WORKSPACE_TIMEZONE)}</span></span>
+                    ? <span className="flex flex-wrap items-center gap-2"><Badge tone="red">Failing</Badge><span className="text-[12px] text-red-700">{sync.lastError}</span><span className="text-[12px] text-ink-500">last good {formatInstant(new Date(sync.lastSuccess), workspaceTimezone())}</span></span>
                     : sync?.lastSuccess
-                      ? <span className="flex flex-wrap items-center gap-2"><Badge tone={stageErrors.length ? 'amber' : 'green'}>{stageErrors.length ? 'Running with problems' : 'Healthy'}</Badge><span className="text-[12px] text-ink-500">last {formatInstant(new Date(sync.lastSuccess), WORKSPACE_TIMEZONE)}</span></span>
+                      ? <span className="flex flex-wrap items-center gap-2"><Badge tone={stageErrors.length ? 'amber' : 'green'}>{stageErrors.length ? 'Running with problems' : 'Healthy'}</Badge><span className="text-[12px] text-ink-500">last {formatInstant(new Date(sync.lastSuccess), workspaceTimezone())}</span></span>
                       : <Badge tone="gray">Not run yet</Badge>,
               },
               ...stageErrors.map(([stage, message]) => ({ k: `Stage ${stage}`, v: <span className="text-[12px] text-red-700">{message}</span> })),
-              { k: 'Full refresh', v: sync?.lastFullRefresh ? formatInstant(new Date(sync.lastFullRefresh), WORKSPACE_TIMEZONE) : <Badge tone="gray">Not yet</Badge> },
+              { k: 'Full refresh', v: sync?.lastFullRefresh ? formatInstant(new Date(sync.lastFullRefresh), workspaceTimezone()) : <Badge tone="gray">Not yet</Badge> },
               {
                 k: 'People',
                 v: <span className="flex flex-wrap items-center gap-3"><span><Count value={cachedPeople} /> cached</span>{counts.people !== undefined ? <span><Count value={counts.people} /> in Twenty</span> : null}{peopleShort ? <Badge tone="red">{counts.people! - cachedPeople} missing</Badge> : null}</span>,
@@ -207,7 +207,7 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
                     ? <Badge tone="green">Shared token</Badge>
                     : <Badge tone="amber">Not configured</Badge>,
               },
-              { k: 'Last reconcile', v: last?.at ? <span className="flex flex-wrap items-center gap-3"><span>{formatInstant(new Date(last.at), WORKSPACE_TIMEZONE)}</span>{last.stats ? <span className="flex flex-wrap gap-3 text-[12px] text-ink-500"><span><Count value={last.stats.people ?? 0} /> {(last.stats.people ?? 0) === 1 ? 'person' : 'people'}</span><span><Count value={last.stats.notes ?? 0} /> {(last.stats.notes ?? 0) === 1 ? 'note' : 'notes'}</span><span><Count value={last.stats.messages ?? 0} /> {(last.stats.messages ?? 0) === 1 ? 'message' : 'messages'}</span><span><Count value={last.stats.opportunities ?? 0} /> {(last.stats.opportunities ?? 0) === 1 ? 'opportunity' : 'opportunities'}</span><span><Count value={last.stats.tasks ?? 0} /> {(last.stats.tasks ?? 0) === 1 ? 'task' : 'tasks'}</span></span> : null}</span> : null },
+              { k: 'Last reconcile', v: last?.at ? <span className="flex flex-wrap items-center gap-3"><span>{formatInstant(new Date(last.at), workspaceTimezone())}</span>{last.stats ? <span className="flex flex-wrap gap-3 text-[12px] text-ink-500"><span><Count value={last.stats.people ?? 0} /> {(last.stats.people ?? 0) === 1 ? 'person' : 'people'}</span><span><Count value={last.stats.notes ?? 0} /> {(last.stats.notes ?? 0) === 1 ? 'note' : 'notes'}</span><span><Count value={last.stats.messages ?? 0} /> {(last.stats.messages ?? 0) === 1 ? 'message' : 'messages'}</span><span><Count value={last.stats.opportunities ?? 0} /> {(last.stats.opportunities ?? 0) === 1 ? 'opportunity' : 'opportunities'}</span><span><Count value={last.stats.tasks ?? 0} /> {(last.stats.tasks ?? 0) === 1 ? 'task' : 'tasks'}</span></span> : null}</span> : null },
             ]}
           />
         </div>
@@ -246,12 +246,12 @@ async function ActivityTab() {
               <tbody>
                 {failed.map((w) => (
                   <tr key={w.id}>
-                    <td className="whitespace-nowrap text-[12px]">{formatInstant(w.createdAt, WORKSPACE_TIMEZONE)}</td>
+                    <td className="whitespace-nowrap text-[12px]">{formatInstant(w.createdAt, workspaceTimezone())}</td>
                     <td className="text-[12px]">{w.operation}{w.status === 'RETRYING' ? <Badge tone="amber" className="ml-1.5">Retrying</Badge> : null}</td>
                     <td className="text-[12px]">{w.objectType}</td>
                     <td className="max-w-md text-[12px] text-red-700">{w.error}</td>
                     <td className="num text-[12px]">{w.attempts}</td>
-                    <td className="whitespace-nowrap text-[12px]">{w.nextAttemptAt ? formatInstant(w.nextAttemptAt, WORKSPACE_TIMEZONE) : <Empty />}</td>
+                    <td className="whitespace-nowrap text-[12px]">{w.nextAttemptAt ? formatInstant(w.nextAttemptAt, workspaceTimezone()) : <Empty />}</td>
                     <td className="whitespace-nowrap text-right"><RetryWriteButton writeId={w.id} /> <DiscardWriteButton writeId={w.id} /></td>
                   </tr>
                 ))}
@@ -279,7 +279,7 @@ async function ActivityTab() {
               <tbody>
                 {events.map((ev) => (
                   <tr key={ev.id} className={ev.needsReview ? 'bg-amber-50/60' : undefined}>
-                    <td className="whitespace-nowrap text-[12px]">{formatInstant(ev.receivedAt, WORKSPACE_TIMEZONE)}</td>
+                    <td className="whitespace-nowrap text-[12px]">{formatInstant(ev.receivedAt, workspaceTimezone())}</td>
                     <td className="text-[12px]">{ev.source.toLowerCase()}</td>
                     <td className="text-[12px]">{ev.eventName}</td>
                     <td className="font-mono text-[11px]">{ev.externalId}</td>
@@ -313,7 +313,7 @@ async function ActivityTab() {
               <tbody>
                 {writes.map((w) => (
                   <tr key={w.id}>
-                    <td className="whitespace-nowrap text-[12px]">{formatInstant(w.createdAt, WORKSPACE_TIMEZONE)}</td>
+                    <td className="whitespace-nowrap text-[12px]">{formatInstant(w.createdAt, workspaceTimezone())}</td>
                     <td className="text-[12px]">
                       {w.operation}
                       {w.dryRun ? <span className="ml-1 rounded bg-sky-50 px-1 text-[10px] text-sky-700">dry run</span> : null}

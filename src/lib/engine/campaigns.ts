@@ -4,7 +4,7 @@ import { prisma } from '../db';
 import { planCampaignCapacity } from './capacity';
 import { logAudit, type AuditActor, SYSTEM_ACTOR } from '../audit';
 import { todayIn } from '../dates';
-import { WORKSPACE_TIMEZONE } from '../workspace';
+import { workspaceTimezone } from '../workspace';
 import { previewEnrollment, resumeEnrollment } from './enrollment';
 import { advanceEnrollment, syncCancelled, type EngineContext } from './tasks';
 import { nonReplierCandidates } from '../campaigns-query';
@@ -44,7 +44,7 @@ export async function changeCampaignStatus(id: string, status: 'PAUSED' | 'STOPP
 export async function activateCampaign(id: string, ctx: EngineContext = { actor: SYSTEM_ACTOR }) {
   const now = ctx.now ?? new Date();
   const campaign = await prisma.campaign.findUnique({ where: { id }, include: { sequence: true, pod: true } });
-  if (!campaign || campaign.status !== 'SCHEDULED' || campaign.startDate > todayIn(WORKSPACE_TIMEZONE, now)) return { enrolled: 0, skipped: 0 };
+  if (!campaign || campaign.status !== 'SCHEDULED' || campaign.startDate > todayIn(workspaceTimezone(), now)) return { enrolled: 0, skipped: 0 };
   if (campaign.pod.archived || campaign.sequence.archived) throw new Error('Campaign needs an available pod and sequence.');
   let ids = campaign.personIds;
   if (campaign.followupSourceId) {
@@ -109,7 +109,7 @@ export async function activateCampaign(id: string, ctx: EngineContext = { actor:
 }
 
 export async function launchScheduledCampaigns(ctx: EngineContext) {
-  const due = await prisma.campaign.findMany({ where: { status: 'SCHEDULED', startDate: { lte: todayIn(WORKSPACE_TIMEZONE, ctx.now) } }, select: { id: true }, take: 100 });
+  const due = await prisma.campaign.findMany({ where: { status: 'SCHEDULED', startDate: { lte: todayIn(workspaceTimezone(), ctx.now) } }, select: { id: true }, take: 100 });
   for (const campaign of due) {
     try { await activateCampaign(campaign.id, ctx); }
     catch (error) { await logAudit({ entityType: 'campaign', entityId: campaign.id, action: 'launch_failed', actor: ctx.actor, details: { error: error instanceof Error ? error.message : 'Launch failed' } }); }

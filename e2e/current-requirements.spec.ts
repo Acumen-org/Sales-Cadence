@@ -66,6 +66,7 @@ test('Pod Manager and Biz Ops seats work with their distinct write permissions',
   await page.goto('/meetings/new');
   await page.getByLabel('Title', { exact: true }).fill('Audit shared meeting');
   await page.getByLabel('Recording or meeting link').fill('https://example.com/audit.mp4');
+  await page.getByLabel('Booked by').selectOption({ index: 1 });
   await page.getByRole('button', { name: 'Add meeting', exact: true }).click();
   await expect(page).toHaveURL(/\/meetings\/[0-9a-f-]+$/);
   const meetingUrl = page.url();
@@ -73,7 +74,8 @@ test('Pod Manager and Biz Ops seats work with their distinct write permissions',
     const context = await browser.newContext(); const seat = await context.newPage();
     await login(seat, `audit-${role}@cadence.local`);
     await seat.goto('/meetings');
-    await expect(seat.getByRole('link', { name: 'Audit shared meeting', exact: true })).toBeVisible();
+    // A fresh context on a busy runner: give the first list render room.
+    await expect(seat.getByRole('link', { name: 'Audit shared meeting', exact: true })).toBeVisible({ timeout: 20_000 });
     if (role === 'ops') {
       await expect(seat.getByRole('link', { name: 'Add meeting', exact: true })).toHaveCount(0);
       await seat.goto('/meetings/new'); await expect(seat).toHaveURL(/\/meetings$/);

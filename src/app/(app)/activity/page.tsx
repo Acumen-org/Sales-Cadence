@@ -6,7 +6,7 @@ import { isJuniorFo, visiblePodIds } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
 import { ACTIVITY_KINDS, KIND_LABELS, listActivity, type ActivityKind } from '@/lib/activity-query';
 import { formatInstant, formatLocalDate, toLocalDate, todayIn } from '@/lib/dates';
-import { reportingRange, REPORTING_TIMEZONE } from '@/lib/reports-query';
+import { reportingRange, reportingTimezone } from '@/lib/reports-query';
 import { ActivityToolbar } from '@/components/activity/activity-toolbar';
 import { ActionIcon } from '@/components/icons';
 import { Badge, DataValue, EmptyState, EventDetail, Notice, Surface, Toolbar, ViewHeader } from '@/components/ui';
@@ -41,7 +41,7 @@ async function ActivityContent({ searchParams }: { searchParams: Promise<Search>
   const defaults = await sectionDefaults(user);
   const actorId = filterParam(sp.actor, defaults.foUserId);
   const podId = filterParam(sp.pod, defaults.podId);
-  const today = todayIn(REPORTING_TIMEZONE);
+  const today = todayIn(reportingTimezone());
   const range = reportingRange(sp.from, sp.to, today, 7);
   const defaultRange = reportingRange(undefined, undefined, today, 7);
   const visiblePods = visiblePodIds(user);
@@ -55,7 +55,7 @@ async function ActivityContent({ searchParams }: { searchParams: Promise<Search>
   ]);
   const groups: Array<{ day: string; items: typeof page.items }> = [];
   for (const item of page.items) {
-    const day = toLocalDate(item.at, REPORTING_TIMEZONE);
+    const day = toLocalDate(item.at, reportingTimezone());
     const last = groups.at(-1);
     if (last?.day === day) last.items.push(item);
     else groups.push({ day, items: [item] });
@@ -85,7 +85,7 @@ async function ActivityContent({ searchParams }: { searchParams: Promise<Search>
               </h2>
               <ol className="divide-y divide-line">{group.items.map((item) => (
                 <li key={item.id} className="grid grid-cols-[2rem_minmax(0,1fr)] gap-x-3 gap-y-2 px-5 py-4 sm:grid-cols-[3rem_2rem_minmax(0,1fr)_auto]">
-                  <time dateTime={item.at.toISOString()} className="col-span-2 text-[13px] tabular-nums text-ink-600 sm:col-span-1 sm:pt-1">{formatInstant(item.at, REPORTING_TIMEZONE).split(', ').pop()}</time>
+                  <time dateTime={item.at.toISOString()} className="col-span-2 text-[13px] tabular-nums text-ink-600 sm:col-span-1 sm:pt-1">{formatInstant(item.at, reportingTimezone()).split(', ').pop()}</time>
                   <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${item.tone === 'in' ? 'bg-emerald-50 text-emerald-700' : 'bg-brand-50 text-brand-700'}`}>
                     {item.icon === 'MEETING' || item.icon === 'STATE' ? <span className="h-3 w-3 rounded-full border-2 border-current" /> : <ActionIcon action={item.icon} size={17} />}
                   </span>

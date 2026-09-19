@@ -4,7 +4,7 @@ import { visiblePodIds } from './auth/rbac';
 import { addDays, diffDays, todayIn } from './dates';
 import { filterParam, sectionDefaults } from './default-filters';
 import { listCampaigns } from './campaigns-query';
-import { buildReports, reportingRange, REPORTING_TIMEZONE, type Reports } from './reports-query';
+import { buildReports, reportingRange, reportingTimezone, type Reports } from './reports-query';
 import type { RunningCampaign } from '@/components/reports/report-document';
 
 /**
@@ -26,7 +26,7 @@ export type ReportBundle = {
 };
 
 export async function loadReportBundle(user: SessionUser, sp: { from?: string; to?: string; pod?: string; fo?: string }): Promise<ReportBundle> {
-  const today = todayIn(REPORTING_TIMEZONE);
+  const today = todayIn(reportingTimezone());
   const range = reportingRange(sp.from, sp.to, today);
   const length = diffDays(range.from, range.to) + 1;
   const previousRange = reportingRange(addDays(range.from, -length), addDays(range.from, -1), today);

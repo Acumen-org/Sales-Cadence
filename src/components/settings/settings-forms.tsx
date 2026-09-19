@@ -4,18 +4,18 @@ import { useState } from 'react';
 import type { Settings } from '@/lib/settings';
 import { saveMatchingSettingsAction, saveRulesSettingsAction, saveSyncSettingsAction, saveTwentySettingsAction } from '@/lib/actions/settings';
 import { ActionForm } from '@/components/action-form';
-import { Card, Field, Info } from '@/components/ui';
+import { Card, Field } from '@/components/ui';
+import { TIMEZONE_CHOICES } from '@/lib/workspace';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-function Check({ name, label, checked, info }: { name: string; label: string; checked: boolean; info?: string }) {
+function Check({ name, label, checked }: { name: string; label: string; checked: boolean }) {
   return (
     <div className="flex items-start gap-2">
       <label className="flex items-start gap-2 text-sm font-normal text-ink-700">
         <input type="checkbox" name={name} defaultChecked={checked} className="mt-0.5 h-4 w-4 rounded" />
         <span>{label}</span>
       </label>
-      {info ? <Info text={info} /> : null}
     </div>
   );
 }
@@ -25,15 +25,15 @@ export function TwentyConnectionForm({ twenty, envBaseUrl, defaultSchemaJson }: 
     <Card title="Connection and schema mapping">
       <ActionForm action={saveTwentySettingsAction} className="space-y-4 p-4">
         <div className="grid gap-4 md:grid-cols-2">
-          <Field label="Twenty base URL" info="No trailing slash. Also used for the Open in Twenty links.">
+          <Field label="Twenty base URL">
             <input name="baseUrl" defaultValue={twenty.baseUrl ?? ''} className="w-full" placeholder={envBaseUrl ? `${envBaseUrl} (from the environment)` : 'https://twenty.example.com'} />
           </Field>
-          <Field label="API key" info="Blank keeps the stored key. A key here overrides TWENTY_API_KEY from the environment.">
+          <Field label="API key">
             <input name="apiKey" type="password" autoComplete="off" className="w-full" placeholder={twenty.apiKey ? '(unchanged)' : ''} />
             {twenty.apiKey ? <Check name="clearApiKey" label="Remove the stored key (fall back to the environment)" checked={false} /> : null}
           </Field>
         </div>
-        <Field label="Field mapping overrides (JSON)" info='Only the names that differ from the defaults, e.g. {"person": {"assignedToId": "relationshipOwnerId"}}. A "personValues" entry replaces that whole option list. Defaults are shown below.'>
+        <Field label="Field mapping overrides (JSON)">
           <textarea name="schema" rows={6} defaultValue={twenty.schema ? JSON.stringify(twenty.schema, null, 2) : ''} className="w-full font-mono text-xs" />
         </Field>
         <details>
@@ -52,20 +52,20 @@ export function MatchingForm({ matching }: { matching: Settings['matching'] }) {
   return (
     <Card title="Note title patterns (regular expressions, case-insensitive)">
       <ActionForm action={saveMatchingSettingsAction} className="space-y-4 p-4">
-        <Field label="Outbound email note" info="Optional named group (?<actor>...) captures who sent it.">
+        <Field label="Outbound email note">
           <input name="outboundEmailTitle" defaultValue={matching.outboundEmailTitle} className="w-full font-mono text-xs" />
         </Field>
         <Field label="Outbound call note">
           <input name="outboundCallTitle" defaultValue={matching.outboundCallTitle} className="w-full font-mono text-xs" />
         </Field>
-        <Field label="Call notes" info="Named group (?<date>...) is informational.">
+        <Field label="Call notes">
           <input name="callNotesTitle" defaultValue={matching.callNotesTitle} className="w-full font-mono text-xs" />
         </Field>
         <div className="grid gap-4 md:grid-cols-2">
-          <Field label="Prefix of notes Cadence writes" info="Notes starting with this are never treated as evidence.">
+          <Field label="Prefix of notes Cadence writes">
             <input name="cadencePrefix" defaultValue={matching.cadencePrefix} className="w-full" />
           </Field>
-          <Field label="Evidence grace (days)" info="Activity older than the enrollment by more than this is a touch, not a completion.">
+          <Field label="Evidence grace (days)">
             <input name="evidenceGraceDays" type="number" min={0} max={30} defaultValue={matching.evidenceGraceDays} className="w-32" />
           </Field>
         </div>
@@ -110,17 +110,22 @@ export function RulesForm({ rules }: { rules: Settings['rules'] }) {
           <Field label="Reconcile lookback (days)">
             <input name="reconcileLookbackDays" type="number" min={1} max={90} defaultValue={rules.reconcileLookbackDays} className="!w-32" />
           </Field>
+          <Field label="Timezone">
+            <select name="workspaceTimezone" defaultValue={rules.workspaceTimezone} className="w-full">
+              {TIMEZONE_CHOICES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+              {TIMEZONE_CHOICES.some((c) => c.value === rules.workspaceTimezone) ? null : <option value={rules.workspaceTimezone}>{rules.workspaceTimezone}</option>}
+            </select>
+          </Field>
         </div>
         <Field label="Dialpad link ({phone} is the number)">
           <input name="clickToCallUrl" inputMode="url" defaultValue={rules.clickToCallUrl} placeholder="https://h00ks.acm.acumen-strategy.com/admin/dialpad?number={phone}" className="w-full" />
         </Field>
         <Field
           label="Our own email domains"
-          info="Comma separated. A meeting counts as booked only when someone outside these domains attends. Subdomains are covered."
         >
           <input name="internalDomains" defaultValue={rules.internalDomains.join(', ')} className="w-full" />
         </Field>
-        <Field label="Our own organisations" info="Comma separated CRM company names. Hidden from prospect directories; CRM records and inbound matching are retained.">
+        <Field label="Our own organisations">
           <input name="internalCompanyNames" defaultValue={rules.internalCompanyNames.join(', ')} className="w-full" />
         </Field>
         <div className="space-y-2">
@@ -270,7 +275,7 @@ export function SyncForm({ sync }: { sync: Settings['sync'] }) {
         <Check name="writeCompletionNotes" label="Write a [Cadence] note on the person for every completed action" checked={sync.writeCompletionNotes} />
         <Check name="mirrorOpenTasks" label="Mirror open Cadence tasks as Twenty Tasks (assigned to the FO, due on the task day)" checked={sync.mirrorOpenTasks} />
         <Check name="deleteMirroredTaskOnSkip" label="Delete the mirrored Twenty task when a Cadence task is skipped or cancelled (otherwise mark it done)" checked={sync.deleteMirroredTaskOnSkip} />
-        <Check name="writeCadenceTaskIdField" label="Write the Cadence task id into the optional Task.cadenceTaskId field" checked={sync.writeCadenceTaskIdField} info="Requires the custom field on Task in Twenty." />
+        <Check name="writeCadenceTaskIdField" label="Write the Cadence task id into the optional Task.cadenceTaskId field" checked={sync.writeCadenceTaskIdField} />
         <button type="submit" className="btn-primary">
           Save sync settings
         </button>

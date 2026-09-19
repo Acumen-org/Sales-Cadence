@@ -7,7 +7,7 @@ import { filterParam, sectionDefaults } from '@/lib/default-filters';
 import { defaultTwentySchema } from '@/lib/twenty/twenty-schema';
 import { foPeopleWhere, peopleScopeWhere } from '@/lib/people-scope';
 import { prisma } from '@/lib/db';
-import { isAdmin, visiblePodIds } from '@/lib/auth/rbac';
+import { visiblePodIds } from '@/lib/auth/rbac';
 import { SyncNowButton } from '@/components/settings/sync-now-button';
 import Link from 'next/link';
 import { ACCOUNT_SORTS, ACCOUNTS_PAGE_SIZE, DEFAULT_ACCOUNT_SORT, listAccounts, peopleWithoutAccountWhere, type AccountSort } from '@/lib/accounts-query';
@@ -65,7 +65,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
         <Stat label="Engaged accounts" value={list.engaged} tone="good" />
       </div>
       <Surface flush>
-        <ViewHeader title="All accounts" caret actions={isAdmin(user) ? <SyncNowButton /> : undefined} />
+        <ViewHeader title="All accounts" caret actions={<SyncNowButton />} />
         <Toolbar>
           <AccountsToolbar q={q} pods={podRows.map((x) => ({ podOwnerValue: x.podOwnerValue, name: x.name }))} fos={fos} products={[...values.productInterest]} pod={pod ?? ''} fo={foUserId ?? ''} product={product ?? ''} campaign={campaign ?? ''} sort={sort} dir={dir} />
         </Toolbar>
@@ -85,12 +85,12 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
               <thead>
                 <tr>
                   <SortableHeader field="name" label="Account" sort={sort} dir={dir} defaultValue={DEFAULT_ACCOUNT_SORT} defaultDir="asc" />
-                  <th>PODs</th>
+                  <th>Pods</th>
                   <th>FOs</th>
                   <th>Product</th>
                   <SortableHeader field="people" label="People at account" sort={sort} dir={dir} defaultValue={DEFAULT_ACCOUNT_SORT} className="num" />
                   <SortableHeader field="inSequence" label="In a campaign" sort={sort} dir={dir} defaultValue={DEFAULT_ACCOUNT_SORT} />
-                  <SortableHeader field="replied" label="Replied" sort={sort} dir={dir} defaultValue={DEFAULT_ACCOUNT_SORT} className="num" />
+                  <SortableHeader field="replied" label="Replies" sort={sort} dir={dir} defaultValue={DEFAULT_ACCOUNT_SORT} className="num" />
                   <th className="num">Meetings</th>
                   <SortableHeader field="lastTouch" label="Last touch" sort={sort} dir={dir} defaultValue={DEFAULT_ACCOUNT_SORT} />
                 </tr>

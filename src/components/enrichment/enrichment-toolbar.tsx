@@ -30,14 +30,13 @@ export type EnrichmentToolbarProps = {
 /**
  * One row: search, pod, FO, what is missing (chosen one kind at a time, shown as removable chips;
  * several together mean "lacks any of these"), the sort, and a Filters button for the rest -
- * account, tier, type, product, campaign, Twenty tag, priority, and whether the view shows open
- * gaps or the ones marked not found. Every change applies at once through the shared navigation,
+ * account, tier, type, product, campaign and Twenty tag. Every change applies at once through the shared navigation,
  * so a filter never loses a search typed a moment before.
  */
 export function EnrichmentToolbar({ tab, q, fields, wanted, pods, fos, tiers, types, products, tags, accounts, values, sort, dir, exportHref, contacts }: EnrichmentToolbarProps) {
   const navigate = useFilterNavigation();
   const panelId = useId();
-  const more = [values.account, values.tier, values.type, values.product, values.campaign, values.tag, values.priority, values.marks].filter(Boolean).length;
+  const more = [values.account, values.tier, values.type, values.product, values.campaign, values.tag].filter(Boolean).length;
   const [showMore, setShowMore] = useState(() => more > 0);
   const push = (mutate: (next: URLSearchParams) => void) => {
     navigate((next) => {
@@ -107,8 +106,6 @@ export function EnrichmentToolbar({ tab, q, fields, wanted, pods, fos, tiers, ty
             <Select name="campaign" value={values.campaign} title="Filter by campaign" all="In or out of campaigns" options={[{ value: 'any', label: 'In a campaign' }, { value: 'none', label: 'Not in a campaign' }]} />
             <Select name="tag" value={values.tag} title="Filter by Twenty tag" all="Any Twenty tag" options={plain(tags)} />
           </> : null}
-          <Select name="priority" value={values.priority} title="Filter by priority" all="Any priority" options={[{ value: 'critical', label: 'Critical' }, { value: 'useful', label: 'Useful only' }]} />
-          <Select name="marks" value={values.marks} title="Show open or not-found gaps" all="Open gaps" options={[{ value: 'notfound', label: 'Marked not found' }]} />
         </div>
       ) : null}
     </div>

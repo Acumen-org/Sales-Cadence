@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { formatLocalDate, type LocalDate } from '@/lib/dates';
 import clsx from 'clsx';
-import { cloneElement, isValidElement, useId, type ReactElement, type ReactNode } from 'react';
+import { cloneElement, isValidElement, useId, type CSSProperties, type ReactElement, type ReactNode } from 'react';
+import { artFor, type Accent, type RecordArt } from '@/lib/accent';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
 
 /* -------------------------------------------------------------------------- */
@@ -140,12 +141,12 @@ export function initialsOf(name: string): string {
 }
 
 /** Initials avatar: rounded square for companies (like a logo tile), circle for people. */
-export function Avatar({ name, size = 32, shape = 'square', className }: { name: string; size?: number; shape?: 'square' | 'circle'; className?: string }) {
+export function Avatar({ name, size = 32, shape = 'square', className, style }: { name: string; size?: number; shape?: 'square' | 'circle'; className?: string; style?: CSSProperties }) {
   return (
     <span
       aria-hidden
       className={clsx('inline-flex shrink-0 items-center justify-center font-medium', shape === 'circle' ? 'rounded-full' : 'rounded-[8px]', toneFor(name), className)}
-      style={{ width: size, height: size, fontSize: Math.max(10, Math.round(size * 0.36)) }}
+      style={{ width: size, height: size, fontSize: Math.max(10, Math.round(size * 0.36)), ...style }}
     >
       {initialsOf(name)}
     </span>
@@ -402,7 +403,7 @@ const FORM_CONTROLS = new Set(['input', 'select', 'textarea']);
  * Label + control. A single input/select/textarea child gets an id (unless it has one) and the
  * label points at it with htmlFor, so click-to-focus, screen readers and accessible queries work.
  */
-export function Field({ label, children, hint, info, className, required }: { label: ReactNode; children: ReactNode; hint?: ReactNode; info?: string; className?: string; /** Marks the label with a red asterisk. */ required?: boolean }) {
+export function Field({ label, children, hint, className, required }: { label: ReactNode; children: ReactNode; hint?: ReactNode; className?: string; /** Marks the label with a red asterisk. */ required?: boolean }) {
   const autoId = useId();
   const single = isValidElement(children) && typeof children.type === 'string' && FORM_CONTROLS.has(children.type);
   const existingId = single ? (children as ReactElement<{ id?: string }>).props.id : undefined;
@@ -416,8 +417,7 @@ export function Field({ label, children, hint, info, className, required }: { la
           {label}
         </label>
         {/* Outside the label, so the label's own text stays exactly the field's name. */}
-        {required ? <span className="ml-0.5 text-red-600" aria-hidden>*</span> : null}
-        {info ? <Info text={info} /> : null}
+        {required ? <span className="ml-0.5 text-[12px] leading-4 text-red-600" aria-hidden>*</span> : null}
       </div>
       {control}
       {hint ? <p id={hintId} className="text-[11.5px] leading-relaxed text-ink-500">{hint}</p> : null}
@@ -436,14 +436,6 @@ export function Count({ value, className }: { value: number; className?: string 
 }
 
 /** The explanation behind a field label, shown on hover instead of as a sentence under the control. */
-export function Info({ text }: { text: string }) {
-  return (
-    <span title={text} aria-label={text} className="ml-1.5 inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-line align-[-2px] text-[10px] leading-none text-ink-400">
-      ?
-    </span>
-  );
-}
-
 export function KeyValue({ items }: { items: { k: string; v: ReactNode }[] }) {
   return (
     <dl className="kv grid grid-cols-[minmax(0,8.5rem)_1fr] gap-x-4 gap-y-2">
@@ -522,6 +514,7 @@ export function RecordHeader({
   shape = 'circle',
   icon,
   accent,
+  seed,
 }: {
   name: string;
   sub?: ReactNode;
@@ -530,22 +523,86 @@ export function RecordHeader({
   shape?: 'square' | 'circle';
   /** For records that are not people: an icon rather than their initials. */
   icon?: ReactNode;
-  /** The record's own colour (see lib/accent.ts): a soft band behind the header and a ring on the avatar. */
-  accent?: { band: string; ring: string; pattern: string } | null;
+  /** The record's own colour (see lib/accent.ts): the band behind the header, the avatar fill, the ornament. */
+  accent?: Accent | null;
+  /** What the ornament is drawn from; the record id, so it never changes. Falls back to the name. */
+  seed?: string;
 }) {
+  const art = accent ? artFor(seed ?? name) : null;
   return (
-    <div className={clsx('surface relative flex flex-wrap items-start justify-between gap-4 overflow-hidden px-5 py-4', accent && `bg-gradient-to-r ${accent.band}`)}>
-      {accent ? <span aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.05]" style={{ backgroundImage: `radial-gradient(${accent.pattern} 1px, transparent 1px)`, backgroundSize: '14px 14px' }} /> : null}
-      <div className="relative flex min-w-0 items-start gap-3.5">
-        {icon ? <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700">{icon}</span> : <Avatar name={name} shape={shape} size={44} className={accent ? clsx('ring-2 ring-offset-2 ring-offset-white', accent.ring) : undefined} />}
+    <div
+      className="surface relative overflow-hidden px-5 py-5"
+      style={accent ? { background: `linear-gradient(105deg, ${accent.mid} 0%, ${accent.tint} 60%, ${accent.tint} 100%)`, borderColor: accent.mid } : undefined}
+    >
+      {accent && art ? <RecordOrnament accent={accent} art={art} /> : null}
+      <div className={clsx('relative flex min-w-0 items-start gap-4', accent && 'max-w-[calc(100%-260px)]')}>
+        {icon ? (
+          <span className={clsx('flex h-12 w-12 shrink-0 items-center justify-center rounded-xl', accent ? 'text-white' : 'bg-brand-50 text-brand-700')} style={accent ? { background: accent.deep } : undefined}>{icon}</span>
+        ) : (
+          <Avatar name={name} shape={shape} size={52} className={accent ? clsx('ring-2 ring-offset-2 ring-offset-white', accent.ring) : undefined} style={accent ? { background: accent.deep, color: '#ffffff' } : undefined} />
+        )}
         <div className="min-w-0">
-          <h2 className="truncate text-[20px] font-semibold tracking-[-0.01em] text-ink-900">{name}</h2>
+          <h2 className="truncate text-[22px] font-semibold tracking-[-0.015em] text-ink-900">{name}</h2>
           {sub ? <div className="mt-1 text-[14px] text-ink-600">{sub}</div> : null}
-          {badges ? <div className="mt-2 flex flex-wrap items-center gap-1.5">{badges}</div> : null}
+          {badges ? <div className="mt-2.5 flex flex-wrap items-center gap-1.5">{badges}</div> : null}
         </div>
       </div>
-      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+      {actions ? <div className="relative mt-4 flex flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
+  );
+}
+
+/**
+ * The ornament behind a record header: one of six motifs in the record's deep colour, sized by
+ * the record's own numbers, sitting at the right edge under the actions. Decorative only - it
+ * carries no information, so it is hidden from assistive technology.
+ */
+function RecordOrnament({ accent, art }: { accent: Accent; art: RecordArt }) {
+  const v = art.values;
+  const c = accent.deep;
+  const W = 260;
+  const H = 120;
+  let shapes: ReactNode = null;
+  switch (art.motif) {
+    case 'rings': {
+      const cx = 190 + v[0] * 30;
+      const cy = 40 + v[1] * 40;
+      const gap = 13 + v[2] * 8;
+      shapes = [0, 1, 2, 3].map((i) => <circle key={i} cx={cx} cy={cy} r={16 + i * gap} fill="none" stroke={c} strokeWidth={2} opacity={0.42 - i * 0.07} />);
+      break;
+    }
+    case 'dots': {
+      shapes = Array.from({ length: 18 }, (_, i) => <circle key={i} cx={66 + (i % 6) * 34} cy={24 + Math.floor(i / 6) * 36} r={4 + v[i % 16] * 6} fill={c} opacity={0.18 + v[(i + 3) % 16] * 0.22} />);
+      break;
+    }
+    case 'bars': {
+      shapes = Array.from({ length: 7 }, (_, i) => {
+        const h = 22 + v[i] * 76;
+        return <rect key={i} x={86 + i * 22} y={H - h} width={12} height={h} rx={4} fill={c} opacity={0.2 + v[(i + 7) % 16] * 0.18} />;
+      });
+      break;
+    }
+    case 'waves': {
+      shapes = [0, 1, 2].map((i) => {
+        const amp = 8 + v[i] * 10;
+        const y = 30 + i * 28 + v[i + 3] * 8;
+        return <path key={i} d={`M0 ${y} C 40 ${y - amp}, 80 ${y + amp}, 120 ${y} S 200 ${y - amp}, 260 ${y}`} fill="none" stroke={c} strokeWidth={2} opacity={0.42 - i * 0.09} />;
+      });
+      break;
+    }
+    case 'arcs': {
+      const gap = 18 + v[0] * 10;
+      shapes = [0, 1, 2, 3].map((i) => {
+        const r = 36 + i * gap;
+        return <path key={i} d={`M ${W} ${H - r} A ${r} ${r} 0 0 0 ${W - r} ${H}`} fill="none" stroke={c} strokeWidth={2} opacity={0.42 - i * 0.07} />;
+      });
+      break;
+    }
+  }
+  return (
+    <svg aria-hidden className="pointer-events-none absolute inset-y-0 right-0 h-full w-[260px]" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMaxYMid slice">
+      {shapes}
+    </svg>
   );
 }
 

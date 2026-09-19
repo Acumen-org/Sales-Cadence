@@ -8,6 +8,7 @@ import { isNotAccount } from './non-prospects';
 import { foPeopleWhere, myPeopleWhere } from './people-scope';
 import { meetingReadWhere } from './meetings-query';
 import { prisma } from './db';
+import { REPLY_TOUCH_WHERE } from './reply-credit';
 import { liveCampaignMemberIds } from './campaign-membership';
 import type { SessionUser } from './auth/current-user';
 import { visiblePodIds, canSeeAllPods, isAdmin, needsPod } from './auth/rbac';
@@ -145,7 +146,7 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
     const rows = await prisma.personCache.findMany({ where: { id: { in: [...upcomingIds] }, companyId: { in: ids }, deletedAt: null, enrollments: { none: { status: { in: ['ACTIVE', 'PAUSED'] } } } }, select: { companyId: true } });
     for (const r of rows) upcomingByCompany.set(r.companyId!, (upcomingByCompany.get(r.companyId!) ?? 0) + 1);
   }
-  const [peopleRows, enrollRows, touchRows, meetingRows, members] = await Promise.all([
+  const [peopleRows, enrollRows, touchRows, meetingRows, members, replyRows] = await Promise.all([
     // People at an account are the directory's people: a colleague filed under a prospect's company in
     // Twenty is not one of its prospects, and this is what lets "with an account" and "without" add up.
     prisma.personCache.groupBy({ by: ['companyId'], where: { AND: [await externalPeopleWhere(), { companyId: { in: ids }, deletedAt: null }] }, _count: { _all: true } }),
@@ -156,7 +157,15 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
       WHERE p."companyId" = ANY(${ids}) GROUP BY p."companyId"`,
     prisma.meeting.groupBy({ by: ['companyId'], where: { companyId: { in: ids } }, _count: { _all: true } }),
     prisma.user.findMany({ where: { twentyMemberId: { not: null } }, select: { name: true, twentyMemberId: true, role: true } }),
+    // Replies: what came back from the account's people - inbound emails, calls and messages Twenty
+    // holds - with machine answers left out. Not the state of a sequence.
+    prisma.$queryRaw<Array<{ companyId: string; n: bigint }>>`
+      SELECT p."companyId" AS "companyId", COUNT(*) AS n
+      FROM "Touch" t JOIN "PersonCache" p ON p.id = t."personId"
+      WHERE p."companyId" = ANY(${ids}) AND p."deletedAt" IS NULL AND ((t.direction = 'INBOUND' AND t.channel IN ('EMAIL', 'CALL', 'LINKEDIN') AND t.summary NOT LIKE 'Auto-reply:%') OR (t.channel = 'CALL' AND t.summary LIKE 'Answered call:%'))
+      GROUP BY p."companyId"`,
   ]);
+  const repliesBy = new Map(replyRows.map((r) => [r.companyId, Number(r.n)]));
 
   const peopleBy = new Map(peopleRows.map((r) => [r.companyId, r._count._all]));
   const lastBy = new Map(touchRows.map((r) => [r.companyId, r.last]));
@@ -191,7 +200,7 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
     pods: [], fos: [], products: [],
     people: peopleBy.get(c.id) ?? 0,
     inSequence: (enrollBy.get(c.id)?.inSequence ?? 0) + (upcomingByCompany?.get(c.id) ?? 0),
-    replied: enrollBy.get(c.id)?.replied ?? 0,
+    replied: repliesBy.get(c.id) ?? 0,
     meetings: meetingsBy.get(c.id) ?? 0,
     lastTouchAt: lastBy.get(c.id) ?? null,
     mine: (user.twentyMemberId && c.ownerMemberId === user.twentyMemberId) || mineIds.has(c.id),
@@ -500,6 +509,7 @@ export async function accountDetail(companyId: string, user: SessionUser) {
   // counting them here would promise the FO something they cannot open.
   const openTasks = tasks.filter((t) => t.state === 'PENDING' && t.enrollment.status !== 'PAUSED');
   const inCampaign = await liveCampaignMemberIds();
+  const inboundReplies = await prisma.touch.count({ where: { personId: { in: accountPeople.map((p) => p.id) }, person: { deletedAt: null }, ...REPLY_TOUCH_WHERE } });
   return {
     company,
     blocked: blocked ? { reason: blocked.reason, byName: blocked.blockedBy?.name ?? null, at: blocked.createdAt } : null,
@@ -520,7 +530,7 @@ export async function accountDetail(companyId: string, user: SessionUser) {
     stats: {
       people: accountPeople.length,
       inSequence: accountPeople.filter((p) => (p.enrollment && (p.enrollment.status === 'ACTIVE' || p.enrollment.status === 'PAUSED')) || inCampaign.has(p.id)).length,
-      replied: accountPeople.filter((p) => p.enrollment && (p.enrollment.status === 'REPLIED' || p.enrollment.status === 'MEETING')).length,
+      replied: inboundReplies,
       meetings: meetings.length,
       touches: accountPeople.reduce((sum, person) => sum + person.touches, 0),
       openTasks: openTasks.length,

@@ -91,6 +91,12 @@ export const RulesSettingsSchema = z.object({
     .trim()
     .refine((v) => v === '' || /^https?:\/\/\S+$/i.test(v), 'Enter an http(s) URL, or leave it blank.')
     .default('https://h00ks.acm.acumen-strategy.com/admin/dialpad?number={phone}'),
+  /** The clock the workspace runs on (IANA zone). Central Time unless changed here. */
+  workspaceTimezone: z
+    .string()
+    .trim()
+    .refine((tz) => { try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return true; } catch { return false; } }, 'Enter a valid timezone, like America/Chicago.')
+    .default('America/Chicago'),
   /** A skip reason flagged as bounce ends the sequence (Outreach: Bounced state). */
   exitOnBounce: z.boolean().default(true),
   /** A call logged with an "answered" disposition counts as a reply and finishes the sequence. */

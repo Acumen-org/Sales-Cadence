@@ -28,7 +28,7 @@ const Filters = z.object({
   page: z.number().int().min(1).max(100000).default(1),
 });
 export type PickerFilters = z.infer<typeof Filters>;
-export type PickerRow = { id: string; name: string; company: string | null; title: string | null; pod: string | null; tier: string | null; state: 'In a sequence' | 'Replied' | 'Finished' | 'Never enrolled' | 'Do not contact' };
+export type PickerRow = { id: string; name: string; company: string | null; title: string | null; pod: string | null; tier: string | null; state: 'In a campaign' | 'Replied' | 'Finished' | 'Never in a campaign' | 'Do not contact' };
 
 /** A page of the picker. Not exported: a "use server" module may only export async functions; the response carries it. */
 const PICKER_PAGE = 100;
@@ -74,7 +74,7 @@ export async function pickPeopleAction(input: unknown): Promise<{ ok: true; rows
   const podName = new Map(pods.map((p) => [p.podOwnerValue, p.name]));
   const rows: PickerRow[] = people.map((p) => {
     const e = p.enrollments[0];
-    const state: PickerRow['state'] = p.dnd || p.optedOut ? 'Do not contact' : !e ? 'Never enrolled' : e.status === 'ACTIVE' || e.status === 'PAUSED' ? 'In a sequence' : e.status === 'REPLIED' || e.status === 'MEETING' ? 'Replied' : 'Finished';
+    const state: PickerRow['state'] = p.dnd || p.optedOut ? 'Do not contact' : !e ? 'Never in a campaign' : e.status === 'ACTIVE' || e.status === 'PAUSED' ? 'In a campaign' : e.status === 'REPLIED' || e.status === 'MEETING' ? 'Replied' : 'Finished';
     return { id: p.id, name: cachedPersonName(p), company: p.companyName, title: p.jobTitle, pod: p.podOwner ? podName.get(p.podOwner) ?? p.podOwner : null, tier: p.tier, state };
   });
   return { ok: true, rows, total, page: f.page, pageSize: PICKER_PAGE };

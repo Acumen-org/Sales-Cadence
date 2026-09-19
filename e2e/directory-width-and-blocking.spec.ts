@@ -66,7 +66,7 @@ test('people keeps one row of filters and no list-category dropdown', async ({ p
   await expect(tier).toBeHidden();
   await page.getByRole('button', { name: /^Filters/ }).click();
   await expect(tier).toBeVisible();
-  await expect(page.getByLabel('Filter by sequence state')).toBeVisible();
+  await expect(page.getByLabel('Filter by campaign state')).toBeVisible();
 });
 
 test('an admin blocks an account out of the platform and puts it back', async ({ page }) => {

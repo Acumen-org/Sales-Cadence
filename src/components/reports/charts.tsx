@@ -8,7 +8,8 @@
 import type { ReactNode } from 'react';
 
 /** Validated (dataviz validator, light surface): the three channels, in this order, always. */
-export const CHANNEL_COLOURS: Record<'EMAIL' | 'CALL' | 'LINKEDIN', string> = { EMAIL: '#2a78d6', CALL: '#eb6834', LINKEDIN: '#1baf7a' };
+/** Three steps of the one green ramp (GREEN_RAMP 4, 2, 1): identity comes from the legend and the label, not a second hue. */
+export const CHANNEL_COLOURS: Record<'EMAIL' | 'CALL' | 'LINKEDIN', string> = { EMAIL: '#24735e', CALL: '#7fb894', LINKEDIN: '#b9d8c0' };
 export const CHANNEL_LABELS: Record<'EMAIL' | 'CALL' | 'LINKEDIN', string> = { EMAIL: 'Email', CALL: 'Calls', LINKEDIN: 'LinkedIn' };
 /** One hue, light to dark, for magnitude. */
 export const GREEN_RAMP = ['#e3efe3', '#b9d8c0', '#7fb894', '#3f8f66', '#24735e', '#17493d'];

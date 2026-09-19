@@ -12,7 +12,7 @@ import { liveCampaignMemberIds } from './campaign-membership';
 import { sortDirection } from './sorting';
 import { twentyCompanyUrl, twentyPersonUrl } from './twenty/urls';
 import { addDays, todayIn } from './dates';
-import { WORKSPACE_TIMEZONE } from './workspace';
+import { workspaceTimezone } from './workspace';
 import { canEnrich, enrichmentCompanyScope, enrichmentPeopleScope, normalizedHeader, type EnrichmentEntity } from './enrichment';
 
 /**
@@ -26,7 +26,7 @@ import { canEnrich, enrichmentCompanyScope, enrichmentPeopleScope, normalizedHea
  * who they are. **Useful** is what makes the work better rather than possible.
  */
 type PersonRecord = Pick<PersonCache, 'firstName' | 'lastName' | 'email' | 'phone' | 'badEmail' | 'badPhone' | 'emailMissing' | 'phoneMissing' | 'companyId' | 'linkedinUrl' | 'jobTitle' | 'tags'>;
-type CompanyRecord = Pick<CompanyCache, 'domain' | 'linkedinUrl' | 'industry' | 'employees' | 'aum' | 'ownerMemberId'>;
+type CompanyRecord = Pick<CompanyCache, 'domain' | 'linkedinUrl' | 'city' | 'employees' | 'aum' | 'ownerMemberId'>;
 type GapContext = { enrichmentTags: Set<string> };
 export type GapSpec<R> = {
   field: string;
@@ -53,7 +53,7 @@ export const PERSON_GAPS: GapSpec<PersonRecord>[] = [
 export const COMPANY_GAPS: GapSpec<CompanyRecord>[] = [
   { field: 'domain', label: 'Website', priority: 'critical', scorecard: true, missing: (c) => (blank(c.domain) ? 'Website missing' : null) },
   { field: 'linkedinUrl', label: 'LinkedIn', priority: 'critical', scorecard: true, missing: (c) => (blank(c.linkedinUrl) ? 'LinkedIn missing' : null) },
-  { field: 'industry', label: 'Industry', priority: 'useful', scorecard: true, missing: (c) => (blank(c.industry) ? 'Industry missing' : null) },
+  { field: 'city', label: 'Address', priority: 'useful', scorecard: true, missing: (c) => (blank(c.city) ? 'Address missing' : null) },
   { field: 'employees', label: 'Employees', priority: 'useful', scorecard: true, missing: (c) => (blank(c.employees) ? 'Employees missing' : null) },
   { field: 'aum', label: 'AUM', priority: 'useful', scorecard: true, missing: (c) => (blank(c.aum) ? 'AUM missing' : null) },
   { field: 'ownerMemberId', label: 'Account owner', priority: 'useful', fixInTwenty: true, scorecard: true, missing: (c) => (blank(c.ownerMemberId) ? 'Account owner not assigned' : null) },
@@ -356,7 +356,7 @@ async function scorecardTallies(user: SessionUser | null): Promise<{ contacts: T
   const [{ rules }, blocked, schema, pods, members] = await Promise.all([getSettings(), blockedCompanyIds(), getTwentySchema(), prisma.pod.findMany({ select: { podOwnerValue: true, name: true } }), prisma.user.findMany({ where: { twentyMemberId: { not: null } }, select: { twentyMemberId: true, name: true } })]);
   const [people, companies] = await Promise.all([
     prisma.personCache.findMany({ where: user ? await enrichmentPeopleScope(user) : { deletedAt: null, AND: [await externalPeopleWhere()] }, select: { id: true, firstName: true, lastName: true, email: true, phone: true, badEmail: true, badPhone: true, emailMissing: true, phoneMissing: true, companyId: true, linkedinUrl: true, jobTitle: true, tags: true, ownerMemberId: true, podOwner: true } }),
-    prisma.companyCache.findMany({ where: user ? await enrichmentCompanyScope(user) : { deletedAt: null }, select: { id: true, name: true, domain: true, linkedinUrl: true, industry: true, employees: true, aum: true, ownerMemberId: true } }),
+    prisma.companyCache.findMany({ where: user ? await enrichmentCompanyScope(user) : { deletedAt: null }, select: { id: true, name: true, domain: true, linkedinUrl: true, city: true, employees: true, aum: true, ownerMemberId: true } }),
   ]);
   const ctx: GapContext = { enrichmentTags: new Set(schema.personValues.needsEnrichmentTags) };
   const names = new Map<string, string>([[groupKey('all', ''), 'Everyone']]);
@@ -395,7 +395,7 @@ const toGroups = (tally: Tally, names: Map<string, string>, specs: GapSpec<Perso
 
 /** Completeness by field, for everyone, each pod and each FO, beside the snapshot from about a week ago. */
 export async function enrichmentScorecard(user: SessionUser, now = new Date()): Promise<Scorecard> {
-  const today = todayIn(WORKSPACE_TIMEZONE, now);
+  const today = todayIn(workspaceTimezone(), now);
   await ensureScorecardSnapshot(now);
   const { contacts, accounts, names } = await scorecardTallies(canSeeAllPods(user) ? null : user);
   // The comparison day: the newest snapshot at least a week old, else the oldest one before today.
@@ -407,13 +407,13 @@ export async function enrichmentScorecard(user: SessionUser, now = new Date()): 
 
 /** Write today's completeness for every group, once a day; the worker calls it nightly and the scorecard view fills a missed day. */
 export async function ensureScorecardSnapshot(now = new Date()): Promise<{ day: string; rows: number; written: boolean }> {
-  const day = todayIn(WORKSPACE_TIMEZONE, now);
+  const day = todayIn(workspaceTimezone(), now);
   if (await prisma.enrichmentSnapshot.count({ where: { day } })) return { day, rows: 0, written: false };
   return snapshotScorecard(now);
 }
 
 export async function snapshotScorecard(now = new Date()): Promise<{ day: string; rows: number; written: boolean }> {
-  const day = todayIn(WORKSPACE_TIMEZONE, now);
+  const day = todayIn(workspaceTimezone(), now);
   const { contacts, accounts } = await scorecardTallies(null);
   const rows: Prisma.EnrichmentSnapshotCreateManyInput[] = [];
   const push = (entity: EnrichmentEntity, tally: Tally, specs: GapSpec<PersonRecord | CompanyRecord>[]) => {

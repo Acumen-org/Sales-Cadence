@@ -195,6 +195,10 @@ async function handlePerson(person: TwentyPerson, deleted: boolean, ctx: EngineC
 // notes
 // ---------------------------------------------------------------------------
 
+/** Subjects mail systems write, not people: nothing to read and nothing answered. */
+export const AUTO_REPLY_SUBJECT = /^(?:\s*(?:re|fwd?)\s*:\s*)*(?:automatic reply|auto(?:matic)?[- ]?reply|autoreply|auto response|out of (?:the )?office(?=\s*(?:[:\-–(]|until|till|through|thru|re\b|$))|ooo\b|undeliverable|delivery (?:status notification|failure|has failed)|mail delivery|message not delivered|read:|accepted:|declined:|tentative:)/i;
+export const isAutomaticReply = (subject: string | null | undefined) => AUTO_REPLY_SUBJECT.test((subject ?? '').trim());
+
 async function recordTouch(data: { personId: string; channel: 'EMAIL' | 'CALL' | 'LINKEDIN' | 'MEETING'; direction: 'OUTBOUND' | 'INBOUND'; occurredAt: Date; summary: string; externalId: string; actorUserId?: string | null; actorLabel?: string | null }) {
   const person = await prisma.personCache.findUnique({ where: { id: data.personId }, select: { id: true } });
   if (!person) return false;
@@ -336,15 +340,19 @@ async function handleMessage(message: TwentyMessage, ctx: EngineContext, setting
       personId = p?.id ?? null;
     }
     if (!personId) return { result: 'ignored_inbound_unknown_sender' };
+    // An out-of-office or "automatic reply" is a machine answering: it is recorded as what it is,
+    // counts as no reply anywhere, and never finishes a sequence.
+    const automatic = isAutomaticReply(subject);
     await recordTouch({
       personId,
       channel: 'EMAIL',
       direction: 'INBOUND',
       occurredAt,
-      summary: `Reply: ${subject}`,
+      summary: `${automatic ? 'Auto-reply' : 'Reply'}: ${subject}`,
       externalId: `message:${message.id}:person:${personId}`,
       actorLabel: cls.fromHandle,
     });
+    if (automatic) return { result: 'inbound_automatic_reply' };
     const enrollment = await prisma.enrollment.findFirst({
       where: { personId, status: { in: [...OCCUPYING_STATUSES, 'REPLIED', 'MEETING'] } },
       orderBy: { createdAt: 'desc' },

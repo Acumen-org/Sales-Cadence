@@ -13,7 +13,7 @@ import { getTwentyClient, type TwentyClient } from '../twenty';
 import type { TwentyPerson } from '../twenty/types';
 import { findDateWithCapacity, reserve, type DayLoad } from './caps';
 import { nextWorkingDay } from './clock';
-import { WORKSPACE_TIMEZONE } from '../workspace';
+import { workspaceTimezone } from '../workspace';
 import { advanceEnrollment, cancelOpenTasks, isUniqueViolation, syncCancelled, type EngineContext } from './tasks';
 import { loadSyncTasks, syncTaskRescheduled, syncTaskResolved, syncTasksCreated } from './sync-out';
 
@@ -357,8 +357,8 @@ export async function resumeEnrollment(enrollmentId: string, opts: { actor: Audi
     if (!e) throw new Error('Enrollment not found');
     if (e.status !== 'PAUSED') return { updated: e, movedIds: [] as string[], refused: 'This enrollment is not paused.' as string | null };
     if (e.campaignId) { const campaign = await tx.campaign.findUnique({ where: { id: e.campaignId } }); if (campaign?.status !== 'ACTIVE') return { updated: e, movedIds: [] as string[], refused: 'The campaign itself is paused. Resume the campaign to release its people.' as string | null }; }
-    const today = todayIn(WORKSPACE_TIMEZONE, now);
-    const pausedOn = e.pausedAt ? todayIn(WORKSPACE_TIMEZONE, e.pausedAt) : today;
+    const today = todayIn(workspaceTimezone(), now);
+    const pausedOn = e.pausedAt ? todayIn(workspaceTimezone(), e.pausedAt) : today;
     const pausedDays = Math.max(0, diffDays(pausedOn, today));
     const shiftDays = settings.rules.clockMode === 'shift' ? e.shiftDays + pausedDays : e.shiftDays;
     const movedIds: string[] = [];
@@ -367,7 +367,7 @@ export async function resumeEnrollment(enrollmentId: string, opts: { actor: Audi
       for (const t of pending) {
         const target = nextWorkingDay(t.dueDate < today ? today : t.dueDate, settings.rules.workingDays);
         if (target !== t.dueDate || t.snoozedTo) {
-          await tx.task.update({ where: { id: t.id }, data: { dueDate: target, dueAt: localDateToInstant(target, e.fo.timezone, 9), snoozedTo: null } });
+          await tx.task.update({ where: { id: t.id }, data: { dueDate: target, dueAt: localDateToInstant(target, workspaceTimezone(), 9), snoozedTo: null } });
           movedIds.push(t.id);
         }
       }
@@ -395,7 +395,7 @@ export async function reassignEnrollment(enrollmentId: string, newFoUserId: stri
   const updated = await prisma.$transaction(async (tx) => {
     const pending = await tx.task.findMany({ where: { enrollmentId, state: 'PENDING' } });
     for (const t of pending) {
-      await tx.task.update({ where: { id: t.id }, data: { foUserId: newFoUserId, dueAt: localDateToInstant(t.snoozedTo ?? t.dueDate, fo.timezone, 9), twentyTaskId: null } });
+      await tx.task.update({ where: { id: t.id }, data: { foUserId: newFoUserId, dueAt: localDateToInstant(t.snoozedTo ?? t.dueDate, workspaceTimezone(), 9), twentyTaskId: null } });
     }
     const u = await tx.enrollment.update({ where: { id: enrollmentId }, data: { foUserId: newFoUserId } });
     await logAudit({ entityType: 'enrollment', entityId: enrollmentId, action: 'reassigned', actor: opts.actor, details: { from: e.foUserId, to: newFoUserId, tasks: pending.length } }, tx);

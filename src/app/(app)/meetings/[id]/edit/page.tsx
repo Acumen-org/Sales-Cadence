@@ -1,6 +1,7 @@
 import { notFound, redirect } from 'next/navigation';
 import { companiesInScope } from '@/lib/meetings-query';
 import { requireUser } from '@/lib/auth/current-user';
+import { ROLES_NEEDING_POD } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
 import { canManageMeetingAction } from '@/lib/actions/meetings';
 import { MeetingForm } from '@/components/meetings/meeting-form';
@@ -12,9 +13,10 @@ import { dateTimeInputValue } from '@/lib/dates';
 export default async function EditMeetingPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
   const { id } = await params;
-  const [meeting, companies] = await Promise.all([
+  const [meeting, companies, fos] = await Promise.all([
     prisma.meeting.findUnique({ where: { id }, include: { attendees: true } }),
     companiesInScope(user),
+    prisma.user.findMany({ where: { active: true, role: { in: ROLES_NEEDING_POD } }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
   ]);
   if (!meeting) notFound();
   if (!(await canManageMeetingAction(id))) redirect(`/meetings/${id}`);
@@ -28,8 +30,10 @@ export default async function EditMeetingPage({ params }: { params: Promise<{ id
             mode="edit"
             timezone={user.timezone}
             companies={companies}
+            fos={fos}
             initial={{
               id: meeting.id,
+              bookedById: meeting.bookedById ?? '',
               title: meeting.title,
               sourceUrl: meeting.sourceUrl,
               occurredAt: dateTimeInputValue(meeting.occurredAt, user.timezone),

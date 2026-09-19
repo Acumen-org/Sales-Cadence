@@ -110,8 +110,8 @@ export function EnrichmentTable({ entity, rows, fields, assignees, canMark, notF
         </colgroup>
         <thead>
           <tr>
-            <th className="w-9 pl-4 pr-0"><input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={!rows.length} aria-label={entity === 'person' ? 'Select contacts' : 'Select accounts'} /></th>
-            <th>{entity === 'person' ? 'Contact' : 'Account'}</th>
+            <th className="w-9 pl-4 pr-0"><input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={!rows.length} aria-label={entity === 'person' ? 'Select people' : 'Select accounts'} /></th>
+            <th>{entity === 'person' ? 'Person' : 'Account'}</th>
             <th>{notFound ? 'Marked not found' : 'Information needed'}</th>
             <th>Priority</th>
             <th>Synced</th>
@@ -130,7 +130,7 @@ export function EnrichmentTable({ entity, rows, fields, assignees, canMark, notF
                     return (
                       <span key={gap.field} className="inline-flex items-center gap-1" title={title || undefined}>
                         <Badge tone={notFound ? 'gray' : gap.assignee ? 'blue' : gap.priority === 'critical' ? 'amber' : 'gray'}>
-                          {gap.label}{gap.fixInTwenty && !notFound ? ' · link it in Twenty' : ''}{gap.assignee ? ` · ${gap.assignee}` : ''}
+                          {gap.label}{gap.assignee ? ` · ${gap.assignee}` : ''}
                         </Badge>
                         {gap.suggestion ? <Link href={`/accounts/${gap.suggestion.id}`} className="text-[12px] text-brand-700 hover:underline" title="The account whose website matches this email">looks like {gap.suggestion.name}</Link> : null}
                       </span>

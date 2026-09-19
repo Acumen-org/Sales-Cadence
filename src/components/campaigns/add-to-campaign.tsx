@@ -15,7 +15,7 @@ type Choice = CampaignChoice & { placesLeft: number | null };
  * "Add to campaign": the upcoming and running campaigns the reader may change, each with the
  * places it still has, and a new campaign at the end. Works for one person or a selection.
  */
-export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', label = 'Add to campaign', onDone }: { personIds: string[]; className?: string; label?: string; onDone?: () => void }) {
+export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', label = 'Add to campaign', onDone, disabled = false, disabledTitle }: { personIds: string[]; className?: string; label?: string; onDone?: () => void; /** Greyed out, with the reason on hover: everyone chosen is already in a campaign. */ disabled?: boolean; disabledTitle?: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [choices, setChoices] = useState<Choice[] | null>(null);
@@ -43,7 +43,7 @@ export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', lab
 
   return (
     <>
-      <button type="button" className={className} onClick={() => setOpen(true)} disabled={!personIds.length}>
+      <button type="button" className={className} disabled={disabled || !personIds.length} title={disabled ? disabledTitle : undefined} onClick={() => setOpen(true)}>
         <IconPlus size={13} /> {label}
       </button>
       {open ? (
@@ -90,7 +90,7 @@ export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', lab
 }
 
 /** "Remove from campaign", one or many, with the count in the confirmation. */
-export function RemoveFromCampaign({ campaignId, campaignName, personIds, className = 'btn-secondary btn-sm', onDone }: { campaignId: string; campaignName: string; personIds: string[]; className?: string; onDone?: () => void }) {
+export function RemoveFromCampaign({ campaignId, campaignName, personIds, className = 'btn-danger btn-sm', label = 'Remove from campaign', onDone }: { campaignId: string; campaignName: string; personIds: string[]; className?: string; label?: string; onDone?: () => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -112,7 +112,45 @@ export function RemoveFromCampaign({ campaignId, campaignName, personIds, classN
           });
         }}
       >
-        Remove from campaign
+        {label}
+      </button>
+      {message ? <span role="status" className={`mt-1 text-xs ${message.ok ? 'text-emerald-700' : 'text-red-700'}`}>{message.text}</span> : null}
+    </span>
+  );
+}
+
+/** Take a selection out of whichever campaigns hold them - one confirmation, one call per campaign. */
+export function RemoveFromCampaigns({ people, className = 'btn-danger btn-sm', onDone }: { people: { id: string; campaignId: string; campaignName: string }[]; className?: string; onDone?: () => void }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const byCampaign = new Map<string, { name: string; ids: string[] }>();
+  for (const p of people) { const g = byCampaign.get(p.campaignId) ?? { name: p.campaignName, ids: [] }; g.ids.push(p.id); byCampaign.set(p.campaignId, g); }
+  const names = [...byCampaign.values()].map((g) => g.name);
+  return (
+    <span className="inline-flex flex-col items-start">
+      <button
+        type="button"
+        className={className}
+        disabled={pending || !people.length}
+        onClick={() => {
+          if (!window.confirm(`Remove ${people.length} ${people.length === 1 ? 'person' : 'people'} from ${names.length === 1 ? names[0] : `${names.length} campaigns`}? Anyone mid-sequence stops there.`)) return;
+          start(async () => {
+            const results: string[] = [];
+            let failed = false;
+            for (const [campaignId, g] of byCampaign) {
+              const fd = new FormData();
+              fd.set('campaignId', campaignId);
+              fd.set('personIds', JSON.stringify(g.ids));
+              const r = await removePeopleFromCampaignAction(fd);
+              if (r.ok) results.push(r.message ?? 'Done.'); else { failed = true; results.push(r.error); }
+            }
+            setMessage({ ok: !failed, text: results.join(' ') });
+            if (!failed) { router.refresh(); onDone?.(); }
+          });
+        }}
+      >
+        Remove from campaign{names.length > 1 ? 's' : ''}
       </button>
       {message ? <span role="status" className={`mt-1 text-xs ${message.ok ? 'text-emerald-700' : 'text-red-700'}`}>{message.text}</span> : null}
     </span>

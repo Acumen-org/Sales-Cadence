@@ -7,7 +7,7 @@ import { Badge, Notice, RecordFields, Surface } from '@/components/ui';
 import { requireUser } from '@/lib/auth/current-user';
 import { isAdmin } from '@/lib/auth/rbac';
 import { formatInstant } from '@/lib/dates';
-import { AssistantHeader, AssistantNotConnected } from '@/components/assistant';
+import { AssistantHeader } from '@/components/assistant';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -24,6 +24,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
  * (src/lib/meetings/analysis.ts), so connecting a model later needs no UI change.
  */
 export async function MeetingAnalysisPanel({
+  talkShare: liveTalk = [],
   meetingId,
   analysis,
   status,
@@ -41,6 +42,8 @@ export async function MeetingAnalysisPanel({
   error: string | null;
   hasTranscript: boolean;
   canRun: boolean;
+  /** Who spoke how much, computed from the transcript as it stands. */
+  talkShare?: Array<{ speaker: string; seconds: number; words: number; share: number }>;
 }) {
   const empty = isAnalysisEmpty(analysis);
   const user = await requireUser();
@@ -51,17 +54,9 @@ export async function MeetingAnalysisPanel({
   return (
     <Surface flush>
       <AssistantHeader
-        connected={configured}
+        connected={configured ? true : isAdmin(user) ? false : null}
         right={canRun && hasTranscript && status !== 'PENDING' ? <ActionButton action={analyseMeetingAction} payload={{ meetingId }} className="btn-secondary btn-sm">{configured ? 'Analyse meeting' : 'Measure talk time'}</ActionButton> : null}
       />
-      {!configured ? (
-        <div className="border-b border-line">
-          <AssistantNotConnected
-            canConfigure={isAdmin(user)}
-            does={['Summarises the call, its next steps and the risks named in it']}
-          />
-        </div>
-      ) : null}
       {status === 'PENDING' ? <div role="status" className="border-b border-line p-4"><Badge tone="amber">Analysis in progress</Badge></div> : null}
 
       {error ? (
@@ -71,7 +66,7 @@ export async function MeetingAnalysisPanel({
       ) : null}
 
       {empty ? (
-        <div className="p-4 text-sm text-ink-500">{analysis && statisticsOnly ? 'This transcript has no timed speaker segments.' : hasTranscript ? 'No analysis saved' : 'Add a transcript to analyze this meeting.'}</div>
+        <TalkTime rows={liveTalk} />
       ) : (
         <>
           {analysis!.outcome ? (
@@ -139,10 +134,10 @@ export async function MeetingAnalysisPanel({
             </Section>
           ) : null}
 
-          {analysis!.talkShare.length ? (
-            <Section title={statisticsOnly ? 'Transcript talk time' : 'Talk time'}>
+          {(analysis!.talkShare.length ? analysis!.talkShare : liveTalk).length ? (
+            <Section title="Talk time">
               <ul className="space-y-2">
-                {analysis!.talkShare.map((t) => (
+                {(analysis!.talkShare.length ? analysis!.talkShare : liveTalk).map((t) => (
                   <li key={t.speaker}>
                     <div className="flex items-baseline justify-between gap-2 text-sm">
                       <span className="truncate text-ink-700">{t.speaker}</span>
@@ -167,5 +162,27 @@ export async function MeetingAnalysisPanel({
         </>
       )}
     </Surface>
+  );
+}
+
+/** Who spoke how much, as the transcript shows it, when no model has read the meeting yet. */
+function TalkTime({ rows }: { rows: Array<{ speaker: string; seconds: number; words: number; share: number }> }) {
+  if (!rows.length) return null;
+  return (
+    <Section title="Talk time">
+      <ul className="space-y-2">
+        {rows.map((t) => (
+          <li key={t.speaker}>
+            <div className="flex items-baseline justify-between gap-2 text-sm">
+              <span className="truncate text-ink-700">{t.speaker}</span>
+              <span className="font-medium text-ink-900">{Math.round(t.share * 100)}%</span>
+            </div>
+            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-canvas">
+              <div className="h-full rounded-full bg-brand-500" style={{ width: `${Math.round(t.share * 100)}%` }} />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </Section>
   );
 }

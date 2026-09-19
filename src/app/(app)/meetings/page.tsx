@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { optionLabel } from '@/lib/twenty/labels';
 import type { Prisma } from '@prisma/client';
 import { requireUser } from '@/lib/auth/current-user';
-import { canCreateMeeting } from '@/lib/auth/rbac';
+import { canCreateMeeting, ROLES_NEEDING_POD } from '@/lib/auth/rbac';
 import { attendeeIsExternal, meetingReadWhere } from '@/lib/meetings-query';
 import { getSettings } from '@/lib/settings';
 import { prisma } from '@/lib/db';
@@ -17,7 +17,7 @@ import { Badge, Empty, EmptyState, IdentityCell, Surface, Toolbar, ViewHeader } 
 
 const PAGE_SIZE = 50;
 
-export default async function MeetingsPage({ searchParams }: { searchParams: Promise<{ page?: string; who?: string; product?: string; from?: string; to?: string; fav?: string }> }) {
+export default async function MeetingsPage({ searchParams }: { searchParams: Promise<{ page?: string; who?: string; product?: string; from?: string; to?: string; fav?: string; booked?: string }> }) {
   const user = await requireUser();
   const sp = await searchParams;
   const page = Math.max(1, Number.parseInt(sp.page ?? '1', 10) || 1);
@@ -26,6 +26,8 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
   const from = isLocalDate(sp.from) ? sp.from! : '';
   const to = isLocalDate(sp.to) ? sp.to! : '';
   const favourites = sp.fav === '1';
+  const fos = await prisma.user.findMany({ where: { active: true, role: { in: ROLES_NEEDING_POD } }, select: { id: true, name: true }, orderBy: { name: 'asc' } });
+  const booked = fos.some((f) => f.id === sp.booked) ? sp.booked! : '';
 
   const readable = await meetingReadWhere(user);
   const filters: Prisma.MeetingWhereInput[] = [readable];
@@ -43,8 +45,9 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
   if (from) filters.push({ occurredAt: { gte: startOfLocalDay(from, user.timezone) } });
   if (to) filters.push({ occurredAt: { lt: startOfLocalDay(addDays(to, 1), user.timezone) } });
   if (favourites) filters.push({ favourites: { some: { userId: user.id } } });
+  if (booked) filters.push({ bookedById: booked });
   const where: Prisma.MeetingWhereInput = { AND: filters };
-  const filtered = Boolean(who || product || from || to || favourites);
+  const filtered = Boolean(who || product || from || to || favourites || booked);
 
   const { rules } = await getSettings();
   const externalCount = (attendees: { email: string | null; external: boolean }[]) => attendees.filter((a) => attendeeIsExternal(a, rules.internalDomains)).length;
@@ -65,6 +68,9 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
         products: true,
         transcript: true,
         createdBy: { select: { name: true } },
+        bookedBy: { select: { name: true } },
+        analysisStatus: true,
+        analysisModel: true,
         _count: { select: { attendees: true } },
         attendees: { select: { email: true, external: true } },
         favourites: { where: { userId: user.id }, select: { userId: true } },
@@ -111,7 +117,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
           }
         />
         <Toolbar>
-          <MeetingsToolbar who={who} product={product} from={from} to={to} favourites={favourites} products={PRODUCTS} />
+          <MeetingsToolbar who={who} product={product} from={from} to={to} favourites={favourites} products={PRODUCTS} booked={booked} fos={fos} />
         </Toolbar>
 
         {meetings.length === 0 ? (
@@ -137,7 +143,8 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                   <th>Products</th>
                   <th>Attendees</th>
                   <th>Transcript</th>
-                  <th>Added by</th>
+                  <th>Analysis</th>
+                  <th>Booked by</th>
                 </tr>
               </thead>
               <tbody>
@@ -175,7 +182,8 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                     </td>
                     <td>{m.transcript ? <Badge tone="blue">Transcript</Badge> : <Empty />}</td>
 
-                    <td className="whitespace-nowrap text-[12.5px]">{m.createdBy?.name ?? <Empty />}</td>
+                    <td className="text-[12.5px]">{m.analysisStatus === 'READY' && m.analysisModel && m.analysisModel !== 'local-stats' ? <Badge tone="green">Ready</Badge> : <Empty />}</td>
+                    <td className="whitespace-nowrap text-[12.5px]">{m.bookedBy?.name ?? <Empty />}</td>
                   </tr>
                 ))}
               </tbody>

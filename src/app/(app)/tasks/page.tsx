@@ -1,6 +1,4 @@
 import { PageFrame } from '@/components/page-frame';
-import { StartingSoonStrip } from '@/components/campaigns/starting-soon';
-import { startingSoon } from '@/lib/campaign-membership';
 import Link from 'next/link';
 import { filterParam, sectionDefaults } from '@/lib/default-filters';
 import { requireUser } from '@/lib/auth/current-user';
@@ -45,7 +43,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const defaults = filters ? await sectionDefaults(user) : { podId: null, podOwnerValue: null, foUserId: null };
   const podId = filters ? filterParam(sp.pod, defaults.podId) : null; const foUserId = filters ? filterParam(sp.fo, defaults.foUserId) : null;
   const limit = Math.min(2000, Math.max(200, Number(sp.limit) || 200));
-  const [{ rows, counts, channelCounts, today, total, held }, options, settings, soon] = await Promise.all([listTaskGroups(user, { tab, podId, foUserId, channel }, new Date(), limit), filterOptions(user), getSettings(), startingSoon(user, { podId })]);
+  const [{ rows, counts, channelCounts, today, total, held }, options, settings] = await Promise.all([listTaskGroups(user, { tab, podId, foUserId, channel }, new Date(), limit), filterOptions(user), getSettings()]);
   const base = new URLSearchParams({ tab, mode });
   if (filters) { base.set('pod', podId ?? ''); base.set('fo', foUserId ?? ''); } if (channel) base.set('type', channel); if (limit > 200) base.set('limit', String(limit));
   const href = (patch: Record<string, string | null>) => { const next = new URLSearchParams(base); for (const [k,v] of Object.entries(patch)) { if (v === null) next.delete(k); else next.set(k,v); } return '/tasks?' + next.toString(); };
@@ -85,7 +83,6 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
       <Toolbar><Link href={href({ type: null, task: null })} className={channel ? 'chip-muted' : 'chip'}>All types</Link>{TASK_CHANNELS.map(c => <Link key={c} href={href({ type: c, task: null })} className={channel === c ? 'chip' : 'chip-muted'}><ActionIcon action={c} size={13} />{CHANNEL_LABELS[c]}<strong className="ml-1">{channelCounts[c]}</strong></Link>)}<span className="w-full sm:ml-auto sm:w-auto"><TaskFilters pods={options.pods} fos={options.fos} podId={podId} foUserId={foUserId} mode={mode} /></span></Toolbar>
     </Surface>
     {/* A campaign that starts this week has no tasks yet; it is still on the screen its work will land on. */}
-    <StartingSoonStrip items={soon} />
     {sp.flash && <TaskFlash message={sp.flash.slice(0,300)} />}
     {missing ? <Notice tone="warn">That task is not in your list any more. It may have been completed, cancelled, or reassigned.</Notice> : null}
     {requested && !inView && brief ? <Notice tone="info">Showing one touch that is not in <span className="font-medium">{TAB_LABELS[tab]}</span>. <Link href={href({ task: null })} className="font-medium underline">Back to the list</Link></Notice> : null}

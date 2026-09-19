@@ -12,7 +12,7 @@ import { refreshPersonCache } from '../lib/person-cache';
 import { snapshotScorecard } from '../lib/enrichment-work';
 import { getTwentyClient } from '../lib/twenty';
 import { todayIn } from '../lib/dates';
-import { WORKSPACE_TIMEZONE } from '../lib/workspace';
+import { workspaceTimezone } from '../lib/workspace';
 
 const config=env();
 const log=(message:string,extra?:unknown)=>console.log('[worker '+new Date().toISOString()+'] '+message,extra??'');
@@ -28,12 +28,12 @@ let lastNightly:string|null=null;
 /** The day the last reconcile actually ran, from its own audit row, so a restart does not repeat it. */
 async function nightlyAlreadyRan(now:Date):Promise<boolean>{
  const row=await prisma.auditLog.findFirst({where:{entityType:'settings',entityId:'reconcile',action:'reconcile_ran'},orderBy:{createdAt:'desc'},select:{createdAt:true}});
- return Boolean(row&&todayIn(WORKSPACE_TIMEZONE,row.createdAt)===todayIn(WORKSPACE_TIMEZONE,now));
+ return Boolean(row&&todayIn(workspaceTimezone(),row.createdAt)===todayIn(workspaceTimezone(),now));
 }
 async function nightly(now:Date){
- const today=todayIn(WORKSPACE_TIMEZONE,now);
+ const today=todayIn(workspaceTimezone(),now);
  if(lastNightly===today)return;
- const hour=Number(new Intl.DateTimeFormat('en-GB',{timeZone:WORKSPACE_TIMEZONE,hour:'2-digit',hour12:false}).format(now));
+ const hour=Number(new Intl.DateTimeFormat('en-GB',{timeZone:workspaceTimezone(),hour:'2-digit',hour12:false}).format(now));
  if(hour<config.RECONCILE_HOUR)return;
  if(await nightlyAlreadyRan(now)){lastNightly=today;return;}
  lastNightly=today;
@@ -58,7 +58,7 @@ async function tick(){
  }catch(error){log('tick failed',error);}finally{running=false;}
 }
 async function main(){
- log('Continuous sync every '+config.CRM_SYNC_SECONDS+' seconds; nightly reconcile after '+config.RECONCILE_HOUR+':00 '+WORKSPACE_TIMEZONE);
+ log('Continuous sync every '+config.CRM_SYNC_SECONDS+' seconds; nightly reconcile after '+config.RECONCILE_HOUR+':00 '+workspaceTimezone());
  await tick();const timer=setInterval(tick,Math.min(config.WORKER_TICK_SECONDS,config.CRM_SYNC_SECONDS)*1000);
  const stop=async()=>{stopping=true;clearInterval(timer);while(running)await new Promise(resolve=>setTimeout(resolve,100));await prisma.$disconnect();process.exit(0);};
  process.on('SIGTERM',stop);process.on('SIGINT',stop);
