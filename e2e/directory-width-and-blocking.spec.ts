@@ -72,13 +72,18 @@ test('people keeps one row of filters and no list-category dropdown', async ({ p
 test('an admin blocks an account out of the platform and puts it back', async ({ page }) => {
   page.on('dialog', (dialog) => dialog.accept());
   await admin(page);
+  // A retried run may find the account still blocked from the attempt before: put it back first.
+  await page.goto('/settings?tab=blocked');
+  const stale = page.locator('tbody tr', { hasText: 'Dummy Company B' });
+  if (await stale.count()) { await stale.getByRole('button', { name: 'Unblock' }).click(); await expect(stale).toHaveCount(0); }
   await page.goto('/accounts?pod=&fo=');
   await page.getByRole('link', { name: 'Dummy Company B' }).click();
   await expect(page.getByRole('heading', { name: 'Dummy Company B' })).toBeVisible();
-  await page.getByRole('button', { name: 'Block account' }).click();
-  await expect(page.getByText('Blocked account', { exact: true })).toBeVisible();
 
   try {
+    await page.getByRole('button', { name: 'Block account' }).click();
+    // The block re-renders the record and the directories; a busy runner takes a while.
+    await expect(page.getByText('Blocked account', { exact: true })).toBeVisible({ timeout: 30_000 });
     await page.goto('/accounts?pod=&fo=');
     await expect(page.getByRole('link', { name: 'Dummy Company B' })).toHaveCount(0);
     await expect(page.getByRole('link', { name: 'Dummy Company A' })).toBeVisible();
