@@ -446,3 +446,20 @@ scorecard cells too dark) - all fixed; second pass 7/10 (multi-hue channel chart
 calendar printing step numbers, Campaigns and Meetings filters not behind Filters, red "Sent"
 cards, asterisk misaligning paired fields) - all fixed; third pass 8/10, with the top-bar help
 icon and the campaign people-picker toolbar fixed after it.
+
+**Live, after the deploy (19 September 2026, commits 98510e5 to d94f977).** Admin and FO seats,
+read-only: People columns Name / Tags / Next / Campaign / MIP / Pod, no Sequence column; the MIP
+toggle narrows the FO's 182 people to 54 and the admin's 8,074 to 84, every row starred; Sync now
+and selection for both seats. Tasks and Home carry no campaign strip. Accounts: chips in their own
+row; Replies column filled on 59 of the first 100 rows (top accounts 320, 279, 166 replies) where
+it read 0 before; the account page tile agrees with the list. Person pages: Campaigns tab lists
+the FO's campaigns or says "Not in a campaign", header ornament drawn. Meetings: Analysis Ready on
+no row (no model), Booked by filter and Filters present; a new meeting needs no link and asks who
+booked it. The Acubooth meeting's talk time reads Jeff Pieta (AIS) 54%, Ryan Brennan 29%, Alisa
+Kolodizner 15%, Lloyd Easters 3% - no "Unknown" - once the page took the share from the transcript
+rather than a count stored before the parser learned bracketed names (d94f977). Enrichment shows
+People / Accounts / Scorecard only; Reports say nothing about enrolling and show 0 replies, which
+is right: the hosted workspace has no enrollment yet, and Reports count replies to outreach.
+Settings > Rules carries the Timezone select (America/Chicago). Speed (FO seat): person-page tabs
+answer in 0.5-1.0 s from click to content (Overview 0.8 s, Activity 1.0 s, Emails 0.5 s) against
+0.8-2.2 s before; account tabs 0.45-0.5 s; routes 170-890 ms server time, Enrichment the slowest.
