@@ -24,20 +24,23 @@ export function LiveRefresh() {
       Boolean(document.querySelector('dialog[open]')) ||
       Boolean(document.activeElement?.closest('input,textarea,select,[contenteditable="true"]'));
     const refresh = () => {
-      if (busy()) return;
+      if (busy()) return false;
       startTransition(() => router.refresh());
+      return true;
     };
     // Ask whether anything changed before re-rendering anything: a refresh that lands on top of a
     // click is what "laggy" felt like, so the timer now only refreshes when the data moved, and
     // never within two seconds of a navigation.
     const check = async () => {
-      if (busy() || Date.now() - navigatedAt < 2000) return;
+      if (busy()) return;
       try {
         const res = await fetch('/api/version', { cache: 'no-store' });
         if (!res.ok) return;
         const { version: latest } = (await res.json()) as { version: number | null };
         if (latest === null) return;
-        if (version !== null && latest !== version) refresh();
+        if (version !== null && latest !== version) {
+          if (Date.now() - navigatedAt < 2000 || !refresh()) return;
+        }
         version = latest;
       } catch {
         // Offline or a hiccup: the next tick asks again.

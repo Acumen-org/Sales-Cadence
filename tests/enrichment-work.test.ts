@@ -32,6 +32,29 @@ describe('enrichment work surface', () => {
     await upsertPersonCache({ ...person(20), linkedinUrl: null, tier: 'LEVEL_2', contactType: ['PARTNER'] });
   });
 
+  it('scorecard totals open all matching records, including complete people and accounts', async () => {
+    await prisma.personCache.update({ where: { id: person(1).id }, data: { firstName: 'Complete', lastName: 'Person', email: 'complete@example.org', phone: '+13125550123', linkedinUrl: 'https://linkedin.com/in/complete', jobTitle: 'Director', badEmail: false, badPhone: false, emailMissing: false, phoneMissing: false, tags: [] } });
+    const queue = await enrichmentQueue(admin, true);
+    const scorecard = await enrichmentScorecard(admin);
+    for (const [groups, entity] of [[scorecard.contacts, 'person'], [scorecard.accounts, 'company']] as const) {
+      const pool = queue.filter(row => row.entity === entity);
+      for (const group of groups) {
+        const result = filterEnrichmentQueue(pool, { includeComplete: true, ...(group.kind === 'pod' ? { pod: group.id } : group.kind === 'fo' ? { fo: group.id } : {}) });
+        expect(result.length, `${entity} ${group.kind} ${group.name}`).toBe(group.total);
+      }
+    }
+    expect(filterEnrichmentQueue(queue, { includeComplete: true }).find(row => row.id === person(1).id)?.gaps).toEqual([]);
+    expect(filterEnrichmentQueue(queue).find(row => row.id === person(1).id)).toBeUndefined();
+  });
+
+  it('city alone does not satisfy an address gap, but a CRM street address does', async () => {
+    const id = person(1).companyId!;
+    await prisma.companyCache.update({ where: { id }, data: { city: 'Chicago', raw: { address: { addressCity: 'Chicago' } } } });
+    expect((await enrichmentQueue(admin)).find(row => row.entity === 'company' && row.id === id)?.gaps.some(gap => gap.field === 'address')).toBe(true);
+    await prisma.companyCache.update({ where: { id }, data: { raw: { address: { addressCity: 'Chicago', addressStreet1: '123 Main Street' } } } });
+    expect((await enrichmentQueue(admin)).find(row => row.entity === 'company' && row.id === id)?.gaps.some(gap => gap.field === 'address')).not.toBe(true);
+  });
+
   it('narrows by every filter on the record and sorts by name, account, gaps and sync time', async () => {
     const queue = (await enrichmentQueue(admin)).filter((i) => i.entity === 'person');
     const ids = (items: { id: string }[]) => items.map((i) => i.id);

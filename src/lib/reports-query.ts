@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { workspaceTimezone } from './workspace';
 import { prisma } from './db';
-import { enrollmentByPerson, REPLY_TOUCH_WHERE } from './reply-credit';
+import { enrollmentByReply, REPLY_TOUCH_WHERE } from './reply-credit';
 import type { SessionUser } from './auth/current-user';
 import { isJuniorFo, visiblePodIds } from './auth/rbac';
 import { addDays, isLocalDate, startOfLocalDay, toLocalDate, type LocalDate } from './dates';
@@ -117,20 +117,20 @@ export async function buildReports(user: SessionUser, today: LocalDate, filters?
   const podOwnerValue = filters?.podId ? pods.find((p) => p.id === filters.podId)?.podOwnerValue ?? '__none__' : null;
   const inboundAll = await prisma.touch.findMany({
     where: { ...REPLY_TOUCH_WHERE, ...(range ? { occurredAt: { gte: range.fromInstant, lt: range.toInstant } } : {}), person: { deletedAt: null } },
-    select: { occurredAt: true, personId: true, person: { select: { podOwner: true } } },
+    select: { id: true, occurredAt: true, personId: true, person: { select: { podOwner: true } } },
   });
-  const credited = await enrollmentByPerson(inboundAll.map((t) => t.personId));
+  const credited = await enrollmentByReply(inboundAll);
   const inbound = inboundAll.filter((t) => {
-    const e = credited.get(t.personId);
+    const e = credited.get(t.id);
     if (filters?.podId) return e ? e.podId === filters.podId : t.person.podOwner === podOwnerValue;
     return true;
   });
   const replies = new Map<string, Date[]>();
-  for (const t of inbound) { const e = credited.get(t.personId); if (e) replies.set(e.id, [...(replies.get(e.id) ?? []), t.occurredAt]); }
+  for (const t of inbound) { const e = credited.get(t.id); if (e) replies.set(e.id, [...(replies.get(e.id) ?? []), t.occurredAt]); }
 
   const byPod = rollup((e) => ({ key: e.podId ?? 'none', label: name(pods, e.podId, 'No pod') }), enrollments, tasks, today, replies, range);
   const byFo = rollup((e) => ({ key: e.foUserId, label: name(users, e.foUserId, 'Unknown') }), enrollments, tasks, today, replies, range);
-  const byCampaign = rollup((e) => (e.campaignId ? { key: e.campaignId, label: name(campaigns, e.campaignId, 'Deleted campaign') } : { key: 'none', label: 'Direct enrollments' }), enrollments, tasks, today, replies, range);
+  const byCampaign = rollup((e) => (e.campaignId ? { key: e.campaignId, label: name(campaigns, e.campaignId, 'Deleted campaign') } : { key: 'none', label: 'Standalone sequences' }), enrollments, tasks, today, replies, range);
   const bySequence = rollup((e) => ({ key: e.sequenceId, label: name(sequences, e.sequenceId, 'Unknown') }), enrollments, tasks, today, replies, range);
 
   const channels = (Object.keys(ACTION_LABELS) as ActionType[]).map((action) => {
@@ -158,8 +158,8 @@ export async function buildReports(user: SessionUser, today: LocalDate, filters?
   });
   // Only replies to outreach: a message from someone nobody has enrolled answers nothing here.
   const repliedRows = inbound
-    .filter((t) => t.occurredAt >= d28 && t.occurredAt < end && credited.has(t.personId))
-    .map((t) => ({ foUserId: credited.get(t.personId)!.foUserId, repliedAt: t.occurredAt as Date | null }))
+    .filter((t) => t.occurredAt >= d28 && t.occurredAt < end && credited.has(t.id))
+    .map((t) => ({ foUserId: credited.get(t.id)!.foUserId, repliedAt: t.occurredAt as Date | null }))
     .filter((r) => !filters?.foUserId || r.foUserId === filters.foUserId);
   const meetingRows = await prisma.enrollment.findMany({ where: { ...scope, meetingAt: { gte: d28, lt: end } }, select: { foUserId: true, meetingAt: true } });
   const answeredKeys = new Set((await import('./settings').then((m) => m.getSettings())).rules.callDispositions.filter((d) => d.answered).map((d) => d.key));

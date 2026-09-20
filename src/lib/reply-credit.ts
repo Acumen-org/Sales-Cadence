@@ -1,3 +1,5 @@
+import { toLocalDate } from './dates';
+import { workspaceTimezone } from './workspace';
 import type { Prisma } from '@prisma/client';
 import { prisma } from './db';
 
@@ -20,25 +22,22 @@ export const REPLY_TOUCH_WHERE: Prisma.TouchWhereInput = {
 /** What a reply is credited to: the person's most recent enrollment, with what Reports groups by. */
 export type CreditedEnrollment = { id: string; foUserId: string; podId: string | null; campaignId: string | null; sequenceId: string };
 
-/**
- * The enrollment a person's reply is credited to: their most recent one - the one whose outreach
- * the reply answers. One query for the whole page, never one per row. A person nobody has ever
- * enrolled has no entry; callers fall back to the FO who owns them in Twenty.
- */
-export async function enrollmentByPerson(personIds: string[]): Promise<Map<string, CreditedEnrollment>> {
-  if (!personIds.length) return new Map();
+/** Credit each reply to the latest sequence that had started when it arrived.
+ * Later campaigns must never take credit for historical responses. */
+export async function enrollmentByReply(replies: Array<{ id: string; personId: string; occurredAt: Date }>): Promise<Map<string, CreditedEnrollment>> {
+  if (!replies.length) return new Map();
   const rows = await prisma.enrollment.findMany({
-    where: { personId: { in: [...new Set(personIds)] } },
+    where: { personId: { in: [...new Set(replies.map(reply => reply.personId))] } },
     select: { id: true, personId: true, foUserId: true, podId: true, campaignId: true, sequenceId: true, startDate: true },
-    orderBy: { startDate: 'desc' },
+    orderBy: [{ startDate: 'desc' }, { createdAt: 'desc' }, { id: 'asc' }],
   });
+  const byPerson = new Map<string, typeof rows>();
+  for (const row of rows) { const list = byPerson.get(row.personId) ?? []; list.push(row); byPerson.set(row.personId, list); }
   const by = new Map<string, CreditedEnrollment>();
-  for (const r of rows) if (!by.has(r.personId)) by.set(r.personId, { id: r.id, foUserId: r.foUserId, podId: r.podId, campaignId: r.campaignId, sequenceId: r.sequenceId });
+  for (const reply of replies) {
+    const day = toLocalDate(reply.occurredAt, workspaceTimezone());
+    const row = byPerson.get(reply.personId)?.find(enrollment => enrollment.startDate <= day);
+    if (row) by.set(reply.id, row);
+  }
   return by;
-}
-
-/** Who a person's reply is credited to: the FO of the credited enrollment. */
-export async function enrollmentFoByPerson(personIds: string[]): Promise<Map<string, string>> {
-  const by = await enrollmentByPerson(personIds);
-  return new Map([...by.entries()].map(([personId, e]) => [personId, e.foUserId]));
 }

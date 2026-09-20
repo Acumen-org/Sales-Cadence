@@ -26,8 +26,8 @@ import { canEnrich, enrichmentCompanyScope, enrichmentPeopleScope, normalizedHea
  * who they are. **Useful** is what makes the work better rather than possible.
  */
 type PersonRecord = Pick<PersonCache, 'firstName' | 'lastName' | 'email' | 'phone' | 'badEmail' | 'badPhone' | 'emailMissing' | 'phoneMissing' | 'companyId' | 'linkedinUrl' | 'jobTitle' | 'tags'>;
-type CompanyRecord = Pick<CompanyCache, 'domain' | 'linkedinUrl' | 'city' | 'employees' | 'aum' | 'ownerMemberId'>;
-type GapContext = { enrichmentTags: Set<string> };
+type CompanyRecord = Pick<CompanyCache, 'domain' | 'linkedinUrl' | 'city' | 'employees' | 'aum' | 'ownerMemberId'> & { raw?: Prisma.JsonValue | null };
+type GapContext = { enrichmentTags: Set<string>; addressField?: string };
 export type GapSpec<R> = {
   field: string;
   label: string;
@@ -53,7 +53,13 @@ export const PERSON_GAPS: GapSpec<PersonRecord>[] = [
 export const COMPANY_GAPS: GapSpec<CompanyRecord>[] = [
   { field: 'domain', label: 'Website', priority: 'critical', scorecard: true, missing: (c) => (blank(c.domain) ? 'Website missing' : null) },
   { field: 'linkedinUrl', label: 'LinkedIn', priority: 'critical', scorecard: true, missing: (c) => (blank(c.linkedinUrl) ? 'LinkedIn missing' : null) },
-  { field: 'city', label: 'Address', priority: 'useful', scorecard: true, missing: (c) => (blank(c.city) ? 'Address missing' : null) },
+  { field: 'address', label: 'Address', priority: 'useful', fixInTwenty: true, scorecard: true, missing: (c, ctx) => {
+    const raw = c.raw && typeof c.raw === 'object' && !Array.isArray(c.raw) ? c.raw : {};
+    const value = raw[ctx.addressField ?? 'address'];
+    const address = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    const street = String(address.addressStreet1 ?? address.addressStreet2 ?? '').trim();
+    return street ? null : 'Street address missing';
+  } },
   { field: 'employees', label: 'Employees', priority: 'useful', scorecard: true, missing: (c) => (blank(c.employees) ? 'Employees missing' : null) },
   { field: 'aum', label: 'AUM', priority: 'useful', scorecard: true, missing: (c) => (blank(c.aum) ? 'AUM missing' : null) },
   { field: 'ownerMemberId', label: 'Account owner', priority: 'useful', fixInTwenty: true, scorecard: true, missing: (c) => (blank(c.ownerMemberId) ? 'Account owner not assigned' : null) },
@@ -103,7 +109,7 @@ function emailHost(email: string | null): string | null {
   return host || null;
 }
 
-export async function enrichmentQueue(user: SessionUser): Promise<EnrichmentQueueItem[]> {
+export async function enrichmentQueue(user: SessionUser, includeComplete = false): Promise<EnrichmentQueueItem[]> {
   const [{ rules }, blocked, schema, connection, members, marks, inCampaign] = await Promise.all([
     getSettings(),
     blockedCompanyIds(),
@@ -115,14 +121,14 @@ export async function enrichmentQueue(user: SessionUser): Promise<EnrichmentQueu
   ]);
   const [people, companies, allCompanies] = await Promise.all([
     prisma.personCache.findMany({ where: await enrichmentPeopleScope(user), select: { id: true, firstName: true, lastName: true, companyId: true, companyName: true, email: true, phone: true, jobTitle: true, linkedinUrl: true, city: true, tags: true, badEmail: true, badPhone: true, emailMissing: true, phoneMissing: true, ownerMemberId: true, podOwner: true, tier: true, contactType: true, productInterest: true, syncedAt: true }, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }, { email: { sort: 'asc', nulls: 'last' } }] }),
-    prisma.companyCache.findMany({ where: await enrichmentCompanyScope(user), select: { id: true, name: true, domain: true, industry: true, employees: true, city: true, aum: true, linkedinUrl: true, ownerMemberId: true, syncedAt: true }, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }, { domain: { sort: 'asc', nulls: 'last' } }] }),
+    prisma.companyCache.findMany({ where: await enrichmentCompanyScope(user), select: { id: true, name: true, domain: true, industry: true, employees: true, city: true, raw: true, aum: true, linkedinUrl: true, ownerMemberId: true, syncedAt: true }, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }, { domain: { sort: 'asc', nulls: 'last' } }] }),
     prisma.companyCache.findMany({ where: { deletedAt: null, domain: { not: null } }, select: { id: true, name: true, domain: true } }),
   ]);
   const byUsers = marks.some((m) => m.byId) ? await prisma.user.findMany({ where: { id: { in: [...new Set(marks.map((m) => m.byId).filter((id): id is string => !!id))] } }, select: { id: true, name: true } }) : [];
   const byIds = new Map(byUsers.map((u) => [u.id, u.name]));
   const memberName = new Map(members.map((m) => [m.twentyMemberId!, m.name]));
   const markBy = new Map(marks.map((m) => [markKey(m.entity, m.recordId, m.field), m]));
-  const ctx: GapContext = { enrichmentTags: new Set(schema.personValues.needsEnrichmentTags) };
+  const ctx: GapContext = { enrichmentTags: new Set(schema.personValues.needsEnrichmentTags), addressField: schema.company.address };
   const blockedIds = new Set(blocked);
   const domainToCompany = new Map<string, { id: string; name: string }>();
   for (const c of allCompanies) {
@@ -163,7 +169,7 @@ export async function enrichmentQueue(user: SessionUser): Promise<EnrichmentQueu
       return [{ field: spec.field, label, priority: spec.priority, fixInTwenty: spec.fixInTwenty, suggestion }];
     });
     prune('person', person.id, new Set(raw.map((g) => g.field)));
-    if (!raw.length) continue;
+    if (!raw.length && !includeComplete) continue;
     const { gaps, hidden } = build('person', person.id, raw);
     items.push({ id: person.id, label: cachedPersonName(person), company: person.companyName, companyId: person.companyId, entity: 'person', href: `/people/${person.id}`, twentyUrl: twentyPersonUrl(connection.baseUrl, person.id), owner: person.ownerMemberId ? memberName.get(person.ownerMemberId) ?? null : null, ownerMemberIds: person.ownerMemberId ? [person.ownerMemberId] : [], podOwners: person.podOwner ? [person.podOwner] : [], tier: person.tier, contactType: person.contactType, productInterest: person.productInterest, tags: person.tags, inCampaign: inCampaign.has(person.id), syncedAt: person.syncedAt, gaps, hidden });
   }
@@ -171,7 +177,7 @@ export async function enrichmentQueue(user: SessionUser): Promise<EnrichmentQueu
     if (isInternalCompany(company, rules) || blockedIds.has(company.id) || isNotAccount(company, rules)) continue;
     const raw = COMPANY_GAPS.flatMap((spec) => { const label = spec.missing(company, ctx); return label ? [{ field: spec.field, label, priority: spec.priority, fixInTwenty: spec.fixInTwenty }] : []; });
     prune('company', company.id, new Set(raw.map((g) => g.field)));
-    if (!raw.length) continue;
+    if (!raw.length && !includeComplete) continue;
     const { gaps, hidden } = build('company', company.id, raw);
     const memberIds = new Set(companyMembers.get(company.id) ?? []);
     if (company.ownerMemberId) memberIds.add(company.ownerMemberId);
@@ -184,6 +190,7 @@ export async function enrichmentQueue(user: SessionUser): Promise<EnrichmentQueu
 
 export type EnrichmentFilters = {
   q?: string;
+  includeComplete?: boolean;
   /** Kinds of missing information; a record shows when it lacks any of them. */
   fields?: string[];
   /** A pod's Twenty value. */
@@ -213,7 +220,7 @@ export function filterEnrichmentQueue(items: EnrichmentQueueItem[], f: Enrichmen
   const view = (item: EnrichmentQueueItem) => (f.notFound ? item.hidden : item.gaps);
   const kept = items.flatMap((item) => {
     const gaps = view(item);
-    if (!gaps.length) return [];
+    if (!gaps.length && !f.includeComplete) return [];
     if (terms.length && !terms.every((term) => `${item.label} ${item.company ?? ''}`.toLowerCase().includes(term))) return [];
     if (fields.length && !gaps.some((gap) => fields.includes(gap.field))) return [];
     if (f.pod && !item.podOwners.includes(f.pod)) return [];
@@ -350,15 +357,15 @@ export type ScorecardGroup = { kind: 'all' | 'pod' | 'fo'; id: string; name: str
 export type Scorecard = { contacts: ScorecardGroup[]; accounts: ScorecardGroup[]; since: string | null; today: string };
 
 type Tally = Map<string, { total: number; filled: Map<string, number> }>; // group key -> counts
-const groupKey = (kind: string, id: string) => `${kind} ${id}`;
+const groupKey = (kind: string, id: string) => `${kind}\u0000${id}`;
 
 async function scorecardTallies(user: SessionUser | null): Promise<{ contacts: Tally; accounts: Tally; names: Map<string, string> }> {
   const [{ rules }, blocked, schema, pods, members] = await Promise.all([getSettings(), blockedCompanyIds(), getTwentySchema(), prisma.pod.findMany({ select: { podOwnerValue: true, name: true } }), prisma.user.findMany({ where: { twentyMemberId: { not: null } }, select: { twentyMemberId: true, name: true } })]);
   const [people, companies] = await Promise.all([
     prisma.personCache.findMany({ where: user ? await enrichmentPeopleScope(user) : { deletedAt: null, AND: [await externalPeopleWhere()] }, select: { id: true, firstName: true, lastName: true, email: true, phone: true, badEmail: true, badPhone: true, emailMissing: true, phoneMissing: true, companyId: true, linkedinUrl: true, jobTitle: true, tags: true, ownerMemberId: true, podOwner: true } }),
-    prisma.companyCache.findMany({ where: user ? await enrichmentCompanyScope(user) : { deletedAt: null }, select: { id: true, name: true, domain: true, linkedinUrl: true, city: true, employees: true, aum: true, ownerMemberId: true } }),
+    prisma.companyCache.findMany({ where: user ? await enrichmentCompanyScope(user) : { deletedAt: null }, select: { id: true, name: true, domain: true, linkedinUrl: true, city: true, raw: true, employees: true, aum: true, ownerMemberId: true } }),
   ]);
-  const ctx: GapContext = { enrichmentTags: new Set(schema.personValues.needsEnrichmentTags) };
+  const ctx: GapContext = { enrichmentTags: new Set(schema.personValues.needsEnrichmentTags), addressField: schema.company.address };
   const names = new Map<string, string>([[groupKey('all', ''), 'Everyone']]);
   for (const p of pods) names.set(groupKey('pod', p.podOwnerValue), p.name);
   for (const m of members) names.set(groupKey('fo', m.twentyMemberId!), m.name);
@@ -373,23 +380,25 @@ async function scorecardTallies(user: SessionUser | null): Promise<{ contacts: T
   const accounts: Tally = new Map();
   const blockedIds = new Set(blocked);
   const companyPods = new Map<string, Set<string>>();
+  const companyMembers = new Map<string, Set<string>>();
   for (const p of people) {
+    if (p.companyId && p.ownerMemberId) (companyMembers.get(p.companyId) ?? companyMembers.set(p.companyId, new Set()).get(p.companyId)!).add(p.ownerMemberId);
     count(contacts, PERSON_GAPS, p, [groupKey('all', ''), ...(p.podOwner ? [groupKey('pod', p.podOwner)] : []), ...(p.ownerMemberId && names.has(groupKey('fo', p.ownerMemberId)) ? [groupKey('fo', p.ownerMemberId)] : [])]);
     if (p.companyId && p.podOwner) (companyPods.get(p.companyId) ?? companyPods.set(p.companyId, new Set()).get(p.companyId)!).add(p.podOwner);
   }
   for (const c of companies) {
     if (isInternalCompany(c, rules) || blockedIds.has(c.id) || isNotAccount(c, rules)) continue;
-    count(accounts, COMPANY_GAPS, c, [groupKey('all', ''), ...[...(companyPods.get(c.id) ?? [])].map((pod) => groupKey('pod', pod)), ...(c.ownerMemberId && names.has(groupKey('fo', c.ownerMemberId)) ? [groupKey('fo', c.ownerMemberId)] : [])]);
+    count(accounts, COMPANY_GAPS, c, [groupKey('all', ''), ...[...(companyPods.get(c.id) ?? [])].map((pod) => groupKey('pod', pod)), ...[...new Set([...(companyMembers.get(c.id) ?? []), ...(c.ownerMemberId ? [c.ownerMemberId] : [])])].filter(id => names.has(groupKey('fo', id))).map(id => groupKey('fo', id))]);
   }
   return { contacts, accounts, names };
 }
 
 const toGroups = (tally: Tally, names: Map<string, string>, specs: GapSpec<PersonRecord | CompanyRecord>[], previous: Map<string, { total: number; filled: number }>, entity: EnrichmentEntity): ScorecardGroup[] =>
   [...tally.entries()].map(([key, row]) => {
-    const [kind, id] = key.split(' ') as ['all' | 'pod' | 'fo', string];
+    const [kind, id] = key.split('\u0000') as ['all' | 'pod' | 'fo', string];
     return {
       kind, id, name: names.get(key) ?? id, total: row.total,
-      cells: specs.filter((s) => s.scorecard).map((s) => ({ field: s.field, label: s.label, filled: row.filled.get(s.field) ?? 0, total: row.total, previous: previous.get(`${entity} ${kind} ${id} ${s.field}`) ?? null })),
+      cells: specs.filter((s) => s.scorecard).map((s) => ({ field: s.field, label: s.label, filled: row.filled.get(s.field) ?? 0, total: row.total, previous: previous.get(`${entity}\u0000${kind}\u0000${id}\u0000${s.field}`) ?? null })),
     };
   }).sort((a, b) => ({ all: 0, pod: 1, fo: 2 }[a.kind] - { all: 0, pod: 1, fo: 2 }[b.kind]) || a.name.localeCompare(b.name));
 
@@ -401,7 +410,7 @@ export async function enrichmentScorecard(user: SessionUser, now = new Date()): 
   // The comparison day: the newest snapshot at least a week old, else the oldest one before today.
   const anchor = (await prisma.enrichmentSnapshot.findFirst({ where: { day: { lte: addDays(today, -7) } }, orderBy: { day: 'desc' }, select: { day: true } })) ?? (await prisma.enrichmentSnapshot.findFirst({ where: { day: { lt: today } }, orderBy: { day: 'asc' }, select: { day: true } }));
   const previous = new Map<string, { total: number; filled: number }>();
-  if (anchor) for (const s of await prisma.enrichmentSnapshot.findMany({ where: { day: anchor.day } })) previous.set(`${s.entity} ${s.groupKind} ${s.groupId} ${s.field}`, { total: s.total, filled: s.filled });
+  if (anchor) for (const s of await prisma.enrichmentSnapshot.findMany({ where: { day: anchor.day } })) previous.set(`${s.entity}\u0000${s.groupKind}\u0000${s.groupId}\u0000${s.field}`, { total: s.total, filled: s.filled });
   return { contacts: toGroups(contacts, names, gapSpecs('person'), previous, 'person'), accounts: toGroups(accounts, names, gapSpecs('company'), previous, 'company'), since: anchor?.day ?? null, today };
 }
 
@@ -418,7 +427,7 @@ export async function snapshotScorecard(now = new Date()): Promise<{ day: string
   const rows: Prisma.EnrichmentSnapshotCreateManyInput[] = [];
   const push = (entity: EnrichmentEntity, tally: Tally, specs: GapSpec<PersonRecord | CompanyRecord>[]) => {
     for (const [key, row] of tally) {
-      const [groupKind, groupId] = key.split(' ');
+      const [groupKind, groupId] = key.split('\u0000');
       for (const s of specs) if (s.scorecard) rows.push({ day, entity, groupKind, groupId, field: s.field, total: row.total, filled: row.filled.get(s.field) ?? 0 });
     }
   };

@@ -125,7 +125,7 @@ export function EnrichmentTable({ entity, rows, fields, assignees, canMark, notF
               <td><IdentityCell name={r.label} sub={sub(r)} href={r.href} shape={r.entity === 'person' ? 'circle' : 'square'} /></td>
               <td>
                 <div className="flex flex-wrap gap-1.5">
-                  {r.gaps.map((gap) => {
+                  {!r.gaps.length ? <span className="text-ink-600">No open missing fields</span> : null}{r.gaps.map((gap) => {
                     const title = [gap.fixInTwenty ? 'A relation or an assignment: an import cannot write it. Link it on the record in Twenty.' : null, gap.assignee ? `Researching: ${gap.assignee}` : null, gap.markedBy && gap.markedAt ? `Marked by ${gap.markedBy}, ${gap.markedAt}` : null].filter(Boolean).join(' ');
                     return (
                       <span key={gap.field} className="inline-flex items-center gap-1" title={title || undefined}>
@@ -138,7 +138,7 @@ export function EnrichmentTable({ entity, rows, fields, assignees, canMark, notF
                   })}
                 </div>
               </td>
-              <td><Badge tone={r.critical ? 'amber' : 'blue'}>{r.critical ? 'Critical' : 'Useful'}</Badge></td>
+              <td><Badge tone={r.critical ? 'amber' : 'blue'}>{!r.gaps.length ? '-' : r.critical ? 'Critical' : 'Useful'}</Badge></td>
               <td className="text-[12px] text-ink-600 whitespace-nowrap">{r.synced}</td>
               <td className="pr-4 text-right">{r.twentyUrl ? <a href={r.twentyUrl} target="_blank" rel="noreferrer" className="btn-ghost btn-sm !px-1.5" aria-label={`Open ${r.label} in Twenty`} title="Open in Twenty"><IconExternal size={14} /></a> : null}</td>
             </tr>

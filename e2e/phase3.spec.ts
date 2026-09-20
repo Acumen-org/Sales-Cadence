@@ -26,7 +26,11 @@ test('enrichment has three views, scores by field and carries the record filters
   await expect(page.getByRole('columnheader', { name: 'Email' }).first()).toBeVisible();
   await expect(page.getByRole('columnheader', { name: 'AUM' }).first()).toBeVisible();
   // A group's record count opens that group's queue with the pod already chosen.
-  await page.locator('a[href*="tab=contacts"][href*="pod="]').first().click();
+  const group = page.locator('a[href*="tab=contacts"][href*="pod="]').first();
+  const total = Number((await group.innerText()).replace(/,/g, ''));
+  await group.click();
+  await expect(page).toHaveURL(/records=all/);
+  await expect(page.getByText(`${total} records`, { exact: true })).toBeVisible();
   await expect(page).toHaveURL(/tab=contacts.*pod=/);
   await expect(page.getByLabel('Filter by pod', { exact: true })).not.toHaveValue('');
 
@@ -78,7 +82,7 @@ test('a selection is exported, assigned for research, marked not found and reope
   await page.getByLabel(`Select ${name}`).check();
   await page.getByRole('button', { name: 'Reopen', exact: true }).click();
   await expect(page.getByRole('link', { name, exact: true })).toHaveCount(0);
-  await page.getByRole('link', { name: 'Open gaps', exact: true }).click();
+  await page.getByRole('link', { name: 'Back to enrichment', exact: true }).click();
   await expect(page).toHaveURL(/tab=contacts/);
   await expect(page.getByRole('link', { name, exact: true })).toBeVisible();
 });

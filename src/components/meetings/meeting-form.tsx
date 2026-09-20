@@ -55,6 +55,14 @@ export function MeetingForm({ companies, fos, initial, mode, timezone }: { compa
       if (r.data.title && !title.trim()) { setTitle(r.data.title); filled.push('title'); }
       if (r.data.date) { setOccurredAt((current) => `${r.data.date}T${(current.split('T')[1] ?? '09:00').slice(0, 5)}`); filled.push('date'); }
       if (r.data.companyId && !companyId) { setCompanyId(r.data.companyId); filled.push('account'); }
+      if (r.data.transcript && !transcript.trim()) {
+        setTranscript(r.data.transcript); filled.push('transcript');
+        const people = await attendeesFromTranscriptAction(r.data.transcript);
+        if (people.ok) {
+          if (people.attendees.length) { setAdditions(people.attendees); filled.push('attendees'); }
+          if (people.durationSec && durationMin === '') setDurationMin(Math.max(1, Math.round(people.durationSec / 60)));
+        }
+      }
       setNote(filled.length ? `Filled ${filled.join(', ')} from the link.` : 'The link gave nothing to fill.');
     });
 
@@ -134,7 +142,7 @@ export function MeetingForm({ companies, fos, initial, mode, timezone }: { compa
           </div>
         </Field>
         <Field label="Transcript" className="md:col-span-2" hint={<span className="flex flex-wrap items-center gap-2">WebVTT, SRT, a JSON export or plain text<button type="button" className="btn-ghost btn-sm" disabled={pending || !transcript.trim()} onClick={attendeesFromTranscript}>Attendees from the speakers</button></span>}>
-          <TranscriptInput name="transcript" label="Transcript" defaultValue={initial.transcript} onChange={setTranscript} />
+          <TranscriptInput name="transcript" label="Transcript" defaultValue={initial.transcript} value={transcript} onChange={setTranscript} />
         </Field>
       </div>
 

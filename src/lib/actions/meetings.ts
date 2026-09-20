@@ -9,10 +9,10 @@ import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { requireUser, toActor, type SessionUser } from '../auth/current-user';
-import { isAdmin, isPodLeader, canCreateMeeting } from '../auth/rbac';
+import { isAdmin, isPodLeader, canCreateMeeting, ROLES_NEEDING_POD } from '../auth/rbac';
 import { logAudit, userActor } from '../audit';
 import { getSettings, isExternalEmail } from '../settings';
-import { inspectLink, resolveDirectMedia } from '../meetings/resolve-media';
+import { inspectLink } from '../meetings/resolve-media';
 import { extractRecordingUrl, parseMeetingLink } from '../meetings/providers';
 import { detectTranscriptFormat, parseTranscript } from '../meetings/transcript';
 import { getMeetingAnalyzer, MeetingAnalysisSchema } from '../meetings/analysis';
@@ -196,13 +196,14 @@ export async function createMeetingAction(formData: FormData): Promise<ActionRes
   const parsed = readForm(formData);
   if (!parsed.success) return { ok: false, error: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') };
   const d = parsed.data;
-  if (!(await prisma.user.findFirst({ where: { id: d.bookedById, active: true }, select: { id: true } }))) return { ok: false, error: 'Choose who booked the meeting.' };
+  if (!(await prisma.user.findFirst({ where: { id: d.bookedById, active: true, role: { in: ROLES_NEEDING_POD } }, select: { id: true } }))) return { ok: false, error: 'Choose who booked the meeting.' };
   const occurredAt = localDateTimeToInstant(d.occurredAt, user.timezone);
   if (!occurredAt) return { ok: false, error: `Pick a valid date and time in ${user.timezone}.` };
   // No link is a meeting without a recording; a SharePoint, OneDrive or Drive link often hands out
   // the file itself when asked, and then the recording plays natively and the transcript follows it.
   const link = d.sourceUrl ? parseMeetingLink(d.sourceUrl) : null;
-  const mediaUrl = link ? link.mediaUrl ?? (link.isJoinLink ? null : await resolveDirectMedia(d.sourceUrl)) : null;
+  const resolved = link && !link.mediaUrl && !link.isJoinLink ? await inspectLink(d.sourceUrl) : null;
+  const mediaUrl = link?.mediaUrl ?? resolved?.mediaUrl ?? null;
   if (link && link.provider === 'OTHER' && link.note?.includes('does not look like a URL')) return { ok: false, error: link.note };
 
   const company = d.companyId ? await prisma.companyCache.findFirst({ where: { id: d.companyId, deletedAt: null }, select: { id: true, name: true } }) : null;
@@ -210,7 +211,7 @@ export async function createMeetingAction(formData: FormData): Promise<ActionRes
   let attendees: Awaited<ReturnType<typeof resolveAttendees>>;
   try { attendees = await resolveAttendees(attendeeEntries(formData), user.id); }
   catch (error) { return { ok: false, error: error instanceof SyntaxError ? 'The attendee list is invalid.' : error instanceof Error ? error.message : 'Unable to resolve attendees.' }; }
-  const transcript = d.transcript?.trim() || null;
+  const transcript = d.transcript?.trim() || resolved?.transcript || null;
 
   const meeting = await prisma.meeting.create({
     data: {
@@ -247,19 +248,21 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
   const parsed = readForm(formData);
   if (!parsed.success) return { ok: false, error: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') };
   const d = parsed.data;
-  if (!(await prisma.user.findFirst({ where: { id: d.bookedById, active: true }, select: { id: true } }))) return { ok: false, error: 'Choose who booked the meeting.' };
+  if (!(await prisma.user.findFirst({ where: { id: d.bookedById, active: true, role: { in: ROLES_NEEDING_POD } }, select: { id: true } }))) return { ok: false, error: 'Choose who booked the meeting.' };
   const occurredAt = localDateTimeToInstant(d.occurredAt, user.timezone);
   if (!occurredAt) return { ok: false, error: `Pick a valid date and time in ${user.timezone}.` };
   // No link is a meeting without a recording; a SharePoint, OneDrive or Drive link often hands out
   // the file itself when asked, and then the recording plays natively and the transcript follows it.
   const link = d.sourceUrl ? parseMeetingLink(d.sourceUrl) : null;
-  const mediaUrl = link ? link.mediaUrl ?? (link.isJoinLink ? null : await resolveDirectMedia(d.sourceUrl)) : null;
+  const sameLink = d.sourceUrl.trim() === existing.sourceUrl;
+  const resolved = !sameLink && link && !link.mediaUrl && !link.isJoinLink ? await inspectLink(d.sourceUrl) : null;
+  const mediaUrl = sameLink ? existing.mediaUrl : link?.mediaUrl ?? resolved?.mediaUrl ?? null;
   const company = d.companyId ? await prisma.companyCache.findFirst({ where: { id: d.companyId, deletedAt: null }, select: { id: true, name: true } }) : null;
   if (d.companyId && !company) return { ok: false, error: 'The selected account no longer exists.' };
   let attendees: Awaited<ReturnType<typeof resolveAttendees>>;
   try { attendees = await resolveAttendees(attendeeEntries(formData), existing.createdById); }
   catch (error) { return { ok: false, error: error instanceof SyntaxError ? 'The attendee list is invalid.' : error instanceof Error ? error.message : 'Unable to resolve attendees.' }; }
-  const transcript = d.transcript?.trim() || null;
+  const transcript = d.transcript?.trim() || resolved?.transcript || null;
 
   await prisma.$transaction(async (tx) => {
     await tx.meetingAttendee.deleteMany({ where: { meetingId: id } });
@@ -280,7 +283,7 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
         transcript,
         transcriptFormat: transcript ? detectTranscriptFormat(transcript) : null,
         // A changed transcript invalidates any analysis.
-        analysis: Prisma.DbNull, analysisStatus: 'NONE', analysedAt: null, analysisModel: null, analysisError: null,
+        ...(transcript !== existing.transcript ? { analysis: Prisma.DbNull, analysisStatus: 'NONE' as const, analysedAt: null, analysisModel: null, analysisError: null } : {}),
         attendees: { create: attendees },
       },
     });
@@ -371,16 +374,17 @@ export async function analyseMeetingAction(formData: FormData): Promise<ActionRe
   await prisma.meeting.update({ where: { id }, data: { analysisStatus: 'PENDING', analysisError: null } });
   try {
     const analysis = MeetingAnalysisSchema.parse(await analyzer.analyze(input));
-    await prisma.meeting.update({
-      where: { id },
+    const saved = await prisma.meeting.updateMany({
+      where: { id, transcript: meeting.transcript, analysisStatus: 'PENDING' },
       data: { analysis, analysisStatus: 'READY', analysisModel: analyzer.name, analysedAt: new Date(), analysisError: null },
     });
+    if (!saved.count) return { ok: false, error: 'The transcript changed during analysis. Run analysis again for the current transcript.' };
     await logAudit({ entityType: 'meeting', entityId: id, action: 'analysed', actor: userActor(user), details: { model: analyzer.name } });
     revalidatePath(`/meetings/${id}`);
     return { ok: true, message: `Analysed with ${analyzer.name}.` };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await prisma.meeting.update({ where: { id }, data: { analysisStatus: 'FAILED', analysisError: message } });
+    await prisma.meeting.updateMany({ where: { id, transcript: meeting.transcript, analysisStatus: 'PENDING' }, data: { analysisStatus: 'FAILED', analysisError: message } });
     revalidatePath(`/meetings/${id}`);
     return { ok: false, error: `Analysis failed: ${message}` };
   }
@@ -411,6 +415,7 @@ export async function saveTranscriptAction(formData: FormData): Promise<ActionRe
 // ---------------------------------------------------------------------------
 
 export type LinkSuggestion = {
+  transcript?: string;
   provider: string;
   label: string;
   isJoinLink: boolean;
@@ -437,7 +442,7 @@ export async function inspectMeetingLinkAction(raw: string): Promise<{ ok: true;
   const haystack = `${title ?? ''} ${page.description ?? ''}`.toLowerCase();
   const match = companies.filter((c) => c.name.length >= 4 && haystack.includes(c.name.toLowerCase())).sort((a, b) => b.name.length - a.name.length)[0] ?? null;
   const mediaUrl = page.mediaUrl ?? link.mediaUrl;
-  return { ok: true, data: { provider: link.provider, label: link.label, isJoinLink: link.isJoinLink, playsInline: Boolean(mediaUrl || link.embedUrl), title, date: page.date, companyId: match?.id ?? null, companyName: match?.name ?? null, mediaUrl } };
+  return { ok: true, data: { provider: link.provider, label: link.label, isJoinLink: link.isJoinLink, playsInline: Boolean(mediaUrl || link.embedUrl), title, date: page.date, companyId: match?.id ?? null, companyName: match?.name ?? null, mediaUrl, transcript: page.transcript } };
 }
 
 /** The people who spoke in a transcript, matched to the CRM and the team; guests stay guests. */

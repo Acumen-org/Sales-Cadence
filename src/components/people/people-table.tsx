@@ -147,7 +147,7 @@ export function PeopleTable({ rows }: Props) {
                   {p.campaign ? (
                     <>
                       <div title={p.campaign.name} className="line-clamp-2 break-words text-[13px] font-medium leading-5 text-ink-900"><Link href={`/campaigns/${p.campaign.id}`} className="hover:text-brand-700 hover:underline">{p.campaign.name}</Link></div>
-                      <div className="mt-1 flex items-center gap-2"><Badge tone={p.campaign.tone}>{p.campaign.label}</Badge>{p.inCampaign ? <RemoveFromCampaign campaignId={p.campaign.id} campaignName={p.campaign.name} personIds={[p.id]} label="Remove"  className="btn-ghost btn-sm"/> : null}</div>
+                      <div className="mt-1 flex items-center gap-2"><Badge tone={p.campaign.tone}>{p.campaign.label}</Badge>{p.inCampaign ? <RemoveFromCampaign campaignId={p.campaign.id} campaignName={p.campaign.name} personIds={[p.id]} label="Remove" className="btn-danger btn-sm"/> : null}</div>
                     </>
                   ) : (
                     <span className="text-[12px] text-ink-300">-</span>

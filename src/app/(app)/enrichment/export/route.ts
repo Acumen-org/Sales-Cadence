@@ -25,7 +25,8 @@ export async function GET(request: Request) {
   const entity: EnrichmentEntity = params.get('entity') === 'company' ? 'company' : 'person';
   const priority = params.get('priority');
   const campaign = params.get('campaign');
-  const records = filterEnrichmentQueue((await enrichmentQueue(user)).filter((item) => item.entity === entity), {
+  const records = filterEnrichmentQueue((await enrichmentQueue(user, params.get('records') === 'all')).filter((item) => item.entity === entity), {
+    includeComplete: params.get('records') === 'all',
     q: params.get('q') ?? '', fields: params.getAll('field'), sort: params.get('sort') ?? 'name', dir: params.get('dir') ?? undefined,
     pod: params.get('pod') ?? '', fo: params.get('fo') ?? '', tier: params.get('tier') ?? '', type: params.get('type') ?? '', product: params.get('product') ?? '', account: params.get('account') ?? '', tag: params.get('tag') ?? '',
     priority: priority === 'critical' || priority === 'useful' ? priority : '', campaign: campaign === 'any' || campaign === 'none' ? campaign : '', notFound: params.get('marks') === 'notfound',

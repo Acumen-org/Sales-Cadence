@@ -1,3 +1,4 @@
+import { hasAiAnalysis } from '@/lib/meetings/analysis';
 import { PageFrame } from '@/components/page-frame';
 import Link from 'next/link';
 import { optionLabel } from '@/lib/twenty/labels';
@@ -70,6 +71,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
         createdBy: { select: { name: true } },
         bookedBy: { select: { name: true } },
         analysisStatus: true,
+        analysis: true,
         analysisModel: true,
         _count: { select: { attendees: true } },
         attendees: { select: { email: true, external: true } },
@@ -182,7 +184,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                     </td>
                     <td>{m.transcript ? <Badge tone="blue">Transcript</Badge> : <Empty />}</td>
 
-                    <td className="text-[12.5px]">{m.analysisStatus === 'READY' && m.analysisModel && m.analysisModel !== 'local-stats' ? <Badge tone="green">Ready</Badge> : <Empty />}</td>
+                    <td className="text-[12.5px]">{hasAiAnalysis(m.analysis, m.analysisModel, m.analysisStatus) ? <Badge tone="green">Ready</Badge> : <Empty />}</td>
                     <td className="whitespace-nowrap text-[12.5px]">{m.bookedBy?.name ?? <Empty />}</td>
                   </tr>
                 ))}

@@ -1,3 +1,5 @@
+import { parseTranscript } from './transcript';
+import { fetchPublicRedirects, isPrivateHost, publicLinkFetch } from './public-link';
 import { parseMeetingLink } from './providers';
 
 /**
@@ -8,15 +10,6 @@ import { parseMeetingLink } from './providers';
  * a page, a sign-in wall, a refusal - leaves the embed path as it was. Nothing here is guessed.
  */
 const TIMEOUT_MS = 6000;
-
-function isPrivateHost(host: string): boolean {
-  const h = host.toLowerCase();
-  if (h === 'localhost' || h.endsWith('.local') || h.endsWith('.internal')) return true;
-  const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(h);
-  if (!m) return false;
-  const [a, b] = [Number(m[1]), Number(m[2])];
-  return a === 10 || a === 127 || a === 0 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31) || (a === 169 && b === 254);
-}
 
 export function candidateMediaUrls(raw: string): string[] {
   let url: URL;
@@ -42,7 +35,7 @@ async function probe(url: string, fetchImpl: typeof fetch): Promise<{ finalUrl: 
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
     // A ranged GET rather than HEAD: some hosts answer HEAD with HTML and GET with the file.
-    const res = await fetchImpl(url, { method: 'GET', redirect: 'follow', headers: { range: 'bytes=0-0', accept: 'video/*,audio/*,*/*;q=0.5' }, signal: controller.signal });
+    const res = await fetchPublicRedirects(url, { method: 'GET', headers: { range: 'bytes=0-0', accept: 'video/*,audio/*,*/*;q=0.5' }, signal: controller.signal }, fetchImpl);
     const type = (res.headers.get('content-type') ?? '').toLowerCase();
     if (!res.ok && res.status !== 206) return null;
     return { finalUrl: res.url || url, type };
@@ -54,7 +47,7 @@ async function probe(url: string, fetchImpl: typeof fetch): Promise<{ finalUrl: 
 }
 
 /** The direct media address behind a link, or null when the link does not hand one out. */
-export async function resolveDirectMedia(raw: string, fetchImpl: typeof fetch = fetch): Promise<string | null> {
+export async function resolveDirectMedia(raw: string, fetchImpl: typeof fetch = publicLinkFetch): Promise<string | null> {
   const parsed = parseMeetingLink(raw);
   if (parsed.mediaUrl) return parsed.mediaUrl;
   if (parsed.isJoinLink) return null;
@@ -66,6 +59,7 @@ export async function resolveDirectMedia(raw: string, fetchImpl: typeof fetch = 
 }
 
 export type LinkInspection = {
+  transcript?: string;
   title: string | null;
   description: string | null;
   /** YYYY-MM-DD read off the page, when it carries one. */
@@ -100,12 +94,14 @@ function meta(html: string, name: string): string | null {
   return m ? decode(m[1]) : null;
 }
 
+function safeDecode(s: string): string { try { return decodeURIComponent(s); } catch { return s; } }
+
 function decode(s: string): string {
   return s.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\s+/g, ' ').trim();
 }
 
 /** What a link's page says about itself: its title, description and a date, plus a direct media address. */
-export async function inspectLink(raw: string, fetchImpl: typeof fetch = fetch): Promise<LinkInspection> {
+export async function inspectLink(raw: string, fetchImpl: typeof fetch = publicLinkFetch): Promise<LinkInspection> {
   const out: LinkInspection = { title: null, description: null, date: null, mediaUrl: null };
   let url: URL;
   try { url = new URL(raw); } catch { return out; }
@@ -113,7 +109,7 @@ export async function inspectLink(raw: string, fetchImpl: typeof fetch = fetch):
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const res = await fetchImpl(url.toString(), { redirect: 'follow', headers: { accept: 'text/html,*/*;q=0.5' }, signal: controller.signal });
+    const res = await fetchPublicRedirects(url.toString(), { headers: { accept: 'text/html,*/*;q=0.5' }, signal: controller.signal }, fetchImpl);
     const type = (res.headers.get('content-type') ?? '').toLowerCase();
     if (type.startsWith('video/') || type.startsWith('audio/')) { out.mediaUrl = res.url || url.toString(); return out; }
     if (res.ok && type.includes('html')) {
@@ -121,9 +117,20 @@ export async function inspectLink(raw: string, fetchImpl: typeof fetch = fetch):
       out.title = meta(html, 'og:title') ?? (/<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1] ? decode(/<title[^>]*>([^<]*)<\/title>/i.exec(html)![1]) : null);
       out.description = meta(html, 'og:description') ?? meta(html, 'description');
       const stamped = meta(html, 'article:published_time') ?? meta(html, 'og:updated_time') ?? meta(html, 'date');
-      out.date = (stamped ? dateInText(stamped) : null) ?? dateInText(`${out.title ?? ''} ${out.description ?? ''}`) ?? dateInText(decodeURIComponent(url.pathname));
+      out.date = (stamped ? dateInText(stamped) : null) ?? dateInText(`${out.title ?? ''} ${out.description ?? ''}`) ?? dateInText(safeDecode(url.pathname));
       const video = meta(html, 'og:video') ?? meta(html, 'og:video:url');
-      if (video && /\.(mp4|webm|m4v|mov|ogg|ogv)(\?|#|$)/i.test(video)) out.mediaUrl = video;
+      if (video) out.mediaUrl = parseMeetingLink(video).mediaUrl;
+      // Public caption tracks can be imported without a provider account or guessed endpoints.
+      for (const track of html.match(/<track\b[^>]*>/gi) ?? []) {
+        const attr = (key: string) => new RegExp(`\\b${key}=["']([^"']*)["']`, 'i').exec(track)?.[1];
+        if (!/^(captions|subtitles)$/i.test(attr('kind') ?? '')) continue;
+        const source = attr('src');
+        if (!source) continue;
+        const captions = await fetchPublicRedirects(new URL(decode(source), res.url || url.toString()).toString(), { signal: controller.signal }, fetchImpl);
+        if (!captions.ok) continue;
+        const text = (await captions.text()).slice(0, 300_000);
+        if (parseTranscript(text).cues.some(cue => cue.end !== null || cue.start > 0)) { out.transcript = text; break; }
+      }
     }
   } catch {
     // The page could not be read: the form keeps what was typed.
@@ -131,6 +138,6 @@ export async function inspectLink(raw: string, fetchImpl: typeof fetch = fetch):
     clearTimeout(timer);
   }
   if (!out.mediaUrl) out.mediaUrl = await resolveDirectMedia(raw, fetchImpl);
-  if (!out.date) out.date = dateInText(decodeURIComponent(url.pathname + ' ' + url.search));
+  if (!out.date) out.date = dateInText(safeDecode(url.pathname + ' ' + url.search));
   return out;
 }

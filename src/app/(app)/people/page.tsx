@@ -72,7 +72,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   if (tag) and.push({ tags: { has: tag } });
   // Most-important people: Twenty's MIP tag, one switch.
   const mip = sp.mip === '1';
-  if (mip) and.push({ tags: { hasSome: ['MIP', 'Mip', 'mip'] } });
+  if (mip) and.push({ tags: { hasSome: tags.filter(tag => isMip([tag])) } });
   if (listCategory) and.push({ listCategory });
   if (product) and.push({ productInterest: { has: product } });
   if (tier) where.tier = tier;

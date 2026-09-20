@@ -436,7 +436,7 @@ export class TwentyGraphqlClient implements TwentyClient {
       c.industry,
       c.employees,
       ...(aumType === 'currency' ? [{ field: c.aum, sub: '{ amountMicros currencyCode }' }] : aumType === 'number' ? [c.aum] : []),
-      { field: c.address, sub: '{ addressCity }' },
+      { field: c.address, sub: '{ addressStreet1 addressStreet2 addressCity addressState addressPostcode addressCountry }' },
       { field: c.linkedinLink, sub: '{ primaryLinkUrl }' },
       c.updatedAt,
       c.deletedAt,

@@ -1,9 +1,12 @@
+import * as mediaLinks from '@/lib/meetings/resolve-media';
+import { hasAiAnalysis } from '@/lib/meetings/analysis';
+import { enrollmentByReply } from '@/lib/reply-credit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '@/lib/db';
 import type { SessionUser } from '@/lib/auth/current-user';
 import { SYSTEM_ACTOR } from '@/lib/audit';
 import { canRate, isMip, mipStarsFor, ratablePodOwners, setMipStars } from '@/lib/mip';
-import { createMeetingAction } from '@/lib/actions/meetings';
+import { createMeetingAction, updateMeetingAction } from '@/lib/actions/meetings';
 import { ingestEvent, isAutomaticReply } from '@/lib/engine/ingest';
 import { rawFromMessage } from '@/lib/engine/reconcile';
 import { enrollPeople } from '@/lib/engine/enrollment';
@@ -65,6 +68,7 @@ describe('meetings', () => {
   it('need the FO who booked them and no longer need a recording link', async () => {
     const missing = await createMeetingAction(form({ title: 'No booker', occurredAt: '2026-09-08T14:30' }));
     expect(missing.ok).toBe(false);
+    expect((await createMeetingAction(form({ title: 'Admin is not a booker', occurredAt: '2026-09-08T14:30', bookedById: b.users.ria.id }))).ok).toBe(false);
     const nobody = await createMeetingAction(form({ title: 'Ghost booker', occurredAt: '2026-09-08T14:30', bookedById: 'nobody' }));
     expect(nobody.ok).toBe(false);
     const ok = await createMeetingAction(form({ title: 'Booked, no recording', occurredAt: '2026-09-08T14:30', bookedById: b.users.alisa.id }));
@@ -77,6 +81,21 @@ describe('meetings', () => {
     // A link, when given, is still checked.
     expect((await createMeetingAction(form({ title: 'Bad link', occurredAt: '2026-09-08T14:30', bookedById: b.users.alisa.id, sourceUrl: 'javascript:alert(1)' }))).ok).toBe(false);
   });
+});
+
+it('editing the booker preserves analysis, but changing the transcript invalidates it', async () => {
+  const meeting = await prisma.meeting.create({ data: {
+    title: 'Keep analysis', sourceUrl: '', provider: 'OTHER', occurredAt: at('2026-09-08'),
+    createdById: b.users.ria.id, bookedById: b.users.alisa.id, transcript: 'Alisa: Follow up next week.',
+    analysis: { outcome: 'Follow up agreed' }, analysisStatus: 'READY', analysisModel: 'configured-model', analysedAt: at('2026-09-09'),
+  } });
+  const form = new FormData();
+  for (const [key, value] of Object.entries({ meetingId: meeting.id, title: meeting.title, sourceUrl: '', occurredAt: '2026-09-08T10:00', bookedById: b.users.leigh.id, transcript: meeting.transcript! })) form.set(key, value);
+  expect((await updateMeetingAction(form)).ok).toBe(true);
+  expect(await prisma.meeting.findUniqueOrThrow({ where: { id: meeting.id } })).toMatchObject({ bookedById: b.users.leigh.id, analysisStatus: 'READY', analysis: { outcome: 'Follow up agreed' } });
+  form.set('transcript', 'Alisa: Updated decision.');
+  expect((await updateMeetingAction(form)).ok).toBe(true);
+  expect(await prisma.meeting.findUniqueOrThrow({ where: { id: meeting.id } })).toMatchObject({ analysisStatus: 'NONE', analysis: null });
 });
 
 describe('automatic replies', () => {
@@ -127,4 +146,35 @@ describe('the workspace clock', () => {
     await getSettings();
     expect(workspaceTimezone()).toBe('America/Chicago');
   });
+});
+
+it('historical replies stay with their original sequence instead of a later campaign', async () => {
+  const earlier = await prisma.enrollment.create({ data: { personId: 'person-01', sequenceId: b.sequence.id, foUserId: b.users.alisa.id, podId: b.pods.Alisa.id, startDate: '2026-09-01', status: 'COMPLETED' } });
+  const later = await prisma.enrollment.create({ data: { personId: 'person-01', sequenceId: b.sequence.id, foUserId: b.users.leigh.id, podId: b.pods.Leigh.id, startDate: '2026-09-21', status: 'ACTIVE' } });
+  const credit = await enrollmentByReply([
+    { id: 'before-outreach', personId: 'person-01', occurredAt: at('2026-08-31') },
+    { id: 'first-reply', personId: 'person-01', occurredAt: at('2026-09-10') },
+    { id: 'second-reply', personId: 'person-01', occurredAt: at('2026-09-22') },
+  ]);
+  expect(credit.has('before-outreach')).toBe(false);
+  expect(credit.get('first-reply')?.id).toBe(earlier.id);
+  expect(credit.get('second-reply')?.id).toBe(later.id);
+});
+
+it('Ready requires saved AI output rather than status, a model name or talk time alone', () => {
+  expect(hasAiAnalysis(null, 'configured-model', 'READY')).toBe(false);
+  expect(hasAiAnalysis({ talkShare: [{ speaker: 'A', share: 1 }] }, 'configured-model', 'READY')).toBe(false);
+  expect(hasAiAnalysis({ outcome: 'Follow up' }, 'local-stats', 'READY')).toBe(false);
+  expect(hasAiAnalysis({ outcome: 'Follow up' }, 'configured-model', 'READY')).toBe(true);
+});
+
+it('meeting creation retains media and captions discovered from a public page', async () => {
+  const transcript = 'WEBVTT\n\n00:00:00.000 --> 00:00:04.000\n<v Alisa>Welcome.';
+  const inspect = vi.spyOn(mediaLinks, 'inspectLink').mockResolvedValue({ title: 'Public meeting', date: null, description: null, mediaUrl: 'https://cdn.example/meeting.mp4', transcript });
+  try {
+    const form = new FormData();
+    for (const [key, value] of Object.entries({ title: 'Public meeting', sourceUrl: 'https://meeting.example/watch', occurredAt: '2026-09-20T10:00', bookedById: b.users.alisa.id })) form.set(key, value);
+    expect((await createMeetingAction(form)).ok).toBe(true);
+    expect(await prisma.meeting.findFirstOrThrow({ where: { title: 'Public meeting' } })).toMatchObject({ mediaUrl: 'https://cdn.example/meeting.mp4', transcript, transcriptFormat: 'vtt' });
+  } finally { inspect.mockRestore(); }
 });

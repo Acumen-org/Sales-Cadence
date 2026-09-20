@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { extractRecordingUrl, parseMeetingLink, providerFromAny } from '@/lib/meetings/providers';
 
 describe('parseMeetingLink', () => {
+  it('plays direct audio recordings with the native transcript clock', () => {
+    for (const extension of ['mp3', 'wav', 'm4a']) expect(parseMeetingLink(`https://media.example.org/meeting.${extension}`).provider).toBe('FILE');
+  });
   it('plays a direct media file inline', () => {
     const r = parseMeetingLink('https://files.example.com/recordings/call.mp4?token=abc');
     expect(r.provider).toBe('FILE');

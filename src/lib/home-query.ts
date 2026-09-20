@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from './db';
-import { enrollmentFoByPerson, REPLY_TOUCH_WHERE } from './reply-credit';
+import { enrollmentByReply, REPLY_TOUCH_WHERE } from './reply-credit';
 import type { SessionUser } from './auth/current-user';
 import { isAdmin, isPodLeader, visiblePodIds, canSeeAllPods } from './auth/rbac';
 import { addDays, startOfLocalDay, todayIn, weekRange, type LocalDate } from './dates';
@@ -134,15 +134,15 @@ async function teamThisWeek(user: SessionUser, today: LocalDate, week: { fromIns
     prisma.task.findMany({ where: { AND: [taskScope, WORKABLE, { foUserId: { in: ids }, state: 'PENDING' }] }, select: { foUserId: true, dueDate: true, snoozedTo: true, enrollmentId: true, stepId: true } }),
     prisma.task.groupBy({ by: ['foUserId'], where: { AND: [taskScope, { foUserId: { in: ids }, state: 'DONE', completedAt: { gte: week.fromInstant, lt: week.toInstant } }] }, _count: { _all: true } }),
     // Replies: what came back this week, credited to the FO whose outreach it answers - see reply-credit.ts.
-    prisma.touch.findMany({ where: { ...REPLY_TOUCH_WHERE, occurredAt: { gte: week.fromInstant, lt: week.toInstant }, person: { deletedAt: null } }, select: { personId: true, person: { select: { ownerMemberId: true } } } }),
+    prisma.touch.findMany({ where: { ...REPLY_TOUCH_WHERE, occurredAt: { gte: week.fromInstant, lt: week.toInstant }, person: { deletedAt: null } }, select: { id: true, occurredAt: true, personId: true, person: { select: { ownerMemberId: true } } } }),
     prisma.enrollment.groupBy({ by: ['foUserId'], where: { AND: [enrollmentScope, { foUserId: { in: ids }, meetingAt: { gte: week.fromInstant, lt: week.toInstant } }] }, _count: { _all: true } }),
   ]);
 
   const doneBy = new Map(doneRows.map((r) => [r.foUserId, r._count._all]));
   const userByMember = new Map(users.flatMap((u) => (u.twentyMemberId ? [[u.twentyMemberId, u.id] as const] : [])));
   const replyBy = new Map<string, number>();
-  const creditedFo = await enrollmentFoByPerson(replyRows.map((r) => r.personId));
-  for (const r of replyRows) { const id = creditedFo.get(r.personId) ?? (r.person.ownerMemberId ? userByMember.get(r.person.ownerMemberId) : null); if (id && ids.includes(id)) replyBy.set(id, (replyBy.get(id) ?? 0) + 1); }
+  const creditedFo = await enrollmentByReply(replyRows);
+  for (const r of replyRows) { const id = creditedFo.get(r.id)?.foUserId ?? (r.person.ownerMemberId ? userByMember.get(r.person.ownerMemberId) : null); if (id && ids.includes(id)) replyBy.set(id, (replyBy.get(id) ?? 0) + 1); }
   const meetingBy = new Map(meetingRows.map((r) => [r.foUserId, r._count._all]));
   // Touchpoints, not modules, so the board agrees with each FO's badge and Tasks tabs.
   const dueBy = new Map<string, { today: Set<string>; overdue: Set<string> }>();

@@ -29,7 +29,7 @@ export type ParsedMeetingLink = {
   note: string | null;
 };
 
-const MEDIA_EXT = /\.(mp4|webm|m4v|ogv|ogg|mov)(\?|#|$)/i;
+const MEDIA_EXT = /\.(mp4|webm|m4v|ogv|ogg|mov|mp3|wav|m4a|aac|flac)(\?|#|$)/i;
 const isHost = (host: string, domain: string) => host === domain || host.endsWith(`.${domain}`);
 
 function safeUrl(raw: string): URL | null {

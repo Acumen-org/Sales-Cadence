@@ -1,3 +1,4 @@
+import { fetchPublicRedirects, isPrivateHost } from '@/lib/meetings/public-link';
 import { describe, expect, it } from 'vitest';
 import { candidateMediaUrls, dateInText, inspectLink, resolveDirectMedia } from '@/lib/meetings/resolve-media';
 
@@ -54,4 +55,32 @@ describe('what a link says about itself', () => {
     const page = await inspectLink('https://example.com/private', fetchImpl);
     expect(page).toEqual({ title: null, description: null, date: null, mediaUrl: null });
   });
+});
+
+it('link inspection refuses private IPv4, IPv6 and redirects into the internal network', async () => {
+  for (const host of ['127.0.0.1', '169.254.169.254', '100.64.0.1', '[::1]', '[::ffff:127.0.0.1]', '[fd00::1]', 'service.internal', 'localhost.']) expect(isPrivateHost(host), host).toBe(true);
+  expect(isPrivateHost('8.8.8.8')).toBe(false);
+  expect(isPrivateHost('2606:4700:4700::1111')).toBe(false);
+  const requested: string[] = [];
+  const fake: typeof fetch = async input => {
+    requested.push(String(input));
+    return new Response(null, { status: 302, headers: { location: 'http://169.254.169.254/metadata' } });
+  };
+  await expect(fetchPublicRedirects('https://public.example/recording', {}, fake)).rejects.toThrow(/public/);
+  expect(requested).toEqual(['https://public.example/recording']);
+});
+it('malformed URL escape sequences cannot crash meeting autofill', async () => {
+  const data = await inspectLink('https://example.com/recording%ZZ', fakeFetch({}));
+  expect(data.title).toBeNull();
+});
+
+it('imports a public caption track with relative links alongside recording metadata', async () => {
+  const vtt = 'WEBVTT\n\n00:00:00.000 --> 00:00:05.000\n<v Alisa>Welcome to the meeting.';
+  const result = await inspectLink('https://meeting.example/watch', fakeFetch({
+    'https://meeting.example/watch': { type: 'text/html', body: '<title>Discovery</title><meta property="og:video" content="https://cdn.example/video.mp4"><track kind="captions" src="/captions.vtt">' },
+    'https://meeting.example/captions.vtt': { type: 'text/vtt', body: vtt },
+  }));
+  expect(result.title).toBe('Discovery');
+  expect(result.mediaUrl).toBe('https://cdn.example/video.mp4');
+  expect(result.transcript).toBe(vtt);
 });

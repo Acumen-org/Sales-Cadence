@@ -54,6 +54,13 @@ export function parseAnalysis(value: unknown): MeetingAnalysis | null {
   return r.success ? r.data : null;
 }
 
+/** A Ready badge requires saved model output, not only status metadata or talk-time statistics. */
+export function hasAiAnalysis(value: unknown, model: string | null, status: string): boolean {
+  if (status !== 'READY' || !model || model === 'local-stats') return false;
+  const a = parseAnalysis(value);
+  return Boolean(a && (a.outcome?.trim() || a.keyPoints.some(group => group.points.length) || a.nextSteps.length || a.openQuestions.length || a.risks.length || a.competitors.length || a.sentiment || a.sections.length));
+}
+
 /** True when there is nothing worth rendering. */
 export function isAnalysisEmpty(a: MeetingAnalysis | null): boolean {
   if (!a) return true;

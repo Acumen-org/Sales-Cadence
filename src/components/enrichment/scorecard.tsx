@@ -17,10 +17,10 @@ const pctOf = (filled: number, total: number) => (total ? Math.round((filled / t
 type Props = { scorecard: Scorecard; /** Twenty member id -> Cadence user id, so an FO row links to that FO's queue. */ foUserByMember: Record<string, string> };
 
 function groupHref(g: ScorecardGroup, tab: 'contacts' | 'accounts', foUserByMember: Record<string, string>): string | null {
-  if (g.kind === 'all') return `/enrichment?tab=${tab}`;
-  if (g.kind === 'pod') return `/enrichment?tab=${tab}&pod=${encodeURIComponent(g.id)}`;
+  if (g.kind === 'all') return `/enrichment?tab=${tab}&records=all`;
+  if (g.kind === 'pod') return `/enrichment?tab=${tab}&records=all&pod=${encodeURIComponent(g.id)}`;
   const userId = foUserByMember[g.id];
-  return userId ? `/enrichment?tab=${tab}&fo=${encodeURIComponent(userId)}` : null;
+  return userId ? `/enrichment?tab=${tab}&records=all&fo=${encodeURIComponent(userId)}` : null;
 }
 
 function Block({ title, groups, tab, foUserByMember }: { title: string; groups: ScorecardGroup[]; tab: 'contacts' | 'accounts'; foUserByMember: Record<string, string> }) {
