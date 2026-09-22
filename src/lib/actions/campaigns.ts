@@ -1,5 +1,9 @@
 'use server';
+import { Prisma } from '@prisma/client';
 
+import { CAMPAIGN_DEFAULT_STEPS } from '../sequences/campaign-default';
+import type { CampaignDraft } from '../campaign-planner';
+import { addDays } from '../dates';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '../db';
@@ -165,43 +169,11 @@ export async function previewCampaignAction(formData: FormData): Promise<ActionR
   }
 }
 
-export async function createCampaignAction(formData: FormData): Promise<ActionResult> {
-  const user = await requireUser();
-  const parsed = readCampaignForm(formData);
-  if (!parsed.success) return formError(parsed);
-  const d = parsed.data;
-  if (!canManageCampaigns(user, d.podId)) return { ok: false, error: 'You cannot create campaigns for this pod.' };
-  const windowError = checkWindow(d);
-  if (windowError) return { ok: false, error: windowError };
-  try {
-    const { ids, sourceRef } = resolvePersonIds(d);
-    if (!ids.length) return { ok: false, error: 'Choose at least one person.' };
-    const sequence = await prisma.sequence.findUnique({ where: { id: d.sequenceId } });
-    if (!sequence || sequence.archived) return { ok: false, error: 'Choose an available sequence.' };
-    const plan = await planCampaignCapacity({ sequenceId: d.sequenceId, podId: d.podId, startDate: d.startDate, endDate: d.endDate, maxRate: d.startsPerFoPerDay ?? null });
-    if ('error' in plan) return { ok: false, error: plan.error };
-    if (plan.tooShort) return { ok: false, error: `This sequence needs ${plan.durationDays} days and the campaign runs ${d.startDate} to ${d.endDate}. The earliest end date that works is ${endDateThatFits(plan.input, 1) ?? 'more than a year away'}.` };
-    const preview = await previewEnrollment({ personIds: ids, sequenceId: d.sequenceId, podId: d.podId, startDate: d.startDate, assignment: { mode: 'OWNER' }, dailyRampByFo: Object.fromEntries(plan.perFo.map((f) => [f.id, f.rate])), lastStartDate: plan.lastStart, actor: userActor(user) });
-    const noRoom = preview.conflicts.filter((c) => c.reason === 'no_room').length;
-    if (noRoom) {
-      const wanted = preview.candidates.length + noRoom;
-      const later = endDateThatFits(plan.input, wanted);
-      return { ok: false, error: `The window fits ${plan.total} people and ${wanted} were chosen. ${later ? `Ending on ${later} would take them all, or` : 'Even a year would not take them all;'} trim the audience by ${noRoom}.` };
-    }
-    if (!preview.candidates.length) return { ok: false, error: 'Nobody in this audience can start. The review names each reason.' };
-    const campaign = await prisma.campaign.create({
-      data: {
-        name: d.name, sequenceId: d.sequenceId, podId: d.podId, sourceType: d.sourceType === 'CSV' ? 'CSV' : 'IDS', sourceRef, personIds: ids,
-        assignmentMode: 'OWNER', startDate: d.startDate, endDate: d.endDate, startsPerFoPerDay: d.startsPerFoPerDay ?? null, productInterest: d.productInterest,
-        description: d.description?.trim() || null, status: 'SCHEDULED', approvedAt: new Date(), approvedById: user.id, createdById: user.id,
-      },
-    });
-    await logAudit({ entityType: 'campaign', entityId: campaign.id, action: 'created', actor: userActor(user), details: { people: ids.length, startDate: d.startDate, endDate: d.endDate, capacity: plan.total } });
-    await activateCampaign(campaign.id, { actor: userActor(user) });
-    refreshCampaign(campaign.id);
-    return { ok: true, message: 'Campaign created.', redirectTo: '/campaigns/' + campaign.id };
-  } catch (error) { return failure(error); }
+export async function createCampaignAction(_data: FormData): Promise<ActionResult> {
+  await requireUser();
+  return { ok: false, error: 'Create and publish your outreach calendar in the campaign studio.' };
 }
+
 function failure(error: unknown): ActionResult { return { ok: false, error: error instanceof Error ? error.message : 'Campaign could not be updated.' }; }
 function refreshCampaign(id: string) { revalidatePath('/campaigns'); revalidatePath('/campaigns/' + id); revalidatePath('/tasks'); revalidatePath('/people'); }
 async function loadCampaignForUser(campaignId: string) {
@@ -222,6 +194,7 @@ export async function stopCampaignAction(data: FormData) { return transition(dat
 export async function restartCampaignAction(data: FormData): Promise<ActionResult> {
   const { user, campaign, error } = await loadCampaignForUser(String(data.get('campaignId') ?? ''));
   if (!campaign) return { ok: false, error: error ?? 'Not found.' };
+  if (campaign.plannerDraft) return { ok: false, error: 'Open the campaign editor to review and publish a complete calendar. Active campaign plans are locked.' };
   const startDate = String(data.get('startDate') ?? todayIn(user.timezone));
   if (!isLocalDate(startDate)) return { ok: false, error: 'Pick a valid start date.' };
   try {
@@ -238,6 +211,7 @@ export async function restartCampaignAction(data: FormData): Promise<ActionResul
 export async function approveCampaignAction(data: FormData): Promise<ActionResult> {
   const { user, campaign, error } = await loadCampaignForUser(String(data.get('campaignId') ?? ''));
   if (!campaign) return { ok: false, error: error ?? 'Not found.' };
+  if (campaign.plannerDraft) return { ok: false, error: 'Open the campaign editor to review and publish a complete calendar. Active campaign plans are locked.' };
   if (!canApproveCampaign(user, campaign.podId)) return { ok: false, error: 'A Sales Leader for this pod or an admin must approve this campaign.' };
   try {
     const eligible = campaign.followupSourceId ? await nonReplierCandidates(campaign.followupSourceId, campaign.followupWaitDays, new Date(), campaign.followupSourceRun ?? undefined) : [];
@@ -274,7 +248,15 @@ export async function reenrollNonRepliersAction(data: FormData): Promise<ActionR
   const preview: FollowupPreview = { candidates: candidates.map(c => ({ id: c.personId, name: [c.person.firstName,c.person.lastName].filter(Boolean).join(' '), company: c.person.companyName, fo: c.fo.name, completedAt: c.completedAt?.toISOString() ?? null })) };
   if (d.confirm !== 'yes') return { ok: true, data: preview };
   if (!candidates.length) return { ok: false, error: 'No contacts qualify yet.' };
-  const next = await prisma.campaign.create({ data: { name: d.name, sequenceId: d.sequenceId, podId: campaign.podId, sourceType: 'IDS', sourceRef: campaign.id, personIds: candidates.map(c => c.personId), assignmentMode: campaign.assignmentMode, startDate: d.startDate, endDate: campaign.endDate, startsPerFoPerDay: campaign.startsPerFoPerDay, productInterest: campaign.productInterest, status: 'PENDING_APPROVAL', followupSourceId: campaign.id, followupSourceRun: campaign.runNumber, followupWaitDays: d.days, createdById: user.id } });
+  const next = await prisma.$transaction(async tx => {
+    const sequence = await tx.sequence.create({ data: { name: 'Default', campaignOwned: true, steps: CAMPAIGN_DEFAULT_STEPS } });
+    const draft: CampaignDraft & { sequenceIds: Record<string, string> } = {
+      name: d.name, podId: campaign.podId, startDate: d.startDate, endDate: addDays(d.startDate, 42),
+      defaultBatchSize: 20, fos: [], productInterest: campaign.productInterest,
+      personIds: candidates.map(c => c.personId), assignments: {}, flows: [{ id: 'default', name: 'Default', steps: CAMPAIGN_DEFAULT_STEPS }], sequenceIds: { default: sequence.id },
+    };
+    return tx.campaign.create({ data: { name: d.name, sequenceId: sequence.id, podId: campaign.podId, sourceType: 'IDS', sourceRef: campaign.id, personIds: draft.personIds, startDate: draft.startDate, endDate: draft.endDate, productInterest: draft.productInterest, plannerDraft: draft, status: 'PENDING_APPROVAL', followupSourceId: campaign.id, followupSourceRun: campaign.runNumber, followupWaitDays: d.days, createdById: user.id } });
+  });
   await logAudit({ entityType: 'campaign', entityId: next.id, action: 'approval_requested', actor: userActor(user), details: { sourceCampaignId: campaign.id, people: candidates.length } });
   refreshCampaign(next.id);
   return { ok: true, message: 'Follow-up submitted for approval.', redirectTo: '/campaigns/' + next.id };
@@ -299,6 +281,7 @@ export async function campaignChoicesAction(): Promise<ActionResult> {
   const choices = await campaignChoices(user, { manageOnly: true });
   const today = todayIn(user.timezone);
   const withRoom = await Promise.all(choices.map(async (c) => {
+    if (c.calendar) return { ...c, placesLeft: null as number | null };
     if (!c.endDate) return { ...c, placesLeft: null as number | null };
     const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: c.id }, select: { sequenceId: true, startsPerFoPerDay: true } });
     const from = c.kind === 'upcoming' ? c.startDate : today > c.startDate ? today : c.startDate;
@@ -317,6 +300,7 @@ export async function addPeopleToCampaignAction(formData: FormData): Promise<Act
   if (!ids.length) return { ok: false, error: 'Choose at least one person.' };
   const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
   if (!campaign) return { ok: false, error: 'Campaign not found.' };
+  if (campaign.plannerDraft) return { ok: false, error: 'Open the campaign editor to review and publish a complete calendar. Active campaign plans are locked.' };
   if (!canChangeCampaignMembers(user, campaign.podId)) return { ok: false, error: 'You cannot change who is in this campaign.' };
   try {
     if (['DRAFT', 'PENDING_APPROVAL', 'SCHEDULED'].includes(campaign.status)) {
@@ -367,6 +351,23 @@ export async function removePeopleFromCampaignAction(formData: FormData): Promis
   if (!campaign) return { ok: false, error: 'Campaign not found.' };
   if (!canChangeCampaignMembers(user, campaign.podId)) return { ok: false, error: 'You cannot change who is in this campaign.' };
   try {
+    if (campaign.plannerDraft && ['DRAFT', 'SCHEDULED', 'PENDING_APPROVAL'].includes(campaign.status)) {
+      const removed = await prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext('campaign-planner-publication'))`;
+        await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`campaign:${campaign.id}`}))`;
+        const fresh = await tx.campaign.findUniqueOrThrow({ where: { id: campaign.id } });
+        if (!['DRAFT', 'SCHEDULED', 'PENDING_APPROVAL'].includes(fresh.status)) throw new Error('This campaign has started. Refresh before removing people.');
+        const draft = fresh.plannerDraft as CampaignDraft;
+        const personIds = fresh.personIds.filter(id => !ids.includes(id));
+        const count = fresh.personIds.length - personIds.length;
+        if (!count) return 0;
+        await tx.campaign.update({ where: { id: fresh.id }, data: { personIds, plannerDraft: { ...draft, personIds, assignments: Object.fromEntries(Object.entries(draft.assignments).filter(([id]) => personIds.includes(id))) }, publishedPlan: Prisma.DbNull, approvedAt: null, approvedById: null, status: fresh.followupSourceId ? 'PENDING_APPROVAL' : 'DRAFT' } });
+        await logAudit({ entityType: 'campaign', entityId: fresh.id, action: 'people_removed', actor: userActor(user), details: { removed: count, calendarNeedsReview: true } }, tx);
+        return count;
+      });
+      refreshCampaign(campaign.id);
+      return { ok: true, message: `${removed} removed. Review and publish the updated campaign calendar before it starts.` };
+    }
     const wanted = new Set(ids);
     const remaining = campaign.personIds.filter((id) => !wanted.has(id));
     const dropped = campaign.personIds.length - remaining.length;
@@ -384,6 +385,7 @@ export async function removePeopleFromCampaignAction(formData: FormData): Promis
 export async function setHardStopAction(formData: FormData): Promise<ActionResult> {
   const { user, campaign, error } = await loadCampaignForUser(String(formData.get('campaignId') ?? ''));
   if (!campaign) return { ok: false, error: error ?? 'Not found.' };
+  if (campaign.plannerDraft) return { ok: false, error: 'Open the campaign editor to review and publish a complete calendar. Active campaign plans are locked.' };
   const on = String(formData.get('on') ?? '') === '1';
   await prisma.campaign.update({ where: { id: campaign.id }, data: { hardStopAtEnd: on } });
   await logAudit({ entityType: 'campaign', entityId: campaign.id, action: 'updated', actor: userActor(user), details: { hardStopAtEnd: on } });

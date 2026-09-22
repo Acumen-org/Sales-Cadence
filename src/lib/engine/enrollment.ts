@@ -251,6 +251,7 @@ export type EnrollOutcome = {
 export async function enrollPeople(req: EnrollRequest, ctx: Omit<EngineContext, 'actor'> = {}, client?: TwentyClient): Promise<EnrollOutcome> {
   const preview = await previewEnrollment(req, client);
   const sequence = await prisma.sequence.findUnique({ where: { id: req.sequenceId } });
+  if (sequence?.campaignOwned) throw new Error('People must start through their published campaign calendar.');
   if (!sequence) throw new Error('Sequence not found');
   const engineCtx: EngineContext = { actor: req.actor, now: ctx.now, skipSync: ctx.skipSync };
   const enrolled: EnrollOutcome['enrolled'] = [];
@@ -360,9 +361,9 @@ export async function resumeEnrollment(enrollmentId: string, opts: { actor: Audi
     const today = todayIn(workspaceTimezone(), now);
     const pausedOn = e.pausedAt ? todayIn(workspaceTimezone(), e.pausedAt) : today;
     const pausedDays = Math.max(0, diffDays(pausedOn, today));
-    const shiftDays = settings.rules.clockMode === 'shift' ? e.shiftDays + pausedDays : e.shiftDays;
+    const shiftDays = !e.scheduleDates.length && settings.rules.clockMode === 'shift' ? e.shiftDays + pausedDays : e.shiftDays;
     const movedIds: string[] = [];
-    if (settings.rules.clockMode === 'shift') {
+    if (!e.scheduleDates.length && settings.rules.clockMode === 'shift') {
       const pending = await tx.task.findMany({ where: { enrollmentId, state: 'PENDING' } });
       for (const t of pending) {
         const target = nextWorkingDay(t.dueDate < today ? today : t.dueDate, settings.rules.workingDays);
@@ -387,6 +388,7 @@ export async function reassignEnrollment(enrollmentId: string, newFoUserId: stri
   const e = await prisma.enrollment.findUnique({ where: { id: enrollmentId }, include: { pod: { include: { users: true } } } });
   if (!e) throw new Error('Enrollment not found');
   if (e.foUserId === newFoUserId) return e;
+  if (e.scheduleDates.length) throw new Error('This FO is reserved in the published campaign calendar. Its active plan cannot be reassigned.');
   const fo = await prisma.user.findUnique({ where: { id: newFoUserId } });
   if (!fo || !fo.active || !needsPod(fo.role)) throw new Error('Choose an active sales team member as the FO');
   if (e.pod && !e.pod.users.some((u) => u.userId === newFoUserId)) throw new Error(`${fo.name} is not a member of ${e.pod.name}`);

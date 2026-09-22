@@ -71,13 +71,9 @@ test('an account reads from Twenty on open, with no sync button to press', async
   await expect(page.locator('main')).toContainText('Asset management');
 });
 
-test('sequence library supports search and empty-state recovery', async ({ page }) => {
-  await page.goto('/sequences');
-  await page.getByLabel('Search sequences').fill('no-such-sequence');
-  await page.getByLabel('Search sequences').press('Enter');
-  await expect(page.getByText('No matching sequences')).toBeVisible();
-  await page.getByRole('link', { name: 'Clear filters' }).click();
-  await expect(page.getByRole('link', { name: /Default outbound/ })).toBeVisible();
+test('the standalone sequence library redirects to campaigns', async ({ page }) => {
+  await page.goto('/sequences'); await expect(page).toHaveURL(/\/campaigns$/);
+  await expect(page.getByRole('link',{name:'Sequences',exact:true})).toHaveCount(0);
 });
 
 test('mobile navigation and all main sections fit a phone', async ({ page }) => {

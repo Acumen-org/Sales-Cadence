@@ -11,6 +11,7 @@ import { prisma } from '@/lib/db';
 import { addDays, formatInstant, isLocalDate, startOfLocalDay } from '@/lib/dates';
 import { PRODUCTS } from '@/lib/workspace';
 import { MeetingsToolbar } from '@/components/meetings/meetings-toolbar';
+import { PillList } from '@/components/pill-list';
 import { FavouriteButton } from '@/components/meetings/favourite-button';
 import { PROVIDER_LABELS } from '@/lib/meetings/providers';
 import { IconCalendar, IconExternal, IconPlus } from '@/components/icons';
@@ -101,6 +102,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
     if (from) p.set('from', from);
     if (to) p.set('to', to);
     if (favourites) p.set('fav', '1');
+    if (booked) p.set('booked', booked);
     p.set('page', String(n));
     return `/meetings?${p.toString()}`;
   };
@@ -133,32 +135,30 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
             }
           />
         ) : (
-          <div className="overflow-x-auto scroll-thin">
-            <table className="table">
+          <div className="min-w-0">
+            <table className="table table-dense table-meetings w-full table-fixed">
+              <colgroup><col className="w-10" /><col style={{width:'24%'}} /><col style={{width:'14%'}} /><col style={{width:'15%'}} /><col style={{width:'10%'}} /><col style={{width:'11%'}} /><col style={{width:'12%'}} /><col style={{width:'10%'}} /></colgroup>
               <thead>
                 <tr>
                   <th aria-label="Favourite" />
                   <th>Meeting</th>
                   <th>When</th>
-                  <th className="num">Length</th>
                   <th>Account</th>
                   <th>Products</th>
                   <th>Attendees</th>
-                  <th>Transcript</th>
-                  <th>Analysis</th>
+                  <th>Content</th>
                   <th>Booked by</th>
                 </tr>
               </thead>
               <tbody>
                 {meetings.map((m) => (
                   <tr key={m.id}>
-                    <td className="!pr-0"><FavouriteButton meetingId={m.id} favourite={m.favourites.length > 0} compact /></td>
-                    <td>
+                    <td data-label="Favourite" className="!pr-0"><FavouriteButton meetingId={m.id} favourite={m.favourites.length > 0} compact /></td>
+                    <td data-label="Meeting">
                       <IdentityCell name={m.title} href={`/meetings/${m.id}`} sub={PROVIDER_LABELS[m.provider]} />
                     </td>
-                    <td className="whitespace-nowrap text-[12.5px]">{formatInstant(m.occurredAt, user.timezone)}</td>
-                    <td className="num whitespace-nowrap text-[12.5px]">{m.durationSec ? `${Math.round(m.durationSec / 60)} min` : '-'}</td>
-                    <td className="text-[12.5px]">
+                    <td data-label="When" className="text-[12.5px]"><time className="block font-semibold">{formatInstant(m.occurredAt, user.timezone)}</time>{m.durationSec ? <span className="mt-1 block text-xs text-ink-600"><strong>{Math.round(m.durationSec / 60)}</strong> min</span> : null}</td>
+                    <td data-label="Account" className="break-words text-[12.5px]">
                       {m.companyId ? (
                         <Link href={`/accounts/${m.companyId}`} className="text-brand-700 hover:underline">
                           {m.companyName}
@@ -167,25 +167,15 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                         m.companyName ?? <span className="text-ink-300">-</span>
                       )}
                     </td>
-                    <td className="text-[12.5px]">
-                      {m.products.length ? (
-                        <span className="flex flex-wrap gap-1">
-                          {m.products.map((p) => <span key={p} className="whitespace-nowrap rounded bg-brand-50 px-1.5 py-0.5 text-[11.5px] font-medium text-brand-800">{optionLabel(p)}</span>)}
-                        </span>
-                      ) : (
-                        <span className="text-ink-300">-</span>
-                      )}
-                    </td>
-                    <td className="text-[12.5px]">
-                      <div className="flex items-center gap-2 whitespace-nowrap">
+                    <td data-label="Products" className="text-[12.5px]"><PillList max={1} noun="products" items={m.products.map(p => ({ label: optionLabel(p), node: <Badge tone="green">{optionLabel(p)}</Badge> }))} /></td>
+                    <td data-label="Attendees" className="text-[12.5px]">
+                      <div className="flex items-center gap-1.5 whitespace-nowrap">
                         <span className="font-medium tabular-nums text-ink-900">{m._count.attendees}</span>
                         {externalCount(m.attendees) ? <Badge tone="green">{externalCount(m.attendees)} external</Badge> : null}
                       </div>
                     </td>
-                    <td>{m.transcript ? <Badge tone="blue">Transcript</Badge> : <Empty />}</td>
-
-                    <td className="text-[12.5px]">{hasAiAnalysis(m.analysis, m.analysisModel, m.analysisStatus) ? <Badge tone="green">Ready</Badge> : <Empty />}</td>
-                    <td className="whitespace-nowrap text-[12.5px]">{m.bookedBy?.name ?? <Empty />}</td>
+                    <td data-label="Content"><div className="flex flex-wrap gap-1">{m.transcript ? <Badge tone="blue">Transcript</Badge> : null}{hasAiAnalysis(m.analysis, m.analysisModel, m.analysisStatus) ? <Badge tone="green">Analysis</Badge> : null}{!m.transcript && !hasAiAnalysis(m.analysis, m.analysisModel, m.analysisStatus) ? <Empty /> : null}</div></td>
+                    <td data-label="Booked by" className="break-words text-[12.5px]">{m.bookedBy?.name ?? <Empty />}</td>
                   </tr>
                 ))}
               </tbody>
@@ -197,14 +187,14 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
       {recordings.length ? (
         <Surface flush>
           <ViewHeader title="Recordings in Twenty" caret meta={<><span className="font-medium text-ink-900">{recordingTotal}</span> on a person record{recordingTotal > recordings.length ? <> · showing <span className="font-medium text-ink-900">{recordings.length}</span></> : null}</>} />
-          <div className="overflow-x-auto scroll-thin">
-            <table className="table">
+          <div className="min-w-0">
+            <table className="table table-dense table-meetings w-full table-fixed">
               <thead>
                 <tr>
                   <th>Person</th>
                   <th>Account</th>
                   <th>Links</th>
-                  <th className="w-40"></th>
+                  <th className="w-1/4"></th>
                 </tr>
               </thead>
               <tbody>
@@ -213,10 +203,10 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                   const already = url ? addedUrls.has(url) : false;
                   return (
                     <tr key={b.id}>
-                      <td>
+                      <td data-label="Person">
                         <IdentityCell name={[b.firstName, b.lastName].filter(Boolean).join(' ') || '(no name)'} href={`/people/${b.id}`} shape="circle" />
                       </td>
-                      <td className="text-[12.5px]">
+                      <td data-label="Account" className="break-words text-[12.5px]">
                         {b.companyId ? (
                           <Link href={`/accounts/${b.companyId}`} className="text-brand-700 hover:underline">
                             {b.companyName}
@@ -225,7 +215,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                           b.companyName ?? <span className="text-ink-300">-</span>
                         )}
                       </td>
-                      <td>
+                      <td data-label="Links">
                         <div className="flex flex-wrap gap-1.5">
                           {b.meetingUrl ? (
                             <a href={b.meetingUrl} target="_blank" rel="noreferrer" className="chip-muted">
@@ -235,11 +225,11 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                           {b.recordingUrl ? <Badge tone="blue">Recording</Badge> : null}
                         </div>
                       </td>
-                      <td className="text-right">
+                      <td data-label="Action" className="text-right">
                         {already ? (
                           <span className="text-[12px] text-ink-500">Already added</span>
                         ) : (
-                          canCreateMeeting(user) && <Link href={`/meetings/new?personId=${b.id}`} className="btn-secondary btn-sm">
+                          canCreateMeeting(user) && <Link href={`/meetings/new?personId=${b.id}`} className="btn-secondary btn-sm !whitespace-normal">
                             <IconPlus size={12} /> Add with recording
                           </Link>
                         )}

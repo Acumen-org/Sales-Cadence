@@ -344,6 +344,7 @@ test('a meeting is tagged with the products it was about', async ({ page }) => {
   await page.goto('/meetings');
   const row = page.locator('table').first().locator('tr').filter({ hasText: 'intro call' }).first();
   await expect(row).toContainText('PHH');
+  await row.getByRole('button',{name:'Show 1 more products'}).click();
   await expect(row).toContainText('Glynac');
 
   // Untagging takes it off again.

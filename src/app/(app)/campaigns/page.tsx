@@ -63,17 +63,17 @@ export default async function CampaignsPage({ searchParams }: { searchParams: Pr
         ) : tab === 'upcoming' ? (
           <div className="overflow-x-auto"><table className="table table-dense w-full table-fixed">
             <colgroup>{['26%', '13%', '15%', '13%', '13%', '10%', '10%'].map((w) => <col key={w} style={{ width: w }} />)}</colgroup>
-            <thead><tr><th>Campaign</th><th>Pod</th><th>Sequence</th><th>Starts</th><th>Runs until</th><th className="num">People</th><th>Approval</th></tr></thead>
+            <thead><tr><th>Campaign</th><th>Pod</th><th>Outreach</th><th>Starts</th><th>Runs until</th><th className="num">People</th><th>Approval</th></tr></thead>
             <tbody>{rows.map((c) => {
               const daysUntil = diffDays(today, c.startDate);
               return <tr key={c.id}>
                 <td><Link href={'/campaigns/' + c.id} className="block truncate text-[13px] font-medium text-ink-900 hover:text-brand-700">{c.name}</Link>{c.productInterest.length ? <div className="truncate text-[12px] text-ink-500">{c.productInterest.map(optionLabel).join(', ')}</div> : null}</td>
                 <td className="truncate text-[12.5px]">{c.podName}</td>
-                <td className="truncate text-[12.5px]"><Link href={'/sequences/' + c.sequenceId} className="hover:text-brand-700">{c.sequenceName}</Link></td>
+                <td className="truncate text-[12.5px]"><Link href={'/campaigns/' + c.id} className="hover:text-brand-700">{c.sequenceName}</Link></td>
                 <td className="text-[12.5px]"><div className="text-ink-900">{formatLocalDate(c.startDate)}</div><div className="text-[12px] text-ink-500">{daysUntil <= 0 ? 'today' : daysUntil === 1 ? 'tomorrow' : `in ${daysUntil} days`}</div></td>
                 <td className="text-[12.5px]">{c.endDate ? formatLocalDate(c.endDate) : <Empty />}</td>
                 <td className="num"><Count value={c.audience} /></td>
-                <td>{c.status === 'PENDING_APPROVAL' ? (canApproveCampaign(user, c.podId) ? <span className="flex flex-wrap gap-1.5"><ActionButton action={approveCampaignAction} payload={{ campaignId: c.id }} className="btn-primary btn-sm">Approve</ActionButton><ActionButton action={rejectCampaignAction} payload={{ campaignId: c.id }} className="btn-ghost btn-sm">Decline</ActionButton></span> : <Badge tone="amber">Awaiting approval</Badge>) : <Badge tone="purple">{campaignStatusLabel(c.status)}</Badge>}</td>
+                <td>{c.status === 'PENDING_APPROVAL' ? (canApproveCampaign(user, c.podId) ? c.calendarPlan ? <Link className="btn-primary btn-sm" href={`/campaigns/${c.id}/edit`}>Review</Link> : <span className="flex flex-wrap gap-1.5"><ActionButton action={approveCampaignAction} payload={{ campaignId: c.id }} className="btn-primary btn-sm">Approve</ActionButton><ActionButton action={rejectCampaignAction} payload={{ campaignId: c.id }} className="btn-ghost btn-sm">Decline</ActionButton></span> : <Badge tone="amber">Awaiting approval</Badge>) : <Badge tone="purple">{campaignStatusLabel(c.status)}</Badge>}</td>
               </tr>;
             })}</tbody>
           </table></div>

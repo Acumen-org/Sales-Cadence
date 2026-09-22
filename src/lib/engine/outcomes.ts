@@ -96,6 +96,7 @@ export async function moveToStep(enrollmentId: string, targetIndex: number, ctx:
   if (current?.status === 'PAUSED') return { ok: false as const, error: 'This campaign is paused. Resume it before moving anyone to another step.' };
   const e = await prisma.enrollment.findUnique({ where: { id: enrollmentId }, include: { sequence: true } });
   if (!e) return { ok: false, error: 'Enrollment not found.' };
+  if (e.scheduleDates.length) return { ok: false, error: 'This person follows the published campaign calendar. Steps cannot be skipped ahead independently.' };
   if (e.status !== 'ACTIVE') return { ok: false, error: 'Only a live enrollment can be moved to another step.' };
   const steps = parseSteps(e.sequence.steps);
   if (targetIndex < 0 || targetIndex >= steps.length) return { ok: false, error: 'That step does not exist.' };

@@ -1,39 +1,33 @@
 import { redirect } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
-import { canEnroll, isAdmin, toActor } from '@/lib/auth/rbac';
-import { prisma } from '@/lib/db';
+import { canEnroll } from '@/lib/auth/rbac';
+import { campaignWorkspaceData } from '@/lib/campaign-workspace-data';
 import { addDays, todayIn } from '@/lib/dates';
 import { defaultTwentySchema } from '@/lib/twenty/twenty-schema';
-import { CampaignForm } from '@/components/campaigns/campaign-form';
-import { PageHeader } from '@/components/ui';
+import { CampaignWorkspace } from '@/components/campaigns/campaign-workspace';
+import { prisma } from '@/lib/db';
+import { canManageCampaigns } from '@/lib/auth/rbac';
+import type { CampaignDraft } from '@/lib/campaign-planner';
+import { diffDays } from '@/lib/dates';
 
-export default async function NewCampaignPage({ searchParams }: { searchParams: Promise<{ ids?: string }> }) {
+export default async function NewCampaignPage({ searchParams }: { searchParams: Promise<{ ids?: string; restart?: string }> }) {
   const user = await requireUser();
-  if (!canEnroll(toActor(user))) redirect('/campaigns');
-  const { ids } = await searchParams;
-  const initialIds = ids ? ids.split(',').map((s) => s.trim()).filter(Boolean) : [];
-  // A campaign is run in a pod, so the choice is the pods this user runs: every pod for an admin,
-  // their own for a leader. Reading other pods is allowed everywhere else; starting work in them is not.
-  const podIds = isAdmin(user) ? null : user.podIds;
-  const [sequences, pods] = await Promise.all([
-    prisma.sequence.findMany({ where: { archived: false }, orderBy: { name: 'asc' }, select: { id: true, name: true, durationDays: true, steps: true } }),
-    // An archived pod cannot take a campaign, so it is never offered as one.
-    prisma.pod.findMany({ where: { archived: false, ...(podIds === null ? {} : { id: { in: podIds } }) }, orderBy: { name: 'asc' } }),
-  ]);
+  if (!canEnroll(user)) redirect('/campaigns');
+  const { ids, restart } = await searchParams;
+  const data = await campaignWorkspaceData(user);
   const today = todayIn(user.timezone);
-  return (
-    <>
-      <PageHeader title="New campaign" />
-      <div className="px-6 pb-8 pt-2">
-        <CampaignForm
-          sequences={sequences.map((s) => ({ id: s.id, name: s.name, durationDays: s.durationDays ?? Math.max(1, ...((s.steps as { day?: number }[] | null) ?? []).map((step) => step.day ?? 1)) }))}
-          pods={pods.map((p) => ({ id: p.id, name: p.name, podOwnerValue: p.podOwnerValue }))}
-          products={[...defaultTwentySchema.personValues.productInterest]}
-          defaultStartDate={today}
-          defaultEndDate={addDays(today, 42)}
-          initialIds={initialIds}
-        />
-      </div>
-    </>
-  );
+  if (restart) {
+    const source = await prisma.campaign.findUnique({ where: { id: restart } });
+    if (source?.plannerDraft && canManageCampaigns(user, source.podId) && ['STOPPED', 'COMPLETED'].includes(source.status)) {
+      const previous = source.plannerDraft as CampaignDraft;
+      const initial = { ...previous, name: `${source.name} - next run`.slice(0, 120), startDate: today, endDate: addDays(today, diffDays(previous.startDate, previous.endDate)), personIds: source.personIds, assignments: Object.fromEntries(Object.entries(previous.assignments).filter(([id]) => source.personIds.includes(id))) };
+      return <div className="px-4 py-5 sm:px-6"><CampaignWorkspace pods={data.pods} products={[...defaultTwentySchema.personValues.productInterest]} initial={initial} /></div>;
+    }
+    redirect('/campaigns');
+  }
+  return <div className="px-4 py-5 sm:px-6"><CampaignWorkspace pods={data.pods} products={[...defaultTwentySchema.personValues.productInterest]} initial={{
+    name: '', podId: data.pods[0]?.id ?? '', startDate: today, endDate: addDays(today, 42), defaultBatchSize: 20,
+    fos: [], productInterest: [], personIds: [...new Set(ids?.split(',').filter(Boolean) ?? [])], assignments: {},
+    flows: [{ id: 'default', name: 'Default', steps: data.defaultSteps }],
+  }} /></div>;
 }

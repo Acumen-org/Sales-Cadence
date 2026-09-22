@@ -11,6 +11,7 @@ import { followingWorkingDay, nextWorkingDay, plannedDateForStep, shiftAfterStep
 import { loadSyncTask, loadSyncTasks, syncTaskCompleted, syncTaskResolved, syncTaskRescheduled, syncTasksCreated } from './sync-out';
 import { resolveNextStep } from './sequence-plan';
 import { workspaceTimezone } from '../workspace';
+import { workingDay } from '../campaign-planner';
 
 /** Who is acting, what time it is (tests), and whether to skip Twenty writes. */
 export type EngineContext = {
@@ -90,7 +91,7 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
       const stepDone = e.currentStep >= 0 && currentTasks.length > 0 && currentTasks.every((t) => t.state !== 'PENDING');
 
       let shiftDays = e.shiftDays;
-      if (stepDone && rules.clockMode === 'shift') {
+      if (stepDone && rules.clockMode === 'shift' && !e.scheduleDates.length) {
         shiftDays = shiftAfterStep(shiftDays, currentTasks[0].plannedDate, latestResolutionDate(currentTasks, workspaceTimezone()), 'shift');
       }
 
@@ -117,17 +118,21 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
       }
 
       const step = steps[nextIndex];
-      let planned = plannedDateForStep(e.startDate, step.day, shiftDays, rules.workingDays);
-      if (ctx.forceGenerate) {
+      const fixedCalendar = e.scheduleDates.length > 0;
+      if (fixedCalendar && (!workingDay(today) || (e.campaign?.endDate && today > e.campaign.endDate))) return { outcome: 'waiting' as const, reason: 'New touchpoints appear only on weekdays within the campaign window.' };
+      let planned = fixedCalendar ? e.scheduleDates[nextIndex] : plannedDateForStep(e.startDate, step.day, shiftDays, rules.workingDays);
+      if (fixedCalendar && (!planned || planned > today || (e.currentStep >= 0 && !stepDone))) return { outcome: 'waiting' as const, reason: 'Waiting for the published date and completion of the previous touchpoint.' };
+      if (fixedCalendar && ctx.forceGenerate) return { outcome: 'waiting' as const, reason: 'This campaign follows its published calendar.' };
+      if (!fixedCalendar && ctx.forceGenerate) {
         // Moved ahead by hand: the step is due now, never retroactively overdue.
         if (planned < today) planned = nextWorkingDay(today, rules.workingDays);
-      } else if (!shouldGenerateNow({ previousStepDone: stepDone, plannedDate: planned, today, mode: rules.clockMode, isFirstStep: e.currentStep < 0 })) {
+      } else if (!fixedCalendar && !shouldGenerateNow({ previousStepDone: stepDone, plannedDate: planned, today, mode: rules.clockMode, isFirstStep: e.currentStep < 0 })) {
         return { outcome: 'waiting' as const, reason: `next step planned for ${planned}` };
       }
 
       // Caps only apply to dates that are still ahead of us; overdue plans stay overdue and visible.
       let dueDate = planned;
-      if (planned >= today) {
+      if (!fixedCalendar && planned >= today) {
         // The load is read and then written, so the FO is locked for the rest of this transaction.
         // The lock above is the sequence: two plans feeding the same person's FO on the same day
         // do not meet there, and without this they each saw room for the last slot and both took
@@ -324,9 +329,10 @@ export async function snoozeTask(input: { taskId: string; toDate: LocalDate }, c
   const settings = await getSettings();
   if (!isLocalDate(input.toDate)) return { ok: false, reason: 'invalid', detail: 'Invalid date.' };
   const res = await prisma.$transaction(async (tx) => {
-    const task = await tx.task.findUnique({ where: { id: input.taskId }, include: { fo: true, enrollment: { select: { status: true } } } });
+    const task = await tx.task.findUnique({ where: { id: input.taskId }, include: { fo: true, enrollment: { select: { status: true, scheduleDates: true } } } });
     if (!task) return { ok: false as const, reason: 'not_found' as const };
     if (task.state !== 'PENDING') return { ok: false as const, reason: 'already_resolved' as const };
+    if (task.enrollment.scheduleDates.length) return { ok: false as const, reason: 'invalid' as const, detail: 'This task follows a published campaign calendar. Its date cannot be moved independently.' };
     if (task.enrollment.status === 'PAUSED') return HELD;
     const today = todayIn(workspaceTimezone(), ctx.now ?? new Date());
     if (input.toDate <= today) return { ok: false as const, reason: 'invalid' as const, detail: 'Snooze to a future date.' };

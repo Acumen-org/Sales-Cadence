@@ -1,5 +1,7 @@
 # Decisions and assumptions
 
+Current campaign behavior is documented in [the campaign calendar model](CAMPAIGN-MODEL-PROPOSAL.md). Sequence-library and capacity decisions below are historical and apply only to legacy campaigns.
+
 Every assumption made while building Cadence, grouped by area. Each entry says what was decided, why, and where to change it.
 
 ## Stack and runtime

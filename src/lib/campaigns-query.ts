@@ -1,3 +1,4 @@
+import type { CampaignDraft } from './campaign-planner';
 import type { Prisma } from '@prisma/client';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
@@ -6,6 +7,7 @@ import { foPeopleWhere } from './people-scope';
 import { parseSteps } from './sequences/steps';
 
 export type CampaignSummary = {
+  calendarPlan: boolean;
   id: string;
   name: string;
   status: string;
@@ -90,16 +92,17 @@ export async function listCampaigns(user: SessionUser, filters: CampaignListFilt
   if (filters.from) and.push({ OR: [{ endDate: null }, { endDate: { gte: filters.from } }] });
   if (filters.to) and.push({ startDate: { lte: filters.to } });
   const campaigns = (await prisma.campaign.findMany({ where, include: { sequence: { select: { name: true, steps: true } }, pod: { select: { name: true } } }, orderBy: [{ status: 'asc' }, { startDate: 'desc' }, { createdAt: 'desc' }] }))
-    .filter((c) => !foPeople || !['DRAFT', 'PENDING_APPROVAL', 'SCHEDULED'].includes(c.status) || c.personIds.some((id) => foPeople.has(id)));
+    .filter((c) => !foPeople || !['DRAFT', 'PENDING_APPROVAL', 'SCHEDULED'].includes(c.status) || (c.plannerDraft ? (c.plannerDraft as CampaignDraft).fos.some(f => f.id === filters.foUserId) : c.personIds.some((id) => foPeople.has(id))));
   const [groups, touches] = await Promise.all([
     prisma.enrollment.groupBy({ by: ['campaignId', 'campaignRun', 'status'], where: { campaignId: { in: campaigns.map((c) => c.id) } }, _count: { _all: true } }),
     touchesByCampaign(campaigns.map((c) => c.id)),
   ]);
   return campaigns.map((c) => ({
+    calendarPlan: Boolean(c.plannerDraft),
     id: c.id,
     name: c.name,
     status: c.status,
-    sequenceName: c.sequence.name,
+    sequenceName: c.plannerDraft ? `${(c.plannerDraft as CampaignDraft).flows.length} outreach groups` : c.sequence.name,
     sequenceId: c.sequenceId,
     podName: c.pod.name,
     podId: c.podId,
@@ -117,7 +120,11 @@ export async function listCampaigns(user: SessionUser, filters: CampaignListFilt
       const t = touches.get(c.id) ?? { done: 0, open: 0, endedPlanned: 0 };
       const perPerson = touchesPerPerson(c.sequence.steps);
       const live = groups.filter((g) => g.campaignId === c.id && g.campaignRun === c.runNumber && (g.status === 'ACTIVE' || g.status === 'PAUSED')).reduce((n, g) => n + g._count._all, 0);
-      const planned = ['DRAFT', 'PENDING_APPROVAL', 'SCHEDULED'].includes(c.status) ? c.personIds.length * perPerson : live * perPerson + t.endedPlanned;
+      let planned = ['DRAFT', 'PENDING_APPROVAL', 'SCHEDULED'].includes(c.status) ? c.personIds.length * perPerson : live * perPerson + t.endedPlanned;
+      if (c.plannerDraft) {
+        const d = c.plannerDraft as CampaignDraft;
+        planned = d.personIds.reduce((n, id) => n + touchesPerPerson(d.flows.find(f => f.id === (d.assignments[id] ?? 'default'))?.steps), 0);
+      }
       return { done: t.done, open: t.open, planned };
     })(),
     ...summarise(groups.filter((g) => g.campaignId === c.id && g.campaignRun === c.runNumber)),

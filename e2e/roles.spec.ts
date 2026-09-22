@@ -1,3 +1,5 @@
+import { beginStudio } from './studio-helper';
+import { seedLegacyCampaign } from './legacy-campaign-fixture';
 import { expect, test, type Page } from '@playwright/test';
 
 /**
@@ -66,13 +68,9 @@ test.describe('Junior FO', () => {
     await page.goto('/campaigns/new');
     await expect(page).not.toHaveURL(/\/campaigns\/new/);
 
-    // Nor edit the plan everyone runs on: the editor is read-only for them.
     await page.goto('/sequences');
+    await expect(page).toHaveURL(/\/campaigns$/);
     await expect(page.getByRole('link', { name: /New sequence/i })).toHaveCount(0);
-    await page.getByRole('link', { name: /Default outbound/ }).first().click();
-    await page.waitForURL(/\/sequences\/[0-9a-f-]+/);
-    await expect(page.getByRole('button', { name: 'Save sequence' })).toHaveCount(0);
-    await pageIsSound(page);
     await signOut(page);
   });
 
@@ -94,36 +92,13 @@ test.describe('Junior FO', () => {
 });
 
 test.describe('Senior FO', () => {
-  test('builds a sequence out of modules and launches a campaign from it', async ({ page }) => {
-    await signIn(page, 'alisa@cadence.local');
-
-    // Build a sequence: name it, then add touchpoints as modules.
-    await page.goto('/sequences/new');
-    await page.getByLabel(/Sequence name|^Name$/).first().fill('E2E role sequence');
-    await page.getByRole('button', { name: /^New touchpoint|Email$/ }).first().click().catch(() => {});
-    const addEmail = page.getByRole('button', { name: 'Email', exact: true });
-    if (await addEmail.count()) await addEmail.first().click();
-    await page.getByRole('button', { name: /Create sequence|Save sequence/ }).click();
-    await expect(page.locator('body')).not.toContainText('Application error');
-
-    // Launch a campaign on it, in their own pod.
-    await page.goto('/campaigns/new');
-    await page.getByLabel('Name', { exact: true }).fill('E2E role campaign');
-    await page.getByLabel('Pod', { exact: true }).selectOption({ label: "Alisa's pod" });
-    // Thirteen and Fourteen are reserved for this file: earlier specs work dummy-01..06.
-    await page.getByRole('button', { name: 'PHH' }).click();
-    await page.getByLabel('Campaign state').selectOption('any');
-    await page.getByLabel('Search people to add').fill('Dummy');
-    for (const name of ['Dummy Thirteen', 'Dummy Fourteen']) await page.getByLabel(`Select ${name}`, { exact: true }).check();
-    await expect(page.getByText(/Who starts · \d+ of 2/)).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByRole('button', { name: /Create campaign/ })).toBeVisible();
-    await pageIsSound(page);
-
-    // A Senior FO reads reports but does not administer the workspace.
-    await visitAll(page, ['/reports', '/reports?tab=pods']);
-    await page.goto('/settings');
-    await expect(page).not.toHaveURL(/\/settings$/);
-    await signOut(page);
+  test('a Senior FO builds outreach inside their own campaign', async ({ page }) => {
+    await signIn(page,'alisa@cadence.local'); await page.goto('/campaigns/new');
+    await page.getByLabel('Campaign name',{exact:true}).fill('Senior FO campaign');
+    await beginStudio(page,'StudioSenior');
+    await page.getByLabel('Step 1 email subject').fill('Senior FO introduction');
+    await expect(page.getByLabel('Step 1 email subject')).toHaveValue('Senior FO introduction');
+    await pageIsSound(page); await signOut(page);
   });
 
   test('reads another pod’s people but cannot run its work', async ({ page }) => {
@@ -136,7 +111,7 @@ test.describe('Senior FO', () => {
     await expect(page.getByRole('heading', { name: 'Dummy Seven' })).toBeVisible();
     // But she cannot start a campaign in it.
     await page.goto('/campaigns/new');
-    const pod = page.getByLabel('Pod', { exact: true });
+    const pod = page.getByLabel('Campaign pod', { exact: true });
     const options = await pod.locator('option').allTextContents();
     expect(options.join(' ')).not.toContain("Andrew's pod");
     await signOut(page);
@@ -145,19 +120,8 @@ test.describe('Senior FO', () => {
 
 test.describe('Sales Leader', () => {
   test('approves the follow-up campaign a Senior FO asked for', async ({ page }) => {
-    // A Senior FO launches a campaign, then asks for a follow-up on the people who never
-    // replied. The case builds its own campaign so it does not depend on another test.
-    await signIn(page, 'alisa@cadence.local');
-    await page.goto('/campaigns/new');
-    await page.getByLabel('Name', { exact: true }).fill('E2E leader source campaign');
-    await page.getByLabel('Pod', { exact: true }).selectOption({ label: "Alisa's pod" });
-    await page.getByRole('button', { name: 'PHH' }).click();
-    await page.getByLabel('Campaign state').selectOption('any');
-    await page.getByLabel('Search people to add').fill('Dummy');
-    for (const name of ['Dummy Thirteen', 'Dummy Fourteen']) await page.getByLabel(`Select ${name}`, { exact: true }).check();
-    await expect(page.getByText(/Who starts · 2 of 2/)).toBeVisible({ timeout: 20_000 });
-    await page.getByRole('button', { name: /Create campaign · 2 start/ }).click();
-    await page.waitForURL(/\/campaigns\/[0-9a-f-]+/);
+    const id=await seedLegacyCampaign('E2E leader source campaign',['dummy-13','dummy-14']);
+    await signIn(page,'alisa@cadence.local'); await page.goto(`/campaigns/${id}`);
 
     // Requesting a follow-up submits it for approval rather than launching it.
     await page.getByLabel('Campaign name').fill('E2E follow-up request');

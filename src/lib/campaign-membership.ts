@@ -1,3 +1,4 @@
+import type { CampaignDraft } from './campaign-planner';
 import type { CampaignStatus, EnrollmentStatus } from '@prisma/client';
 import { prisma } from './db';
 import { addDays, todayIn, type LocalDate } from './dates';
@@ -55,17 +56,21 @@ export async function membershipFor(personIds: string[]): Promise<Map<string, Me
   const out = new Map<string, Membership[]>();
   if (!personIds.length) return out;
   const [scheduled, enrollments] = await Promise.all([
-    prisma.campaign.findMany({ where: { status: { in: UPCOMING }, personIds: { hasSome: personIds } }, select: { id: true, name: true, status: true, startDate: true, endDate: true, podId: true, personIds: true, sequenceId: true, sequence: { select: { name: true, steps: true } } } }),
-    prisma.enrollment.findMany({ where: { personId: { in: personIds }, campaignId: { not: null } }, orderBy: { createdAt: 'desc' }, select: { id: true, personId: true, status: true, currentStep: true, campaign: { select: { id: true, name: true, status: true, startDate: true, endDate: true, podId: true, sequenceId: true, sequence: { select: { name: true, steps: true } } } } } }),
+    prisma.campaign.findMany({ where: { status: { in: UPCOMING }, personIds: { hasSome: personIds } }, select: { id: true, name: true, status: true, startDate: true, endDate: true, podId: true, personIds: true, plannerDraft: true, sequenceId: true, sequence: { select: { name: true, steps: true } } } }),
+    prisma.enrollment.findMany({ where: { personId: { in: personIds }, campaignId: { not: null } }, orderBy: { createdAt: 'desc' }, select: { id: true, personId: true, status: true, currentStep: true, sequenceId: true, sequence: { select: { name: true, steps: true } }, campaign: { select: { id: true, name: true, status: true, startDate: true, endDate: true, podId: true, sequenceId: true, sequence: { select: { name: true, steps: true } } } } } }),
   ]);
   const want = new Set(personIds);
   const stepCount = (steps: unknown) => { const parsed = safeParseSteps(steps); return parsed.ok ? parsed.steps.length : 0; };
   const push = (personId: string, m: Membership) => { const list = out.get(personId) ?? []; list.push(m); out.set(personId, list); };
-  for (const c of scheduled) for (const id of c.personIds) if (want.has(id)) push(id, { campaignId: c.id, campaignName: c.name, campaignStatus: c.status, kind: 'upcoming', startDate: c.startDate, endDate: c.endDate, podId: c.podId, enrollmentId: null, enrollmentStatus: null, sequenceId: c.sequenceId, sequenceName: c.sequence.name, step: null, steps: stepCount(c.sequence.steps) });
+  for (const c of scheduled) for (const id of c.personIds) if (want.has(id)) {
+    const draft = c.plannerDraft as CampaignDraft | null;
+    const flow = draft?.flows.find(f => f.id === (draft.assignments[id] ?? 'default'));
+    push(id, { campaignId: c.id, campaignName: c.name, campaignStatus: c.status, kind: 'upcoming', startDate: c.startDate, endDate: c.endDate, podId: c.podId, enrollmentId: null, enrollmentStatus: null, sequenceId: c.sequenceId, sequenceName: flow?.name ?? c.sequence.name, step: null, steps: flow?.steps.length ?? stepCount(c.sequence.steps) });
+  }
   for (const e of enrollments) {
     const c = e.campaign!;
     const running = e.status === 'ACTIVE' || e.status === 'PAUSED';
-    push(e.personId, { campaignId: c.id, campaignName: c.name, campaignStatus: c.status, kind: running ? 'running' : 'finished', startDate: c.startDate, endDate: c.endDate, podId: c.podId, enrollmentId: e.id, enrollmentStatus: e.status, sequenceId: c.sequenceId, sequenceName: c.sequence.name, step: e.currentStep >= 0 ? e.currentStep : null, steps: stepCount(c.sequence.steps) });
+    push(e.personId, { campaignId: c.id, campaignName: c.name, campaignStatus: c.status, kind: running ? 'running' : 'finished', startDate: c.startDate, endDate: c.endDate, podId: c.podId, enrollmentId: e.id, enrollmentStatus: e.status, sequenceId: e.sequenceId, sequenceName: e.sequence.name, step: e.currentStep >= 0 ? e.currentStep : null, steps: stepCount(e.sequence.steps) });
   }
   const order: Record<MembershipKind, number> = { running: 0, upcoming: 1, finished: 2 };
   for (const list of out.values()) list.sort((a, b) => order[a.kind] - order[b.kind]);
@@ -94,7 +99,7 @@ export async function campaignMemberWhere(campaignId: string) {
   return { enrollments: { some: { campaignId } } };
 }
 
-export type CampaignChoice = { id: string; name: string; status: CampaignStatus; kind: 'upcoming' | 'running'; startDate: LocalDate; endDate: LocalDate | null; podId: string; podName: string; members: number };
+export type CampaignChoice = { calendar: boolean; id: string; name: string; status: CampaignStatus; kind: 'upcoming' | 'running'; startDate: LocalDate; endDate: LocalDate | null; podId: string; podName: string; members: number };
 
 /** Campaigns a person can be added to: upcoming and running ones the reader may manage, or read. */
 export async function campaignChoices(user: SessionUser, opts: { manageOnly?: boolean } = {}): Promise<CampaignChoice[]> {
@@ -102,11 +107,11 @@ export async function campaignChoices(user: SessionUser, opts: { manageOnly?: bo
   const campaigns = await prisma.campaign.findMany({
     where: { status: { in: [...UPCOMING, 'ACTIVE', 'PAUSED'] }, ...(pods === null ? {} : { podId: { in: pods } }) },
     orderBy: [{ status: 'asc' }, { startDate: 'asc' }],
-    select: { id: true, name: true, status: true, startDate: true, endDate: true, podId: true, personIds: true, pod: { select: { name: true } }, _count: { select: { enrollments: { where: { status: { in: ['ACTIVE', 'PAUSED'] } } } } } },
+    select: { id: true, name: true, status: true, startDate: true, endDate: true, podId: true, personIds: true, plannerDraft: true, pod: { select: { name: true } }, _count: { select: { enrollments: { where: { status: { in: ['ACTIVE', 'PAUSED'] } } } } } },
   });
   return campaigns
     .filter((c) => !opts.manageOnly || canChangeCampaignMembers(user, c.podId))
-    .map((c) => ({ id: c.id, name: c.name, status: c.status, kind: UPCOMING.includes(c.status) ? 'upcoming' as const : 'running' as const, startDate: c.startDate, endDate: c.endDate, podId: c.podId, podName: c.pod.name, members: UPCOMING.includes(c.status) ? c.personIds.length : c._count.enrollments }));
+    .map((c) => ({ calendar: Boolean(c.plannerDraft), id: c.id, name: c.name, status: c.status, kind: UPCOMING.includes(c.status) ? 'upcoming' as const : 'running' as const, startDate: c.startDate, endDate: c.endDate, podId: c.podId, podName: c.pod.name, members: UPCOMING.includes(c.status) ? c.personIds.length : c._count.enrollments }));
 }
 
 export type StartingSoon = { id: string; name: string; startDate: LocalDate; endDate: LocalDate | null; podName: string; people: number; mine: number; daysUntil: number };

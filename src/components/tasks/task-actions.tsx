@@ -13,6 +13,7 @@ export type DispositionOption = { key: string; label: string; answered: boolean 
 export type SkipReasonOption = { key: string; label: string; exit: string };
 
 type Props = {
+  fixedCalendar?: boolean;
   taskId: string;
   action: ActionType;
   nextUrl: string | null;
@@ -221,6 +222,7 @@ export function TaskActions(p: Props) {
           setPanel((v) => (v === 'skip' ? 'none' : 'skip'));
           break;
         case 'z':
+          if (p.fixedCalendar) return;
           e.preventDefault();
           setPanel((v) => (v === 'snooze' ? 'none' : 'snooze'));
           break;
@@ -252,7 +254,7 @@ export function TaskActions(p: Props) {
   const toggle = (x: Panel) => setPanel((v) => (v === x ? 'none' : x));
   const laterSteps = p.steps.filter((s) => s.index > p.currentStep);
   const delegates = (p.delegates ?? []).filter((d) => d.id !== p.currentFoId);
-  const canDelegate = p.canManageEnrollment && delegates.length > 0;
+  const canDelegate = !p.fixedCalendar && p.canManageEnrollment && delegates.length > 0;
 
   return (
     <div>
@@ -268,7 +270,7 @@ export function TaskActions(p: Props) {
         </button>
         </> : null}
         {variant !== 'module' ? <>
-        <button type="button" disabled={pending} className={clsx(secondary, panel === 'snooze' && 'border-ink-300 bg-canvas')} onClick={() => toggle('snooze')}>
+        <button type="button" disabled={pending || p.fixedCalendar} title={p.fixedCalendar ? 'Date reserved in the campaign calendar' : undefined} className={clsx(secondary, panel === 'snooze' && 'border-ink-300 bg-canvas')} onClick={() => toggle('snooze')}>
           <IconClock size={16} /> Snooze
         </button>
         {p.twentyUrl ? (
@@ -455,7 +457,7 @@ export function TaskActions(p: Props) {
                 </form>
               ) : null}
 
-              {p.canManageEnrollment && laterSteps.length ? (
+              {!p.fixedCalendar && p.canManageEnrollment && laterSteps.length ? (
                 <form
                   className="space-y-2 md:border-l md:border-line md:pl-3.5"
                   onSubmit={(e) => {

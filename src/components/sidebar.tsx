@@ -7,7 +7,7 @@ import clsx from 'clsx';
 import type { SessionUser } from '@/lib/auth/current-user';
 import { canViewReports, ROLE_LABELS } from '@/lib/auth/rbac';
 import { logoutAction } from '@/lib/actions/auth';
-import { IconActivity, IconCalendar, IconCampaigns, IconClose, IconCompany, IconHome, IconLogout, IconMenu, IconPeople, IconReports, IconSequences, IconSettings, IconTasks } from './icons';
+import { IconActivity, IconCalendar, IconCampaigns, IconClose, IconCompany, IconHome, IconLogout, IconMenu, IconPeople, IconReports, IconSettings, IconTasks } from './icons';
 import { Avatar } from './ui';
 import { BrandMark } from './brand';
 import { Modal } from './modal';
@@ -22,7 +22,6 @@ const GROUPS = [
     { href: '/meetings', label: 'Meetings', icon: IconCalendar },
   ] },
   { label: 'Engagement', items: [
-    { href: '/sequences', label: 'Sequences', icon: IconSequences },
     { href: '/campaigns', label: 'Campaigns', icon: IconCampaigns },
   ] },
   { label: 'Insights', items: [

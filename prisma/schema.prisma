@@ -203,9 +203,10 @@ model UserPod {
 /// plan never rewrites work already handed to an FO.
 model Sequence {
   id              String   @id @default(uuid())
-  name            String   @unique
+  name            String
   description     String?
   archived        Boolean  @default(false)
+  campaignOwned   Boolean  @default(false)
   /// Nurture: start again this many days after the last step, until the person answers.
   repeatEveryDays Int?
   /// How many calendar days the plan spans; no step may fall after it. Required for new plans.
@@ -249,6 +250,9 @@ model Campaign {
   productInterest String[]      @default([])
   status         CampaignStatus @default(DRAFT)
   description    String?
+  /// Campaign-owned editor input and the exact calendar accepted at publication.
+  plannerDraft   Json?
+  publishedPlan  Json?
   followupSourceId String?
   followupSourceRun Int?
   followupWaitDays Int @default(0)
@@ -287,6 +291,8 @@ model Enrollment {
   currentStepId     String?
   /// Accumulated delay (calendar days) applied to not-yet-generated steps (clock mode = shift).
   shiftDays         Int              @default(0)
+  /// Immutable campaign calendar; legacy enrollments use the existing scheduling engine.
+  scheduleDates     String[]         @default([])
   status            EnrollmentStatus @default(ACTIVE)
   exitReason        String?
   pausedAt          DateTime?

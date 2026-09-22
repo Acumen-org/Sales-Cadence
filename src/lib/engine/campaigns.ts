@@ -1,4 +1,5 @@
 import { lockAccounts } from '../account-lock';
+import { activateCalendarCampaign } from './campaign-calendar';
 import type { CampaignStatus } from '@prisma/client';
 import { prisma } from '../db';
 import { planCampaignCapacity } from './capacity';
@@ -15,6 +16,7 @@ export async function changeCampaignStatus(id: string, status: 'PAUSED' | 'STOPP
     await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`campaign:${id}`}))`;
     const campaign = await tx.campaign.findUniqueOrThrow({ where: { id }, include: { pod: true } });
     if (campaign.pod.archived && status === 'ACTIVE') throw new Error('Restore the pod before resuming this campaign.');
+    if (campaign.plannerDraft && status === 'ACTIVE' && campaign.endDate && campaign.endDate < todayIn(workspaceTimezone(), now)) throw new Error('This campaign window has ended. Stop this campaign and plan another run with new dates.');
     const allowed: CampaignStatus[] = status === 'PAUSED' ? ['ACTIVE','SCHEDULED'] : status === 'ACTIVE' ? ['PAUSED'] : ['ACTIVE','PAUSED','SCHEDULED','PENDING_APPROVAL','DRAFT'];
     if (!allowed.includes(campaign.status)) throw new Error('Campaign state changed. Refresh and try again.');
     const cancelled: string[] = [];
@@ -45,6 +47,7 @@ export async function activateCampaign(id: string, ctx: EngineContext = { actor:
   const now = ctx.now ?? new Date();
   const campaign = await prisma.campaign.findUnique({ where: { id }, include: { sequence: true, pod: true } });
   if (!campaign || campaign.status !== 'SCHEDULED' || campaign.startDate > todayIn(workspaceTimezone(), now)) return { enrolled: 0, skipped: 0 };
+  if (campaign.plannerDraft) return activateCalendarCampaign(id, ctx);
   if (campaign.pod.archived || campaign.sequence.archived) throw new Error('Campaign needs an available pod and sequence.');
   let ids = campaign.personIds;
   if (campaign.followupSourceId) {

@@ -3,11 +3,11 @@
 import { tagFilter, tagTone } from '@/lib/crm-tags';
 import { useFilterNavigation } from '@/components/filter-navigation';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Badge, IdentityCell, type BadgeTone, TierBadge } from '@/components/ui';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
 import { PillList } from '@/components/pill-list';
-import { AddToCampaign, RemoveFromCampaign, RemoveFromCampaigns } from '@/components/campaigns/add-to-campaign';
+import { AddToCampaign, RemoveFromCampaigns } from '@/components/campaigns/add-to-campaign';
 import { MipStars } from './mip-stars';
 
 export type PeopleTableRow = {
@@ -57,6 +57,8 @@ function Tag({ value, field }: { value: string; field?: string }) {
 /** The directory: CRM tags, the campaign and the sequence by name, and a selection to add to a campaign. */
 export function PeopleTable({ rows }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(null), 8000); return () => clearTimeout(timer); }, [notice]);
   const selectable = rows.filter((r) => !r.dnd && !r.optedOut);
   const allSelected = selectable.length > 0 && selectable.every((r) => selected.has(r.id));
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(selectable.map((r) => r.id)));
@@ -67,18 +69,19 @@ export function PeopleTable({ rows }: Props) {
       else n.add(id);
       return n;
     });
-  const chosen = [...selected];
+  const chosen = rows.filter(r => selected.has(r.id)).map(r => r.id);
   const chosenRows = rows.filter((r) => selected.has(r.id));
   const inCampaigns = chosenRows.filter((r) => r.inCampaign && r.campaign).map((r) => ({ id: r.id, campaignId: r.campaign!.id, campaignName: r.campaign!.name }));
   const showNext = rows.some((p) => p.next?.action || p.next?.due);
 
   return (
     <div>
+      {notice && <div role="status" className="fixed bottom-6 right-6 z-50 max-w-[min(90vw,28rem)] rounded-lg bg-ink-900 px-4 py-3 text-sm text-white shadow-lg">{notice}<button type="button" aria-label="Dismiss campaign notification" className="ml-3" onClick={() => setNotice(null)}>&times;</button></div>}
       {selected.size ? (
         <div className="flex flex-wrap items-center gap-3 border-y border-brand-100 bg-brand-50/70 px-4 py-2 text-[12.5px] text-brand-800">
           <span className="font-medium">{selected.size} selected</span>
-          <AddToCampaign personIds={chosen} onDone={() => setSelected(new Set())} disabled={chosenRows.every((r) => r.inCampaign)} disabledTitle={chosenRows.every((r) => r.inCampaign) ? (chosen.length === 1 ? 'Already in a campaign' : 'Everyone chosen is already in a campaign') : undefined} />
-          {inCampaigns.length ? <RemoveFromCampaigns people={inCampaigns} onDone={() => setSelected(new Set())} /> : null}
+          <AddToCampaign personIds={chosenRows.filter(r => !r.inCampaign).map(r => r.id)} onDone={() => setSelected(new Set())} disabled={chosenRows.every((r) => r.inCampaign)} disabledTitle={chosenRows.every((r) => r.inCampaign) ? (chosen.length === 1 ? 'Already in a campaign' : 'Everyone chosen is already in a campaign') : undefined} />
+          <RemoveFromCampaigns people={inCampaigns} onDone={message => { setSelected(new Set()); setNotice(message ?? 'People removed from campaign.'); }} />
           <button type="button" className="btn-ghost btn-sm" onClick={() => setSelected(new Set())}>
             Clear
           </button>
@@ -147,7 +150,7 @@ export function PeopleTable({ rows }: Props) {
                   {p.campaign ? (
                     <>
                       <div title={p.campaign.name} className="line-clamp-2 break-words text-[13px] font-medium leading-5 text-ink-900"><Link href={`/campaigns/${p.campaign.id}`} className="hover:text-brand-700 hover:underline">{p.campaign.name}</Link></div>
-                      <div className="mt-1 flex items-center gap-2"><Badge tone={p.campaign.tone}>{p.campaign.label}</Badge>{p.inCampaign ? <RemoveFromCampaign campaignId={p.campaign.id} campaignName={p.campaign.name} personIds={[p.id]} label="Remove" className="btn-danger btn-sm"/> : null}</div>
+                      <div className="mt-1 flex items-center gap-2"><Badge tone={p.campaign.tone}>{p.campaign.label}</Badge></div>
                     </>
                   ) : (
                     <span className="text-[12px] text-ink-300">-</span>

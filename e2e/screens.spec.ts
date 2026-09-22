@@ -1,3 +1,4 @@
+import { beginStudio } from './studio-helper';
 import { test, type Page } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -114,13 +115,10 @@ test('capture screens', async ({ page }) => {
   await page.goto('/enrichment?tab=scorecard');
   await shot(page, '07e3-enrichment-scorecard');
 
-  await page.goto('/sequences');
-  await shot(page, '08-sequences');
-  await page.getByRole('link', { name: /Default outbound/ }).first().click();
-  await page.waitForURL(/\/sequences\//);
-  await shot(page, '09-sequence-detail');
-  await page.goto('/sequences/new');
-  await shot(page, '09b-sequence-new');
+  await page.goto('/campaigns/new');
+  await shot(page, '08-campaign-studio');
+  await beginStudio(page,'StudioScreens');
+  await shot(page, '09-campaign-outreach');
 
   await page.goto('/campaigns');
   await shot(page, '10-campaigns');
@@ -154,7 +152,7 @@ test('capture screens', async ({ page }) => {
   // Global search is available throughout the workspace.
   await page.goto('/tasks');
   await page.getByTitle('Search (Ctrl+K)').click();
-  await page.getByPlaceholder('Search people, campaigns and sequences').fill('Dummy');
+  await page.getByPlaceholder('Search people and campaigns').fill('Dummy');
   await page.waitForTimeout(600);
   await shot(page, '15-search');
   await page.keyboard.press('Escape');

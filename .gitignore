@@ -24,5 +24,6 @@ test-results
 .screens
 .next-review/
 .pgdata-review*/
+.pgdata-*/
 .review/
 .live

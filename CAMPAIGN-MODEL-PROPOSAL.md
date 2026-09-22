@@ -1,38 +1,48 @@
-# Campaign and sequence model for discussion
+# Campaign calendar model - local implementation
 
-Reviewed against the September list on 20 September 2026. This is a proposal, not shipped campaign behaviour. Point 18 explicitly asks for discussion before changing the campaign/sequence core.
+This replaces the earlier proposal. The campaign studio implements the model below.
 
-## What is actually implemented
+## Campaign setup
 
-A campaign currently has one sequence, one pod, start/end dates and a planned audience. The database permits only one ACTIVE or PAUSED enrollment per person, even outside a campaign. This is stricter than points 3 and 19: simultaneous standalone sequences alongside a campaign are **not implemented**. Neither are per-person sequence choices inside a campaign, creator-selected FO rosters, or full editing of an upcoming campaign.
+The studio has three steps: People, Outreach, Schedule. Dates, products, selected FOs and the audience belong to the campaign. Each FO has a new-people/day batch size, initially copied from the campaign default. Capacity is independent of other campaigns and of legacy workspace daily caps.
 
-The existing capacity planner does simulate later actions, roll work onto configured working days and include existing FO load. It derives a starting rate automatically. Its default daily action cap in code is 40, with a workspace setting and possible per-user override; this is distinct from new people started per day. The creator cannot yet select that daily starting rate in the campaign form. The latest sequence editor uses calendar-day offsets with non-working dates rolled forward; this audit does not change those semantics.
+Outreach is authored within this campaign. Default is generated from a cold-outreach channel recipe, with its step count and spacing verified against the campaign dates, audience and per-FO limits. It is not a fixed eight-step template. Selected contacts can receive a separate editable copy. A contact has exactly one outreach flow. There is no reusable sequence library or save-as-template action. Private database sequence rows support existing task execution and history; they are not reusable user-facing sequences.
 
-## Recommended model
+## Planning rules
 
-1. **Dates are a completion window.** Every planned action for every chosen person must fit by the end date. Reject an infeasible launch and show the specific FO/day overflow. Offer an extended end date or a shorter sequence. Reducing starts per day reduces workload but cannot shorten a sequence's intrinsic span: a 23-day plan cannot finish inside two weeks even for one person.
-2. **Separate starts from workload.** The creator chooses new people per FO per day, prefilled from a configurable workspace default (suggested starting default: 5, not yet approved). A separate per-FO daily action cap covers all campaigns and standalone sequences. An email + call touchpoint costs two action slots. Sequence step-count and duration limits are configurable authoring safeguards; they do not replace the daily simulation.
-3. **Choose the FO roster explicitly.** Assign only to selected, eligible pod members. Preserve the CRM owner if that owner is selected. A contact owned by an unselected FO is an explicit conflict requiring reassignment or exclusion; do not silently reassign them. Balance only genuinely unowned people across selected FOs, considering existing commitments.
-4. **One campaign, one chosen sequence per person.** A campaign has a default sequence and an allowed sequence list. Each member has exactly one selection, individually or in bulk. Separate standalone sequences may run alongside that campaign, as point 19 requests. Prevent duplicate live membership in the same sequence and reserve a person's active campaign slot atomically. Scheduled-campaign conflicts must be surfaced before launch.
-5. **Preserve history and make stopping rules explicit.** A reply or opt-out should stop all automated follow-up for that person by default, with exact reply evidence retained against the originating task/sequence where known. Historical replies must never move to a newer campaign. Concurrency rules must cover enrollment, scheduler, campaign launch, replies, pause/resume and restart together.
-6. **Upcoming campaigns are editable; active plans are locked.** Before launch, allow dates, name, audience, selected FOs, rates and per-person sequence choices to change, then revalidate capacity. A pending-approval campaign that changes materially needs approval again. After launch lock those planning fields, as point 17 requests. Retain explicit pause/stop and the membership removal requested in point 8; additions to a running campaign must pass a fresh capacity check. Do not quietly expose end-date changes as an exception to the lock.
-7. **Show the actual calendar.** One row per FO, one column per working day, displaying planned actions / daily cap and new starts. Differentiate existing commitments from this campaign's proposed work. Show the first/last starting day and final completion date as labelled values, without an unexplained purple line. The planner should also report the first infeasible date and how many people fit.
+- Start and end dates are required. Every selected FO must have one or two batches on every Monday-Friday date in the window.
+- A batch contains at most that FO's new-people/day count. Two batches on the same day must be at different step numbers. A combined call/email touchpoint counts people once and creates separate required activities.
+- Reserve each batch's entire journey before admitting it. First-touch batches start on distinct days in priority order.
+- Priority is Clients, MIP, Tier 1, Tier 2, Tier 3, then unclassified; overlapping categories take the highest priority. CRM LEVEL_1/2/3 values are recognized. Equal-priority contacts are grouped by outreach to avoid unnecessary tiny batches, then ordered by name and ID.
+- Preserve CRM ownership. Unselected or unmapped owners are explicit conflicts. Distribute only unowned contacts, balancing this campaign's audience relative to each FO's batch size.
+- Consecutive people on the same outreach flow form a batch after priority and flow grouping. Do not move a lower-priority person ahead to fill a different flow's batch. This can produce partially filled batches.
+- Gaps count calendar days from the previous adjusted touchpoint. Saturday moves to Friday, except a one-day gap moves to Monday. Sunday moves to Monday. No touchpoint is placed on a weekend, and no new touchpoint is generated on a weekend.
+- All journeys finish by the end date. No invalid calendar can be published. Step 01 validates eligibility and produces a fitted starter before opening Outreach. Step 02 checks edits in place; Schedule opens only after these checks pass. Suggestions modify gaps, end date or batch sizes only after the same planner verifies a complete replacement calendar. Applying a suggestion requires a fresh review before publication.
 
-## How capacity is computed
+The deterministic search tries earlier starts first. It has a work limit and reports search exhaustion separately from infeasibility. It does not claim a global sales-optimal result. Not every possible input has a solution, and the system cannot manufacture meaningful outreach to fill an impossible window.
 
-For each selected FO and each candidate person's start day:
+## Execution and lifecycle
 
-- Expand that person's selected sequence into individual email/call/LinkedIn actions using the same date rules as the scheduler.
-- Add those actions to the FO's existing commitments, including future scheduled campaign reservations and standalone work.
-- Accept the start only if every action remains on/before the campaign end and every daily total is within the FO's cap.
-- Enforce the creator's maximum new starts for that FO/day. Do not increase it automatically to fit the audience.
+Publication stores the exact calendar, contact assignments and step dates. Launch uses those dates without running a second capacity allocator. Both activities of a combined touchpoint must resolve before the next step becomes available. Replies and opt-outs retain the existing stop behavior.
 
-For mixed sequences or pre-existing work, multiplying people by steps, or dividing the audience by a uniform start rate, is not sufficient. The day-by-day simulation is authoritative. The suggested end date is the first date at which that same simulation fits everyone. Sequence step changes must trigger capacity revalidation for unstarted campaigns; started work retains the existing in-use-step protections.
+Saving an upcoming campaign as a draft withdraws its published schedule. Publishing it again revalidates the full plan. Concurrent edits require the latest revision, and publication requires the fingerprint of the reviewed draft. Membership reservations and launch are transactional; competing publications cannot silently share the same people.
 
-## Discussion still needed
+Before launch, unavailable people, blocked accounts, changed owners, unavailable FOs or changed follow-up eligibility prevent a partial launch. The campaign displays an attention message for review. Campaign-owned steps cannot be edited through legacy endpoints.
 
-- Confirm action-based daily capacity (email + call = two slots); this is recommended and matches the current engine's workload unit.
-- Set the default starts/day and authoring limits. Do not silently replace the existing daily cap with a proposed number.
-- Confirm whether Biz Ops should remain read-only or gain the campaign-membership exception implied by "everyone" in point 8.
+Active plans are locked. Independent task snoozing, step jumping and delegation are disabled for calendar tasks because they would invalidate the accepted dates and FO reservations. Pause, stop, reply and explicit removal remain available. Pausing does not shift dates. Resuming after the end date is refused. Plan another run opens a new draft with the previous campaign's audience and outreach for fresh date/capacity review; previous history stays intact.
 
-Implementation should ship the roster, selected start rates, mixed-sequence planner and upcoming editing together, then migrate the one-live-enrollment constraint with concurrency tests. Removing the current unique index alone would leave replies, tasks and capacity inconsistent.
+The guarantee covers the published plan. Actual replies, opt-outs, removals and missed work can reduce coverage. Missed tasks remain visibly overdue rather than being silently combined with another batch or moved beyond the deadline. At the end date the campaign stops remaining work.
+
+## Compatibility and deployment
+
+Existing campaigns retain their historical execution model. Upcoming legacy campaigns can be opened in the studio and converted before launch. Sequence routes redirect to campaigns; historical IDs remain in the database. Follow-up requests use private campaign outreach and require a leader's calendar review before publication.
+
+Migration: `20261001000000_campaign_calendar` adds campaign drafts/calendars, enrollment dates and private-flow ownership. It removes unique sequence names so separate campaigns can each have a Default flow. Deploy migration before starting code. Deployment uses the regular tested main-branch release pipeline.
+
+## Studio refinements
+
+Outreach groups are created, named, edited and deleted in the left sidebar. Contacts leave Default when assigned to a custom group. Contacts in other custom groups remain visible but cannot be selected, including through page-wide or all-matching selection. Deleting a group returns its people to Default.
+
+The calendar is a compact working-week view. Dates and FO limits can be adjusted in a dialog without leaving it; an invalid adjustment keeps the last valid calendar intact. Starter generation is limited to new, unauthored outreach. Existing campaign drafts and restarted custom outreach are preserved.
+
+People membership changes are bulk actions. Mixed selections add only currently available contacts and remove only campaign members. Removing people from an upcoming calendar returns it to draft for review; it cannot run using a stale published plan. Meetings use a fixed-width desktop table and labeled rows on smaller screens.

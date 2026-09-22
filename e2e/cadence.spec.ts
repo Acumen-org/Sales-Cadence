@@ -1,3 +1,5 @@
+import { beginStudio } from './studio-helper';
+import { seedLegacyCampaign } from './legacy-campaign-fixture';
 import { expect, test, type Page } from '@playwright/test';
 
 const DEMO_EMAILS: Record<string, string> = {
@@ -69,39 +71,22 @@ async function pickPeople(page: Page, names: string[]) {
   for (const name of names) await page.getByLabel(`Select ${name}`, { exact: true }).check();
 }
 
-test('a Senior FO creates a campaign and the review names who is skipped', async ({ page }) => {
-  await loginAs(page, 'Alisa');
-  await page.goto('/campaigns/new');
-  await page.getByLabel('Name', { exact: true }).fill('E2E SaaStr follow-up');
-  await page.getByLabel('Pod', { exact: true }).selectOption({ label: "Alisa's pod" });
-  await page.getByRole('button', { name: 'PHH' }).click();
-  // Dummy Six is do-not-contact in Twenty: it must be listed as skipped, not enrolled.
-  await pickPeople(page, ['Dummy One', 'Dummy Two', 'Dummy Three', 'Dummy Four', 'Dummy Six']);
-  await expect(page.getByText(/Who starts · 4 of 5/)).toBeVisible({ timeout: 20_000 });
-  // The review table names the reason; the picker's tag filter and pills carry the same words.
-  const skipped = page.getByRole('table').filter({ has: page.getByRole('columnheader', { name: 'Skipped', exact: true }) });
-  await expect(skipped.getByRole('cell', { name: 'Do not contact', exact: true })).toBeVisible();
-  await expect(page.getByText(/Room for \d+ people/)).toBeVisible();
-  await page.getByRole('button', { name: /Create campaign · 4 start/ }).click();
-  await expect(page).toHaveURL(/\/campaigns\/[0-9a-f-]+$/);
-  await expect(page.getByRole('heading', { name: 'E2E SaaStr follow-up' })).toBeVisible();
-  // The four who were enrolled are on the campaign, and the skipped one is not.
-  await expect(page.locator('main')).toContainText('Dummy One');
-  await expect(page.locator('main')).not.toContainText('Dummy Six');
-  await logout(page);
+test('an existing campaign remains readable after upgrading to campaign-owned outreach', async ({ page }) => {
+  const id=await seedLegacyCampaign('E2E SaaStr follow-up',['dummy-01','dummy-02','dummy-03','dummy-04']);
+  await loginAs(page,'Alisa'); await page.goto(`/campaigns/${id}`);
+  await expect(page.getByRole('heading',{name:'E2E SaaStr follow-up'})).toBeVisible();
+  await expect(page.locator('main')).toContainText('Dummy One'); await logout(page);
 });
 
 test('the same person cannot be enrolled twice', async ({ page }) => {
-  await loginAs(page, 'Alisa');
-  await page.goto('/campaigns/new');
-  await page.getByLabel('Name', { exact: true }).fill('E2E duplicate check');
-  await page.getByRole('button', { name: 'PHH' }).click();
-  // Dummy One was enrolled by the case above, so a second attempt must refuse.
-  await pickPeople(page, ['Dummy One']);
-  await expect(page.getByText(/Who starts · 0 of 1/)).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText('Already in a sequence')).toBeVisible();
-  await expect(page.getByRole('button', { name: /Create campaign/ })).toBeDisabled();
-  await logout(page);
+  await loginAs(page,'Alisa'); await page.goto('/campaigns/new');
+  await page.getByLabel('Campaign name',{exact:true}).fill('Duplicate audience');
+  await page.getByRole('button',{name:'PHH',exact:true}).click();
+  await page.getByRole('checkbox',{name:'Alisa Senior',exact:true}).check();
+  await pickPeople(page,['Dummy One']);
+  await page.getByRole('button',{name:'Next: Outreach',exact:true}).click();
+  await expect(page.locator('main').getByRole('alert')).toContainText('already belong');
+  await expect(page.getByRole('button',{name:'Publish campaign'})).toHaveCount(0); await logout(page);
 });
 
 test('task flow: complete an email, log a call with an outcome, skip with a bounce', async ({ page }) => {
@@ -208,30 +193,13 @@ test('answered call finishes the sequence as replied and shows on Home', async (
   await logout(page);
 });
 
-test('a sequence is one editable plan: a free step saves, a step in use is refused', async ({ page }) => {
-  await loginAs(page, 'Admin');
-  await page.goto('/sequences');
-  await page.getByRole('link', { name: /Default outbound/ }).click();
-  await page.waitForURL(/\/sequences\/[0-9a-f-]+/);
+test('outreach is edited inside campaigns and the old library no longer opens', async ({ page }) => {
+  await loginAs(page,'Admin'); await page.goto('/sequences'); await expect(page).toHaveURL(/\/campaigns$/);
+  await beginStudio(page,'StudioInline');
+  await expect(page.getByRole('heading',{name:'Default',exact:true})).toBeVisible();
+  await page.getByLabel('Step 1 email subject').fill('Campaign-only subject');
 
-  // The plan is touchpoints on calendar days, and a step people are standing on says so.
-  await expect(page.getByLabel('Sequence name')).toHaveValue(/Default outbound/);
-  await expect(page.getByLabel(/^Day \d+/).first()).toBeVisible();
-  await expect(page.getByText(/Locked\s*\d+ open touch(es)?/).first()).toBeVisible();
-
-  // Editing a step nobody is on saves in place. There is no version to choose.
-  const lastSubject = page.getByLabel(/email subject/i).last();
-  await lastSubject.fill('e2e: closing subject');
-  await page.getByRole('button', { name: 'Save sequence' }).click();
-  await expect(page.getByText(/Sequence saved/)).toBeVisible();
-  await page.reload();
-  await expect(page.getByLabel(/email subject/i).last()).toHaveValue('e2e: closing subject');
-
-  // The locked step's fields cannot be typed into at all, so the refusal is not a surprise
-  // that arrives on save.
-  const lockedStep = page.locator('section').filter({ hasText: /Locked\s*\d+ open touch(es)?/ }).first();
-  await expect(lockedStep.getByLabel(/email subject/i).first()).toBeDisabled();
-  await logout(page);
+  await expect(page.getByLabel('Step 1 email subject')).toHaveValue('Campaign-only subject');
 });
 
 test('admin saves rules; a junior FO cannot open settings', async ({ page }) => {

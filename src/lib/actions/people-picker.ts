@@ -16,6 +16,7 @@ import { defaultTwentySchema } from '../twenty/twenty-schema';
  * that is who a campaign is usually for.
  */
 const Filters = z.object({
+  withinIds: z.array(z.string()).max(10000).optional(),
   q: z.string().trim().max(200).default(''),
   pod: z.string().trim().max(100).default(''),
   fo: z.string().trim().max(100).default(''),
@@ -36,6 +37,7 @@ const PICKER_PAGE = 100;
 async function pickerWhere(f: PickerFilters, user: Awaited<ReturnType<typeof requireUser>>): Promise<Prisma.PersonCacheWhereInput> {
   const values = defaultTwentySchema.personValues;
   const and: Prisma.PersonCacheWhereInput[] = [await peopleScopeWhere(user)];
+  if (f.withinIds) and.push({ id: { in: f.withinIds } });
   const search = personSearchWhere(f.q);
   if (search) and.push(search);
   if (f.pod) and.push({ podOwner: f.pod });

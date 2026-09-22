@@ -6,7 +6,7 @@ import { IconFilter, IconSearch } from '@/components/icons';
 import { Badge, Count, TierBadge } from '@/components/ui';
 import { optionLabel } from '@/lib/twenty/labels';
 
-type Props = { value: string[]; onChange: (ids: string[]) => void };
+type Props = { value: string[]; onChange: (ids: string[]) => void; withinIds?: string[]; initialPod?: string; disabledIds?: string[]; disabledReason?: string };
 
 const STATE_TONE: Record<PickerRow['state'], 'gray' | 'green' | 'blue' | 'amber' | 'red'> = { 'Never in a campaign': 'gray', 'In a campaign': 'green', Replied: 'blue', Finished: 'amber', 'Do not contact': 'red' };
 
@@ -16,12 +16,12 @@ const STATE_TONE: Record<PickerRow['state'], 'gray' | 'green' | 'blue' | 'amber'
  * The selection lives in the parent as a list of ids; this keeps the latest copy in a ref so a
  * late search response can never overwrite a tick made while it was in flight.
  */
-export function PeoplePicker({ value, onChange }: Props) {
+export function PeoplePicker({ value, onChange, withinIds, initialPod, disabledIds = [], disabledReason = 'Assigned to another outreach group' }: Props) {
   const latest = useRef(value);
   latest.current = value;
   const [options, setOptions] = useState<PickerOptions | null>(null);
   const [showMore, setShowMore] = useState(false);
-  const [filters, setFilters] = useState<PickerFilters>({ q: '', pod: '', fo: '', product: '', tier: '', type: '', tag: '', account: '', state: 'cold', page: 1 });
+  const [filters, setFilters] = useState<PickerFilters>({ q: '', pod: initialPod ?? '', fo: '', product: '', tier: '', type: '', tag: '', account: '', state: 'any', page: 1 });
   const moreCount = [filters.tier, filters.type, filters.product, filters.tag].filter(Boolean).length;
   const [text, setText] = useState('');
   const [rows, setRows] = useState<PickerRow[]>([]);
@@ -42,32 +42,35 @@ export function PeoplePicker({ value, onChange }: Props) {
   useEffect(() => {
     const id = ++request.current;
     start(async () => {
-      const r = await pickPeopleAction(filters);
+      const r = await pickPeopleAction({ ...filters, withinIds });
       // An older answer arriving after a newer one is dropped.
       if (id !== request.current) return;
       if (r.ok) { setRows(r.rows); setTotal(r.total); setPageSize(r.pageSize); setError(null); }
       else setError(r.error);
     });
-  }, [filters]);
+  }, [filters, withinIds]);
 
   const set = (patch: Partial<PickerFilters>) => setFilters((f) => ({ ...f, ...patch, page: patch.page ?? 1 }));
   const selected = new Set(value);
-  const shownSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
+  const disabled = new Set(disabledIds);
+  const available = rows.filter(r => !disabled.has(r.id));
+  const shownSelected = available.length > 0 && available.every((r) => selected.has(r.id));
   const toggle = (id: string) => {
+    if (disabled.has(id)) return;
     const next = new Set(latest.current);
     if (next.has(id)) next.delete(id); else next.add(id);
     onChange([...next]);
   };
   const toggleShown = () => {
     const next = new Set(latest.current);
-    if (shownSelected) for (const r of rows) next.delete(r.id); else for (const r of rows) next.add(r.id);
+    if (shownSelected) for (const r of available) next.delete(r.id); else for (const r of available) next.add(r.id);
     onChange([...next]);
   };
   const selectAll = async () => {
     setSelectingAll(true);
     try {
-      const r = await pickAllIdsAction(filters);
-      if (r.ok) onChange([...new Set([...latest.current, ...r.ids])]);
+      const r = await pickAllIdsAction({ ...filters, withinIds });
+      if (r.ok) onChange([...new Set([...latest.current, ...r.ids.filter(id => !disabled.has(id))])]);
       else setError(r.error);
     } finally {
       setSelectingAll(false);
@@ -96,7 +99,6 @@ export function PeoplePicker({ value, onChange }: Props) {
             <Select name="fo" label="Filter by FO" all="All FOs" items={options.fos.map((f) => ({ value: f.id, label: f.name }))} />
             <select value={filters.state} onChange={(e) => set({ state: e.target.value as PickerFilters['state'] })} aria-label="Campaign state" className="!w-auto !max-w-[190px] !py-1.5 !text-[12.5px]">
               <option value="cold">Never in a campaign</option>
-              <option value="finished">Finished a sequence</option>
               <option value="enrolled">In a campaign</option>
               <option value="any">Any campaign state</option>
             </select>
@@ -132,7 +134,7 @@ export function PeoplePicker({ value, onChange }: Props) {
             <colgroup><col className="w-9" /><col style={{ width: '44%' }} /><col style={{ width: '18%' }} /><col style={{ width: '14%' }} /><col style={{ width: '20%' }} /></colgroup>
             <thead>
               <tr>
-                <th className="pl-3 pr-0"><input type="checkbox" aria-label="Select everyone shown" checked={shownSelected} onChange={toggleShown} disabled={!rows.length} /></th>
+                <th className="pl-3 pr-0"><input type="checkbox" aria-label="Select everyone shown" checked={shownSelected} onChange={toggleShown} disabled={!available.length} /></th>
                 <th>Person</th>
                 <th>Pod</th>
                 <th>Tier</th>
@@ -141,8 +143,8 @@ export function PeoplePicker({ value, onChange }: Props) {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id} className={selected.has(r.id) ? 'bg-brand-50/60' : undefined}>
-                  <td className="pl-3 pr-0"><input type="checkbox" aria-label={`Select ${r.name}`} checked={selected.has(r.id)} onChange={() => toggle(r.id)} /></td>
+                <tr key={r.id} className={disabled.has(r.id) ? 'opacity-45' : selected.has(r.id) ? 'bg-brand-50/60' : undefined} title={disabled.has(r.id) ? disabledReason : undefined}>
+                  <td className="pl-3 pr-0"><input type="checkbox" aria-label={`Select ${r.name}`} disabled={disabled.has(r.id)} checked={selected.has(r.id)} onChange={() => toggle(r.id)} /></td>
                   <td>
                     <div className="truncate text-[13px] font-medium text-ink-900">{r.name}</div>
                     {r.title || r.company ? <div className="truncate text-[12px] text-ink-500">{[r.title, r.company].filter(Boolean).join(' · ')}</div> : null}

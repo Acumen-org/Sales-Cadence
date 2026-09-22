@@ -67,7 +67,6 @@ export function CampaignsToolbar({ q, pods, sequences, fos, products, pod, seque
       {active ? <button type="button" onClick={() => { reset(); navigate((next) => { const tab = next.get('tab'); for (const key of [...next.keys()]) next.delete(key); if (tab) next.set('tab', tab); }); }} className="btn-ghost btn-sm">Reset</button> : null}
 
       <div id={panelId} className={`${showMore ? 'flex' : 'hidden'} w-full flex-wrap items-center gap-2 rounded-[10px] border border-line bg-canvas/70 p-2`}>
-        <Select name="sequence" value={sequence} label="Filter by sequence" all="Any sequence" items={sequences.map((s) => ({ value: s.id, label: s.name }))} />
         <Select name="product" value={product} label="Filter by product" all="Any product" items={products.map((p) => ({ value: p, label: optionLabel(p) }))} />
         <label className="flex items-center gap-1.5 text-[12px] text-ink-500">From<input type="date" value={from} onChange={(e) => update({ from: e.target.value || null })} aria-label="Running from" className="!w-auto !py-1.5 !text-[12.5px]" /></label>
         <label className="flex items-center gap-1.5 text-[12px] text-ink-500">To<input type="date" value={to} onChange={(e) => update({ to: e.target.value || null })} aria-label="Running to" className="!w-auto !py-1.5 !text-[12.5px]" /></label>

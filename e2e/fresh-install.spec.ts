@@ -92,7 +92,7 @@ test('the empty screens say what is missing and offer the way forward', async ({
 
   // The default sequence is the one thing that ships, so a campaign can be built on day one.
   await page.goto('/sequences');
-  await expect(page.getByRole('link', { name: /Default outbound/ })).toBeVisible();
+  await expect(page).toHaveURL(/\/campaigns$/);
 
   // Nothing has been worked yet, so there is no history anywhere.
   await page.goto('/meetings');

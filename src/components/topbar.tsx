@@ -47,7 +47,7 @@ export function TopBar({ role, unread, needsReview, timezone }: Props) {
       <NotificationsBell unread={unread} timezone={timezone} />
       <button type="button" className="btn-ghost btn-sm" title="Shortcuts and help" aria-label="Help" onClick={() => setHelpOpen(true)}>Help</button>
     </header>
-    {key !== 'home' ? <div className="px-4 pb-5 pt-7 sm:px-8"><h1 className="text-[28px] font-semibold tracking-[-0.045em] text-ink-900">{title}</h1></div> : null}
+    {key !== 'home' && !(key === 'campaigns' && pathname.split('/').length > 2) ? <div className="px-4 pb-5 pt-7 sm:px-8"><h1 className="text-[28px] font-semibold tracking-[-0.045em] text-ink-900">{title}</h1></div> : null}
     {searchOpen ? <SearchDialog onClose={() => setSearchOpen(false)} /> : null}
     {helpOpen ? <HelpDialog onClose={() => setHelpOpen(false)} needsReview={needsReview} isAdmin={role === 'ADMIN'} /> : null}
   </>;
@@ -80,7 +80,7 @@ function SearchDialog({ onClose }: { onClose: () => void }) {
         if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => hits.length ? (a + 1) % hits.length : 0); }
         if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => hits.length ? (a - 1 + hits.length) % hits.length : 0); }
         if (e.key === 'Enter') { e.preventDefault(); go(hits[active]); }
-      }} placeholder="Search people, campaigns and sequences" aria-label="Search" className="!border-0 !bg-transparent !py-5 !text-[14px] !ring-0" />
+      }} placeholder="Search people and campaigns" aria-label="Search" className="!border-0 !bg-transparent !py-5 !text-[14px] !ring-0" />
       <button type="button" onClick={onClose} aria-label="Close search" className="btn-icon-ghost"><IconClose size={17} /></button>
     </div>
     <div className="max-h-[52vh] overflow-y-auto p-2 scroll-thin" aria-busy={pending}>

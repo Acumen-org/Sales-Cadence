@@ -11,7 +11,7 @@ import { logAudit, SYSTEM_ACTOR } from '../src/lib/audit';
 /** Core: the default sequence (version 1, exactly as specified) and the admin account. */
 async function seedCore() {
   const steps = StepsSchema.parse(DEFAULT_SEQUENCE_STEPS);
-  let sequence = await prisma.sequence.findUnique({ where: { name: DEFAULT_SEQUENCE_NAME } });
+  let sequence = await prisma.sequence.findFirst({ where: { name: DEFAULT_SEQUENCE_NAME } });
   if (!sequence) {
     sequence = await prisma.sequence.create({ data: { name: DEFAULT_SEQUENCE_NAME, steps } });
     await logAudit({ entityType: 'sequence', entityId: sequence.id, action: 'seeded', actor: SYSTEM_ACTOR, details: { steps: steps.length } });

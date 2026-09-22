@@ -39,6 +39,7 @@ export async function saveSequenceSteps(sequenceId: string, stepsInput: unknown,
   return prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${sequenceId}))`;
     const sequence = await tx.sequence.findUniqueOrThrow({ where: { id: sequenceId } });
+    if (sequence.campaignOwned) throw new Error('Edit outreach inside its upcoming campaign. Published active plans are locked.');
     const current = StepsSchema.safeParse(sequence.steps);
     const before = current.success ? current.data : [];
     if (sequence.durationDays !== null && lastDay(steps) > sequence.durationDays) throw new Error(`Step ${steps.length} is on day ${lastDay(steps)}, past the plan's ${sequence.durationDays} days.`);
@@ -61,6 +62,8 @@ export async function updateSequenceMeta(
   patch: { name?: string; description?: string | null; archived?: boolean; repeatEveryDays?: number | null; durationDays?: number | null },
   actor: AuditActor,
 ) {
+  const owned = await prisma.sequence.findUnique({ where: { id: sequenceId }, select: { campaignOwned: true } });
+  if (owned?.campaignOwned) throw new Error('Manage this outreach inside its campaign.');
   if (patch.durationDays !== undefined && patch.durationDays !== null) {
     const current = await prisma.sequence.findUniqueOrThrow({ where: { id: sequenceId }, select: { steps: true } });
     const parsed = StepsSchema.safeParse(current.steps);

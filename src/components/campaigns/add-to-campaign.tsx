@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { addPeopleToCampaignAction, campaignChoicesAction, removePeopleFromCampaignAction } from '@/lib/actions/campaigns';
@@ -8,6 +7,7 @@ import type { CampaignChoice } from '@/lib/campaign-membership';
 import { Modal } from '@/components/modal';
 import { IconCampaigns, IconClose, IconPlus } from '@/components/icons';
 import { Badge, Count, EmptyState } from '@/components/ui';
+import { campaignSelectionUrl } from '@/lib/campaign-selection';
 
 type Choice = CampaignChoice & { placesLeft: number | null };
 
@@ -33,6 +33,9 @@ export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', lab
 
   const add = (campaignId: string) =>
     start(async () => {
+      const choice = choices?.find(c => c.id === campaignId);
+      if (choice?.calendar) { try { router.push(campaignSelectionUrl(`/campaigns/${campaignId}/edit`, personIds)); } catch { setError('Your browser could not retain this selection. Open the campaign and select people there.'); } return; }
+
       const fd = new FormData();
       fd.set('campaignId', campaignId);
       fd.set('personIds', JSON.stringify(personIds));
@@ -70,8 +73,8 @@ export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', lab
                         </div>
                         <div className="mt-0.5 text-[12px] text-ink-500">{c.podName} · {c.startDate}{c.endDate ? ` → ${c.endDate}` : ''} · <Count value={c.members} /> in it{c.placesLeft !== null ? <> · <span className={full ? 'text-red-700' : ''}><Count value={c.placesLeft} /> places left</span></> : null}</div>
                       </div>
-                      <button type="button" className="btn-secondary btn-sm" disabled={pending || full} onClick={() => add(c.id)} title={full ? 'Not enough room before the end date' : undefined}>
-                        Add
+                      <button type="button" className="btn-secondary btn-sm" disabled={pending || full || (c.calendar && c.kind === 'running')} onClick={() => add(c.id)} title={full ? 'Not enough room before the end date' : c.calendar && c.kind === 'running' ? 'Active campaign plans are locked' : undefined}>
+                        {c.calendar ? c.kind === 'running' ? 'Plan locked' : 'Add and review' : 'Add'}
                       </button>
                     </li>
                   );
@@ -80,7 +83,7 @@ export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', lab
             ) : null}
           </div>
           <div className="flex items-center justify-between gap-3 border-t border-line p-4">
-            <Link href={`/campaigns/new?ids=${encodeURIComponent(personIds.join(','))}`} className="btn-primary btn-sm"><IconPlus size={13} /> New campaign</Link>
+            <button type="button" onClick={() => { try { router.push(campaignSelectionUrl('/campaigns/new', personIds)); } catch { setError('Your browser could not retain this selection. Open a new campaign and select people there.'); } }} className="btn-primary btn-sm"><IconPlus size={13} /> New campaign</button>
             <button type="button" className="btn-ghost btn-sm" onClick={() => setOpen(false)}>Close</button>
           </div>
         </Modal>
@@ -120,7 +123,7 @@ export function RemoveFromCampaign({ campaignId, campaignName, personIds, classN
 }
 
 /** Take a selection out of whichever campaigns hold them - one confirmation, one call per campaign. */
-export function RemoveFromCampaigns({ people, className = 'btn-danger btn-sm', onDone }: { people: { id: string; campaignId: string; campaignName: string }[]; className?: string; onDone?: () => void }) {
+export function RemoveFromCampaigns({ people, className = 'btn-danger btn-sm', onDone }: { people: { id: string; campaignId: string; campaignName: string }[]; className?: string; onDone?: (message?: string) => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -146,7 +149,7 @@ export function RemoveFromCampaigns({ people, className = 'btn-danger btn-sm', o
               if (r.ok) results.push(r.message ?? 'Done.'); else { failed = true; results.push(r.error); }
             }
             setMessage({ ok: !failed, text: results.join(' ') });
-            if (!failed) { router.refresh(); onDone?.(); }
+            if (!failed) { router.refresh(); onDone?.(results.join(' ')); }
           });
         }}
       >
