@@ -102,7 +102,7 @@ export async function listCampaigns(user: SessionUser, filters: CampaignListFilt
     id: c.id,
     name: c.name,
     status: c.status,
-    sequenceName: c.plannerDraft ? `${(c.plannerDraft as CampaignDraft).flows.length} outreach groups` : c.sequence.name,
+    sequenceName: c.plannerDraft ? `${(c.plannerDraft as CampaignDraft).flows.length} outreach group${(c.plannerDraft as CampaignDraft).flows.length === 1 ? '' : 's'}` : c.sequence.name,
     sequenceId: c.sequenceId,
     podName: c.pod.name,
     podId: c.podId,

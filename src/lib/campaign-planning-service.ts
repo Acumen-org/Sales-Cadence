@@ -6,8 +6,9 @@ import { canManageCampaigns, canApproveCampaign, ROLES_NEEDING_POD } from './aut
 import { campaignAudienceIssues, type AudienceIssueKind } from './campaign-audience';
 import { cachedPersonName } from './person-cache';
 import { cleanRichText } from './rich-text';
-import { CampaignDraftSaveSchema, CampaignDraftSchema, buildCampaignCalendar, calendarDays, shortDateLabel, suggestCampaignCalendar, type CalendarSuggestion, type CampaignDraft, type CampaignCalendar, type PlannerPerson } from './campaign-planner';
-import { fitCampaign, type CampaignFit, type FitPace } from './campaign-fit';
+import { CampaignDraftSaveSchema, CampaignDraftSchema, calendarDays, outreachIsAutomatic, shortDateLabel, suggestCampaignCalendar, type CalendarSuggestion, type CampaignDraft, type CampaignCalendar, type PlanIssue, type PlannerPerson } from './campaign-planner';
+import { fitCampaign, isFit, type CampaignFit, type FitPace, type FitProblem } from './campaign-fit';
+import { outreachRecipe } from './campaign-starter';
 import { logAudit, userActor } from './audit';
 import { todayIn } from './dates';
 import { workspaceTimezone } from './workspace';
@@ -29,7 +30,12 @@ export type CampaignPlan = {
   droppedFos: { id: string; name: string; reason: string }[];
   limits: Record<string, number>;
   suggestions: CalendarSuggestion[];
+  /** For a plan that cannot be made: whether People (audience, dates) or Outreach has to change. */
+  stage: 'people' | 'outreach' | null;
 };
+
+/** "Alyssa", "Alyssa and Avani", "Alyssa, Avani and Rahul". */
+export const nameList = (names: string[]) => names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
 
 const json = (data: unknown) => JSON.parse(JSON.stringify(data)) as Prisma.InputJsonValue;
 export const calendarFingerprint = (draft: CampaignDraft, calendar: CampaignCalendar) => createHash('sha256').update(JSON.stringify({ draft, calendar })).digest('hex');
@@ -68,69 +74,80 @@ export async function planCampaign(input: unknown, user: SessionUser, campaignId
   const people: PlannerPerson[] = target.personIds.map(id => { const p = byId.get(id)!; return { id: p.id, name: cachedPersonName(p), ownerMemberId: p.ownerMemberId, tags: p.tags, contactType: p.contactType, tier: p.tier }; });
   const describe = (id: string, kind: LeftOut['kind'], reason: string): LeftOut => { const p = byId.get(id); return { id, name: p ? cachedPersonName(p) : 'Unknown contact', company: p?.companyName ?? null, kind, reason }; };
 
-  const fitOptions = { reshapeOutreach: options.reshapeOutreach };
-  const fit = people.length ? fitCampaign(target, people, fos, fitOptions) : null;
-  // A suggestion for an outreach nobody has edited reshapes it too; say how long it would be.
-  const withSteps = (s: CalendarSuggestion): CalendarSuggestion => {
-    const n = s.calendar.batches[0]?.dates.length;
-    return options.reshapeOutreach && !s.draft.outreachEdited && n ? { ...s, detail: s.detail ? `${s.detail.replace(/\.$/, '')}, with ${n} step${n === 1 ? '' : 's'}.` : `${n} step${n === 1 ? '' : 's'}` } : s;
-  };
-  const asRequest = (s: CalendarSuggestion) => withSteps({ ...s, draft: { ...s.draft, personIds: intent.personIds, outreachEdited: intent.outreachEdited || s.draft.flows !== team.flows } });
-  /** Changes that would keep every reachable person, each verified: a faster pace first (the owner's to give), then spacing, then dates. */
-  const keepEveryone = (): CalendarSuggestion[] => {
-    const keepsAll = (f: CampaignFit | null) => !!f && f.droppedFos.every(d => d.personIds.length === 0);
-    const paceText = (f: CampaignFit) => f.paces.filter(p => p.to !== p.from).map(p => `${p.name} ${p.from} → ${p.to} new a day`).join(' · ');
-    // The pace an FO would need, found with no ceiling, then checked as the request Apply will make.
-    const faster = fitCampaign(target, people, fos, { ...fitOptions, allowTrim: false, ceiling: () => 500 });
-    const offer = faster && { ...team, fos: team.fos.map(f => ({ ...f, batchSize: faster.paces.find(p => p.foId === f.id)?.to ?? f.batchSize })) };
-    const checked = offer ? fitCampaign({ ...offer, personIds: target.personIds }, people, fos, { ...fitOptions, allowTrim: false }) : null;
-    // Labelled from the checked plan, against the paces asked for: what Apply will actually run.
-    const offerText = checked ? paceText({ ...checked, paces: checked.paces.map(p => ({ ...p, from: team.fos.find(f => f.id === p.foId)?.batchSize ?? p.from })) }) : '';
-    const pace = offer && checked && keepsAll(checked) && offerText ? [asRequest({ label: offerText, detail: '', draft: offer, calendar: checked.calendar })] : [];
-    const fits = new Map<CampaignDraft, CampaignFit>();
-    const rest = suggestCampaignCalendar(team, people, fos, { paces: false, outreach: !options.reshapeOutreach, verify: d => { const f = fitCampaign({ ...d, personIds: target.personIds }, people, fos, { ...fitOptions, allowTrim: false }); if (f && keepsAll(f)) { fits.set(d, f); return f.calendar; } return null; } })
-      .map(s => { const f = fits.get(s.draft); return asRequest({ ...s, detail: [s.detail, f ? paceText(f) : ''].filter(Boolean).join(' · ') }); });
-    return [...pace, ...rest].slice(0, 3);
+  const result = people.length ? fitCampaign(target, people, fos, { reshapeOutreach: options.reshapeOutreach }) : null;
+  const fit = isFit(result) ? result : null;
+  const endLabel = shortDateLabel(intent.endDate);
+  const days = calendarDays(intent.startDate, intent.endDate);
+  const keepsAll = (r: ReturnType<typeof fitCampaign>): r is CampaignFit => isFit(r) && r.overflow.length === 0 && r.droppedFos.every(d => d.personIds.length === 0);
+  const verified = (d: CampaignDraft, reshape: boolean) => { const r = fitCampaign({ ...d, personIds: target.personIds }, people, fos, { reshapeOutreach: reshape, allowTrim: false }); return keepsAll(r) ? r.calendar : null; };
+  /** Verified ways to take everyone reachable, as the request Apply makes: the studio's own outreach, spacing, leaving an FO off, then dates. */
+  const alternatives = (leaveOff: { foId: string; name: string }[] = []): CalendarSuggestion[] => {
+    const out: CalendarSuggestion[] = [];
+    if (!options.reshapeOutreach) {
+      const auto: CampaignDraft = { ...team, flows: [{ id: 'default', name: 'Default', steps: outreachRecipe(1) }], assignments: {}, outreachEdited: false };
+      const calendar = verified(auto, true);
+      if (calendar) out.push({ label: 'Let the studio set the outreach', detail: 'Touchpoints and spacing fitted to these dates', draft: auto, calendar });
+    }
+    for (const fo of leaveOff) {
+      const member = fos.find(f => f.id === fo.foId)?.twentyMemberId;
+      const rest = people.filter(p => !member || p.ownerMemberId !== member);
+      const without = { ...team, fos: team.fos.filter(f => f.id !== fo.foId) };
+      const r = without.fos.length && rest.length ? fitCampaign({ ...without, personIds: rest.map(p => p.id) }, rest, fos, { reshapeOutreach: options.reshapeOutreach, allowTrim: false }) : null;
+      const waiting = people.length - rest.length;
+      if (isFit(r)) out.push({ label: `Leave ${fo.name} off`, detail: waiting ? `${waiting} ${waiting === 1 ? 'contact waits' : 'contacts wait'} for another campaign` : '', draft: without, calendar: r.calendar });
+    }
+    const rest = suggestCampaignCalendar(team, people, fos, { paces: false, outreach: !options.reshapeOutreach, verify: d => verified(d, options.reshapeOutreach) });
+    return [...out, ...rest].slice(0, 3).map(x => ({ ...x, draft: { ...x.draft, personIds: intent.personIds, outreachEdited: x.draft.outreachEdited ?? intent.outreachEdited } }));
   };
   const droppedFos = gone.map(f => ({ id: f.id, name: goneNames.get(f.id) ?? 'An FO', reason: 'no longer in this pod' }));
   if (fit) {
-    // The same shape whichever way it was reached (a reshaped starter or the edited outreach it
-    // became), so the fingerprint a review shows is the one publishing recomputes.
+    // The same shape whichever way it was reached (a built outreach or the edited one it became),
+    // so the fingerprint a review shows is the one publishing recomputes.
     fit.draft = CampaignDraftSchema.parse(fit.draft);
-    for (const id of fit.overflow) leftOut.push(describe(id, 'dates', `Did not fit by ${shortDateLabel(intent.endDate)}`));
+    for (const id of fit.overflow) leftOut.push(describe(id, 'dates', `More than 500 a day would be needed by ${endLabel}`));
     for (const fo of fit.droppedFos) {
       droppedFos.push({ id: fo.id, name: fo.name, reason: fo.reason === 'few' ? 'too few contacts to fill every working day' : 'no contacts in this audience' });
       for (const id of fo.personIds) leftOut.push(describe(id, 'fo', `${fo.name} has too few contacts to fill every working day`));
     }
-    const days = calendarDays(fit.draft.startDate, fit.draft.endDate).length;
     const trimmed = fit.overflow.length > 0 || fit.droppedFos.some(f => f.personIds.length > 0);
-    const suggestions = trimmed && !options.forPublish ? keepEveryone() : [];
-    // Another step is offered only while one more, at the tightest spacing, still keeps everyone.
+    const suggestions = fit.overflow.length && !options.forPublish ? alternatives() : [];
+    // Another step is offered while one more, at the tightest spacing, still takes everyone.
     const limits = options.forPublish ? {} : Object.fromEntries(fit.draft.flows.map((flow, i) => {
       const n = flow.steps.length;
-      if (trimmed || n >= Math.min(60, days)) return [flow.id, n];
+      if (trimmed || n >= Math.min(60, days.length)) return [flow.id, n];
       if (i >= 5) return [flow.id, n + 1];
       const last = flow.steps.at(-1)!;
       const longer = fit.draft.flows.map(f => f.id === flow.id ? { ...f, steps: [...f.steps, { ...structuredClone(last), id: `${last.id}-next`, day: last.day + 1 }] } : f);
-      return [flow.id, fitCampaign({ ...team, flows: longer, assignments: fit.draft.assignments, personIds: target.personIds }, people, fos, { reshapeOutreach: false, allowTrim: false }) ? n + 1 : n];
+      return [flow.id, keepsAll(fitCampaign({ ...team, flows: longer, assignments: fit.draft.assignments, personIds: target.personIds }, people, fos, { reshapeOutreach: false, allowTrim: false })) ? n + 1 : n];
     }));
-    return { draft: fit.draft, calendar: fit.calendar, fingerprint: calendarFingerprint(fit.draft, fit.calendar), paces: fit.paces, leftOut, droppedFos, limits, suggestions };
+    return { draft: fit.draft, calendar: fit.calendar, fingerprint: calendarFingerprint(fit.draft, fit.calendar), paces: fit.paces, leftOut, droppedFos, limits, suggestions, stage: null };
   }
-  // Nothing fits even after pacing, reshaping and trimming: explain with the planner's own issues.
-  const calendar = buildCampaignCalendar(target, people, fos, 20000);
-  if (!people.length) calendar.issues = [{ title: 'None of the selected people can be reached.', detail: 'Each one is listed with the reason.' }];
-  const suggestions = people.length && !options.forPublish ? suggestCampaignCalendar(team, people, fos, { paces: false, verify: d => fitCampaign({ ...d, personIds: target.personIds }, people, fos, fitOptions)?.calendar ?? null }).map(asRequest) : [];
-  const days = calendarDays(intent.startDate, intent.endDate).length;
-  return { draft: target, calendar, fingerprint: calendarFingerprint(target, calendar), paces: [], leftOut, droppedFos, limits: Object.fromEntries(intent.flows.map(f => [f.id, Math.min(60, days)])), suggestions };
+  // No plan: say exactly what stands in the way, each reason once with everyone it applies to.
+  const problems: FitProblem[] = result && !isFit(result) ? result.problems : [];
+  const by = (reason: FitProblem['reason']) => problems.filter(p => p.reason === reason);
+  const planIssues: PlanIssue[] = [];
+  let stage: CampaignPlan['stage'] = 'people';
+  if (!people.length) planIssues.push({ title: 'None of the selected people can be reached.', detail: 'Each one is listed below with the reason.' });
+  else if (!days.length) planIssues.push({ title: `${shortDateLabel(intent.startDate)} to ${endLabel} has no working days.`, detail: '' });
+  else if (problems.length) {
+    stage = 'outreach';
+    const window = by('window'), few = by('few'), search = by('search');
+    if (window.length) planIssues.push({ title: `The outreach does not finish by ${endLabel}.`, detail: window.length < team.fos.length ? `For ${nameList(window.map(p => p.name))}` : '' });
+    if (few.length) planIssues.push({ title: `${nameList(few.map(p => p.name))}: too few contacts to fill every working day with this outreach.`, detail: '' });
+    if (search.length) planIssues.push({ title: `${nameList(search.map(p => p.name))}: no arrangement of this outreach covers every working day.`, detail: '' });
+  } else planIssues.push({ title: `Too few contacts to fill every working day from ${shortDateLabel(intent.startDate)} to ${endLabel}.`, detail: '' });
+  const suggestions = stage === 'outreach' && !options.forPublish ? alternatives(by('few')) : [];
+  const calendar: CampaignCalendar = { version: 1, days, batches: [], people, fos, issues: planIssues, valid: false, exhausted: false };
+  return { draft: target, calendar, fingerprint: calendarFingerprint(target, calendar), paces: [], leftOut, droppedFos, limits: Object.fromEntries(intent.flows.map(f => [f.id, Math.min(60, days.length)])), suggestions, stage };
 }
 
 export async function previewCampaignCalendar(input: unknown, user: SessionUser, campaignId?: string) {
-  return planCampaign(input, user, campaignId, { reshapeOutreach: false });
+  return planCampaign(input, user, campaignId, { reshapeOutreach: outreachIsAutomatic(CampaignDraftSchema.parse(input), campaignId) });
 }
 
 export async function prepareCampaignStudio(input: unknown, user: SessionUser, campaignId?: string, fit = false) {
   const draft = CampaignDraftSchema.parse(input);
-  if (draft.startDate < todayIn(workspaceTimezone())) throw new Error('Choose a current or future start date.');
+  if (draft.startDate < todayIn(workspaceTimezone())) throw new Error(`The start date ${shortDateLabel(draft.startDate)} has passed.`);
   if (!draft.personIds.length) throw new Error('Select the people for this campaign.');
   return planCampaign(draft, user, campaignId, { reshapeOutreach: fit });
 }
@@ -193,7 +210,8 @@ async function dropStaleFlows(tx: Tx, previous: Prisma.JsonValue | null | undefi
 
 export async function saveCampaignCalendar(input: unknown, user: SessionUser, options: { id?: string; revision?: string; publish?: boolean; fingerprint?: string; auto?: boolean }) {
   if (!options.publish) return saveDraft(input, user, options);
-  const checked = await planCampaign(input, user, options.id, { reshapeOutreach: false, forPublish: true });
+  const automatic = outreachIsAutomatic(CampaignDraftSchema.parse(input), options.id);
+  const checked = await planCampaign(input, user, options.id, { reshapeOutreach: automatic, forPublish: true });
   const request = CampaignDraftSchema.parse(input);
   if (checked.draft.startDate < todayIn(workspaceTimezone())) throw new Error('The start date has passed. Choose a current or future start date and review the calendar.');
   const id = options.id ?? randomUUID();
@@ -211,7 +229,7 @@ export async function saveCampaignCalendar(input: unknown, user: SessionUser, op
       if (!['DRAFT', 'SCHEDULED', 'PENDING_APPROVAL'].includes(existing.status) || await tx.enrollment.count({ where: { campaignId: id } })) throw new Error('This campaign has already started. Its plan is locked.');
       if (existing.updatedAt.toISOString() !== options.revision) throw new Error('Someone changed this campaign. Reload before saving to protect their changes.');
     }
-    const fresh = await planCampaign(input, user, options.id, { reshapeOutreach: false, forPublish: true }, tx);
+    const fresh = await planCampaign(input, user, options.id, { reshapeOutreach: automatic, forPublish: true }, tx);
     const d = fresh.draft;
     if (!fresh.calendar.valid || fresh.fingerprint !== options.fingerprint) throw new Error('The plan changed after your last review: a CRM detail or another campaign moved. Check the updated plan, then publish again.');
     const sequenceIds = await saveFlows(tx, d.flows, existing?.plannerDraft);

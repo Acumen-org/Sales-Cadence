@@ -80,15 +80,26 @@ describe('who a campaign can reach', () => {
     expect([plan.draft.startDate, plan.draft.endDate]).toEqual(['2027-01-04', '2027-01-08']);
   });
 
-  it('says why a selected FO is left off, and offers the faster pace that keeps everyone first', async () => {
+  it('says why a selected FO is left off, and raises the pace instead of leaving anyone out', async () => {
     const many = Array.from({ length: 12 }, (_, i) => `aud-m${i}`);
     await prisma.personCache.createMany({ data: many.map(id => ({ id, firstName: 'Aud', lastName: id, podOwner: 'ALISA', ownerMemberId: b.users.alisa.twentyMemberId })) });
     const plan = await planCampaign(draft({ personIds: [...ids, ...many], fos: [{ id: b.users.alisa.id, batchSize: 1 }, { id: b.users.karson.id, batchSize: 1 }] }), admin, undefined, { reshapeOutreach: true });
     expect(plan.calendar.valid).toBe(true);
     expect(plan.droppedFos).toEqual([{ id: b.users.karson.id, name: b.users.karson.name, reason: 'no contacts in this audience' }]);
-    expect(plan.leftOut.some(l => l.kind === 'dates')).toBe(true);
-    expect(plan.suggestions[0].label).toMatch(new RegExp(`^${b.users.alisa.name} 1 → [0-9]+ new a day$`));
-    expect(plan.suggestions[0].calendar.batches.flatMap(x => x.personIds)).toHaveLength(16);
+    expect(plan.leftOut).toEqual([]); expect(plan.draft.personIds).toHaveLength(16);
+    expect(plan.paces).toEqual([{ foId: b.users.alisa.id, name: b.users.alisa.name, from: 1, to: 4 }]);
+  });
+
+  it('names every FO an edited outreach cannot take, once, and offers the studio’s own outreach first', async () => {
+    const karsons = Array.from({ length: 4 }, (_, i) => `aud-k${i}`);
+    await prisma.personCache.createMany({ data: karsons.map(id => ({ id, firstName: 'Aud', lastName: id, podOwner: 'ALISA', ownerMemberId: b.users.karson.twentyMemberId })) });
+    const spaced = [outreachRecipe(2)[0], { ...outreachRecipe(2)[1], day: 3 }];
+    const plan = await planCampaign(draft({ personIds: [...ids, ...karsons], fos: [{ id: b.users.alisa.id, batchSize: 1 }, { id: b.users.karson.id, batchSize: 1 }], flows: [{ id: 'default', name: 'Default', steps: spaced }], outreachEdited: true }), admin, undefined, { reshapeOutreach: false });
+    expect(plan.calendar.valid).toBe(false); expect(plan.stage).toBe('outreach');
+    const names = [b.users.alisa.name, b.users.karson.name].sort((x, y) => plan.calendar.issues[0].title.indexOf(x) - plan.calendar.issues[0].title.indexOf(y));
+    expect(plan.calendar.issues).toEqual([{ title: `${names[0]} and ${names[1]}: no arrangement of this outreach covers every working day.`, detail: '' }]);
+    expect(plan.suggestions[0].label).toBe('Let the studio set the outreach');
+    expect(plan.suggestions[0].draft.outreachEdited).toBe(false);
   });
 
   it('keeps an unfinished draft, and autosaves without an audit line each time', async () => {

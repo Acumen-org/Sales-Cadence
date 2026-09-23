@@ -27,11 +27,11 @@ export default async function NewCampaignPage({ searchParams }: { searchParams: 
       const removed = new Set(saved.personIds.filter(id => !source.personIds.includes(id)));
       const personIds = saved.request ? previous.personIds.filter(id => !removed.has(id)) : source.personIds;
       const initial = { ...previous, name: `${source.name} - next run`.slice(0, 120), startDate: today, endDate: addDays(today, diffDays(previous.startDate, previous.endDate)), personIds, assignments: Object.fromEntries(Object.entries(previous.assignments).filter(([id]) => personIds.includes(id))), foAssignments: undefined, outreachEdited: previous.outreachEdited ?? true };
-      return <div className="px-4 py-5 sm:px-6"><CampaignWorkspace pods={data.pods} products={[...defaultTwentySchema.personValues.productInterest]} initial={initial} /></div>;
+      return <div className="px-4 py-5 sm:px-6"><CampaignWorkspace today={today} pods={data.pods} products={[...defaultTwentySchema.personValues.productInterest]} initial={initial} /></div>;
     }
     redirect('/campaigns');
   }
-  return <div className="px-4 py-5 sm:px-6"><CampaignWorkspace pods={data.pods} products={[...defaultTwentySchema.personValues.productInterest]} initial={{
+  return <div className="px-4 py-5 sm:px-6"><CampaignWorkspace today={today} pods={data.pods} products={[...defaultTwentySchema.personValues.productInterest]} initial={{
     name: '', podId: data.pods[0]?.id ?? '', startDate: today, endDate: addDays(today, 42), defaultBatchSize: 20,
     fos: [], productInterest: [], personIds: [...new Set(ids?.split(',').filter(Boolean) ?? [])], assignments: {},
     flows: [{ id: 'default', name: 'Default', steps: data.defaultSteps }], outreachEdited: false,

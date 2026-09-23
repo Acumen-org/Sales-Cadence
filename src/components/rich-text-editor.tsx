@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 
@@ -8,6 +8,7 @@ export function RichTextEditor({ value, onChange, label, disabled = false }: {
   value: string; onChange: (html: string, text: string) => void; label: string; disabled?: boolean;
 }) {
   const [linkOpen, setLinkOpen] = useState(false);
+  const used = useRef(false);
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
   const editor = useEditor({
@@ -17,7 +18,9 @@ export function RichTextEditor({ value, onChange, label, disabled = false }: {
     content: value,
     editable: !disabled,
     editorProps: { attributes: { role: 'textbox', 'aria-label': label, 'aria-multiline': 'true', class: 'max-h-[44vh] min-h-40 overflow-y-auto scroll-thin px-4 py-3 text-[14px] leading-7 text-ink-900 outline-none [&_a]:font-medium [&_a]:text-brand-700 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:mb-2' } },
-    onUpdate: ({ editor: e }) => onChange(e.getHTML(), e.getText()),
+    // Only once someone has worked in the editor or its toolbar: the update it makes while settling
+    // its initial content is not an edit, and must not mark the outreach as edited.
+    onUpdate: ({ editor: e }) => { if (used.current) onChange(e.getHTML(), e.getText()); },
   });
   useEffect(() => { editor?.setEditable(!disabled); }, [editor, disabled]);
   useEffect(() => {
@@ -31,7 +34,8 @@ export function RichTextEditor({ value, onChange, label, disabled = false }: {
     { label: 'Bulleted list', text: '• List', active: editor.isActive('bulletList'), run: () => editor.chain().focus().toggleBulletList().run() },
     { label: 'Numbered list', text: '1. List', active: editor.isActive('orderedList'), run: () => editor.chain().focus().toggleOrderedList().run() },
   ];
-  return <div className={`overflow-hidden rounded-xl border border-line ${disabled ? 'bg-canvas text-ink-500' : 'bg-white'}`}>
+  const touch = () => { used.current = true; };
+  return <div onPointerDownCapture={touch} onKeyDownCapture={touch} onFocusCapture={touch} onPasteCapture={touch} onDropCapture={touch} className={`overflow-hidden rounded-xl border border-line ${disabled ? 'bg-canvas text-ink-500' : 'bg-white'}`}>
     {!disabled && <div role="toolbar" aria-label={`${label} formatting`} className="flex flex-wrap items-center gap-1 border-b border-line bg-canvas/60 px-2 py-1.5">
       {controls.map(c => <button type="button" key={c.label} title={c.label} aria-label={c.label} aria-pressed={c.active} onMouseDown={e => e.preventDefault()} onClick={c.run} className={`rounded px-2.5 py-1 text-sm ${c.active ? 'bg-brand-100 text-brand-900' : 'text-ink-700 hover:bg-white'}`}>{c.text}</button>)}
       <button type="button" className="btn-ghost btn-sm" onClick={() => { setUrl(editor.getAttributes('link').href ?? ''); setLinkOpen(!linkOpen); }}>Link</button>

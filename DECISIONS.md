@@ -806,3 +806,16 @@ and only as a last resort the lowest-priority people or an FO who cannot fill th
 out, with verified ways to keep everyone offered beside the plan. Dates never move. The rules in
 the campaign model are unchanged; see "How the studio fits a plan" there. Drafts save themselves.
 The picker gained a Priority filter, so "Clients, MIP and Tier 1" is one selection.
+
+## Lowest pace, and People never waits on Outreach (24 September 2026)
+
+The owner: no strict 1.5x limit - "what's the lower no: of new people a day for all FOs, that would
+make this work", robustly; step 02's touchpoints and spacing are worked out from what is possible,
+and step 01 must not get stuck because of 02. The fitter now plans everyone reachable, keeps each
+FO's request when it works (balanced), and otherwise takes the lowest pace that works, up to 500.
+An unedited outreach is built to those paces; a very small FO gets an outreach group of their own
+rather than raising everyone else's pace. An edited outreach is never changed: step 02 explains, once
+per reason with every FO named, and offers verified fixes including Let the studio set the outreach.
+The rich-text editor no longer reports its own initial content as an edit (it had been marking the
+outreach edited the moment step 02 opened, which stopped it adapting to later date changes).
+

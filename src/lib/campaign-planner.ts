@@ -27,6 +27,13 @@ export const CampaignDraftSchema = z.object({
   if (Object.entries(d.assignments).some(([id, flow]) => !d.personIds.includes(id) || !flowIds.has(flow))) issue('Every outreach assignment must belong to a selected person and this campaign.');
 });
 export type CampaignDraft = z.infer<typeof CampaignDraftSchema>;
+/**
+ * Until someone edits the outreach the studio builds it. Without the flag (a draft from before it
+ * existed), only an unsaved draft still holding the untouched starter counts as automatic, so no
+ * one's own steps or outreach groups are ever rebuilt away.
+ */
+export const outreachIsAutomatic = (d: Pick<CampaignDraft, 'outreachEdited' | 'flows'>, campaignId?: string) =>
+  d.outreachEdited === false || (d.outreachEdited === undefined && !campaignId && d.flows.length === 1 && d.flows[0].steps.every(s => s.id.startsWith('starter-')));
 /** What a draft needs to be kept: a name, a pod and two dates. Everything else is checked when it is planned. */
 export const CampaignDraftSaveSchema = z.object({
   name: z.string().trim().min(1, 'Name your campaign.').max(120),
@@ -71,23 +78,32 @@ export function valuePriorityGroups(value: string, field: 'tag' | 'contactType' 
   const groups = priorityGroups(field === 'tier' ? { tags: [], contactType: [], tier: value } : { tags: [value], contactType: [], tier: null });
   return groups[0] === 5 ? [] : groups;
 }
-export const weekday = (day: string) => new Date(`${day}T12:00:00Z`).getUTCDay();
+const weekdays = new Map<string, number>();
+export const weekday = (day: string) => { let d = weekdays.get(day); if (d === undefined) { d = new Date(`${day}T12:00:00Z`).getUTCDay(); weekdays.set(day, d); } return d; };
 export const workingDay = (day: string) => ![0, 6].includes(weekday(day));
 export function calendarDays(start: string, end: string) {
   const days: string[] = [];
   for (let d = start; d <= end; d = addDays(d, 1)) if (workingDay(d)) days.push(d);
   return days;
 }
-export function outreachDates(start: string, steps: SequenceStep[]) {
-  const dates = [start];
+// Pure and asked for the same start and spacing thousands of times while a plan is fitted; the
+// answers are frozen, and nothing may change them.
+const journeys = new Map<string, readonly string[] | null>();
+export function outreachDates(start: string, steps: SequenceStep[]): string[] | null {
+  const key = `${start}|${steps.map(s => s.day).join(',')}`;
+  const known = journeys.get(key);
+  if (known !== undefined) return known as string[] | null;
+  let dates: string[] | null = [start];
   for (let i = 1; i < steps.length; i++) {
     const gap = steps[i].day - steps[i - 1].day;
     let next = addDays(dates[i - 1], gap);
     if (weekday(next) === 6) next = addDays(next, gap === 1 ? 2 : -1);
     else if (weekday(next) === 0) next = addDays(next, 1);
-    if (next <= dates[i - 1]) return null;
+    if (next <= dates[i - 1]) { dates = null; break; }
     dates.push(next);
   }
+  if (journeys.size > 200_000) journeys.clear();
+  journeys.set(key, dates && Object.freeze(dates));
   return dates;
 }
 /** "Fri, Sep 25" (or "Sep 25"): the studio's plan wording, within a campaign's own year. */

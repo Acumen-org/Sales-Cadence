@@ -36,13 +36,14 @@ test('builds contact-specific outreach, publishes a full calendar, and edits the
   expect((await db.campaign.findUniqueOrThrow({where:{id:campaignId}})).status).toBe('DRAFT');
   expect(errors).toEqual([]);
 });
-test('an outreach edit that no longer fits leaves the lowest priority out and offers the fix',async({page})=>{
+test('an edited outreach that cannot take everyone says why in Outreach and offers verified fixes',async({page})=>{
   await login(page);await beginStudio(page,'StudioGap');await page.getByLabel('Gap before step 2').fill('2');
-  const plan=page.getByRole('region',{name:'Plan'});
-  await expect(plan).toContainText('3 of 4 planned');
-  await plan.getByRole('button',{name:'1 left out'}).click();await expect(plan).toContainText('StudioGap 4');await expect(plan).toContainText('Did not fit by Fri, Jan 8');
-  await expect(plan).toContainText('Keep everyone');await plan.getByRole('button',{name:'Apply',exact:true}).first().click();
-  await expect(plan).toContainText('4 people planned');await expect(plan.getByRole('button',{name:/left out/})).toHaveCount(0);
+  await expect(page.getByText('Adjust this plan',{exact:true})).toBeVisible();
+  await expect(page.getByText('Alisa Senior: no arrangement of this outreach covers every working day.',{exact:true}).first()).toBeVisible();
+  await expect(page.getByRole('button',{name:'Next: Schedule'})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'Let the studio set the outreach',exact:true}).first()).toBeVisible();
+  await page.getByText('Wait 1 day before step 2',{exact:true}).locator('xpath=../..').getByRole('button',{name:'Apply',exact:true}).click();
+  await expect(page.getByRole('region',{name:'Plan'})).toContainText('4 people planned');
   await page.getByRole('button',{name:'Next: Schedule'}).click();
   await expect(page.getByRole('heading',{name:'Your outreach calendar'})).toBeVisible();
   await page.getByRole('button',{name:'Dates & limits'}).click();await page.getByLabel('Adjust end date').fill('2027-01-15');await page.getByRole('button',{name:'Update calendar'}).click();
@@ -60,8 +61,10 @@ test('retired sequence URLs lead to campaigns and the studio fits a phone',async
 
 test('gates setup and leaves numeric inputs empty while editing',async({page})=>{
  await login(page);await page.goto('/campaigns/new');
- await expect(page.getByRole('button',{name:'Next: Outreach'})).toBeDisabled();
- const nav=page.getByRole('navigation',{name:'Campaign setup'});await expect(nav.getByRole('button').nth(1)).toBeDisabled();await expect(nav.getByRole('button').nth(2)).toBeDisabled();
+ // Next never waits in silence: it names everything still needed, once.
+ await page.getByRole('button',{name:'Next: Outreach'}).click();
+ await expect(page.locator('main').getByRole('alert')).toContainText('Still needed: a campaign name, a product, an FO and people.');
+ const nav=page.getByRole('navigation',{name:'Campaign setup'});await expect(nav.getByRole('button').nth(2)).toBeDisabled();
  const rate=page.getByLabel('Default new people per day');await rate.fill('');await expect(rate).toHaveValue('');await rate.pressSequentially('25');await expect(rate).toHaveValue('25');
  await page.getByRole('checkbox',{name:'Alisa Senior',exact:true}).check();const own=page.getByLabel('Alisa Senior new people per day');await own.fill('');await expect(own).toHaveValue('');await own.pressSequentially('12');await expect(own).toHaveValue('12');
  await expect(page.locator('option').filter({hasText:'Finished a sequence'})).toHaveCount(0);
