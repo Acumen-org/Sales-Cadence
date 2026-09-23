@@ -65,12 +65,6 @@ test('anonymous visitors are redirected to login', async ({ page }) => {
 });
 
 /** The new campaign form: pick people from the directory; the review runs by itself. */
-async function pickPeople(page: Page, names: string[]) {
-  await page.getByLabel('Campaign state').selectOption('any');
-  await page.getByLabel('Search people to add').fill('Dummy');
-  for (const name of names) await page.getByLabel(`Select ${name}`, { exact: true }).check();
-}
-
 test('an existing campaign remains readable after upgrading to campaign-owned outreach', async ({ page }) => {
   const id=await seedLegacyCampaign('E2E SaaStr follow-up',['dummy-01','dummy-02','dummy-03','dummy-04']);
   await loginAs(page,'Alisa'); await page.goto(`/campaigns/${id}`);
@@ -83,9 +77,11 @@ test('the same person cannot be enrolled twice', async ({ page }) => {
   await page.getByLabel('Campaign name',{exact:true}).fill('Duplicate audience');
   await page.getByRole('button',{name:'PHH',exact:true}).click();
   await page.getByRole('checkbox',{name:'Alisa Senior',exact:true}).check();
-  await pickPeople(page,['Dummy One']);
-  await page.getByRole('button',{name:'Next: Outreach',exact:true}).click();
-  await expect(page.locator('main').getByRole('alert')).toContainText('already belong');
+  // Someone already in a campaign cannot be ticked, and the row says which campaign holds them.
+  await page.getByLabel('Campaign state').selectOption('any');
+  await page.getByLabel('Search people to add').fill('Dummy One');
+  await expect(page.getByLabel('Select Dummy One',{exact:true})).toBeDisabled();
+  await expect(page.getByRole('row',{name:/Dummy One/})).toContainText('In E2E SaaStr follow-up');
   await expect(page.getByRole('button',{name:'Publish campaign'})).toHaveCount(0); await logout(page);
 });
 

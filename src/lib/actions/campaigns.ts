@@ -357,11 +357,12 @@ export async function removePeopleFromCampaignAction(formData: FormData): Promis
         await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`campaign:${campaign.id}`}))`;
         const fresh = await tx.campaign.findUniqueOrThrow({ where: { id: campaign.id } });
         if (!['DRAFT', 'SCHEDULED', 'PENDING_APPROVAL'].includes(fresh.status)) throw new Error('This campaign has started. Refresh before removing people.');
-        const draft = fresh.plannerDraft as CampaignDraft;
+        const draft = fresh.plannerDraft as CampaignDraft & { request?: CampaignDraft };
         const personIds = fresh.personIds.filter(id => !ids.includes(id));
         const count = fresh.personIds.length - personIds.length;
         if (!count) return 0;
-        await tx.campaign.update({ where: { id: fresh.id }, data: { personIds, plannerDraft: { ...draft, personIds, assignments: Object.fromEntries(Object.entries(draft.assignments).filter(([id]) => personIds.includes(id))) }, publishedPlan: Prisma.DbNull, approvedAt: null, approvedById: null, status: fresh.followupSourceId ? 'PENDING_APPROVAL' : 'DRAFT' } });
+        const without = (d: CampaignDraft) => ({ ...d, personIds: d.personIds.filter(id => !ids.includes(id)), assignments: Object.fromEntries(Object.entries(d.assignments).filter(([id]) => !ids.includes(id))) });
+        await tx.campaign.update({ where: { id: fresh.id }, data: { personIds, plannerDraft: { ...without(draft), ...(draft.request ? { request: without(draft.request) } : {}) }, publishedPlan: Prisma.DbNull, approvedAt: null, approvedById: null, status: fresh.followupSourceId ? 'PENDING_APPROVAL' : 'DRAFT' } });
         await logAudit({ entityType: 'campaign', entityId: fresh.id, action: 'people_removed', actor: userActor(user), details: { removed: count, calendarNeedsReview: true } }, tx);
         return count;
       });

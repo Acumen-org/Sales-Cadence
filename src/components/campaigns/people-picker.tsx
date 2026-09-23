@@ -5,8 +5,9 @@ import { pickAllIdsAction, pickPeopleAction, pickerOptionsAction, type PickerFil
 import { IconFilter, IconSearch } from '@/components/icons';
 import { Badge, Count, TierBadge } from '@/components/ui';
 import { optionLabel } from '@/lib/twenty/labels';
+import { PRIORITY_LABELS } from '@/lib/campaign-planner';
 
-type Props = { value: string[]; onChange: (ids: string[]) => void; withinIds?: string[]; initialPod?: string; disabledIds?: string[]; disabledReason?: string };
+type Props = { campaignPodId?: string; campaignFoIds?: string[]; campaignId?: string; value: string[]; onChange: (ids: string[]) => void; withinIds?: string[]; initialPod?: string; disabledIds?: string[]; disabledReason?: string };
 
 const STATE_TONE: Record<PickerRow['state'], 'gray' | 'green' | 'blue' | 'amber' | 'red'> = { 'Never in a campaign': 'gray', 'In a campaign': 'green', Replied: 'blue', Finished: 'amber', 'Do not contact': 'red' };
 
@@ -16,12 +17,14 @@ const STATE_TONE: Record<PickerRow['state'], 'gray' | 'green' | 'blue' | 'amber'
  * The selection lives in the parent as a list of ids; this keeps the latest copy in a ref so a
  * late search response can never overwrite a tick made while it was in flight.
  */
-export function PeoplePicker({ value, onChange, withinIds, initialPod, disabledIds = [], disabledReason = 'Assigned to another outreach group' }: Props) {
+export function PeoplePicker({ campaignPodId, campaignFoIds, campaignId, value, onChange, withinIds, initialPod, disabledIds = [], disabledReason = 'Assigned to another outreach group' }: Props) {
+  const foKey = JSON.stringify(campaignFoIds ?? []);
+  const [selectionNotice, setSelectionNotice] = useState('');
   const latest = useRef(value);
   latest.current = value;
   const [options, setOptions] = useState<PickerOptions | null>(null);
   const [showMore, setShowMore] = useState(false);
-  const [filters, setFilters] = useState<PickerFilters>({ q: '', pod: initialPod ?? '', fo: '', product: '', tier: '', type: '', tag: '', account: '', state: 'any', page: 1 });
+  const [filters, setFilters] = useState<PickerFilters>({ q: '', pod: initialPod ?? '', fo: '', product: '', tier: '', type: '', tag: '', account: '', state: 'any', priority: [], page: 1 });
   const moreCount = [filters.tier, filters.type, filters.product, filters.tag].filter(Boolean).length;
   const [text, setText] = useState('');
   const [rows, setRows] = useState<PickerRow[]>([]);
@@ -42,21 +45,22 @@ export function PeoplePicker({ value, onChange, withinIds, initialPod, disabledI
   useEffect(() => {
     const id = ++request.current;
     start(async () => {
-      const r = await pickPeopleAction({ ...filters, withinIds });
+      const r = await pickPeopleAction({ ...filters, withinIds, campaignPodId, campaignFoIds: JSON.parse(foKey), campaignId });
       // An older answer arriving after a newer one is dropped.
       if (id !== request.current) return;
       if (r.ok) { setRows(r.rows); setTotal(r.total); setPageSize(r.pageSize); setError(null); }
       else setError(r.error);
     });
-  }, [filters, withinIds]);
+  }, [filters, withinIds, campaignPodId, foKey, campaignId]);
 
   const set = (patch: Partial<PickerFilters>) => setFilters((f) => ({ ...f, ...patch, page: patch.page ?? 1 }));
   const selected = new Set(value);
-  const disabled = new Set(disabledIds);
+  const disabled = new Set([...disabledIds, ...rows.filter(r => r.ineligibleReason).map(r => r.id)]);
   const available = rows.filter(r => !disabled.has(r.id));
   const shownSelected = available.length > 0 && available.every((r) => selected.has(r.id));
   const toggle = (id: string) => {
-    if (disabled.has(id)) return;
+    // Someone who cannot join can still be taken out; they just cannot be ticked.
+    if (disabled.has(id) && !latest.current.includes(id)) return;
     const next = new Set(latest.current);
     if (next.has(id)) next.delete(id); else next.add(id);
     onChange([...next]);
@@ -69,8 +73,8 @@ export function PeoplePicker({ value, onChange, withinIds, initialPod, disabledI
   const selectAll = async () => {
     setSelectingAll(true);
     try {
-      const r = await pickAllIdsAction({ ...filters, withinIds });
-      if (r.ok) onChange([...new Set([...latest.current, ...r.ids.filter(id => !disabled.has(id))])]);
+      const r = await pickAllIdsAction({ ...filters, withinIds, campaignPodId, campaignFoIds: JSON.parse(foKey), campaignId });
+      if (r.ok) { onChange([...new Set([...latest.current, ...r.ids.filter(id => !disabled.has(id))])]); setSelectionNotice(r.skipped ? `${r.skipped.toLocaleString('en-US')} unavailable skipped` : ''); }
       else setError(r.error);
     } finally {
       setSelectingAll(false);
@@ -102,6 +106,7 @@ export function PeoplePicker({ value, onChange, withinIds, initialPod, disabledI
               <option value="enrolled">In a campaign</option>
               <option value="any">Any campaign state</option>
             </select>
+            <PriorityFilter value={filters.priority} onChange={priority => set({ priority })} />
             <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} className={`btn-secondary btn-sm ${showMore || moreCount ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
               <IconFilter size={14} /> Filters{moreCount ? <span className="ml-1 tabular-nums">{moreCount}</span> : null}
             </button>
@@ -118,8 +123,9 @@ export function PeoplePicker({ value, onChange, withinIds, initialPod, disabledI
       <div className="flex flex-wrap items-center gap-3 text-[12.5px] text-ink-600">
         <span><Count value={total} /> matching{total > 0 ? <span className="text-ink-400"> · {first.toLocaleString('en-US')}–{last.toLocaleString('en-US')}</span> : null}</span>
         <button type="button" className="btn-secondary btn-sm" disabled={pending || selectingAll || total === 0} onClick={() => void selectAll()}>
-          {selectingAll ? 'Selecting…' : `Select all ${total.toLocaleString('en-US')} matching`}
+          {selectingAll ? 'Selecting…' : 'Select all matching'}
         </button>
+        {selectionNotice && <span role="status" className="text-ink-500">{selectionNotice}</span>}
         <span className="ml-auto flex items-center gap-2">
           <span><Count value={value.length} /> selected</span>
           {value.length ? <button type="button" className="btn-ghost btn-sm" onClick={() => onChange([])}>Clear selection</button> : null}
@@ -143,11 +149,11 @@ export function PeoplePicker({ value, onChange, withinIds, initialPod, disabledI
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id} className={disabled.has(r.id) ? 'opacity-45' : selected.has(r.id) ? 'bg-brand-50/60' : undefined} title={disabled.has(r.id) ? disabledReason : undefined}>
-                  <td className="pl-3 pr-0"><input type="checkbox" aria-label={`Select ${r.name}`} disabled={disabled.has(r.id)} checked={selected.has(r.id)} onChange={() => toggle(r.id)} /></td>
+                <tr key={r.id} className={selected.has(r.id) && !disabled.has(r.id) ? 'bg-brand-50/60' : undefined} title={r.ineligibleReason ?? (disabled.has(r.id) ? disabledReason : undefined)}>
+                  <td className="pl-3 pr-0"><input type="checkbox" aria-label={`Select ${r.name}`} disabled={disabled.has(r.id) && !selected.has(r.id)} checked={selected.has(r.id)} onChange={() => toggle(r.id)} /></td>
                   <td>
-                    <div className="truncate text-[13px] font-medium text-ink-900">{r.name}</div>
-                    {r.title || r.company ? <div className="truncate text-[12px] text-ink-500">{[r.title, r.company].filter(Boolean).join(' · ')}</div> : null}
+                    <div className={`truncate text-[13px] font-medium ${disabled.has(r.id) ? 'text-ink-400' : 'text-ink-900'}`}>{r.name}</div>
+                    {r.ineligibleReason ? <div className={`truncate text-[12px] ${r.state === 'Do not contact' ? 'text-red-700' : 'text-ink-600'}`}>{r.ineligibleReason}{r.company ? <span className="text-ink-400"> · {r.company}</span> : null}</div> : r.title || r.company ? <div className={`truncate text-[12px] ${disabled.has(r.id) ? 'text-ink-400' : 'text-ink-500'}`}>{[r.title, r.company].filter(Boolean).join(' · ')}</div> : null}
                   </td>
                   <td className="truncate text-[12.5px] text-ink-700">{r.pod ?? <span className="text-ink-300">-</span>}</td>
                   <td><TierBadge tier={r.tier} /></td>
@@ -168,6 +174,37 @@ export function PeoplePicker({ value, onChange, withinIds, initialPod, disabledI
           </div>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/** The planner's priority groups as one multi-choice control; a contact in any chosen group matches. */
+function PriorityFilter({ value, onChange }: { value: number[]; onChange: (groups: number[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent | KeyboardEvent) => { if (e instanceof KeyboardEvent ? e.key === 'Escape' : !box.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', close); document.addEventListener('keydown', close);
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', close); };
+  }, [open]);
+  const label = value.length ? [...value].sort().map(g => PRIORITY_LABELS[g]).join(', ') : 'Any priority';
+  return (
+    <div ref={box} className="relative">
+      <button type="button" aria-haspopup="true" aria-expanded={open} aria-label="Filter by priority" onClick={() => setOpen(!open)} className={`btn-secondary btn-sm max-w-[240px] ${value.length ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
+        <span className="truncate">{label}</span>
+      </button>
+      {open ? (
+        <div role="group" aria-label="Priority" className="absolute left-0 top-full z-20 mt-1 w-48 rounded-[10px] border border-line bg-white p-1.5 shadow-lg">
+          {PRIORITY_LABELS.map((name, g) => (
+            <label key={name} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-canvas">
+              <input type="checkbox" checked={value.includes(g)} onChange={() => onChange(value.includes(g) ? value.filter(x => x !== g) : [...value, g])} />
+              {name}
+            </label>
+          ))}
+          {value.length ? <button type="button" className="btn-ghost btn-sm mt-1 w-full justify-start" onClick={() => onChange([])}>Any priority</button> : null}
+        </div>
+      ) : null}
     </div>
   );
 }

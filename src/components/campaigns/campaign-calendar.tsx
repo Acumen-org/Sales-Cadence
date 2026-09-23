@@ -14,8 +14,9 @@ export function CampaignCalendarView({ draft, calendar }: { draft: CampaignDraft
   const visible = calendar.batches.filter(b => foId === 'all' || b.foId === foId);
   return <div className="space-y-4">
     <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold">Your outreach calendar</h2><p className="text-sm text-ink-600">Monday–Friday · <strong>{calendar.days.length}</strong> working days</p></div><select aria-label="Calendar FO" value={foId} onChange={e => { setFoId(e.target.value); setFocus(null); }} className="!w-auto"><option value="all">All FOs</option>{calendar.fos.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}</select></div>
-    {selectedFo && <div className="flex flex-wrap gap-2 text-sm"><span className="chip">{selectedFo.name}</span><span className="chip-muted">Up to <strong>{draft.fos.find(f => f.id === foId)?.batchSize ?? 0}</strong> per batch</span><span className="chip-muted">Maximum <strong>{2 * (draft.fos.find(f => f.id === foId)?.batchSize ?? 0)}</strong> people/day</span>{focus && <button className="btn-ghost btn-sm" type="button" onClick={() => setFocus(null)}>Show all batches</button>}</div>}
+    {selectedFo && focus && <div className="flex"><button className="btn-ghost btn-sm" type="button" onClick={() => setFocus(null)}>Show all batches</button></div>}
     <div className="grid gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-2 xl:grid-cols-5">
+      {Array.from({ length: calendar.days.length ? weekday(calendar.days[0]) - 1 : 0 }, (_, i) => <div key={`lead-${i}`} aria-hidden className="hidden bg-canvas xl:block" />)}
       {calendar.days.map(day => {
         const events = visible.flatMap(b => { const step = b.dates.indexOf(day); return step < 0 ? [] : [{ b, step }]; });
         return <section key={day} className={`min-h-36 p-3 ${['', 'xl:col-start-1', 'xl:col-start-2', 'xl:col-start-3', 'xl:col-start-4', 'xl:col-start-5'][weekday(day)]} ${events.length ? 'bg-white' : 'bg-canvas'}`} aria-label={calendarDateLabel(day)}>
@@ -29,6 +30,7 @@ export function CampaignCalendarView({ draft, calendar }: { draft: CampaignDraft
           {!events.length && <span className="text-xs font-medium text-amber-800">No coverage</span>}
         </section>;
       })}
+      {Array.from({ length: calendar.days.length ? 5 - weekday(calendar.days.at(-1)!) : 0 }, (_, i) => <div key={`trail-${i}`} aria-hidden className="hidden bg-canvas xl:block" />)}
     </div>
     {selected && picked && flow && <Modal label={`${flow.name} · Step ${selected.step + 1}`} onClose={() => setSelected(null)}>
       <div className="space-y-4 p-5"><p className="font-semibold">{calendarDateLabel(picked.dates[selected.step])}</p><div className="flex flex-wrap gap-2">{picked.dates.map((d, i) => <button type="button" className={i === selected.step ? 'chip' : 'chip-muted'} key={d} onClick={() => setSelected({ batchId: picked.id, step: i })}>Step {i + 1} · {d}</button>)}</div><div className="max-h-64 overflow-y-auto divide-y divide-line">{picked.personIds.map(id => { const p = calendar.people.find(p => p.id === id); return <div key={id} className="flex justify-between gap-2 py-2 text-sm"><span>{p?.name ?? id}</span><span className="chip-muted">{p ? PRIORITY_LABELS[contactPriority(p)] : ''}</span></div>; })}</div>{flow.steps[selected.step].actions.map(a => <div key={a.id} className="rounded-xl border border-line p-3"><strong>{a.label}</strong>{a.subject && <p className="mt-1 font-medium">{a.subject}</p>}<p className="mt-2 whitespace-pre-wrap text-sm">{a.template}</p></div>)}</div>

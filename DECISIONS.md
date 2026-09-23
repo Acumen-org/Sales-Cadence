@@ -789,3 +789,20 @@ The "?" icons and the "last start" marker and legend are gone. One active campai
 already enforced by the database (a partial unique index on Enrollment for ACTIVE and PAUSED);
 several sequences per campaign, the per-FO daily starts, the step cap and FO selection are the
 subject of the proposal that goes with this round, and wait for that discussion.
+
+## The campaign studio plans itself (23 September 2026)
+
+The owner tried Alyssa and Avani, 23-30 September, 20 new people a day, Clients + MIP + Tier 1 in
+Alisa's pod, and got "Some selected people are unavailable, blocked, opted out, or outside this
+pod" with nobody named, and no draft to show. Walked on the hosted app: 109 selected; one was Do
+not contact (the picker let her be ticked), three were owned by people on no pod (Nicolas
+Fernandez, Alisa Kolodizner), and behind those, the window has six working days while Alyssa
+owns about 88 of the audience and Avani 17 - at 20 a day no single outreach length covers every
+working day for both. Each of the three would have stopped the campaign in turn.
+
+The studio now fits the plan instead of refusing it: the unreachable are left out by name and
+reason, paces move (down freely, up to 1.5 times the request), an unedited outreach is reshaped,
+and only as a last resort the lowest-priority people or an FO who cannot fill the window are left
+out, with verified ways to keep everyone offered beside the plan. Dates never move. The rules in
+the campaign model are unchanged; see "How the studio fits a plan" there. Drafts save themselves.
+The picker gained a Priority filter, so "Clients, MIP and Tier 1" is one selection.

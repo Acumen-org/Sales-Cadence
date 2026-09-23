@@ -12,6 +12,10 @@ export const CampaignDraftSchema = z.object({
   flows: z.array(z.object({ id: z.string().min(1), name: z.string().trim().min(1, 'Name each outreach group before continuing.').max(80), steps: StepsSchema })).min(1).max(30),
   personIds: z.array(z.string().min(1)).max(10000),
   assignments: z.record(z.string(), z.string()),
+  /** Which FO runs an unowned contact, as the fitter balanced it. Owned contacts ignore it. */
+  foAssignments: z.record(z.string(), z.string()).optional(),
+  /** Set once someone edits the outreach; until then the studio may reshape the starter. */
+  outreachEdited: z.boolean().optional(),
 }).superRefine((d, ctx) => {
   const issue = (message: string) => ctx.addIssue({ code: 'custom', message });
   if (d.endDate < d.startDate || diffDays(d.startDate, d.endDate) > 366) issue('Choose a campaign window of up to one year.');
@@ -23,6 +27,19 @@ export const CampaignDraftSchema = z.object({
   if (Object.entries(d.assignments).some(([id, flow]) => !d.personIds.includes(id) || !flowIds.has(flow))) issue('Every outreach assignment must belong to a selected person and this campaign.');
 });
 export type CampaignDraft = z.infer<typeof CampaignDraftSchema>;
+/** What a draft needs to be kept: a name, a pod and two dates. Everything else is checked when it is planned. */
+export const CampaignDraftSaveSchema = z.object({
+  name: z.string().trim().min(1, 'Name your campaign.').max(120),
+  podId: z.string().min(1), startDate: date, endDate: date,
+  productInterest: z.array(z.string().min(1)).max(20),
+  defaultBatchSize: z.number().int().min(0).max(500),
+  fos: z.array(z.object({ id: z.string().min(1), batchSize: z.number().int().min(0).max(500) })).max(100),
+  flows: z.array(z.object({ id: z.string().min(1), name: z.string().max(80), steps: StepsSchema })).min(1).max(30),
+  personIds: z.array(z.string().min(1)).max(10000),
+  assignments: z.record(z.string(), z.string()),
+  foAssignments: z.record(z.string(), z.string()).optional(),
+  outreachEdited: z.boolean().optional(),
+});
 export type PlannerPerson = { id: string; name: string; ownerMemberId: string | null; tags: string[]; contactType: string[]; tier: string | null };
 export type PlannerFo = { id: string; name: string; twentyMemberId: string | null };
 export type PlannedBatch = { id: string; foId: string; flowId: string; personIds: string[]; dates: string[]; priority: number };
@@ -36,6 +53,23 @@ export function contactPriority(p: Pick<PlannerPerson, 'tags' | 'contactType' | 
   if (labels.includes('mip')) return 1;
   const tiers = [normal(p.tier ?? ''), ...labels];
   return tiers.some(t => ['1', 'tier1', 'level1'].includes(t)) ? 2 : tiers.some(t => ['2', 'tier2', 'level2'].includes(t)) ? 3 : tiers.some(t => ['3', 'tier3', 'level3'].includes(t)) ? 4 : 5;
+}
+const CLIENT_LABELS = ['client', 'clients'];
+const TIER_LABELS = [['1', 'tier1', 'level1'], ['2', 'tier2', 'level2'], ['3', 'tier3', 'level3']];
+/** Every priority group a contact belongs to; contactPriority is the highest of them. */
+export function priorityGroups(p: Pick<PlannerPerson, 'tags' | 'contactType' | 'tier'>) {
+  const labels = [...p.tags, ...p.contactType].map(normal);
+  const tiers = [normal(p.tier ?? ''), ...labels];
+  const groups: number[] = [];
+  if (labels.some(t => CLIENT_LABELS.includes(t))) groups.push(0);
+  if (labels.includes('mip')) groups.push(1);
+  TIER_LABELS.forEach((names, i) => { if (tiers.some(t => names.includes(t))) groups.push(2 + i); });
+  return groups.length ? groups : [5];
+}
+/** The groups one CRM value places a contact in: tags and contact types are labels, the tier field only counts for tiers. */
+export function valuePriorityGroups(value: string, field: 'tag' | 'contactType' | 'tier') {
+  const groups = priorityGroups(field === 'tier' ? { tags: [], contactType: [], tier: value } : { tags: [value], contactType: [], tier: null });
+  return groups[0] === 5 ? [] : groups;
 }
 export const weekday = (day: string) => new Date(`${day}T12:00:00Z`).getUTCDay();
 export const workingDay = (day: string) => ![0, 6].includes(weekday(day));
@@ -56,11 +90,16 @@ export function outreachDates(start: string, steps: SequenceStep[]) {
   }
   return dates;
 }
+/** "Fri, Sep 25" (or "Sep 25"): the studio's plan wording, within a campaign's own year. */
+export function shortDateLabel(day: string, withWeekday = true) {
+  return new Intl.DateTimeFormat('en-US', { ...(withWeekday ? { weekday: 'short' as const } : {}), month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${day}T12:00:00Z`));
+}
 export function calendarDateLabel(day: string) {
   return new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${day}T12:00:00Z`));
 }
 
-export function campaignBatches(draft: CampaignDraft, people: PlannerPerson[], fos: PlannerFo[]) {
+/** Each FO's people in the order they start: owners first, unowned balanced (or as pinned), then priority and outreach. */
+export function campaignQueues(draft: CampaignDraft, people: PlannerPerson[], fos: PlannerFo[]) {
   const issues: PlanIssue[] = [];
   const issue = (title: string, detail: string) => issues.push({ title, detail });
   const ordered = [...people].sort((a, b) => contactPriority(a) - contactPriority(b) || a.name.localeCompare(b.name, 'en', { sensitivity: 'base', numeric: true }) || a.id.localeCompare(b.id));
@@ -74,16 +113,23 @@ export function campaignBatches(draft: CampaignDraft, people: PlannerPerson[], f
     else roster.get(id)!.people.push(p);
   }
   for (const p of ordered.filter(p => !p.ownerMemberId)) {
-    const fo = [...roster.values()].sort((a, b) => a.people.length / a.batchSize - b.people.length / b.batchSize || a.id.localeCompare(b.id))[0];
+    const pinned = draft.foAssignments?.[p.id];
+    const fo = pinned && roster.has(pinned) ? roster.get(pinned)! : [...roster.values()].sort((a, b) => a.people.length / a.batchSize - b.people.length / b.batchSize || a.id.localeCompare(b.id))[0];
     if (fo) fo.people.push(p);
   }
+  // Group equal-priority people by outreach so selecting scattered names does not
+  // unnecessarily create many tiny batches. Priority always precedes grouping.
+  const flowOrder = new Map(draft.flows.map((f, i) => [f.id, i]));
+  for (const fo of roster.values()) fo.people.sort((a, b) => contactPriority(a) - contactPriority(b) || flowOrder.get(draft.assignments[a.id] ?? 'default')! - flowOrder.get(draft.assignments[b.id] ?? 'default')! || position.get(a.id)! - position.get(b.id)!);
+  return { roster, issues };
+}
+
+export function campaignBatches(draft: CampaignDraft, people: PlannerPerson[], fos: PlannerFo[]) {
+  const { roster, issues } = campaignQueues(draft, people, fos);
   if (issues.length) return { batches: [], issues };
   const all: PlannedBatch[] = [];
   for (const fo of roster.values()) {
-    // Group equal-priority people by outreach so selecting scattered names does not
-    // unnecessarily create many tiny batches. Priority always precedes grouping.
-    const flowOrder = new Map(draft.flows.map((f, i) => [f.id, i]));
-    const queue = fo.people.sort((a, b) => contactPriority(a) - contactPriority(b) || flowOrder.get(draft.assignments[a.id] ?? 'default')! - flowOrder.get(draft.assignments[b.id] ?? 'default')! || position.get(a.id)! - position.get(b.id)!);
+    const queue = fo.people;
     const batches: PlannedBatch[] = [];
     // Preserve strict priority across different flows; never pull a low-priority person ahead to fill a batch.
     for (const p of queue) {
@@ -155,15 +201,17 @@ export function buildCampaignCalendar(draft: CampaignDraft, people: PlannerPerso
 
 export type CalendarSuggestion = { label: string; detail: string; draft: CampaignDraft; calendar: CampaignCalendar };
 /** Only show adjustments actually verified by the same scheduler. Never silently change outreach. */
-export function suggestCampaignCalendar(d: CampaignDraft, people: PlannerPerson[], fos: PlannerFo[]): CalendarSuggestion[] {
+export function suggestCampaignCalendar(d: CampaignDraft, people: PlannerPerson[], fos: PlannerFo[], options: { verify?: (draft: CampaignDraft) => CampaignCalendar | null; paces?: boolean; outreach?: boolean } = {}): CalendarSuggestion[] {
   const out: CalendarSuggestion[] = [];
+  const verify = options.verify ?? ((draft: CampaignDraft) => buildCampaignCalendar(draft, people, fos, 6000));
   const tryDraft = (draft: CampaignDraft, label: string, detail: string) => {
-    const calendar = buildCampaignCalendar(draft, people, fos, 6000);
-    if (calendar.valid) out.push({ label, detail, draft, calendar });
+    const calendar = verify(draft);
+    if (calendar?.valid) out.push({ label, detail, draft, calendar });
   };
   // Small gap edits first, retaining the audience and dates.
   let attempts = 0;
-  for (const flow of d.flows) for (let step = 1; step < flow.steps.length && attempts < 18 && out.length < 3; step++) {
+  // An outreach the studio may still reshape has already been tried in every shape; only dates remain.
+  for (const flow of options.outreach === false ? [] : d.flows) for (let step = 1; step < flow.steps.length && attempts < 18 && out.length < 3; step++) {
     for (const delta of [-1, 1]) {
       if (flow.steps[step].day - flow.steps[step - 1].day + delta < 1) continue;
       attempts++;
@@ -171,32 +219,43 @@ export function suggestCampaignCalendar(d: CampaignDraft, people: PlannerPerson[
       const changed = draft.flows.find(f => f.id === flow.id)!;
       changed.steps = changed.steps.map((s, i) => ({ ...s, day: s.day + (i >= step ? delta : 0) }));
       if (changed.steps.at(-1)!.day > 367) continue;
-      tryDraft(draft, `Adjust ${flow.name}, step ${step + 1}`, `Change its gap to ${changed.steps[step].day - changed.steps[step - 1].day} calendar days. Later steps retain their gaps.`);
+      { const wait = changed.steps[step].day - changed.steps[step - 1].day; tryDraft(draft, `${d.flows.length > 1 ? `${flow.name}: wait` : 'Wait'} ${wait} day${wait === 1 ? '' : 's'} before step ${step + 1}`, 'Later steps keep their spacing.'); }
     }
   }
-  for (const delta of [-1, 1, -2, 2, -3, 3, -7, 7]) {
+  // Dates are the one thing the studio never moves on its own; offer them only when a pacing
+  // change alone cannot work.
+  for (const delta of options.verify ? [] : [-1, 1, -2, 2, -3, 3, -7, 7]) {
     if (out.length >= 3) break;
     const endDate = addDays(d.endDate, delta);
     if (endDate < d.startDate || diffDays(d.startDate, endDate) > 366) continue;
     tryDraft({ ...d, endDate }, `End on ${calendarDateLabel(endDate)}`, 'Keep your audience, batch sizes and outreach unchanged.');
   }
-  for (const factor of [0.75, 0.5, 0.25, 1.25, 2]) {
+  for (const factor of options.paces === false ? [] : [0.75, 0.5, 0.25, 1.25, 2]) {
     if (out.length >= 3) break;
     const changed = { ...d, defaultBatchSize: Math.max(1, Math.min(500, Math.round(d.defaultBatchSize * factor))), fos: d.fos.map(f => ({ ...f, batchSize: Math.max(1, Math.min(500, Math.round(f.batchSize * factor))) })) };
     tryDraft(changed, 'Adjust new people per day', changed.fos.map(f => `${fos.find(fo => fo.id === f.id)?.name}: ${f.batchSize}`).join(' · '));
   }
   // Broader recovery when a small edit cannot work. This changes pacing, so never
   // apply automatically; describe it explicitly and retain all authored messages.
-  if (!out.length) {
+  if (!out.length && options.outreach !== false) {
     for (const gap of [2, 3, 1]) {
       const flows = d.flows.map(f => ({ ...f, steps: f.steps.map((s, i) => ({ ...s, day: 1 + i * gap })) }));
-      for (const delta of [0, -7, 7, -14, 14]) {
+      // The studio keeps its dates here; a date change is offered on its own, below.
+      for (const delta of options.verify ? [0] : [0, -7, 7, -14, 14]) {
         if (out.length >= 3) break;
         const endDate = addDays(d.endDate, delta);
         if (endDate < d.startDate || diffDays(d.startDate, endDate) > 366 || flows.some(f => f.steps.at(-1)!.day > 367)) continue;
-        tryDraft({ ...d, flows, endDate }, `Change all waits to ${gap} calendar day${gap === 1 ? '' : 's'}`, `This changes outreach pacing for every group. Keep all messages and people; end on ${calendarDateLabel(endDate)}. Weekend rules still apply.`);
+        tryDraft({ ...d, flows, endDate }, `Wait ${gap} day${gap === 1 ? '' : 's'} between every step`, delta ? `Every group, messages unchanged; end on ${calendarDateLabel(endDate)}.` : 'Every group; messages unchanged.');
       }
       if (out.length) break;
+    }
+  }
+  if (!out.length && options.verify) {
+    for (const delta of [1, 2, 3, 7, 14]) {
+      if (out.length) break;
+      const endDate = addDays(d.endDate, delta);
+      if (diffDays(d.startDate, endDate) > 366) continue;
+      tryDraft({ ...d, endDate }, `End on ${shortDateLabel(endDate)}`, '');
     }
   }
   return out.slice(0, 3);

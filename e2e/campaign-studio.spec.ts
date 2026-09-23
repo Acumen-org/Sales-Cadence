@@ -36,13 +36,13 @@ test('builds contact-specific outreach, publishes a full calendar, and edits the
   expect((await db.campaign.findUniqueOrThrow({where:{id:campaignId}})).status).toBe('DRAFT');
   expect(errors).toEqual([]);
 });
-test('resolves spacing blockers in Outreach before opening Schedule',async({page})=>{
+test('an outreach edit that no longer fits leaves the lowest priority out and offers the fix',async({page})=>{
   await login(page);await beginStudio(page,'StudioGap');await page.getByLabel('Gap before step 2').fill('2');
-  await expect(page.getByRole('button',{name:'Next: Schedule'})).toBeDisabled();
-  await expect(page.getByText('Adjust this plan',{exact:true})).toBeVisible();
-  await expect(page.getByText(/Monday, Jan 4, 2027 through Friday, Jan 8, 2027/)).toBeVisible();
-  await page.getByRole('button',{name:'Apply',exact:true}).first().click();
-  await expect(page.getByRole('button',{name:'Next: Schedule'})).toBeEnabled();
+  const plan=page.getByRole('region',{name:'Plan'});
+  await expect(plan).toContainText('3 of 4 planned');
+  await plan.getByRole('button',{name:'1 left out'}).click();await expect(plan).toContainText('StudioGap 4');await expect(plan).toContainText('Did not fit by Fri, Jan 8');
+  await expect(plan).toContainText('Keep everyone');await plan.getByRole('button',{name:'Apply',exact:true}).first().click();
+  await expect(plan).toContainText('4 people planned');await expect(plan.getByRole('button',{name:/left out/})).toHaveCount(0);
   await page.getByRole('button',{name:'Next: Schedule'}).click();
   await expect(page.getByRole('heading',{name:'Your outreach calendar'})).toBeVisible();
   await page.getByRole('button',{name:'Dates & limits'}).click();await page.getByLabel('Adjust end date').fill('2027-01-15');await page.getByRole('button',{name:'Update calendar'}).click();
@@ -69,7 +69,10 @@ test('gates setup and leaves numeric inputs empty while editing',async({page})=>
 
 test('adapts the starter and keeps custom groups exclusive with sidebar editing',async({page})=>{
  await login(page);await beginStudio(page,'StudioGroups');await expect(page.getByRole('button',{name:/^Drag step/})).toHaveCount(2);
- await expect(page.getByRole('button',{name:'Email',exact:true}).last()).toBeDisabled();
+ // A third step still keeps all four people, at two a day, so it is offered.
+ const addEmail=page.getByRole('button',{name:'Email',exact:true}).last();await expect(addEmail).toBeEnabled();
+ await addEmail.click();await expect(page.getByRole('button',{name:/^Drag step/})).toHaveCount(3);await expect(page.getByRole('region',{name:'Plan'})).toContainText('4 people planned');
+ await page.getByRole('button',{name:'Remove step 3'}).click();await expect(page.getByRole('button',{name:/^Drag step/})).toHaveCount(2);
  const sidebar=page.getByRole('complementary',{name:'Outreach groups'});
  await sidebar.getByRole('button',{name:'Add outreach group',exact:true}).click();await page.getByLabel('Select StudioGroups 1',{exact:true}).check();await page.getByRole('button',{name:'Create outreach group (1)'}).click();
  const name=page.getByLabel('Outreach group name');await name.fill('');await expect(name).toHaveValue('');await expect(page.getByRole('button',{name:'Next: Schedule'})).toBeDisabled();await name.fill('Clients');
@@ -97,6 +100,29 @@ test('meeting tables fit desktop and phone without a horizontal scroll area',asy
 });
 
 test('admin can permanently erase a draft through its confirmation dialog',async({page})=>{
- await login(page);await beginStudio(page,'StudioErase');await page.getByRole('button',{name:'Save draft',exact:true}).click();await expect(page.getByText('Draft saved',{exact:true})).toBeVisible();const id=page.url().split('/').at(-2)!;
+ await login(page);await beginStudio(page,'StudioErase');await expect(page.getByText('Draft saved',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Save draft',exact:true})).toHaveCount(0);const id=page.url().split('/').at(-2)!;
  await page.goto(`/campaigns/${id}`);await page.getByRole('button',{name:'Delete campaign',exact:true}).click();await expect(page.getByRole('button',{name:'Permanently delete',exact:true})).toBeDisabled();await page.getByLabel('Confirm campaign name').fill('StudioErase');await page.getByRole('button',{name:'Permanently delete',exact:true}).click();await page.waitForURL(/\/campaigns$/);expect(await db.campaign.findUnique({where:{id}})).toBeNull();expect(await db.personCache.count({where:{id:{startsWith:'StudioErase-'}}})).toBe(4);
+});
+
+test('unreachable contacts are skipped in the picker and left out of the plan with their reason',async({page})=>{
+ await login(page);await beginStudio(page,'AudienceReview');await page.getByRole('button',{name:'Back',exact:true}).click();
+ await db.personCache.createMany({data:[{id:'AudienceReview-dnd',firstName:'AudienceReview',lastName:'DoNotContact',sortName:'audiencereview donotcontact',podOwner:'ALISA',dnd:true},{id:'AudienceReview-optout',firstName:'AudienceReview',lastName:'OptedOut',sortName:'audiencereview optedout',podOwner:'ALISA',optedOut:true}]});
+ await page.getByLabel('Search people to add').fill('AudienceReview');await expect(page.getByText('6 matching')).toBeVisible();await expect(page.getByRole('button',{name:'Select all matching',exact:true})).toBeEnabled();
+ await expect(page.getByLabel('Select AudienceReview DoNotContact',{exact:true})).toBeDisabled();await expect(page.getByLabel('Select AudienceReview OptedOut',{exact:true})).toBeDisabled();
+ await page.getByRole('button',{name:'Select all matching',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'2 unavailable skipped'})).toBeVisible();
+ // A CRM flag set after selection does not stop the campaign: that person is left out, by name.
+ await db.personCache.update({where:{id:'AudienceReview-0'},data:{dnd:true}});
+ await page.getByRole('button',{name:'Next: Outreach',exact:true}).click();await expect(page.getByRole('heading',{name:'Outreach groups',exact:true})).toBeVisible();
+ await expect(page.locator('main').getByRole('alert')).toHaveCount(0);
+ const plan=page.getByRole('region',{name:'Plan'});await expect(plan).toContainText('3 of 4 planned');
+ await plan.getByRole('button',{name:'1 left out'}).click();await expect(plan).toContainText('Do not contact');await expect(plan).toContainText('AudienceReview 1');
+ await page.getByRole('button',{name:'Next: Schedule'}).click();await expect(page.getByRole('button',{name:'Publish campaign'})).toBeEnabled();
+});
+
+test('the studio saves its own draft as it is filled in',async({page})=>{
+ await login(page);await page.goto('/campaigns/new');await page.getByLabel('Campaign name',{exact:true}).fill('Saves itself');
+ await expect(page.getByText('Draft saved',{exact:true})).toBeVisible();await expect(page).toHaveURL(/\/campaigns\/[a-f0-9-]+\/edit$/);
+ await page.getByLabel('Default new people per day').fill('');await page.getByRole('button',{name:'PHH',exact:true}).click();await expect(page.getByText('Draft saved',{exact:true})).toBeVisible();
+ await page.reload();await expect(page.getByLabel('Campaign name',{exact:true})).toHaveValue('Saves itself');await expect(page.getByLabel('Default new people per day')).toHaveValue('');await expect(page.getByRole('button',{name:'PHH',exact:true})).toHaveAttribute('aria-pressed','true');
+ const id=page.url().split('/').at(-2)!;const c=await db.campaign.findUniqueOrThrow({where:{id}});expect(c.status).toBe('DRAFT');expect(c.name).toBe('Saves itself');
 });

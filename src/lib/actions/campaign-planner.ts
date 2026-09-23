@@ -13,10 +13,12 @@ export async function previewCalendarAction(input: unknown, id?: string) {
   try { return { ok: true as const, data: await previewCampaignCalendar(input, await requireUser(), id) }; }
   catch (e) { return { ok: false as const, error: message(e) }; }
 }
-export async function saveCalendarAction(input: unknown, options: { id?: string; revision?: string; publish?: boolean; fingerprint?: string }) {
+export async function saveCalendarAction(input: unknown, options: { id?: string; revision?: string; publish?: boolean; fingerprint?: string; auto?: boolean }) {
   try {
     const saved = await saveCampaignCalendar(input, await requireUser(), options);
-    revalidatePath('/campaigns'); revalidatePath(`/campaigns/${saved.id}`);
+    // A draft save must not re-render the studio it came from (the campaign pages are dynamic and
+    // read fresh on the next visit); publishing leaves the studio, so it refreshes them.
+    if (options.publish) { revalidatePath('/campaigns'); revalidatePath(`/campaigns/${saved.id}`); }
     return { ok: true as const, id: saved.id, revision: saved.updatedAt.toISOString() };
   } catch (e) { return { ok: false as const, error: message(e) }; }
 }
