@@ -6,7 +6,7 @@ import { canReadPerson } from '@/lib/people-scope';
 import { accountScopeCompanyIds } from '@/lib/accounts-query';
 import { notFound } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
-import { canChangeCampaignMembers, canCreateMeeting } from '@/lib/auth/rbac';
+import { canChangeCampaignPeople, canCreateMeeting, mayChangeCampaignPeople } from '@/lib/auth/rbac';
 import { membershipFor, membershipLabel } from '@/lib/campaign-membership';
 import { AddToCampaign, RemoveFromCampaign } from '@/components/campaigns/add-to-campaign';
 import { prisma } from '@/lib/db';
@@ -76,7 +76,6 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
   const canOpenAccount = Boolean(person.companyId) && (accountScope === null || accountScope.includes(person.companyId!));
 
   const memberships = (await membershipFor([id])).get(id) ?? [];
-  const cadencePodId = person.podOwner ? pods.find((p) => p.podOwnerValue === person.podOwner)?.id ?? null : null;
   // With nothing running, how the last engagement ended is the fact that decides what to do next,
   // so the card carries it rather than reading as if this person had never been worked.
   const standing = crmStanding(person);
@@ -271,7 +270,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
             {tab === 'overview' ? (
               // Grouped the way the record is grouped in Twenty, so the two read the same.
               <div className="space-y-3">
-                <Card title={memberships.some((m) => m.kind !== 'finished') || !memberships.length ? 'Campaigns' : 'Last campaign'} actions={<span className="flex items-center gap-2">{canChangeCampaignMembers(user, cadencePodId) ? <AddToCampaign personIds={[id]} className="btn-secondary btn-sm" /> : null}<Link href={`/people/${id}?tab=sequences`} className="btn-ghost btn-sm">View history</Link></span>}>
+                <Card title={memberships.some((m) => m.kind !== 'finished') || !memberships.length ? 'Campaigns' : 'Last campaign'} actions={<span className="flex items-center gap-2">{mayChangeCampaignPeople(user) ? <AddToCampaign personIds={[id]} className="btn-secondary btn-sm" /> : null}<Link href={`/people/${id}?tab=sequences`} className="btn-ghost btn-sm">View history</Link></span>}>
                   {memberships.length ? <div className="divide-y divide-line">{memberships.filter((m) => m.kind !== 'finished').concat(memberships.filter((m) => m.kind === 'finished').slice(0, 1)).map((m) => {
                     const label = membershipLabel(m);
                     return <div key={`${m.campaignId}-${m.enrollmentId ?? 'soon'}`} className="flex flex-wrap items-center justify-between gap-3 p-4">
@@ -279,7 +278,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                         <div className="font-medium text-ink-900"><Link href={`/campaigns/${m.campaignId}`} className="hover:text-brand-700 hover:underline">{m.campaignName}</Link></div>
                         <div className="mt-1 text-[12.5px] text-ink-500"><Link href={`/sequences/${m.sequenceId}`} className="text-brand-700">{m.sequenceName}</Link>{m.step !== null ? ` · step ${m.step + 1} of ${m.steps}` : m.kind === 'upcoming' ? ` · starts ${formatLocalDate(m.startDate)}` : ''}{m.endDate ? ` · ends ${formatLocalDate(m.endDate)}` : ''}</div>
                       </div>
-                      <div className="flex items-center gap-2"><Badge tone={label.tone}>{label.label}</Badge>{m.kind !== 'finished' && canChangeCampaignMembers(user, m.podId) ? <RemoveFromCampaign campaignId={m.campaignId} campaignName={m.campaignName} personIds={[id]} className="btn-ghost btn-sm" /> : null}</div>
+                      <div className="flex items-center gap-2"><Badge tone={label.tone}>{label.label}</Badge>{m.kind !== 'finished' && canChangeCampaignPeople(user, { podId: m.podId, foIds: m.foIds, podWide: m.podWide }) ? <RemoveFromCampaign campaignId={m.campaignId} campaignName={m.campaignName} personIds={[id]} className="btn-ghost btn-sm" /> : null}</div>
                     </div>;
                   })}</div> : <div className="p-4 text-sm text-ink-500">Never in a campaign</div>}
                 </Card>

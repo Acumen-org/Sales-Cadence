@@ -33,8 +33,6 @@ export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', lab
 
   const add = (campaignId: string) =>
     start(async () => {
-      const choice = choices?.find(c => c.id === campaignId);
-      if (choice?.calendar) { try { router.push(campaignSelectionUrl(`/campaigns/${campaignId}/edit`, personIds)); } catch { setError('Your browser could not retain this selection. Open the campaign and select people there.'); } return; }
 
       const fd = new FormData();
       fd.set('campaignId', campaignId);
@@ -73,9 +71,9 @@ export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', lab
                         </div>
                         <div className="mt-0.5 text-[12px] text-ink-500">{c.podName} · {c.startDate}{c.endDate ? ` → ${c.endDate}` : ''} · <Count value={c.members} /> in it{c.placesLeft !== null ? <> · <span className={full ? 'text-red-700' : ''}><Count value={c.placesLeft} /> places left</span></> : null}</div>
                       </div>
-                      <button type="button" className="btn-secondary btn-sm" disabled={pending || full || (c.calendar && c.kind === 'running')} onClick={() => add(c.id)} title={full ? 'Not enough room before the end date' : c.calendar && c.kind === 'running' ? 'Active campaign plans are locked' : undefined}>
-                        {c.calendar ? c.kind === 'running' ? 'Plan locked' : 'Add and review' : 'Add'}
-                      </button>
+                      {c.calendar && c.kind === 'running' ? <span className="text-[12.5px] text-ink-500">Started</span> : <button type="button" className="btn-secondary btn-sm" disabled={pending || full} onClick={() => add(c.id)} title={full ? 'Not enough room before the end date' : undefined}>
+                        Add
+                      </button>}
                     </li>
                   );
                 })}
@@ -104,7 +102,7 @@ export function RemoveFromCampaign({ campaignId, campaignName, personIds, classN
         className={className}
         disabled={pending || !personIds.length}
         onClick={() => {
-          if (!window.confirm(`Remove ${personIds.length} ${personIds.length === 1 ? 'person' : 'people'} from ${campaignName}? Anyone mid-sequence stops there.`)) return;
+          if (!window.confirm(`Remove ${personIds.length} ${personIds.length === 1 ? 'person' : 'people'} from ${campaignName}? Their outreach stops.`)) return;
           start(async () => {
             const fd = new FormData();
             fd.set('campaignId', campaignId);
@@ -137,7 +135,7 @@ export function RemoveFromCampaigns({ people, className = 'btn-danger btn-sm', o
         className={className}
         disabled={pending || !people.length}
         onClick={() => {
-          if (!window.confirm(`Remove ${people.length} ${people.length === 1 ? 'person' : 'people'} from ${names.length === 1 ? names[0] : `${names.length} campaigns`}? Anyone mid-sequence stops there.`)) return;
+          if (!window.confirm(`Remove ${people.length} ${people.length === 1 ? 'person' : 'people'} from ${names.length === 1 ? names[0] : `${names.length} campaigns`}? Their outreach stops.`)) return;
           start(async () => {
             const results: string[] = [];
             let failed = false;
@@ -149,7 +147,9 @@ export function RemoveFromCampaigns({ people, className = 'btn-danger btn-sm', o
               if (r.ok) results.push(r.message ?? 'Done.'); else { failed = true; results.push(r.error); }
             }
             setMessage({ ok: !failed, text: results.join(' ') });
-            if (!failed) { router.refresh(); onDone?.(results.join(' ')); }
+            // Whatever went through shows at once, even when another campaign refused.
+            router.refresh();
+            if (!failed) onDone?.(results.join(' '));
           });
         }}
       >

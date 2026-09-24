@@ -3,10 +3,15 @@ import { PlannedCampaignDetail } from '@/components/campaigns/planned-campaign-d
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
-import { canManageCampaigns, canApproveCampaign, canSeeAllPods } from '@/lib/auth/rbac';
+import { canManageCampaigns, canApproveCampaign, canDeleteCampaign, canSeeAllPods } from '@/lib/auth/rbac';
 import { campaignDetail, touchesPerPerson } from '@/lib/campaigns-query';
+import { campaignPeoplePage } from '@/lib/campaign-people-page';
+import { addFoCandidates, addFoWindow } from '@/lib/campaign-add-fo';
+import { AddFoPanel } from '@/components/campaigns/add-fo-panel';
+import type { CampaignDraft } from '@/lib/campaign-planner';
 import { prisma } from '@/lib/db';
 import { addDays, diffDays, formatLocalDate, todayIn } from '@/lib/dates';
+import { workspaceTimezone } from '@/lib/workspace';
 import { cachedPersonName } from '@/lib/person-cache';
 import { planCampaignCapacity } from '@/lib/engine/capacity';
 import { previewEnrollment, type EnrollConflict } from '@/lib/engine/enrollment';
@@ -35,10 +40,14 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
   if (!canSeeAllPods(user) && !user.podIds.includes(campaign.podId)) redirect('/campaigns');
   const manager = canManageCampaigns(user, campaign.podId);
   if (campaign.plannerDraft) {
-    const rows = await prisma.enrollment.findMany({ where: { campaignId: id }, include: { person: true, fo: true, tasks: true }, orderBy: { startDate: 'asc' } });
+    const people = await campaignPeoplePage(campaign, sp.page, sp.q);
+    // On the start day of a running campaign, the pod's leaders can still bring in a new FO.
+    // Rendered all start day, even once nobody is left to add, so the last "joined" message stays.
+    const joinable = manager && addFoWindow(campaign).open ? await addFoCandidates(id) : null;
+    const addFo = joinable ? <AddFoPanel campaignId={id} campaignName={campaign.name} podId={campaign.podId} candidates={joinable.map((f) => ({ id: f.id, name: f.name }))} defaultPace={(campaign.plannerDraft as unknown as CampaignDraft).defaultBatchSize || 10} today={todayIn(workspaceTimezone())} /> : undefined;
     const failed = campaign.status === 'SCHEDULED' ? await prisma.auditLog.findFirst({ where: { entityType: 'campaign', entityId: id, action: 'launch_failed' }, orderBy: { createdAt: 'desc' } }) : null;
     const launchError = failed?.details && typeof failed.details === 'object' && 'error' in failed.details ? String(failed.details.error) : null;
-    return <PlannedCampaignDetail admin={user.role === 'ADMIN'} campaign={campaign} manager={manager} enrollments={rows} launchError={launchError} />;
+    return <PlannedCampaignDetail canDelete={canDeleteCampaign(user, { status: campaign.status, podId: campaign.podId, everLaunched: people.launched })} campaign={campaign} manager={manager} people={people} q={sp.q ?? ''} launchError={launchError} addFo={addFo} />;
   }
   const proposed = ['PENDING_APPROVAL', 'SCHEDULED', 'DRAFT'].includes(campaign.status);
   const page = Math.max(1, Number.parseInt(sp.page ?? '1', 10) || 1);
@@ -93,7 +102,7 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
         icon={<IconCampaigns size={20} />}
         sub={<span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]"><span>{campaign.pod.name}</span><span className="text-ink-300">·</span><Link href={`/sequences/${campaign.sequenceId}`} className="text-brand-700 hover:underline">{campaign.sequence.name}</Link>{campaign.productInterest.length ? <><span className="text-ink-300">·</span><span>{campaign.productInterest.map(optionLabel).join(', ')}</span></> : null}</span>}
         badges={<><Badge tone={CAMPAIGN_TONE[campaign.status] ?? 'gray'}>{campaignStatusLabel(campaign.status)}</Badge>{ranOver ? <Badge tone="amber">{ranOver} ran over</Badge> : null}{campaign.hardStopAtEnd ? <Badge tone="gray">Stops at end date</Badge> : null}</>}
-        actions={<>{manager && ['DRAFT','SCHEDULED','PENDING_APPROVAL'].includes(campaign.status) && !history.length && <Link href={`/campaigns/${id}/edit`} className="btn-primary">Edit campaign</Link>}{manager && <CampaignLifecycle campaignId={id} status={campaign.status} canApprove={canApproveCampaign(user, campaign.podId)} />}{user.role === 'ADMIN' && ['STOPPED', 'COMPLETED', 'DRAFT'].includes(campaign.status) && <DeleteCampaign id={id} name={campaign.name} />}<Link href="/campaigns" className="btn-ghost btn-sm">All campaigns</Link></>}
+        actions={<>{manager && ['DRAFT','SCHEDULED','PENDING_APPROVAL'].includes(campaign.status) && !history.length && <Link href={`/campaigns/${id}/edit`} className="btn-primary">Edit campaign</Link>}{manager && <CampaignLifecycle campaignId={id} status={campaign.status} canApprove={canApproveCampaign(user, campaign.podId)} />}{canDeleteCampaign(user, { status: campaign.status, podId: campaign.podId, everLaunched: history.length > 0 }) && <DeleteCampaign id={id} name={campaign.name} simple={!history.length && ['DRAFT', 'PENDING_APPROVAL'].includes(campaign.status)} />}<Link href="/campaigns" className="btn-ghost btn-sm">All campaigns</Link></>}
       />
 
       {/* The window. */}

@@ -41,7 +41,7 @@ export type PickerFilters = z.infer<typeof Filters>;
 export type PickerRow = { ineligibleReason?: string; id: string; name: string; company: string | null; title: string | null; pod: string | null; tier: string | null; state: 'In a campaign' | 'Replied' | 'Finished' | 'Never in a campaign' | 'Do not contact' };
 
 /** A page of the picker. Not exported: a "use server" module may only export async functions; the response carries it. */
-const PICKER_PAGE = 100;
+const PICKER_PAGE = 50;
 
 async function campaignContext(f: PickerFilters, user: Awaited<ReturnType<typeof requireUser>>) {
   if (!f.campaignPodId) return undefined;

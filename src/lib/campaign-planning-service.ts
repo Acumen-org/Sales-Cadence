@@ -6,7 +6,7 @@ import { canManageCampaigns, canApproveCampaign, ROLES_NEEDING_POD } from './aut
 import { campaignAudienceIssues, type AudienceIssueKind } from './campaign-audience';
 import { cachedPersonName } from './person-cache';
 import { cleanRichText } from './rich-text';
-import { CampaignDraftSaveSchema, CampaignDraftSchema, calendarDays, dateRangeLabel, outreachIsAutomatic, shortDateLabel, suggestCampaignCalendar, type CalendarSuggestion, type CampaignDraft, type CampaignCalendar, type PlanIssue, type PlannerPerson } from './campaign-planner';
+import { CampaignDraftSaveSchema, CampaignDraftSchema, calendarDays, dateRangeLabel, outreachIsAutomatic, shortDateLabel, spacingInWords, suggestCampaignCalendar, type CalendarSuggestion, type CampaignDraft, type CampaignCalendar, type PlanIssue, type PlannerPerson } from './campaign-planner';
 import { fitCampaign, isFit, type CampaignFit, type FitPace, type FitProblem } from './campaign-fit';
 import { outreachRecipe } from './campaign-starter';
 import { logAudit, userActor } from './audit';
@@ -38,8 +38,7 @@ export type CampaignPlan = {
 export const nameList = (names: string[]) => names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-/** How often steps go out, in words: "one each working day", "one a week", "one every 3 days". */
-export const spacingInWords = (gap: number) => gap === 1 ? 'one each working day' : gap === 7 ? 'one a week' : gap % 7 === 0 ? `one every ${gap / 7} weeks` : `one every ${gap} days`;
+export { spacingInWords } from './campaign-planner';
 
 /** What a built outreach sends, in words ("2 steps, one a week"), grouped by the FOs who send the same. */
 export function outreachInWords(draft: Pick<CampaignDraft, 'flows' | 'fos'>, fos: { id: string; name: string }[]) {
@@ -62,10 +61,10 @@ export const calendarFingerprint = (draft: CampaignDraft, calendar: CampaignCale
  * `fitCampaign`. Only a plan the planner cannot make at all comes back invalid, with its issues and
  * suggestions verified the same way.
  */
-export async function planCampaign(input: unknown, user: SessionUser, campaignId: string | undefined, options: { reshapeOutreach: boolean; forPublish?: boolean }, db: Tx = prisma): Promise<CampaignPlan> {
+export async function planCampaign(input: unknown, user: SessionUser, campaignId: string | undefined, options: { reshapeOutreach: boolean; forPublish?: boolean; /** The caller checked who may change this campaign's people. */ authorized?: boolean }, db: Tx = prisma): Promise<CampaignPlan> {
   const intent = CampaignDraftSchema.parse(input);
   if (intent.productInterest.some(p => !(defaultTwentySchema.personValues.productInterest as readonly string[]).includes(p))) throw new Error('Choose an available product.');
-  if (!canManageCampaigns(user, intent.podId)) throw new Error('You cannot manage campaigns for this pod.');
+  if (!options.authorized && !canManageCampaigns(user, intent.podId)) throw new Error('You cannot manage campaigns for this pod.');
   const pod = await db.pod.findUnique({ where: { id: intent.podId } });
   if (!pod || pod.archived) throw new Error('Choose an available pod.');
   const fos = await db.user.findMany({ where: { id: { in: intent.fos.map(f => f.id) }, active: true, role: { in: ROLES_NEEDING_POD }, pods: { some: { podId: pod.id } } }, select: { id: true, name: true, twentyMemberId: true }, orderBy: { id: 'asc' } });
@@ -276,3 +275,44 @@ export async function saveCampaignCalendar(input: unknown, user: SessionUser, op
     return campaign;
   }, { timeout: 60000 });
 }
+
+export type Replanned = { outcome: 'republished' | 'withdrawn'; plan: CampaignPlan | null; reason: string | null };
+
+/**
+ * A scheduled campaign whose people changed from People: planned again the way its owner planned
+ * it, and published in place when the plan still holds, so nobody has to review it again just to
+ * keep it starting. When it cannot hold - or a follow-up needs an approval the person making the
+ * change cannot give - it goes back for review with the change kept in the request. The caller
+ * has already checked that this person may change the campaign's people.
+ */
+export async function replanScheduledCampaign(id: string, change: (request: CampaignDraft) => CampaignDraft, user: SessionUser, reason: 'people_added' | 'people_removed'): Promise<Replanned> {
+  const initial = await prisma.campaign.findUniqueOrThrow({ where: { id } });
+  const firstLook = initial.plannerDraft as unknown as CampaignDraft & { request?: CampaignDraft };
+  const companies = await prisma.personCache.findMany({ where: { id: { in: change(firstLook.request ?? firstLook).personIds } }, select: { companyId: true } });
+  return prisma.$transaction(async tx => {
+    await lockAccounts(tx, companies.map(p => p.companyId));
+    await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext('campaign-planner-publication'))`;
+    await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`campaign:${id}`}))`;
+    const existing = await tx.campaign.findUniqueOrThrow({ where: { id } });
+    if (existing.status !== 'SCHEDULED' || await tx.enrollment.count({ where: { campaignId: id } })) throw new Error('This campaign has started. Refresh and try again.');
+    const saved = existing.plannerDraft as unknown as CampaignDraft & { request?: CampaignDraft; sequenceIds?: Record<string, string> };
+    const request = CampaignDraftSchema.parse(change(CampaignDraftSchema.parse(saved.request ?? saved)));
+    const approvable = !existing.followupSourceId || canApproveCampaign(user, existing.podId);
+    const plan = request.startDate >= todayIn(workspaceTimezone()) ? await planCampaign(request, user, id, { reshapeOutreach: outreachIsAutomatic(request, id), forPublish: true, authorized: true }, tx) : null;
+    if (plan?.calendar.valid && approvable) {
+      const d = plan.draft;
+      const sequenceIds = await saveFlows(tx, d.flows, existing.plannerDraft);
+      await tx.campaign.update({ where: { id }, data: { personIds: d.personIds, startsPerFoPerDay: d.defaultBatchSize, sequenceId: sequenceIds.default, plannerDraft: json({ ...d, sequenceIds, request }), publishedPlan: json({ ...plan.calendar, sequenceIds }) } });
+      await dropStaleFlows(tx, existing.plannerDraft, sequenceIds);
+      await logAudit({ entityType: 'campaign', entityId: id, action: 'calendar_republished', actor: userActor(user), details: { reason, people: d.personIds.length, leftOut: plan.leftOut.length } }, tx);
+      return { outcome: 'republished', plan, reason: null };
+    }
+    // Back for review, the change kept: the editor opens the request, and the draft it came from
+    // says the same, so nothing still lists who was taken out.
+    await tx.campaign.update({ where: { id }, data: { personIds: request.personIds, plannerDraft: json({ ...saved, ...change(saved), sequenceIds: saved.sequenceIds, request }), publishedPlan: Prisma.DbNull, approvedAt: null, approvedById: null, status: existing.followupSourceId ? 'PENDING_APPROVAL' : 'DRAFT' } });
+    await logAudit({ entityType: 'campaign', entityId: id, action: reason, actor: userActor(user), details: { calendarNeedsReview: true } }, tx);
+    const why = !approvable ? 'a follow-up needs a Sales Leader or Pod Manager to approve its new plan' : plan ? plan.calendar.issues[0]?.title ?? 'the plan no longer holds' : 'its start date has passed';
+    return { outcome: 'withdrawn', plan, reason: why };
+  }, { timeout: 60000 });
+}
+

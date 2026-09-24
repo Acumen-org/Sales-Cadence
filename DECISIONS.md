@@ -860,3 +860,58 @@ Enrichment and Reports to be streamlined, with anything useless removed or repla
   held at 0%, the scorecard is quiet where complete and opens the records missing a field from any
   shaded cell, and the identical Synced column is gone.
 
+## Draft deletion, who changes a campaign's people, and a new FO on the start day (24 September 2026)
+
+The owner could not delete a draft (JJJ) on the hosted site, saw the Upcoming row cut off on the
+right, asked for the dots on the whole calendar rather than on each day with the canvas colour
+kept, for a dropdown with All FOs as the default so the calendar works for any number of FOs, for
+50 people a page on a campaign, for Any priority to go with Any tier moved to the first row, and to
+see only the contacts selected (filters back to default). Then two changes to campaign core, asked
+for explicitly: "I should also be able to add new FOs to a running campaign. I cannot alter
+anything to existing FOs ... This can only be done on the start day", and "Only FOs who are in the
+campaign can [add or remove its people] and the sales leader and pod admin of that pod. Admin of
+course can do anything."
+
+- Deleting: a draft or one waiting for approval can be deleted by the pod's leaders (Senior FO,
+  Sales Leader, Pod Manager) as well as admins, if it never ran. Anything published, stopped,
+  completed or run before stays admin-only, and only a stopped or completed one can go. A draft that
+  never ran asks once ("Delete JJJ?"); a campaign with history still asks for its name. Deleting a
+  campaign removes its own private outreach but never a library sequence: before this, a library
+  sequence no other campaign used was deleted with it.
+- The Upcoming row was cut off because the tabs keyed their column widths by the width itself;
+  two equal widths shared a key and React kept stale columns when the tab changed.
+- Calendar: one dotted field under the whole grid, day cells transparent on it, weekends and days
+  outside the campaign slightly shaded, the colour unchanged. A dropdown opens on All FOs: each day
+  lists its FOs as plain rows with how many people they reach, in the dropdown's order every day so a
+  row belongs to one FO; up to eight all show, a bigger team shows seven and "+N more FOs". Choosing
+  one opens that FO's calendar with its batch cards. With more than four FOs the studio's pace line
+  is a range ("1–5 across 7 FOs") that opens to each FO's pace.
+- A campaign's page lists people 50 at a time, with search, whatever its state; the studio's people
+  list is 50 a page too. Counts at the top are read from the database, not by loading every
+  enrollment. Before launch the page shows no empty stats; the follow-up form waits until someone
+  has finished their outreach.
+- Picker: no Priority filter; Tier sits in the first row next to MIP. "N selected" shows only the
+  people selected, with every filter and the search back to default; unticking one there takes them
+  out, and clearing the selection returns to everyone.
+- Who changes a campaign's people from People: the FOs on it (its plan's team and anyone running
+  one of its enrollments), its pod's Sales Leader and Pod Manager, and admins. A Senior FO of the pod
+  who is not on it cannot, nor can Biz Ops. A campaign made before the studio has no team of its
+  own until it runs, so its pod's FOs keep the rule they had; once it runs, its FOs are the ones
+  running it. Remove on People is offered only for campaigns the user may change. People offers Add and Remove only to roles that can
+  ever use them, and the campaign list in Add only holds campaigns the user may change.
+- A studio campaign takes people until it starts. A draft grows its audience; a scheduled one is
+  planned again and published in place, and goes back to draft only when the plan no longer holds
+  (or a follow-up would need an approver). Who cannot be in it is skipped, with the reason. Once it
+  runs its plan is fixed: taking someone out ends their outreach, and nobody new joins from People.
+- A new FO on the start day, from the campaign page, by the pod's leaders or an admin. Pick an FO of
+  the pod not on it yet, a pace, and their people; the part is planned on its own under the same
+  rules as every FO's (something each working day, whole journeys by the end date) and shown before
+  anything is written. It uses the campaign's outreach; only when that cannot fill the FO's days and
+  the studio built it does the FO get an outreach group of their own. Applying plans again inside
+  one transaction under the locks publishing and launch use, and refuses if anything moved since the
+  review. Existing FOs' batches, outreach, enrollments and tasks are never touched; only the new
+  people are enrolled, and their first steps are on today's list at once. The option is open from
+  the start date through the first working day (a campaign dated from a Saturday takes an FO on
+  Monday too), not for follow-ups, and gone after that. Several FOs can join the same day, one after
+  another or at once.
+

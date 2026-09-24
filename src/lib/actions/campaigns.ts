@@ -8,7 +8,8 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '../db';
 import { requireUser, toActor } from '../auth/current-user';
-import { canApproveCampaign, canChangeCampaignMembers, canManageCampaigns } from '../auth/rbac';
+import { canApproveCampaign, canChangeCampaignPeople, canManageCampaigns } from '../auth/rbac';
+import { addPeopleToCalendarCampaign, campaignTeam, removePeopleFromUpcomingCalendar } from '../campaign-people';
 import { logAudit, userActor } from '../audit';
 import { parsePersonIds } from '../csv';
 import { isLocalDate, todayIn } from '../dates';
@@ -300,9 +301,13 @@ export async function addPeopleToCampaignAction(formData: FormData): Promise<Act
   if (!ids.length) return { ok: false, error: 'Choose at least one person.' };
   const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
   if (!campaign) return { ok: false, error: 'Campaign not found.' };
-  if (campaign.plannerDraft) return { ok: false, error: 'Open the campaign editor to review and publish a complete calendar. Active campaign plans are locked.' };
-  if (!canChangeCampaignMembers(user, campaign.podId)) return { ok: false, error: 'You cannot change who is in this campaign.' };
+  if (!canChangeCampaignPeople(user, await campaignTeam(campaign))) return { ok: false, error: 'Only the FOs on this campaign, its pod\'s Sales Leader and Pod Manager, and admins can change who is in it.' };
   try {
+    if (campaign.plannerDraft) {
+      const r = await addPeopleToCalendarCampaign(user, campaign, ids);
+      if (r.ok) refreshCampaign(campaignId);
+      return r;
+    }
     if (['DRAFT', 'PENDING_APPROVAL', 'SCHEDULED'].includes(campaign.status)) {
       // The same check launch will run, so somebody promised elsewhere, do-not-contact or in
       // another pod is refused now, by name, rather than skipped silently on the day.
@@ -349,8 +354,13 @@ export async function removePeopleFromCampaignAction(formData: FormData): Promis
   if (!ids.length) return { ok: false, error: 'Choose at least one person.' };
   const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
   if (!campaign) return { ok: false, error: 'Campaign not found.' };
-  if (!canChangeCampaignMembers(user, campaign.podId)) return { ok: false, error: 'You cannot change who is in this campaign.' };
+  if (!canChangeCampaignPeople(user, await campaignTeam(campaign))) return { ok: false, error: 'Only the FOs on this campaign, its pod\'s Sales Leader and Pod Manager, and admins can change who is in it.' };
   try {
+    if (campaign.plannerDraft && ['DRAFT', 'SCHEDULED', 'PENDING_APPROVAL'].includes(campaign.status) && !(await prisma.enrollment.count({ where: { campaignId } }))) {
+      const r = await removePeopleFromUpcomingCalendar(user, campaign, ids);
+      if (r.ok) refreshCampaign(campaignId);
+      return r;
+    }
     if (campaign.plannerDraft && ['DRAFT', 'SCHEDULED', 'PENDING_APPROVAL'].includes(campaign.status)) {
       const removed = await prisma.$transaction(async tx => {
         await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext('campaign-planner-publication'))`;

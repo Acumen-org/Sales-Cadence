@@ -2,7 +2,7 @@ import { sortDirection } from '@/lib/sorting';
 import { personTagOptions } from '@/lib/people-options';
 import { peopleWithoutAccountWhere } from '@/lib/accounts-query';
 import { PageFrame } from '@/components/page-frame';
-import { needsPod } from '@/lib/auth/rbac';
+import { canChangeCampaignPeople, mayChangeCampaignPeople, needsPod } from '@/lib/auth/rbac';
 import Link from 'next/link';
 import { personSearchWhere } from '@/lib/search-terms';
 import { filterParam, sectionDefaults } from '@/lib/default-filters';
@@ -172,7 +172,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
           : null,
       dnd: p.dnd,
       optedOut: p.optedOut,
-      campaign: shown && shownLabel ? { id: shown.campaignId, name: shown.campaignName, label: shownLabel.label, tone: shownLabel.tone } : null,
+      campaign: shown && shownLabel ? { id: shown.campaignId, name: shown.campaignName, label: shownLabel.label, tone: shownLabel.tone, canRemove: canChangeCampaignPeople(user, shown) } : null,
       inCampaign: Boolean(shown && shown.kind !== 'finished'),
       mip: isMip(p.tags),
       stars: stars.get(p.id) ?? 0,
@@ -216,7 +216,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
         {rows.length === 0 ? (
           <EmptyState icon={<IconPeople size={20} />} title="No people match" hint="Adjust the filters to find a contact." />
         ) : (
-          <PeopleTable rows={rows} />
+          <PeopleTable rows={rows} canMove={mayChangeCampaignPeople(user)} />
         )}
       </Surface>
 

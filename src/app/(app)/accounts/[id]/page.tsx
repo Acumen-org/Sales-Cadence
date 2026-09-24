@@ -360,7 +360,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
             ) : (
               <div className="overflow-x-auto scroll-thin">
                 <table className="table table-dense w-full table-fixed">
-                  <colgroup>{['40%', '20%', '16%', '12%', '12%'].map((w) => <col key={w} style={{ width: w }} />)}</colgroup>
+                  <colgroup>{['40%', '20%', '16%', '12%', '12%'].map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
                   <thead><tr><th>Meeting</th><th>When</th><th>Attendees</th><th>Transcript</th><th>Length</th></tr></thead>
                   <tbody>
                     {meetings.map((m) => <tr key={m.id}>

@@ -5,7 +5,6 @@ import { pickAllIdsAction, pickPeopleAction, pickerOptionsAction, type PickerFil
 import { IconFilter, IconSearch } from '@/components/icons';
 import { Badge, Count, TierBadge } from '@/components/ui';
 import { optionLabel } from '@/lib/twenty/labels';
-import { PRIORITY_LABELS } from '@/lib/campaign-planner';
 
 type Props = { campaignPodId?: string; campaignFoIds?: string[]; campaignId?: string; value: string[]; onChange: (ids: string[]) => void; withinIds?: string[]; initialPod?: string; disabledIds?: string[]; disabledReason?: string };
 
@@ -24,8 +23,12 @@ export function PeoplePicker({ campaignPodId, campaignFoIds, campaignId, value, 
   latest.current = value;
   const [options, setOptions] = useState<PickerOptions | null>(null);
   const [showMore, setShowMore] = useState(false);
-  const [filters, setFilters] = useState<PickerFilters>({ q: '', pod: initialPod ?? '', fo: '', product: '', tier: '', type: '', tag: '', account: '', state: 'any', priority: [], mip: false, page: 1 });
-  const moreCount = [filters.tier, filters.type, filters.product, filters.tag].filter(Boolean).length;
+  const blank = (pod: string): PickerFilters => ({ q: '', pod, fo: '', product: '', tier: '', type: '', tag: '', account: '', state: 'any', priority: [], mip: false, page: 1 });
+  const [filters, setFilters] = useState<PickerFilters>(() => blank(initialPod ?? ''));
+  // "Selected" shows exactly who is chosen, whatever filters found them: the filters start again from nothing.
+  const [onlySelected, setOnlySelected] = useState(false);
+  const selectedKey = onlySelected ? JSON.stringify(value) : '';
+  const moreCount = [filters.type, filters.product, filters.tag].filter(Boolean).length;
   const [text, setText] = useState('');
   const [rows, setRows] = useState<PickerRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -42,16 +45,20 @@ export function PeoplePicker({ campaignPodId, campaignFoIds, campaignId, value, 
     return () => clearTimeout(t);
   }, [text]);
 
+  useEffect(() => { if (onlySelected && !value.length) { setOnlySelected(false); setFilters(blank(initialPod ?? '')); } }, [onlySelected, value.length, initialPod]);
+  const scope = onlySelected ? (selectedKey ? (JSON.parse(selectedKey) as string[]).filter((id) => !withinIds || withinIds.includes(id)) : []) : withinIds;
   useEffect(() => {
     const id = ++request.current;
     start(async () => {
-      const r = await pickPeopleAction({ ...filters, withinIds, campaignPodId, campaignFoIds: JSON.parse(foKey), campaignId });
+      const r = await pickPeopleAction({ ...filters, withinIds: scope, campaignPodId, campaignFoIds: JSON.parse(foKey), campaignId });
       // An older answer arriving after a newer one is dropped.
       if (id !== request.current) return;
       if (r.ok) { setRows(r.rows); setTotal(r.total); setPageSize(r.pageSize); setError(null); }
       else setError(r.error);
     });
-  }, [filters, withinIds, campaignPodId, foKey, campaignId]);
+    // scope is derived from withinIds and the selection (selectedKey) listed here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters, withinIds, selectedKey, campaignPodId, foKey, campaignId]);
 
   const set = (patch: Partial<PickerFilters>) => setFilters((f) => ({ ...f, ...patch, page: patch.page ?? 1 }));
   const selected = new Set(value);
@@ -106,13 +113,12 @@ export function PeoplePicker({ campaignPodId, campaignFoIds, campaignId, value, 
               <option value="enrolled">In a campaign</option>
               <option value="any">Any campaign state</option>
             </select>
-            <button type="button" onClick={() => set({ mip: !filters.mip })} aria-pressed={filters.mip} className={filters.mip ? 'chip' : 'chip-muted !border !border-line'} title="Most-important people, as well as any priority picked">MIP</button>
-            <PriorityFilter value={filters.priority} mip={filters.mip} onChange={priority => set({ priority })} />
+            {filterSelect({ name: 'tier', label: 'Filter by tier', all: 'Any tier', items: options.tiers.map((t) => ({ value: t, label: optionLabel(t) })) })}
+            <button type="button" onClick={() => set({ mip: !filters.mip })} aria-pressed={filters.mip} className={filters.mip ? 'chip' : 'chip-muted !border !border-line'} title="Most-important people">MIP</button>
             <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} className={`btn-secondary btn-sm ${showMore || moreCount ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
               <IconFilter size={14} /> Filters{moreCount ? <span className="ml-1 tabular-nums">{moreCount}</span> : null}
             </button>
             {showMore || moreCount ? <div className="flex w-full flex-wrap items-center gap-2 rounded-[10px] border border-line bg-canvas/70 p-2">
-              {filterSelect({ name: 'tier', label: 'Filter by tier', all: 'Any tier', items: options.tiers.map((t) => ({ value: t, label: optionLabel(t) })) })}
               {filterSelect({ name: 'type', label: 'Filter by contact type', all: 'Any type', items: options.types.map((t) => ({ value: t, label: optionLabel(t) })) })}
               {filterSelect({ name: 'product', label: 'Filter by product', all: 'Any product', items: options.products.map((p) => ({ value: p, label: optionLabel(p) })) })}
               {options.tags.length ? filterSelect({ name: 'tag', label: 'Filter by Twenty tag', all: 'Any tag', items: options.tags.map((t) => ({ value: t, label: optionLabel(t) })) }) : null}
@@ -123,12 +129,14 @@ export function PeoplePicker({ campaignPodId, campaignFoIds, campaignId, value, 
 
       <div className="flex flex-wrap items-center gap-3 text-[12.5px] text-ink-600">
         <span><Count value={total} /> matching{total > 0 ? <span className="text-ink-400"> · {first.toLocaleString('en-US')}–{last.toLocaleString('en-US')}</span> : null}</span>
-        <button type="button" className="btn-secondary btn-sm" disabled={pending || selectingAll || total === 0} onClick={() => void selectAll()}>
+        {onlySelected ? <span className="font-medium text-ink-900">Showing the people you selected</span> : <button type="button" className="btn-secondary btn-sm" disabled={pending || selectingAll || total === 0} onClick={() => void selectAll()}>
           {selectingAll ? 'Selecting…' : 'Select all matching'}
-        </button>
+        </button>}
         {selectionNotice && <span role="status" className="text-ink-500">{selectionNotice}</span>}
         <span className="ml-auto flex items-center gap-2">
-          <span><Count value={value.length} /> selected</span>
+          {onlySelected
+            ? <button type="button" className="btn-secondary btn-sm" onClick={() => { setOnlySelected(false); setText(''); setFilters(blank(initialPod ?? '')); }}>Show everyone</button>
+            : <button type="button" className="btn-secondary btn-sm !text-ink-800" disabled={!value.length || value.length > 10000} title={value.length > 10000 ? 'Too many to list; narrow the selection to see it' : undefined} onClick={() => { setOnlySelected(true); setText(''); setFilters(blank('')); setSelectionNotice(''); setTotal(value.length); }}><Count value={value.length} /> selected</button>}
           {value.length ? <button type="button" className="btn-ghost btn-sm" onClick={() => onChange([])}>Clear selection</button> : null}
         </span>
       </div>
@@ -179,33 +187,3 @@ export function PeoplePicker({ campaignPodId, campaignFoIds, campaignId, value, 
   );
 }
 
-/** The planner's priority groups as one multi-choice control; a contact in any chosen group matches. MIP has its own switch, as on People. */
-function PriorityFilter({ value, mip, onChange }: { value: number[]; mip: boolean; onChange: (groups: number[]) => void }) {
-  const [open, setOpen] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: MouseEvent | KeyboardEvent) => { if (e instanceof KeyboardEvent ? e.key === 'Escape' : !box.current?.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener('mousedown', close); document.addEventListener('keydown', close);
-    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', close); };
-  }, [open]);
-  const label = value.length ? `${[...value].sort().map(g => PRIORITY_LABELS[g]).join(', ')}${mip ? ' + MIP' : ''}` : mip ? 'MIP only' : 'Any priority';
-  return (
-    <div ref={box} className="relative">
-      <button type="button" aria-haspopup="true" aria-expanded={open} aria-label="Filter by priority" onClick={() => setOpen(!open)} className={`btn-secondary btn-sm max-w-[240px] ${value.length ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
-        <span className="truncate">{label}</span>
-      </button>
-      {open ? (
-        <div role="group" aria-label="Priority" className="absolute left-0 top-full z-20 mt-1 w-48 rounded-[10px] border border-line bg-white p-1.5 shadow-lg">
-          {PRIORITY_LABELS.map((name, g) => g === 1 ? null : (
-            <label key={name} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-canvas">
-              <input type="checkbox" checked={value.includes(g)} onChange={() => onChange(value.includes(g) ? value.filter(x => x !== g) : [...value, g])} />
-              {name}
-            </label>
-          ))}
-          {value.length ? <button type="button" className="btn-ghost btn-sm mt-1 w-full justify-start" onClick={() => onChange([])}>Any priority</button> : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}

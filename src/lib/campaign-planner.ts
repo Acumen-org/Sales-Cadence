@@ -236,6 +236,9 @@ export function buildCampaignCalendar(draft: CampaignDraft, people: PlannerPerso
   return result;
 }
 
+/** How often steps go out, in words: "one each working day", "one a week", "one every 3 days". */
+export const spacingInWords = (gap: number) => gap === 1 ? 'one each working day' : gap === 7 ? 'one a week' : gap % 7 === 0 ? `one every ${gap / 7} weeks` : `one every ${gap} days`;
+
 const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
 /** "one", "two" ... "ten", then digits: how a person would say a small count of days. */
 export const numberInWords = (n: number) => NUMBER_WORDS[n] ?? String(n);

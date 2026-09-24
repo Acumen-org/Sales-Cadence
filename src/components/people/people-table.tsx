@@ -30,7 +30,7 @@ export type PeopleTableRow = {
   dnd: boolean;
   optedOut: boolean;
   /** The campaign this row shows: running first, then upcoming, then the latest finished. */
-  campaign: { id: string; name: string; label: string; tone: BadgeTone } | null;
+  campaign: { id: string; name: string; label: string; tone: BadgeTone; canRemove: boolean } | null;
   /** The sequence behind it, and where the person is in it. */
   sequence: { id: string; name: string; step: number | null; steps: number } | null;
   /** In an upcoming or running campaign right now. */
@@ -46,6 +46,8 @@ export type PeopleTableRow = {
 
 type Props = {
   rows: PeopleTableRow[];
+  /** Whether this reader may move people in or out of campaigns; Biz Ops only reads. */
+  canMove?: boolean;
 };
 
 function Tag({ value, field }: { value: string; field?: string }) {
@@ -55,7 +57,7 @@ function Tag({ value, field }: { value: string; field?: string }) {
 }
 
 /** The directory: CRM tags, the campaign and the sequence by name, and a selection to add to a campaign. */
-export function PeopleTable({ rows }: Props) {
+export function PeopleTable({ rows, canMove = true }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(null), 8000); return () => clearTimeout(timer); }, [notice]);
@@ -71,7 +73,7 @@ export function PeopleTable({ rows }: Props) {
     });
   const chosen = rows.filter(r => selected.has(r.id)).map(r => r.id);
   const chosenRows = rows.filter((r) => selected.has(r.id));
-  const inCampaigns = chosenRows.filter((r) => r.inCampaign && r.campaign).map((r) => ({ id: r.id, campaignId: r.campaign!.id, campaignName: r.campaign!.name }));
+  const inCampaigns = chosenRows.filter((r) => r.inCampaign && r.campaign?.canRemove).map((r) => ({ id: r.id, campaignId: r.campaign!.id, campaignName: r.campaign!.name }));
   const showNext = rows.some((p) => p.next?.action || p.next?.due);
 
   return (
@@ -80,8 +82,8 @@ export function PeopleTable({ rows }: Props) {
       {selected.size ? (
         <div className="flex flex-wrap items-center gap-3 border-y border-brand-100 bg-brand-50/70 px-4 py-2 text-[12.5px] text-brand-800">
           <span className="font-medium">{selected.size} selected</span>
-          <AddToCampaign personIds={chosenRows.filter(r => !r.inCampaign).map(r => r.id)} onDone={() => setSelected(new Set())} disabled={chosenRows.every((r) => r.inCampaign)} disabledTitle={chosenRows.every((r) => r.inCampaign) ? (chosen.length === 1 ? 'Already in a campaign' : 'Everyone chosen is already in a campaign') : undefined} />
-          <RemoveFromCampaigns people={inCampaigns} onDone={message => { setSelected(new Set()); setNotice(message ?? 'People removed from campaign.'); }} />
+          {canMove ? <><AddToCampaign personIds={chosenRows.filter(r => !r.inCampaign).map(r => r.id)} onDone={() => setSelected(new Set())} disabled={chosenRows.every((r) => r.inCampaign)} disabledTitle={chosenRows.every((r) => r.inCampaign) ? (chosen.length === 1 ? 'Already in a campaign' : 'Everyone chosen is already in a campaign') : undefined} />
+          <RemoveFromCampaigns people={inCampaigns} onDone={message => { setSelected(new Set()); setNotice(message ?? 'People removed from campaign.'); }} /></> : null}
           <button type="button" className="btn-ghost btn-sm" onClick={() => setSelected(new Set())}>
             Clear
           </button>

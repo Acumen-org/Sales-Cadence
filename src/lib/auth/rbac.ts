@@ -47,14 +47,18 @@ export function canManagePod(a: Actor, podId: string | null | undefined): boolea
 }
 
 /**
- * Who may put people into a campaign or take them out: everyone who works the pod - a junior as
- * much as the leader - plus admins. Biz Ops reads; it does not move people (owner, 19 September 2026).
+ * Who may put people into a campaign or take them out (owner, 24 September 2026): the FOs working
+ * that campaign, the Sales Leader and Pod Manager of its pod, and admins. Biz Ops reads; a Senior
+ * FO who is not on the campaign does not move its people.
  */
-export function canChangeCampaignMembers(a: Actor, podId: string | null | undefined): boolean {
+export function canChangeCampaignPeople(a: Actor, c: { podId: string | null | undefined; foIds: readonly string[]; /** A campaign from before the studio that has not run has no team of its own: everyone who works its pod, as it always was. */ podWide?: boolean }): boolean {
   if (isAdmin(a)) return true;
-  if (!podId) return false;
-  return needsPod(a.role) && a.podIds.includes(podId);
+  if ((isSalesLeader(a) || isPodManager(a)) && c.podId && a.podIds.includes(c.podId)) return true;
+  if (c.podWide) return needsPod(a.role) && !!c.podId && a.podIds.includes(c.podId);
+  return needsPod(a.role) && c.foIds.includes(a.id);
 }
+/** Whether this reader might change some campaign's people at all, for showing the controls. */
+export const mayChangeCampaignPeople = (a: Actor) => isAdmin(a) || needsPod(a.role);
 
 /** Pods whose reports and task lists this user may browse. Null = all pods, which is everyone now. */
 export function visiblePodIds(_a: Actor): string[] | null {
@@ -103,6 +107,15 @@ export const canManageUsers = (a: Actor) => isAdmin(a);
 export const canManageCampaigns = (a: Actor, podId?: string | null) => canEnroll(a, podId);
 /** Reports stay with the roles that run pods and the ones that oversee them. */
 export const canViewReports = (a: Actor) => isAdmin(a) || isBizOps(a) || isPodLeader(a);
+/**
+ * Who may erase a campaign. The pod's campaign managers may delete a draft (or one waiting for
+ * approval) that never put anyone in outreach; an admin may also erase one that was stopped or
+ * finished. A published or running campaign is stopped first; history is an admin's call.
+ */
+export function canDeleteCampaign(a: Actor, c: { status: string; podId: string | null; everLaunched: boolean }): boolean {
+  if (isAdmin(a)) return ['DRAFT', 'PENDING_APPROVAL', 'STOPPED', 'COMPLETED'].includes(c.status);
+  return canManageCampaigns(a, c.podId) && ['DRAFT', 'PENDING_APPROVAL'].includes(c.status) && !c.everLaunched;
+}
 export const canApproveCampaign = (a: Actor, podId: string | null) => isAdmin(a) || ((isSalesLeader(a) || isPodManager(a)) && canManagePod(a, podId));
 
 /** Junior FOs may snooze only to the next working day; others may pick a date. */
