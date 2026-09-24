@@ -819,3 +819,16 @@ per reason with every FO named, and offers verified fixes including Let the stud
 The rich-text editor no longer reports its own initial content as an edit (it had been marking the
 outreach edited the moment step 02 opened, which stopped it adapting to later date changes).
 
+## Plain words, the studio as the recommended fix, a real calendar (24 September 2026)
+
+The owner: "Let the studio set the outreach" leaves the outreach sidebar and gets a view of its own
+in Adjust this plan, "since it's like the studio doing the work for you"; everything the system
+writes back is in plain language ("Alyssa and Avani: no arrangement of this outreach covers every
+working day" and "Wait 1 day before step 2" were not clear even to the person who built it); step 03
+is a real Monday-to-Sunday calendar that copes with 31-day months; "Every working day covered" goes,
+since step 03 only opens when that is true; and a batch clicked and closed no longer leaves the
+others dimmed. The panel now names the problem, says the rule it breaks, offers the studio's outreach
+first with what it would send, then the small fixes, each checked; any applied fix has Undo. The
+calendar pages month by month and shows whole weeks; the dimming was replaced by a hover outline that
+cannot outlive the pointer.
+

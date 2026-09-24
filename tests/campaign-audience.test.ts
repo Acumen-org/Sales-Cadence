@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import type { SessionUser } from '@/lib/auth/current-user';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 import { campaignAudienceIssues } from '@/lib/campaign-audience';
-import { planCampaign, previewCampaignCalendar, saveCampaignCalendar } from '@/lib/campaign-planning-service';
+import { outreachInWords, planCampaign, previewCampaignCalendar, saveCampaignCalendar } from '@/lib/campaign-planning-service';
 import type { CampaignDraft } from '@/lib/campaign-planner';
 import { outreachRecipe } from '@/lib/campaign-starter';
 import { pickAllIdsAction, pickPeopleAction } from '@/lib/actions/people-picker';
@@ -34,10 +34,12 @@ describe('who a campaign can reach', () => {
     const context = { podId: b.pods.Alisa.id, podOwnerValue: 'ALISA', podName: 'Alisa', ownerMemberIds: [b.users.alisa.twentyMemberId!], checkOwners: true };
     const issues = await campaignAudienceIssues(['aud-1', 'dnd', 'optout', 'deleted', 'outside', 'karsons', 'andrews', 'seatless', 'missing'], context);
     const reason = Object.fromEntries(issues.map(i => [i.id, i.reason]));
-    expect(reason).toEqual({ dnd: 'Do not contact', optout: 'Opted out', deleted: 'No longer in Twenty', outside: 'Outside Alisa', karsons: `Owned by ${b.users.karson.name}`, andrews: `Owned by ${b.users.andrew.name}`, seatless: 'Owner has no Cadence seat', missing: 'No longer in Twenty' });
+    expect(reason).toEqual({ dnd: 'Do not contact', optout: 'Opted out', deleted: 'No longer in Twenty', outside: 'Not in the Alisa pod', karsons: `Owned by ${b.users.karson.name}`, andrews: `Owned by ${b.users.andrew.name}`, seatless: 'Owner is not a Cadence user', missing: 'No longer in Twenty' });
     // Karson works this pod and could be added; Andrew does not.
     expect(issues.find(i => i.id === 'karsons')?.ownerId).toBe(b.users.karson.id);
     expect(issues.find(i => i.id === 'andrews')?.ownerId).toBeUndefined();
+    // A pod named the way Twenty labels it is not called a pod twice.
+    expect((await campaignAudienceIssues(['outside'], { ...context, podName: "Alisa's pod" }))[0].reason).toBe("Not in Alisa's pod");
     // Before the team is chosen, ownership is not a reason yet.
     expect((await campaignAudienceIssues(['karsons'], { ...context, checkOwners: false }))).toEqual([]);
   });
@@ -68,7 +70,7 @@ describe('who a campaign can reach', () => {
     const stored = c.plannerDraft as unknown as CampaignDraft & { request: CampaignDraft };
     expect(stored.personIds).toEqual(ids); expect(stored.request.personIds).toEqual(intent.personIds);
     // Once published they are held: another new campaign leaves them out as busy.
-    expect((await planCampaign(intent, admin, undefined, { reshapeOutreach: true })).leftOut.find(l => l.id === 'aud-1')?.reason).toBe('In Audience');
+    expect((await planCampaign(intent, admin, undefined, { reshapeOutreach: true })).leftOut.find(l => l.id === 'aud-1')?.reason).toBe('Already in Audience');
   });
 
   it('fits the pace instead of refusing, and never moves the dates', async () => {
@@ -85,21 +87,37 @@ describe('who a campaign can reach', () => {
     await prisma.personCache.createMany({ data: many.map(id => ({ id, firstName: 'Aud', lastName: id, podOwner: 'ALISA', ownerMemberId: b.users.alisa.twentyMemberId })) });
     const plan = await planCampaign(draft({ personIds: [...ids, ...many], fos: [{ id: b.users.alisa.id, batchSize: 1 }, { id: b.users.karson.id, batchSize: 1 }] }), admin, undefined, { reshapeOutreach: true });
     expect(plan.calendar.valid).toBe(true);
-    expect(plan.droppedFos).toEqual([{ id: b.users.karson.id, name: b.users.karson.name, reason: 'no contacts in this audience' }]);
+    expect(plan.droppedFos).toEqual([{ id: b.users.karson.id, name: b.users.karson.name, reason: 'they own none of the people you picked' }]);
     expect(plan.leftOut).toEqual([]); expect(plan.draft.personIds).toHaveLength(16);
     expect(plan.paces).toEqual([{ foId: b.users.alisa.id, name: b.users.alisa.name, from: 1, to: 4 }]);
   });
 
-  it('names every FO an edited outreach cannot take, once, and offers the studio’s own outreach first', async () => {
+  it('says once, in plain words, why an edited outreach cannot take everyone, and offers the studio’s own outreach first', async () => {
     const karsons = Array.from({ length: 4 }, (_, i) => `aud-k${i}`);
     await prisma.personCache.createMany({ data: karsons.map(id => ({ id, firstName: 'Aud', lastName: id, podOwner: 'ALISA', ownerMemberId: b.users.karson.twentyMemberId })) });
     const spaced = [outreachRecipe(2)[0], { ...outreachRecipe(2)[1], day: 3 }];
     const plan = await planCampaign(draft({ personIds: [...ids, ...karsons], fos: [{ id: b.users.alisa.id, batchSize: 1 }, { id: b.users.karson.id, batchSize: 1 }], flows: [{ id: 'default', name: 'Default', steps: spaced }], outreachEdited: true }), admin, undefined, { reshapeOutreach: false });
     expect(plan.calendar.valid).toBe(false); expect(plan.stage).toBe('outreach');
     const names = [b.users.alisa.name, b.users.karson.name].sort((x, y) => plan.calendar.issues[0].title.indexOf(x) - plan.calendar.issues[0].title.indexOf(y));
-    expect(plan.calendar.issues).toEqual([{ title: `${names[0]} and ${names[1]}: no arrangement of this outreach covers every working day.`, detail: '' }]);
-    expect(plan.suggestions[0].label).toBe('Let the studio set the outreach');
+    expect(plan.calendar.issues).toEqual([{ title: `${names[0]} and ${names[1]} would have working days with nothing to send.`, detail: 'The waits between steps leave gaps. Every FO needs something to send each working day.', kind: 'search' }]);
+    expect(plan.suggestions[0]).toMatchObject({ label: 'Let the studio set the outreach', studio: true });
+    expect(plan.suggestions[0].detail).toMatch(/^(It sends \d+ steps?[^.]*\. All 8 people fit by Fri, Jan 8\.|(One step [^.]+\. )?All 8 people fit by Fri, Jan 8\. .+ sends? .+\.)$/);
     expect(plan.suggestions[0].draft.outreachEdited).toBe(false);
+  });
+
+  it('offers the studio outreach for a single person in the singular', async () => {
+    const spaced = [outreachRecipe(2)[0], { ...outreachRecipe(2)[1], day: 3 }];
+    const plan = await planCampaign(draft({ personIds: ['aud-1'], flows: [{ id: 'default', name: 'Default', steps: spaced }], outreachEdited: true }), admin, undefined, { reshapeOutreach: false });
+    expect(plan.calendar.valid).toBe(false);
+    expect(plan.calendar.issues[0]).toMatchObject({ kind: 'few', title: `${b.users.alisa.name} doesn't have enough people to fill every working day.` });
+    expect(plan.suggestions[0]).toMatchObject({ studio: true, detail: 'It sends 5 steps, one each working day. The 1 person fits by Fri, Jan 8.' });
+  });
+
+  it('describes a built outreach in words, per FO only when their outreach differs', () => {
+    const team = [{ id: 'a', name: 'Alyssa' }, { id: 'v', name: 'Avani' }], fos = team.map(f => ({ id: f.id, batchSize: 1 }));
+    expect(outreachInWords({ fos, flows: [{ id: 'default', name: 'Default', steps: outreachRecipe(2, 1) }] }, team)).toEqual([{ names: ['Alyssa', 'Avani'], text: '2 steps, one each working day', steps: '2 steps', spacing: 'one each working day' }]);
+    expect(outreachInWords({ fos, flows: [{ id: 'default', name: 'Default', steps: outreachRecipe(3, 2) }, { id: 'fo-v', name: 'For Avani', steps: outreachRecipe(1) }] }, team)).toEqual([{ names: ['Alyssa'], text: '3 steps, one every 2 days', steps: '3 steps', spacing: 'one every 2 days' }, { names: ['Avani'], text: '1 step', steps: '1 step', spacing: '' }]);
+    expect(outreachInWords({ fos, flows: [{ id: 'default', name: 'Default', steps: outreachRecipe(4, 7) }] }, team)).toEqual([{ names: ['Alyssa', 'Avani'], text: '4 steps, one a week', steps: '4 steps', spacing: 'one a week' }]);
   });
 
   it('keeps an unfinished draft, and autosaves without an audit line each time', async () => {

@@ -3,12 +3,13 @@ import { addDays, diffDays, isLocalDate } from './dates';
 import { StepsSchema, type SequenceStep } from './sequences/steps';
 
 const date = z.string().refine(isLocalDate, 'Choose a valid date.');
+const PACE_RANGE = 'New people a day must be a whole number from 1 to 500.';
 export const CampaignDraftSchema = z.object({
   name: z.string().trim().min(1, 'Name your campaign.').max(120),
   podId: z.string().min(1), startDate: date, endDate: date,
   productInterest: z.array(z.string().min(1)).min(1, 'Choose a product.'),
-  defaultBatchSize: z.number().int().min(1).max(500),
-  fos: z.array(z.object({ id: z.string().min(1), batchSize: z.number().int().min(1).max(500) })).min(1, 'Select at least one FO.'),
+  defaultBatchSize: z.number({ invalid_type_error: PACE_RANGE }).int(PACE_RANGE).min(1, PACE_RANGE).max(500, PACE_RANGE),
+  fos: z.array(z.object({ id: z.string().min(1), batchSize: z.number({ invalid_type_error: PACE_RANGE }).int(PACE_RANGE).min(1, PACE_RANGE).max(500, PACE_RANGE) })).min(1, 'Select at least one FO.'),
   flows: z.array(z.object({ id: z.string().min(1), name: z.string().trim().min(1, 'Name each outreach group before continuing.').max(80), steps: StepsSchema })).min(1).max(30),
   personIds: z.array(z.string().min(1)).max(10000),
   assignments: z.record(z.string(), z.string()),
@@ -50,7 +51,8 @@ export const CampaignDraftSaveSchema = z.object({
 export type PlannerPerson = { id: string; name: string; ownerMemberId: string | null; tags: string[]; contactType: string[]; tier: string | null };
 export type PlannerFo = { id: string; name: string; twentyMemberId: string | null };
 export type PlannedBatch = { id: string; foId: string; flowId: string; personIds: string[]; dates: string[]; priority: number };
-export type PlanIssue = { title: string; detail: string; foId?: string; date?: string };
+/** `kind` says which part of the plan stands in the way, so the page can point at it. */
+export type PlanIssue = { title: string; detail: string; foId?: string; date?: string; kind?: 'window' | 'few' | 'many' | 'search' | 'people' };
 export type CampaignCalendar = { version: 1; days: string[]; batches: PlannedBatch[]; people: PlannerPerson[]; fos: PlannerFo[]; issues: PlanIssue[]; valid: boolean; exhausted: boolean };
 export const PRIORITY_LABELS = ['Clients', 'MIP', 'Tier 1', 'Tier 2', 'Tier 3', 'Unclassified'];
 const normal = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -106,9 +108,28 @@ export function outreachDates(start: string, steps: SequenceStep[]): string[] | 
   journeys.set(key, dates && Object.freeze(dates));
   return dates;
 }
-/** "Fri, Sep 25" (or "Sep 25"): the studio's plan wording, within a campaign's own year. */
-export function shortDateLabel(day: string, withWeekday = true) {
-  return new Intl.DateTimeFormat('en-US', { ...(withWeekday ? { weekday: 'short' as const } : {}), month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${day}T12:00:00Z`));
+const nextMonth = (month: string) => addDays(`${month}-28`, 7).slice(0, 7);
+/** Each month a campaign touches, as YYYY-MM, first to last. */
+export function calendarMonths(start: string, end: string) {
+  const out: string[] = [];
+  for (let m = start.slice(0, 7); m <= end.slice(0, 7); m = nextMonth(m)) out.push(m);
+  return out;
+}
+/** The dates a month calendar shows: whole weeks, Monday to Sunday, so 4 to 6 rows whatever the month's length. */
+export function monthGrid(month: string) {
+  const first = `${month}-01`, last = addDays(`${nextMonth(month)}-01`, -1);
+  const out: string[] = [];
+  for (let d = addDays(first, -((weekday(first) + 6) % 7)); d <= addDays(last, 6 - (weekday(last) + 6) % 7); d = addDays(d, 1)) out.push(d);
+  return out;
+}
+/** "Fri, Sep 25" (or "Sep 25"), with the year only when asked: the studio's plan wording. */
+export function shortDateLabel(day: string, withWeekday = true, withYear = false) {
+  return new Intl.DateTimeFormat('en-US', { ...(withWeekday ? { weekday: 'short' as const } : {}), month: 'short', day: 'numeric', ...(withYear ? { year: 'numeric' as const } : {}), timeZone: 'UTC' }).format(new Date(`${day}T12:00:00Z`));
+}
+/** "Thu, Sep 24 to Wed, Sep 30"; the years are said when the window crosses one. */
+export function dateRangeLabel(start: string, end: string) {
+  const years = start.slice(0, 4) !== end.slice(0, 4);
+  return start === end ? shortDateLabel(start, true, years) : `${shortDateLabel(start, true, years)} to ${shortDateLabel(end, true, years)}`;
 }
 export function calendarDateLabel(day: string) {
   return new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${day}T12:00:00Z`));
@@ -215,7 +236,13 @@ export function buildCampaignCalendar(draft: CampaignDraft, people: PlannerPerso
   return result;
 }
 
-export type CalendarSuggestion = { label: string; detail: string; draft: CampaignDraft; calendar: CampaignCalendar };
+const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+/** "one", "two" ... "ten", then digits: how a person would say a small count of days. */
+export const numberInWords = (n: number) => NUMBER_WORDS[n] ?? String(n);
+const daysInWords = (n: number) => `${numberInWords(n)} ${n === 1 ? 'day' : 'days'}`;
+
+/** `studio` marks the one fix where the studio builds the outreach itself. */
+export type CalendarSuggestion = { label: string; detail: string; draft: CampaignDraft; calendar: CampaignCalendar; studio?: true };
 /** Only show adjustments actually verified by the same scheduler. Never silently change outreach. */
 export function suggestCampaignCalendar(d: CampaignDraft, people: PlannerPerson[], fos: PlannerFo[], options: { verify?: (draft: CampaignDraft) => CampaignCalendar | null; paces?: boolean; outreach?: boolean } = {}): CalendarSuggestion[] {
   const out: CalendarSuggestion[] = [];
@@ -235,7 +262,12 @@ export function suggestCampaignCalendar(d: CampaignDraft, people: PlannerPerson[
       const changed = draft.flows.find(f => f.id === flow.id)!;
       changed.steps = changed.steps.map((s, i) => ({ ...s, day: s.day + (i >= step ? delta : 0) }));
       if (changed.steps.at(-1)!.day > 367) continue;
-      { const wait = changed.steps[step].day - changed.steps[step - 1].day; tryDraft(draft, `${d.flows.length > 1 ? `${flow.name}: wait` : 'Wait'} ${wait} day${wait === 1 ? '' : 's'} before step ${step + 1}`, 'Later steps keep their spacing.'); }
+      {
+        // Said the way the outreach editor shows it: when this step goes out, counted from the one before.
+        const wait = changed.steps[step].day - changed.steps[step - 1].day, was = wait - delta;
+        const text = `send step ${step + 1} ${daysInWords(wait)} after step ${step}, not ${numberInWords(was)}`;
+        tryDraft(draft, d.flows.length > 1 ? `${flow.name}: ${text}` : text[0].toUpperCase() + text.slice(1), step + 1 < flow.steps.length ? `Later steps move ${delta < 0 ? 'a day earlier' : 'a day later'} too.` : '');
+      }
     }
   }
   // Dates are the one thing the studio never moves on its own; offer them only when a pacing
@@ -244,12 +276,12 @@ export function suggestCampaignCalendar(d: CampaignDraft, people: PlannerPerson[
     if (out.length >= 3) break;
     const endDate = addDays(d.endDate, delta);
     if (endDate < d.startDate || diffDays(d.startDate, endDate) > 366) continue;
-    tryDraft({ ...d, endDate }, `End on ${calendarDateLabel(endDate)}`, 'Keep your audience, batch sizes and outreach unchanged.');
+    tryDraft({ ...d, endDate }, `Move the end date to ${shortDateLabel(endDate)}`, 'Everything else stays the same.');
   }
   for (const factor of options.paces === false ? [] : [0.75, 0.5, 0.25, 1.25, 2]) {
     if (out.length >= 3) break;
     const changed = { ...d, defaultBatchSize: Math.max(1, Math.min(500, Math.round(d.defaultBatchSize * factor))), fos: d.fos.map(f => ({ ...f, batchSize: Math.max(1, Math.min(500, Math.round(f.batchSize * factor))) })) };
-    tryDraft(changed, 'Adjust new people per day', changed.fos.map(f => `${fos.find(fo => fo.id === f.id)?.name}: ${f.batchSize}`).join(' · '));
+    tryDraft(changed, 'Change new people a day', changed.fos.map(f => `${fos.find(fo => fo.id === f.id)?.name}: ${f.batchSize}`).join(' · '));
   }
   // Broader recovery when a small edit cannot work. This changes pacing, so never
   // apply automatically; describe it explicitly and retain all authored messages.
@@ -261,7 +293,7 @@ export function suggestCampaignCalendar(d: CampaignDraft, people: PlannerPerson[
         if (out.length >= 3) break;
         const endDate = addDays(d.endDate, delta);
         if (endDate < d.startDate || diffDays(d.startDate, endDate) > 366 || flows.some(f => f.steps.at(-1)!.day > 367)) continue;
-        tryDraft({ ...d, flows, endDate }, `Wait ${gap} day${gap === 1 ? '' : 's'} between every step`, delta ? `Every group, messages unchanged; end on ${calendarDateLabel(endDate)}.` : 'Every group; messages unchanged.');
+        tryDraft({ ...d, flows, endDate }, gap === 1 ? 'Send one step each working day' : `Send each step ${daysInWords(gap)} after the one before`, `${d.flows.length > 1 ? 'This changes every outreach group. ' : ''}Your messages stay the same.${delta ? ` The end date moves to ${shortDateLabel(endDate)}.` : ''}`);
       }
       if (out.length) break;
     }
@@ -271,7 +303,8 @@ export function suggestCampaignCalendar(d: CampaignDraft, people: PlannerPerson[
       if (out.length) break;
       const endDate = addDays(d.endDate, delta);
       if (diffDays(d.startDate, endDate) > 366) continue;
-      tryDraft({ ...d, endDate }, `End on ${shortDateLabel(endDate)}`, '');
+      const years = d.startDate.slice(0, 4) !== endDate.slice(0, 4);
+      tryDraft({ ...d, endDate }, `Move the end date to ${shortDateLabel(endDate, true, years)}`, `It was ${shortDateLabel(d.endDate, true, years)}. Nothing else changes.`);
     }
   }
   return out.slice(0, 3);

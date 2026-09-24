@@ -23,7 +23,7 @@ export function OutreachBuilder({ steps, onChange, maxSteps = 60 }: { maxSteps?:
       {i > 0 && <div className="ml-6 flex items-center gap-3 border-l-2 border-brand-200 py-4 pl-6 text-sm text-ink-600"><span>Wait</span><input aria-label={`Gap before step ${i + 1}`} type="number" min={1} max={366} className="!w-20 text-center !font-bold" value={step.day - steps[i - 1].day} onChange={e => {
         const gap = Number(e.target.value); if (!Number.isInteger(gap) || gap < 1 || gap > 366) return;
         const delta = gap - (step.day - steps[i - 1].day); onChange(steps.map((s, n) => ({ ...s, day: s.day + (n >= i ? delta : 0) })));
-      }} /><span>calendar days</span></div>}
+      }} /><span>{step.day - steps[i - 1].day === 1 ? 'calendar day' : 'calendar days'}</span></div>}
       <section className={`overflow-hidden rounded-2xl border bg-white ${open === step.id ? 'border-brand-300 shadow-sm' : 'border-line'}`}>
         <div className="flex items-center gap-3 p-4">
           <button type="button" onPointerDown={e => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); setDrag(i); }} onPointerUp={e => {
@@ -32,19 +32,19 @@ export function OutreachBuilder({ steps, onChange, maxSteps = 60 }: { maxSteps?:
             if (to !== null && to !== undefined) move(i, Number(to));
             e.currentTarget.releasePointerCapture(e.pointerId); setDrag(null);
           }} onPointerCancel={() => setDrag(null)} aria-label={`Drag step ${i + 1}`} className="touch-none cursor-grab rounded-lg bg-brand-50 px-3 py-2 font-bold text-brand-800">{i + 1}</button>
-          <button type="button" aria-expanded={open === step.id} onClick={() => setOpen(open === step.id ? null : step.id)} className="min-w-0 flex-1 text-left"><span className="block font-semibold text-ink-900">{step.title || `Touchpoint ${i + 1}`}</span><span className="mt-1 flex flex-wrap gap-3 text-sm text-ink-600">{step.actions.map(a => <span key={a.id} className="flex items-center gap-1.5"><ActionIcon action={a.type} size={14} />{ACTION_LABELS[a.type]}</span>)}</span></button>
+          <button type="button" aria-expanded={open === step.id} onClick={() => setOpen(open === step.id ? null : step.id)} className="min-w-0 flex-1 text-left"><span className="block font-semibold text-ink-900">{step.title || `Step ${i + 1}`}</span><span className="mt-1 flex flex-wrap gap-3 text-sm text-ink-600">{step.actions.map(a => <span key={a.id} className="flex items-center gap-1.5"><ActionIcon action={a.type} size={14} />{ACTION_LABELS[a.type]}</span>)}</span></button>
           <button type="button" className="btn-ghost btn-sm" aria-label={`Move step ${i + 1} up`} disabled={i === 0} onClick={() => move(i, i - 1)}><IconArrowUp size={15} /></button>
           <button type="button" className="btn-ghost btn-sm" aria-label={`Move step ${i + 1} down`} disabled={i === steps.length - 1} onClick={() => move(i, i + 1)}><IconArrowDown size={15} /></button>
           <button type="button" className="btn-ghost btn-sm text-red-700" aria-label={`Remove step ${i + 1}`} disabled={steps.length === 1} onClick={() => { const next = steps.filter((_, n) => n !== i); const offset = next[0].day - 1; onChange(next.map(s => ({ ...s, day: s.day - offset }))); }}><IconTrash size={15} /></button>
         </div>
         {open === step.id && <div className="space-y-4 border-t border-line bg-canvas/40 p-4">
-          <label className="block text-sm font-medium">Touchpoint name<input className="mt-1 w-full" aria-label={`Step ${i + 1} name`} value={step.title ?? ''} onChange={e => update(i, { title: e.target.value })} /></label>
+          <label className="block text-sm font-medium">Step name<input className="mt-1 w-full" aria-label={`Step ${i + 1} name`} value={step.title ?? ''} onChange={e => update(i, { title: e.target.value })} /></label>
           {step.actions.map((a, j) => <div key={a.id} className="space-y-3 rounded-xl border border-line bg-white p-3">
             <div className="flex items-center justify-between"><span className="flex items-center gap-2 font-semibold"><ActionIcon action={a.type} />{ACTION_LABELS[a.type]}</span>{step.actions.length > 1 && <button type="button" className="btn-ghost btn-sm" aria-label={`Remove ${ACTION_LABELS[a.type]} from step ${i + 1}`} onClick={() => update(i, { actions: step.actions.filter((_, n) => n !== j) })}>Remove</button>}</div>
             {a.type === 'EMAIL' && <input aria-label={`Step ${i + 1} email subject`} placeholder="Email subject" value={a.subject ?? ''} onChange={e => update(i, { actions: step.actions.map((act, n) => n === j ? { ...act, subject: e.target.value } : act) })} className="w-full" />}
             <RichTextEditor label={`Step ${i + 1} ${ACTION_LABELS[a.type]} message`} value={a.bodyHtml ?? html(a.template ?? '')} onChange={(bodyHtml, template) => update(i, { actions: step.actions.map((act, n) => n === j ? { ...act, bodyHtml, template } : act) })} />
           </div>)}
-          {step.actions.length < 4 && <div className="flex flex-wrap items-center gap-2"><span className="text-sm text-ink-600">Add to this touchpoint</span>{ACTION_TYPES.filter(t => !step.actions.some(a => a.type === t)).map(type => <button type="button" key={type} className="btn-secondary btn-sm" onClick={() => update(i, { actions: [...step.actions, { id: newStepId('act'), type, label: ACTION_LABELS[type], template: '' }] })}><ActionIcon action={type} size={14} />{ACTION_LABELS[type]}</button>)}</div>}
+          {step.actions.length < 4 && <div className="flex flex-wrap items-center gap-2"><span className="text-sm text-ink-600">Add to this step</span>{ACTION_TYPES.filter(t => !step.actions.some(a => a.type === t)).map(type => <button type="button" key={type} className="btn-secondary btn-sm" onClick={() => update(i, { actions: [...step.actions, { id: newStepId('act'), type, label: ACTION_LABELS[type], template: '' }] })}><ActionIcon action={type} size={14} />{ACTION_LABELS[type]}</button>)}</div>}
         </div>}
       </section>
     </div>)}

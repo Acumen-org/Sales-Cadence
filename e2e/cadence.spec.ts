@@ -81,7 +81,7 @@ test('the same person cannot be enrolled twice', async ({ page }) => {
   await page.getByLabel('Campaign state').selectOption('any');
   await page.getByLabel('Search people to add').fill('Dummy One');
   await expect(page.getByLabel('Select Dummy One',{exact:true})).toBeDisabled();
-  await expect(page.getByRole('row',{name:/Dummy One/})).toContainText('In E2E SaaStr follow-up');
+  await expect(page.getByRole('row',{name:/Dummy One/})).toContainText('Already in E2E SaaStr follow-up');
   await expect(page.getByRole('button',{name:'Publish campaign'})).toHaveCount(0); await logout(page);
 });
 

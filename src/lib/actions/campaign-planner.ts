@@ -4,7 +4,7 @@ import { requireUser } from '../auth/current-user';
 import { ZodError } from 'zod';
 import { previewCampaignCalendar, saveCampaignCalendar, prepareCampaignStudio } from '../campaign-planning-service';
 
-const message = (e: unknown) => e instanceof ZodError ? e.issues.map(i => i.message).join(' ') : e instanceof Error ? e.message : 'Unable to plan this campaign.';
+const message = (e: unknown) => e instanceof ZodError ? [...new Set(e.issues.map(i => i.message))].join(' ') : e instanceof Error ? e.message : 'Unable to plan this campaign.';
 export async function prepareStudioAction(input: unknown, id?: string, fit = false) {
   try { return { ok: true as const, data: await prepareCampaignStudio(input, await requireUser(), id, fit) }; }
   catch (e) { return { ok: false as const, error: message(e) }; }

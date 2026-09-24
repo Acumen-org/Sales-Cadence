@@ -62,7 +62,7 @@ test('campaign outreach exposes simple calendar gaps instead of a separate seque
   await login(page);await beginStudio(page,'StudioSpacing',{count:2,endDate:'2027-01-15'});
   await expect(page.getByLabel('Gap before step 2')).toHaveAttribute('min','1');
   await expect(page.getByLabel('Sequence name',{exact:true})).toHaveCount(0);
-  await expect(page.getByText('calendar days',{exact:true}).first()).toBeVisible();
+  await expect(page.getByText(/^calendar days?$/).first()).toBeVisible();
 });
 
 test('accounts count people with and without an account, and the second opens People', async ({ page }) => {

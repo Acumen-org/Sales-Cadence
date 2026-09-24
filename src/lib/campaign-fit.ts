@@ -23,7 +23,7 @@ import { outreachRecipe } from './campaign-starter';
 export type FitPace = { foId: string; name: string; from: number; to: number };
 export type FitDroppedFo = { id: string; name: string; personIds: string[]; reason: 'none' | 'few' };
 /** Why an edited outreach cannot take an FO's contacts. */
-export type FitProblem = { foId: string; name: string; reason: 'window' | 'few' | 'search' };
+export type FitProblem = { foId: string; name: string; reason: 'window' | 'few' | 'many' | 'search' };
 export type CampaignFit = { draft: CampaignDraft; calendar: CampaignCalendar; paces: FitPace[]; droppedFos: FitDroppedFo[]; overflow: string[] };
 export type FitFailure = { problems: FitProblem[] };
 /** The start-day count, exposed for its test. */
@@ -204,7 +204,7 @@ export function fitCampaign(input: CampaignDraft, people: PlannerPerson[], fos: 
           if (!('fail' in trimmed)) { overflow.push(...queue.slice(k).map(p => p.id)); queue = queue.slice(0, k); r = trimmed; break; }
         }
       }
-      if ('fail' in r) { problems.push({ foId: c.id, name: c.meta.name, reason: r.fail === 'many' ? 'search' : r.fail }); continue; }
+      if ('fail' in r) { problems.push({ foId: c.id, name: c.meta.name, reason: r.fail }); continue; }
       paces.set(c.id, r.pace); kept.set(c.id, queue);
     }
     if (problems.length) return { problems };

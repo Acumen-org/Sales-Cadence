@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { addDays } from '@/lib/dates';
-import { buildCampaignCalendar, outreachDates, contactPriority, CampaignDraftSchema, suggestCampaignCalendar, type CampaignDraft, type PlannerPerson, type CampaignCalendar, workingDay } from '@/lib/campaign-planner';
+import { buildCampaignCalendar, outreachDates, contactPriority, CampaignDraftSchema, suggestCampaignCalendar, type CampaignDraft, type PlannerPerson, type CampaignCalendar, workingDay, calendarMonths, monthGrid, weekday, dateRangeLabel, numberInWords } from '@/lib/campaign-planner';
 import type { SequenceStep } from '@/lib/sequences/steps';
 import { CAMPAIGN_DEFAULT_STEPS } from '@/lib/sequences/campaign-default';
 
@@ -62,6 +62,8 @@ describe('campaign calendar constraints', () => {
   it('returns only verified suggestions and distinguishes search limits from infeasibility', () => {
     const d = draft(4, [1,3]); const suggestions = suggestCampaignCalendar(d, people(4), fos);
     expect(suggestions.length).toBeGreaterThan(0); for (const s of suggestions) invariants(s.draft, s.calendar);
+    // Said the way the outreach editor shows it: the wait between two steps, old and new.
+    expect(suggestions.map(s => s.label)).toContain('Send step 2 one day after step 1, not two');
     const limit = buildCampaignCalendar(draft(4,[1,2]), people(4), fos, 0); expect(limit.exhausted).toBe(true); expect(limit.valid).toBe(false);
   });
   it('rejects tampered dates, duplicate FO IDs, invalid assignments and nonpositive gaps', () => {
@@ -118,5 +120,34 @@ describe('campaign calendar constraints', () => {
       invariants(s.draft, s.calendar);
       expect(s.draft.flows[0].steps.map(s => s.actions)).toEqual(CAMPAIGN_DEFAULT_STEPS.map(s => s.actions));
     }
+  });
+});
+
+describe('month calendar', () => {
+  it('shows whole Monday-to-Sunday weeks for every month length, across years', () => {
+    const months = calendarMonths('2026-01-15', '2028-12-02');
+    expect(months).toHaveLength(36);
+    for (const month of months) {
+      const grid = monthGrid(month);
+      const [y, m] = month.split('-').map(Number);
+      const length = new Date(Date.UTC(y, m, 0)).getUTCDate();
+      expect([28, 35, 42]).toContain(grid.length);
+      expect(weekday(grid[0])).toBe(1); expect(weekday(grid.at(-1)!)).toBe(0);
+      grid.forEach((d, i) => { if (i) expect(d).toBe(addDays(grid[i - 1], 1)); });
+      const own = grid.filter(d => d.startsWith(month));
+      expect(own).toHaveLength(length); expect(own[0]).toBe(`${month}-01`);
+    }
+    // 31 days from a Saturday takes six rows; 28 from a Monday, four.
+    expect(monthGrid('2026-08')).toHaveLength(42); expect(monthGrid('2027-02')).toHaveLength(28);
+    expect(monthGrid('2028-02').filter(d => d.startsWith('2028-02'))).toHaveLength(29);
+    expect(calendarMonths('2026-12-28', '2027-01-04')).toEqual(['2026-12', '2027-01']);
+    expect(calendarMonths('2026-09-24', '2026-09-30')).toEqual(['2026-09']);
+  });
+
+  it('says dates the way people do: years only across a year, small counts in words', () => {
+    expect(dateRangeLabel('2026-09-24', '2026-09-30')).toBe('Thu, Sep 24 to Wed, Sep 30');
+    expect(dateRangeLabel('2026-09-24', '2027-09-24')).toBe('Thu, Sep 24, 2026 to Fri, Sep 24, 2027');
+    expect(dateRangeLabel('2026-09-26', '2026-09-26')).toBe('Sat, Sep 26');
+    expect([1, 2, 10, 11].map(numberInWords)).toEqual(['one', 'two', 'ten', '11']);
   });
 });

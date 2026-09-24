@@ -40,7 +40,7 @@ describe('published campaign execution', () => {
   });
   it('invalidates stale previews, rejects unauthorized writes and protects concurrent edits', async () => {
     const p=await previewCampaignCalendar(d,user);
-    await expect(saveCampaignCalendar({...d,endDate:'2027-01-09'},user,{publish:true,fingerprint:p.fingerprint})).rejects.toThrow(/review/);
+    await expect(saveCampaignCalendar({...d,endDate:'2027-01-09'},user,{publish:true,fingerprint:p.fingerprint})).rejects.toThrow(/The plan changed since you last looked/);
     await expect(saveCampaignCalendar(d,{...user,role:'BIZ_OPS'},{publish:false})).rejects.toThrow(/cannot/);
     const c=await saveCampaignCalendar(d,user,{});
     const updated=await saveCampaignCalendar({...d,name:'Revised'},user,{id:c.id,revision:c.updatedAt.toISOString()});expect(updated.status).toBe('DRAFT');

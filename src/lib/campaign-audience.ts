@@ -35,15 +35,15 @@ export async function campaignAudienceIssues(ids: string[], context?: AudienceCo
     if (p.optedOut) return issue('optedOut', 'Opted out');
     if (p.companyId && blockedIds.has(p.companyId)) return issue('blocked', 'Blocked account');
     if (!externalIds.has(id)) return issue('internal', 'Internal contact');
-    if (occupied.has(id)) return issue('busy', `In ${occupied.get(id)}`);
+    if (occupied.has(id)) return issue('busy', `Already in ${occupied.get(id)}`);
     if (!context) return [];
     const ownedHere = !!p.ownerMemberId && context.ownerMemberIds.includes(p.ownerMemberId);
     if (context.checkOwners && p.ownerMemberId && !ownedHere) {
       const owner = ownerOf.get(p.ownerMemberId);
       const runsHere = owner?.active && ROLES_NEEDING_POD.includes(owner.role) && owner.pods.some(x => x.podId === context.podId);
-      return issue('owner', owner ? `Owned by ${owner.name}` : 'Owner has no Cadence seat', runsHere ? owner!.id : undefined);
+      return issue('owner', owner ? `Owned by ${owner.name}` : 'Owner is not a Cadence user', runsHere ? owner!.id : undefined);
     }
-    if (!ownedHere && p.podOwner !== context.podOwnerValue) return issue('outside', `Outside ${context.podName}`);
+    if (!ownedHere && p.podOwner !== context.podOwnerValue) return issue('outside', `Not in ${/\bpod$/i.test(context.podName) ? context.podName : `the ${context.podName} pod`}`);
     return [];
   });
 }

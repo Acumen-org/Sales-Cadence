@@ -20,9 +20,15 @@ test('builds contact-specific outreach, publishes a full calendar, and edits the
   await page.getByRole('button',{name:'Next: Schedule'}).click();
   await expect(page.getByRole('heading',{name:'Your outreach calendar'})).toBeVisible();
   await expect(page.getByRole('button',{name:'Publish campaign'})).toBeEnabled();
-  await page.getByRole('button',{name:/Default · Batch/}).first().click();
+  await page.getByRole('button',{name:/^Default · Step 1 of/}).first().click();
   await expect(page.getByRole('dialog')).toContainText('Monday, Jan 4, 2027');
   await page.keyboard.press('Escape');
+  // A real week, Monday to Sunday; closing a batch leaves every other batch as it was.
+  for(const d of ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'])await expect(page.getByText(d,{exact:true}).first()).toBeVisible();
+  // Hovering a batch outlines its other steps; moving away, or closing its details, leaves nothing marked.
+  const marked=page.locator('[data-day] button.ring-2');await page.mouse.move(0,0);await expect(marked).toHaveCount(0);
+  await page.getByRole('button',{name:/^Default · Step 1 of/}).first().hover();await expect(marked).not.toHaveCount(0);
+  await page.mouse.move(0,0);await expect(marked).toHaveCount(0);
   await page.getByRole('button',{name:'Publish campaign'}).click();
   await page.waitForURL(/\/campaigns\/[a-f0-9-]+$/);
   await expect(page.getByRole('heading',{name:'StudioPilot',exact:true})).toBeVisible();
@@ -38,17 +44,35 @@ test('builds contact-specific outreach, publishes a full calendar, and edits the
 });
 test('an edited outreach that cannot take everyone says why in Outreach and offers verified fixes',async({page})=>{
   await login(page);await beginStudio(page,'StudioGap');await page.getByLabel('Gap before step 2').fill('2');
-  await expect(page.getByText('Adjust this plan',{exact:true})).toBeVisible();
-  await expect(page.getByText('Alisa Senior: no arrangement of this outreach covers every working day.',{exact:true}).first()).toBeVisible();
+  const fix=page.getByRole('region',{name:'Adjust this plan'});
+  await expect(fix.getByRole('heading',{name:'Alisa Senior would have working days with nothing to send',exact:true})).toBeVisible();
+  await expect(fix).toContainText('The waits between steps leave gaps. Every FO needs something to send each working day.');
   await expect(page.getByRole('button',{name:'Next: Schedule'})).toBeDisabled();
-  await expect(page.getByRole('button',{name:'Let the studio set the outreach',exact:true}).first()).toBeVisible();
-  await page.getByText('Wait 1 day before step 2',{exact:true}).locator('xpath=../..').getByRole('button',{name:'Apply',exact:true}).click();
+  // Typing while it is re-checked keeps the panel where it is instead of pulling it out from under the cursor.
+  await page.getByLabel('Step 1 email subject').fill('Still here');expect(await fix.count()).toBe(1);await expect(fix.getByRole('button',{name:'Set it for me'})).toBeEnabled();
+  // The studio's own outreach is the recommended fix, in the panel and beside Next; it can be taken back.
+  await expect(page.locator('footer')).toContainText('Fix the plan above to continue.');await expect(page.locator('footer').getByRole('button',{name:'See how to fix'})).toBeVisible();
+  await expect(fix).toContainText('Let the studio set the outreach');
+  await fix.getByRole('button',{name:'Set it for me',exact:true}).click();
+  await expect(page.getByRole('status').filter({hasText:'The studio set the outreach.'})).toBeVisible();
+  await expect(page.getByRole('region',{name:'Plan'})).toContainText('4 people planned');await expect(fix).toHaveCount(0);
+  await expect(page.getByRole('complementary',{name:'Outreach groups'})).not.toContainText('Let the studio set the outreach');
+  await page.getByRole('status').filter({hasText:'The studio set the outreach.'}).getByRole('button',{name:'Undo this change'}).click();
+  await expect(fix).toContainText('would have working days with nothing to send');await expect(page.getByLabel('Gap before step 2')).toHaveValue('2');
+  await fix.getByText('Send step 2 one day after step 1, not two',{exact:true}).locator('xpath=../..').getByRole('button',{name:'Apply',exact:true}).click();
   await expect(page.getByRole('region',{name:'Plan'})).toContainText('4 people planned');
+  await expect(page.getByRole('status').filter({hasText:'Changed: Send step 2 one day after step 1, not two.'})).toBeVisible();
   await page.getByRole('button',{name:'Next: Schedule'}).click();
   await expect(page.getByRole('heading',{name:'Your outreach calendar'})).toBeVisible();
-  await page.getByRole('button',{name:'Dates & limits'}).click();await page.getByLabel('Adjust end date').fill('2027-01-15');await page.getByRole('button',{name:'Update calendar'}).click();
-  await expect(page.getByRole('dialog')).toContainText('Adjust this plan');await page.getByRole('button',{name:'Cancel',exact:true}).click();
-  await expect(page.getByRole('heading',{name:'Your outreach calendar'})).toBeVisible();
+  await page.getByRole('button',{name:'Dates and limits'}).click();await page.getByLabel('Adjust end date').fill('2027-01-15');await page.getByRole('button',{name:'Update calendar'}).click();
+  const dialog=page.getByRole('dialog');await expect(dialog.getByRole('region',{name:'Adjust this plan'})).toBeVisible();
+  // Nothing changed since the plan that does not fit: Update waits for a change.
+  await expect(dialog.getByRole('button',{name:'Update calendar'})).toBeDisabled();
+  // A fix applied here can be taken back on Schedule too.
+  await dialog.getByRole('button',{name:'Set it for me',exact:true}).click();await expect(dialog).toHaveCount(0);
+  const undone=page.getByRole('status').filter({hasText:'Dates and limits changed.'});await expect(undone).toBeVisible();await expect(page.getByText(/Jan 15 · \d+ working days/)).toBeVisible();
+  await undone.getByRole('button',{name:'Undo this change'}).click();await expect(undone).toHaveCount(0);
+  await expect(page.getByRole('heading',{name:'Your outreach calendar'})).toBeVisible();await expect(page.getByText(/Jan 15 · \d+ working days/)).toHaveCount(0);
 });
 test('retired sequence URLs lead to campaigns and the studio fits a phone',async({page})=>{
   await login(page);await page.goto('/sequences');await expect(page).toHaveURL(/\/campaigns$/);
@@ -112,7 +136,7 @@ test('unreachable contacts are skipped in the picker and left out of the plan wi
  await db.personCache.createMany({data:[{id:'AudienceReview-dnd',firstName:'AudienceReview',lastName:'DoNotContact',sortName:'audiencereview donotcontact',podOwner:'ALISA',dnd:true},{id:'AudienceReview-optout',firstName:'AudienceReview',lastName:'OptedOut',sortName:'audiencereview optedout',podOwner:'ALISA',optedOut:true}]});
  await page.getByLabel('Search people to add').fill('AudienceReview');await expect(page.getByText('6 matching')).toBeVisible();await expect(page.getByRole('button',{name:'Select all matching',exact:true})).toBeEnabled();
  await expect(page.getByLabel('Select AudienceReview DoNotContact',{exact:true})).toBeDisabled();await expect(page.getByLabel('Select AudienceReview OptedOut',{exact:true})).toBeDisabled();
- await page.getByRole('button',{name:'Select all matching',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'2 unavailable skipped'})).toBeVisible();
+ await page.getByRole('button',{name:'Select all matching',exact:true}).click();await expect(page.getByRole('status').filter({hasText:"2 people can't join this campaign and weren't added"})).toBeVisible();
  // A CRM flag set after selection does not stop the campaign: that person is left out, by name.
  await db.personCache.update({where:{id:'AudienceReview-0'},data:{dnd:true}});
  await page.getByRole('button',{name:'Next: Outreach',exact:true}).click();await expect(page.getByRole('heading',{name:'Outreach groups',exact:true})).toBeVisible();

@@ -74,7 +74,7 @@ export function PeoplePicker({ campaignPodId, campaignFoIds, campaignId, value, 
     setSelectingAll(true);
     try {
       const r = await pickAllIdsAction({ ...filters, withinIds, campaignPodId, campaignFoIds: JSON.parse(foKey), campaignId });
-      if (r.ok) { onChange([...new Set([...latest.current, ...r.ids.filter(id => !disabled.has(id))])]); setSelectionNotice(r.skipped ? `${r.skipped.toLocaleString('en-US')} unavailable skipped` : ''); }
+      if (r.ok) { onChange([...new Set([...latest.current, ...r.ids.filter(id => !disabled.has(id))])]); setSelectionNotice(r.skipped ? `${r.skipped === 1 ? "1 person can't join this campaign and wasn't" : `${r.skipped.toLocaleString('en-US')} people can't join this campaign and weren't`} added` : ''); }
       else setError(r.error);
     } finally {
       setSelectingAll(false);
