@@ -12,14 +12,14 @@ type Props = { personId: string; timezone: string; baseHref: string; notesAfter?
 
 /**
  * Received or sent is the first thing to know about an email, so it is what the card is made of:
- * a green edge for what came in, a brand-coloured one for what went out, each message in its own frame so
+ * a green frame and header for what came in, a brand-coloured one for what went out, each message in its own frame so
  * two of them can never read as one. The direction rule is the engine's own (`classifyMessage`),
  * not a second opinion: sent by one of our users is outbound, sent by a person is inbound.
  */
 const DIRECTION = {
-  inbound: { label: 'Received', tone: 'green' as const, frame: 'border-emerald-200', edge: 'border-l-emerald-500', head: 'bg-emerald-50/70' },
-  outbound: { label: 'Sent', tone: 'blue' as const, frame: 'border-brand-200', edge: 'border-l-brand-400', head: 'bg-brand-50/60' },
-  unknown: { label: 'Email', tone: 'gray' as const, frame: 'border-line', edge: 'border-l-ink-300', head: 'bg-canvas' },
+  inbound: { label: 'Received', tone: 'green' as const, frame: 'border-emerald-200', head: 'bg-emerald-50/70' },
+  outbound: { label: 'Sent', tone: 'blue' as const, frame: 'border-brand-200', head: 'bg-brand-50/60' },
+  unknown: { label: 'Email', tone: 'gray' as const, frame: 'border-line', head: 'bg-canvas' },
 };
 
 /** Full CRM email and note content, with cursor navigation through older records. */
@@ -47,7 +47,7 @@ export async function CrmHistory({ personId, timezone, baseHref, notesAfter, ema
         const recipients = message.participants.filter((p) => p.role === 'to');
         const who = (list: typeof message.participants) => list.map((p) => p.displayName || p.handle).filter(Boolean).join(', ');
 
-        return <details open key={message.id} className={`group overflow-hidden rounded-xl border border-l-[3px] ${direction.frame} ${direction.edge} bg-white`}>
+        return <details open key={message.id} className={`group overflow-hidden rounded-xl border ${direction.frame} bg-white`}>
           <summary className={`flex cursor-pointer list-none items-start gap-3 px-4 py-3 ${direction.head}`}>
             <ActionIcon action="EMAIL" size={16} className="mt-0.5 shrink-0 text-ink-500" />
             <div className="min-w-0 flex-1">

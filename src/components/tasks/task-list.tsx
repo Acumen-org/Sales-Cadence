@@ -145,8 +145,7 @@ export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispos
           const overdue = t.state === 'PENDING' && t.due < today;
           const isSelected = t.id === selectedId;
           return (
-            <li key={t.id} className={clsx('relative flex items-stretch', isSelected ? 'bg-brand-50/70' : 'hover:bg-canvas/70')}>
-              {isSelected ? <span className="absolute inset-y-0 left-0 w-[3px] bg-brand-600" /> : null}
+            <li key={t.id} className={clsx('relative flex items-stretch', isSelected ? 'bg-brand-50 ring-1 ring-inset ring-brand-200' : 'hover:bg-canvas/70')}>
               {bulkEnabled ? (
                 <label className="flex items-center pl-3">
                   <input type="checkbox" checked={selected.has(t.id)} onChange={() => toggleOne(t.id)} disabled={t.state !== 'PENDING'} aria-label={`Select ${t.personName}`} />

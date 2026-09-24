@@ -33,6 +33,13 @@ test('enrichment has three views, scores by field and carries the record filters
   await expect(page.getByText(`${total} records`, { exact: true })).toBeVisible();
   await expect(page).toHaveURL(/tab=contacts.*pod=/);
   await expect(page.getByLabel('Filter by pod', { exact: true })).not.toHaveValue('');
+  // A field below 100% opens the records missing just that field.
+  await page.goto('/enrichment?tab=scorecard');
+  const gap = page.locator('td a[href*="field="]').first();
+  const field = new URL(await gap.getAttribute('href') ?? '', 'http://x').searchParams.get('field');
+  await gap.click();
+  await expect(page).toHaveURL(new RegExp(`field=${field}`));
+  await expect(page.locator('tbody tr').first()).toBeVisible();
 
   await page.goto('/enrichment?tab=contacts');
   await expect(page.getByRole('columnheader', { name: 'Person', exact: true })).toBeVisible();
@@ -46,9 +53,15 @@ test('enrichment has three views, scores by field and carries the record filters
   for (const label of ['Filter by priority', 'Show open or not-found gaps']) await expect(page.getByLabel(label, { exact: true })).toHaveCount(0);
   const href = await page.getByRole('link', { name: 'Export to enrich' }).getAttribute('href');
   expect(href).toContain('entity=person');
+  // The way back in sits beside the way out, and the upload page lists what came in before.
+  await expect(page.getByRole('link', { name: 'Upload enriched file' })).toHaveAttribute('href', '/enrichment/import?entity=person');
+  await page.getByRole('link', { name: 'Upload enriched file' }).click();
+  await expect(page.getByRole('heading', { name: 'Upload enrichment' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Earlier uploads' })).toBeVisible();
 
   await page.goto('/enrichment?tab=accounts');
   await expect(page.getByRole('columnheader', { name: 'Account', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Upload enriched file' })).toHaveAttribute('href', '/enrichment/import?entity=company');
   await page.getByRole('button', { name: /^Filters/ }).click();
   await expect(page.getByLabel('Filter by tier', { exact: true })).toHaveCount(0);
   await expect(page.getByLabel('Filter by pod', { exact: true })).toBeVisible();

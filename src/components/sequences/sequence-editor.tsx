@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { ACTION_LABELS, ACTION_TYPES, newStepId, StepsSchema, type ActionType, type SequenceStep, type StepAction } from '@/lib/sequences/steps';
 import { ActionForm } from '@/components/action-form';
 import type { ActionResult } from '@/lib/actions/users';
-import { ActionIcon, IconArrowDown, IconArrowUp, IconLock, IconPlus, IconTrash } from '@/components/icons';
+import { ActionIcon, IconArrowDown, IconArrowUp, IconClock, IconLock, IconPlus, IconTrash } from '@/components/icons';
 import { Field } from '@/components/ui';
 import { RichTextEditor } from '@/components/rich-text-editor';
 
@@ -110,7 +110,7 @@ export function SequenceEditor({ sequenceId, initialSteps, action, submitLabel, 
     ) : null}
     <ol className="space-y-0">
       {steps.map((step, i) => <li key={step.id} ref={(el) => { rows.current[i] = el; }} className={dragged !== null && over === i && dragged !== i ? (over < dragged ? 'border-t-2 border-brand-400' : 'border-b-2 border-brand-400') : dragged === i ? 'opacity-60' : undefined}>
-        {i > 0 && <div className="ml-8 flex h-11 items-center border-l-2 border-brand-200 pl-5 text-xs text-ink-500">Wait <span className="mx-1 font-medium text-ink-900">{step.day - steps[i - 1].day}</span> {step.day - steps[i - 1].day === 1 ? 'day' : 'days'}</div>}
+        {i > 0 && <div className="flex h-11 items-center gap-2 pl-8 text-xs text-ink-500"><IconClock size={14} className="text-ink-400" />Wait <span className="mx-1 font-medium text-ink-900">{step.day - steps[i - 1].day}</span> {step.day - steps[i - 1].day === 1 ? 'day' : 'days'}</div>}
         <section className={`surface overflow-hidden ${selected === i ? 'ring-2 ring-brand-200' : ''}`} onFocusCapture={() => setSelected(i)} onPointerDownCapture={() => setSelected(i)}>
           <div className="flex flex-wrap items-center gap-3 border-b border-line bg-canvas/50 px-5 py-4">
             {!readOnly && <button type="button" aria-label={'Drag step ' + (i + 1)} title={locked(i) ? 'Work or cancel its open touches to move this step' : 'Drag to reorder'} disabled={locked(i)} onPointerDown={startDrag(i)} className={(dragged === i ? 'cursor-grabbing' : 'cursor-grab') + ' touch-none select-none px-1 text-lg text-ink-500 disabled:cursor-default'}>⠿</button>}

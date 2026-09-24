@@ -234,6 +234,12 @@ test('reports and people pages render with data', async ({ page }) => {
   await expect(page.getByLabel('From')).toHaveValue('2026-01-01');
   await expect(page.locator('table').first()).not.toContainText('Overdue');
   await expect(page.locator('table').first()).not.toContainText('Stalled');
+  // One page: no picture/table switch, the retired views gone, the breakdown in tabs.
+  for (const gone of ['Picture', 'Table', 'By sequence', 'By FO and channel', 'Leaderboard', 'When the work happens']) await expect(page.locator('main').getByText(gone, { exact: true })).toHaveCount(0);
+  for (const tab of ['By FO', 'By pod', 'By campaign', 'By channel']) await expect(page.getByRole('link', { name: tab, exact: true })).toBeVisible();
+  // The funnel's stages are nested and say what they are out of.
+  await expect(page.getByText(/^of \d+$/).first()).toBeVisible();
+  await expect(page.locator('main').getByText('Touches by channel', { exact: true })).toHaveCount(0);
   await page.goto('/reports?view=table&tab=pods');
   // Scoped to the table: the pod filter above it lists every pod as an option.
   await expect(page.locator('table').first().getByRole('cell', { name: "Alisa's pod" })).toBeVisible();

@@ -147,6 +147,10 @@ describe('choosing people by priority', () => {
     expect(await pick([3])).toEqual(['prio-t2']);
     expect(await pick([5])).toEqual(['prio-none', 'prio-null']);
     expect(await pick([])).toHaveLength(7);
+    // MIP is its own switch, as on People, and joins the priority groups chosen.
+    const mip = async (priority: number[]) => { const r = await pickPeopleAction({ q: 'Prio', state: 'any', priority, mip: true }); if (!r.ok) throw new Error(r.error); return r.rows.map(x => x.id).sort(); };
+    expect(await mip([])).toEqual(['prio-mip']);
+    expect(await mip([0, 2])).toEqual(['prio-client', 'prio-mip', 'prio-t1', 'prio-t1tag']);
   });
   it('shows why a contact cannot join and skips them in select-all', async () => {
     await prisma.personCache.createMany({ data: [

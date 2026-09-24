@@ -347,7 +347,7 @@ export function EmptyState({ title, hint, action, icon }: { title: string; hint?
 }
 
 /** Underline tabs. `inset` adds the page gutter; inside a surface pass inset={false}. */
-export function Tabs({ tabs, current, inset = true }: { tabs: { key: string; label: ReactNode; href: string; count?: number }[]; current: string; inset?: boolean }) {
+export function Tabs({ tabs, current, inset = true, scroll }: { tabs: { key: string; label: ReactNode; href: string; count?: number }[]; current: string; inset?: boolean; /** false keeps the page where it is, for tabs low on a long page. */ scroll?: boolean }) {
   return (
     <div className={clsx('flex gap-3 overflow-x-auto border-b border-line scroll-thin sm:gap-5', inset ? 'px-4 sm:px-6' : 'px-3 sm:px-5')}>
       {tabs.map((t) => {
@@ -356,6 +356,7 @@ export function Tabs({ tabs, current, inset = true }: { tabs: { key: string; lab
           <Link
             key={t.key}
             href={t.href}
+            scroll={scroll}
             aria-current={active ? 'page' : undefined}
             className={clsx(
               'flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 py-3 text-[13px] font-medium transition-colors',

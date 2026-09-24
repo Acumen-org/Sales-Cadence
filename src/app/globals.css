@@ -140,6 +140,13 @@
   .card {
     @apply surface;
   }
+  /* The campaign calendar's working days: a quiet dotted field the batch cards sit on. */
+  .calendar-dots {
+    background-color: #fff;
+    background-image: radial-gradient(rgb(25 43 41 / 0.13) 1px, transparent 1.3px);
+    background-size: 14px 14px;
+    background-position: 7px 7px;
+  }
   .card-head {
     @apply flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4;
   }
@@ -219,10 +226,6 @@
   }
   .nav-item-active {
     @apply bg-[#d5e9ad]/[0.10] text-[#dfefc1];
-  }
-  .nav-item-active::before {
-    content: '';
-    @apply absolute -left-3 h-4 w-[3px] rounded-r-full bg-[#d5e9ad];
   }
   .nav-item:focus-visible { outline-color: #d5e9ad; }
   .sidebar-shell {

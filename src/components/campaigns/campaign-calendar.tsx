@@ -1,17 +1,29 @@
 'use client';
 import { useMemo, useState, type ReactNode } from 'react';
-import { calendarDateLabel, calendarMonths, dateRangeLabel, monthGrid, shortDateLabel, PRIORITY_LABELS, contactPriority, type CampaignDraft, type CampaignCalendar } from '@/lib/campaign-planner';
+import { calendarDateLabel, calendarMonths, dateRangeLabel, monthGrid, shortDateLabel, weekday, PRIORITY_LABELS, contactPriority, type CampaignDraft, type CampaignCalendar } from '@/lib/campaign-planner';
+import { addDays, diffDays } from '@/lib/dates';
 import { ActionIcon, IconChevronLeft, IconChevronRight } from '@/components/icons';
 import { Modal } from '@/components/modal';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const monthName = (month: string, short = false) => new Intl.DateTimeFormat('en-US', { month: short ? 'short' : 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${month}-01T12:00:00Z`));
 const people = (n: number) => `${n} ${n === 1 ? 'person' : 'people'}`;
+const mondayOf = (day: string) => addDays(day, -((weekday(day) + 6) % 7));
+/** A campaign of up to six weeks is one page; longer ones page by month. */
+const ONE_PAGE_WEEKS = 6;
+
+/** "September 2026", or "September – October 2026" when a short campaign crosses a month. */
+function spanTitle(first: string, last: string) {
+  if (first.slice(0, 7) === last.slice(0, 7)) return monthName(first.slice(0, 7));
+  const name = (m: string) => new Intl.DateTimeFormat('en-US', { month: 'long', timeZone: 'UTC' }).format(new Date(`${m}-01T12:00:00Z`));
+  return first.slice(0, 4) === last.slice(0, 4) ? `${name(first.slice(0, 7))} – ${monthName(last.slice(0, 7))}` : `${monthName(first.slice(0, 7))} – ${monthName(last.slice(0, 7))}`;
+}
 
 /**
- * The plan as a month calendar, Monday to Sunday, one month at a time. Weekends and dates outside
- * the campaign stay empty; each working day shows the batches whose steps go out. Hovering a batch
- * outlines its other steps; nothing stays marked once the pointer leaves or the view changes.
+ * The plan as a calendar, Monday to Sunday, showing the weeks the campaign runs in: one page for up
+ * to six weeks, otherwise a month at a time. Working days sit on a dotted field with each batch as a
+ * card, a first step lightly tinted; weekends and dates outside the campaign stay plain. Hovering a
+ * batch outlines its other steps; nothing stays marked once the pointer leaves or the view changes.
  */
 export function CampaignCalendarView({ draft, calendar, actions }: { draft: CampaignDraft; calendar: CampaignCalendar; actions?: ReactNode }) {
   const fos = useMemo(() => [...calendar.fos].sort((a, b) => a.name.localeCompare(b.name)), [calendar.fos]);
@@ -21,13 +33,20 @@ export function CampaignCalendarView({ draft, calendar, actions }: { draft: Camp
   const [hover, setHover] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ batchId: string; step: number } | null>(null);
   const first = calendar.days[0] ?? draft.startDate, last = calendar.days.at(-1) ?? draft.endDate;
-  const months = useMemo(() => calendarMonths(first, last), [first, last]);
+  const weeksSpanned = diffDays(mondayOf(first), mondayOf(last)) / 7 + 1;
+  const onePage = weeksSpanned <= ONE_PAGE_WEEKS;
+  const months = useMemo(() => (onePage ? [first.slice(0, 7)] : calendarMonths(first, last)), [onePage, first, last]);
   const [shown, setShown] = useState<string | null>(null);
   const month = shown && months.includes(shown) ? shown : first.slice(0, 7);
   const monthIndex = months.indexOf(month);
   const showMonth = (m: string) => { setHover(null); setShown(m); };
   const showFo = (id: string) => { setHover(null); setChosenFo(id); };
   const working = useMemo(() => new Set(calendar.days), [calendar.days]);
+  // Whole weeks, Monday to Sunday, but only the ones the campaign runs in: every row has room.
+  const days = useMemo(() => {
+    const grid = onePage ? Array.from({ length: weeksSpanned * 7 }, (_, i) => addDays(mondayOf(first), i)) : monthGrid(month);
+    return Array.from({ length: grid.length / 7 }, (_, w) => grid.slice(w * 7, w * 7 + 7)).filter(week => week.some(d => d >= first && d <= last)).flat();
+  }, [onePage, weeksSpanned, month, first, last]);
   const byDay = useMemo(() => {
     const m = new Map<string, { b: CampaignCalendar['batches'][number]; step: number }[]>();
     for (const b of calendar.batches) if (foId === 'all' || b.foId === foId) b.dates.forEach((d, step) => { const list = m.get(d) ?? []; list.push({ b, step }); m.set(d, list); });
@@ -38,7 +57,7 @@ export function CampaignCalendarView({ draft, calendar, actions }: { draft: Camp
   const picked = calendar.batches.find(b => b.id === selected?.batchId);
   const flow = draft.flows.find(f => f.id === picked?.flowId);
   const count = (events: { b: { personIds: string[] } }[]) => events.reduce((n, e) => n + e.b.personIds.length, 0);
-  const years = months[0]?.slice(0, 4) !== months.at(-1)?.slice(0, 4);
+  const years = first.slice(0, 4) !== last.slice(0, 4);
   return <div className="space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h2 className="text-lg font-semibold">Your outreach calendar</h2><p className="mt-0.5 text-sm text-ink-600">{dateRangeLabel(first, last)} · <span className="tabular-nums">{calendar.days.length}</span> working {calendar.days.length === 1 ? 'day' : 'days'}</p></div>
@@ -52,35 +71,35 @@ export function CampaignCalendarView({ draft, calendar, actions }: { draft: Camp
     <div className="flex flex-wrap items-center justify-between gap-3">
       {/* One or two months: the month and arrows. More: a strip of months between the arrows, so nothing moves as you page. */}
       <div className="flex flex-wrap items-center gap-1">
-        <h3 className={`text-base font-semibold text-ink-900 ${months.length > 2 ? 'sr-only' : 'w-40'}`} aria-live="polite">{monthName(month)}</h3>
+        <h3 className={`text-base font-semibold text-ink-900 ${months.length > 2 ? 'sr-only' : 'min-w-40'}`} aria-live="polite">{onePage ? spanTitle(first, last) : monthName(month)}</h3>
         {months.length > 1 && <button type="button" className="btn-icon-ghost disabled:opacity-40 disabled:hover:bg-transparent" aria-label="Previous month" disabled={monthIndex <= 0} onClick={() => showMonth(months[monthIndex - 1])}><IconChevronLeft size={16} /></button>}
         {months.length > 2 && <span role="group" aria-label="Months" className="flex flex-wrap gap-1">{months.map((m, i) => <button type="button" key={m} aria-pressed={m === month} onClick={() => showMonth(m)} className={`rounded-md px-2.5 py-1 text-sm ${m === month ? 'bg-ink-900 text-white' : 'text-ink-600 hover:bg-canvas'}`}>{i === 0 || (years && m.endsWith('-01')) ? monthName(m, true) : monthName(m, true).slice(0, 3)}</button>)}</span>}
         {months.length > 1 && <button type="button" className="btn-icon-ghost disabled:opacity-40 disabled:hover:bg-transparent" aria-label="Next month" disabled={monthIndex >= months.length - 1} onClick={() => showMonth(months[monthIndex + 1])}><IconChevronRight size={16} /></button>}
       </div>
-      <div className={`flex items-center gap-4 text-xs text-ink-600 ${foId === 'all' ? 'invisible' : ''}`}><span className="flex items-center gap-1.5"><span className="h-3 w-1 rounded-sm bg-brand-500" />New people start</span><span className="flex items-center gap-1.5"><span className="h-3 w-1 rounded-sm bg-ink-300" />Follow-up</span></div>
+      {foId !== 'all' && <p className="flex items-center gap-4 text-xs text-ink-600"><span className="flex items-center gap-1.5"><span className="h-3 w-4 rounded border border-brand-200 bg-brand-50" />First step, new people</span><span className="flex items-center gap-1.5"><span className="h-3 w-4 rounded border border-ink-300 bg-white" />Follow-up</span></p>}
     </div>
-    <div className="overflow-x-auto rounded-lg border border-line">
-      <div className="grid min-w-[760px] grid-cols-[repeat(5,minmax(0,1fr))_repeat(2,minmax(0,0.6fr))] gap-px bg-line">
-        {WEEKDAYS.map((d, i) => <div key={d} className={`bg-white px-2.5 py-2 text-xs font-semibold ${i > 4 ? 'text-ink-400' : 'text-ink-600'}`}>{d}</div>)}
-        {monthGrid(month).map(day => {
+    <div className="overflow-x-auto rounded-xl border border-line">
+      <div className="grid min-w-[900px] grid-cols-[repeat(5,minmax(0,1fr))_repeat(2,minmax(0,0.55fr))] gap-px bg-line">
+        {WEEKDAYS.map((d, i) => <div key={d} className={`bg-white px-3 py-2.5 text-xs font-semibold uppercase tracking-wide ${i > 4 ? 'text-ink-400' : 'text-ink-500'}`}>{d}</div>)}
+        {days.map(day => {
           const works = working.has(day);
           const events = works ? byDay.get(day) ?? [] : [];
           const date = day.endsWith('-01') ? shortDateLabel(day, false) : String(Number(day.slice(8)));
-          return <div key={day} data-day={day} className={works ? 'min-h-[4.5rem] bg-white p-2' : 'min-h-[2.25rem] bg-canvas px-2 py-1.5'}>
-            <div className="mb-1 flex items-start justify-between gap-1">
-              <span className="flex items-center gap-1.5"><time dateTime={day} title={calendarDateLabel(day)} className={`text-xs font-semibold ${day.slice(0, 7) !== month ? 'text-ink-400' : works ? 'text-ink-900' : 'text-ink-500'}`}>{date}</time>{(day === first || day === last) && <span className="rounded bg-brand-50 px-1 text-[10px] font-medium text-brand-700">{day === first ? 'Start' : 'End'}</span>}</span>
+          return <div key={day} data-day={day} className={`flex min-h-[9rem] flex-col ${works ? 'calendar-dots' : 'bg-canvas'}`}>
+            <div className={`flex items-center justify-between gap-1 px-2.5 pb-1.5 pt-2.5 ${works ? 'bg-white' : ''}`}>
+              <span className="flex items-center gap-1.5"><time dateTime={day} title={calendarDateLabel(day)} className={`text-sm font-semibold ${works && (onePage || day.slice(0, 7) === month) ? 'text-ink-900' : 'text-ink-400'}`}>{date}</time>{(day === first || day === last) && <span className="rounded bg-white px-1.5 py-px text-[10.5px] font-medium text-ink-700 ring-1 ring-ink-300">{day === first ? 'Start' : 'End'}</span>}</span>
               {events.length > 1 && <span className="text-xs tabular-nums text-ink-600">{people(count(events))}</span>}
             </div>
-            {works && (foId === 'all' ? <div className="space-y-1">{fos.map(fo => <button type="button" key={fo.id} title={`Show ${fo.name}'s calendar`} onClick={() => showFo(fo.id)} className="group flex w-full items-center justify-between gap-2 rounded bg-canvas px-2 py-1 text-xs hover:bg-brand-50"><span className="truncate">{fo.name}</span><span className="flex items-center gap-0.5 font-semibold tabular-nums">{count(events.filter(e => e.b.foId === fo.id))}<IconChevronRight size={12} className="opacity-0 group-hover:opacity-100" /></span></button>)}</div>
-              : <div className="space-y-1">{events.map(({ b, step }) => {
+            {works && (foId === 'all' ? <div className="space-y-1.5 px-2.5 pb-2.5 pt-1">{fos.map(fo => <button type="button" key={fo.id} title={`Show ${fo.name}'s calendar`} onClick={() => showFo(fo.id)} className="group flex w-full items-center justify-between gap-2 rounded-lg border border-line bg-white px-2.5 py-2 text-[13px] shadow-sm hover:border-ink-300"><span className="truncate text-ink-800">{fo.name}</span><span className="flex items-center gap-0.5 font-semibold tabular-nums text-ink-900">{count(events.filter(e => e.b.foId === fo.id))}<IconChevronRight size={12} className="text-ink-400 opacity-0 group-hover:opacity-100" /></span></button>)}</div>
+              : <div className="space-y-1.5 px-2.5 pb-2.5 pt-1">{events.map(({ b, step }) => {
                 const f = draft.flows.find(f => f.id === b.flowId)!;
                 return <button type="button" key={b.id} aria-label={`${f.name} · Step ${step + 1} of ${f.steps.length} · ${people(b.personIds.length)} · first step ${shortDateLabel(b.dates[0], true, years)}`} onClick={() => { setHover(null); setSelected({ batchId: b.id, step }); }} onMouseEnter={() => setHover(b.id)} onMouseLeave={() => setHover(null)}
-                  className={`block w-full rounded-md border-l-[3px] px-2 py-1 text-left text-xs ${step === 0 ? 'border-brand-500 bg-brand-50/60' : 'border-ink-300 bg-canvas'} ${hover === b.id ? 'ring-2 ring-brand-300' : ''}`}>
-                  <span className="flex items-center justify-between gap-1"><span className="truncate font-semibold text-ink-900">Step {step + 1} <span className="font-normal text-ink-500">of {f.steps.length}</span></span><span className="flex shrink-0 gap-1 text-ink-600">{f.steps[step].actions.map(a => <ActionIcon key={a.id} action={a.type} size={12} />)}</span></span>
-                  <span className="mt-0.5 block truncate text-ink-600">{people(b.personIds.length)} · {PRIORITY_LABELS[b.priority]}</span>
+                  className={`block w-full rounded-lg border px-3 py-2.5 text-left text-[13px] shadow-sm transition-colors ${step === 0 ? 'bg-brand-50' : 'bg-white'} ${hover === b.id ? 'border-brand-400 ring-2 ring-brand-100' : step === 0 ? 'border-brand-200 hover:border-brand-300' : 'border-line hover:border-ink-300'}`}>
+                  <span className="flex items-center justify-between gap-1.5"><span className="truncate text-sm font-semibold text-ink-900">Step {step + 1} <span className="font-normal text-ink-500">of {f.steps.length}</span></span><span className="flex shrink-0 gap-1 text-ink-500">{f.steps[step].actions.map(a => <ActionIcon key={a.id} action={a.type} size={14} />)}</span></span>
+                  <span className="mt-1 block truncate text-ink-600">{people(b.personIds.length)} · {PRIORITY_LABELS[b.priority]}</span>
                   {mixed && <span className="mt-0.5 block truncate text-ink-500">{f.name}</span>}
                 </button>;
-              })}{!events.length && <span className="text-xs font-medium text-amber-800">Nothing to send</span>}</div>)}
+              })}{!events.length && <span className="rounded bg-white px-1 text-xs font-medium text-amber-800">Nothing to send</span>}</div>)}
           </div>;
         })}
       </div>

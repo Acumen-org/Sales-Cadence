@@ -138,8 +138,8 @@ test('capture screens', async ({ page }) => {
   await page.waitForURL(/\/home/);
   await page.goto('/reports');
   await shot(page, '12-reports');
-  await page.goto('/reports?view=table');
-  await shot(page, '12b-reports-table');
+  await page.goto('/reports?tab=pods');
+  await shot(page, '12b-reports-by-pod');
   await page.goto('/settings?tab=users');
   await shot(page, '13-settings-users');
   await page.goto('/settings?tab=twenty');

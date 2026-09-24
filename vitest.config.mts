@@ -5,6 +5,8 @@ export default defineConfig({
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
+  // Components are rendered in a few tests; the app compiles JSX with the automatic runtime too.
+  esbuild: { jsx: 'automatic' },
   test: {
     environment: 'node',
     globals: false,

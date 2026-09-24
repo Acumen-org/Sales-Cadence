@@ -832,3 +832,31 @@ first with what it would send, then the small fixes, each checked; any applied f
 calendar pages month by month and shows whole weeks; the dimming was replaced by a hover outline that
 cannot outlive the pointer.
 
+## A bigger calendar, one Reports page, and enrichment that comes back in (24 September 2026)
+
+The owner found the calendar underwhelming and smaller than before, asked for a dotted background
+inside it and for no green stripe on the left of anything ("it screams AI slop"), reported a studio
+dropdown that closed on its own, asked for MIP as its own switch as on People, and asked for
+Enrichment and Reports to be streamlined, with anything useless removed or replaced.
+
+- The calendar shows only the weeks a campaign runs in, in big cells: working days dotted, batch
+  cards white (a first step lightly tinted), weekends plain; a short campaign is one page. Every
+  left-edge stripe in the app is gone: calendar cards, email cards, the step-wait connector, the
+  campaign alerts, the sidebar's active item and the selected task.
+- The dropdown bug: four toolbars built their selects from a component defined inside another
+  component, so each re-render replaced the element and closed an open one. They are plain calls now.
+- MIP is a switch beside Priority in the studio's picker; it joins the priority groups chosen, so
+  Clients, Tier 1 and MIP is still one selection.
+- Reports is one page (this supersedes "a picture first, a table second"): the headline numbers with
+  what they were, the nested funnel beside the campaigns running, then one breakdown in tabs - By FO
+  (the FO and channel tables merged), By pod, By campaign, By channel. The leaderboard and the
+  channel chart repeated that table, and the weekday heatmap described what campaign plans now
+  decide, so they are gone, as is the retired By sequence view. This week and this month are
+  compared with the same days a week or a month before. The exported file's styles are checked by
+  a test against every class the report uses.
+- Enrichment keeps its three views. Upload enriched file now sits beside Export to enrich (the
+  upload page had no way in since the Imports tab went), the upload page lists earlier uploads, the
+  header counts records missing something critical instead of a percentage that nice-to-have fields
+  held at 0%, the scorecard is quiet where complete and opens the records missing a field from any
+  shaded cell, and the identical Synced column is gone.
+

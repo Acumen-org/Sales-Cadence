@@ -1,10 +1,10 @@
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
-import { visiblePodIds } from './auth/rbac';
-import { addDays, diffDays, todayIn } from './dates';
+import { ROLES_NEEDING_POD, visiblePodIds } from './auth/rbac';
+import { diffDays, todayIn } from './dates';
 import { filterParam, sectionDefaults } from './default-filters';
 import { listCampaigns } from './campaigns-query';
-import { buildReports, reportingRange, reportingTimezone, type Reports } from './reports-query';
+import { buildReports, comparisonRange, reportingRange, reportingTimezone, type Reports } from './reports-query';
 import type { RunningCampaign } from '@/components/reports/report-document';
 
 /**
@@ -28,8 +28,8 @@ export type ReportBundle = {
 export async function loadReportBundle(user: SessionUser, sp: { from?: string; to?: string; pod?: string; fo?: string }): Promise<ReportBundle> {
   const today = todayIn(reportingTimezone());
   const range = reportingRange(sp.from, sp.to, today);
-  const length = diffDays(range.from, range.to) + 1;
-  const previousRange = reportingRange(addDays(range.from, -length), addDays(range.from, -1), today);
+  const before = comparisonRange(range.from, range.to);
+  const previousRange = reportingRange(before.from, before.to, today);
   const visiblePods = visiblePodIds(user);
   const defaults = await sectionDefaults(user);
   const podId = filterParam(sp.pod, defaults.podId);
@@ -37,7 +37,8 @@ export async function loadReportBundle(user: SessionUser, sp: { from?: string; t
   const [pods, users, reports, previous, running] = await Promise.all([
     prisma.pod.findMany({ where: visiblePods === null ? {} : { id: { in: visiblePods } }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
     prisma.user.findMany({
-      where: { AND: [visiblePods === null ? {} : { OR: [{ id: user.id }, { pods: { some: { podId: { in: visiblePods } } } }] }, ...(podId ? [{ pods: { some: { podId } } }] : [])] },
+      // FOs, and anyone who still has outreach of their own: exactly the people the FO table can show.
+      where: { AND: [{ OR: [{ role: { in: ROLES_NEEDING_POD } }, { enrollments: { some: {} } }] }, visiblePods === null ? {} : { OR: [{ id: user.id }, { pods: { some: { podId: { in: visiblePods } } } }] }, ...(podId ? [{ pods: { some: { podId } } }] : [])] },
       select: { id: true, name: true }, orderBy: { name: 'asc' },
     }),
     buildReports(user, today, { range, podId, foUserId }),

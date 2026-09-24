@@ -4,7 +4,7 @@ import { prisma } from './db';
 import { enrollmentByReply, REPLY_TOUCH_WHERE } from './reply-credit';
 import type { SessionUser } from './auth/current-user';
 import { isJuniorFo, visiblePodIds } from './auth/rbac';
-import { addDays, isLocalDate, startOfLocalDay, toLocalDate, type LocalDate } from './dates';
+import { addDays, dayOfWeek, diffDays, isLocalDate, startOfLocalDay, toLocalDate, type LocalDate } from './dates';
 import { ACTION_LABELS, type ActionType } from './sequences/steps';
 
 export type GroupRow = {
@@ -39,9 +39,26 @@ export function reportingRange(from: string | undefined, to: string | undefined,
   return { from: first, to: last, fromInstant: startOfLocalDay(first, reportingTimezone()), toInstant: startOfLocalDay(addDays(last, 1), reportingTimezone()), error };
 }
 
+/**
+ * The period a range is read against. A week to date is compared with the same days a week before,
+ * so a Monday is never set against a weekend; a whole month with the whole month before; a month to
+ * date with the same days of the month before. Anything else: the same number of days just before it.
+ */
+export function comparisonRange(from: LocalDate, to: LocalDate): { from: LocalDate; to: LocalDate } {
+  const length = diffDays(from, to) + 1;
+  if (dayOfWeek(from) === 0 && length <= 7) return { from: addDays(from, -7), to: addDays(to, -7) };
+  if (from.endsWith('-01') && to.slice(0, 7) === from.slice(0, 7)) {
+    const lastMonthEnd = addDays(from, -1), lastMonth = lastMonthEnd.slice(0, 7);
+    if (addDays(to, 1).endsWith('-01')) return { from: `${lastMonth}-01`, to: lastMonthEnd };
+    const day = Math.min(Number(to.slice(8)), Number(lastMonthEnd.slice(8)));
+    return { from: `${lastMonth}-01`, to: `${lastMonth}-${String(day).padStart(2, '0')}` };
+  }
+  return { from: addDays(from, -length), to: addDays(from, -1) };
+}
+
 export type ReportFilters = { range: ReportingRange; podId?: string | null; foUserId?: string | null };
 
-type EnrollmentLite = { id: string; status: string; podId: string | null; foUserId: string; campaignId: string | null; sequenceId: string; createdAt: Date; repliedAt: Date | null; meetingAt: Date | null; completedAt: Date | null; exitedAt: Date | null };
+type EnrollmentLite = { id: string; status: string; podId: string | null; foUserId: string; campaignId: string | null; createdAt: Date; repliedAt: Date | null; meetingAt: Date | null; completedAt: Date | null; exitedAt: Date | null };
 type TaskLite = { enrollmentId: string; state: string; dueDate: string; snoozedTo: string | null; action: string; chosenAction: string | null; completionSource: string | null; foUserId: string };
 
 function enrollmentScope(user: SessionUser): Prisma.EnrollmentWhereInput {
@@ -94,12 +111,11 @@ export type Reports = Awaited<ReturnType<typeof buildReports>>;
 export async function buildReports(user: SessionUser, today: LocalDate, filters?: ReportFilters) {
   const range = filters?.range;
   const scope: Prisma.EnrollmentWhereInput = { AND: [enrollmentScope(user), ...(filters?.podId ? [{ podId: filters.podId }] : []), ...(filters?.foUserId ? [{ foUserId: filters.foUserId }] : [])] };
-  const [enrollments, pods, users, campaigns, sequences] = await Promise.all([
-    prisma.enrollment.findMany({ where: { AND: [scope, ...(range ? [{ createdAt: { lt: range.toInstant } }] : [])] }, select: { id: true, status: true, podId: true, foUserId: true, campaignId: true, sequenceId: true, createdAt: true, repliedAt: true, meetingAt: true, completedAt: true, exitedAt: true } }),
+  const [enrollments, pods, users, campaigns] = await Promise.all([
+    prisma.enrollment.findMany({ where: { AND: [scope, ...(range ? [{ createdAt: { lt: range.toInstant } }] : [])] }, select: { id: true, status: true, podId: true, foUserId: true, campaignId: true, createdAt: true, repliedAt: true, meetingAt: true, completedAt: true, exitedAt: true } }),
     prisma.pod.findMany({ select: { id: true, name: true, podOwnerValue: true } }),
     prisma.user.findMany({ select: { id: true, name: true, twentyMemberId: true } }),
     prisma.campaign.findMany({ select: { id: true, name: true } }),
-    prisma.sequence.findMany({ select: { id: true, name: true } }),
   ]);
   const enrollmentIds = enrollments.map((e) => e.id);
   const tasks = await prisma.task.findMany({
@@ -130,8 +146,7 @@ export async function buildReports(user: SessionUser, today: LocalDate, filters?
 
   const byPod = rollup((e) => ({ key: e.podId ?? 'none', label: name(pods, e.podId, 'No pod') }), enrollments, tasks, today, replies, range);
   const byFo = rollup((e) => ({ key: e.foUserId, label: name(users, e.foUserId, 'Unknown') }), enrollments, tasks, today, replies, range);
-  const byCampaign = rollup((e) => (e.campaignId ? { key: e.campaignId, label: name(campaigns, e.campaignId, 'Deleted campaign') } : { key: 'none', label: 'Standalone sequences' }), enrollments, tasks, today, replies, range);
-  const bySequence = rollup((e) => ({ key: e.sequenceId, label: name(sequences, e.sequenceId, 'Unknown') }), enrollments, tasks, today, replies, range);
+  const byCampaign = rollup((e) => (e.campaignId ? { key: e.campaignId, label: name(campaigns, e.campaignId, 'Deleted campaign') } : { key: 'none', label: 'Not in a campaign' }), enrollments, tasks, today, replies, range);
 
   const channels = (Object.keys(ACTION_LABELS) as ActionType[]).map((action) => {
     const ts = tasks.filter((t) => (t.chosenAction ?? t.action) === action);
@@ -149,7 +164,6 @@ export async function buildReports(user: SessionUser, today: LocalDate, filters?
   });
 
 
-  const d7 = range?.fromInstant ?? startOfLocalDay(addDays(today, -6), reportingTimezone());
   const d28 = range?.fromInstant ?? startOfLocalDay(addDays(today, -27), reportingTimezone());
   const end = range?.toInstant ?? startOfLocalDay(addDays(today, 1), reportingTimezone());
   const doneTasks = await prisma.task.findMany({
@@ -181,12 +195,12 @@ export async function buildReports(user: SessionUser, today: LocalDate, filters?
           meetings: meetingRows.filter((r) => r.foUserId === u.id && r.meetingAt! >= since).length,
         };
       };
-      return { id: u.id, name: u.name, period: window(d28), last7: window(d7), last28: window(d28) };
+      return { id: u.id, name: u.name, period: window(d28) };
     })
     .filter((row) => !range || row.period.total || row.period.replies || row.period.meetings || enrollments.some((e) => e.foUserId === row.id && e.createdAt >= range.fromInstant && e.createdAt < range.toInstant))
     .sort((a, b) => b.period.total - a.period.total || a.name.localeCompare(b.name));
 
-  // Day by day across the range, for sparklines; the weekday x FO grid; the funnel of the cohort.
+  // Day by day across the range, for sparklines; the funnel of the cohort.
   const dayKey = (d: Date) => toLocalDate(d, reportingTimezone());
   const from = range?.from ?? toLocalDate(d28, reportingTimezone());
   const to = range?.to ?? today;
@@ -204,27 +218,23 @@ export async function buildReports(user: SessionUser, today: LocalDate, filters?
       LINKEDIN: doneTasks.filter((t) => t.completedAt && dayKey(t.completedAt) === date && (t.chosenAction ?? t.action).startsWith('LINKEDIN')).length,
     },
   }));
-  const weekday = (d: Date) => new Date(`${dayKey(d)}T00:00:00Z`).getUTCDay();
-  const heat = activity.map((row) => {
-    const cells = [0, 0, 0, 0, 0, 0, 0];
-    for (const t of doneTasks) if (t.foUserId === row.id && t.completedAt && (!range || (t.completedAt >= range.fromInstant && t.completedAt < range.toInstant))) cells[weekday(t.completedAt)] += 1;
-    return { id: row.id, name: row.name, cells };
-  });
   const cohort = range ? enrollments.filter((e) => e.createdAt >= range.fromInstant && e.createdAt < range.toInstant) : enrollments;
   const cohortIds = new Set(cohort.map((e) => e.id));
   const touched = new Set(tasks.filter((t) => t.state === 'DONE' && cohortIds.has(t.enrollmentId)).map((t) => t.enrollmentId));
+  // Nested stages: a meeting counts as a reply, and a reply as contact, so no stage can exceed the one before.
+  const met = (e: EnrollmentLite) => !!e.meetingAt || e.status === 'MEETING';
+  const answered = (e: EnrollmentLite) => (replies.get(e.id)?.length ?? 0) > 0 || met(e);
   const funnel = {
     enrolled: cohort.length,
-    touched: touched.size,
-    replied: cohort.filter((e) => (replies.get(e.id)?.length ?? 0) > 0).length,
-    meeting: cohort.filter((e) => e.meetingAt || e.status === 'MEETING').length,
+    touched: cohort.filter((e) => touched.has(e.id) || answered(e)).length,
+    replied: cohort.filter(answered).length,
+    meeting: cohort.filter(met).length,
   };
 
   return {
     today,
     range: { from, to },
     daily,
-    heat,
     funnel,
     activity,
     totals: {
@@ -237,7 +247,6 @@ export async function buildReports(user: SessionUser, today: LocalDate, filters?
     byPod,
     byFo,
     byCampaign,
-    bySequence,
     channels,
   };
 }

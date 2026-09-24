@@ -48,7 +48,7 @@ export const PERSON_GAPS: GapSpec<PersonRecord>[] = [
   { field: 'companyId', label: 'Company', priority: 'critical', fixInTwenty: true, scorecard: true, missing: (p) => (p.companyId ? null : 'Company not linked') },
   { field: 'linkedinUrl', label: 'LinkedIn', priority: 'critical', scorecard: true, missing: (p) => (p.linkedinUrl ? null : 'LinkedIn missing') },
   { field: 'jobTitle', label: 'Job title', priority: 'useful', scorecard: true, missing: (p) => (p.jobTitle ? null : 'Job title missing') },
-  { field: 'tags', label: 'Flagged in CRM', priority: 'critical', missing: (p, ctx) => (p.tags.some((tag) => ctx.enrichmentTags.has(tag) || /enrichment[\s_-]*(required|needed)/i.test(tag)) ? 'Flagged in CRM' : null) },
+  { field: 'tags', label: 'Marked for enrichment in Twenty', priority: 'critical', missing: (p, ctx) => (p.tags.some((tag) => ctx.enrichmentTags.has(tag) || /enrichment[\s_-]*(required|needed)/i.test(tag)) ? 'Marked for enrichment in Twenty' : null) },
 ];
 export const COMPANY_GAPS: GapSpec<CompanyRecord>[] = [
   { field: 'domain', label: 'Website', priority: 'critical', scorecard: true, missing: (c) => (blank(c.domain) ? 'Website missing' : null) },

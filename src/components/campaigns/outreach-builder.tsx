@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { ACTION_LABELS, ACTION_TYPES, type ActionType, type SequenceStep, newStepId } from '@/lib/sequences/steps';
 import { RichTextEditor } from '@/components/rich-text-editor';
-import { ActionIcon, IconArrowDown, IconArrowUp, IconPlus, IconTrash } from '@/components/icons';
+import { ActionIcon, IconArrowDown, IconArrowUp, IconClock, IconPlus, IconTrash } from '@/components/icons';
 
 const html = (text: string) => '<p>' + text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') + '</p>';
 export function OutreachBuilder({ steps, onChange, maxSteps = 60 }: { maxSteps?: number; steps: SequenceStep[]; onChange: (steps: SequenceStep[]) => void }) {
@@ -20,7 +20,7 @@ export function OutreachBuilder({ steps, onChange, maxSteps = 60 }: { maxSteps?:
   };
   return <div className="space-y-4">
     {steps.map((step, i) => <div key={step.id} data-outreach-step={i} className={drag === i ? 'opacity-60' : ''}>
-      {i > 0 && <div className="ml-6 flex items-center gap-3 border-l-2 border-brand-200 py-4 pl-6 text-sm text-ink-600"><span>Wait</span><input aria-label={`Gap before step ${i + 1}`} type="number" min={1} max={366} className="!w-20 text-center !font-bold" value={step.day - steps[i - 1].day} onChange={e => {
+      {i > 0 && <div className="flex items-center gap-3 py-3 pl-6 text-sm text-ink-600"><IconClock size={15} className="text-ink-400" /><span>Wait</span><input aria-label={`Gap before step ${i + 1}`} type="number" min={1} max={366} className="!w-20 text-center !font-bold" value={step.day - steps[i - 1].day} onChange={e => {
         const gap = Number(e.target.value); if (!Number.isInteger(gap) || gap < 1 || gap > 366) return;
         const delta = gap - (step.day - steps[i - 1].day); onChange(steps.map((s, n) => ({ ...s, day: s.day + (n >= i ? delta : 0) })));
       }} /><span>{step.day - steps[i - 1].day === 1 ? 'calendar day' : 'calendar days'}</span></div>}

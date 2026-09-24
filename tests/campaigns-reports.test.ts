@@ -102,7 +102,7 @@ describe('campaigns and reports', () => {
     expect(funnel[7].done).toBe(1);
   });
 
-  it('reports roll up by pod, FO, campaign, sequence and channel with overdue and stalled lists', async () => {
+  it('reports roll up by pod, FO, campaign and channel', async () => {
     const admin = sessionUser(b.users.ria, []);
     const r = await buildReports(admin, '2026-09-20');
     expect(r.totals.enrollments).toBe(4);
@@ -113,7 +113,13 @@ describe('campaigns and reports', () => {
     expect(pod.completed).toBe(1);
     expect(pod.replyRate).toBeCloseTo(0.25);
     expect(r.byCampaign[0].label).toBe('SaaStr follow-up');
-    expect(r.bySequence[0].tasksDone).toBeGreaterThanOrEqual(13);
+    expect(r.byFo.reduce((n, f) => n + f.tasksDone, 0)).toBeGreaterThanOrEqual(13);
+    expect('bySequence' in r).toBe(false);
+    // Nested stages: a meeting counts as a reply and a reply as contact, so the funnel never widens.
+    expect(r.funnel.enrolled).toBeGreaterThanOrEqual(r.funnel.touched);
+    expect(r.funnel.touched).toBeGreaterThanOrEqual(r.funnel.replied);
+    expect(r.funnel.replied).toBeGreaterThanOrEqual(r.funnel.meeting);
+    expect(r.funnel.replied).toBeGreaterThanOrEqual(1);
     const email = r.channels.find((c) => c.action === 'EMAIL')!;
     expect(email.manual).toBeGreaterThanOrEqual(4);
 

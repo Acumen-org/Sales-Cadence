@@ -43,8 +43,8 @@ export function EnrichmentImportForm({ initialEntity = 'person' }: { initialEnti
           <Field label="Record type"><select value={entity} disabled={pending} onChange={(event) => { const selected = event.target.value as EnrichmentEntity; setEntity(selected); setHeaders([]); if (source) inspect(source, selected); }}><option value="person">People</option><option value="company">Accounts</option></select></Field>
           <Field label="Import name"><input value={name} onChange={(event) => setName(event.target.value)} maxLength={200} /></Field>
           <div className="rounded-xl border border-dashed border-brand-200 bg-brand-50/30 p-6 sm:col-span-2">
-            <Field label="CSV or JSON file">
-              <input type="file" accept=".csv,.tsv,.json,text/csv,application/json" disabled={pending} onChange={async (event) => {
+            <Field label="The filled-in file (CSV or JSON)">
+              <input type="file" className="text-sm text-ink-600 file:mr-3 file:cursor-pointer file:rounded-lg file:border file:border-line file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-ink-900 hover:file:bg-canvas" accept=".csv,.tsv,.json,text/csv,application/json" disabled={pending} onChange={async (event) => {
                 const file = event.target.files?.[0];
                 if (!file) return;
                 if (file.size > 4_000_000) { setError('Files can be up to 4 MB.'); return; }

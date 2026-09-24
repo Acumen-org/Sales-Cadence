@@ -17,7 +17,6 @@ export type EnrichmentRow = {
   twentyUrl: string | null;
   owner: string | null;
   critical: boolean;
-  synced: string;
   gaps: { field: string; label: string; priority: 'critical' | 'useful'; fixInTwenty?: boolean; assignee: string | null; markedBy: string | null; markedAt: string | null; suggestion: { id: string; name: string } | null }[];
 };
 
@@ -102,9 +101,8 @@ export function EnrichmentTable({ entity, rows, fields, assignees, canMark, notF
       <table className="table w-full table-fixed">
         <colgroup>
           <col className="w-10" />
-          <col style={{ width: '27%' }} />
-          <col style={{ width: '45%' }} />
-          <col style={{ width: '10%' }} />
+          <col style={{ width: '30%' }} />
+          <col style={{ width: '52%' }} />
           <col style={{ width: '10%' }} />
           <col className="w-12" />
         </colgroup>
@@ -114,7 +112,6 @@ export function EnrichmentTable({ entity, rows, fields, assignees, canMark, notF
             <th>{entity === 'person' ? 'Person' : 'Account'}</th>
             <th>{notFound ? 'Marked not found' : 'Information needed'}</th>
             <th>Priority</th>
-            <th>Synced</th>
             <th><span className="sr-only">Open in Twenty</span></th>
           </tr>
         </thead>
@@ -125,11 +122,11 @@ export function EnrichmentTable({ entity, rows, fields, assignees, canMark, notF
               <td><IdentityCell name={r.label} sub={sub(r)} href={r.href} shape={r.entity === 'person' ? 'circle' : 'square'} /></td>
               <td>
                 <div className="flex flex-wrap gap-1.5">
-                  {!r.gaps.length ? <span className="text-ink-600">No open missing fields</span> : null}{r.gaps.map((gap) => {
+                  {!r.gaps.length ? <span className="text-ink-500">Nothing missing</span> : null}{r.gaps.map((gap) => {
                     const title = [gap.fixInTwenty ? 'A relation or an assignment: an import cannot write it. Link it on the record in Twenty.' : null, gap.assignee ? `Researching: ${gap.assignee}` : null, gap.markedBy && gap.markedAt ? `Marked by ${gap.markedBy}, ${gap.markedAt}` : null].filter(Boolean).join(' ');
                     return (
                       <span key={gap.field} className="inline-flex items-center gap-1" title={title || undefined}>
-                        <Badge tone={notFound ? 'gray' : gap.assignee ? 'blue' : gap.priority === 'critical' ? 'amber' : 'gray'}>
+                        <Badge tone={gap.assignee && !notFound ? 'blue' : 'gray'}>
                           {gap.label}{gap.assignee ? ` · ${gap.assignee}` : ''}
                         </Badge>
                         {gap.suggestion ? <Link href={`/accounts/${gap.suggestion.id}`} className="text-[12px] text-brand-700 hover:underline" title="The account whose website matches this email">looks like {gap.suggestion.name}</Link> : null}
@@ -138,8 +135,7 @@ export function EnrichmentTable({ entity, rows, fields, assignees, canMark, notF
                   })}
                 </div>
               </td>
-              <td><Badge tone={r.critical ? 'amber' : 'blue'}>{!r.gaps.length ? '-' : r.critical ? 'Critical' : 'Useful'}</Badge></td>
-              <td className="text-[12px] text-ink-600 whitespace-nowrap">{r.synced}</td>
+              <td className="whitespace-nowrap text-[12.5px]">{!r.gaps.length ? null : r.critical ? <span className="font-medium text-red-700">Critical</span> : <span className="text-ink-500">Nice to have</span>}</td>
               <td className="pr-4 text-right">{r.twentyUrl ? <a href={r.twentyUrl} target="_blank" rel="noreferrer" className="btn-ghost btn-sm !px-1.5" aria-label={`Open ${r.label} in Twenty`} title="Open in Twenty"><IconExternal size={14} /></a> : null}</td>
             </tr>
           ))}

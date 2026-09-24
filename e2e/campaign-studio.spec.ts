@@ -153,3 +153,13 @@ test('the studio saves its own draft as it is filled in',async({page})=>{
  await page.reload();await expect(page.getByLabel('Campaign name',{exact:true})).toHaveValue('Saves itself');await expect(page.getByLabel('Default new people per day')).toHaveValue('');await expect(page.getByRole('button',{name:'PHH',exact:true})).toHaveAttribute('aria-pressed','true');
  const id=page.url().split('/').at(-2)!;const c=await db.campaign.findUniqueOrThrow({where:{id}});expect(c.status).toBe('DRAFT');expect(c.name).toBe('Saves itself');
 });
+
+test('filter dropdowns stay the same element while the list reloads, so one that is open does not close',async({page})=>{
+ await login(page);await page.goto('/campaigns/new');
+ // Before: each re-render made a new <select>, and an open one closed as soon as results arrived.
+ const fo=await page.getByLabel('Filter by FO',{exact:true}).elementHandle();
+ await page.getByLabel('Search people to add').fill('Dummy');await page.waitForTimeout(900);
+ expect(await fo!.evaluate(el=>el.isConnected)).toBe(true);
+ await page.getByRole('button',{name:'MIP',exact:true}).click();await expect(page.getByRole('button',{name:'MIP',exact:true})).toHaveAttribute('aria-pressed','true');
+ expect(await fo!.evaluate(el=>el.isConnected)).toBe(true);
+});

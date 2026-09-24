@@ -33,6 +33,8 @@ const Filters = z.object({
   state: z.enum(['any', 'cold', 'enrolled', 'finished']).default('cold'),
   /** Planner priority groups (0 Clients ... 5 Unclassified); a contact in any of them matches. */
   priority: z.array(z.number().int().min(0).max(5)).max(6).default([]),
+  /** MIP, its own switch as on People; it joins the priority groups chosen (the planner's MIP group). */
+  mip: z.boolean().default(false),
   page: z.number().int().min(1).max(100000).default(1),
 });
 export type PickerFilters = z.infer<typeof Filters>;
@@ -88,7 +90,7 @@ async function pickerWhere(f: PickerFilters, user: Awaited<ReturnType<typeof req
   if (f.tier && (values.tier as readonly string[]).includes(f.tier)) and.push({ tier: f.tier });
   if (f.type && (values.contactType as readonly string[]).includes(f.type)) and.push({ contactType: { has: f.type } });
   if (f.tag) and.push({ tags: { has: f.tag } });
-  const priority = await priorityWhere(f.priority);
+  const priority = await priorityWhere(f.mip ? [...new Set([...f.priority, 1])] : f.priority);
   if (priority) and.push(priority);
   if (f.account) and.push({ companyName: { contains: f.account, mode: 'insensitive' } });
   if (f.state === 'cold') and.push({ enrollments: { none: {} }, dnd: false, optedOut: false });

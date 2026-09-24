@@ -24,7 +24,7 @@ export function PeoplePicker({ campaignPodId, campaignFoIds, campaignId, value, 
   latest.current = value;
   const [options, setOptions] = useState<PickerOptions | null>(null);
   const [showMore, setShowMore] = useState(false);
-  const [filters, setFilters] = useState<PickerFilters>({ q: '', pod: initialPod ?? '', fo: '', product: '', tier: '', type: '', tag: '', account: '', state: 'any', priority: [], page: 1 });
+  const [filters, setFilters] = useState<PickerFilters>({ q: '', pod: initialPod ?? '', fo: '', product: '', tier: '', type: '', tag: '', account: '', state: 'any', priority: [], mip: false, page: 1 });
   const moreCount = [filters.tier, filters.type, filters.product, filters.tag].filter(Boolean).length;
   const [text, setText] = useState('');
   const [rows, setRows] = useState<PickerRow[]>([]);
@@ -83,7 +83,7 @@ export function PeoplePicker({ campaignPodId, campaignFoIds, campaignId, value, 
   const first = (filters.page - 1) * pageSize + 1;
   const last = Math.min(filters.page * pageSize, total);
 
-  const Select = ({ name, label, all, items }: { name: keyof PickerFilters; label: string; all: string; items: { value: string; label: string }[] }) => (
+  const filterSelect = ({ name, label, all, items }: { name: keyof PickerFilters; label: string; all: string; items: { value: string; label: string }[] }) => (
     <select value={String(filters[name])} onChange={(e) => set({ [name]: e.target.value } as Partial<PickerFilters>)} aria-label={label} className="!w-auto !py-1.5 !text-[12.5px]">
       <option value="">{all}</option>
       {items.map((i) => <option key={i.value} value={i.value}>{i.label}</option>)}
@@ -99,22 +99,23 @@ export function PeoplePicker({ campaignPodId, campaignFoIds, campaignId, value, 
         </div>
         {options ? (
           <>
-            <Select name="pod" label="Filter by pod" all="All pods" items={options.pods.map((p) => ({ value: p.value, label: p.name }))} />
-            <Select name="fo" label="Filter by FO" all="All FOs" items={options.fos.map((f) => ({ value: f.id, label: f.name }))} />
+            {filterSelect({ name: 'pod', label: 'Filter by pod', all: 'All pods', items: options.pods.map((p) => ({ value: p.value, label: p.name })) })}
+            {filterSelect({ name: 'fo', label: 'Filter by FO', all: 'All FOs', items: options.fos.map((f) => ({ value: f.id, label: f.name })) })}
             <select value={filters.state} onChange={(e) => set({ state: e.target.value as PickerFilters['state'] })} aria-label="Campaign state" className="!w-auto !max-w-[190px] !py-1.5 !text-[12.5px]">
               <option value="cold">Never in a campaign</option>
               <option value="enrolled">In a campaign</option>
               <option value="any">Any campaign state</option>
             </select>
-            <PriorityFilter value={filters.priority} onChange={priority => set({ priority })} />
+            <button type="button" onClick={() => set({ mip: !filters.mip })} aria-pressed={filters.mip} className={filters.mip ? 'chip' : 'chip-muted !border !border-line'} title="Most-important people, as well as any priority picked">MIP</button>
+            <PriorityFilter value={filters.priority} mip={filters.mip} onChange={priority => set({ priority })} />
             <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} className={`btn-secondary btn-sm ${showMore || moreCount ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
               <IconFilter size={14} /> Filters{moreCount ? <span className="ml-1 tabular-nums">{moreCount}</span> : null}
             </button>
             {showMore || moreCount ? <div className="flex w-full flex-wrap items-center gap-2 rounded-[10px] border border-line bg-canvas/70 p-2">
-              <Select name="tier" label="Filter by tier" all="Any tier" items={options.tiers.map((t) => ({ value: t, label: optionLabel(t) }))} />
-              <Select name="type" label="Filter by contact type" all="Any type" items={options.types.map((t) => ({ value: t, label: optionLabel(t) }))} />
-              <Select name="product" label="Filter by product" all="Any product" items={options.products.map((p) => ({ value: p, label: optionLabel(p) }))} />
-              {options.tags.length ? <Select name="tag" label="Filter by Twenty tag" all="Any tag" items={options.tags.map((t) => ({ value: t, label: optionLabel(t) }))} /> : null}
+              {filterSelect({ name: 'tier', label: 'Filter by tier', all: 'Any tier', items: options.tiers.map((t) => ({ value: t, label: optionLabel(t) })) })}
+              {filterSelect({ name: 'type', label: 'Filter by contact type', all: 'Any type', items: options.types.map((t) => ({ value: t, label: optionLabel(t) })) })}
+              {filterSelect({ name: 'product', label: 'Filter by product', all: 'Any product', items: options.products.map((p) => ({ value: p, label: optionLabel(p) })) })}
+              {options.tags.length ? filterSelect({ name: 'tag', label: 'Filter by Twenty tag', all: 'Any tag', items: options.tags.map((t) => ({ value: t, label: optionLabel(t) })) }) : null}
             </div> : null}
           </>
         ) : null}
@@ -178,8 +179,8 @@ export function PeoplePicker({ campaignPodId, campaignFoIds, campaignId, value, 
   );
 }
 
-/** The planner's priority groups as one multi-choice control; a contact in any chosen group matches. */
-function PriorityFilter({ value, onChange }: { value: number[]; onChange: (groups: number[]) => void }) {
+/** The planner's priority groups as one multi-choice control; a contact in any chosen group matches. MIP has its own switch, as on People. */
+function PriorityFilter({ value, mip, onChange }: { value: number[]; mip: boolean; onChange: (groups: number[]) => void }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -188,7 +189,7 @@ function PriorityFilter({ value, onChange }: { value: number[]; onChange: (group
     document.addEventListener('mousedown', close); document.addEventListener('keydown', close);
     return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', close); };
   }, [open]);
-  const label = value.length ? [...value].sort().map(g => PRIORITY_LABELS[g]).join(', ') : 'Any priority';
+  const label = value.length ? `${[...value].sort().map(g => PRIORITY_LABELS[g]).join(', ')}${mip ? ' + MIP' : ''}` : mip ? 'MIP only' : 'Any priority';
   return (
     <div ref={box} className="relative">
       <button type="button" aria-haspopup="true" aria-expanded={open} aria-label="Filter by priority" onClick={() => setOpen(!open)} className={`btn-secondary btn-sm max-w-[240px] ${value.length ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
@@ -196,7 +197,7 @@ function PriorityFilter({ value, onChange }: { value: number[]; onChange: (group
       </button>
       {open ? (
         <div role="group" aria-label="Priority" className="absolute left-0 top-full z-20 mt-1 w-48 rounded-[10px] border border-line bg-white p-1.5 shadow-lg">
-          {PRIORITY_LABELS.map((name, g) => (
+          {PRIORITY_LABELS.map((name, g) => g === 1 ? null : (
             <label key={name} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-canvas">
               <input type="checkbox" checked={value.includes(g)} onChange={() => onChange(value.includes(g) ? value.filter(x => x !== g) : [...value, g])} />
               {name}

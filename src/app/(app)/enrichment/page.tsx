@@ -8,7 +8,7 @@ import { canEnrich, enrichmentPeopleScope, listableAccountCount } from '@/lib/en
 import { defaultEnrichmentDirection, ENRICHMENT_SORTS, enrichmentFilterOptions, enrichmentQueue, enrichmentScorecard, filterEnrichmentQueue, type EnrichmentFilters } from '@/lib/enrichment-work';
 import { formatInstant } from '@/lib/dates';
 import { workspaceTimezone } from '@/lib/workspace';
-import { DataValue, EmptyState, Stat, Surface, Tabs, ViewHeader } from '@/components/ui';
+import { DataValue, EmptyState, Surface, Tabs, ViewHeader } from '@/components/ui';
 import { EnrichmentToolbar } from '@/components/enrichment/enrichment-toolbar';
 import { EnrichmentTable, type EnrichmentRow } from '@/components/enrichment/enrichment-table';
 import { EnrichmentScorecard } from '@/components/enrichment/scorecard';
@@ -34,6 +34,13 @@ export default async function EnrichmentPage({ searchParams }: { searchParams: P
     listableAccountCount(user),
   ]);
   const contacts = queue.filter((item) => item.entity === 'person' && item.gaps.length);
+  // What needs doing, in counts of records missing something critical; nice-to-have fields wait in the tabs.
+  const critical = (items: typeof contacts) => items.filter((item) => item.gaps.some((gap) => gap.priority === 'critical')).length;
+  const needs = (items: typeof contacts, one: string, many: string) => {
+    const n = critical(items), rest = items.length - n;
+    if (n) return `${n.toLocaleString('en-US')} ${n === 1 ? one : many} missing something critical`;
+    return rest ? `${rest.toLocaleString('en-US')} ${rest === 1 ? one : many} missing only nice-to-have details` : `no ${many} missing anything`;
+  };
   const accounts = queue.filter((item) => item.entity === 'company' && item.gaps.length);
   const entity = tab === 'accounts' ? 'company' : 'person';
   const pool = queue.filter((item) => item.entity === entity);
@@ -48,7 +55,7 @@ export default async function EnrichmentPage({ searchParams }: { searchParams: P
   };
   // Several kinds of missing information at once: a record shows when it lacks any of them.
   const wanted = (Array.isArray(sp.field) ? sp.field : sp.field ? [sp.field] : []).filter((f) => options.fields.some((o) => o.field === f));
-  const sort = ENRICHMENT_SORTS.includes(sp.sort as (typeof ENRICHMENT_SORTS)[number]) ? (sp.sort as (typeof ENRICHMENT_SORTS)[number]) : 'name';
+  const sort = sp.sort !== 'synced' && ENRICHMENT_SORTS.includes(sp.sort as (typeof ENRICHMENT_SORTS)[number]) ? (sp.sort as (typeof ENRICHMENT_SORTS)[number]) : 'name';
   const dir = sortDirection(sp.dir, defaultEnrichmentDirection(sort));
   const filters: EnrichmentFilters = { includeComplete: sp.records === 'all', q: sp.q, fields: wanted, sort, dir, pod: values.pod, fo: foMember, tier: values.tier, type: values.type, product: values.product, account: values.account, tag: values.tag, priority: values.priority as EnrichmentFilters['priority'], campaign: values.campaign as EnrichmentFilters['campaign'], notFound: values.marks === 'notfound' };
   const filtered = filterEnrichmentQueue(pool, filters);
@@ -74,35 +81,35 @@ export default async function EnrichmentPage({ searchParams }: { searchParams: P
   const scorecard = tab === 'scorecard' ? await enrichmentScorecard(user) : null;
   const rows: EnrichmentRow[] = filtered.slice((page - 1) * PAGE, page * PAGE).map((item) => ({
     id: item.id, entity: item.entity, label: item.label, company: item.company, href: item.href, twentyUrl: item.twentyUrl, owner: item.owner,
-    critical: item.gaps.some((gap) => gap.priority === 'critical'), synced: formatInstant(item.syncedAt, workspaceTimezone()),
+    critical: item.gaps.some((gap) => gap.priority === 'critical'),
     gaps: item.gaps.map((gap) => ({ field: gap.field, label: gap.label, priority: gap.priority, fixInTwenty: gap.fixInTwenty, assignee: gap.mark?.kind === 'assigned' ? gap.mark.assigneeName : null, markedBy: gap.mark?.byName ?? null, markedAt: gap.mark ? formatInstant(gap.mark.at, workspaceTimezone()) : null, suggestion: gap.suggestion ?? null })),
   }));
   const assignees = users.filter((u) => canSeeAllPods(user) || needsPod(u.role) || u.id === user.id).map((u) => ({ id: u.id, name: u.name }));
   const withFilters = (
-    <EnrichmentToolbar tab={tab} q={sp.q ?? ''} fields={options.fields} wanted={wanted} pods={pods.map((p) => ({ value: p.podOwnerValue, name: p.name }))} fos={fos.map((f) => ({ id: f.id, name: f.name }))} tiers={options.tiers} types={options.types} products={options.products} tags={options.tags} accounts={options.accounts} values={values} sort={sort} dir={dir} exportHref={`/enrichment/export?${exportParams.toString()}`} contacts={tab !== 'accounts'} />
+    <EnrichmentToolbar tab={tab} q={sp.q ?? ''} fields={options.fields} wanted={wanted} pods={pods.map((p) => ({ value: p.podOwnerValue, name: p.name }))} fos={fos.map((f) => ({ id: f.id, name: f.name }))} tiers={options.tiers} types={options.types} products={options.products} tags={options.tags} accounts={options.accounts} values={values} sort={sort} dir={dir} contacts={tab !== 'accounts'} />
   );
   const footer = (
     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-4"><span className="flex items-center gap-3"><DataValue>{total} records</DataValue>{values.marks ? <Link href={`/enrichment?tab=${tab}`} className="text-[12px] text-brand-700 hover:underline">Back to enrichment</Link> : hiddenCount ? <Link href={`/enrichment?tab=${tab}&marks=notfound`} className="text-[12px] text-brand-700 hover:underline">{hiddenCount} marked not found</Link> : null}</span><div className="flex items-center gap-3">{page > 1 ? <Link href={pageHref(page - 1)} className="btn-secondary btn-sm">Previous</Link> : null}<span className="text-[12px] text-ink-500">Page <DataValue>{page}</DataValue> / <DataValue>{pageCount}</DataValue></span>{page < pageCount ? <Link href={pageHref(page + 1)} className="btn-secondary btn-sm">Next</Link> : null}</div></div>
   );
-  const empty = <EmptyState title={anyFilter ? 'No records match these filters' : 'Nothing is missing'} action={anyFilter ? <Link href={`/enrichment?tab=${tab}`} className="btn-secondary">Clear filters</Link> : undefined} />;
+  // A field every missing record of which is marked not found: say so, and open those instead.
+  const markedOnly = !rows.length && !filters.notFound && wanted.length ? filterEnrichmentQueue(pool, { ...filters, notFound: true }).length : 0;
+  const these = wanted.length > 1 ? 'these' : 'this';
+  const markedHref = () => { const p = params(); p.set('marks', 'notfound'); return `/enrichment?${p.toString()}`; };
+  const empty = markedOnly
+    ? <EmptyState title={markedOnly === 1 ? `The 1 record missing ${these} is marked not found` : `All ${markedOnly} records missing ${these} are marked not found`} action={<Link href={markedHref()} className="btn-secondary">Show them</Link>} />
+    : <EmptyState title={anyFilter ? 'No records match these filters' : 'Nothing is missing'} action={anyFilter ? <Link href={`/enrichment?tab=${tab}`} className="btn-secondary">Clear filters</Link> : undefined} />;
 
   return (
     <PageFrame className="space-y-5 px-6 pb-8 pt-2">
-      <div className="grid gap-3 sm:grid-cols-4">
-        <Stat label="People to enrich" value={contacts.length} />
-        <Stat label="Accounts to enrich" value={accounts.length} />
-        <Stat label="People complete" value={peopleTotal ? `${Math.round(((peopleTotal - contacts.length) / peopleTotal) * 100)}%` : '–'} />
-        <Stat label="Accounts complete" value={accountsTotal ? `${Math.round(((accountsTotal - accounts.length) / accountsTotal) * 100)}%` : '–'} />
-      </div>
       <Surface flush>
-        <ViewHeader title="Data readiness" />
+        <ViewHeader title={<>Data readiness{peopleTotal + accountsTotal === 0 ? null : <span className="text-[12.5px] font-normal tracking-normal text-ink-500">{needs(contacts, 'person', 'people')} · {needs(accounts, 'account', 'accounts')}</span>}</>} actions={tab === 'scorecard' ? undefined : <span className="flex items-center gap-2"><a href={`/enrichment/export?${exportParams.toString()}`} className="btn-secondary btn-sm">Export to enrich</a>{canEnrich(user) ? <Link href={`/enrichment/import?entity=${entity}`} className="btn-secondary btn-sm">Upload enriched file</Link> : null}</span>} />
         <Tabs inset={false} current={tab} tabs={[
           { key: 'contacts', label: 'People', count: contacts.length, href: '/enrichment?tab=contacts' },
           { key: 'accounts', label: 'Accounts', count: accounts.length, href: '/enrichment?tab=accounts' },
           { key: 'scorecard', label: 'Scorecard', href: '/enrichment?tab=scorecard' },
         ]} />
         {tab === 'scorecard' && scorecard ? (
-          scorecard.contacts.length || scorecard.accounts.length ? <EnrichmentScorecard scorecard={scorecard} foUserByMember={Object.fromEntries(users.flatMap((u) => (u.twentyMemberId ? [[u.twentyMemberId, u.id]] : [])))} /> : <EmptyState title="No records to score yet" />
+          scorecard.contacts.length || scorecard.accounts.length ? <EnrichmentScorecard scorecard={scorecard} foUserByMember={Object.fromEntries(fos.flatMap((u) => (u.twentyMemberId ? [[u.twentyMemberId, u.id]] : [])))} /> : <EmptyState title="No records to score yet" />
         ) : (
           <>
             {withFilters}

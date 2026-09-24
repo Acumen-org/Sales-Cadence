@@ -91,7 +91,7 @@ export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, p
   /** What the CRM says about a person: kept behind one button so the bar stays a single row. */
   const moreCount = [product, tier, type, tag, status].filter(Boolean).length;
 
-  const Select = ({ name, value, label, options, all }: { name: string; value: string; label: string; options: string[]; all: string }) => (
+  const filterSelect = ({ name, value, label, options, all }: { name: string; value: string; label: string; options: string[]; all: string }) => (
     <select value={value} onChange={(e) => update({ [name]: e.target.value || null })} aria-label={label} className="!w-auto !py-2 !text-[12.5px]">
       <option value="">{all}</option>
       {options.map((o) => (
@@ -154,10 +154,10 @@ export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, p
       ) : null}
 
       <div id={panelId} className={`${showMore ? 'flex' : 'hidden'} w-full flex-wrap items-center gap-2 rounded-[10px] border border-line bg-canvas/70 p-2`}>
-        <Select name="product" value={product} label="Filter by product interest" options={products} all="Any product" />
-        <Select name="tier" value={tier} label="Filter by tier" options={tiers} all="Any tier" />
-        <Select name="type" value={type} label="Filter by contact type" options={types} all="Any type" />
-        <Select name="tag" value={tag} label="Filter by Twenty tag" options={tags} all="Any Twenty tag" />
+        {filterSelect({ name: 'product', value: product, label: 'Filter by product interest', options: products, all: 'Any product' })}
+        {filterSelect({ name: 'tier', value: tier, label: 'Filter by tier', options: tiers, all: 'Any tier' })}
+        {filterSelect({ name: 'type', value: type, label: 'Filter by contact type', options: types, all: 'Any type' })}
+        {filterSelect({ name: 'tag', value: tag, label: 'Filter by Twenty tag', options: tags, all: 'Any Twenty tag' })}
         <select value={status} onChange={(e) => update({ status: e.target.value || null })} aria-label="Filter by campaign state" className="!w-auto !py-2 !text-[12.5px]">
           {SEQUENCE_STATES.map((s) => (
             <option key={s.value} value={s.value}>
