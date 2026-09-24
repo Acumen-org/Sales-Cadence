@@ -45,7 +45,7 @@ function Tile({ label, value, previous, series, invert }: { label: string; value
       <div className="min-w-0">
         <div className="text-[11px] font-medium text-ink-500">{label}</div>
         <div className={`mt-2 text-[30px] font-semibold leading-tight tracking-[-0.04em] tabular-nums ${value === 0 ? 'text-ink-400' : 'text-ink-900'}`}>{value.toLocaleString('en-US')}</div>
-        {previous !== null ? <div className="mt-1 flex items-center gap-1.5"><Delta current={value} previous={previous} invert={invert} /><span className="text-[11.5px] text-ink-500">was {previous.toLocaleString('en-US')}</span></div> : null}
+        {previous !== null ? <div className="mt-1 flex flex-wrap items-center gap-x-1.5"><Delta current={value} previous={previous} invert={invert} />{value !== previous ? <span className="whitespace-nowrap text-[11.5px] text-ink-500">was {previous.toLocaleString('en-US')}</span> : null}</div> : null}
       </div>
       <Sparkline values={series} label={`${label}, day by day`} />
     </div>

@@ -30,12 +30,12 @@ export function Sparkline({ values, colour = '#24735e', width = 140, height = 36
 }
 
 export function Delta({ current, previous, invert = false }: { current: number; previous: number; invert?: boolean }) {
-  if (!previous && !current) return <span className="text-[12px] text-ink-400">no change</span>;
+  if (!previous && !current) return <span className="whitespace-nowrap text-[12px] text-ink-400">no change</span>;
   const diff = current - previous;
   const pct = previous ? Math.round((diff / previous) * 100) : null;
   const good = invert ? diff <= 0 : diff >= 0;
   return (
-    <span className={`inline-flex items-center gap-1 text-[12px] tabular-nums ${diff === 0 ? 'text-ink-400' : good ? 'text-emerald-700' : 'text-amber-700'}`} title={`Previous period: ${previous.toLocaleString('en-US')}`}>
+    <span className={`inline-flex items-center gap-1 whitespace-nowrap text-[12px] tabular-nums ${diff === 0 ? 'text-ink-400' : good ? 'text-emerald-700' : 'text-amber-700'}`} title={`Previous period: ${previous.toLocaleString('en-US')}`}>
       <span aria-hidden>{diff > 0 ? '▲' : diff < 0 ? '▼' : '•'}</span>
       {diff === 0 ? 'same' : `${diff > 0 ? '+' : ''}${diff.toLocaleString('en-US')}${pct !== null ? ` (${pct > 0 ? '+' : ''}${pct}%)` : ''}`}
     </span>
