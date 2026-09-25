@@ -8,7 +8,7 @@ import { channelOf, parseSteps, type ActionType } from '../sequences/steps';
 import { effectiveDailyCap, getSettings } from '../settings';
 import { findDateWithCapacity, loadFromRows, type DayLoad } from './caps';
 import { followingWorkingDay, nextWorkingDay, plannedDateForStep, shiftAfterStep, shouldGenerateNow } from './clock';
-import { loadSyncTask, loadSyncTasks, syncTaskCompleted, syncTaskResolved, syncTaskRescheduled, syncTasksCreated } from './sync-out';
+import { afterResponse, loadSyncTask, loadSyncTasks, syncTaskCompleted, syncTaskResolved, syncTaskRescheduled, syncTasksCreated } from './sync-out';
 import { resolveNextStep } from './sequence-plan';
 import { workspaceTimezone } from '../workspace';
 import { workingDay } from '../campaign-planner';
@@ -193,7 +193,8 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
   // A step opens as work on its date. An email or call made before then was not this step
   // (owner, 25 September 2026): it never closes it, however it is recorded.
   if (result.outcome === 'generated' && !ctx.skipSync) {
-    await syncTasksCreated(await loadSyncTasks(result.taskIds));
+    const ids = result.taskIds;
+    await afterResponse(async () => syncTasksCreated(await loadSyncTasks(ids)));
   }
   return result;
 }
@@ -293,8 +294,8 @@ export async function completeTask(input: CompleteTaskInput, ctx: EngineContext)
 
   const advance: AdvanceResult = ctx.deferAdvance ? { outcome: 'waiting', reason: 'applying outcome' } : await advanceEnrollment(tx_result.task.enrollmentId, ctx);
   if (!ctx.skipSync) {
-    const full = await loadSyncTask(tx_result.task.id);
-    if (full) await syncTaskCompleted(full);
+    const id = tx_result.task.id;
+    await afterResponse(async () => { const full = await loadSyncTask(id); if (full) await syncTaskCompleted(full); });
   }
   return { ok: true, task: tx_result.task, advance };
 }
@@ -319,8 +320,8 @@ export async function skipTask(input: { taskId: string; reason: string; note?: s
   if (!res.ok) return res;
   const advance: AdvanceResult = ctx.deferAdvance ? { outcome: 'waiting', reason: 'applying outcome' } : await advanceEnrollment(res.task.enrollmentId, ctx);
   if (!ctx.skipSync) {
-    const full = await loadSyncTask(res.task.id);
-    if (full) await syncTaskResolved(full);
+    const id = res.task.id;
+    await afterResponse(async () => { const full = await loadSyncTask(id); if (full) await syncTaskResolved(full); });
   }
   return { ok: true, task: res.task, advance };
 }

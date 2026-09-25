@@ -74,6 +74,22 @@ async function reportFailure(task: SyncTask, operation: string, err: unknown, wr
   }
 }
 
+/**
+ * Mirror to Twenty once the FO's click has been answered. Twenty allows 100 requests a minute and
+ * the worker shares them, so a click that waited on Twenty could sit for a minute in its rate-limit
+ * waits. In a request the writes run after the response; anywhere else (the worker, tests) they run
+ * now. A failure is already kept in the outbox by the writers themselves.
+ */
+export async function afterResponse(work: () => Promise<void>): Promise<void> {
+  const guarded = () => work().catch((err) => console.warn('[sync-out] mirror after response failed', err));
+  try {
+    const { after } = await import('next/server');
+    after(guarded);
+  } catch {
+    await guarded();
+  }
+}
+
 /** Mirror freshly generated tasks as open Twenty Tasks. */
 export async function syncTasksCreated(tasks: SyncTask[]): Promise<void> {
   if (!tasks.length) return;
