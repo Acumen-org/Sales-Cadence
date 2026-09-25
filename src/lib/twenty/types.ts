@@ -153,6 +153,33 @@ export type TwentyMessage = {
   updatedAt: string;
 };
 
+/** Someone on a calendar event Twenty synced: a guest, the organiser, one of us. */
+export type TwentyCalendarParticipant = {
+  id: string;
+  handle: string;
+  displayName: string | null;
+  isOrganizer: boolean;
+  personId: string | null;
+  workspaceMemberId: string | null;
+};
+
+/** A meeting on a calendar connected to Twenty. */
+export type TwentyCalendarEvent = {
+  id: string;
+  title: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  isFullDay: boolean;
+  isCanceled: boolean;
+  location: string | null;
+  description: string | null;
+  /** The join link (Meet, Zoom, Teams), when the invite has one. */
+  conferenceUrl: string | null;
+  iCalUid: string | null;
+  participants: TwentyCalendarParticipant[];
+  updatedAt: string;
+};
+
 export type TwentyTaskStatus = 'TODO' | 'IN_PROGRESS' | 'DONE' | string;
 
 export type TwentyTask = {

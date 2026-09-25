@@ -11,8 +11,9 @@ import { prisma } from '../db';
 import { requireUser, toActor, type SessionUser } from '../auth/current-user';
 import { isAdmin, isPodLeader, canCreateMeeting, ROLES_NEEDING_POD } from '../auth/rbac';
 import { logAudit, userActor } from '../audit';
-import { getSettings, isExternalEmail } from '../settings';
 import { inspectLink } from '../meetings/resolve-media';
+import { resolveAttendees } from '../meetings/attendees';
+import { calendarEventForLink, linkKey, linkNeedle } from '../meetings/calendar-import';
 import { extractRecordingUrl, parseMeetingLink } from '../meetings/providers';
 import { detectTranscriptFormat, parseTranscript } from '../meetings/transcript';
 import { getMeetingAnalyzer, MeetingAnalysisSchema } from '../meetings/analysis';
@@ -145,51 +146,6 @@ function readForm(formData: FormData) {
   });
 }
 
-/** Match attendees to Twenty people and Cadence users, and mark who is external. */
-async function resolveAttendees(entries: AttendeeSelection[], hostUserId: string | null) {
-  const settings = await getSettings();
-  const emails = entries.map((e) => e.email).filter((e): e is string => Boolean(e));
-  const [people, users] = await Promise.all([
-    prisma.personCache.findMany({ where: { deletedAt: null, OR: [{ id: { in: entries.flatMap((e) => e.personId ? [e.personId] : []) } }, { email: { in: emails, mode: 'insensitive' } }] }, select: { id: true, email: true, firstName: true, lastName: true } }),
-    // A colleague's mailbox address is often not their Cadence login, so aliases count too.
-    prisma.user.findMany({ where: { OR: [{ id: { in: entries.flatMap((e) => e.userId ? [e.userId] : []) } }, { email: { in: emails, mode: 'insensitive' } }, { aliases: { hasSome: emails } }] }, select: { id: true, email: true, name: true, aliases: true } }),
-  ]);
-  const personByEmail = new Map(people.map((p) => [p.email?.toLowerCase(), p]));
-  const userByEmail = new Map<string, { id: string; name: string }>();
-  for (const u of users) {
-    for (const key of [u.email, ...u.aliases]) {
-      const k = key.toLowerCase();
-      if (k.includes('@') && !userByEmail.has(k)) userByEmail.set(k, { id: u.id, name: u.name });
-    }
-  }
-  const seen = new Set<string>();
-  return entries.map((e) => {
-    const key = e.email?.toLowerCase();
-    const person = e.personId ? people.find((p) => p.id === e.personId) : key ? personByEmail.get(key) : undefined;
-    const user = e.userId ? users.find((u) => u.id === e.userId) : key ? userByEmail.get(key) : undefined;
-    if (e.personId && !person) throw new Error('A selected contact no longer exists. Remove them and try again.');
-    if (e.userId && !user) throw new Error('A selected team member no longer exists. Remove them and try again.');
-    const canonicalUser = user ? users.find((u) => u.id === user.id) : undefined;
-    const email = canonicalUser ? canonicalUser.email : person ? person.email : e.email?.toLowerCase() ?? null;
-    return {
-      name: user?.name ?? (person ? `${person.firstName} ${person.lastName}`.trim() : e.name),
-      email,
-      personId: person?.id ?? null,
-      userId: user?.id ?? null,
-      // The domain decides. A colleague is also a person in Twenty (the mailbox sync makes them
-      // one), so "known to the CRM" cannot mean external: Alisa was marked external on her own call.
-      external: user ? false : email ? isExternalEmail(email, settings.rules.internalDomains) : Boolean(person),
-      host: Boolean(user && user.id === hostUserId),
-    };
-  }).filter((entry) => {
-    const keys = [entry.userId ? `user:${entry.userId}` : null, entry.personId ? `person:${entry.personId}` : null, entry.email ? `email:${entry.email.toLowerCase()}` : null].filter((key): key is string => Boolean(key));
-    if (!keys.length) keys.push(`name:${entry.name?.toLowerCase()}`);
-    if (keys.some((key) => seen.has(key))) return false;
-    keys.forEach((key) => seen.add(key));
-    return true;
-  });
-}
-
 export async function createMeetingAction(formData: FormData): Promise<ActionResult> {
   const user = await requireUser();
   if (!canCreateMeeting(user)) return { ok: false, error: 'Biz Ops has read-only access to meetings.' };
@@ -269,6 +225,7 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
     await tx.meeting.update({
       where: { id },
       data: {
+        editedAt: new Date(),
         title: d.title,
       bookedById: d.bookedById,
         provider: link?.provider ?? 'OTHER',
@@ -426,23 +383,80 @@ export type LinkSuggestion = {
   companyId: string | null;
   companyName: string | null;
   mediaUrl: string | null;
+  /** HH:mm, when the meeting's time is known (from its calendar event). */
+  time?: string | null;
+  durationMin?: number | null;
+  attendees?: AttendeeSelection[];
+  bookedById?: string | null;
+  /** The link belongs to a meeting Cadence already has. */
+  existingMeetingId?: string | null;
+  fromCalendar?: boolean;
 };
 
+/** A sign-in page is not a meeting: its title must never become one. */
+const SIGN_IN = /\b(sign[\s-]?in|log[\s-]?in|sign on|single sign-on|authenticat|access denied|request access)\b/i;
+
+/** The local date and time of an instant, as a datetime-local input wants it. */
+function localDateTime(at: Date, timezone: string) {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(at);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
+  return { date: `${get('year')}-${get('month')}-${get('day')}`, time: `${get('hour')}:${get('minute')}` };
+}
+
 /** Everything the link can tell us before anyone types: provider, title, date, the account it names. */
+/**
+ * Everything a pasted link can tell us before anyone types. A join link from an invite finds its
+ * event on the team's calendars in Twenty, which carries the lot: title, time, length, who booked
+ * it, who is on it and the account. A link to a meeting Cadence already has says so. Anything else
+ * is read as a page, for a title, a date and the account it names.
+ */
 export async function inspectMeetingLinkAction(raw: string): Promise<{ ok: true; data: LinkSuggestion } | { ok: false; error: string }> {
   const user = await requireUser();
   if (!canCreateMeeting(user)) return { ok: false, error: 'Biz Ops has read-only access to meetings.' };
   const url = extractRecordingUrl(String(raw ?? ''));
   const link = parseMeetingLink(url);
   if (link.provider === 'OTHER' && link.note?.includes('does not look like a URL')) return { ok: false, error: link.note };
+  const base = { provider: link.provider, label: link.label, isJoinLink: link.isJoinLink, playsInline: Boolean(link.mediaUrl || link.embedUrl), mediaUrl: link.mediaUrl };
+
+  // Already here: this link's meeting within a few hours of now. A personal room's other meetings,
+  // earlier in the week or next week, are other meetings.
+  const key = linkKey(url);
+  const needle = linkNeedle(url);
+  const around = 6 * 3_600_000;
+  const candidates = key && needle ? await prisma.meeting.findMany({ where: { sourceUrl: { contains: needle, mode: 'insensitive' }, occurredAt: { gte: new Date(Date.now() - around), lte: new Date(Date.now() + around) } }, orderBy: { occurredAt: 'desc' }, take: 20, select: { id: true, sourceUrl: true } }) : [];
+  const already = candidates.find((m) => linkKey(m.sourceUrl) === key);
+  if (already) return { ok: true, data: { ...base, title: null, date: null, companyId: null, companyName: null, existingMeetingId: already.id } };
+
+  const event = await calendarEventForLink(url.trim());
+  if (event?.startsAt) {
+    const imported = await prisma.meeting.findUnique({ where: { calendarEventId: event.id }, select: { id: true } });
+    if (imported) return { ok: true, data: { ...base, title: null, date: null, companyId: null, companyName: null, existingMeetingId: imported.id } };
+    const at = localDateTime(new Date(event.startsAt), user.timezone);
+    const team = await prisma.user.findMany({ where: { active: true }, select: { id: true, email: true, aliases: true, twentyMemberId: true, role: true } });
+    const member = (p: { handle: string; workspaceMemberId: string | null }) => (p.workspaceMemberId ? team.find((u) => u.twentyMemberId === p.workspaceMemberId) : undefined) ?? team.find((u) => [u.email, ...u.aliases].some((x) => x.toLowerCase() === p.handle.toLowerCase()));
+    const people = await prisma.personCache.findMany({ where: { deletedAt: null, OR: [{ id: { in: event.participants.flatMap((p) => (p.personId ? [p.personId] : [])) } }, { email: { in: event.participants.map((p) => p.handle).filter(Boolean), mode: 'insensitive' } }] }, select: { id: true, email: true, companyId: true, companyName: true } });
+    const attendees: AttendeeSelection[] = event.participants.map((p) => {
+      const u = member(p);
+      const person = u ? null : people.find((x) => x.id === p.personId) ?? people.find((x) => x.email?.toLowerCase() === p.handle.toLowerCase());
+      return { userId: u?.id ?? null, personId: person?.id ?? null, name: p.displayName, email: p.handle || null };
+    });
+    const fos = (ROLES_NEEDING_POD as readonly string[]);
+    const organiser = event.participants.find((p) => p.isOrganizer);
+    const booker = [organiser, ...event.participants].map((p) => (p ? member(p) : undefined)).find((u) => u && fos.includes(u.role));
+    const account = people.find((p) => p.companyId);
+    const durationMin = event.endsAt ? Math.max(1, Math.round((new Date(event.endsAt).getTime() - new Date(event.startsAt).getTime()) / 60_000)) : null;
+    return { ok: true, data: { ...base, title: event.title, date: at.date, time: at.time, durationMin, attendees, bookedById: booker?.id ?? null, companyId: account?.companyId ?? null, companyName: account?.companyName ?? null, fromCalendar: true } };
+  }
+
   const page = await inspectLink(url);
-  const title = page.title?.replace(/\s*[|·-]\s*(Microsoft Stream|SharePoint|Google Drive|Zoom|OneDrive).*$/i, '').trim() || null;
+  const cleaned = page.title?.replace(/\s*[|·-]\s*(Microsoft Stream|SharePoint|Google Drive|Zoom|OneDrive|Google Meet|Microsoft Teams).*$/i, '').trim() || null;
+  const title = cleaned && !SIGN_IN.test(cleaned) ? cleaned : null;
   // An account named in the title: the longest cached company name the title contains.
   const companies = await prisma.companyCache.findMany({ where: { deletedAt: null, name: { not: '' } }, select: { id: true, name: true }, orderBy: { name: 'asc' } });
   const haystack = `${title ?? ''} ${page.description ?? ''}`.toLowerCase();
   const match = companies.filter((c) => c.name.length >= 4 && haystack.includes(c.name.toLowerCase())).sort((a, b) => b.name.length - a.name.length)[0] ?? null;
   const mediaUrl = page.mediaUrl ?? link.mediaUrl;
-  return { ok: true, data: { provider: link.provider, label: link.label, isJoinLink: link.isJoinLink, playsInline: Boolean(mediaUrl || link.embedUrl), title, date: page.date, companyId: match?.id ?? null, companyName: match?.name ?? null, mediaUrl, transcript: page.transcript } };
+  return { ok: true, data: { ...base, playsInline: Boolean(mediaUrl || link.embedUrl), title, date: title ? page.date : null, companyId: match?.id ?? null, companyName: match?.name ?? null, mediaUrl, transcript: page.transcript } };
 }
 
 /** The people who spoke in a transcript, matched to the CRM and the team; guests stay guests. */

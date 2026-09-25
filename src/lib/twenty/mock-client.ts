@@ -1,6 +1,6 @@
 import type { ListOptions, ListPeopleOptions, TwentyClient } from './client';
 import { MOCK_COMPANIES, MOCK_MEMBERS, MOCK_MESSAGES, MOCK_NOTES, MOCK_OPPORTUNITIES, MOCK_PEOPLE, MOCK_TASKS, MOCK_VIEWS } from './fixtures';
-import { DEMO_COMPANIES, DEMO_MEMBERS, DEMO_MESSAGES, DEMO_NOTES, DEMO_OPPORTUNITIES, DEMO_PEOPLE, DEMO_POD_OPTIONS, DEMO_TASKS, DEMO_VIEWS } from './demo-fixtures';
+import { DEMO_COMPANIES, DEMO_MEMBERS, DEMO_MESSAGES, DEMO_NOTES, DEMO_OPPORTUNITIES, DEMO_PEOPLE, DEMO_POD_OPTIONS, DEMO_TASKS, DEMO_VIEWS, demoCalendarEvents } from './demo-fixtures';
 import { defaultTwentySchema } from './twenty-schema';
 
 export type MockDataset = 'demo' | 'test';
@@ -39,6 +39,7 @@ function datasetFor(kind: MockDataset) {
     podOptions: DEMO_POD_OPTIONS,
   };
 }
+import type { TwentyCalendarEvent, TwentyCalendarParticipant } from './types';
 import type {
   CreateNoteInput,
   CreateTaskInput,
@@ -95,6 +96,7 @@ export class MockTwentyClient implements TwentyClient {
   members: TwentyWorkspaceMember[] = [];
   notes: TwentyNote[] = [];
   messages: TwentyMessage[] = [];
+  calendarEvents: TwentyCalendarEvent[] = [];
   tasks: TwentyTask[] = [];
   opportunities: TwentyOpportunity[] = [];
   views: TwentyView[] = [];
@@ -119,6 +121,7 @@ export class MockTwentyClient implements TwentyClient {
     this.members = clone(d.members);
     this.notes = clone(d.notes);
     this.messages = clone(d.messages);
+    this.calendarEvents = kind === 'demo' ? demoCalendarEvents() : [];
     this.tasks = clone(d.tasks);
     this.opportunities = clone(d.opportunities);
     this.views = clone(d.views);
@@ -177,6 +180,28 @@ export class MockTwentyClient implements TwentyClient {
     const msg: TwentyMessage = { id, subject: input.subject ?? null, text: null, receivedAt, threadId: null, participants, updatedAt: receivedAt };
     this.messages.push(msg);
     return msg;
+  }
+
+  /** A calendar event, as Twenty syncs it from a connected calendar. */
+  addCalendarEvent(input: Partial<Omit<TwentyCalendarEvent, 'participants'>> & { startsAt: string; participants: Array<Partial<TwentyCalendarParticipant> & { handle: string }> }): TwentyCalendarEvent {
+    const id = input.id ?? this.nextId('cal');
+    const now = new Date().toISOString();
+    const event: TwentyCalendarEvent = {
+      id,
+      title: input.title ?? null,
+      startsAt: input.startsAt,
+      endsAt: input.endsAt ?? null,
+      isFullDay: input.isFullDay ?? false,
+      isCanceled: input.isCanceled ?? false,
+      location: input.location ?? null,
+      description: input.description ?? null,
+      conferenceUrl: input.conferenceUrl ?? null,
+      iCalUid: input.iCalUid ?? null,
+      participants: input.participants.map((p, i) => ({ id: p.id ?? `${id}-p${i + 1}`, handle: p.handle, displayName: p.displayName ?? null, isOrganizer: p.isOrganizer ?? false, personId: p.personId ?? null, workspaceMemberId: p.workspaceMemberId ?? null })),
+      updatedAt: input.updatedAt ?? now,
+    };
+    this.calendarEvents = [...this.calendarEvents.filter((e) => e.id !== id), event];
+    return event;
   }
 
   updatePerson(id: string, patch: Partial<TwentyPerson>): TwentyPerson {
@@ -291,6 +316,21 @@ export class MockTwentyClient implements TwentyClient {
     this.maybeFail();
     const m = this.messages.find((x) => x.id === id);
     return m ? clone(m) : null;
+  }
+
+  async listCalendarEvents(opts?: ListOptions & { startsFrom?: string; startsBefore?: string; conferenceUrl?: string }): Promise<Page<TwentyCalendarEvent>> {
+    this.maybeFail();
+    let items = since(this.calendarEvents, opts);
+    if (opts?.startsFrom) items = items.filter((e) => (e.startsAt ?? '') >= opts.startsFrom!);
+    if (opts?.startsBefore) items = items.filter((e) => (e.startsAt ?? '') < opts.startsBefore!);
+    if (opts?.conferenceUrl) items = items.filter((e) => (e.conferenceUrl ?? '').toLowerCase().includes(opts.conferenceUrl!.toLowerCase()));
+    return page(clone(items.slice().sort((a, b) => ((a.startsAt ?? '') < (b.startsAt ?? '') ? -1 : 1))), opts);
+  }
+
+  async getCalendarEvent(id: string) {
+    this.maybeFail();
+    const e = this.calendarEvents.find((x) => x.id === id);
+    return e ? clone(e) : null;
   }
 
   async listTasks(opts?: ListOptions & { personId?: string }): Promise<Page<TwentyTask>> {

@@ -2,11 +2,12 @@ import clsx from 'clsx';
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { requireUser } from '@/lib/auth/current-user';
-import { formatLocalDate } from '@/lib/dates';
-import { buildHome } from '@/lib/home-query';
+import { diffDays, formatLocalDate } from '@/lib/dates';
+import { buildHome, type TeamRow } from '@/lib/home-query';
 import { TASK_CHANNELS, type TaskChannel } from '@/lib/tasks-query';
+import { ACTION_LABELS } from '@/lib/sequences/steps';
 import { ActionIcon, IconBolt, IconCalendar, IconCheck, IconChevronRight, IconCompany, IconPeople } from '@/components/icons';
-import { Avatar, EmptyState, Surface, Count } from '@/components/ui';
+import { Avatar, EmptyState, Surface } from '@/components/ui';
 
 const CHANNEL_LABELS: Record<TaskChannel, string> = { CALL: 'Calls', EMAIL: 'Emails', LINKEDIN: 'LinkedIn' };
 
@@ -64,7 +65,7 @@ async function HomeContent() {
         <Tile
           label="To reach today"
           value={h.my.peopleToReachToday}
-          hint={h.my.overdueTotal ? <><N tone="warn">{h.my.overdueTotal}</N> overdue {h.my.overdueTotal === 1 ? 'touchpoint' : 'touchpoints'}</> : <><N>{h.my.todayTotal}</N> scheduled {h.my.todayTotal === 1 ? 'touchpoint' : 'touchpoints'}</>}
+          hint={h.my.overdueTotal ? <><N tone="warn">{h.my.overdueTotal}</N> overdue {h.my.overdueTotal === 1 ? 'step' : 'steps'}</> : <><N>{h.my.todayTotal}</N> {h.my.todayTotal === 1 ? 'step' : 'steps'} due</>}
           href={`/tasks?tab=today&mode=flow&${mine}`}
           icon={<IconPeople size={17} />}
           tone={h.my.overdueTotal ? 'warn' : undefined}
@@ -75,14 +76,14 @@ async function HomeContent() {
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(300px,1fr)]">
-        <Surface flush>
-          <div className="relative overflow-hidden bg-[#203e35] px-6 py-6 text-white">
+        <Surface flush className="flex flex-col">
+          <div className="relative flex-1 overflow-hidden bg-[#203e35] px-6 py-6 text-white">
             <div className="focus-art" aria-hidden />
             <div className="relative">
-              <p className="mb-3 flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-[#d5e9ad]"><IconBolt size={12} /> {h.my.overdueTotal ? 'Overdue first' : h.my.todayTotal ? 'Due today' : 'Nothing due'}</p>
+              <p className="mb-3 flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-[#d5e9ad]"><IconBolt size={12} /> {h.my.overdueTotal ? 'Overdue first' : h.my.todayTotal ? 'Due today' : h.my.nextForTeam ? 'Nothing due for you' : 'Nothing due'}</p>
               <h2 className="flex items-baseline gap-3 text-[25px] font-medium leading-[1.25] tracking-[-0.035em]">
                 <span className="text-[46px] font-semibold leading-none tracking-[-0.04em]">{h.my.overdueTotal || h.my.todayTotal || h.my.peopleToReachToday}</span>
-                <span>{h.my.overdueTotal ? `overdue ${h.my.overdueTotal === 1 ? 'touchpoint' : 'touchpoints'}` : h.my.todayTotal ? `${h.my.todayTotal === 1 ? 'touchpoint' : 'touchpoints'} due today` : 'due today'}</span>
+                <span>{h.my.overdueTotal ? `overdue ${h.my.overdueTotal === 1 ? 'step' : 'steps'}` : h.my.todayTotal ? `${h.my.todayTotal === 1 ? 'step' : 'steps'} due today` : 'due today'}</span>
               </h2>
               <p className="mb-5 mt-3 text-[12px] text-[#c1d4ca]">
                 {h.my.overdueTotal && h.my.todayTotal ? <><span className="font-medium text-white">{h.my.todayTotal}</span> more due today across <span className="font-medium text-white">{h.my.peopleToReachToday}</span> {h.my.peopleToReachToday === 1 ? 'person' : 'people'}</> : null}
@@ -97,10 +98,20 @@ async function HomeContent() {
           </Link>)}</div>
         </Surface>
         <Surface flush>
-          <div className="flex items-center justify-between border-b border-line px-5 py-4"><h2 className="text-[14px] font-semibold">Up next</h2><Link href={`/tasks?tab=${focusTab}&${mine}`} className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-700">View all <IconChevronRight size={12} /></Link></div>
-          {h.my.nextTasks.length ? <div className="divide-y divide-line/70">{h.my.nextTasks.map((task) => <Link key={task.id} href={`/tasks?task=${task.id}&mode=flow&tab=${task.due < h.today ? 'overdue' : task.due === h.today ? 'today' : 'upcoming'}&${mine}`} className="flex items-center gap-3 px-5 py-4 transition hover:bg-brand-50/50">
-            <Avatar name={task.name} shape="circle" size={34} /><span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-medium">{task.name}</span><span className="mt-0.5 block truncate text-[10px] text-ink-500">{task.company ?? task.label}</span></span><span className="text-right"><span className={`block text-[10px] ${task.due < h.today ? 'text-amber-700' : 'text-ink-500'}`}>{task.due < h.today ? 'Overdue' : task.due === h.today ? 'Today' : formatLocalDate(task.due)}</span><span className="mt-1.5 flex justify-end text-ink-400"><ActionIcon action={task.action} size={13} /></span></span>
-          </Link>)}</div> : <EmptyState icon={<IconCheck size={20} />} title="Nothing scheduled" />}
+          <div className="flex items-center justify-between border-b border-line px-5 py-4"><h2 className="text-[14px] font-semibold">{h.my.nextForTeam ? 'Up next for the team' : 'Up next'}</h2><Link href={`/tasks?tab=${focusTab}&${h.my.nextForTeam ? 'fo=' : mine}`} className="inline-flex items-center gap-1 text-[12px] font-medium text-brand-700 hover:underline">All tasks <IconChevronRight size={13} /></Link></div>
+          {h.my.nextTasks.length ? <ul>{(['Overdue', 'Today', 'Coming up'] as const).map((when) => {
+            const rows = h.my.nextTasks.filter((t) => (when === 'Overdue' ? t.due < h.today : when === 'Today' ? t.due === h.today : t.due > h.today));
+            return rows.length ? <li key={when}>
+              <div className={`border-b border-line/70 bg-canvas/60 px-5 py-1.5 text-[11px] font-medium uppercase tracking-[0.08em] ${when === 'Overdue' ? 'text-red-700' : 'text-ink-500'}`}>{when}{!h.my.nextForTeam && when !== 'Coming up' ? <span className="tabular-nums"> · {when === 'Overdue' ? h.my.overdueTotal : h.my.todayTotal}</span> : null}</div>
+              <ul className="divide-y divide-line/70">{rows.map((task) => <li key={task.id}><Link href={`/tasks?task=${task.id}&mode=flow&tab=${task.due < h.today ? 'overdue' : task.due === h.today ? 'today' : 'upcoming'}&${h.my.nextForTeam ? 'fo=' : mine}`} className="flex items-center gap-3 px-5 py-2.5 transition hover:bg-brand-50/50">
+                <Avatar name={task.name} shape="circle" size={32} />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-ink-900">{task.name}</span>{when !== 'Today' ? <DueLabel due={task.due} today={h.today} /> : null}</span>
+                  <span className="mt-0.5 flex items-center gap-1.5 text-[12.5px] text-ink-700"><span className="flex shrink-0 gap-1 text-ink-500">{task.actions.map((a) => <ActionIcon key={a} action={a} size={13} />)}</span><span className="shrink-0">{task.actions.map((a) => ACTION_LABELS[a as keyof typeof ACTION_LABELS] ?? a).join(' + ')}</span><span className="min-w-0 truncate text-ink-500">· {[task.campaign ?? 'No campaign', h.my.nextForTeam && task.fo ? task.fo : task.company].filter(Boolean).join(' · ')}</span></span>
+                </span>
+              </Link></li>)}</ul>
+            </li> : null;
+          })}</ul> : <EmptyState icon={<IconCheck size={20} />} title="Nothing due" />}
         </Surface>
       </div>
 
@@ -109,117 +120,107 @@ async function HomeContent() {
   );
 }
 
-/**
- * One figure in the board. Zero is quiet, in the rows and in the totals alike, so the eye lands
- * on people who actually owe work.
- */
-function Figure({ value, tone }: { value: number; tone?: 'warn' | 'good' | 'brand' }) {
-  if (!value) return <Count value={0} />;
-  const colour = tone === 'warn' ? 'text-red-700' : tone === 'good' ? 'text-emerald-700' : tone === 'brand' ? 'text-brand-700' : 'text-ink-900';
-  return <span className={`font-medium ${colour}`}>{value}</span>;
+/** How late an overdue step is, or when a later one falls. */
+function DueLabel({ due, today }: { due: string; today: string }) {
+  const late = diffDays(due, today);
+  const [tone, text] = due < today ? ['bg-red-50 text-red-700', late === 1 ? '1 day' : `${late} days`] : ['bg-canvas text-ink-600', formatLocalDate(due)];
+  return <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11.5px] font-medium tabular-nums ${tone}`}>{text}</span>;
 }
 
-type TeamRow = { id: string; name: string; today: number; overdue: number; doneWeek: number; replies: number; meetings: number };
+/** One figure on the board, centred and easy to read; zero is quiet so the eye lands on work. */
+function Figure({ value, tone }: { value: number; tone?: 'warn' | 'good' | 'brand' }) {
+  if (!value) return <span className="text-ink-300">0</span>;
+  const colour = tone === 'warn' ? 'text-red-700' : tone === 'good' ? 'text-emerald-700' : tone === 'brand' ? 'text-brand-700' : 'text-ink-900';
+  return <span className={`font-medium ${colour}`}>{value.toLocaleString('en-US')}</span>;
+}
+
+/** How far through the week's steps an FO is: the count and a bar that is their own week. */
+function WeekProgress({ done, due }: { done: number; due: number }) {
+  const pct = due ? Math.min(100, Math.round((done / due) * 100)) : 0;
+  return <div className="min-w-[200px]">
+    <div className="mb-2 text-[14px] tabular-nums text-ink-600"><span className="font-medium text-ink-900">{done.toLocaleString('en-US')}</span> of {due.toLocaleString('en-US')} steps done</div>
+    <div className="h-2.5 overflow-hidden rounded-full bg-line" role="img" aria-label={`${pct}% of this week's steps done`}><div className={`h-full rounded-full transition-[width] ${pct >= 100 ? 'bg-emerald-500' : 'bg-brand-500'}`} style={{ width: `${pct}%` }} /></div>
+  </div>;
+}
 
 /**
- * The week's board. A plain grid of numbers was unreadable, so each FO gets a row with the
- * work they owe on the left, a bar for what they have actually finished, and outcomes on the
- * right. The bar is scaled to the busiest person, which is the only comparison that matters
- * when you are scanning for who needs help.
+ * The week's board, Monday to Sunday. Each FO with work this week is a row: who they are, how far
+ * through the week's steps they are, the people reached, what is due today and overdue, and what
+ * came back. Every figure is in steps - one person's step of outreach - and the bar is each FO's
+ * own week, counted against every step planned for it, not a race against the busiest person.
+ * Those with nothing this week share one line at the foot.
  */
 function TeamBoard({ rows, week, title }: { rows: TeamRow[]; week: { from: string; to: string }; title: string }) {
-  const total = rows.reduce(
-    (a, r) => ({
-      today: a.today + r.today,
-      overdue: a.overdue + r.overdue,
-      doneWeek: a.doneWeek + r.doneWeek,
-      replies: a.replies + r.replies,
-      meetings: a.meetings + r.meetings,
-    }),
-    { today: 0, overdue: 0, doneWeek: 0, replies: 0, meetings: 0 },
+  const busy = rows.filter((r) => r.dueWeek + r.today + r.overdue + r.replies + r.meetings > 0);
+  const idle = rows.filter((r) => !busy.includes(r));
+  const total = busy.reduce(
+    (a, r) => ({ today: a.today + r.today, overdue: a.overdue + r.overdue, doneWeek: a.doneWeek + r.doneWeek, dueWeek: a.dueWeek + r.dueWeek, peopleWeek: a.peopleWeek + r.peopleWeek, replies: a.replies + r.replies, meetings: a.meetings + r.meetings }),
+    { today: 0, overdue: 0, doneWeek: 0, dueWeek: 0, peopleWeek: 0, replies: 0, meetings: 0 },
   );
-  const peak = Math.max(1, ...rows.map((r) => r.doneWeek));
-
+  const head = 'px-3 py-3 text-center font-medium';
+  const cell = 'px-3 py-4 text-center text-[18px] tabular-nums';
   return (
     <Surface flush>
-      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line px-5 py-5">
-        <h2 className="text-[14px] font-semibold text-ink-900">{title}</h2>
-        <p className="text-[11.5px] text-ink-500">
-          {formatLocalDate(week.from)} to {formatLocalDate(week.to)}
-        </p>
+      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line px-5 py-4">
+        <h2 className="text-[15px] font-semibold text-ink-900">{title}</h2>
+        <p className="text-[13px] text-ink-500">{formatLocalDate(week.from)} to {formatLocalDate(week.to)}</p>
       </div>
-
-      {rows.length === 0 ? (
-        <EmptyState title="Nobody in your pods yet" />
-      ) : (
-        <div className="overflow-x-auto scroll-thin">
-          <table className="w-full border-collapse text-[13px]">
-            <thead>
-              <tr className="border-b border-line bg-[#fafbf9] text-[10px] font-medium uppercase tracking-[0.07em] text-ink-500">
-                {/* Explicit widths: the name column absorbs the slack so the figures stay together. */}
-                <th className="px-4 py-2 text-left font-medium">Person</th>
-                <th className="w-[92px] px-3 py-2 text-right font-medium">Due today</th>
-                <th className="w-[84px] px-3 py-2 text-right font-medium">Overdue</th>
-                <th className="w-[172px] px-3 py-2 text-left font-medium">Done this week</th>
-                <th className="w-[78px] px-3 py-2 text-right font-medium">Replies</th>
-                <th className="w-[88px] px-3 py-2 text-right font-medium">Meetings</th>
-                <th className="w-[92px] px-4 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((t) => (
-                <tr key={t.id} className="group border-b border-line/70 transition last:border-b-0 hover:bg-canvas/60">
-                  <td className="px-4 py-2.5">
-                    <div className="flex items-center gap-2.5">
-                      <Avatar name={t.name} shape="circle" size={28} />
-                      <span className="truncate font-medium text-ink-900">{t.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums"><Figure value={t.today} /></td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">
-                    <Figure value={t.overdue} tone="warn" />
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <div className="flex items-center gap-2.5">
-                      <span className="h-1.5 w-full max-w-[104px] overflow-hidden rounded-full bg-line">
-                        <span className="block h-full rounded-full bg-brand-500 transition-[width]" style={{ width: `${Math.round((t.doneWeek / peak) * 100)}%` }} />
-                      </span>
-                      <span className="w-6 shrink-0 text-right tabular-nums"><Figure value={t.doneWeek} /></span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">
-                    <Figure value={t.replies} tone="good" />
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">
-                    <Figure value={t.meetings} tone="brand" />
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    <Link
-                      href={`/tasks?tab=today&fo=${t.id}`}
-                      className="inline-flex items-center gap-0.5 whitespace-nowrap text-[12.5px] font-medium text-ink-400 transition group-hover:text-brand-700"
-                    >
-                      Tasks <IconChevronRight size={14} />
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            {rows.length > 1 ? (
-              <tfoot>
-                <tr className="border-t border-line bg-canvas/50 text-[12.5px] text-ink-700">
-                  <td className="px-4 py-2 font-medium">Everyone</td>
-                  <td className="px-3 py-2 text-right tabular-nums"><Figure value={total.today} /></td>
-                  <td className="px-3 py-2 text-right tabular-nums"><Figure value={total.overdue} tone="warn" /></td>
-                  <td className="px-3 py-2 tabular-nums"><span className="flex items-center gap-2.5"><span className="w-full max-w-[104px]" /><span className="w-6 shrink-0 text-right"><Figure value={total.doneWeek} /></span></span></td>
-                  <td className="px-3 py-2 text-right tabular-nums"><Figure value={total.replies} tone="good" /></td>
-                  <td className="px-3 py-2 text-right tabular-nums"><Figure value={total.meetings} tone="brand" /></td>
-                  <td />
-                </tr>
-              </tfoot>
-            ) : null}
-          </table>
-        </div>
-      )}
+      <table className="w-full table-fixed border-collapse text-[15px]">
+        <colgroup><col className="w-[250px]" /><col /><col className="w-[104px]" /><col className="w-[104px]" /><col className="w-[104px]" /><col className="w-[104px]" /><col className="w-[104px]" /><col className="w-[56px]" /></colgroup>
+        <thead>
+          <tr className="border-b border-line bg-[#fafbf9] text-[12px] uppercase tracking-[0.07em] text-ink-500">
+            <th className="px-5 py-3 text-left font-medium">FO</th>
+            <th className="px-3 py-3 text-left font-medium">This week</th>
+            <th className={head}>Reached</th>
+            <th className={head}>Due today</th>
+            <th className={head}>Overdue</th>
+            <th className={head}>Replies</th>
+            <th className={head}>Meetings</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {busy.map((t) => (
+            <tr key={t.id} className="group border-b border-line/70 transition last:border-b-0 hover:bg-canvas/60">
+              <td className="px-5 py-4">
+                <div className="flex items-center gap-3">
+                  <Avatar name={t.name} shape="circle" size={36} />
+                  <span className="min-w-0"><span className="block truncate text-[16px] font-medium text-ink-900">{t.name}</span>{t.pod ? <span className="mt-0.5 block truncate text-[12.5px] text-ink-500">{t.pod}</span> : null}</span>
+                </div>
+              </td>
+              <td className="px-3 py-4">{t.dueWeek ? <WeekProgress done={t.doneWeek} due={t.dueWeek} /> : <span className="text-[14px] text-ink-400">Nothing planned</span>}</td>
+              <td className={cell}><Figure value={t.peopleWeek} /></td>
+              <td className={cell}><Figure value={t.today} /></td>
+              <td className={cell}><Figure value={t.overdue} tone="warn" /></td>
+              <td className={cell}><Figure value={t.replies} tone="good" /></td>
+              <td className={cell}><Figure value={t.meetings} tone="brand" /></td>
+              <td className="px-3 py-4 text-right">
+                <Link href={`/tasks?tab=today&fo=${t.id}`} aria-label={`${t.name}'s tasks`} className="inline-grid h-8 w-8 place-items-center rounded-lg text-ink-400 transition hover:bg-brand-50 hover:text-brand-700 group-hover:text-brand-700"><IconChevronRight size={16} /></Link>
+              </td>
+            </tr>
+          ))}
+          {!busy.length ? <tr><td colSpan={8} className="px-5 py-8 text-center text-[14px] text-ink-500">Nothing planned for anyone this week</td></tr> : null}
+        </tbody>
+        <tfoot>
+          {busy.length > 1 ? (
+            <tr className="border-t border-line bg-canvas/50 text-ink-700">
+              <td className="px-5 py-3.5 text-[15px] font-medium">Everyone</td>
+              <td className="px-3 py-3.5">{total.dueWeek ? <WeekProgress done={total.doneWeek} due={total.dueWeek} /> : null}</td>
+              <td className={cell}><Figure value={total.peopleWeek} /></td>
+              <td className={cell}><Figure value={total.today} /></td>
+              <td className={cell}><Figure value={total.overdue} tone="warn" /></td>
+              <td className={cell}><Figure value={total.replies} tone="good" /></td>
+              <td className={cell}><Figure value={total.meetings} tone="brand" /></td>
+              <td />
+            </tr>
+          ) : null}
+          {idle.length ? (
+            <tr className="border-t border-line">
+              <td colSpan={8} className="px-5 py-3 text-[13px] text-ink-500"><span className="text-ink-700">Nothing this week:</span> {idle.map((r, i) => <span key={r.id}>{i ? ', ' : ''}<Link href={`/tasks?tab=upcoming&fo=${r.id}`} className="hover:text-brand-700 hover:underline">{r.name}</Link></span>)}</td>
+            </tr>
+          ) : null}
+        </tfoot>
+      </table>
     </Surface>
   );
 }

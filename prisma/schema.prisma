@@ -549,6 +549,10 @@ model Meeting {
   analysedAt       DateTime?
   createdById      String?
   createdBy        User?           @relation("MeetingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  /// The Twenty calendar event this meeting was made from, when it came from a calendar.
+  calendarEventId  String?         @unique
+  /// When someone last edited it by hand: after that only its time follows the calendar.
+  editedAt         DateTime?
   /// The FO who booked it: mandatory on a new meeting, set on older ones when someone edits them.
   bookedById String?
   bookedBy User? @relation("MeetingBookedBy", fields: [bookedById], references: [id], onDelete: SetNull)
@@ -614,6 +618,7 @@ model Touch {
 
   @@index([personId, occurredAt])
   @@index([occurredAt])
+  @@index([createdAt])
 }
 
 /// Raw inbound events (webhooks, reconcile scans) with dedupe and processing result.

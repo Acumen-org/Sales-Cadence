@@ -5,12 +5,12 @@ import { SYSTEM_ACTOR } from '@/lib/audit';
 import type { SessionUser } from '@/lib/auth/current-user';
 import { buildHome } from '@/lib/home-query';
 import { myOwnershipCounts } from '@/lib/accounts-query';
-import { weekRange } from '@/lib/dates';
+import { workWeekRange } from '@/lib/dates';
 import { enrollPeople } from '@/lib/engine';
 import { completeTask } from '@/lib/engine/tasks';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 
-// 2026-09-08 is a Tuesday, so this week is Sun 6th to Sat 12th.
+// 2026-09-08 is a Tuesday, so this working week is Mon 7th to Sun 13th.
 const TUESDAY = new Date('2026-09-08T10:00:00Z');
 
 function sessionUser(
@@ -46,10 +46,26 @@ describe('home', () => {
     expect(home.my.peopleToReachToday + (home.my.overdueTotal ? 1 : 0)).toBeGreaterThan(0);
   });
 
-  it('labels the week Sunday to Saturday in the user timezone', async () => {
+  it('labels the week Monday to Sunday in the user timezone', async () => {
     const home = await buildHome(sessionUser(b.users.alisa, [b.pods.Alisa.id]), TUESDAY);
-    expect([home.week.from, home.week.to]).toEqual(['2026-09-06', '2026-09-12']);
-    expect(home.week.fromInstant).toEqual(weekRange('2026-09-08', 'Europe/London').fromInstant);
+    expect([home.week.from, home.week.to]).toEqual(['2026-09-07', '2026-09-13']);
+    expect(home.week.fromInstant).toEqual(workWeekRange('2026-09-08', 'Europe/London').fromInstant);
+    // A Sunday belongs to the week that started the Monday before, not to a fresh empty week.
+    expect(workWeekRange('2026-09-13', 'Europe/London').from).toBe('2026-09-07');
+    expect(workWeekRange('2026-09-14', 'Europe/London').from).toBe('2026-09-14');
+  });
+
+  it('shows what is next as one row per person and step, with the campaign it belongs to', async () => {
+    const alisa = sessionUser(b.users.alisa, [b.pods.Alisa.id]);
+    const home = await buildHome(alisa, TUESDAY);
+    // Day 1 of the default sequence is an email and a LinkedIn connect for one person: one row.
+    expect(home.my.nextTasks).toHaveLength(1);
+    expect(home.my.nextTasks[0]).toEqual(expect.objectContaining({ name: expect.any(String), actions: expect.arrayContaining(['EMAIL']) }));
+    expect(home.my.nextForTeam).toBe(false);
+    // An admin with no work of their own sees the team's next steps, with whose they are.
+    const admin = await buildHome(sessionUser(b.users.ria, []), TUESDAY);
+    expect(admin.my.nextForTeam).toBe(true);
+    expect(admin.my.nextTasks[0]).toEqual(expect.objectContaining({ fo: 'Alisa Marsh' }));
   });
 
   it('counts what a user owns: accounts and relationships', async () => {
@@ -80,7 +96,12 @@ describe('home', () => {
     const row = home.team.find((t) => t.id === b.users.alisa.id)!;
     expect(row.name).toBe('Alisa Marsh');
     expect(row.doneWeek).toBe(1); // the August one is last week
+    // The week's own work: the step done this week, and nothing else due by Sunday.
+    expect(row.dueWeek).toBe(1);
+    expect(row.peopleWeek).toBe(1);
     expect(home.team.length).toBeGreaterThan(1); // admins see everyone
+    // FOs only: an admin carries no outreach and is not a row.
+    expect(home.team.some((t) => t.id === b.users.ria.id)).toBe(false);
   });
 
   it('credits replies and meetings to the FO whose enrollment they belong to', async () => {

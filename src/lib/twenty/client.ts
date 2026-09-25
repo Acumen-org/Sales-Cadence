@@ -2,6 +2,7 @@ import type {
   CreateNoteInput,
   CreateTaskInput,
   Page,
+  TwentyCalendarEvent,
   TwentyCompany,
   TwentyIntrospection,
   TwentyMessage,
@@ -66,6 +67,9 @@ export interface TwentyClient {
   listTasks(opts?: ListOptions & { personId?: string }): Promise<Page<TwentyTask>>;
   getTask(id: string): Promise<TwentyTask | null>;
   listOpportunities(opts?: ListOptions & { personId?: string }): Promise<Page<TwentyOpportunity>>;
+  /** Events on calendars connected to Twenty, with who is on them. `conferenceUrl` matches a part of the join link. */
+  listCalendarEvents(opts?: ListOptions & { startsFrom?: string; startsBefore?: string; conferenceUrl?: string }): Promise<Page<TwentyCalendarEvent>>;
+  getCalendarEvent(id: string): Promise<TwentyCalendarEvent | null>;
 
   // ---- writes (Cadence only edits records it created) ----
   createNote(input: CreateNoteInput): Promise<{ id: string }>;

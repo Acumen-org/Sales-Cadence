@@ -440,7 +440,7 @@ export function TaskActions(p: Props) {
                     submitDelegate();
                   }}
                 >
-                  <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-500">Delegate this touchpoint</p>
+                  <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-500">Delegate this step</p>
                   <div className="flex overflow-hidden rounded-[10px] border border-line bg-white focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100">
                     <select value={delegateTo} onChange={(e) => setDelegateTo(e.target.value)} aria-label="Delegate to" className="min-w-0 flex-1 !rounded-none !border-0 !bg-transparent !ring-0">
                       <option value="">Choose a pod-mate</option>

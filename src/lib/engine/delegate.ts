@@ -15,7 +15,7 @@ export async function delegateTasks(taskIds: string[], toUserId: string, actor: 
   if (!ids.length) return { ok: false, error: 'Nothing to delegate.' };
   const tasks = await prisma.task.findMany({ where: { id: { in: ids } }, include: syncTaskInclude });
   if (tasks.length !== ids.length) return { ok: false, error: 'One of these touchpoints no longer exists.' };
-  if (tasks.some(t => t.enrollment.scheduleDates.length)) return { ok: false, error: 'These touchpoints are reserved for the FOs in a published campaign calendar.' };
+  if (tasks.some(t => t.enrollment.scheduleDates.length)) return { ok: false, error: 'These steps are reserved for the FOs in a published campaign calendar.' };
   if (tasks.some((t) => t.state !== 'PENDING')) return { ok: false, error: 'Only open touchpoints can be delegated.' };
   if (tasks.some((t) => !canManageEnrollment(actor, { foUserId: t.foUserId, podId: t.enrollment.podId }))) return { ok: false, error: 'You can delegate work in your own pods only.' };
   const to = await prisma.user.findUnique({ where: { id: toUserId }, include: { pods: { select: { podId: true } } } });

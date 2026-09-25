@@ -13,6 +13,7 @@ import { snapshotScorecard } from '../lib/enrichment-work';
 import { getTwentyClient } from '../lib/twenty';
 import { todayIn } from '../lib/dates';
 import { workspaceTimezone } from '../lib/workspace';
+import { importCalendarWindow } from '../lib/meetings/calendar-import';
 
 const config=env();
 const log=(message:string,extra?:unknown)=>console.log('[worker '+new Date().toISOString()+'] '+message,extra??'');
@@ -40,6 +41,15 @@ async function nightly(now:Date){
  try{const stats=await reconcile({actor:SYSTEM_ACTOR,now});log('nightly reconcile',stats);}catch(error){log('nightly reconcile failed',error);}
  try{const stats=await refreshPersonCache(await getTwentyClient());log('cache refresh',stats);}catch(error){log('cache refresh failed',error);}
  try{const stats=await snapshotScorecard(now);log('enrichment scorecard snapshot',stats);}catch(error){log('enrichment scorecard snapshot failed',error);}
+ // Meetings booked days ago for next week have not changed since: the calendar is read by date too.
+ try{const stats=await importCalendarWindow({from:new Date(now.getTime()-7*86400000),to:new Date(now.getTime()+60*86400000)});log('calendar meetings',stats);}catch(error){log('calendar meetings failed',error);}
+}
+/** The first time meetings come from calendars, the last month and the next two are read at once. */
+let calendarChecked=false;
+async function firstCalendarImport(now:Date){
+ if(calendarChecked)return;calendarChecked=true;
+ if(await prisma.setting.findUnique({where:{key:'calendarFirstImport'}}))return;
+ try{const stats=await importCalendarWindow({from:new Date(now.getTime()-30*86400000),to:new Date(now.getTime()+60*86400000)});log('first calendar import',stats);await prisma.setting.upsert({where:{key:'calendarFirstImport'},create:{key:'calendarFirstImport',value:{at:now.toISOString(),stats}},update:{value:{at:now.toISOString(),stats}}});}catch(error){log('first calendar import failed',error);}
 }
 async function tick(){
  if(running||stopping)return;running=true;
@@ -49,6 +59,7 @@ async function tick(){
      try{await syncContinuously();lastSync=now;}catch(error){log('CRM sync failed',error);}
    }
    await nightly(new Date(now));
+   await firstCalendarImport(new Date(now));
    await launchScheduledCampaigns({actor:SYSTEM_ACTOR});
    const stats=await runSchedulerTick({actor:SYSTEM_ACTOR});
    if(stats.generated||stats.completed)log('scheduler',stats);

@@ -9,7 +9,7 @@ import { activateCampaign, changeCampaignStatus } from '@/lib/engine/campaigns';
 import { advanceEnrollment, completeTask, runSchedulerTick } from '@/lib/engine/tasks';
 import { ingestEvent } from '@/lib/engine/ingest';
 import { rawFromMessage, rawFromNote } from '@/lib/engine/reconcile';
-import { subjectKey } from '@/lib/engine/observed-evidence';
+import { completeFromEarlierEvidence, subjectKey } from '@/lib/engine/observed-evidence';
 import { SYSTEM_ACTOR, userActor } from '@/lib/audit';
 import { getSettings, saveSettingsSection } from '@/lib/settings';
 import { getMockTwentyClient } from '@/lib/twenty/mock-client';
@@ -76,18 +76,20 @@ describe('emails and calls close the step they belong to', () => {
     expect(await prisma.touch.count({ where: { personId, direction: 'INBOUND' } })).toBe(0);
   });
 
-  it('keeps an email sent before the step opens and closes the step the moment it opens', async () => {
+  it('leaves a step that opens after an email as work: the email was not that step', async () => {
     const later = await laterDay();
     expect(later.currentStep).toBe(-1);
     const r = await email(later.personId, { handle: 'alisa@cadence.local', workspaceMemberId: b.users.alisa.twentyMemberId }, 'Re: Alisa and Roman connect on PHH', on('04', '15:00:00'));
     expect(r).toEqual(expect.objectContaining({ result: 'message_outbound_touch', details: { [later.personId]: 'no_pending_task' } }));
-    // Its first day: the step opens already done, and nothing is waiting on the FO's list.
-    const opened = await advanceEnrollment(later.id, ctx(later.startDate.slice(8)));
+    // Its first day: the step opens as work, and the scheduler does not close it from the earlier email.
+    const opened = await advanceEnrollment(later.id, ctx(later.startDate.slice(8), '06:00:00'));
     expect(opened.outcome).toBe('generated');
+    await runSchedulerTick(ctx(later.startDate.slice(8), '07:00:00'));
     const e = await enrollment(later.personId);
-    expect(e.tasks).toHaveLength(1);
-    expect(e.tasks[0]).toEqual(expect.objectContaining({ state: 'DONE', completionSource: 'OBSERVED_MESSAGE', evidenceId: expect.stringMatching(/^message:/) }));
-    expect(await prisma.task.count({ where: { enrollmentId: later.id, state: 'PENDING' } })).toBe(0);
+    expect(e.tasks.map((t) => t.state)).toEqual(['PENDING']);
+    // An email once it is open closes it.
+    await email(later.personId, { handle: 'alisa@cadence.local', workspaceMemberId: b.users.alisa.twentyMemberId }, 'Following up', on(later.startDate.slice(8), '15:00:00'));
+    expect((await enrollment(later.personId)).tasks[0].state).toBe('DONE');
   });
 
   it('counts the same email once when it arrives as a synced message and as a logged note', async () => {
@@ -97,7 +99,7 @@ describe('emails and calls close the step they belong to', () => {
     expect(dup).toMatchObject({ result: 'note_outbound_email_touch', details: { [personId]: 'no_pending_task', loggedBy: 'crm-sales-glynac' } });
     // Tuesday: Email 2 opens and stays open - the note was Email 1 again.
     const e0 = await enrollment(personId);
-    await advanceEnrollment(e0.id, ctx('05'));
+    await advanceEnrollment(e0.id, ctx('05', '09:00:00'));
     let e = await enrollment(personId);
     expect(e.tasks.map((t) => t.state)).toEqual(['DONE', 'PENDING']);
     // A real second email closes it, logged by the team's tool with no Cadence user behind it.
@@ -129,7 +131,7 @@ describe('emails and calls close the step they belong to', () => {
     expect((await enrollment(personId)).tasks.map((t) => t.state)).toEqual(['DONE', 'PENDING']);
     // The team's tool logged that email twenty minutes after the Done; it reaches Cadence on Tuesday.
     const late = await note(personId, '[Email] Outbound email: Following up from the webinar', on('04', '15:20:00'));
-    expect(late.details).toMatchObject({ [personId]: 'same_touch' });
+    expect(late.details).toMatchObject({ [personId]: 'before_step_opened' });
     await runSchedulerTick(ctx('05', '12:30:00'));
     expect((await enrollment(personId)).tasks.map((t) => t.state)).toEqual(['DONE', 'PENDING']);
     // Tuesday's follow-up in the same thread is the next email, not the same one.
@@ -148,10 +150,12 @@ describe('emails and calls close the step they belong to', () => {
   });
 
   it('records a closing from Twenty as Cadence, not as whoever clicked last', async () => {
-    const later = await laterDay();
-    await email(later.personId, { handle: 'alisa@cadence.local', workspaceMemberId: b.users.alisa.twentyMemberId }, 'Early hello', on('04', '15:00:00'));
-    await advanceEnrollment(later.id, { actor: userActor(b.users.karson), now: on(later.startDate.slice(8)), skipSync: true });
-    const task = (await enrollment(later.personId)).tasks[0];
+    const personId = await firstDay();
+    const open = (await enrollment(personId)).tasks[0];
+    // Came in while it could not be applied, after the step opened.
+    await prisma.touch.create({ data: { personId, channel: 'EMAIL', direction: 'OUTBOUND', occurredAt: on('04', '14:00:00'), summary: 'Email sent: Hello', externalId: `message:held:person:${personId}` } });
+    expect(await completeFromEarlierEvidence([open.id], { actor: userActor(b.users.karson), now: on('04', '17:00:00'), skipSync: true })).toEqual([open.id]);
+    const task = (await enrollment(personId)).tasks[0];
     expect(task).toEqual(expect.objectContaining({ state: 'DONE', completedById: null, completionSource: 'OBSERVED_MESSAGE' }));
     const audit = await prisma.auditLog.findFirstOrThrow({ where: { entityType: 'task', entityId: task.id, action: 'completed' } });
     expect(audit.actorType).toBe('SYSTEM');

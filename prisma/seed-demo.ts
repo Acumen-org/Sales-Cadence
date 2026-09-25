@@ -197,6 +197,7 @@ async function seedMeetings() {
     const personByEmail = new Map(people.map((p) => [p.email?.toLowerCase(), p.id]));
     const host = m.attendees.find((a) => a.host);
     const createdById = host ? mailbox.get(host.email.toLowerCase())?.id ?? null : null;
+    const bookedById = createdById ?? m.attendees.map((a) => mailbox.get(a.email.toLowerCase())?.id).find(Boolean) ?? null;
 
     const meeting = await prisma.meeting.create({
       data: {
@@ -213,6 +214,7 @@ async function seedMeetings() {
         transcript: m.transcript ?? null,
         transcriptFormat: m.transcript ? detectTranscriptFormat(m.transcript) : null,
         createdById,
+        bookedById,
         attendees: {
           create: m.attendees.map((a) => ({
             name: a.name,

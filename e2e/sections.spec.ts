@@ -54,17 +54,21 @@ test('the team board reports this week, with a total row', async ({ page }) => {
   await loginAs(page, 'Admin');
   await expect(page.getByRole('heading', { name: 'The team this week' })).toBeVisible();
   const headers = page.locator('table thead th');
-  await expect(headers.nth(0)).toHaveText('Person');
-  await expect(headers.nth(1)).toHaveText('Due today');
-  await expect(headers.nth(2)).toHaveText('Overdue');
-  await expect(headers.nth(3)).toHaveText('Done this week');
-  await expect(headers.nth(4)).toHaveText('Replies');
-  await expect(headers.nth(5)).toHaveText('Meetings');
+  await expect(headers.nth(0)).toHaveText('FO');
+  await expect(headers.nth(1)).toHaveText('This week');
+  await expect(headers.nth(2)).toHaveText('Reached');
+  await expect(headers.nth(3)).toHaveText('Due today');
+  await expect(headers.nth(4)).toHaveText('Overdue');
+  await expect(headers.nth(5)).toHaveText('Replies');
+  await expect(headers.nth(6)).toHaveText('Meetings');
+  // Each FO's own week: steps done out of those due, never a bar scaled to somebody else.
+  await expect(page.locator('table tbody').getByText(/\d+ of \d+ steps done|Nothing planned/).first()).toBeVisible();
   await expect(page.getByText('In sequence')).toHaveCount(0);
   await expect(page.getByText(/\(7d\)/)).toHaveCount(0);
   // Everyone's totals, and a link into each person's tasks.
-  await expect(page.locator('table tfoot')).toContainText('Everyone');
-  await expect(page.getByRole('link', { name: /^Tasks$/ }).first()).toBeVisible();
+  // Totals when more than one FO has work; everyone with nothing this week on one line.
+  await expect(page.locator('table tfoot')).toContainText(/Everyone|Nothing this week:/);
+  await expect(page.getByRole('link', { name: /'s tasks$/ }).first()).toBeVisible();
   await logout(page);
 });
 
@@ -170,7 +174,7 @@ test('a meeting plays in the app with its transcript and no analysis until a mod
   }
   await page.goto('/meetings?fav=1');
   await expect(page.getByRole('link', { name: /E2E discovery call/ }).first()).toBeVisible();
-  // The first table is the list of meetings in Cadence; "Recordings in Twenty" is a second one.
+  // The first table is the list of meetings in Cadence; "Recordings on people" is a second one.
   await expect(page.locator('table').first()).toContainText(/\d external/);
   await logout(page);
 });
@@ -180,7 +184,7 @@ test('a Zoom recording link is offered as a link-out, not a broken frame', async
   await page.goto('/meetings/new');
   await page.getByLabel('Title').fill('E2E zoom review');
   await page.getByLabel('Recording or meeting link').fill('https://acme.zoom.us/rec/share/e2e');
-  await expect(page.getByText(/blocks embedding/)).toBeVisible();
+  await expect(page.getByText('Opens in a new tab', { exact: true })).toBeVisible();
   await page.getByLabel('Date and time').fill('2026-09-08T14:00');
   await page.getByRole('button', { name: /Add meeting|Save/ }).click();
   await expect(page).toHaveURL(/\/meetings\/[0-9a-f-]+$/);
@@ -308,7 +312,7 @@ test('the person record shows the real Twenty fields, grouped as Twenty groups t
 test('recordings Twenty holds are offered for adding, pre-filled', async ({ page }) => {
   await loginAs(page, 'Alisa');
   await page.goto('/meetings');
-  await expect(page.getByText('Recordings in Twenty')).toBeVisible();
+  await expect(page.getByText('Recordings on people')).toBeVisible();
   const row = page.locator('table').filter({ hasText: 'Dummy Four' }).first();
   await expect(row).toContainText('recording');
 

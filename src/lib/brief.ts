@@ -145,7 +145,8 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
   const nextStep = next
     ? {
         step: next,
-        plannedDate: plannedDateForStep(enrollmentFull.startDate, next.day, enrollmentFull.shiftDays, settings.rules.workingDays),
+        // A published calendar holds each step's own date; otherwise it follows from the day.
+        plannedDate: enrollmentFull.scheduleDates[steps.indexOf(next)] ?? plannedDateForStep(enrollmentFull.startDate, next.day, enrollmentFull.shiftDays, settings.rules.workingDays),
         description: describeStep(next),
       }
     : null;

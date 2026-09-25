@@ -126,7 +126,7 @@ who is about to contradict the CRM's plan can see it first.
 |---|---|---|
 | `latestCallActivity` | Date time | the person's history, when no Cadence touch covers that moment |
 | `lastEmailActivity` | Date time | same |
-| `salesCallRecordingLink` | Links | "Recordings in Twenty" on the Meetings page; "Add with transcript" pre-fills the form with it |
+| `salesCallRecordingLink` | Links | "Recordings on people" on the Meetings page; "Add with transcript" pre-fills the form with it |
 | `meetingLink` | Links | join link on the person |
 | `bookingId` | Text | shown beside them |
 

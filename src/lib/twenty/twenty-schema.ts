@@ -25,6 +25,8 @@ export const defaultTwentySchema = {
     messageParticipant: { singular: 'messageParticipant', plural: 'messageParticipants', typeName: 'MessageParticipant' },
     opportunity: { singular: 'opportunity', plural: 'opportunities', typeName: 'Opportunity' },
     workspaceMember: { singular: 'workspaceMember', plural: 'workspaceMembers', typeName: 'WorkspaceMember' },
+    calendarEvent: { singular: 'calendarEvent', plural: 'calendarEvents', typeName: 'CalendarEvent' },
+    calendarEventParticipant: { singular: 'calendarEventParticipant', plural: 'calendarEventParticipants', typeName: 'CalendarEventParticipant' },
   },
 
   person: {
@@ -192,6 +194,31 @@ export const defaultTwentySchema = {
     workspaceMemberId: 'workspaceMemberId',
   },
 
+  /** Stock Twenty: the events of calendars connected to the workspace. */
+  calendarEvent: {
+    title: 'title',
+    startsAt: 'startsAt',
+    endsAt: 'endsAt',
+    isFullDay: 'isFullDay',
+    isCanceled: 'isCanceled',
+    location: 'location',
+    description: 'description',
+    /** Composite link: { primaryLinkUrl, primaryLinkLabel } */
+    conferenceLink: 'conferenceLink',
+    iCalUid: 'iCalUid',
+    calendarEventParticipants: 'calendarEventParticipants',
+    updatedAt: 'updatedAt',
+  },
+
+  calendarEventParticipant: {
+    calendarEventId: 'calendarEventId',
+    handle: 'handle',
+    displayName: 'displayName',
+    isOrganizer: 'isOrganizer',
+    personId: 'personId',
+    workspaceMemberId: 'workspaceMemberId',
+  },
+
   /** Values of MessageParticipant.role. */
   participantRoles: { from: 'from', to: 'to', cc: 'cc', bcc: 'bcc' },
 
@@ -257,6 +284,8 @@ export type TwentySchema = {
   taskStatus: { [K in keyof typeof defaultTwentySchema.taskStatus]: string };
   message: { [K in keyof typeof defaultTwentySchema.message]: string };
   messageParticipant: { [K in keyof typeof defaultTwentySchema.messageParticipant]: string };
+  calendarEvent: { [K in keyof typeof defaultTwentySchema.calendarEvent]: string };
+  calendarEventParticipant: { [K in keyof typeof defaultTwentySchema.calendarEventParticipant]: string };
   participantRoles: { [K in keyof typeof defaultTwentySchema.participantRoles]: string };
   opportunity: { [K in keyof typeof defaultTwentySchema.opportunity]: string };
   workspaceMember: { [K in keyof typeof defaultTwentySchema.workspaceMember]: string };

@@ -338,7 +338,7 @@ so each got its own place rather than being flattened into one list:
   automations for 246 and 226 people respectively - joins the person's history, but only where no
   Cadence touch or synced email already covers that moment, so nothing is shown twice.
 - **Recordings** - `salesCallRecordingLink`, `meetingLink`, `bookingId` - give the Meetings
-  section a **"Recordings in Twenty"** list: the people whose record carries a recording link,
+  section a **"Recordings on people"** list: the people whose record carries a recording link,
   each with a one-click "Add with transcript" that pre-fills the form from the person. Cadence
   does not create a Meeting row by itself, because a meeting here carries attendees and a
   transcript that only a human can supply. Twenty's `meetingTime` is not read at all: the team
@@ -936,10 +936,12 @@ The rule now:
   made it: a Cadence user matched by member, login email or an alias that is an address, a sender
   at one of the internal domains, or a note matching the outbound email or call title (the title
   says it is ours). Unnamed evidence is not sent for review any more.
-- **When it counts.** From when the person joined the campaign, and after the step before it was
-  done. A touch made before its step opens is kept and closes the step the moment it opens, so
-  the step never lands on the FO's list. A scheduler pass closes any open step whose touch is
-  already on file.
+- **When it counts.** Only once the step is open, and after the step before it was done. A step
+  opens on its calendar date; an email sent before then is not that step, and the step still
+  arrives as work (owner, 25 September 2026: "this should stay that way" - a first version that
+  kept early emails was reverted). A person enrolled by hand still counts an email sent up to the
+  grace days before, as it always has. A scheduler pass closes an open step whose touch came in
+  while it could not be applied (a paused campaign).
 - **Counted once.** One email or call is one touch, however it reaches Cadence:
   - the synced message and the note logged for it;
   - two logs of one call;
@@ -959,4 +961,45 @@ Tasks:
   and removed: it stalled navigation inside Tasks (Done, Task flow).
 - The Activity log in Settings names each event by its note title or email subject, and says in
   words what it did ("Closed an email step", "Kept for the next step").
+
+## The campaign on every task, a team board that shows progress, meetings from the calendar, a chime (25 September 2026)
+
+The owner: tasks should show "the campaign name as a header for each time a task is open"; the
+team table on Home was "very underwhelming ... Alyssa completed 3 people and the bar is already
+full", with too much empty space, and "Up Next ... Idk what to expect there"; adding a meeting
+"is very manual" and "the filling info with link thing does not work"; "I want to hear a chime
+sound when I get a notification".
+
+- **Tasks.** An open task starts with a band in the sidebar's green: the campaign (or, outside
+  one, the sequence), linked, with the step ("Step 1 of 9") and the campaign's end date.
+- **Home: the team this week.** The week runs Monday to Sunday. Every figure is in steps (one
+  person's step of outreach), and each FO's bar is their own week: steps done this week against
+  those due by Sunday, with the people reached, never a bar scaled to the busiest person. The
+  board lists FOs only (anyone in a pod, or with work or results this week), those owing most
+  first. Numbers are centred and larger, and the progress column takes the width.
+- **Home: up next.** The next four steps in the order the Tasks flow works them (overdue oldest
+  first, then today, then later), one two-line row per person and step, with the campaign, a due
+  pill and the step's channels, so the card ends level with the focus card beside it. An admin or
+  pod leader with no work of their own sees the team's, with whose it is.
+- **Meetings from the calendar.** Twenty syncs the team's calendars and sends every event.
+  - **What becomes a meeting:** an event with someone from our side and a contact from the CRM
+    on it. It carries the title, time, length, join link, account and attendees.
+  - **Who booked it:** the organiser if they carry outreach, else the first FO on the invite.
+  - **Changes:** a reschedule or a new guest updates the same meeting. A recording, notes, a
+    transcript or products put on it by hand are never overwritten.
+  - **Cancellations:** a cancelled or deleted event takes its meeting away, unless someone has
+    worked on it.
+  - **Duplicates:** a meeting already added by hand at the same time, with the same link or
+    title, is linked rather than duplicated.
+  - **When it reads:** webhooks, the regular sync, once the first time (the last month and the
+    next two), and nightly by date.
+- **Fill from link.** A pasted join link finds its event on the calendars and fills everything
+  from it. A link for a meeting Cadence already has within six hours says so and links to it, and
+  takes back what an earlier link filled (never what was typed); a personal room's other meetings
+  are other meetings. The search keeps a Teams id's underscore and treats Zoom's regional hosts as
+  one. Otherwise the page is read, but a sign-in page's title is never taken for the meeting's.
+- **Chime.** It existed but was silent: each chime made a new audio player outside a click, which
+  browsers mute. Now one player is unlocked on the first click or key and reused, the bell checks
+  its own count every 20 seconds (dialog open or not, tab in view or not), and the chime is three
+  soft bell notes.
 

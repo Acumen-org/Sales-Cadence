@@ -34,7 +34,7 @@ export function parseChannel(v: string | undefined): TaskChannel | null {
 }
 
 export const taskRowInclude = {
-  enrollment: { include: { person: true, sequence: { select: { id: true, name: true } }, pod: { select: { id: true, name: true } }, campaign: { select: { id: true, name: true } } } },
+  enrollment: { include: { person: true, sequence: { select: { id: true, name: true } }, pod: { select: { id: true, name: true } }, campaign: { select: { id: true, name: true, endDate: true, status: true } } } },
   fo: { select: { id: true, name: true, timezone: true, twentyMemberId: true } },
 } satisfies Prisma.TaskInclude;
 

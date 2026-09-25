@@ -8,9 +8,11 @@ import { completeTask, type EngineContext } from './tasks';
 
 /**
  * Emails and calls Cadence saw in Twenty close the step they belong to (owner, 24 September 2026:
- * "the tasks are not auto closing when emailing or calling has happened"). A touch made before its
- * step opened - a campaign whose batch starts on Monday, emailed on Thursday - is kept and counted
- * the moment the step opens, and a scheduler pass catches any open step whose touch is already in.
+ * "the tasks are not auto closing when emailing or calling has happened"), whoever on the team made
+ * them. A step opens on its date, and only what happens once it is open counts for it: an email
+ * sent before then was not this step, and the step still arrives as work (owner, 25 September).
+ * A scheduler pass closes an open step whose touch came in while it could not be applied (a paused
+ * campaign, a failed write).
  *
  * Only what was observed counts: a synced email (message:<id>) or a logged note (note:<id>). A task
  * marked done by hand writes task:<id>, which is never evidence for another step.
@@ -79,17 +81,19 @@ export async function alreadyCounted(personId: string, touch: TouchLike, matchin
 }
 
 /**
- * The earliest a touch may be and still count for this task: after the step before it was done,
- * or, for the first step, from when the person joined. An email arriving as it happens may be up
- * to the grace days older than the join (a step open from the start); one kept for a step that
- * opens later never is, so a note sent before the campaign cannot close its first step.
+ * The earliest a touch may be and still count for this task: once the step opened, and after the
+ * step before it was done. A first step that opened as the person was enrolled by hand also takes
+ * an email sent up to the grace days before (the FO wrote, then enrolled), as it always has.
  */
-export async function windowStart(task: Pick<Task, 'enrollmentId' | 'stepIndex'>, matching: MatchingSettings, options: { grace: boolean } = { grace: true }): Promise<Date> {
+export async function windowStart(task: Pick<Task, 'enrollmentId' | 'stepIndex' | 'createdAt'>, matching: MatchingSettings, options: { grace: boolean } = { grace: true }): Promise<Date> {
   const [previous, enrollment] = await Promise.all([
     prisma.task.aggregate({ where: { enrollmentId: task.enrollmentId, stepIndex: { lt: task.stepIndex } }, _max: { completedAt: true } }),
     prisma.enrollment.findUniqueOrThrow({ where: { id: task.enrollmentId }, select: { createdAt: true } }),
   ]);
-  return previous._max.completedAt ?? new Date(enrollment.createdAt.getTime() - (options.grace ? matching.evidenceGraceDays * DAY : 0));
+  const openedOnJoining = task.stepIndex === 0 && Math.abs(task.createdAt.getTime() - enrollment.createdAt.getTime()) < 10 * 60_000;
+  const opened = openedOnJoining && options.grace ? new Date(enrollment.createdAt.getTime() - matching.evidenceGraceDays * DAY) : task.createdAt;
+  const done = previous._max.completedAt;
+  return done && done > opened ? done : opened;
 }
 
 /** A note counts only for the channel its title says (a call note never closes an email). */
@@ -97,9 +101,10 @@ const countsFor = (t: TouchLike, action: Task['action'], matching: MatchingSetti
   t.externalId.startsWith('message:') ? action === 'EMAIL' : (actionTypesFor(classifyNoteTitle(t.summary, matching).kind, matching) as string[]).includes(action);
 
 /**
- * Close these open email and call tasks from touches already recorded for the person. Returns the
- * ids closed. Each touch closes one step, the oldest first. Closed as what it is - Cadence reading
- * Twenty - never as whoever's click started this, and never moving a plan on by hand.
+ * Close these open email and call tasks from touches already recorded for the person since each
+ * step opened. Returns the ids closed. Each touch closes one step, the oldest first. Closed as what
+ * it is - Cadence reading Twenty - never as whoever's click started this, and never moving a plan
+ * on by hand.
  */
 export async function completeFromEarlierEvidence(taskIds: string[], ctx: EngineContext): Promise<string[]> {
   if (!taskIds.length) return [];
@@ -129,10 +134,10 @@ export async function completeFromEarlierEvidence(taskIds: string[], ctx: Engine
 }
 
 /**
- * Every open email or call whose touch is already in: an email that came in while its step was
- * still ahead, or before this rule existed. One query finds them, leaving out touches that are a
- * second record of one already counted so the same ones are not tried every minute; most ticks
- * find none. The earliest due first.
+ * Every open email or call whose touch, made since the step opened, is already in: one that came
+ * in while the campaign was paused, or before this rule existed. One query finds them, leaving out
+ * touches that are a second record of one already counted so the same ones are not tried every
+ * minute; most ticks find none. The earliest due first.
  */
 export async function catchUpObservedEvidence(ctx: EngineContext): Promise<number> {
   const { rules } = await getSettings();
@@ -147,9 +152,10 @@ export async function catchUpObservedEvidence(ctx: EngineContext): Promise<numbe
         WHERE x."personId" = e."personId" AND x.direction = 'OUTBOUND' AND x.channel::text = t.action::text
           AND (x."externalId" LIKE 'message:%' OR x."externalId" LIKE 'note:%')
           AND x."occurredAt" >= ${since}
+          AND x."occurredAt" >= t."createdAt"
           AND x."occurredAt" >= COALESCE(
             (SELECT max(p."completedAt") FROM "Task" p WHERE p."enrollmentId" = e.id AND p."stepIndex" < t."stepIndex"),
-            e."createdAt")
+            t."createdAt")
           AND NOT EXISTS (SELECT 1 FROM "Task" u WHERE u."evidenceId" = x."externalId")
           AND NOT EXISTS (
             SELECT 1 FROM "Task" u JOIN "Enrollment" ue ON ue.id = u."enrollmentId" JOIN "Touch" c ON c."externalId" = u."evidenceId"

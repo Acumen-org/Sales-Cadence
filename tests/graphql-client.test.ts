@@ -275,6 +275,16 @@ describe('TwentyGraphqlClient', () => {
     expect(tasks.query).not.toContain('some');
   });
 
+  it('searches calendar events by link, keeping the underscore of a Teams meeting id', async () => {
+    const { client, calls } = fakeClient(() => ({ data: { calendarEvents: { edges: [], pageInfo: { hasNextPage: false, endCursor: null } } } }), {
+      fieldsWith: ['startsAt', 'endsAt', 'isFullDay', 'isCanceled', 'location', 'description', 'conferenceLink', 'iCalUid', 'calendarEventParticipants'],
+    });
+    await client.listCalendarEvents({ conferenceUrl: '19:meeting_NjQ1ZmI%', startsFrom: '2026-08-26T00:00:00.000Z', limit: 60 });
+    const call = calls.find((c) => c.query.includes('calendarEvents('))!;
+    expect(call.variables.filter).toEqual({ and: [{ startsAt: { gte: '2026-08-26T00:00:00.000Z' } }, { conferenceLink: { primaryLinkUrl: { ilike: '%19:meeting_NjQ1ZmI%' } } }] });
+    expect(call.variables.orderBy).toEqual([{ startsAt: 'AscNullsLast' }]);
+  });
+
   it('uses the default schema object names', () => {
     expect(defaultTwentySchema.objects.person.plural).toBe('people');
     expect(defaultTwentySchema.objects.noteTarget.typeName).toBe('NoteTarget');

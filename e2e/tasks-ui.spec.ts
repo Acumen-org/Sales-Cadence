@@ -144,7 +144,7 @@ test('the person panel carries the CRM record, not a made-up stage', async ({ pa
   // "Approaching" was a label Cadence invented; it is gone.
   await expect(panel.getByText('Approaching')).toHaveCount(0);
   // What the CRM holds, in the CRM's own terms: the record, its own next action, its tags.
-  for (const section of ['Contact details', 'CRM profile', 'CRM tags', 'Sequence progress', 'Recent activity']) {
+  for (const section of ['Contact details', 'CRM profile', 'CRM tags', 'Outreach progress', 'Recent activity']) {
     await expect(panel.getByText(section, { exact: true }).first(), section).toBeVisible();
   }
   // The CRM's own next action appears for the people who have one written in Twenty.

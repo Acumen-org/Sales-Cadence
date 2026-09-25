@@ -1,5 +1,5 @@
 import type { ListOptions, ListPeopleOptions, TwentyClient } from './client';
-import { normalizeCompany, normalizeMessage, normalizeNote, normalizeOpportunity, normalizePerson, normalizeTask, normalizeWorkspaceMember, connectionToArray } from './normalize';
+import { normalizeCalendarEvent, normalizeCompany, normalizeMessage, normalizeNote, normalizeOpportunity, normalizePerson, normalizeTask, normalizeWorkspaceMember, connectionToArray } from './normalize';
 import type { TwentySchema } from './twenty-schema';
 import type {
   CreateNoteInput,
@@ -18,7 +18,7 @@ import type {
   TwentyWorkspaceMember,
   UpdateTaskInput,
   EnrichPersonInput,
-  EnrichCompanyInput,TwentyWebhook, CreateWebhookInput } from './types';
+  EnrichCompanyInput,TwentyWebhook, CreateWebhookInput, TwentyCalendarEvent } from './types';
 
 export type TwentyGraphqlClientOptions = {
   /** Twenty server base URL, no trailing slash. The API lives at /graphql and /metadata. */
@@ -329,6 +329,25 @@ export class TwentyGraphqlClient implements TwentyClient {
     ]);
   }
 
+  private calendarEventSelection() {
+    const e = this.s.calendarEvent;
+    const p = this.s.calendarEventParticipant;
+    return this.selection(this.s.objects.calendarEvent.typeName, [
+      'id',
+      e.title,
+      e.startsAt,
+      e.endsAt,
+      e.isFullDay,
+      e.isCanceled,
+      e.location,
+      e.description,
+      { field: e.conferenceLink, sub: '{ primaryLinkUrl primaryLinkLabel }' },
+      e.iCalUid,
+      { field: e.calendarEventParticipants, sub: `{ edges { node { id ${p.handle} ${p.displayName} ${p.isOrganizer} ${p.personId} ${p.workspaceMemberId} } } }` },
+      e.updatedAt,
+    ]);
+  }
+
   private async taskSelection() {
     const t = this.s.task;
     const tt = await this.targetFields('taskTarget');
@@ -597,6 +616,30 @@ export class TwentyGraphqlClient implements TwentyClient {
       after: opts.after ?? null,
     });
     return this.page(data[this.s.objects.message.plural], (n) => normalizeMessage(n, this.s));
+  }
+
+  async listCalendarEvents(opts: ListOptions & { startsFrom?: string; startsBefore?: string; conferenceUrl?: string } = {}): Promise<Page<TwentyCalendarEvent>> {
+    const sel = await this.calendarEventSelection();
+    const e = this.s.calendarEvent;
+    const and: Record<string, unknown>[] = [];
+    if (opts.updatedSince) and.push({ [e.updatedAt]: { gte: opts.updatedSince } });
+    if (opts.startsFrom) and.push({ [e.startsAt]: { gte: opts.startsFrom } });
+    if (opts.startsBefore) and.push({ [e.startsAt]: { lt: opts.startsBefore } });
+    // A classic Teams id is "meeting_NjQ1...": the underscore stays (as a LIKE wildcard it still matches itself).
+    if (opts.conferenceUrl) and.push({ [e.conferenceLink]: { primaryLinkUrl: { ilike: `%${opts.conferenceUrl.replace(/%/g, '')}%` } } });
+    const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.calendarEvent.plural, this.s.objects.calendarEvent.typeName, sel), {
+      filter: and.length ? { and } : undefined,
+      orderBy: [{ [e.startsAt]: 'AscNullsLast' }],
+      first: Math.min(opts.limit ?? PAGE_SIZE, PAGE_SIZE),
+      after: opts.after ?? null,
+    });
+    return this.page(data[this.s.objects.calendarEvent.plural], (n) => normalizeCalendarEvent(n, this.s));
+  }
+
+  async getCalendarEvent(id: string): Promise<TwentyCalendarEvent | null> {
+    const sel = await this.calendarEventSelection();
+    const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.calendarEvent.plural, this.s.objects.calendarEvent.typeName, sel), { filter: { id: { eq: id } }, first: 1 });
+    return this.page(data[this.s.objects.calendarEvent.plural], (n) => normalizeCalendarEvent(n, this.s)).items[0] ?? null;
   }
 
   async getMessage(id: string): Promise<TwentyMessage | null> {

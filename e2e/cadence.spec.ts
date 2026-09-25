@@ -180,7 +180,8 @@ test('answered call finishes the sequence as replied and shows on Home', async (
   await page.goto('/home');
   await expect(page.getByRole('heading', { name: /this week/ })).toBeVisible();
   // The enrollment's own FO gets the credit, so somebody in the pod table has a reply this week.
-  const replyCells = await page.locator('table tbody tr td:nth-child(5)').allTextContents();
+  // FO, This week, Reached, Due today, Overdue, Replies: the sixth column.
+  const replyCells = await page.locator('table tbody tr td:nth-child(6)').allTextContents();
   expect(replyCells.some((v) => Number(v.trim()) > 0)).toBe(true);
   // And the person is finished as replied.
   await page.goto('/people?q=' + encodeURIComponent(person.split(' ')[1] ?? person));

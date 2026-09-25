@@ -42,6 +42,8 @@ export class DryRunTwentyClient implements TwentyClient {
   listTasks: TwentyClient['listTasks'] = (o) => this.inner.listTasks(o);
   getTask: TwentyClient['getTask'] = (id) => this.inner.getTask(id);
   listOpportunities: TwentyClient['listOpportunities'] = (o) => this.inner.listOpportunities(o);
+  listCalendarEvents: TwentyClient['listCalendarEvents'] = (o) => this.inner.listCalendarEvents(o);
+  getCalendarEvent: TwentyClient['getCalendarEvent'] = (id) => this.inner.getCalendarEvent(id);
   introspect: TwentyClient['introspect'] = () => this.inner.introspect();
   ping: TwentyClient['ping'] = async () => {
     const r = await this.inner.ping();

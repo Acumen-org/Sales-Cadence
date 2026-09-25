@@ -186,7 +186,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
 
       {recordings.length ? (
         <Surface flush>
-          <ViewHeader title="Recordings in Twenty" caret meta={<><span className="font-medium text-ink-900">{recordingTotal}</span> on a person record{recordingTotal > recordings.length ? <> · showing <span className="font-medium text-ink-900">{recordings.length}</span></> : null}</>} />
+          <ViewHeader title="Recordings on people" caret meta={<><span className="font-medium text-ink-900">{recordingTotal}</span> on a person record{recordingTotal > recordings.length ? <> · showing <span className="font-medium text-ink-900">{recordings.length}</span></> : null}</>} />
           <div className="min-w-0">
             <table className="table table-dense table-meetings w-full table-fixed">
               <thead>

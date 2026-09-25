@@ -1,6 +1,8 @@
 import type { TwentySchema } from './twenty-schema';
 import type {
   ParticipantRole,
+  TwentyCalendarEvent,
+  TwentyCalendarParticipant,
   TwentyCompany,
   TwentyMessage,
   TwentyMessageParticipant,
@@ -266,6 +268,38 @@ export function normalizeMessage(raw: Raw, s: TwentySchema): TwentyMessage {
   };
 }
 
+export function normalizeCalendarParticipant(raw: Raw, s: TwentySchema): TwentyCalendarParticipant & { calendarEventId: string | null } {
+  const p = s.calendarEventParticipant;
+  return {
+    id: String(raw.id),
+    handle: str(raw[p.handle]) ?? '',
+    displayName: str(raw[p.displayName]),
+    isOrganizer: raw[p.isOrganizer] === true,
+    personId: str(raw[p.personId]),
+    workspaceMemberId: str(raw[p.workspaceMemberId]),
+    calendarEventId: str(raw[p.calendarEventId]),
+  };
+}
+
+export function normalizeCalendarEvent(raw: Raw, s: TwentySchema): TwentyCalendarEvent {
+  const e = s.calendarEvent;
+  const link = obj(raw[e.conferenceLink]);
+  return {
+    id: String(raw.id),
+    title: str(raw[e.title]),
+    startsAt: str(raw[e.startsAt]),
+    endsAt: str(raw[e.endsAt]),
+    isFullDay: raw[e.isFullDay] === true,
+    isCanceled: raw[e.isCanceled] === true,
+    location: str(raw[e.location]),
+    description: str(raw[e.description]),
+    conferenceUrl: str(link.primaryLinkUrl) ?? (typeof raw[e.conferenceLink] === 'string' ? str(raw[e.conferenceLink]) : null),
+    iCalUid: str(raw[e.iCalUid]),
+    participants: connectionToArray(raw[e.calendarEventParticipants]).map((p) => normalizeCalendarParticipant(p, s)).map(({ calendarEventId: _event, ...p }) => p),
+    updatedAt: iso(raw[e.updatedAt] ?? raw.updatedAt ?? raw.createdAt),
+  };
+}
+
 export function normalizeTask(raw: Raw, s: TwentySchema): TwentyTask {
   const targets = connectionToArray(raw[s.task.taskTargets]);
   const createdBy = obj(raw[s.task.createdBy]);
@@ -297,7 +331,7 @@ export function normalizeOpportunity(raw: Raw, s: TwentySchema): TwentyOpportuni
 }
 
 /** Canonical object type for a Twenty object name (singular or plural), or null if we do not track it. */
-export type CanonicalObject = 'person' | 'company' | 'note' | 'task' | 'message' | 'messageParticipant' | 'opportunity' | 'workspaceMember' | 'noteTarget' | 'taskTarget';
+export type CanonicalObject = 'person' | 'company' | 'note' | 'task' | 'message' | 'messageParticipant' | 'opportunity' | 'workspaceMember' | 'noteTarget' | 'taskTarget' | 'calendarEvent' | 'calendarEventParticipant';
 
 export function canonicalObjectType(name: string, s: TwentySchema): CanonicalObject | null {
   const n = name.trim();

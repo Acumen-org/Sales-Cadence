@@ -12,7 +12,7 @@ import { loadSyncTask, loadSyncTasks, syncTaskCompleted, syncTaskResolved, syncT
 import { resolveNextStep } from './sequence-plan';
 import { workspaceTimezone } from '../workspace';
 import { workingDay } from '../campaign-planner';
-import { catchUpObservedEvidence, completeFromEarlierEvidence } from './observed-evidence';
+import { catchUpObservedEvidence } from './observed-evidence';
 
 /** Who is acting, what time it is (tests), and whether to skip Twenty writes. */
 export type EngineContext = {
@@ -163,6 +163,8 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
             dueDate,
             dueAt,
             plannedDate: planned,
+            // When the step opened, on the engine's clock: evidence counts only from here.
+            createdAt: now,
           },
         });
         taskIds.push(t.id);
@@ -188,11 +190,10 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
     throw err;
   }
 
-  if (result.outcome === 'generated') {
-    // An email or call made before this step opened closes it now; only what is still open is mirrored.
-    // Reading that history must never keep a new step from reaching Twenty.
-    const closed = new Set(await completeFromEarlierEvidence(result.taskIds, ctx).catch((err) => { console.warn('[evidence] could not read earlier touches', err); return [] as string[]; }));
-    if (!ctx.skipSync) await syncTasksCreated(await loadSyncTasks(result.taskIds.filter((id) => !closed.has(id))));
+  // A step opens as work on its date. An email or call made before then was not this step
+  // (owner, 25 September 2026): it never closes it, however it is recorded.
+  if (result.outcome === 'generated' && !ctx.skipSync) {
+    await syncTasksCreated(await loadSyncTasks(result.taskIds));
   }
   return result;
 }

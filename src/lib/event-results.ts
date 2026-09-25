@@ -4,9 +4,9 @@
  */
 const PER_PERSON: Record<string, string> = {
   completed: 'Closed the step',
-  no_pending_task: 'Kept for the next step',
+  no_pending_task: 'No step open',
   same_touch: 'Already counted',
-  before_previous_step: 'Belonged to the step before',
+  before_step_opened: 'Before the step opened',
   stale_evidence: 'From before they joined',
   no_active_enrollment: 'Not in a campaign',
   touch_only: 'On the timeline',
@@ -48,6 +48,14 @@ const EXACT: Record<string, string> = {
   ignored_opportunity_no_contact: 'Opportunity with no contact',
   ignored_opportunity_disabled: 'Opportunities do not book meetings',
   no_record_id: 'No record',
+  calendar_created: 'Meeting added from the calendar',
+  calendar_updated: 'Meeting updated from the calendar',
+  calendar_linked: 'Matched to a meeting added by hand',
+  calendar_removed: 'Removed: event cancelled',
+  calendar_read_already: 'Read with the rest of the event',
+  calendar_skipped: 'Not a meeting with a contact',
+  ignored_event_not_found: 'Event deleted from the calendar',
+  ignored_no_event_id: 'Not a calendar event',
 };
 
 /** One line for the row. Given the outcome per person (from ingestEvent), an email or note says what it did for each. */

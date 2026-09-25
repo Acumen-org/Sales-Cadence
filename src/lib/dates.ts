@@ -139,6 +139,13 @@ export function weekRange(today: LocalDate, timezone: string): { from: LocalDate
   return { from, to, fromInstant: startOfLocalDay(from, timezone), toInstant: startOfLocalDay(addDays(to, 1), timezone) };
 }
 
+/** The working week around a date: Monday to Sunday, in the given timezone. */
+export function workWeekRange(today: LocalDate, timezone: string): { from: LocalDate; to: LocalDate; fromInstant: Date; toInstant: Date } {
+  const from = addDays(today, -((dayOfWeek(today) + 6) % 7));
+  const to = addDays(from, 6);
+  return { from, to, fromInstant: startOfLocalDay(from, timezone), toInstant: startOfLocalDay(addDays(to, 1), timezone) };
+}
+
 export function relativeDays(date: LocalDate, today: LocalDate): string {
   const n = diffDays(today, date);
   if (n === 0) return 'Today';

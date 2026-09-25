@@ -1,4 +1,4 @@
-import type { TwentyCompany, TwentyMessage, TwentyNote, TwentyOpportunity, TwentyPerson, TwentyTask, TwentyView, TwentyWorkspaceMember } from './types';
+import type { TwentyCalendarEvent, TwentyCompany, TwentyMessage, TwentyNote, TwentyOpportunity, TwentyPerson, TwentyTask, TwentyView, TwentyWorkspaceMember } from './types';
 
 /**
  * The demo workspace used by the app in mock mode: one dummy record of everything.
@@ -340,3 +340,23 @@ export const DEMO_VIEWS: TwentyView[] = [
   { id: 'view-andrew-pod', name: "Andrew's pod - all people", objectSingular: 'person', personIds: DEMO_PEOPLE.filter((x) => x.podOwner === 'ANDREW').map((x) => x.id) },
   { id: 'view-all-dummies', name: 'All dummy people', objectSingular: 'person', personIds: DEMO_PEOPLE.map((x) => x.id) },
 ];
+
+/**
+ * Two meetings on Alisa's calendar, for showing meetings arriving by themselves: one tomorrow with
+ * Dummy One, one two days ago with Dummy Two. Served only when CADENCE_DEMO_CALENDAR=1, so the
+ * browser suite's meeting counts stay as they were.
+ */
+export function demoCalendarEvents(now = new Date()): TwentyCalendarEvent[] {
+  if (process.env.CADENCE_DEMO_CALENDAR !== '1') return [];
+  const at = (days: number, hour: number) => { const d = new Date(now); d.setUTCDate(d.getUTCDate() + days); d.setUTCHours(hour, 0, 0, 0); return d.toISOString(); };
+  const person = (id: string) => DEMO_PEOPLE.find((p) => p.id === id)!;
+  const alisa = { id: 'cal-p-alisa', handle: 'alisa@dummy.example', displayName: 'Alisa Senior', isOrganizer: true, personId: null, workspaceMemberId: 'wm-alisa' };
+  const guest = (id: string) => ({ id: `cal-p-${id}`, handle: person(id).email ?? '', displayName: `Dummy ${person(id).lastName}`, isOrganizer: false, personId: id, workspaceMemberId: null });
+  return [
+    { id: 'demo-cal-1', title: 'PHH walkthrough with Dummy One', startsAt: at(1, 15), endsAt: at(1, 16), isFullDay: false, isCanceled: false, location: null, description: null, conferenceUrl: 'https://meet.google.com/dmo-demo-one', iCalUid: 'demo-1', participants: [alisa, guest('dummy-01')], updatedAt: now.toISOString() },
+    // A guest who is not in the CRM yet: not a meeting by itself, but its link fills the form.
+    { id: 'demo-cal-3', title: 'Coffee with a new prospect', startsAt: at(3, 10), endsAt: at(3, 10).replace(':00:00', ':45:00'), isFullDay: false, isCanceled: false, location: null, description: null, conferenceUrl: 'https://teams.microsoft.com/l/meetup-join/19%3ameeting_demo3%40thread.v2/0', iCalUid: 'demo-3', participants: [alisa, { id: 'cal-p-new', handle: 'sam.new@prospect-demo.example', displayName: 'Sam New', isOrganizer: false, personId: null, workspaceMemberId: null }], updatedAt: now.toISOString() },
+    { id: 'demo-cal-2', title: 'Intro call: Dummy Two', startsAt: at(-2, 14), endsAt: at(-2, 14).replace(':00:00', ':30:00'), isFullDay: false, isCanceled: false, location: null, description: null, conferenceUrl: 'https://zoom.us/j/9990001112', iCalUid: 'demo-2', participants: [alisa, guest('dummy-02')], updatedAt: now.toISOString() },
+  ];
+}
+

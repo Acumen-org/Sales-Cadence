@@ -42,7 +42,7 @@ export type ContinuousSyncState = {
 
 /** A full listing of Twenty once a day, on top of the change scans, so the cache cannot drift. */
 const FULL_REFRESH_EVERY_MS = 24 * 3600_000;
-const CURSOR_STAGES = ['cache.people', 'cache.companies', 'cache.deletedPeople', 'cache.deletedCompanies', 'people', 'deletedPeople', 'notes', 'messages', 'opportunities', 'tasks'];
+const CURSOR_STAGES = ['cache.people', 'cache.companies', 'cache.deletedPeople', 'cache.deletedCompanies', 'people', 'deletedPeople', 'notes', 'messages', 'opportunities', 'tasks', 'calendar'];
 
 /**
  * The pass the worker runs every CRM_SYNC_SECONDS. People and companies changed since the

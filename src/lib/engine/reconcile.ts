@@ -5,6 +5,7 @@ import { getSettings } from '../settings';
 import { getTwentyClient, type TwentyClient } from '../twenty';
 import { paginate } from '../twenty/client';
 import { ingestEvent, type IngestResult } from './ingest';
+import { importCalendarEvent } from '../meetings/calendar-import';
 
 export type ReconcileStats = {
   since: string;
@@ -16,6 +17,9 @@ export type ReconcileStats = {
   messages: number;
   opportunities: number;
   tasks: number;
+  /** Calendar events read, and the meetings they added. */
+  calendarEvents: number;
+  calendarMeetings: number;
   processed: number;
   duplicates: number;
   completions: number;
@@ -49,7 +53,7 @@ export async function reconcile(opts: { days?: number; since?: string; sinceBySt
   const since = opts.since ?? new Date(now.getTime() - days * 86_400_000).toISOString();
   const stageSince = (name: string) => opts.sinceByStage?.[name] ?? since;
   const actor = opts.actor ?? RECONCILE_ACTOR;
-  const stats: ReconcileStats = { since, people: 0, notes: 0, messages: 0, opportunities: 0, tasks: 0, processed: 0, duplicates: 0, completions: 0, replies: 0, meetings: 0, errors: 0, needsReview: 0, cacheFailed: 0, cacheError: null, stageErrors: {} };
+  const stats: ReconcileStats = { since, people: 0, notes: 0, messages: 0, opportunities: 0, tasks: 0, calendarEvents: 0, calendarMeetings: 0, processed: 0, duplicates: 0, completions: 0, replies: 0, meetings: 0, errors: 0, needsReview: 0, cacheFailed: 0, cacheError: null, stageErrors: {} };
   const common = { source: 'RECONCILE' as const, now, skipSync: opts.skipSync };
   // Every pass is its own stage: a permission the API key lacks for messages, or an object the
   // workspace renamed, used to stop the whole reconcile at that point and leave the watermark
@@ -108,6 +112,15 @@ export async function reconcile(opts: { days?: number; since?: string; sinceBySt
     for await (const task of paginate((after) => c.listTasks({ updatedSince: stageSince('tasks'), after, limit: 100 }))) {
       stats.tasks += 1;
       tally(stats, await ingestEvent({ ...common, objectType: 'task', eventName: 'task.updated', record: rawFromTask(task), recordId: task.id, updatedAt: task.updatedAt }, c));
+    }
+  });
+
+  // Calendar events straight into meetings: no activity row, since the meeting is the record.
+  await stage('calendar', async () => {
+    for await (const event of paginate((after) => c.listCalendarEvents({ updatedSince: stageSince('calendar'), after, limit: 100 }))) {
+      stats.calendarEvents += 1;
+      const r = await importCalendarEvent(event);
+      if (r.result === 'created' || r.result === 'linked') stats.calendarMeetings += 1;
     }
   });
 

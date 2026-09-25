@@ -6,6 +6,7 @@ import { getSettings, getTwentySchema, type MatchingSettings, type Settings } fr
 import { getTwentyClient, type TwentyClient } from '../twenty';
 import {
   canonicalObjectType,
+  normalizeCalendarParticipant,
   normalizeCompany,
   normalizeMessage,
   normalizeNote,
@@ -20,6 +21,7 @@ import { OCCUPYING_STATUSES, applyPersonFlags, markMeeting, markReplied } from '
 import { actionTypesFor, classifyMessage, classifyNoteTitle, resolveNoteActor, type UserLike } from './matching';
 import { completeTask, type EngineContext } from './tasks';
 import { alreadyCounted, windowStart } from './observed-evidence';
+import { importCalendarEvent, readRecently, removeCalendarEvent, type CalendarImport } from '../meetings/calendar-import';
 
 export type IngestInput = {
   source: EventSource;
@@ -135,9 +137,29 @@ async function process(type: CanonicalObject, input: IngestInput, ctx: EngineCon
     case 'opportunity':
       if (deleted) return { result: 'ignored_deleted' };
       return handleOpportunity(normalizeOpportunity(input.record, schema), ctx, settings);
+    case 'calendarEvent':
+      if (deleted) return fromCalendar(await removeCalendarEvent(String(input.record.id)));
+      return handleCalendarEvent(String(input.record.id), client);
+    case 'calendarEventParticipant': {
+      // A guest added or answering: the event is read again, whole.
+      const p = normalizeCalendarParticipant(input.record, schema);
+      if (!p.calendarEventId) return { result: 'ignored_no_event_id' };
+      if (readRecently(p.calendarEventId)) return { result: 'calendar_read_already' };
+      return handleCalendarEvent(p.calendarEventId, client);
+    }
     default:
       return { result: `ignored_object_${type}` };
   }
+}
+
+const fromCalendar = (r: CalendarImport): ProcessOutcome => ({ result: `calendar_${r.result}`, details: { ...(r.reason ? { reason: r.reason } : {}), ...(r.meetingId ? { meetingId: r.meetingId } : {}) } });
+
+/** A calendar event, read whole from Twenty (a webhook carries it without its guests), into a meeting. */
+async function handleCalendarEvent(id: string, client?: TwentyClient): Promise<ProcessOutcome> {
+  const c = client ?? (await getTwentyClient());
+  const event = await c.getCalendarEvent(id);
+  if (!event) return { result: 'ignored_event_not_found' };
+  return fromCalendar(await importCalendarEvent(event));
 }
 
 async function fetchMessage(id: string, client?: TwentyClient): Promise<TwentyMessage | null> {
@@ -215,8 +237,8 @@ async function recordTouch(data: { personId: string; channel: 'EMAIL' | 'CALL' |
  * Complete the earliest pending task of one of `types` on the person's active enrollment. An
  * email or call from our side counts whoever made it: the FO, a colleague writing from their own
  * mailbox, or a note the team's tools logged (owner, 24 September 2026: tasks close "when emailing
- * or calling has happened"). A step not open yet keeps the touch: it is counted when the step
- * opens (completeFromEarlierEvidence). Returns a result code.
+ * or calling has happened"). A step not open yet is not closed by it, then or later (owner, 25
+ * September 2026). Returns a result code.
  */
 async function completeFromEvidence(params: {
   personId: string;
@@ -239,8 +261,8 @@ async function completeFromEvidence(params: {
     orderBy: [{ stepIndex: 'asc' }, { actionIndex: 'asc' }],
   });
   if (!task) return { code: 'no_pending_task' };
-  // Done before the step before it was: that touch belonged to the earlier step.
-  if (occurredAt < (await windowStart(task, params.matching))) return { code: 'before_previous_step' };
+  // Before this step opened, or before the step ahead of it was done: it was not this step.
+  if (occurredAt < (await windowStart(task, params.matching))) return { code: 'before_step_opened' };
   // A second record of a touch already counted - the note logged for a synced email, the email behind a step marked done.
   if (await alreadyCounted(personId, { externalId: evidenceId, channel: task.action === 'CALL' ? 'CALL' : 'EMAIL', occurredAt, summary: params.summary }, params.matching)) return { code: 'same_touch' };
   const r = await completeTask({ taskId: task.id, source, evidenceId, chosenAction: task.action, occurredAt }, ctx);

@@ -12,10 +12,11 @@ export async function GET() {
   if (!user) return NextResponse.json({ version: null }, { status: 401 });
   const [task, touch, enrollment, notification] = await Promise.all([
     prisma.task.aggregate({ _max: { updatedAt: true } }),
-    prisma.touch.aggregate({ _max: { occurredAt: true } }),
+    // When a touch arrived, not when it happened: a reply synced late still changes the screen.
+    prisma.touch.aggregate({ _max: { createdAt: true } }),
     prisma.enrollment.aggregate({ _max: { updatedAt: true } }),
     prisma.user.findUnique({ where: { id: user.id }, select: { notificationsReadAt: true } }),
   ]);
-  const stamps = [task._max.updatedAt, touch._max.occurredAt, enrollment._max.updatedAt, notification?.notificationsReadAt].map((d) => d?.getTime() ?? 0);
+  const stamps = [task._max.updatedAt, touch._max.createdAt, enrollment._max.updatedAt, notification?.notificationsReadAt].map((d) => d?.getTime() ?? 0);
   return NextResponse.json({ version: Math.max(...stamps) }, { headers: { 'cache-control': 'no-store' } });
 }
