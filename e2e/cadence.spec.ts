@@ -92,6 +92,8 @@ test('task flow: complete an email, log a call with an outcome, skip with a boun
   // Saturday it is still Friday evening in Chicago and the work is under Today. Look for the
   // work rather than guessing the calendar.
   await page.goto('/tasks?tab=today&fo=');
+  // The list shows once the page has hydrated; count it only then.
+  await page.getByRole('link', { name: /^Today/ }).first().waitFor();
   const dueToday = await page.locator('main').getByRole('link', { name: /^Dummy \w+/ }).count();
   const tab = dueToday ? 'today' : 'upcoming';
   if (!dueToday) await page.goto(`/tasks?tab=${tab}&fo=`);

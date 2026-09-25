@@ -105,7 +105,9 @@ describe('tasks query and brief', () => {
     expect(brief!.nextStep?.step.day).toBe(3);
     expect(brief!.nextStep?.plannedDate).toBe('2026-09-09');
     expect(brief!.nextStep?.description).toBe('Call 1, then Follow-up email');
-    expect(brief!.notes.map((n) => n.id)).toEqual(['note-01']); // from the mock workspace
+    // Nothing on the brief waits for Twenty: its notes and emails are CrmHistory's, opportunities stream in.
+    expect(brief).not.toHaveProperty('notes');
+    expect(brief).not.toHaveProperty('opportunities');
     expect(brief!.twentyUrl).toContain('/object/person/person-01');
 
     // a junior from another pod may not see it

@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import Link, { useLinkStatus } from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import clsx from 'clsx';
@@ -10,6 +10,12 @@ import { logoutAction } from '@/lib/actions/auth';
 import { IconActivity, IconCalendar, IconCampaigns, IconClose, IconCompany, IconHome, IconLogout, IconMenu, IconPeople, IconReports, IconSettings, IconTasks } from './icons';
 import { Avatar } from './ui';
 import { BrandMark } from './brand';
+
+/** A section shows it is opening the moment it is clicked, while its page is read. */
+function Opening() {
+  const { pending } = useLinkStatus();
+  return pending ? <span aria-hidden className="pointer-events-none absolute inset-0 animate-pulse rounded-lg bg-white/[0.08]" /> : null;
+}
 import { Modal } from './modal';
 
 const GROUPS = [
@@ -57,6 +63,7 @@ function SidebarContent({ user, mode, dryRun, todayCount, overdueCount, close }:
             const active = pathname === item.href || pathname.startsWith(item.href + '/');
             const Icon = item.icon;
             return <Link key={item.href} href={item.href} onClick={close} aria-current={active ? 'page' : undefined} className={clsx('nav-item', active && 'nav-item-active')}>
+              <Opening />
               <Icon size={18} /> <span>{item.label}</span>
               {item.href === '/tasks' && todayCount + overdueCount > 0 ? <span className={clsx('ml-auto rounded-md px-1.5 py-0.5 text-[10px] tabular-nums', overdueCount ? 'bg-red-400/20 text-red-200' : 'bg-white/10 text-[#dfefc1]')} title={overdueCount ? `${overdueCount} overdue` : undefined}>{todayCount + overdueCount}</span> : null}
             </Link>;

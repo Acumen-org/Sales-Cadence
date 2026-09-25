@@ -48,15 +48,20 @@ describe('webhook ingestion', () => {
     expect(await prisma.activityEvent.count({ where: { externalId: 'note-dup' } })).toBe(1);
   });
 
-  it('an outbound email by someone other than the FO does not complete the task', async () => {
-    // note-04 in the fixtures: written by Ria (an admin) about person-03, whose FO is Alisa
-    const note = (await mock.getNote('note-04'))!;
-    const r = await ingestEvent({ source: 'WEBHOOK', objectType: 'note', eventName: 'note.created', record: rawFromNote(note), now: at('2026-09-07') });
-    expect(r.result).toBe('ignored_non_fo');
+  it('an outbound email by anyone on the team completes the FO task', async () => {
+    // note-04 in the fixtures: written by Ria (an admin) about person-03, whose FO is Alisa.
+    // The owner (24 Sep 2026): tasks close "when emailing or calling has happened", whoever did it.
+    // The fixture itself is from 3 Sep, before person-03 joined on 6 Sep: too old to count.
+    const old = (await mock.getNote('note-04'))!;
+    const stale = await ingestEvent({ source: 'WEBHOOK', objectType: 'note', eventName: 'note.created', record: rawFromNote(old), now: at('2026-09-07') });
+    expect(stale).toEqual(expect.objectContaining({ result: 'note_outbound_email_touch', details: { 'person-03': 'stale_evidence' } }));
+    const note = mock.addNote({ id: 'note-ria', title: '[Email] Outbound email: Following up on our conversation', personIds: ['person-03'], createdByMemberId: 'wm-ria', createdByName: 'Ria Patel', createdAt: iso('2026-09-07', '11:00:00'), updatedAt: iso('2026-09-07', '11:00:00') });
+    const r = await ingestEvent({ source: 'WEBHOOK', objectType: 'note', eventName: 'note.created', record: rawFromNote(note), now: at('2026-09-07', '11:05:00') });
+    expect(r.result).toBe('note_outbound_email_completed');
     const pending = await pendingTasks('person-03');
-    expect(pending.map((t) => t.label)).toEqual(['Email 1', 'LinkedIn connect']);
-    // but the touch is on the timeline
-    const touch = await prisma.touch.findUnique({ where: { externalId: 'note:note-04:person:person-03' } });
+    expect(pending.map((t) => t.label)).toEqual(['LinkedIn connect']);
+    // and the touch is on the timeline, under who sent it
+    const touch = await prisma.touch.findUnique({ where: { externalId: 'note:note-ria:person:person-03' } });
     expect(touch?.actorLabel).toBe('Ria Patel');
     expect(touch?.direction).toBe('OUTBOUND');
   });
@@ -201,9 +206,12 @@ describe('webhook ingestion', () => {
     expect((await ingestEvent({ source: 'WEBHOOK', objectType: 'note', eventName: 'note.created', record: rawFromNote(own), now: at('2026-09-07') })).result).toBe('ignored_cadence_note');
     const stranger = mock.addNote({ title: '[CALL] Outbound Call by tw_nobody', personIds: ['person-03'], createdAt: iso('2026-09-07'), updatedAt: iso('2026-09-07') });
     const r = await ingestEvent({ source: 'WEBHOOK', objectType: 'note', eventName: 'note.created', record: rawFromNote(stranger), now: at('2026-09-07') });
-    expect(r.result).toBe('note_unknown_actor');
-    expect(r.needsReview).toBe(true);
-    expect((await pendingTasks('person-03')).map((t) => t.label)).toEqual(['Email 1', 'LinkedIn connect']);
+    // Logged by someone without a Cadence login: nothing to review; with no call open it is a touch.
+    expect(r.result).toBe('note_outbound_call_touch');
+    expect(r.details).toMatchObject({ loggedBy: 'tw_nobody' });
+    expect(r.needsReview).toBeFalsy();
+    expect((await pendingTasks('person-03')).map((t) => t.label)).toEqual(['LinkedIn connect']);
+    expect(await prisma.touch.findUnique({ where: { externalId: `note:${stranger.id}:person:person-03` } })).toEqual(expect.objectContaining({ channel: 'CALL', direction: 'OUTBOUND' }));
   });
 
   it('a mirrored Twenty task marked done in Twenty completes the Cadence task', async () => {

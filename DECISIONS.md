@@ -915,3 +915,48 @@ course can do anything."
   Monday too), not for follow-ups, and gone after that. Several FOs can join the same day, one after
   another or at once.
 
+## Tasks close when the email or call happened, and Tasks opens without waiting on Twenty (25 September 2026)
+
+The owner: "When I click task section, it takes few seconds. Also, the tasks are not auto closing
+(done) when emailing or calling has happened (or the items in that step has happened)."
+
+What the hosted campaign showed:
+- The FOs on it (junior FOs) are copied in while the pod's managing director sends from her own
+  mailbox. The engine only accepted evidence from the enrollment's FO, so those emails closed
+  nothing.
+- A calendar campaign opens a step only on its date. An email sent before then found no open task,
+  and the step later appeared as work although the person had been emailed.
+- The team's tool logs each email in Twenty as a note titled "[Email] Outbound email: <subject>".
+  It is written by an integration account, so no Cadence user resolved and nothing closed.
+- Mail from another of our addresses (alisa@prairie-hill.com; prairie-hill.com is an internal
+  domain) was read as a reply.
+
+The rule now:
+- **Who counts.** An email or call from our side closes the step's matching activity, whoever
+  made it: a Cadence user matched by member, login email or an alias that is an address, a sender
+  at one of the internal domains, or a note matching the outbound email or call title (the title
+  says it is ours). Unnamed evidence is not sent for review any more.
+- **When it counts.** From when the person joined the campaign, and after the step before it was
+  done. A touch made before its step opens is kept and closes the step the moment it opens, so
+  the step never lands on the FO's list. A scheduler pass closes any open step whose touch is
+  already on file.
+- **Counted once.** One email or call is one touch, however it reaches Cadence:
+  - the synced message and the note logged for it;
+  - two logs of one call;
+  - the email or call behind a step already marked done, in Cadence or in Twenty.
+  Records of one touch fall within six hours of each other and, for an email, share a subject. A
+  next-day "Re:" is the next email. A call note never closes an email.
+- **Credited to Cadence.** A step closed this way is recorded as closed by Cadence reading Twenty,
+  never as whoever clicked last.
+- **Never counted.** An inbound reply, a manual completion elsewhere, or anything from before the
+  person joined.
+
+Tasks:
+- The task brief no longer reads Twenty's notes and emails; the panel never showed them, and CRM
+  history shows them.
+- Opportunities and CRM history stream in beside the task instead of holding it back.
+- The sidebar shows a section opening the moment it is clicked. A route loading screen was tried
+  and removed: it stalled navigation inside Tasks (Done, Task flow).
+- The Activity log in Settings names each event by its note title or email subject, and says in
+  words what it did ("Closed an email step", "Kept for the next step").
+

@@ -11,7 +11,7 @@ import { describeStep, parseSteps, StepActionSchema, type SequenceStep, type Ste
 import { cleanRichText, plainToHtml } from './rich-text';
 import { getSettings, getTwentyConnection } from './settings';
 import { getTwentyClient } from './twenty';
-import type { TwentyMessage, TwentyNote, TwentyOpportunity } from './twenty/types';
+import type { TwentyOpportunity } from './twenty/types';
 import { twentyPersonUrl } from './twenty/urls';
 import { taskRowInclude, type TaskRow } from './tasks-query';
 
@@ -62,19 +62,14 @@ export type TaskBrief = {
   step: SequenceStep | null;
   action: RenderedAction;
   touches: Array<{ id: string; channel: string; direction: string; occurredAt: Date; summary: string; actorLabel: string | null }>;
-  notes: TwentyNote[];
-  /** Emails Twenty has synced for this person, newest first. */
-  emails: Array<{ id: string; subject: string | null; preview: string | null; at: Date; inbound: boolean; from: string | null }>;
-  /** Touches, emails, notes and sequence events on one clock, newest first. */
+  /** Touches and sequence events on one clock, newest first. Twenty's emails and notes are CrmHistory's. */
   timeline: BriefTimelineItem[];
   colleagues: ColleagueRow[];
-  opportunities: TwentyOpportunity[];
   nextStep: { step: SequenceStep; plannedDate: LocalDate; description: string } | null;
   /** Steps of the plan (for "move to step") and where the enrollment is. */
   steps: { index: number; day: number; label: string }[];
   currentStep: number;
   enrollment: { id: string; status: string; exitReason: string | null; startDate: string; campaignName: string | null; sequenceName: string; foName: string; shiftDays: number };
-  warnings: string[];
 };
 
 /**
@@ -113,7 +108,6 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
     }),
   ]);
   const person = task.enrollment.person;
-  const warnings: string[] = [];
 
   // One plan per sequence. What this task says is frozen on the task itself, so an edit to the
   // plan since it was generated cannot rewrite the message an FO is looking at.
@@ -133,13 +127,11 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
     return { task: t, action: { ...rendered, subject: t.draftSubject ?? rendered.subject, html: t.draftHtml ?? rendered.html } };
   });
 
-  const [touches, colleagues, notesResult, oppsResult, emailsResult, stateEvents, pod, owner] = await Promise.all([
+  // Everything here is Cadence's own data, so the task opens without waiting on Twenty.
+  const [touches, colleagues, stateEvents, pod, owner] = await Promise.all([
     // 20 feeds both the dot timeline and the merged timeline below it.
     prisma.touch.findMany({ where: { personId: person.id }, orderBy: { occurredAt: 'desc' }, take: 20 }),
     loadColleagues(person.companyId, person.id),
-    fetchNotes(person.id),
-    fetchOpportunities(person.id),
-    fetchEmails(person.id),
     prisma.auditLog.findMany({
       where: { entityType: 'enrollment', entityId: task.enrollmentId, action: { in: ['enrolled', 'replied', 'meeting', 'exited', 'paused', 'resumed', 'moved_to_step'] } },
       orderBy: { createdAt: 'desc' },
@@ -148,9 +140,6 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
     person.podOwner ? prisma.pod.findUnique({ where: { podOwnerValue: person.podOwner }, select: { name: true } }) : Promise.resolve(null),
     person.ownerMemberId ? prisma.user.findFirst({ where: { twentyMemberId: person.ownerMemberId }, select: { name: true } }) : Promise.resolve(null),
   ]);
-  if (notesResult.error) warnings.push(notesResult.error);
-  if (oppsResult.error && oppsResult.error !== notesResult.error) warnings.push(oppsResult.error);
-  if (emailsResult.error && emailsResult.error !== notesResult.error) warnings.push(emailsResult.error);
 
   const next = previewNextStep({ currentStep: enrollmentFull.currentStep, currentStepId: enrollmentFull.currentStepId, steps });
   const nextStep = next
@@ -175,17 +164,12 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
     step,
     action,
     touches: touches.map((t) => ({ id: t.id, channel: t.channel, direction: t.direction, occurredAt: t.occurredAt, summary: t.summary, actorLabel: t.actorLabel })),
-    notes: notesResult.notes,
-    emails: emailsResult.emails,
     timeline: buildTimeline({
       touches,
-      notes: notesResult.notes,
-      emails: emailsResult.emails,
       stateEvents,
       crm: { lastCallAt: person.lastCallAt, lastEmailAt: person.lastEmailAt },
     }),
     colleagues,
-    opportunities: oppsResult.opportunities,
     nextStep,
     steps: steps.map((s, index) => ({ index, day: s.day, label: describeStep(s) })),
     currentStep: enrollmentFull.currentStep,
@@ -199,7 +183,6 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
       foName: enrollmentFull.fo.name,
       shiftDays: enrollmentFull.shiftDays,
     },
-    warnings,
   };
 }
 
@@ -226,64 +209,17 @@ async function loadColleagues(companyId: string | null, personId: string): Promi
   });
 }
 
-async function fetchNotes(personId: string): Promise<{ notes: TwentyNote[]; error?: string }> {
-  try {
-    const client = await getTwentyClient();
-    const page = await client.listNotes({ personId, limit: 5 });
-    return { notes: page.items.slice(0, 5) };
-  } catch (err) {
-    return { notes: [], error: `Twenty unavailable: ${err instanceof Error ? err.message : String(err)}` };
-  }
-}
-
-/**
- * Emails Twenty synced for this person. Direction comes from the participant list: if the person
- * is the sender it came in, otherwise it went out from one of our mailboxes.
- */
-async function fetchEmails(personId: string): Promise<{ emails: TaskBrief['emails']; error?: string }> {
-  try {
-    const client = await getTwentyClient();
-    const page = await client.listMessages({ personId, limit: 8 });
-    const emails = page.items
-      .map((m: TwentyMessage) => {
-        const from = m.participants.find((x) => x.role === 'from');
-        const text = (m.text ?? '').replace(/\s+/g, ' ').trim();
-        return {
-          id: m.id,
-          subject: m.subject,
-          preview: text ? text.slice(0, 180) : null,
-          at: new Date(m.receivedAt ?? m.updatedAt ?? Date.now()),
-          inbound: from?.personId === personId,
-          from: from?.displayName ?? from?.handle ?? null,
-        };
-      })
-      .sort((a, b) => b.at.getTime() - a.at.getTime());
-    return { emails };
-  } catch (err) {
-    return { emails: [], error: `Twenty unavailable: ${err instanceof Error ? err.message : String(err)}` };
-  }
-}
-
 /** One clock for everything known about this person, newest first. */
 function buildTimeline(input: {
   touches: Array<{ id: string; channel: string; direction: string; occurredAt: Date; summary: string; actorLabel: string | null }>;
-  notes: TwentyNote[];
-  emails: TaskBrief['emails'];
   stateEvents: Array<{ id: string; action: string; createdAt: Date; actorLabel: string | null; details: unknown }>;
   /** Twenty's own last-touch stamps, which exist for people Cadence never worked. */
   crm: { lastCallAt: Date | null; lastEmailAt: Date | null };
 }): BriefTimelineItem[] {
   const kindOfChannel = (channel: string): BriefTimelineItem['kind'] => (channel === 'EMAIL' ? 'email' : channel === 'CALL' ? 'call' : channel === 'MEETING' ? 'meeting' : 'linkedin');
-  // An email listed in full from Twenty would otherwise show again as its touch record.
-  const emailSubjects = new Set(input.emails.map((e) => (e.subject ?? '').toLowerCase()).filter(Boolean));
-  const looksLikeListedEmail = (summary: string) => {
-    const stripped = summary.replace(/^(reply|email)\s*[:-]?\s*/i, '').toLowerCase();
-    return emailSubjects.has(stripped) || [...emailSubjects].some((s) => stripped.includes(s));
-  };
 
   const items: BriefTimelineItem[] = [
     ...input.touches
-      .filter((t) => !(t.channel === 'EMAIL' && looksLikeListedEmail(t.summary)))
       .map<BriefTimelineItem>((t) => ({
         id: `t:${t.id}`,
         at: t.occurredAt,
@@ -293,24 +229,6 @@ function buildTimeline(input: {
         detail: null,
         actor: t.actorLabel,
       })),
-    ...input.emails.map<BriefTimelineItem>((e) => ({
-      id: `m:${e.id}`,
-      at: e.at,
-      kind: 'email',
-      direction: e.inbound ? 'in' : 'out',
-      title: e.subject ?? (e.inbound ? 'Email received' : 'Email sent'),
-      detail: e.preview,
-      actor: e.from,
-    })),
-    ...input.notes.map<BriefTimelineItem>((n) => ({
-      id: `n:${n.id}`,
-      at: new Date(n.createdAt ?? Date.now()),
-      kind: 'note',
-      direction: 'neutral',
-      title: n.title || 'Note',
-      detail: n.bodyMarkdown || null,
-      actor: n.createdByName,
-    })),
     ...input.stateEvents.map<BriefTimelineItem>((a) => {
       const said = describeAudit(a.action, a.details as Record<string, unknown> | null, null);
       return {
@@ -342,7 +260,8 @@ function buildTimeline(input: {
   return items.sort((a, b) => b.at.getTime() - a.at.getTime()).slice(0, 24);
 }
 
-async function fetchOpportunities(personId: string): Promise<{ opportunities: TwentyOpportunity[]; error?: string }> {
+/** Open opportunities from Twenty, read after the task is on screen (TaskBriefPanel streams them). */
+export async function fetchOpportunities(personId: string): Promise<{ opportunities: TwentyOpportunity[]; error?: string }> {
   try {
     const client = await getTwentyClient();
     const page = await client.listOpportunities({ personId, limit: 10 });

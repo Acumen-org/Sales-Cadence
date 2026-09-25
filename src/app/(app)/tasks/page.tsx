@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { PageFrame } from '@/components/page-frame';
 import Link from 'next/link';
 import { filterParam, sectionDefaults } from '@/lib/default-filters';
@@ -106,7 +107,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
           </div>)}</div>
           {openModules.length > 1 && canActOnTask(user, { foUserId: openModules[0].task.foUserId, podId: openModules[0].task.enrollment.podId }) ? <div className="border-t border-line p-5"><TaskActions fixedCalendar={brief.task.enrollment.scheduleDates.length > 0} variant="step" taskId={openModules[0].task.id} snoozeTaskIds={openModules.map(m => m.task.id)} action={openModules[0].task.action} nextUrl={nextUrl} prevUrl={prevUrl} twentyUrl={brief.twentyUrl} nextWorkingDay={nextWorkingDay} canPickSnoozeDate={canSnoozeFreely(user)} dispositions={dispositions} skipReasons={skipReasons} steps={brief.steps} currentStep={brief.currentStep} canManageEnrollment={canManageEnrollment(user, { foUserId: openModules[0].task.foUserId, podId: openModules[0].task.enrollment.podId })} delegates={delegatesFor(openModules[0].task.enrollment.podId)} currentFoId={openModules[0].task.foUserId} keyboardEnabled /></div> : null}
         </Surface>}</div>
-        {brief && <aside className="min-w-0 space-y-4 xl:col-start-2 2xl:col-auto"><TaskBriefPanel brief={brief} timezone={user.timezone} callTemplate={settings.rules.clickToCallUrl} /><SuggestedApproach canConfigure={isAdmin(user)} /><CrmHistory personId={brief.person.id} timezone={user.timezone} baseHref={href({ task: brief.task.id })} notesAfter={sp.crmNotes} emailsAfter={sp.crmEmails} /></aside>}
+        {brief && <aside className="min-w-0 space-y-4 xl:col-start-2 2xl:col-auto"><TaskBriefPanel brief={brief} timezone={user.timezone} callTemplate={settings.rules.clickToCallUrl} /><SuggestedApproach canConfigure={isAdmin(user)} /><Suspense key={brief.person.id} fallback={<div className="surface h-40" />}><CrmHistory personId={brief.person.id} timezone={user.timezone} baseHref={href({ task: brief.task.id })} notesAfter={sp.crmNotes} emailsAfter={sp.crmEmails} /></Suspense></aside>}
       </div>
     </>}
   </PageFrame>;

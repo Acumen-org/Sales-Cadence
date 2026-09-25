@@ -1,6 +1,7 @@
 import { callHref, opensDialpad } from '@/lib/calls';
 import Link from 'next/link';
-import type { BriefTimelineItem, TaskBrief } from '@/lib/brief';
+import { Suspense } from 'react';
+import { fetchOpportunities, type BriefTimelineItem, type TaskBrief } from '@/lib/brief';
 import { compareLocalDates, formatInstant, formatLocalDate, type LocalDate } from '@/lib/dates';
 import { ACTION_LABELS } from '@/lib/sequences/steps';
 import { ActionIcon, IconExternal, IconNote } from '@/components/icons';
@@ -32,13 +33,20 @@ function TimelineRow({ item, timezone }: { item: BriefTimelineItem; timezone: st
   </li>;
 }
 
+/** Open opportunities, read from Twenty after the rest of the task is on screen. */
+async function OpenOpportunities({ personId }: { personId: string }) {
+  const { opportunities, error } = await fetchOpportunities(personId);
+  if (error) return <div className="p-4"><Notice tone="warn">Opportunities are temporarily unavailable.</Notice></div>;
+  if (!opportunities.length) return null;
+  return <Section title="Open opportunities"><ul className="space-y-3">{opportunities.map((opportunity) => <li key={opportunity.id} className="flex items-center justify-between gap-2 text-sm"><span className="font-medium text-ink-900">{opportunity.name}</span><Badge tone="purple">{opportunity.stage ?? 'Open'}</Badge></li>)}</ul></Section>;
+}
+
 /** The selected contact's CRM context. Full emails and notes follow in CrmHistory. */
 export function TaskBriefPanel({ brief, timezone, callTemplate }: { brief: TaskBrief; timezone: string; callTemplate?: string | null }) {
   const person = brief.person;
   const localActivity = brief.timeline.filter((item) => item.kind !== 'email' && item.kind !== 'note');
   const campaign = brief.task.enrollment.campaign;
   return <Surface flush>
-    {brief.warnings.length ? <div className="p-4"><Notice tone="warn">Some CRM information is temporarily unavailable. Cached contact data is shown.</Notice></div> : null}
 
     <Section title="Contact details">
       <KeyValue items={filled([
@@ -91,9 +99,10 @@ export function TaskBriefPanel({ brief, timezone, callTemplate }: { brief: TaskB
       {localActivity.length ? <ul className="max-h-96 overflow-y-auto scroll-thin">{localActivity.map((item) => <TimelineRow key={item.id} item={item} timezone={timezone} />)}</ul> : <div className="text-sm text-ink-500">No calls or sequence events recorded</div>}
     </Section>
 
-    {brief.opportunities.length ? <Section title="Open opportunities"><ul className="space-y-3">{brief.opportunities.map((opportunity) => <li key={opportunity.id} className="flex items-center justify-between gap-2 text-sm"><span className="font-medium text-ink-900">{opportunity.name}</span><Badge tone="purple">{opportunity.stage ?? 'Open'}</Badge></li>)}</ul></Section> : null}
     <Section title="Colleagues" right={person.companyId ? <Link href={`/accounts/${person.companyId}?tab=people`} className="text-xs font-medium text-brand-700 hover:underline">All company people</Link> : null}>
       {brief.colleagues.length ? <ul className="space-y-4">{brief.colleagues.map((colleague) => <li key={colleague.personId} className="flex items-start gap-2.5"><Avatar name={colleague.name} shape="circle" size={28} /><div className="min-w-0 flex-1"><Link href={`/people/${colleague.personId}`} className="text-sm font-medium text-ink-900 hover:text-brand-700">{colleague.name}</Link>{colleague.jobTitle ? <div className="mt-1 text-xs text-ink-500">{colleague.jobTitle}</div> : null}{colleague.status ? <div className="mt-2"><Badge tone={colleague.status === 'DND' ? 'red' : ENROLLMENT_TONE[colleague.status] ?? 'gray'}>{enrollmentStatusLabel({ status: colleague.status, exitReason: colleague.exitReason })}</Badge></div> : null}</div></li>)}</ul> : <span className="text-sm text-ink-500">No other people linked</span>}
     </Section>
+    {/* Last, so nothing above moves when Twenty answers; one boundary per person, so moving to the next task never waits on the last one's. */}
+    <Suspense key={person.id} fallback={null}><OpenOpportunities personId={person.id} /></Suspense>
   </Surface>;
 }

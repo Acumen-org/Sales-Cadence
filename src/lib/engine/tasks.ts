@@ -12,6 +12,7 @@ import { loadSyncTask, loadSyncTasks, syncTaskCompleted, syncTaskResolved, syncT
 import { resolveNextStep } from './sequence-plan';
 import { workspaceTimezone } from '../workspace';
 import { workingDay } from '../campaign-planner';
+import { catchUpObservedEvidence, completeFromEarlierEvidence } from './observed-evidence';
 
 /** Who is acting, what time it is (tests), and whether to skip Twenty writes. */
 export type EngineContext = {
@@ -187,8 +188,11 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
     throw err;
   }
 
-  if (result.outcome === 'generated' && !ctx.skipSync) {
-    await syncTasksCreated(await loadSyncTasks(result.taskIds));
+  if (result.outcome === 'generated') {
+    // An email or call made before this step opened closes it now; only what is still open is mirrored.
+    // Reading that history must never keep a new step from reaching Twenty.
+    const closed = new Set(await completeFromEarlierEvidence(result.taskIds, ctx).catch((err) => { console.warn('[evidence] could not read earlier touches', err); return [] as string[]; }));
+    if (!ctx.skipSync) await syncTasksCreated(await loadSyncTasks(result.taskIds.filter((id) => !closed.has(id))));
   }
   return result;
 }
@@ -398,6 +402,9 @@ export async function runSchedulerTick(ctx: EngineContext): Promise<{ scanned: n
     }
     cursor = batch[batch.length - 1].id;
   }
+  // Open emails and calls whose touch is already in Twenty's history. A failure here must not
+  // hold back the end-date stops below.
+  await catchUpObservedEvidence(ctx).catch((err) => console.warn('[evidence] catch-up failed', err));
   // The end date. By default people mid-sequence finish and the campaign shows how many ran
   // over; a campaign marked to stop hard ends what is left, through the same exit path as a stop.
   const today = todayIn(workspaceTimezone(), ctx.now ?? new Date());

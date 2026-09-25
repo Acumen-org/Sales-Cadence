@@ -25,6 +25,7 @@ import { MatchingForm, RulesForm, SyncForm, TwentyConnectionForm } from '@/compo
 import { getMeetingAnalyzer } from '@/lib/meetings/analysis';
 import { ASSISTANT_NAME, ASSISTANT_SETTINGS_TAB } from '@/lib/workspace';
 import { IconAssistant } from '@/components/icons';
+import { describeEventResult } from '@/lib/event-results';
 
 const TABS = [
   { key: 'twenty', label: 'Twenty' },
@@ -218,6 +219,13 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
   );
 }
 
+/** What an event was about, in words: a note's title or an email's subject, where it has one. */
+function recordLabel(payload: unknown): string | null {
+  const p = (payload ?? {}) as Record<string, unknown>;
+  const text = [p.title, p.subject, p.name].find((v): v is string => typeof v === 'string' && v.trim() !== '');
+  return text ? text.trim().slice(0, 160) : null;
+}
+
 async function ActivityTab() {
   const [events, writes, failed] = await Promise.all([
     recentEvents(100),
@@ -282,9 +290,9 @@ async function ActivityTab() {
                     <td className="whitespace-nowrap text-[12px]">{formatInstant(ev.receivedAt, workspaceTimezone())}</td>
                     <td className="text-[12px]">{ev.source.toLowerCase()}</td>
                     <td className="text-[12px]">{ev.eventName}</td>
-                    <td className="font-mono text-[11px]">{ev.externalId}</td>
+                    <td className="max-w-[28rem] text-[12px]">{recordLabel(ev.payload) ?? <span className="font-mono text-[11px]">{ev.externalId}</span>}</td>
                     <td className="text-[12px]">
-                      {ev.result ?? <span className="text-ink-300">pending</span>}
+                      {ev.result ? <span title={ev.result}>{describeEventResult(ev.result) ?? ev.result}</span> : <span className="text-ink-300">pending</span>}
                       {ev.reviewNote ? <div className="text-amber-700">{ev.reviewNote}</div> : null}
                     </td>
                     <td className="text-right">{ev.needsReview ? <ReviewButton eventId={ev.id} /> : null}</td>

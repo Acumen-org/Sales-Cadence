@@ -19,6 +19,7 @@ import type { TwentyCompany, TwentyMessage, TwentyNote, TwentyOpportunity, Twent
 import { OCCUPYING_STATUSES, applyPersonFlags, markMeeting, markReplied } from './enrollment';
 import { actionTypesFor, classifyMessage, classifyNoteTitle, resolveNoteActor, type UserLike } from './matching';
 import { completeTask, type EngineContext } from './tasks';
+import { alreadyCounted, windowStart } from './observed-evidence';
 
 export type IngestInput = {
   source: EventSource;
@@ -211,23 +212,26 @@ async function recordTouch(data: { personId: string; channel: 'EMAIL' | 'CALL' |
 }
 
 /**
- * Complete the earliest pending task of one of `types` on the person's active enrollment,
- * but only if `actor` is that enrollment's FO. Returns a result code.
+ * Complete the earliest pending task of one of `types` on the person's active enrollment. An
+ * email or call from our side counts whoever made it: the FO, a colleague writing from their own
+ * mailbox, or a note the team's tools logged (owner, 24 September 2026: tasks close "when emailing
+ * or calling has happened"). A step not open yet keeps the touch: it is counted when the step
+ * opens (completeFromEarlierEvidence). Returns a result code.
  */
 async function completeFromEvidence(params: {
   personId: string;
-  actor: UserLike;
   types: Array<'EMAIL' | 'CALL'>;
   evidenceId: string;
   occurredAt: Date;
+  /** What the touch says (the note title or "Email sent: <subject>"), to know the same email seen twice. */
+  summary: string;
   source: 'OBSERVED_NOTE' | 'OBSERVED_MESSAGE';
   matching: MatchingSettings;
   ctx: EngineContext;
 }): Promise<{ code: string; taskId?: string }> {
-  const { personId, actor, types, evidenceId, occurredAt, source, ctx } = params;
+  const { personId, types, evidenceId, occurredAt, source, ctx } = params;
   const enrollment = await prisma.enrollment.findFirst({ where: { personId, status: 'ACTIVE' } });
   if (!enrollment) return { code: 'no_active_enrollment' };
-  if (enrollment.foUserId !== actor.id) return { code: 'ignored_non_fo' };
   const graceMs = params.matching.evidenceGraceDays * 86_400_000;
   if (occurredAt.getTime() < enrollment.createdAt.getTime() - graceMs) return { code: 'stale_evidence' };
   const task = await prisma.task.findFirst({
@@ -235,6 +239,10 @@ async function completeFromEvidence(params: {
     orderBy: [{ stepIndex: 'asc' }, { actionIndex: 'asc' }],
   });
   if (!task) return { code: 'no_pending_task' };
+  // Done before the step before it was: that touch belonged to the earlier step.
+  if (occurredAt < (await windowStart(task, params.matching))) return { code: 'before_previous_step' };
+  // A second record of a touch already counted - the note logged for a synced email, the email behind a step marked done.
+  if (await alreadyCounted(personId, { externalId: evidenceId, channel: task.action === 'CALL' ? 'CALL' : 'EMAIL', occurredAt, summary: params.summary }, params.matching)) return { code: 'same_touch' };
   const r = await completeTask({ taskId: task.id, source, evidenceId, chosenAction: task.action, occurredAt }, ctx);
   if (!r.ok) return { code: r.reason, taskId: task.id };
   return { code: 'completed', taskId: task.id };
@@ -253,7 +261,6 @@ async function handleNote(note: TwentyNote, ctx: EngineContext, settings: Settin
   const occurredAt = new Date(note.createdAt);
   const outcomes: Record<string, string> = {};
   let anyCompleted = false;
-  let anyNonFo = false;
 
   for (const personId of note.personIds) {
     await recordTouch({
@@ -266,26 +273,18 @@ async function handleNote(note: TwentyNote, ctx: EngineContext, settings: Settin
       actorUserId: actor?.id ?? null,
       actorLabel: actor?.name ?? note.createdByName ?? cls.actorHandle ?? null,
     });
-    if (!actor) {
-      outcomes[personId] = 'unknown_actor';
-      continue;
-    }
     if (!types.length) {
       outcomes[personId] = 'touch_only';
       continue;
     }
-    const r = await completeFromEvidence({ personId, actor, types, evidenceId: `note:${note.id}:person:${personId}`, occurredAt, source: 'OBSERVED_NOTE', matching: settings.matching, ctx });
+    const r = await completeFromEvidence({ personId, types, evidenceId: `note:${note.id}:person:${personId}`, occurredAt, summary: note.title, source: 'OBSERVED_NOTE', matching: settings.matching, ctx });
     outcomes[personId] = r.code;
     if (r.code === 'completed') anyCompleted = true;
-    if (r.code === 'ignored_non_fo') anyNonFo = true;
   }
 
-  if (!actor) {
-    return { result: 'note_unknown_actor', needsReview: true, reviewNote: `Could not map "${note.createdByName ?? cls.actorHandle ?? 'unknown'}" to a Cadence user`, details: outcomes };
-  }
   if (anyCompleted) return { result: `note_${cls.kind}_completed`, details: outcomes };
-  if (anyNonFo) return { result: 'ignored_non_fo', details: outcomes };
-  return { result: `note_${cls.kind}_touch`, details: outcomes };
+  // Logged by a tool or someone without a Cadence login: the touch counts all the same, only unnamed.
+  return { result: `note_${cls.kind}_touch`, details: actor ? outcomes : { ...outcomes, loggedBy: note.createdByName ?? cls.actorHandle ?? null } };
 }
 
 // ---------------------------------------------------------------------------
@@ -294,7 +293,7 @@ async function handleNote(note: TwentyNote, ctx: EngineContext, settings: Settin
 
 async function handleMessage(message: TwentyMessage, ctx: EngineContext, settings: Settings): Promise<ProcessOutcome> {
   const users = await loadUsers();
-  const cls = classifyMessage(message, users);
+  const cls = classifyMessage(message, users, settings.rules.internalDomains);
   const occurredAt = new Date(message.receivedAt);
   const subject = message.subject ?? '(no subject)';
 
@@ -302,7 +301,6 @@ async function handleMessage(message: TwentyMessage, ctx: EngineContext, setting
     if (!cls.recipientPersonIds.length) return { result: 'ignored_outbound_no_person' };
     const outcomes: Record<string, string> = {};
     let anyCompleted = false;
-    let anyNonFo = false;
     for (const personId of cls.recipientPersonIds) {
       await recordTouch({
         personId,
@@ -311,25 +309,23 @@ async function handleMessage(message: TwentyMessage, ctx: EngineContext, setting
         occurredAt,
         summary: `Email sent: ${subject}`,
         externalId: `message:${message.id}:person:${personId}`,
-        actorUserId: cls.actor.id,
-        actorLabel: cls.actor.name,
+        actorUserId: cls.actor?.id ?? null,
+        actorLabel: cls.actor?.name ?? cls.fromHandle,
       });
       const r = await completeFromEvidence({
         personId,
-        actor: cls.actor,
         types: ['EMAIL'],
         evidenceId: `message:${message.id}:person:${personId}`,
         occurredAt,
+        summary: `Email sent: ${subject}`,
         source: 'OBSERVED_MESSAGE',
         matching: settings.matching,
         ctx,
       });
       outcomes[personId] = r.code;
       if (r.code === 'completed') anyCompleted = true;
-      if (r.code === 'ignored_non_fo') anyNonFo = true;
     }
     if (anyCompleted) return { result: 'message_outbound_completed', details: outcomes };
-    if (anyNonFo) return { result: 'ignored_non_fo', details: outcomes };
     return { result: 'message_outbound_touch', details: outcomes };
   }
 

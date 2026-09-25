@@ -56,7 +56,7 @@ describe('message direction', () => {
     const outbound = classifyMessage(MOCK_MESSAGES[0], users);
     expect(outbound.direction).toBe('outbound');
     if (outbound.direction === 'outbound') {
-      expect(outbound.actor.id).toBe('u-alisa');
+      expect(outbound.actor?.id).toBe('u-alisa');
       expect(outbound.recipientPersonIds).toEqual(['person-01']);
     }
     const inbound = classifyMessage(MOCK_MESSAGES[1], users);
@@ -72,6 +72,24 @@ describe('message direction', () => {
     const r = classifyMessage(msg, users);
     expect(r.direction).toBe('outbound');
     if (r.direction === 'outbound') expect(r.recipientPersonIds.sort()).toEqual(['person-15', 'person-16']);
+  });
+
+  it('reads a colleague writing from another of our addresses as ours, not as a reply', () => {
+    const from = (handle: string) => ({ ...MOCK_MESSAGES[0], participants: MOCK_MESSAGES[0].participants.map((p) => (p.role === 'from' ? { ...p, workspaceMemberId: null, personId: null, handle } : p)) });
+    // An alias that is an address names the user.
+    const aliased = users.map((u) => (u.id === 'u-alisa' ? { ...u, aliases: [...u.aliases, 'Alisa@Prairie-Hill.com'] } : u));
+    const named = classifyMessage(from('alisa@prairie-hill.com'), aliased, ['prairie-hill.com']);
+    expect(named).toEqual(expect.objectContaining({ direction: 'outbound', actor: expect.objectContaining({ id: 'u-alisa' }) }));
+    // Our own domain without a Cadence login: still ours, unnamed.
+    const unnamed = classifyMessage(from('smilliman@prairie-hill.com'), users, ['prairie-hill.com']);
+    expect(unnamed).toEqual(expect.objectContaining({ direction: 'outbound', actor: null, recipientPersonIds: ['person-01'] }));
+    expect(classifyMessage(from('smilliman@mail.prairie-hill.com'), users, ['prairie-hill.com']).direction).toBe('outbound');
+    // Somebody else's domain is not ours, even when it ends the same way.
+    expect(classifyMessage(from('someone@notprairie-hill.com'), users, ['prairie-hill.com']).direction).toBe('inbound');
+    expect(classifyMessage(from('smilliman@prairie-hill.com'), users).direction).toBe('inbound');
+    // A Twenty workspace member with no Cadence login, on any domain, is one of us.
+    const member = { ...MOCK_MESSAGES[0], participants: MOCK_MESSAGES[0].participants.map((p) => (p.role === 'from' ? { ...p, workspaceMemberId: 'wm-colleague', personId: null, handle: 'colleague@partner-firm.com' } : p)) };
+    expect(classifyMessage(member, users)).toEqual(expect.objectContaining({ direction: 'outbound', actor: null }));
   });
 
   it('gives up on messages without a usable sender', () => {

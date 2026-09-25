@@ -47,6 +47,8 @@ async function openTabWithWork(page: Page, extra = ''): Promise<string> {
   // under Upcoming, so the calendar must not decide whether these cases can run.
   for (const tab of ['today', 'overdue', 'upcoming']) {
     await page.goto(`/tasks?tab=${tab}${extra}`);
+    // The list shows once the page has hydrated; count it only then.
+    await page.getByRole('link', { name: /^Today/ }).first().waitFor();
     if (await page.getByRole('button', { name: 'More', exact: true }).first().isVisible().catch(() => false)) return tab;
   }
   throw new Error(`No task tab has pending work${extra ? ` for ${extra}` : ''}; the seed or an earlier case cleared them all.`);

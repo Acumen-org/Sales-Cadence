@@ -73,23 +73,34 @@ export function resolveNoteActor<U extends UserLike>(note: Pick<TwentyNote, 'cre
 }
 
 export type MessageDirection =
-  | { direction: 'outbound'; actor: UserLike; recipientPersonIds: string[]; fromHandle: string }
+  | { direction: 'outbound'; actor: UserLike | null; recipientPersonIds: string[]; fromHandle: string }
   | { direction: 'inbound'; fromPersonId: string | null; fromHandle: string; recipientUsers: UserLike[] }
   | { direction: 'unknown'; reason: string };
 
+/** A user's addresses: their login email and any alias that is an address (alisa@prairie-hill.com). */
+const addressesOf = (u: UserLike) => [u.email, ...u.aliases].filter((a) => a.includes('@')).map((a) => a.trim().toLowerCase());
+const domainOf = (handle: string) => handle.split('@')[1]?.trim().toLowerCase() ?? '';
+export const isInternalAddress = (handle: string, internalDomains: readonly string[]) => {
+  const domain = domainOf(handle);
+  return !!domain && internalDomains.some((d) => { const own = d.trim().toLowerCase().replace(/^@/, ''); return own && (domain === own || domain.endsWith(`.${own}`)); });
+};
+
 /**
- * Outbound = sent by one of our users (from participant is a workspace member, or its handle is
- * a user's email). Inbound = sent by a person (from participant has a personId). Everything else
- * is ignored: we never guess.
+ * Outbound = sent from our side: by one of our users (the address is a user's email or alias),
+ * by any Twenty workspace member, or from one of our own domains when the sender has no Cadence
+ * login (alisa@prairie-hill.com, a colleague's mailbox). Inbound = sent by a person. Everything
+ * else is ignored: we never guess.
  */
-export function classifyMessage(message: TwentyMessage, users: UserLike[]): MessageDirection {
+export function classifyMessage(message: TwentyMessage, users: UserLike[], internalDomains: readonly string[] = []): MessageDirection {
   const from = message.participants.find((p) => p.role === 'from');
   if (!from) return { direction: 'unknown', reason: 'no from participant' };
   const handle = (from.handle ?? '').toLowerCase();
   const actor =
     (from.workspaceMemberId ? users.find((u) => u.twentyMemberId === from.workspaceMemberId) : undefined) ??
-    users.find((u) => u.email.toLowerCase() === handle && handle !== '');
-  if (actor) {
+    (handle ? users.find((u) => addressesOf(u).includes(handle)) : undefined) ??
+    null;
+  // A Twenty workspace member is one of us even without a Cadence login.
+  if (actor || from.workspaceMemberId || isInternalAddress(handle, internalDomains)) {
     const recipientPersonIds = [...new Set(message.participants.filter((p) => p.role !== 'from' && p.personId).map((p) => p.personId!))];
     return { direction: 'outbound', actor, recipientPersonIds, fromHandle: from.handle };
   }
