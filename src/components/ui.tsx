@@ -253,6 +253,7 @@ export function enrollmentStatusLabel(e: { status: string; exitReason?: string |
       if (r === 'opted_out') return 'Opted out';
       if (r === 'dnd') return 'Do not contact';
       if (r === 'not_interested') return 'Not interested';
+      if (r === 'not_a_prospect') return 'Not a prospect';
       if (r === 'bad_data') return 'Bad data';
       if (r === 'person_deleted') return 'Deleted in Twenty';
       if (r.startsWith('campaign_')) return 'Campaign stopped';

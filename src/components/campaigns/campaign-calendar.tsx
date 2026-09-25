@@ -86,13 +86,13 @@ export function CampaignCalendarView({ draft, calendar, actions }: { draft: Camp
       {foId !== 'all' && <p className="flex items-center gap-4 text-xs text-ink-600"><span className="flex items-center gap-1.5"><span className="h-3 w-4 rounded border border-brand-200 bg-brand-50" />First step, new people</span><span className="flex items-center gap-1.5"><span className="h-3 w-4 rounded border border-ink-300 bg-white" />Follow-up</span></p>}
     </div>
     <div className="overflow-x-auto rounded-xl border border-line">
-      <div className="calendar-dots grid min-w-[900px] grid-cols-[repeat(5,minmax(0,1fr))_repeat(2,minmax(0,0.55fr))] [&>*:nth-child(7n)]:border-r-0 [&>*:nth-last-child(-n+7)]:border-b-0 [&>*]:border-b [&>*]:border-r [&>*]:border-line">
+      <div className="grid min-w-[900px] bg-white grid-cols-[repeat(5,minmax(0,1fr))_repeat(2,minmax(0,0.55fr))] [&>*:nth-child(7n)]:border-r-0 [&>*:nth-last-child(-n+7)]:border-b-0 [&>*]:border-b [&>*]:border-r [&>*]:border-line">
         {WEEKDAYS.map((d, i) => <div key={d} className={`bg-white px-3 py-2.5 text-xs font-semibold uppercase tracking-wide ${i > 4 ? 'text-ink-400' : 'text-ink-500'}`}>{d}</div>)}
         {days.map(day => {
           const works = working.has(day);
           const events = works ? byDay.get(day) ?? [] : [];
           const date = day.endsWith('-01') ? shortDateLabel(day, false) : String(Number(day.slice(8)));
-          return <div key={day} data-day={day} className={`flex min-h-[9rem] flex-col ${works ? '' : 'bg-canvas/80'}`}>
+          return <div key={day} data-day={day} className={`flex min-h-[9rem] flex-col ${works ? 'bg-white' : 'calendar-dots'}`}>
             <div className="flex items-center justify-between gap-1 px-2.5 pb-1.5 pt-2.5">
               <span className="flex items-center gap-1.5"><time dateTime={day} title={calendarDateLabel(day)} className={`text-sm font-semibold ${works && (onePage || day.slice(0, 7) === month) ? 'text-ink-900' : 'text-ink-400'}`}>{date}</time>{(day === first || day === last) && <span className="rounded bg-white px-1.5 py-px text-[10.5px] font-medium text-ink-700 ring-1 ring-ink-300">{day === first ? 'Start' : 'End'}</span>}</span>
               {events.length > 1 && <span className="rounded bg-white/90 px-1 text-xs tabular-nums text-ink-600">{people(count(events))}</span>}

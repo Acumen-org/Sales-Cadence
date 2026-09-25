@@ -146,6 +146,7 @@ model User {
   pods           UserPod[]
   sessions       Session[]
   enrollments    Enrollment[] @relation("EnrollmentFo")
+  nextActions    NextAction[] @relation("NextActionFo")
   tasks          Task[]       @relation("TaskFo")
   completedTasks Task[]       @relation("TaskCompletedBy")
   meetings       Meeting[]    @relation("MeetingCreatedBy")
@@ -459,6 +460,7 @@ model PersonCache {
   syncedAt        DateTime  @default(now())
 
   enrollments      Enrollment[]
+  nextActions      NextAction[]
   touches          Touch[]
   meetingAttendees MeetingAttendee[]
 
@@ -519,6 +521,12 @@ model BlockedAccount {
 // Meetings: a recording link, its transcript, and (later) its analysis
 // ---------------------------------------------------------------------------
 
+enum MeetingReview {
+  PENDING
+  APPROVED
+  DISMISSED
+}
+
 model Meeting {
   id               String          @id @default(uuid())
   title            String
@@ -556,6 +564,11 @@ model Meeting {
   /// The FO who booked it: mandatory on a new meeting, set on older ones when someone edits them.
   bookedById String?
   bookedBy User? @relation("MeetingBookedBy", fields: [bookedById], references: [id], onDelete: SetNull)
+  /// A meeting from a calendar waits for a pod manager: PENDING until approved, DISMISSED once
+  /// removed (kept so the calendar never brings it back). One added by hand is APPROVED.
+  review           MeetingReview   @default(APPROVED)
+  reviewedById     String?
+  reviewedAt       DateTime?
   createdAt        DateTime        @default(now())
   favourites       MeetingFavourite[]
   updatedAt        DateTime        @updatedAt
@@ -565,6 +578,7 @@ model Meeting {
   @@index([occurredAt])
   @@index([companyId, occurredAt])
   @@index([createdById])
+  @@index([review, occurredAt])
   @@index([analysisStatus])
 }
 
@@ -767,4 +781,53 @@ model EnrichmentRow {
   updatedAt DateTime @updatedAt
   @@unique([batchId, rowNumber])
   @@index([batchId, status])
+}
+
+enum NextActionRepeat {
+  NONE
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  QUARTERLY
+}
+
+enum NextActionState {
+  OPEN
+  DONE
+  CANCELLED
+}
+
+/// A person's next action outside any campaign (owner, 25 September 2026): what to do, on which
+/// day, once or on repeat. It is worked in Tasks and kept in step with the person's Next Action and
+/// Next Action Due Date in Twenty, both ways. One open next action per person, as Twenty has one.
+model NextAction {
+  id            String           @id @default(uuid())
+  personId      String
+  person        PersonCache      @relation(fields: [personId], references: [id], onDelete: Cascade)
+  foUserId      String
+  fo            User             @relation("NextActionFo", fields: [foUserId], references: [id])
+  /// What to do, as it is written to Twenty's Next Action.
+  label         String
+  action        ActionType       @default(EMAIL)
+  /// LocalDate (YYYY-MM-DD): the day it is due, written to Twenty's Next Action Due Date.
+  dueDate       String
+  repeat        NextActionRepeat @default(NONE)
+  state         NextActionState  @default(OPEN)
+  createdById   String?
+  completedById String?
+  /// How many times a repeating one has been done.
+  doneCount     Int              @default(0)
+  lastDoneAt    DateTime?
+  closedAt      DateTime?
+  /// True while Cadence's value has not reached Twenty yet; the worker keeps trying.
+  crmPending    Boolean          @default(true)
+  /// When Twenty last matched this next action, by Cadence's write or by following Twenty.
+  crmSyncedAt   DateTime?
+  crmError      String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@index([foUserId, state, dueDate])
+  @@index([personId, state])
+  @@index([state, crmPending])
 }

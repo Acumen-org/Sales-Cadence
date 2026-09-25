@@ -63,6 +63,8 @@ export function describeAudit(action: string, details: Details, actorLabel: stri
               ? 'Removed: do not contact set in Twenty'
               : reason === 'not_interested'
                 ? 'Removed: not interested'
+                : reason === 'not_a_prospect'
+                ? 'Removed: not a prospect for this product'
                 : reason === 'bad_data'
                   ? 'Removed: bad contact data'
                   : reason === 'person_deleted'

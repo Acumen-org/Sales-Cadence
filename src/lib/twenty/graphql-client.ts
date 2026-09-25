@@ -2,6 +2,7 @@ import type { ListOptions, ListPeopleOptions, TwentyClient } from './client';
 import { normalizeCalendarEvent, normalizeCompany, normalizeMessage, normalizeNote, normalizeOpportunity, normalizePerson, normalizeTask, normalizeWorkspaceMember, connectionToArray } from './normalize';
 import type { TwentySchema } from './twenty-schema';
 import type {
+  PersonNextActionInput,
   CreateNoteInput,
   CreateTaskInput,
   Page,
@@ -779,6 +780,15 @@ export class TwentyGraphqlClient implements TwentyClient {
     const result = await this.request<Record<string, Raw>>(`mutation EnrichPerson($id: UUID!, $data: ${type}UpdateInput!) { update${type}(id: $id, data: $data) { ${selection} } }`, { id, data });
     if (!result[`update${type}`]) throw new TwentyApiError('Twenty did not return the updated contact.');
     return normalizePerson(result[`update${type}`], this.s);
+  }
+
+  async setPersonNextAction(id: string, patch: PersonNextActionInput): Promise<void> {
+    const fields = this.s.person;
+    const data: Raw = { [fields.nextAction]: patch.nextAction, [fields.nextActionDueDate]: patch.nextActionDueDate };
+    const type = this.s.objects.person.typeName;
+    await this.assertWritableFields(type, data);
+    const result = await this.request<Record<string, Raw>>(`mutation SetNextAction($id: UUID!, $data: ${type}UpdateInput!) { update${type}(id: $id, data: $data) { id } }`, { id, data });
+    if (!result[`update${type}`]) throw new TwentyApiError('Twenty did not update the contact.');
   }
 
   async enrichCompany(id: string, patch: EnrichCompanyInput, current?: TwentyCompany): Promise<TwentyCompany> {

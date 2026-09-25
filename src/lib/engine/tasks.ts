@@ -335,14 +335,16 @@ export async function snoozeTask(input: { taskId: string; toDate: LocalDate }, c
   const settings = await getSettings();
   if (!isLocalDate(input.toDate)) return { ok: false, reason: 'invalid', detail: 'Invalid date.' };
   const res = await prisma.$transaction(async (tx) => {
-    const task = await tx.task.findUnique({ where: { id: input.taskId }, include: { fo: true, enrollment: { select: { status: true, scheduleDates: true } } } });
+    const task = await tx.task.findUnique({ where: { id: input.taskId }, include: { fo: true, enrollment: { select: { status: true, campaign: { select: { endDate: true } } } } } });
     if (!task) return { ok: false as const, reason: 'not_found' as const };
     if (task.state !== 'PENDING') return { ok: false as const, reason: 'already_resolved' as const };
-    if (task.enrollment.scheduleDates.length) return { ok: false as const, reason: 'invalid' as const, detail: 'This task follows a published campaign calendar. Its date cannot be moved independently.' };
     if (task.enrollment.status === 'PAUSED') return HELD;
     const today = todayIn(workspaceTimezone(), ctx.now ?? new Date());
     if (input.toDate <= today) return { ok: false as const, reason: 'invalid' as const, detail: 'Snooze to a future date.' };
     const toDate = nextWorkingDay(input.toDate, settings.rules.workingDays);
+    // A campaign's calendar keeps its dates; only this step waits. It cannot wait past the campaign.
+    const endDate = task.enrollment.campaign?.endDate;
+    if (endDate && toDate > endDate) return { ok: false as const, reason: 'invalid' as const, detail: `The campaign ends on ${endDate}. Snooze to a day before then.` };
     const claimed = await tx.task.updateMany({ where: { id: task.id, state: 'PENDING' }, data: { snoozedTo: toDate, dueAt: localDateToInstant(toDate, workspaceTimezone(), 9) } });
     if (claimed.count === 0) return { ok: false as const, reason: 'already_resolved' as const };
     const updated = await tx.task.findUniqueOrThrow({ where: { id: task.id } });
@@ -351,8 +353,8 @@ export async function snoozeTask(input: { taskId: string; toDate: LocalDate }, c
   });
   if (!res.ok) return res;
   if (!ctx.skipSync) {
-    const full = await loadSyncTask(res.task.id);
-    if (full) await syncTaskRescheduled(full);
+    const id = res.task.id;
+    await afterResponse(async () => { const full = await loadSyncTask(id); if (full) await syncTaskRescheduled(full); });
   }
   return { ok: true, task: res.task, advance: { outcome: 'waiting', reason: 'snoozed' } };
 }

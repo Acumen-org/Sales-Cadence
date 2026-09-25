@@ -155,7 +155,7 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
       SELECT p."companyId" AS "companyId", MAX(t."occurredAt") AS last
       FROM "Touch" t JOIN "PersonCache" p ON p.id = t."personId"
       WHERE p."companyId" = ANY(${ids}) GROUP BY p."companyId"`,
-    prisma.meeting.groupBy({ by: ['companyId'], where: { companyId: { in: ids } }, _count: { _all: true } }),
+    prisma.meeting.groupBy({ by: ['companyId'], where: { companyId: { in: ids }, review: 'APPROVED' }, _count: { _all: true } }),
     prisma.user.findMany({ where: { twentyMemberId: { not: null } }, select: { name: true, twentyMemberId: true, role: true } }),
     // Replies: what came back from the account's people - inbound emails, calls and messages Twenty
     // holds - with machine answers left out. Not the state of a sequence.

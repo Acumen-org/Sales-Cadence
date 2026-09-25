@@ -11,6 +11,7 @@ import { foPeopleWhere, peopleScopeWhere } from '@/lib/people-scope';
 import { campaignChoices, campaignMemberWhere, membershipFor, membershipLabel, primaryMembership } from '@/lib/campaign-membership';
 import type { Prisma } from '@prisma/client';
 import { requireUser } from '@/lib/auth/current-user';
+import { nextActionAccess } from '@/lib/next-actions';
 import { visiblePodIds } from '@/lib/auth/rbac';
 import { canRate, isMip, mipStarsFor, ratablePodOwners } from '@/lib/mip';
 import { prisma } from '@/lib/db';
@@ -135,6 +136,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
   };
 
   const today = todayIn(user.timezone);
+  const nextAccess = await nextActionAccess(user);
   const podByOwner = new Map(pods.map((x) => [x.podOwnerValue, x]));
   // The filters offer the pods this reader can see and the active people in them.
   const visible = visiblePodIds(user);
@@ -216,7 +218,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
         {rows.length === 0 ? (
           <EmptyState icon={<IconPeople size={20} />} title="No people match" hint="Adjust the filters to find a contact." />
         ) : (
-          <PeopleTable rows={rows} canMove={mayChangeCampaignPeople(user)} />
+          <PeopleTable rows={rows} canMove={mayChangeCampaignPeople(user)} nextActions={{ ...nextAccess, today }} />
         )}
       </Surface>
 

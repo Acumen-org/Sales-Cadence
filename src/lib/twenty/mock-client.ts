@@ -39,7 +39,7 @@ function datasetFor(kind: MockDataset) {
     podOptions: DEMO_POD_OPTIONS,
   };
 }
-import type { TwentyCalendarEvent, TwentyCalendarParticipant } from './types';
+import type { PersonNextActionInput, TwentyCalendarEvent, TwentyCalendarParticipant } from './types';
 import type {
   CreateNoteInput,
   CreateTaskInput,
@@ -64,6 +64,7 @@ export type MockWrite =
   | { op: 'updateTask'; id: string; patch: UpdateTaskInput }
   | { op: 'enrichPerson'; id: string; patch: EnrichPersonInput }
   | { op: 'enrichCompany'; id: string; patch: EnrichCompanyInput }
+  | { op: 'setPersonNextAction'; id: string; patch: PersonNextActionInput }
   | { op: 'deleteTask'; id: string };
 
 function clone<T>(v: T): T {
@@ -422,6 +423,14 @@ export class MockTwentyClient implements TwentyClient {
     Object.assign(person, patch, { updatedAt: new Date().toISOString() });
     this.writes.push({ op: 'enrichPerson', id, patch: clone(patch) });
     return clone(person);
+  }
+
+  async setPersonNextAction(id: string, patch: PersonNextActionInput) {
+    this.maybeFail();
+    const person = this.people.find((item) => item.id === id && !item.deletedAt);
+    if (!person) throw new Error('This contact no longer exists in Twenty.');
+    Object.assign(person, patch, { updatedAt: new Date().toISOString() });
+    this.writes.push({ op: 'setPersonNextAction', id, patch: clone(patch) });
   }
 
   async enrichCompany(id: string, patch: EnrichCompanyInput) {

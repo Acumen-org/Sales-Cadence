@@ -1003,3 +1003,38 @@ sound when I get a notification".
   its own count every 20 seconds (dialog open or not, tab in view or not), and the chime is three
   soft bell notes.
 
+
+## Snooze on every step, meetings that wait for approval, next actions outside campaigns (25 September 2026)
+
+The owner: "Snooze is not working either. Please test all buttons especially in the tasks
+section"; the campaign name "can't show full text"; meetings "should not add anything from the
+past and it should only add something once it is approved"; Settings and Reports slow; the
+calendar's dots on the wrong cells; a new end reason; and next actions, "recurring ... or not",
+"tied into the next action due date in CRM", from a person's page and in bulk from People,
+"nothing to do with any campaigns".
+
+- **Snooze.** It was switched off on purpose for every step of a campaign calendar, which is most
+  of the live work, so the button was grey. A step now snoozes wherever it is; the calendar keeps
+  every other date, and a step cannot be snoozed past its campaign's end. Done, Skip, Log call and
+  Snooze all answer at once and send their Twenty writes after the answer.
+- **Campaign band on a task.** The name has the whole second row; Step and Ends are small pills in
+  the top-right corner.
+- **Meetings from the calendars wait for approval.** Nothing from the past is imported. A new one
+  is "To approve" on the Meetings page, for an admin or the Pod Manager or Sales Leader of its pod
+  (the FO who booked it is in the pod, or a contact on it belongs to it). Approved, it joins the
+  meetings; removed, it is kept as removed so the calendar never brings it back. The same pod
+  manager can remove it after approving. What the first import had already added: past ones are
+  removed, future ones wait for approval, anything someone worked on stays.
+- **Settings** opens at once; the Twenty checks on its first tab follow. **Reports**: the
+  breakdown tabs switch in place, and the report queries join in the database and run together.
+- **Calendar.** The days with outreach are plain white; the dots are only on the empty cream days.
+  The campaign page's banner is dark, with the status, dates and a bar for how far through it is.
+- **End the sequence: "Not a prospect for this product".**
+- **Next actions.** One per person, as Twenty has one Next Action and one Next Action Due Date:
+  what to do, how (email, call, LinkedIn), the day, and whether it repeats (every week, 2 weeks,
+  month, 3 months). Set from the person's page or for everyone selected in People; given to each
+  person's own FO by default (a junior FO's are their own). It is worked in Tasks next to the
+  steps, counted in the tabs and the sidebar: Done closes a one-off and moves a repeating one on
+  from the day it was due; Snooze and Stop too. Cadence writes the two fields to Twenty on every
+  change and clears them when it closes; the worker retries what did not reach Twenty and follows
+  what people change there: a new date moves it, a cleared date closes it.

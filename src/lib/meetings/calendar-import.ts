@@ -16,6 +16,10 @@ import { parseMeetingLink } from './providers';
  * cancellation updates that same meeting. The FO who booked it is the organiser when they carry
  * outreach, else the first such FO on the invite. What people add by hand - notes, a recording,
  * a transcript, products - is never overwritten.
+ *
+ * Nothing from the past comes in, and what does waits under "To approve" on the Meetings page
+ * until a pod manager approves it (it then joins the other meetings) or removes it (it stays
+ * gone). The same pod manager can still remove it after approving.
  */
 export type CalendarImport = { result: 'created' | 'updated' | 'linked' | 'removed' | 'skipped'; reason?: string; meetingId?: string };
 
@@ -46,11 +50,15 @@ function whoIs(p: TwentyCalendarParticipant, team: Team) {
 }
 
 export async function importCalendarEvent(event: TwentyCalendarEvent): Promise<CalendarImport> {
-  const existing = await prisma.meeting.findUnique({ where: { calendarEventId: event.id }, select: { id: true, sourceUrl: true, bookedById: true, companyId: true, editedAt: true, attendees: { select: { email: true, personId: true, userId: true } } } });
+  const existing = await prisma.meeting.findUnique({ where: { calendarEventId: event.id }, select: { id: true, review: true, sourceUrl: true, bookedById: true, companyId: true, editedAt: true, attendees: { select: { email: true, personId: true, userId: true } } } });
   if (event.isCanceled) return removeImported(existing?.id ?? null, 'The meeting was cancelled');
   if (event.isFullDay || !event.startsAt) return removeImported(existing?.id ?? null, 'Not a meeting at a time');
   const startsAt = new Date(event.startsAt);
   if (Number.isNaN(startsAt.getTime())) return skipped('No start time');
+  // A pod manager took it off: the calendar never brings it back.
+  if (existing?.review === 'DISMISSED') return { result: 'skipped', reason: 'Removed by a pod manager', meetingId: existing.id };
+  // Only what is still ahead comes in (owner, 25 September 2026: nothing from the past).
+  if (!existing && startsAt.getTime() < Date.now()) return skipped('Already happened');
 
   const [settings, team] = await Promise.all([
     getSettings(),
@@ -135,6 +143,8 @@ export async function importCalendarEvent(event: TwentyCalendarEvent): Promise<C
       companyId: account?.companyId ?? null,
       companyName: account?.companyName ?? null,
       bookedById: bookedBy?.id ?? null,
+      // It waits under "To approve" until a pod manager approves or removes it.
+      review: 'PENDING',
       attendees: { create: attendees },
     },
   });

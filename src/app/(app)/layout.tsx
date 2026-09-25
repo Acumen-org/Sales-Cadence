@@ -18,16 +18,18 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const mine = { AND: [taskScopeWhere(user), WORKABLE, { foUserId: user.id }] };
   // One read for the badge counts: every open touchpoint of mine up to today, bucketed here. The
   // layout runs on every navigation, so each query it saves is felt on every click.
-  const [unread, openGroups, needsReview] = await Promise.all([
+  const [unread, openGroups, needsReview, myNext] = await Promise.all([
     unreadNotifications(user),
     prisma.task.findMany({ where: { AND: [mine, { state: 'PENDING' }, { OR: [{ snoozedTo: null, dueDate: { lte: today } }, { snoozedTo: { not: null, lte: today } }] }] }, select: { enrollmentId: true, stepId: true, dueDate: true, snoozedTo: true } }),
     isAdmin(user) ? prisma.activityEvent.count({ where: { needsReview: true } }) : Promise.resolve(0),
+    // Next actions of mine due by today count like any step.
+    prisma.nextAction.findMany({ where: { foUserId: user.id, state: 'OPEN', dueDate: { lte: today } }, select: { dueDate: true } }),
   ]);
   const todayGroups = new Set<string>();
   const overdueGroups = new Set<string>();
   for (const t of openGroups) ((t.snoozedTo ?? t.dueDate) === today ? todayGroups : overdueGroups).add(`${t.enrollmentId}:${t.stepId}`);
-  const todayCount = todayGroups.size;
-  const overdueCount = overdueGroups.size;
+  const todayCount = todayGroups.size + myNext.filter((n) => n.dueDate === today).length;
+  const overdueCount = overdueGroups.size + myNext.filter((n) => n.dueDate < today).length;
 
   return (
     <FilterNavigationProvider><div className="flex min-h-screen bg-canvas">

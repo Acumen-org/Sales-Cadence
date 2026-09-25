@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { PageFrame } from '@/components/page-frame';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
@@ -52,7 +53,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <Tabs inset={false} current={tab} tabs={TABS.map((t) => ({ ...t, href: `/settings?tab=${t.key}`, count: t.key === 'activity' && reviewCount ? reviewCount : undefined }))} />
       </Surface>
 
-      {tab === 'twenty' ? <TwentyTab mode={e.TWENTY_MODE} dryRun={e.CADENCE_DRY_RUN} hasEnvKey={Boolean(e.TWENTY_API_KEY)} /> : null}
+      {/* The Twenty tab asks Twenty itself how it is; the page opens first and the answer follows. */}
+      {tab === 'twenty' ? <Suspense fallback={<Surface><p className="text-[13px] text-ink-500">Loading…</p></Surface>}><TwentyTab mode={e.TWENTY_MODE} dryRun={e.CADENCE_DRY_RUN} hasEnvKey={Boolean(e.TWENTY_API_KEY)} /></Suspense> : null}
       {tab === 'rules' ? (
         <div className="space-y-3">
           <RulesForm rules={settings.rules} />

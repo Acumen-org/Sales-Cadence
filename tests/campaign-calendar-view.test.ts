@@ -41,8 +41,14 @@ describe('the campaign calendar with many FOs', () => {
     expect(cell).not.toContain('more FOs');
   });
 
-  it('puts the dots on the whole calendar, not on each day', () => {
-    expect(html.match(/calendar-dots/g)).toHaveLength(1);
-    expect(html).toMatch(/class="calendar-dots grid/);
+  it('keeps the outreach days plain and puts the dots only on the empty days', () => {
+    // Owner, 25 September 2026: "Remove dots from active cells and keep it clean".
+    const cells = [...html.matchAll(/data-day="(\d{4}-\d{2}-\d{2})" class="([^"]*)"/g)].map(([, day, cls]) => ({ day, cls }));
+    expect(cells.length).toBeGreaterThan(days.length);
+    for (const c of cells) {
+      if (days.includes(c.day)) { expect(c.cls, c.day).toContain('bg-white'); expect(c.cls, c.day).not.toContain('calendar-dots'); }
+      else expect(c.cls, c.day).toContain('calendar-dots');
+    }
+    expect(html).not.toMatch(/class="calendar-dots grid/);
   });
 });

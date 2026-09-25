@@ -13,7 +13,8 @@ import { getSettings, saveSettingsSection } from '@/lib/settings';
 const auth = vi.hoisted(() => ({ user: vi.fn() }));
 vi.mock('@/lib/auth/current-user', () => ({ requireUser: auth.user, requireAdmin: auth.user, toActor: (user: SessionUser) => user }));
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }));
-const { inspectMeetingLinkAction } = await import('@/lib/actions/meetings');
+const { inspectMeetingLinkAction, approveMeetingAction, deleteMeetingAction } = await import('@/lib/actions/meetings');
+const { meetingReadWhere } = await import('@/lib/meetings-query');
 
 const asUser = (user: User, podIds: string[] = []): SessionUser => ({ ...user, podIds, pods: podIds.map((id) => ({ id, name: id })) });
 const MEET = 'https://meet.google.com/abc-defg-hij';
@@ -184,5 +185,50 @@ describe('meetings from the calendar', () => {
     expect(linkKey('https://us06web.zoom.us/j/81234567890?pwd=abc')).toBe(linkKey('https://zoom.us/j/81234567890'));
     expect(linkKey('https://acme.zoom.us/j/81234567890')).toBe('zoom.us/j/81234567890');
     expect(linkKey('https://meet.google.com/abc-defg-hij')).not.toBe(linkKey('https://zoom.us/abc-defg-hij'));
+  });
+
+  describe('approval', () => {
+    const form = (meetingId: string) => { const fd = new FormData(); fd.set('meetingId', meetingId); return fd; };
+    const podManager = async (pod: string) => asUser(await prisma.user.create({ data: { email: `pm-${pod}@cadence.local`, name: `PM ${pod}`, role: 'POD_MANAGER', passwordHash: 'x', pods: { create: [{ podId: pod }] } } }), [pod]);
+
+    it('waits for approval, and nothing from the past comes in', async () => {
+      await importCalendarEvent(event());
+      const m = await prisma.meeting.findUniqueOrThrow({ where: { calendarEventId: 'cal-1' } });
+      expect(m.review).toBe('PENDING');
+      // Not among the meetings until approved.
+      expect(await prisma.meeting.count({ where: await meetingReadWhere(asUser(b.users.alisa, [b.pods.Alisa.id])) })).toBe(0);
+      const past = await importCalendarEvent(event({ id: 'cal-past', startsAt: '2020-01-05T16:00:00.000Z', endsAt: '2020-01-05T16:45:00.000Z' }));
+      expect(past).toEqual(expect.objectContaining({ result: 'skipped', reason: 'Already happened' }));
+      expect(await prisma.meeting.count({ where: { calendarEventId: 'cal-past' } })).toBe(0);
+    });
+
+    it("is approved by the pod manager of that pod only, and then joins the other meetings", async () => {
+      await importCalendarEvent(event());
+      const m = await prisma.meeting.findUniqueOrThrow({ where: { calendarEventId: 'cal-1' } });
+      // An FO of the pod, and the pod manager of another pod, cannot approve it.
+      auth.user.mockResolvedValue(asUser(b.users.karson, [b.pods.Alisa.id]));
+      expect((await approveMeetingAction(form(m.id))).ok).toBe(false);
+      auth.user.mockResolvedValue(await podManager(b.pods.Leigh.id));
+      expect((await approveMeetingAction(form(m.id))).ok).toBe(false);
+      auth.user.mockResolvedValue(await podManager(b.pods.Alisa.id));
+      expect((await approveMeetingAction(form(m.id))).ok).toBe(true);
+      expect((await prisma.meeting.findUniqueOrThrow({ where: { id: m.id } })).review).toBe('APPROVED');
+      expect(await prisma.meeting.count({ where: await meetingReadWhere(asUser(b.users.alisa, [b.pods.Alisa.id])) })).toBe(1);
+      // The same pod manager can still take it away after approving it.
+      expect((await deleteMeetingAction(form(m.id))).ok).toBe(true);
+      expect((await prisma.meeting.findUniqueOrThrow({ where: { id: m.id } })).review).toBe('DISMISSED');
+    });
+
+    it('removed stays removed: the calendar never brings it back', async () => {
+      await importCalendarEvent(event());
+      const m = await prisma.meeting.findUniqueOrThrow({ where: { calendarEventId: 'cal-1' } });
+      auth.user.mockResolvedValue(await podManager(b.pods.Alisa.id));
+      expect((await deleteMeetingAction(form(m.id))).ok).toBe(true);
+      const again = await importCalendarEvent(event({ title: 'Renamed', startsAt: '2027-01-07T16:00:00.000Z', endsAt: '2027-01-07T16:30:00.000Z' }));
+      expect(again.result).toBe('skipped');
+      const after = await prisma.meeting.findUniqueOrThrow({ where: { id: m.id } });
+      expect(after).toEqual(expect.objectContaining({ review: 'DISMISSED', title: 'Alisa and Nina: PHH' }));
+      expect(await prisma.meeting.count()).toBe(1);
+    });
   });
 });

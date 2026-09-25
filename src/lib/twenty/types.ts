@@ -265,6 +265,8 @@ export type UpdateTaskInput = {
   bodyMarkdown?: string;
 };
 
+/** A person's Next Action and its due date (YYYY-MM-DD); null clears the field in Twenty. */
+export type PersonNextActionInput = { nextAction: string | null; nextActionDueDate: string | null };
 export type EnrichPersonInput = Partial<Pick<TwentyPerson, 'firstName' | 'lastName' | 'email' | 'phone' | 'linkedinUrl' | 'jobTitle' | 'city'>>;
 export type EnrichCompanyInput = Partial<Pick<TwentyCompany, 'name' | 'domain' | 'industry' | 'employees' | 'city' | 'linkedinUrl' | 'aum'>>;
 

@@ -245,7 +245,7 @@ test('reports and people pages render with data', async ({ page }) => {
   await expect(page.locator('main').getByText('Touches by channel', { exact: true })).toHaveCount(0);
   await page.goto('/reports?view=table&tab=pods');
   // Scoped to the table: the pod filter above it lists every pod as an option.
-  await expect(page.locator('table').first().getByRole('cell', { name: "Alisa's pod" })).toBeVisible();
+  await expect(page.locator('table:visible').first().getByRole('cell', { name: "Alisa's pod" })).toBeVisible();
   // The people list is filtered on what Twenty holds, and shows it as Twenty's own labels.
   await page.goto('/people?tier=LEVEL_1');
   await expect(page.locator('table').getByText('Tier 1', { exact: true }).first()).toBeVisible();

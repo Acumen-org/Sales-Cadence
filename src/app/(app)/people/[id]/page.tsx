@@ -6,6 +6,11 @@ import { canReadPerson } from '@/lib/people-scope';
 import { accountScopeCompanyIds } from '@/lib/accounts-query';
 import { notFound } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
+import { nextActionAccess, REPEAT_LABELS } from '@/lib/next-actions';
+import { ACTION_LABELS } from '@/lib/sequences/steps';
+import { completeNextActionAction, stopNextActionAction } from '@/lib/actions/next-actions';
+import { NextActionButton } from '@/components/people/next-action-form';
+import { ActionButton } from '@/components/action-form';
 import { canChangeCampaignPeople, canCreateMeeting, mayChangeCampaignPeople } from '@/lib/auth/rbac';
 import { membershipFor, membershipLabel } from '@/lib/campaign-membership';
 import { AddToCampaign, RemoveFromCampaign } from '@/components/campaigns/add-to-campaign';
@@ -55,6 +60,12 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
     getSettings(),
     person.companyId ? prisma.personCache.findMany({ where: { companyId: person.companyId, id: { not: id }, deletedAt: null }, include: { enrollments: { orderBy: { createdAt: 'desc' }, take: 1 } }, take: 30 }) : Promise.resolve([]),
   ]);
+
+  const [openNext, nextAccess] = await Promise.all([
+    prisma.nextAction.findFirst({ where: { personId: id, state: 'OPEN' }, include: { fo: { select: { id: true, name: true } } } }),
+    nextActionAccess(user),
+  ]);
+  const mayWorkNext = openNext ? openNext.foUserId === user.id || user.role === 'ADMIN' || (nextAccess.canAssign && nextAccess.fos.some((f) => f.id === openNext.foUserId)) : false;
 
   let notes: TwentyNote[] = [];
   let opportunities: TwentyOpportunity[] = [];
@@ -270,6 +281,27 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
             {tab === 'overview' ? (
               // Grouped the way the record is grouped in Twenty, so the two read the same.
               <div className="space-y-3">
+                <Card
+                  title="Next action"
+                  actions={nextAccess.canSet ? <span className="flex items-center gap-2">
+                    {openNext && mayWorkNext ? <ActionButton action={completeNextActionAction} payload={{ id: openNext.id }} className="btn-primary btn-sm">Done</ActionButton> : null}
+                    <NextActionButton personIds={[id]} today={today} fos={nextAccess.fos} canAssign={nextAccess.canAssign} label={openNext ? 'Change' : 'Set next action'} initial={openNext ? { label: openNext.label, action: openNext.action, dueDate: openNext.dueDate < today ? today : openNext.dueDate, repeat: openNext.repeat, foUserId: openNext.foUserId } : undefined} />
+                    {openNext && mayWorkNext ? <ActionButton action={stopNextActionAction} payload={{ id: openNext.id }} className="btn-ghost btn-sm" confirm="Stop this next action? It is cleared in Twenty too.">Stop</ActionButton> : null}
+                  </span> : null}
+                >
+                  {openNext ? (
+                    <div className="p-4">
+                      <RecordFields items={[
+                        { label: 'What to do', value: openNext.label },
+                        { label: 'How', value: ACTION_LABELS[openNext.action] },
+                        { label: 'Due', value: <span className={openNext.dueDate < today ? 'text-red-700' : undefined}>{formatLocalDate(openNext.dueDate, 'long')}</span> },
+                        { label: 'Repeats', value: REPEAT_LABELS[openNext.repeat] },
+                        { label: 'FO', value: openNext.fo.name },
+                      ]} />
+                    </div>
+                  ) : <p className="p-4 text-[13px] text-ink-500">None</p>}
+                </Card>
+
                 <Card title={memberships.some((m) => m.kind !== 'finished') || !memberships.length ? 'Campaigns' : 'Last campaign'} actions={<span className="flex items-center gap-2">{mayChangeCampaignPeople(user) ? <AddToCampaign personIds={[id]} className="btn-secondary btn-sm" /> : null}<Link href={`/people/${id}?tab=sequences`} className="btn-ghost btn-sm">View history</Link></span>}>
                   {memberships.length ? <div className="divide-y divide-line">{memberships.filter((m) => m.kind !== 'finished').concat(memberships.filter((m) => m.kind === 'finished').slice(0, 1)).map((m) => {
                     const label = membershipLabel(m);

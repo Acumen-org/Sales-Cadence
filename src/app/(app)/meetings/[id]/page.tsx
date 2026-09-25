@@ -10,9 +10,9 @@ import { formatInstant } from '@/lib/dates';
 import { parseAnalysis } from '@/lib/meetings/analysis';
 import { parseTranscript, talkShare } from '@/lib/meetings/transcript';
 import { parseMeetingLink, PROVIDER_LABELS } from '@/lib/meetings/providers';
-import { canManageMeetingAction, deleteMeetingAction, saveTranscriptAction } from '@/lib/actions/meetings';
+import { approveMeetingAction, canManageMeetingAction, deleteMeetingAction, saveTranscriptAction } from '@/lib/actions/meetings';
 import { ActionButton, ActionForm } from '@/components/action-form';
-import { meetingReadWhere, attendeeIsExternal } from '@/lib/meetings-query';
+import { MEETING_EXISTS, attendeeIsExternal, mayReviewMeeting } from '@/lib/meetings-query';
 import { MeetingAnalysisPanel } from '@/components/meetings/meeting-analysis';
 import { AttendeeEditor } from '@/components/meetings/attendee-editor';
 import { MeetingStage } from '@/components/meetings/meeting-stage';
@@ -24,7 +24,8 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
   const { id } = await params;
   const meeting = await prisma.meeting.findFirst({
     // Scoped, not merely fetched: a transcript is a prospect conversation.
-    where: { AND: [{ id }, await meetingReadWhere(user)] },
+    // Approved, or waiting for approval (the pod manager opens it from "To approve"); never removed.
+    where: { AND: [{ id }, MEETING_EXISTS] },
     include: { attendees: { orderBy: [{ host: 'desc' }, { external: 'asc' }, { name: 'asc' }] }, createdBy: { select: { name: true } }, bookedBy: { select: { name: true } }, favourites: { where: { userId: user.id }, select: { userId: true } } },
   });
   if (!meeting) notFound();
@@ -33,7 +34,8 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
   const analysis = parseAnalysis(meeting.analysis);
   // Who spoke how much, from the transcript as it stands - the same normalised cues the reader sees.
   const liveTalk = meeting.transcript ? talkShare(parseTranscript(meeting.transcript, (meeting.transcriptFormat as never) ?? undefined).cues) : [];
-  const mayEdit = await canManageMeetingAction(id);
+  const [mayEdit, mayReview] = await Promise.all([canManageMeetingAction(id), mayReviewMeeting(user, id)]);
+  const pending = meeting.review === 'PENDING';
   const { rules } = await getSettings();
   // Externality follows the address and the current domain list, not the flag stored at creation.
   meeting.attendees = meeting.attendees.map((a) => ({ ...a, external: attendeeIsExternal(a, rules.internalDomains) }));
@@ -49,6 +51,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
             <>
               {externals.length ? <Badge tone="green" dot>{externals.length} external</Badge> : <Badge tone="gray">{meeting.attendees.length ? 'Internal only' : 'No attendees'}</Badge>}
               {meeting.transcript ? <Badge tone="blue">Transcript</Badge> : null}
+              {pending ? <Badge tone="amber">Waiting for approval</Badge> : null}
             </>
           }
           actions={
@@ -62,9 +65,14 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
                   Edit
                 </Link>
               ) : null}
-              {mayEdit ? (
-                <ActionButton action={deleteMeetingAction} payload={{ meetingId: meeting.id }} className="btn-ghost btn-sm text-red-600" confirm="Delete this meeting and its transcript?">
-                  Delete
+              {pending && mayReview ? (
+                <ActionButton action={approveMeetingAction} payload={{ meetingId: meeting.id }} className="btn-primary btn-sm">
+                  Approve
+                </ActionButton>
+              ) : null}
+              {mayEdit || mayReview ? (
+                <ActionButton action={deleteMeetingAction} payload={{ meetingId: meeting.id }} className="btn-ghost btn-sm text-red-600" confirm={pending ? 'Remove this meeting? It will not come back from the calendar.' : 'Delete this meeting and its transcript?'}>
+                  {pending ? 'Remove' : 'Delete'}
                 </ActionButton>
               ) : null}
               <Link href="/meetings" className="btn-ghost btn-sm">

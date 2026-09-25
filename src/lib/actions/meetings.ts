@@ -11,6 +11,7 @@ import { prisma } from '../db';
 import { requireUser, toActor, type SessionUser } from '../auth/current-user';
 import { isAdmin, isPodLeader, canCreateMeeting, ROLES_NEEDING_POD } from '../auth/rbac';
 import { logAudit, userActor } from '../audit';
+import { mayReviewMeeting } from '../meetings-query';
 import { inspectLink } from '../meetings/resolve-media';
 import { resolveAttendees } from '../meetings/attendees';
 import { calendarEventForLink, linkKey, linkNeedle } from '../meetings/calendar-import';
@@ -294,14 +295,34 @@ export async function deleteMeetingAction(formData: FormData): Promise<ActionRes
   const user = await requireUser();
   const id = String(formData.get('meetingId') ?? '');
   const existing = await prisma.meeting.findUnique({ where: { id } });
-  if (!existing) return { ok: false, error: 'Meeting not found.' };
-  if (!(await mayManageMeeting(user, existing))) return { ok: false, error: 'You do not have permission to delete this meeting.' };
-  await prisma.meeting.delete({ where: { id } });
-  await logAudit({ entityType: 'meeting', entityId: id, action: 'deleted', actor: userActor(user), details: { title: existing.title } });
+  if (!existing || existing.review === 'DISMISSED') return { ok: false, error: 'Meeting not found.' };
+  if (!(await mayManageMeeting(user, existing)) && !(await mayReviewMeeting(user, id))) return { ok: false, error: 'You do not have permission to delete this meeting.' };
+  if (existing.calendarEventId) {
+    // From a calendar: kept as removed, so the next read of that calendar does not add it again.
+    await prisma.meeting.update({ where: { id }, data: { review: 'DISMISSED', reviewedById: user.id, reviewedAt: new Date() } });
+  } else {
+    await prisma.meeting.delete({ where: { id } });
+  }
+  await logAudit({ entityType: 'meeting', entityId: id, action: existing.review === 'PENDING' ? 'rejected' : 'deleted', actor: userActor(user), details: { title: existing.title } });
   revalidatePath('/meetings');
   revalidatePath('/accounts');
   if (existing.companyId) revalidatePath(`/accounts/${existing.companyId}`);
   return { ok: true, message: 'Meeting deleted.', redirectTo: '/meetings' };
+}
+
+/** A pod manager approves a meeting from the calendar: it joins the other meetings. */
+export async function approveMeetingAction(formData: FormData): Promise<ActionResult> {
+  const user = await requireUser();
+  const id = String(formData.get('meetingId') ?? '');
+  const existing = await prisma.meeting.findUnique({ where: { id }, select: { id: true, title: true, review: true, companyId: true } });
+  if (!existing || existing.review === 'DISMISSED') return { ok: false, error: 'Meeting not found.' };
+  if (existing.review === 'APPROVED') return { ok: true, message: 'Already approved.' };
+  if (!(await mayReviewMeeting(user, id))) return { ok: false, error: 'Only a pod manager of this pod can approve this meeting.' };
+  await prisma.meeting.update({ where: { id }, data: { review: 'APPROVED', reviewedById: user.id, reviewedAt: new Date() } });
+  await logAudit({ entityType: 'meeting', entityId: id, action: 'approved', actor: userActor(user), details: { title: existing.title } });
+  revalidatePath('/meetings');
+  if (existing.companyId) revalidatePath(`/accounts/${existing.companyId}`);
+  return { ok: true, message: 'Approved.' };
 }
 
 /**
@@ -423,14 +444,14 @@ export async function inspectMeetingLinkAction(raw: string): Promise<{ ok: true;
   const key = linkKey(url);
   const needle = linkNeedle(url);
   const around = 6 * 3_600_000;
-  const candidates = key && needle ? await prisma.meeting.findMany({ where: { sourceUrl: { contains: needle, mode: 'insensitive' }, occurredAt: { gte: new Date(Date.now() - around), lte: new Date(Date.now() + around) } }, orderBy: { occurredAt: 'desc' }, take: 20, select: { id: true, sourceUrl: true } }) : [];
+  const candidates = key && needle ? await prisma.meeting.findMany({ where: { review: { not: 'DISMISSED' }, sourceUrl: { contains: needle, mode: 'insensitive' }, occurredAt: { gte: new Date(Date.now() - around), lte: new Date(Date.now() + around) } }, orderBy: { occurredAt: 'desc' }, take: 20, select: { id: true, sourceUrl: true } }) : [];
   const already = candidates.find((m) => linkKey(m.sourceUrl) === key);
   if (already) return { ok: true, data: { ...base, title: null, date: null, companyId: null, companyName: null, existingMeetingId: already.id } };
 
   const event = await calendarEventForLink(url.trim());
   if (event?.startsAt) {
-    const imported = await prisma.meeting.findUnique({ where: { calendarEventId: event.id }, select: { id: true } });
-    if (imported) return { ok: true, data: { ...base, title: null, date: null, companyId: null, companyName: null, existingMeetingId: imported.id } };
+    const imported = await prisma.meeting.findUnique({ where: { calendarEventId: event.id }, select: { id: true, review: true } });
+    if (imported && imported.review !== 'DISMISSED') return { ok: true, data: { ...base, title: null, date: null, companyId: null, companyName: null, existingMeetingId: imported.id } };
     const at = localDateTime(new Date(event.startsAt), user.timezone);
     const team = await prisma.user.findMany({ where: { active: true }, select: { id: true, email: true, aliases: true, twentyMemberId: true, role: true } });
     const member = (p: { handle: string; workspaceMemberId: string | null }) => (p.workspaceMemberId ? team.find((u) => u.twentyMemberId === p.workspaceMemberId) : undefined) ?? team.find((u) => [u.email, ...u.aliases].some((x) => x.toLowerCase() === p.handle.toLowerCase()));

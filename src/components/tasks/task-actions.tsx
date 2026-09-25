@@ -51,6 +51,7 @@ const END_REASONS = [
   { key: 'replied', label: 'They replied', detail: 'Counts as a reply for this person and the FO.' },
   { key: 'no_reply', label: 'Ran its course, no reply', detail: 'Every step was worked and nobody answered.' },
   { key: 'not_interested', label: 'Not interested', detail: 'They said no.' },
+  { key: 'not_a_prospect', label: 'Not a prospect for this product', detail: 'They are not a fit for the product this outreach is about.' },
   { key: 'opted_out', label: 'Asked not to be contacted', detail: 'Stops all outreach to this person.' },
   { key: 'bad_data', label: 'Wrong or missing details', detail: 'Ends the sequence. Correct the record in Twenty or Enrichment.' },
   { key: 'removed', label: 'Another reason', detail: 'Ends the sequence without one of the labels above.' },
@@ -222,7 +223,6 @@ export function TaskActions(p: Props) {
           setPanel((v) => (v === 'skip' ? 'none' : 'skip'));
           break;
         case 'z':
-          if (p.fixedCalendar) return;
           e.preventDefault();
           setPanel((v) => (v === 'snooze' ? 'none' : 'snooze'));
           break;
@@ -270,7 +270,7 @@ export function TaskActions(p: Props) {
         </button>
         </> : null}
         {variant !== 'module' ? <>
-        <button type="button" disabled={pending || p.fixedCalendar} title={p.fixedCalendar ? 'Date reserved in the campaign calendar' : undefined} className={clsx(secondary, panel === 'snooze' && 'border-ink-300 bg-canvas')} onClick={() => toggle('snooze')}>
+        <button type="button" disabled={pending} className={clsx(secondary, panel === 'snooze' && 'border-ink-300 bg-canvas')} onClick={() => toggle('snooze')}>
           <IconClock size={16} /> Snooze
         </button>
         {p.twentyUrl ? (

@@ -5,7 +5,9 @@ import { optionLabel } from '@/lib/twenty/labels';
 import type { Prisma } from '@prisma/client';
 import { requireUser } from '@/lib/auth/current-user';
 import { canCreateMeeting, ROLES_NEEDING_POD } from '@/lib/auth/rbac';
-import { attendeeIsExternal, meetingReadWhere } from '@/lib/meetings-query';
+import { attendeeIsExternal, meetingReadWhere, meetingsToReviewWhere } from '@/lib/meetings-query';
+import { approveMeetingAction, deleteMeetingAction } from '@/lib/actions/meetings';
+import { ActionButton } from '@/components/action-form';
 import { getSettings } from '@/lib/settings';
 import { prisma } from '@/lib/db';
 import { addDays, formatInstant, isLocalDate, startOfLocalDay } from '@/lib/dates';
@@ -52,6 +54,14 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
   const filtered = Boolean(who || product || from || to || favourites || booked);
 
   const { rules } = await getSettings();
+  // Meetings from the calendars wait here for the pod manager of their pod, soonest first.
+  const reviewScope = await meetingsToReviewWhere(user);
+  const toApprove = reviewScope ? await prisma.meeting.findMany({
+    where: { AND: [{ review: 'PENDING' }, reviewScope] },
+    orderBy: { occurredAt: 'asc' },
+    take: 50,
+    select: { id: true, title: true, provider: true, occurredAt: true, durationSec: true, companyId: true, companyName: true, bookedBy: { select: { name: true } }, attendees: { select: { email: true, external: true } } },
+  }) : [];
   const externalCount = (attendees: { email: string | null; external: boolean }[]) => attendees.filter((a) => attendeeIsExternal(a, rules.internalDomains)).length;
   const [meetings, total, recordingTotal, recordings] = await Promise.all([
     prisma.meeting.findMany({
@@ -109,6 +119,33 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
 
   return (
     <PageFrame className="space-y-3 px-6 pb-8 pt-2">
+      {toApprove.length ? (
+        <Surface flush>
+          <ViewHeader title="To approve" meta={`${toApprove.length} from the calendars`} />
+          <div className="min-w-0">
+            <table className="table table-dense table-meetings w-full table-fixed">
+              <colgroup><col style={{width:'28%'}} /><col style={{width:'15%'}} /><col style={{width:'17%'}} /><col style={{width:'12%'}} /><col style={{width:'12%'}} /><col style={{width:'16%'}} /></colgroup>
+              <thead><tr><th>Meeting</th><th>When</th><th>Account</th><th>Attendees</th><th>Booked by</th><th aria-label="Approve or remove" /></tr></thead>
+              <tbody>
+                {toApprove.map((m) => (
+                  <tr key={m.id}>
+                    <td data-label="Meeting"><IdentityCell name={m.title} href={`/meetings/${m.id}`} sub={PROVIDER_LABELS[m.provider]} /></td>
+                    <td data-label="When" className="text-[12.5px]"><time className="block font-semibold">{formatInstant(m.occurredAt, user.timezone)}</time>{m.durationSec ? <span className="mt-1 block text-xs text-ink-600"><strong>{Math.round(m.durationSec / 60)}</strong> min</span> : null}</td>
+                    <td data-label="Account" className="break-words text-[12.5px]">{m.companyId ? <Link href={`/accounts/${m.companyId}`} className="text-brand-700 hover:underline">{m.companyName}</Link> : m.companyName ?? <span className="text-ink-300">-</span>}</td>
+                    <td data-label="Attendees" className="text-[12.5px]"><div className="flex items-center gap-1.5 whitespace-nowrap"><span className="font-medium tabular-nums text-ink-900">{m.attendees.length}</span>{externalCount(m.attendees) ? <Badge tone="green">{externalCount(m.attendees)} external</Badge> : null}</div></td>
+                    <td data-label="Booked by" className="break-words text-[12.5px]">{m.bookedBy?.name ?? <Empty />}</td>
+                    <td className="text-right"><span className="inline-flex gap-1.5">
+                      <ActionButton action={approveMeetingAction} payload={{ meetingId: m.id }} className="btn-primary btn-sm">Approve</ActionButton>
+                      <ActionButton action={deleteMeetingAction} payload={{ meetingId: m.id }} className="btn-secondary btn-sm" confirm="Remove this meeting? It will not come back from the calendar.">Remove</ActionButton>
+                    </span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Surface>
+      ) : null}
+
       <Surface flush>
         <ViewHeader
           title="All meetings"

@@ -117,24 +117,34 @@ export async function buildReports(user: SessionUser, today: LocalDate, filters?
     prisma.user.findMany({ select: { id: true, name: true, twentyMemberId: true } }),
     prisma.campaign.findMany({ select: { id: true, name: true } }),
   ]);
-  const enrollmentIds = enrollments.map((e) => e.id);
-  const tasks = await prisma.task.findMany({
-    where: { enrollmentId: { in: enrollmentIds }, ...(range ? { OR: [{ state: { in: ['DONE', 'SKIPPED'] }, completedAt: { gte: range.fromInstant, lt: range.toInstant } }, { state: { in: ['PENDING', 'CANCELLED'] }, dueDate: { gte: range.from, lte: range.to } }] } : {}) },
+  // The same enrollments, as a join the database does, not a list of thousands of ids sent back to it.
+  const enrolled: Prisma.EnrollmentWhereInput = { AND: [scope, ...(range ? [{ createdAt: { lt: range.toInstant } }] : [])] };
+  const d28 = range?.fromInstant ?? startOfLocalDay(addDays(today, -27), reportingTimezone());
+  const end = range?.toInstant ?? startOfLocalDay(addDays(today, 1), reportingTimezone());
+  const podOwnerValue = filters?.podId ? pods.find((p) => p.id === filters.podId)?.podOwnerValue ?? '__none__' : null;
+  const [tasks, inboundAll, doneTasks, meetingRows, settings] = await Promise.all([prisma.task.findMany({
+    where: { enrollment: enrolled, ...(range ? { OR: [{ state: { in: ['DONE', 'SKIPPED'] }, completedAt: { gte: range.fromInstant, lt: range.toInstant } }, { state: { in: ['PENDING', 'CANCELLED'] }, dueDate: { gte: range.from, lte: range.to } }] } : {}) },
     // The enrollment's own status comes with it: a paused campaign's open touches are held, and
     // reporting them as scheduled is the one place that rule could still leak.
     select: { enrollmentId: true, state: true, dueDate: true, snoozedTo: true, action: true, chosenAction: true, completionSource: true, foUserId: true, enrollment: { select: { status: true } } },
-  });
-  const name = (list: { id: string; name: string }[], id: string | null, fallback: string) => list.find((x) => x.id === id)?.name ?? fallback;
-
+  }),
   // Replies: what came back from people - inbound emails, calls and messages Twenty holds, machine
   // answers left out, plus calls they answered - credited to the enrollment whose outreach they
   // answer (reply-credit.ts) and through it to its FO, pod, campaign and sequence. Never the state
   // of a sequence. Without a range the rollups are all-time, so the messages are too.
-  const podOwnerValue = filters?.podId ? pods.find((p) => p.id === filters.podId)?.podOwnerValue ?? '__none__' : null;
-  const inboundAll = await prisma.touch.findMany({
+  prisma.touch.findMany({
     where: { ...REPLY_TOUCH_WHERE, ...(range ? { occurredAt: { gte: range.fromInstant, lt: range.toInstant } } : {}), person: { deletedAt: null } },
     select: { id: true, occurredAt: true, personId: true, person: { select: { podOwner: true } } },
-  });
+  }),
+  prisma.task.findMany({
+    where: { enrollment: enrolled, state: 'DONE', completedAt: { gte: d28, lt: end } },
+    select: { foUserId: true, action: true, chosenAction: true, disposition: true, completedAt: true, completionSource: true },
+  }),
+  prisma.enrollment.findMany({ where: { ...scope, meetingAt: { gte: d28, lt: end } }, select: { foUserId: true, meetingAt: true } }),
+  import('./settings').then((m) => m.getSettings()),
+  ]);
+  const name = (list: { id: string; name: string }[], id: string | null, fallback: string) => list.find((x) => x.id === id)?.name ?? fallback;
+
   const credited = await enrollmentByReply(inboundAll);
   const inbound = inboundAll.filter((t) => {
     const e = credited.get(t.id);
@@ -164,19 +174,12 @@ export async function buildReports(user: SessionUser, today: LocalDate, filters?
   });
 
 
-  const d28 = range?.fromInstant ?? startOfLocalDay(addDays(today, -27), reportingTimezone());
-  const end = range?.toInstant ?? startOfLocalDay(addDays(today, 1), reportingTimezone());
-  const doneTasks = await prisma.task.findMany({
-    where: { enrollmentId: { in: enrollmentIds }, state: 'DONE', completedAt: { gte: d28, lt: end } },
-    select: { foUserId: true, action: true, chosenAction: true, disposition: true, completedAt: true, completionSource: true },
-  });
   // Only replies to outreach: a message from someone nobody has enrolled answers nothing here.
   const repliedRows = inbound
     .filter((t) => t.occurredAt >= d28 && t.occurredAt < end && credited.has(t.id))
     .map((t) => ({ foUserId: credited.get(t.id)!.foUserId, repliedAt: t.occurredAt as Date | null }))
     .filter((r) => !filters?.foUserId || r.foUserId === filters.foUserId);
-  const meetingRows = await prisma.enrollment.findMany({ where: { ...scope, meetingAt: { gte: d28, lt: end } }, select: { foUserId: true, meetingAt: true } });
-  const answeredKeys = new Set((await import('./settings').then((m) => m.getSettings())).rules.callDispositions.filter((d) => d.answered).map((d) => d.key));
+  const answeredKeys = new Set(settings.rules.callDispositions.filter((d) => d.answered).map((d) => d.key));
   const activity = users
     .filter((u) => enrollments.some((e) => e.foUserId === u.id) || doneTasks.some((t) => t.foUserId === u.id))
     .map((u) => {

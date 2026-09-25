@@ -5,7 +5,7 @@ import { getTwentyConnection, getTwentySchema } from '../settings';
 import type { TwentyClient } from './client';
 import { TwentyGraphqlClient } from './graphql-client';
 import { getMockTwentyClient } from './mock-client';
-import type { CreateNoteInput, CreateTaskInput, UpdateTaskInput, EnrichPersonInput, EnrichCompanyInput, TwentyPerson, TwentyCompany } from './types';
+import type { CreateNoteInput, CreateTaskInput, UpdateTaskInput, EnrichPersonInput, PersonNextActionInput, EnrichCompanyInput, TwentyPerson, TwentyCompany } from './types';
 
 /**
  * CADENCE_DRY_RUN=true: reads pass through, writes are logged (console + TwentyWrite
@@ -71,6 +71,9 @@ export class DryRunTwentyClient implements TwentyClient {
     if (!record) throw new Error('This contact no longer exists in Twenty.');
     await this.record('enrichPerson', 'person', { id, ...patch }, id);
     return record;
+  }
+  async setPersonNextAction(id: string, patch: PersonNextActionInput) {
+    await this.record('setPersonNextAction', 'person', { id, ...patch }, id);
   }
   async enrichCompany(id: string, patch: EnrichCompanyInput, current?: TwentyCompany) {
     const record = current ?? (await this.inner.listCompanies({ ids: [id], limit: 1 })).items[0];

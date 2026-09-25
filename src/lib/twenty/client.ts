@@ -1,4 +1,5 @@
 import type {
+  PersonNextActionInput,
   CreateNoteInput,
   CreateTaskInput,
   Page,
@@ -79,6 +80,8 @@ export interface TwentyClient {
   /** Explicitly reviewed enrichment; unlike task writes, this updates existing CRM records. */
   enrichPerson(id: string, patch: EnrichPersonInput, current?: TwentyPerson): Promise<TwentyPerson>;
   enrichCompany(id: string, patch: EnrichCompanyInput, current?: TwentyCompany): Promise<TwentyCompany>;
+  /** A person's Next Action and Next Action Due Date, kept in step with Cadence's next action. */
+  setPersonNextAction(id: string, patch: PersonNextActionInput): Promise<void>;
 
   // ---- schema ----
   introspect(): Promise<TwentyIntrospection>;

@@ -9,6 +9,7 @@ import { optionLabel, optionLabels } from '@/lib/twenty/labels';
 import { PillList } from '@/components/pill-list';
 import { AddToCampaign, RemoveFromCampaigns } from '@/components/campaigns/add-to-campaign';
 import { MipStars } from './mip-stars';
+import { NextActionButton } from './next-action-form';
 
 export type PeopleTableRow = {
   id: string;
@@ -25,7 +26,7 @@ export type PeopleTableRow = {
   leadSource: string[];
   tags: string[];
   warnings: { label: string; tone: BadgeTone }[];
-  /** Twenty's own plan for this person, which Cadence never overwrites. */
+  /** Twenty's Next Action and its due date: set in Twenty, or by a next action set here. */
   next: { action: string | null; due: string | null; step: string | null; overdue: boolean } | null;
   dnd: boolean;
   optedOut: boolean;
@@ -48,6 +49,8 @@ type Props = {
   rows: PeopleTableRow[];
   /** Whether this reader may move people in or out of campaigns; Biz Ops only reads. */
   canMove?: boolean;
+  /** Whether this reader sets next actions, and to whom they can give them. */
+  nextActions?: { canSet: boolean; canAssign: boolean; fos: { id: string; name: string }[]; today: string };
 };
 
 function Tag({ value, field }: { value: string; field?: string }) {
@@ -57,7 +60,7 @@ function Tag({ value, field }: { value: string; field?: string }) {
 }
 
 /** The directory: CRM tags, the campaign and the sequence by name, and a selection to add to a campaign. */
-export function PeopleTable({ rows, canMove = true }: Props) {
+export function PeopleTable({ rows, canMove = true, nextActions }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(null), 8000); return () => clearTimeout(timer); }, [notice]);
@@ -84,6 +87,7 @@ export function PeopleTable({ rows, canMove = true }: Props) {
           <span className="font-medium">{selected.size} selected</span>
           {canMove ? <><AddToCampaign personIds={chosenRows.filter(r => !r.inCampaign).map(r => r.id)} onDone={() => setSelected(new Set())} disabled={chosenRows.every((r) => r.inCampaign)} disabledTitle={chosenRows.every((r) => r.inCampaign) ? (chosen.length === 1 ? 'Already in a campaign' : 'Everyone chosen is already in a campaign') : undefined} />
           <RemoveFromCampaigns people={inCampaigns} onDone={message => { setSelected(new Set()); setNotice(message ?? 'People removed from campaign.'); }} /></> : null}
+          {nextActions?.canSet ? <NextActionButton personIds={chosen} today={nextActions.today} fos={nextActions.fos} canAssign={nextActions.canAssign} onDone={(message) => { setSelected(new Set()); setNotice(message); }} /> : null}
           <button type="button" className="btn-ghost btn-sm" onClick={() => setSelected(new Set())}>
             Clear
           </button>

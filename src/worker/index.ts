@@ -14,6 +14,7 @@ import { getTwentyClient } from '../lib/twenty';
 import { todayIn } from '../lib/dates';
 import { workspaceTimezone } from '../lib/workspace';
 import { importCalendarWindow } from '../lib/meetings/calendar-import';
+import { syncNextActions } from '../lib/next-actions';
 
 const config=env();
 const log=(message:string,extra?:unknown)=>console.log('[worker '+new Date().toISOString()+'] '+message,extra??'');
@@ -65,6 +66,8 @@ async function tick(){
    if(stats.generated||stats.completed)log('scheduler',stats);
    const retried=await retryFailedWrites();
    if(retried.retried)log('twenty write retry',retried);
+   // Next actions: what has not reached Twenty yet, and what people changed there.
+   try{const na=await syncNextActions();if(na.pushed||na.failed||na.followed||na.closed)log('next actions',na);}catch(error){log('next actions failed',error);}
    if(now-lastPurge>=3600000){await purgeExpiredSessions();lastPurge=now;}
  }catch(error){log('tick failed',error);}finally{running=false;}
 }

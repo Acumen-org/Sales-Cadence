@@ -109,7 +109,7 @@ async function activityScope(f: ActivityFilters): Promise<FeedScope> {
     prisma.enrollment.findMany({ where: enrollment, select: { id: true, sequenceId: true } }),
     prisma.task.findMany({ where: { enrollment }, select: { id: true } }),
     prisma.campaign.findMany({ where: { podId: { in: allowedPods.map((p) => p.id) } }, select: { id: true, sequenceId: true } }),
-    prisma.meeting.findMany({ where: { OR: [{ attendees: { some: { person } } }, ...(!f.podId ? [{ createdById: user.id }, { attendees: { some: { userId: user.id } } }] : [])] }, select: { id: true } }),
+    prisma.meeting.findMany({ where: { review: 'APPROVED', OR: [{ attendees: { some: { person } } }, ...(!f.podId ? [{ createdById: user.id }, { attendees: { some: { userId: user.id } } }] : [])] }, select: { id: true } }),
   ]);
   return {
     audit: { OR: [

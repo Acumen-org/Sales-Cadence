@@ -5,7 +5,8 @@ import { requireUser } from '@/lib/auth/current-user';
 import { canViewReports, toActor } from '@/lib/auth/rbac';
 import { addDays, startOfWeekSunday } from '@/lib/dates';
 import { loadReportBundle } from '@/lib/reports-bundle';
-import { Field, Notice, Surface, Tabs, ViewHeader } from '@/components/ui';
+import { Field, Notice, Surface, ViewHeader } from '@/components/ui';
+import { BreakdownSwitch } from '@/components/reports/breakdown-switch';
 import { BREAKDOWNS, BreakdownTable, RATES_NOTE, ReportDocument, type BreakdownKey } from '@/components/reports/report-document';
 
 /**
@@ -61,8 +62,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       <ReportDocument reports={reports} previous={previous} range={{ from: range.from, to: range.to }} compared={bundle.previousRange} scope={scope} campaigns={campaigns} breakdown={
         <Surface flush>
           <ViewHeader title="Breakdown" />
-          <Tabs inset={false} scroll={false} current={tab} tabs={BREAKDOWNS.map((b) => ({ key: b.key, label: b.label, href: query({ tab: b.key }) }))} />
-          <div className="p-4"><BreakdownTable tab={tab} reports={reports} previous={previous} />{tab === 'channels' ? null : <p className="mt-3 text-[12px] text-ink-500">{RATES_NOTE}</p>}</div>
+          <BreakdownSwitch initial={tab} panels={BREAKDOWNS.map((b) => ({ key: b.key, label: b.label, href: query({ tab: b.key }), node: <><BreakdownTable tab={b.key} reports={reports} previous={previous} />{b.key === 'channels' ? null : <p className="mt-3 text-[12px] text-ink-500">{RATES_NOTE}</p>}</> }))} />
         </Surface>
       } />
     </PageFrame>

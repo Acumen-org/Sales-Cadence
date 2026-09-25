@@ -140,9 +140,10 @@
   .card {
     @apply surface;
   }
-  /* The campaign calendar's working days: a quiet dotted field the batch cards sit on. */
+  /* The campaign calendar's empty days (weekends, outside the campaign): cream with a quiet dot
+     field. Days with outreach stay plain white, so the cards sit on a clean surface. */
   .calendar-dots {
-    background-color: #fff;
+    @apply bg-canvas;
     background-image: radial-gradient(rgb(25 43 41 / 0.13) 1px, transparent 1.3px);
     background-size: 14px 14px;
     background-position: 7px 7px;

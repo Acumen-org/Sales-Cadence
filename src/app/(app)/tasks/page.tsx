@@ -10,7 +10,11 @@ import { cachedPersonName } from '@/lib/person-cache';
 import { getSettings } from '@/lib/settings';
 import { ACTION_LABELS, channelOf } from '@/lib/sequences/steps';
 import { filterOptions, listTaskGroups, parseChannel, parseTab, TASK_CHANNELS, type TaskChannel, type TaskTab } from '@/lib/tasks-query';
-import { ActionIcon, IconCampaigns, IconChevronLeft, IconChevronRight } from '@/components/icons';
+import { ActionIcon, IconCampaigns, IconChevronLeft, IconChevronRight, IconRefresh } from '@/components/icons';
+import { prisma } from '@/lib/db';
+import { addDays, formatInstant, formatLocalDate, startOfLocalDay } from '@/lib/dates';
+import { nextActionInclude, nextActionWhere, REPEAT_LABELS } from '@/lib/next-actions';
+import { NextActionControls } from '@/components/tasks/next-action-controls';
 import { TaskActions } from '@/components/tasks/task-actions';
 import { PersonBadges, TaskBriefPanel } from '@/components/tasks/task-brief';
 import { SuggestedApproach } from '@/components/tasks/suggested-approach';
@@ -21,7 +25,7 @@ import { TaskList } from '@/components/tasks/task-list';
 import { CrmHistory } from '@/components/people/crm-history';
 import { Avatar, Badge, EmptyState, Notice, RecordFields, Surface, Tabs, Toolbar, type BadgeTone } from '@/components/ui';
 
-type Search = { tab?: string; mode?: string; task?: string; pod?: string; fo?: string; type?: string; flash?: string; crmNotes?: string; crmEmails?: string; limit?: string };
+type Search = { tab?: string; mode?: string; task?: string; next?: string; pod?: string; fo?: string; type?: string; flash?: string; crmNotes?: string; crmEmails?: string; limit?: string };
 const TAB_LABELS: Record<TaskTab, string> = { today: 'Today', overdue: 'Overdue', upcoming: 'Upcoming', done: 'Done' };
 const CHANNEL_LABELS: Record<TaskChannel, string> = { CALL: 'Calls', EMAIL: 'Emails', LINKEDIN: 'LinkedIn' };
 
@@ -37,20 +41,67 @@ const EMPTY_TITLES: Record<TaskTab, string> = {
 function CampaignBand({ brief }: { brief: NonNullable<Awaited<ReturnType<typeof getTaskBrief>>> }) {
   const campaign = brief.task.enrollment.campaign;
   const ends = campaign?.endDate ? new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(`${campaign.endDate}T12:00:00Z`)) : null;
-  return <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-t-[inherit] bg-brand-900 px-5 py-3.5 text-white">
-    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/10 text-[#d5e9ad]"><IconCampaigns size={17} /></span>
+  const name = campaign ? campaign.name : brief.enrollment.sequenceName;
+  const href = campaign ? '/campaigns/' + campaign.id : '/sequences/' + brief.task.enrollment.sequence.id;
+  // The name has the whole second row to itself; the facts sit small in the top-right corner.
+  return <div className="flex items-start gap-3 rounded-t-[inherit] bg-brand-900 px-5 py-3.5 text-white">
+    <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/10 text-[#d5e9ad]"><IconCampaigns size={17} /></span>
     <div className="min-w-0 flex-1">
-      <div className="text-[10.5px] font-medium uppercase tracking-[0.14em] text-brand-200">{campaign ? 'Campaign' : 'Outreach'}</div>
-      {campaign
-        ? <Link href={'/campaigns/' + campaign.id} className="block truncate text-[19px] font-semibold leading-snug tracking-[-0.01em] text-white hover:text-[#dfefc1]">{campaign.name}</Link>
-        : <Link href={'/sequences/' + brief.task.enrollment.sequence.id} className="block truncate text-[19px] font-semibold leading-snug tracking-[-0.01em] text-white hover:text-[#dfefc1]">{brief.enrollment.sequenceName}</Link>}
-    </div>
-    <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
-      <span className="rounded-full bg-white/10 px-2.5 py-1 tabular-nums text-white">Step {brief.stepIndex + 1} of {brief.stepCount}</span>
-      {ends ? <span className="rounded-full bg-white/10 px-2.5 py-1 text-brand-100">Ends {ends}</span> : null}
-      {campaign?.status === 'PAUSED' ? <span className="rounded-full bg-amber-300/20 px-2.5 py-1 text-amber-100">Paused</span> : null}
+      <div className="flex items-center gap-3">
+        <span className="flex-1 text-[10.5px] font-medium uppercase tracking-[0.14em] text-brand-200">{campaign ? 'Campaign' : 'Outreach'}</span>
+        <span className="flex shrink-0 items-center gap-1.5 text-[11px] leading-none">
+          <span className="rounded-full bg-white/10 px-2 py-1 tabular-nums text-white">Step {brief.stepIndex + 1} of {brief.stepCount}</span>
+          {ends ? <span className="rounded-full bg-white/10 px-2 py-1 text-brand-100">Ends {ends}</span> : null}
+          {campaign?.status === 'PAUSED' ? <span className="rounded-full bg-amber-300/20 px-2 py-1 text-amber-100">Paused</span> : null}
+        </span>
+      </div>
+      <Link href={href} className="mt-1 block break-words text-[19px] font-semibold leading-snug tracking-[-0.01em] text-white hover:text-[#dfefc1]">{name}</Link>
     </div>
   </div>;
+}
+
+type NextItem = Awaited<ReturnType<typeof prisma.nextAction.findMany<{ include: typeof nextActionInclude }>>>[number];
+const personName = (p: { firstName: string; lastName: string; email: string | null }) => `${p.firstName} ${p.lastName}`.trim() || p.email || 'Unnamed';
+const dueLabel = (due: string, today: string) => (due === today ? 'Today' : formatLocalDate(due));
+
+/** Next actions at the top of a tab's list: whose, what, how and when. */
+function NextActionList({ items, selectedId, today, showFo, href }: { items: NextItem[]; selectedId: string | null; today: string; showFo: boolean; href: (id: string) => string }) {
+  return <div className="border-b border-line">
+    <div className="bg-canvas/60 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-500">Next actions <span className="tabular-nums">· {items.length}</span></div>
+    <ul className="divide-y divide-line">{items.map((n) => <li key={n.id}>
+      <Link href={href(n.id)} aria-current={n.id === selectedId ? 'true' : undefined} className={`flex items-start gap-3 px-3 py-2.5 transition hover:bg-brand-50/50 ${n.id === selectedId ? 'bg-brand-50' : ''}`}>
+        <Avatar name={personName(n.person)} shape="circle" size={30} />
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink-900">{personName(n.person)}</span><span className={`shrink-0 text-[12px] ${n.state === 'OPEN' && n.dueDate < today ? 'text-red-700' : 'text-ink-500'}`}>{n.state === 'OPEN' ? dueLabel(n.dueDate, today) : 'Done'}</span></span>
+          <span className="mt-0.5 flex items-center gap-1.5 text-[12px] text-ink-600"><span className="shrink-0 text-ink-500"><ActionIcon action={n.action} size={12} /></span><span className="truncate">{n.label}</span>{n.repeat !== 'NONE' ? <span className="shrink-0 text-ink-400" title={REPEAT_LABELS[n.repeat]}><IconRefresh size={11} /></span> : null}</span>
+          {showFo ? <span className="mt-0.5 block truncate text-[11.5px] text-ink-500">FO {n.fo.name}</span> : null}
+        </span>
+      </Link>
+    </li>)}</ul>
+  </div>;
+}
+
+/** An open next action: the band says it is one and what it is; below, the person and the controls. */
+function NextActionPanel({ item: n, today, timezone, nextUrl, nextWorkingDay, mayWork }: { item: NextItem; today: string; timezone: string; nextUrl: string; nextWorkingDay: string; mayWork: boolean }) {
+  const name = personName(n.person);
+  const overdue = n.state === 'OPEN' && n.dueDate < today;
+  return <Surface flush>
+    <div className="flex items-start gap-3 rounded-t-[inherit] bg-brand-900 px-5 py-3.5 text-white">
+      <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/10 text-[#d5e9ad]"><IconRefresh size={16} /></span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-3">
+          <span className="flex-1 text-[10.5px] font-medium uppercase tracking-[0.14em] text-brand-200">Next action</span>
+          <span className="flex shrink-0 items-center gap-1.5 text-[11px] leading-none"><span className="rounded-full bg-white/10 px-2 py-1 text-white">{REPEAT_LABELS[n.repeat]}</span></span>
+        </div>
+        <div className="mt-1 break-words text-[19px] font-semibold leading-snug tracking-[-0.01em]">{n.label}</div>
+      </div>
+    </div>
+    <header className="border-b border-line bg-gradient-to-r from-brand-50/70 to-white p-5">
+      <div className="mb-4 flex items-center gap-3"><Avatar name={name} shape="circle" size={44} /><div><Link href={'/people/' + n.person.id} className="text-xl font-semibold tracking-tight hover:text-brand-700">{name}</Link><div className="mt-1 text-sm text-ink-500">{n.person.jobTitle ?? 'Title missing'}</div></div><div className="ml-auto"><Badge tone={n.state !== 'OPEN' ? 'gray' : overdue ? 'red' : n.dueDate === today ? 'green' : 'blue'}>{n.state !== 'OPEN' ? 'Done' : overdue ? 'Overdue' : n.dueDate === today ? 'Due today' : 'Upcoming'}</Badge></div></div>
+      <RecordFields items={[{ label: 'Company', value: n.person.companyName }, { label: 'How', value: <span className="inline-flex items-center gap-1.5"><ActionIcon action={n.action} size={14} />{ACTION_LABELS[n.action]}</span> }, { label: 'Due', value: formatLocalDate(n.dueDate, 'long') }, { label: 'Assigned to', value: n.fo.name }, { label: 'Email', value: n.person.email }, { label: 'Phone', value: n.person.phone }, ...(n.lastDoneAt ? [{ label: 'Last done', value: formatInstant(n.lastDoneAt, timezone) }] : [])]} />
+    </header>
+    {n.state === 'OPEN' && mayWork ? <div className="p-5"><NextActionControls id={n.id} nextUrl={nextUrl} nextWorkingDay={nextWorkingDay} repeats={n.repeat !== 'NONE'} /></div> : null}
+  </Surface>;
 }
 
 export default async function TasksPage({ searchParams }: { searchParams: Promise<Search> }) {
@@ -65,15 +116,33 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const podId = filters ? filterParam(sp.pod, defaults.podId) : null; const foUserId = filters ? filterParam(sp.fo, defaults.foUserId) : null;
   const limit = Math.min(2000, Math.max(200, Number(sp.limit) || 200));
   const [{ rows, counts, channelCounts, today, total, held }, options, settings] = await Promise.all([listTaskGroups(user, { tab, podId, foUserId, channel }, new Date(), limit), filterOptions(user), getSettings()]);
+  // Next actions (outside any campaign) are work in these same tabs, counted with the tasks.
+  const recentDone = startOfLocalDay(addDays(today, -30), user.timezone);
+  const [openNext, doneNext] = await Promise.all([
+    prisma.nextAction.findMany({ where: nextActionWhere({ podId, foUserId, channel: null }), include: nextActionInclude, orderBy: [{ dueDate: 'asc' }, { createdAt: 'asc' }], take: 500 }),
+    tab === 'done' ? prisma.nextAction.findMany({ where: { ...(foUserId ? { foUserId } : {}), ...(podId ? { fo: { pods: { some: { podId } } } } : {}), lastDoneAt: { gte: recentDone } }, include: nextActionInclude, orderBy: { lastDoneAt: 'desc' }, take: 100 }) : Promise.resolve([]),
+  ]);
+  const nextTab = (n: { dueDate: string }): TaskTab => (n.dueDate < today ? 'overdue' : n.dueDate === today ? 'today' : 'upcoming');
+  for (const n of openNext) {
+    if (nextTab(n) === tab) channelCounts[channelOf(n.action)]++;
+    if (!channel || channelOf(n.action) === channel) counts[nextTab(n)]++;
+  }
+  counts.done += doneNext.filter((n) => !channel || channelOf(n.action) === channel).length;
+  const nextInTab = (tab === 'done' ? doneNext : openNext.filter((n) => nextTab(n) === tab)).filter((n) => !channel || channelOf(n.action) === channel);
   const base = new URLSearchParams({ tab, mode });
   if (filters) { base.set('pod', podId ?? ''); base.set('fo', foUserId ?? ''); } if (channel) base.set('type', channel); if (limit > 200) base.set('limit', String(limit));
   const href = (patch: Record<string, string | null>) => { const next = new URLSearchParams(base); for (const [k,v] of Object.entries(patch)) { if (v === null) next.delete(k); else next.set(k,v); } return '/tasks?' + next.toString(); };
   // A ?task= that is not in this tab used to fall through to the first row, so a link from Home
   // or a bookmark opened somebody else's touch with the composer and the Done button attached to
   // it. The requested task is opened on its own if it is this user's; otherwise the screen says so.
-  const requested = sp.task?.trim() || null;
+  const requestedNext = sp.next?.trim() || null;
+  const requested = requestedNext ? null : sp.task?.trim() || null;
   const inView = rows.find(r => r.id === requested || r.childIds.includes(requested ?? '')) ?? null;
-  const selected = inView ?? (requested ? null : rows[0] ?? null);
+  const selected = requestedNext ? null : inView ?? (requested ? null : rows[0] ?? null);
+  // A next action opens when asked for, or first when the tab has no task to open.
+  const selectedNext = requestedNext ? nextInTab.find((n) => n.id === requestedNext) ?? await prisma.nextAction.findUnique({ where: { id: requestedNext }, include: nextActionInclude }) : !selected && !requested ? nextInTab[0] ?? null : null;
+  const nextIndex = selectedNext ? nextInTab.findIndex((n) => n.id === selectedNext.id) : -1;
+  const afterNext = nextIndex >= 0 && nextInTab[nextIndex + 1] ? href({ next: nextInTab[nextIndex + 1].id, task: null }) : rows[0] ? href({ task: rows[0].id, next: null }) : href({ task: null, next: null });
   const index = selected ? rows.findIndex(r => r.id === selected.id) : -1;
   const following = index >= 0 ? rows[index + 1] ?? (rows.length > 1 ? rows[0] : null) : rows[0] ?? null;
   const nextUrl = following ? href({ task: following.id }) : href({ task: null });
@@ -108,14 +177,14 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
     {missing ? <Notice tone="warn">That task is not in your list any more. It may have been completed, cancelled, or reassigned.</Notice> : null}
     {requested && !inView && brief ? <Notice tone="info">Showing one touch that is not in <span className="font-medium">{TAB_LABELS[tab]}</span>. <Link href={href({ task: null })} className="font-medium underline">Back to the list</Link></Notice> : null}
     {held ? <Notice tone="info"><span className="font-medium">{held}</span> {held === 1 ? 'step is' : 'steps are'} held: their outreach is paused. {manager ? <Link href="/campaigns" className="font-medium underline">Open campaigns</Link> : 'Ask a pod leader to resume it.'}</Notice> : null}
-    {!rows.length && !brief ? <Surface><EmptyState title={EMPTY_TITLES[tab]} icon={<ActionIcon action={channel ?? 'EMAIL'} size={22} />}
+    {!rows.length && !brief && !nextInTab.length && !selectedNext ? <Surface><EmptyState title={EMPTY_TITLES[tab]} icon={<ActionIcon action={channel ?? 'EMAIL'} size={22} />}
       /* An empty Today with work sitting in Overdue is the one case where the FO must not be left
          looking at a clear screen: send them to the tab that actually has the work. */
       action={tab !== 'overdue' && counts.overdue ? <Link href={href({ tab: 'overdue', task: null })} className="btn-primary">View {counts.overdue} overdue {counts.overdue === 1 ? 'step' : 'steps'}</Link> : tab !== 'upcoming' && counts.upcoming ? <Link href={href({ tab: 'upcoming', task: null })} className="btn-secondary">View {counts.upcoming} upcoming</Link> : undefined} /></Surface> : <>
       {mode === 'flow' && <div className="flex items-center gap-3 rounded-xl border border-brand-200 bg-brand-50 p-3"><strong>{index + 1} / {total}</strong><span className="text-sm text-ink-500">Task flow</span><div className="ml-auto flex gap-2">{prevUrl && <Link aria-label="Previous task" href={prevUrl} className="btn-secondary btn-sm"><IconChevronLeft size={14} /></Link>}{following && <Link href={nextUrl} className="btn-secondary btn-sm">Next<IconChevronRight size={14} /></Link>}<Link href={href({ mode: 'list', task: selected?.id ?? null })} className="btn-secondary btn-sm">Back to list</Link></div></div>}
       <div className={mode === 'flow' ? 'grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_380px]' : 'grid items-start gap-4 xl:grid-cols-[300px_minmax(0,1fr)] 2xl:grid-cols-[300px_minmax(0,1fr)_360px]'}>
-        {mode === 'list' && <Surface flush className="max-h-[65vh] overflow-y-auto scroll-thin xl:sticky xl:top-4 xl:max-h-[calc(100vh-17rem)]"><TaskList key={tab + '-' + (channel ?? '')} rows={listRows} selectedId={selected?.id ?? null} today={today} showFo={filters} hrefTemplate={href({ task: '__ID__' })} dispositions={dispositions} skipReasons={skipReasons} fos={options.fos} nextWorkingDay={nextWorkingDay} canPickSnoozeDate={canSnoozeFreely(user)} bulkEnabled={tab !== 'done'} />{rows.length < total && <Link href={href({ limit: String(limit + 200) })} className="btn-ghost m-3">Load more · <strong>{total - rows.length}</strong></Link>}</Surface>}
-        <div className="min-w-0 space-y-4">{brief && <Surface flush>
+        {mode === 'list' && <Surface flush className="max-h-[65vh] overflow-y-auto scroll-thin xl:sticky xl:top-4 xl:max-h-[calc(100vh-17rem)]">{nextInTab.length ? <NextActionList items={nextInTab} selectedId={selectedNext?.id ?? null} today={today} showFo={filters} href={(id) => href({ next: id, task: null })} /> : null}{rows.length ? <TaskList key={tab + '-' + (channel ?? '')} rows={listRows} selectedId={selected?.id ?? null} today={today} showFo={filters} hrefTemplate={href({ task: '__ID__' })} dispositions={dispositions} skipReasons={skipReasons} fos={options.fos} nextWorkingDay={nextWorkingDay} canPickSnoozeDate={canSnoozeFreely(user)} bulkEnabled={tab !== 'done'} /> : null}{rows.length < total && <Link href={href({ limit: String(limit + 200) })} className="btn-ghost m-3">Load more · <strong>{total - rows.length}</strong></Link>}</Surface>}
+        <div className="min-w-0 space-y-4">{selectedNext && <NextActionPanel item={selectedNext} today={today} timezone={user.timezone} nextUrl={afterNext} nextWorkingDay={nextWorkingDay} mayWork={canActOnTask(user, { foUserId: selectedNext.foUserId, podId: null }) || (isPodLeader(user) && (options.fos.find((f) => f.id === selectedNext.foUserId)?.podIds ?? []).some((id) => user.podIds.includes(id)))} />}{brief && <Surface flush>
           <CampaignBand brief={brief} />
           <header className="border-b border-line bg-gradient-to-r from-brand-50/70 to-white p-5"><div className="mb-4 flex items-center gap-3"><Avatar name={brief.personName} shape="circle" size={44} /><div><Link href={'/people/' + brief.person.id} className="text-xl font-semibold tracking-tight hover:text-brand-700">{brief.personName}</Link><div className="mt-1 text-sm text-ink-500">{brief.person.jobTitle ?? 'Title missing'}</div></div><div className="ml-auto flex flex-wrap items-center justify-end gap-1.5"><PersonBadges person={brief.person} /><Badge tone={dueState.tone}>{dueState.label}</Badge></div></div>
             <RecordFields items={[{ label:'Company', value:brief.person.companyName },{ label:'Outreach', value:<Link href={'/sequences/' + brief.task.enrollment.sequence.id}>{brief.enrollment.sequenceName}</Link> },{ label:'Day', value:brief.task.stepDay },{ label:'Due', value:brief.task.snoozedTo ?? brief.task.dueDate },{ label:'Assigned to', value:brief.enrollment.foName }]} />
