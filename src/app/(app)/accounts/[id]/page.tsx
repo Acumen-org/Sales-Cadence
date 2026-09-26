@@ -2,7 +2,6 @@ import { canCreateMeeting, isAdmin } from '@/lib/auth/rbac';
 import { ActionButton } from '@/components/action-form';
 import { blockAccountAction, unblockAccountAction } from '@/lib/actions/blocked-accounts';
 import Link from 'next/link';
-import { Suspense } from 'react';
 import { RecordSync } from '@/components/record-sync';
 import { notFound } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
@@ -62,7 +61,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
 
   return (
     <>
-      <Suspense fallback={null}><RecordSync kind="company" id={company.id} /></Suspense>
+      <RecordSync kind="company" id={company.id} />
       <div className="px-6 pt-2">
         <RecordHeader
           name={company.name}

@@ -1,12 +1,22 @@
-import { liveRead } from '@/lib/twenty/live-read';
-import { RefreshWhenChanged } from './refresh-when-changed';
+'use client';
+
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
 /**
- * Re-reads one record from Twenty after the page has painted from the cache. Rendered inside a
- * Suspense boundary at the bottom of a record page, so the page never waits for the CRM and never
- * shows its errors; when the record changed, the page refreshes itself once.
+ * Re-reads one record from Twenty once the page has painted, and refreshes the page once when the
+ * record changed there. It asks from the browser, outside the page's render: an action on the
+ * record never waits for Twenty, and a gateway that is down shows nothing.
  */
-export async function RecordSync({ kind, id }: { kind: 'person' | 'company'; id: string }) {
-  const result = await liveRead(kind, id);
-  return <RefreshWhenChanged changed={result.changed} />;
+export function RecordSync({ kind, id }: { kind: 'person' | 'company'; id: string }) {
+  const router = useRouter();
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/record-sync?kind=${kind}&id=${encodeURIComponent(id)}`, { cache: 'no-store' })
+      .then((res) => (res.ok ? (res.json() as Promise<{ changed?: boolean }>) : null))
+      .then((r) => { if (live && r?.changed) router.refresh(); })
+      .catch(() => { /* the next visit asks again */ });
+    return () => { live = false; };
+  }, [kind, id, router]);
+  return null;
 }

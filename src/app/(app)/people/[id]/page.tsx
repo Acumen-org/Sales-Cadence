@@ -126,7 +126,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
 
   return (
     <>
-      <Suspense fallback={null}><RecordSync kind="person" id={id} /></Suspense>
+      <RecordSync kind="person" id={id} />
       <div className="px-6 pt-2">
         <RecordHeader
           name={cachedPersonName(person)}
