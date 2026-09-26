@@ -52,6 +52,18 @@ async function firstCalendarImport(now:Date){
  if(await prisma.setting.findUnique({where:{key:'calendarFirstImport'}}))return;
  try{const stats=await importCalendarWindow({from:new Date(now.getTime()-30*86400000),to:new Date(now.getTime()+60*86400000)});log('first calendar import',stats);await prisma.setting.upsert({where:{key:'calendarFirstImport'},create:{key:'calendarFirstImport',value:{at:now.toISOString(),stats}},update:{value:{at:now.toISOString(),stats}}});}catch(error){log('first calendar import failed',error);}
 }
+/**
+ * Once: the last two weeks of notes and emails are read again. Logged calls and emails whose person
+ * Twenty attached a moment late were set aside as "on no contact" and never read again; now they
+ * are, and each closes the step that was open when it happened.
+ */
+let evidenceRescanChecked=false;
+async function evidenceRescan(now:Date){
+ if(evidenceRescanChecked)return;evidenceRescanChecked=true;
+ const key='evidenceRescan20260926';
+ if(await prisma.setting.findUnique({where:{key}}))return;
+ try{const stats=await reconcile({days:14,only:['notes','messages'],actor:SYSTEM_ACTOR,now});log('evidence rescan',stats);await prisma.setting.upsert({where:{key},create:{key,value:{at:now.toISOString(),stats}},update:{value:{at:now.toISOString(),stats}}});}catch(error){log('evidence rescan failed',error);}
+}
 async function tick(){
  if(running||stopping)return;running=true;
  try{
@@ -61,6 +73,7 @@ async function tick(){
    }
    await nightly(new Date(now));
    await firstCalendarImport(new Date(now));
+   await evidenceRescan(new Date(now));
    await launchScheduledCampaigns({actor:SYSTEM_ACTOR});
    const stats=await runSchedulerTick({actor:SYSTEM_ACTOR});
    if(stats.generated||stats.completed)log('scheduler',stats);

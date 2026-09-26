@@ -10,6 +10,7 @@ import { addFoCandidates, addFoWindow } from '@/lib/campaign-add-fo';
 import { AddFoPanel } from '@/components/campaigns/add-fo-panel';
 import type { CampaignDraft } from '@/lib/campaign-planner';
 import { prisma } from '@/lib/db';
+import { barColour } from '@/lib/bar-colour';
 import { addDays, diffDays, formatLocalDate, todayIn } from '@/lib/dates';
 import { workspaceTimezone } from '@/lib/workspace';
 import { cachedPersonName } from '@/lib/person-cache';
@@ -113,11 +114,11 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
         </div>
         {total ? (
           <div className="relative mt-3 h-2 w-full rounded-full bg-ink-100">
-            <div className="absolute inset-y-0 left-0 rounded-full bg-brand-500" style={{ width: `${pct(Math.min(todayDay, total))}%` }} />
+            <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${pct(Math.min(todayDay, total))}%`, background: barColour(pct(Math.min(todayDay, total)) / 100) }} />
             {todayDay >= 1 && todayDay <= total ? <div className="absolute -top-1.5 h-5 w-0.5 bg-ink-900" style={{ left: `${pct(todayDay)}%` }} title="Today" /> : null}
           </div>
         ) : null}
-        {total ? <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-ink-500"><span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-brand-500" />elapsed</span><span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-ink-900" />today</span></div> : null}
+        {total ? <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-ink-500"><span><span className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: barColour(pct(Math.min(todayDay, total)) / 100) }} />elapsed</span><span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-ink-900" />today</span></div> : null}
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">

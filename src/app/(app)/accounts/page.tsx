@@ -1,3 +1,4 @@
+import { barColour } from '@/lib/bar-colour';
 import { sortDirection } from '@/lib/sorting';
 import { optionLabel } from '@/lib/twenty/labels';
 import { PageFrame } from '@/components/page-frame';
@@ -118,7 +119,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
                       {a.people ? (
                         <div className="min-w-0">
                           <div className="tabular-nums text-ink-800"><span className={a.inSequence ? 'text-ink-900' : 'text-ink-400'}>{a.inSequence.toLocaleString('en-US')}</span> <span className="text-ink-400">of {a.people.toLocaleString('en-US')}</span></div>
-                          <div className="mt-1 h-1 w-full max-w-[6rem] overflow-hidden rounded-full bg-ink-100"><div className="h-full rounded-full bg-brand-500" style={{ width: `${Math.min(100, Math.round((a.inSequence / a.people) * 100))}%` }} /></div>
+                          <div className="mt-1 h-1 w-full max-w-[6rem] overflow-hidden rounded-full bg-ink-100"><div className="h-full rounded-full" style={{ width: `${Math.min(100, Math.round((a.inSequence / a.people) * 100))}%`, background: barColour(a.inSequence / a.people) }} /></div>
                         </div>
                       ) : <Empty />}
                     </td>

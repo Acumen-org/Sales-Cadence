@@ -6,6 +6,7 @@ import { analyseMeetingAction } from '@/lib/actions/meetings';
 import { Badge, Notice, RecordFields, Surface } from '@/components/ui';
 import { requireUser } from '@/lib/auth/current-user';
 import { isAdmin } from '@/lib/auth/rbac';
+import { barColour } from '@/lib/bar-colour';
 import { formatInstant } from '@/lib/dates';
 import { AssistantHeader } from '@/components/assistant';
 
@@ -144,7 +145,7 @@ export async function MeetingAnalysisPanel({
                       <span className="font-medium text-ink-900">{Math.round(t.share * 100)}%</span>
                     </div>
                     <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-canvas">
-                      <div className="h-full rounded-full bg-brand-500" style={{ width: `${Math.round(t.share * 100)}%` }} />
+                      <div className="h-full rounded-full" style={{ width: `${Math.round(t.share * 100)}%`, background: barColour(t.share) }} />
                     </div>
                   </li>
                 ))}
@@ -178,7 +179,7 @@ function TalkTime({ rows }: { rows: Array<{ speaker: string; seconds: number; wo
               <span className="font-medium text-ink-900">{Math.round(t.share * 100)}%</span>
             </div>
             <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-canvas">
-              <div className="h-full rounded-full bg-brand-500" style={{ width: `${Math.round(t.share * 100)}%` }} />
+              <div className="h-full rounded-full" style={{ width: `${Math.round(t.share * 100)}%`, background: barColour(t.share) }} />
             </div>
           </li>
         ))}

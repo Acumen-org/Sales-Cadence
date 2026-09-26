@@ -2,6 +2,7 @@ import clsx from 'clsx';
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { requireUser } from '@/lib/auth/current-user';
+import { barColour } from '@/lib/bar-colour';
 import { diffDays, formatLocalDate } from '@/lib/dates';
 import { buildHome, type TeamRow } from '@/lib/home-query';
 import { TASK_CHANNELS, type TaskChannel } from '@/lib/tasks-query';
@@ -139,7 +140,7 @@ function WeekProgress({ done, due }: { done: number; due: number }) {
   const pct = due ? Math.min(100, Math.round((done / due) * 100)) : 0;
   return <div className="min-w-[200px]">
     <div className="mb-2 text-[14px] tabular-nums text-ink-600"><span className="font-medium text-ink-900">{done.toLocaleString('en-US')}</span> of {due.toLocaleString('en-US')} steps done</div>
-    <div className="h-2.5 overflow-hidden rounded-full bg-line" role="img" aria-label={`${pct}% of this week's steps done`}><div className={`h-full rounded-full transition-[width] ${pct >= 100 ? 'bg-emerald-500' : 'bg-brand-500'}`} style={{ width: `${pct}%` }} /></div>
+    <div className="h-2.5 overflow-hidden rounded-full bg-line" role="img" aria-label={`${pct}% of this week's steps done`}><div className="h-full rounded-full transition-[width,background-color]" style={{ width: `${pct}%`, background: barColour(pct / 100) }} /></div>
   </div>;
 }
 

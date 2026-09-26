@@ -183,6 +183,24 @@ describe('emails and calls close the step they belong to', () => {
     expect((await enrollment(personId)).tasks[0].state).toBe('PENDING');
   });
 
+  it('closes the step from an email to an address Twenty has not matched to the contact', async () => {
+    const personId = await firstDay();
+    await prisma.personCache.update({ where: { id: personId }, data: { email: 'Dana.Reyes@Prospect.example' } });
+    const m = mock.addMessage({ subject: 'PHH webinar', receivedAt: on('04', '15:00:00').toISOString(), from: { handle: 'alisa@cadence.local', workspaceMemberId: b.users.alisa.twentyMemberId }, to: [{ handle: 'dana.reyes@prospect.example', personId: null }, { handle: 'karson@cadence.local', role: 'cc' }] });
+    const r = await ingestEvent({ source: 'WEBHOOK', objectType: 'message', eventName: 'message.created', record: rawFromMessage(m), now: on('04', '15:00:00'), skipSync: true });
+    expect(r).toMatchObject({ result: 'message_outbound_completed', details: { [personId]: 'completed' } });
+    expect((await enrollment(personId)).tasks[0].state).toBe('DONE');
+  });
+
+  it('does not pick between two contacts who share an address', async () => {
+    const personId = await firstDay();
+    await prisma.personCache.updateMany({ where: { id: { in: [personId, 'person-01'] } }, data: { email: 'office@prospect.example' } });
+    const m = mock.addMessage({ subject: 'Hello', receivedAt: on('04', '15:00:00').toISOString(), from: { handle: 'alisa@cadence.local', workspaceMemberId: b.users.alisa.twentyMemberId }, to: [{ handle: 'office@prospect.example', personId: null }] });
+    const r = await ingestEvent({ source: 'WEBHOOK', objectType: 'message', eventName: 'message.created', record: rawFromMessage(m), now: on('04', '15:00:00'), skipSync: true });
+    expect(r.result).toBe('ignored_outbound_no_person');
+    expect((await enrollment(personId)).tasks[0].state).toBe('PENDING');
+  });
+
   it('holds evidence while the campaign is paused and uses it once it runs again', async () => {
     const personId = await firstDay();
     await changeCampaignStatus(campaignId, 'PAUSED', SYSTEM_ACTOR, on('04', '13:00:00'));
@@ -216,6 +234,48 @@ describe('calls logged in Twenty', () => {
     // The step waits for its email; the scheduler does not reuse the call for it.
     await runSchedulerTick({ actor: SYSTEM_ACTOR, now: on('04', '17:00:00'), skipSync: true });
     expect((await prisma.task.findFirstOrThrow({ where: { enrollment: { personId: 'person-05' }, action: 'EMAIL' } })).state).toBe('PENDING');
+  });
+
+  // Dialpad and the email logger write the note first and link the contact a moment later, so the
+  // note's own webhook arrives on no one. That note used to be set aside and never read again.
+  const loggedLate = () => {
+    const n = mock.addNote({ title: '[CALL] Outbound Call', personIds: [], createdByName: 'Dialpad', createdAt: on('04', '15:00:00').toISOString(), updatedAt: on('04', '15:00:00').toISOString() });
+    const { noteTargets: _targets, ...bare } = rawFromNote(n);
+    return { n, bare };
+  };
+  const callTask = () => prisma.task.findFirstOrThrow({ where: { enrollment: { personId: 'person-05' }, action: 'CALL' } });
+
+  it('closes the call once Twenty links the contact to the note, just after the note', async () => {
+    const { n, bare } = loggedLate();
+    const first = await ingestEvent({ source: 'WEBHOOK', objectType: 'note', eventName: 'note.created', record: bare, now: on('04', '15:00:05'), skipSync: true });
+    expect(first.result).toBe('ignored_note_no_person');
+    n.personIds.push('person-05');
+    const linked = await ingestEvent({ source: 'WEBHOOK', objectType: 'noteTarget', eventName: 'noteTarget.created', record: { id: 'nt-1', noteId: n.id, personId: 'person-05', companyId: null }, now: on('04', '15:00:06'), skipSync: true });
+    expect(linked.result).toBe('note_outbound_call_completed');
+    expect(await callTask()).toEqual(expect.objectContaining({ state: 'DONE', evidenceId: `note:${n.id}:person:person-05` }));
+    // A link to an account is not a contact.
+    const account = await ingestEvent({ source: 'WEBHOOK', objectType: 'noteTarget', eventName: 'noteTarget.created', record: { id: 'nt-2', noteId: n.id, personId: null, companyId: 'company-01' }, skipSync: true });
+    expect(account.result).toBe('ignored_note_target_not_person');
+  });
+
+  it('reads a note set aside on no contact again when the sync lists it with its contact', async () => {
+    const { n, bare } = loggedLate();
+    expect((await ingestEvent({ source: 'WEBHOOK', objectType: 'note', eventName: 'note.created', record: bare, now: on('04', '15:00:05'), skipSync: true })).result).toBe('ignored_note_no_person');
+    n.personIds.push('person-05');
+    // The next sync lists the same version of the note, now with its contact: read again, not "already received".
+    const listed = { source: 'RECONCILE' as const, objectType: 'note', eventName: 'note.updated', record: rawFromNote(n), recordId: n.id, updatedAt: n.updatedAt, now: on('04', '15:02:00'), skipSync: true };
+    expect((await ingestEvent(listed)).result).toBe('note_outbound_call_completed');
+    expect((await callTask()).state).toBe('DONE');
+    // Read whole once, it is done with.
+    expect((await ingestEvent(listed)).status).toBe('duplicate');
+    expect(await prisma.activityEvent.count({ where: { externalId: n.id } })).toBe(1);
+  });
+
+  it('reads a webhook note whole when the contact is already linked in Twenty', async () => {
+    const { n, bare } = loggedLate();
+    n.personIds.push('person-05');
+    const r = await ingestEvent({ source: 'WEBHOOK', objectType: 'note', eventName: 'note.created', record: bare, now: on('04', '15:00:05'), skipSync: true });
+    expect(r.result).toBe('note_outbound_call_completed');
   });
 });
 

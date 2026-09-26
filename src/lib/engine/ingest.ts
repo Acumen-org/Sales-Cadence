@@ -18,7 +18,7 @@ import {
 } from '../twenty/normalize';
 import type { TwentyCompany, TwentyMessage, TwentyNote, TwentyOpportunity, TwentyPerson, TwentyTask } from '../twenty/types';
 import { OCCUPYING_STATUSES, applyPersonFlags, markMeeting, markReplied } from './enrollment';
-import { actionTypesFor, classifyMessage, classifyNoteTitle, resolveNoteActor, type UserLike } from './matching';
+import { actionTypesFor, classifyMessage, classifyNoteTitle, isInternalAddress, resolveNoteActor, type UserLike } from './matching';
 import { completeTask, type EngineContext } from './tasks';
 import { alreadyCounted, windowStart } from './observed-evidence';
 import { importCalendarEvent, readRecently, removeCalendarEvent, type CalendarImport } from '../meetings/calendar-import';
@@ -53,6 +53,16 @@ export function dedupeKeyFor(objectType: string, recordId: string, updatedAt: st
 }
 
 /**
+ * Results that mean Twenty sent the record before it was whole: a note not yet attached to its
+ * person (the tools that log calls and emails attach the person a moment after the note), an email
+ * whose people Twenty had not matched yet, or a read that failed. The same record seen again - the
+ * sync's next listing, a later webhook - is read again rather than skipped as done, or that call or
+ * email would never close its step.
+ */
+const INCOMPLETE = new Set(['ignored_note_no_person', 'ignored_note_not_found', 'ignored_outbound_no_person', 'ignored_message_not_found', 'ignored_message_unknown_direction']);
+export const isIncompleteResult = (result: string | null | undefined) => Boolean(result && (INCOMPLETE.has(result) || result.startsWith('error:')));
+
+/**
  * Rule 6: every inbound event is stored once (dedupe on object + id + updatedAt), then processed.
  * Processing is idempotent by construction (single-use evidence, no-op state transitions), so a
  * lost race or a reconcile re-scan can never advance a step twice.
@@ -66,25 +76,35 @@ export async function ingestEvent(input: IngestInput, client?: TwentyClient): Pr
   const updatedAt = deletionAt ?? input.updatedAt ?? (typeof input.record.updatedAt === 'string' ? input.record.updatedAt : null);
   const dedupeKey = dedupeKeyFor(canonical, recordId, updatedAt, input.eventName);
 
-  const existing = await prisma.activityEvent.findUnique({ where: { dedupeKey }, select: { id: true } });
-  if (existing) return { status: 'duplicate', result: 'duplicate', eventId: existing.id, details: { dedupeKey } };
+  const existing = await prisma.activityEvent.findUnique({ where: { dedupeKey }, select: { id: true, result: true } });
+  if (existing && !isIncompleteResult(existing.result)) return { status: 'duplicate', result: 'duplicate', eventId: existing.id, details: { dedupeKey } };
 
-  let event: ActivityEvent;
-  try {
-    event = await prisma.activityEvent.create({
-      data: {
-        source: input.source,
-        objectType: canonical,
-        eventName: input.eventName,
-        externalId: recordId,
-        externalUpdatedAt: updatedAt ? new Date(updatedAt) : null,
-        dedupeKey,
-        payload: input.record as Prisma.InputJsonValue,
-      },
+  let event: Pick<ActivityEvent, 'id'>;
+  if (existing) {
+    // Claimed on the result it had, so two readers arriving at once do not both read it again.
+    const claimed = await prisma.activityEvent.updateMany({
+      where: { id: existing.id, result: existing.result },
+      data: { source: input.source, eventName: input.eventName, payload: input.record as Prisma.InputJsonValue, processedAt: null, result: null },
     });
-  } catch (err) {
-    if ((err as { code?: string }).code === 'P2002') return { status: 'duplicate', result: 'duplicate', details: { dedupeKey } };
-    throw err;
+    if (!claimed.count) return { status: 'duplicate', result: 'duplicate', eventId: existing.id, details: { dedupeKey } };
+    event = existing;
+  } else {
+    try {
+      event = await prisma.activityEvent.create({
+        data: {
+          source: input.source,
+          objectType: canonical,
+          eventName: input.eventName,
+          externalId: recordId,
+          externalUpdatedAt: updatedAt ? new Date(updatedAt) : null,
+          dedupeKey,
+          payload: input.record as Prisma.InputJsonValue,
+        },
+      });
+    } catch (err) {
+      if ((err as { code?: string }).code === 'P2002') return { status: 'duplicate', result: 'duplicate', details: { dedupeKey } };
+      throw err;
+    }
   }
 
   const actor: AuditActor = input.source === 'RECONCILE' ? RECONCILE_ACTOR : webhookActor(input.eventName, recordId);
@@ -113,9 +133,25 @@ async function process(type: CanonicalObject, input: IngestInput, ctx: EngineCon
       return handlePerson(normalizePerson(input.record, schema), deleted, ctx);
     case 'company':
       return handleCompany(normalizeCompany(input.record, schema), deleted);
-    case 'note':
+    case 'note': {
       if (deleted) return { result: 'ignored_deleted' };
-      return handleNote(normalizeNote(input.record, schema), ctx, settings);
+      // A webhook carries a note without the people it is about: a logged call or email is read whole.
+      const note = normalizeNote(input.record, schema);
+      const kind = classifyNoteTitle(note.title, settings.matching).kind;
+      const partial = !note.personIds.length && kind !== 'other' && kind !== 'cadence';
+      return handleNote(partial ? ((await fetchNote(note.id, client).catch(() => null)) ?? note) : note, ctx, settings);
+    }
+    case 'noteTarget': {
+      // The person a note is about arrives as its own record, just after the note: read the note again.
+      if (deleted) return { result: 'ignored_deleted' };
+      const personKeys = [schema.noteTarget.personId, 'targetPersonId'].filter((k) => k in input.record);
+      if (personKeys.length && personKeys.every((k) => !input.record[k])) return { result: 'ignored_note_target_not_person' };
+      const noteId = input.record[schema.noteTarget.noteId];
+      if (typeof noteId !== 'string' || !noteId) return { result: 'ignored_no_note_id' };
+      const note = await fetchNote(noteId, client);
+      if (!note) return { result: 'ignored_note_not_found' };
+      return handleNote(note, ctx, settings);
+    }
     case 'message': {
       if (deleted) return { result: 'ignored_deleted' };
       const inline = normalizeMessage(input.record, schema);
@@ -165,6 +201,11 @@ async function handleCalendarEvent(id: string, client?: TwentyClient): Promise<P
 async function fetchMessage(id: string, client?: TwentyClient): Promise<TwentyMessage | null> {
   const c = client ?? (await getTwentyClient());
   return c.getMessage(id);
+}
+
+async function fetchNote(id: string, client?: TwentyClient): Promise<TwentyNote | null> {
+  const c = client ?? (await getTwentyClient());
+  return c.getNote(id);
 }
 
 async function loadUsers(): Promise<UserLike[]> {
@@ -313,6 +354,27 @@ async function handleNote(note: TwentyNote, ctx: EngineContext, settings: Settin
 // messages
 // ---------------------------------------------------------------------------
 
+/**
+ * Recipients Twenty has not matched to a person yet (a contact added after the email, a second
+ * address): the person whose address it is, when exactly one person has it. Our own addresses
+ * never count.
+ */
+async function recipientsByAddress(message: TwentyMessage, users: UserLike[], internalDomains: readonly string[]): Promise<string[]> {
+  const ours = new Set(users.flatMap((u) => [u.email, ...u.aliases]).map((a) => a.trim().toLowerCase()));
+  const handles = [...new Set(message.participants.filter((p) => p.role !== 'from' && !p.personId && !p.workspaceMemberId).map((p) => (p.handle ?? '').trim().toLowerCase()))].filter(
+    (h) => h.includes('@') && !ours.has(h) && !isInternalAddress(h, internalDomains),
+  );
+  if (!handles.length) return [];
+  const people = await prisma.personCache.findMany({
+    where: { deletedAt: null, OR: [{ email: { in: handles, mode: 'insensitive' } }, { additionalEmails: { hasSome: handles } }] },
+    select: { id: true, email: true, additionalEmails: true },
+  });
+  return handles.flatMap((h) => {
+    const owners = people.filter((p) => p.email?.toLowerCase() === h || p.additionalEmails.some((a) => a.toLowerCase() === h));
+    return owners.length === 1 ? [owners[0].id] : [];
+  });
+}
+
 async function handleMessage(message: TwentyMessage, ctx: EngineContext, settings: Settings): Promise<ProcessOutcome> {
   const users = await loadUsers();
   const cls = classifyMessage(message, users, settings.rules.internalDomains);
@@ -320,10 +382,11 @@ async function handleMessage(message: TwentyMessage, ctx: EngineContext, setting
   const subject = message.subject ?? '(no subject)';
 
   if (cls.direction === 'outbound') {
-    if (!cls.recipientPersonIds.length) return { result: 'ignored_outbound_no_person' };
+    const recipientPersonIds = [...new Set([...cls.recipientPersonIds, ...(await recipientsByAddress(message, users, settings.rules.internalDomains))])];
+    if (!recipientPersonIds.length) return { result: 'ignored_outbound_no_person' };
     const outcomes: Record<string, string> = {};
     let anyCompleted = false;
-    for (const personId of cls.recipientPersonIds) {
+    for (const personId of recipientPersonIds) {
       await recordTouch({
         personId,
         channel: 'EMAIL',

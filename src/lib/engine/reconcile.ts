@@ -45,7 +45,7 @@ function tally(stats: ReconcileStats, r: IngestResult) {
  * Nightly and on-demand: re-scan Twenty activity for the last N days and run it through the
  * same ingestion pipeline as webhooks. Dedupe makes this safe to run any time.
  */
-export async function reconcile(opts: { days?: number; since?: string; sinceByStage?: Record<string, string>; actor?: AuditActor; now?: Date; skipSync?: boolean } = {}, client?: TwentyClient): Promise<ReconcileStats> {
+export async function reconcile(opts: { days?: number; since?: string; sinceByStage?: Record<string, string>; actor?: AuditActor; now?: Date; skipSync?: boolean; /** Only these listings, without the cache refresh: a partial pass is not the nightly one. */ only?: string[] } = {}, client?: TwentyClient): Promise<ReconcileStats> {
   const settings = await getSettings();
   const c = client ?? (await getTwentyClient());
   const days = opts.days ?? settings.rules.reconcileLookbackDays;
@@ -59,6 +59,7 @@ export async function reconcile(opts: { days?: number; since?: string; sinceBySt
   // workspace renamed, used to stop the whole reconcile at that point and leave the watermark
   // where it was, so the same failure repeated every minute and nothing after it ever ran.
   const stage = async (name: string, fn: () => Promise<void>) => {
+    if (opts.only && !opts.only.includes(name)) return;
     try {
       await fn();
     } catch (err) {
@@ -68,11 +69,13 @@ export async function reconcile(opts: { days?: number; since?: string; sinceBySt
   };
 
   // People first so dnd flips and new people are known before activity is matched.
-  const cache = await refreshPersonCache(c, { since, sinceByStage: Object.fromEntries(['people', 'companies', 'deletedPeople', 'deletedCompanies'].map((name) => [name, stageSince(`cache.${name}`)])) });
-  stats.people = cache.people;
-  stats.cacheFailed = cache.failed;
-  stats.cacheError = cache.firstError;
-  for (const [name, message] of Object.entries(cache.stageErrors)) if (message) stats.stageErrors[`cache.${name}`] = message;
+  if (!opts.only) {
+    const cache = await refreshPersonCache(c, { since, sinceByStage: Object.fromEntries(['people', 'companies', 'deletedPeople', 'deletedCompanies'].map((name) => [name, stageSince(`cache.${name}`)])) });
+    stats.people = cache.people;
+    stats.cacheFailed = cache.failed;
+    stats.cacheError = cache.firstError;
+    for (const [name, message] of Object.entries(cache.stageErrors)) if (message) stats.stageErrors[`cache.${name}`] = message;
+  }
   await stage('people', async () => {
     for await (const person of paginate((after) => c.listPeople({ updatedSince: stageSince('people'), after, limit: 100, includeDeleted: true }))) {
       tally(stats, await ingestEvent({ ...common, objectType: 'person', eventName: person.deletedAt ? 'person.deleted' : 'person.updated', record: (person.raw as Record<string, unknown> | undefined) ?? rawFromPerson(person), recordId: person.id, updatedAt: person.updatedAt }, c));
@@ -124,6 +127,7 @@ export async function reconcile(opts: { days?: number; since?: string; sinceBySt
     }
   });
 
+  if (opts.only) return stats;
   await prisma.setting.upsert({ where: { key: 'lastReconcile' }, create: { key: 'lastReconcile', value: { at: now.toISOString(), stats } }, update: { value: { at: now.toISOString(), stats } } });
   await logAudit({ entityType: 'settings', entityId: 'reconcile', action: 'reconcile_ran', actor, details: stats });
   return stats;

@@ -1,4 +1,5 @@
 import { DeleteCampaign } from './delete-campaign';
+import { barColour } from '@/lib/bar-colour';
 import { diffDays, todayIn, type LocalDate } from '@/lib/dates';
 import { IconCampaigns } from '@/components/icons';
 import { workspaceTimezone } from '@/lib/workspace';
@@ -46,7 +47,7 @@ export function PlannedCampaignDetail({ campaign: c, manager, people, q = '', la
         <div><span className="block text-[11px] uppercase tracking-[0.08em] text-[#c1d4ca]">Outreach groups</span><span className="text-[15px] font-medium tabular-nums">{draft.flows.length}</span></div>
         {c.endDate ? <div className="min-w-0">
           <div className="flex items-baseline justify-between gap-2 text-[12px] text-[#c1d4ca]"><span>{today < c.startDate ? `Starts in ${daysLeft(today, c.startDate)}` : today > c.endDate ? 'Finished' : `Day ${diffDays(c.startDate, today) + 1} of ${span}`}</span>{today >= c.startDate && today <= c.endDate ? <span className="tabular-nums">{daysLeft(today, c.endDate)} left</span> : null}</div>
-          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/15"><div className="h-full rounded-full bg-[#d5e9ad]" style={{ width: `${Math.round(elapsed * 100)}%` }} /></div>
+          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/15"><div className="h-full rounded-full" style={{ width: `${Math.round(elapsed * 100)}%`, background: barColour(elapsed, 'dark') }} /></div>
         </div> : null}
       </div>
     </header>

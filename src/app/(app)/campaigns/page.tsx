@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { PageFrame } from '@/components/page-frame';
+import { barColour } from '@/lib/bar-colour';
 import { formatLocalDate, todayIn, diffDays } from '@/lib/dates';
 import { requireUser } from '@/lib/auth/current-user';
 import { canEnroll, canApproveCampaign, needsPod, visiblePodIds } from '@/lib/auth/rbac';
@@ -89,7 +90,7 @@ export default async function CampaignsPage({ searchParams }: { searchParams: Pr
               return <tr key={c.id}>
                 <td><Link href={'/campaigns/' + c.id} className="block truncate text-[13px] font-medium text-ink-900 hover:text-brand-700">{c.name}</Link><div className="truncate text-[12px] text-ink-500">{c.sequenceName}</div></td>
                 <td className="truncate text-[12.5px]">{c.podName}</td>
-                <td className="text-[12px]">{total ? <><div className="flex flex-wrap items-baseline justify-between gap-x-2 text-ink-700"><span className="whitespace-nowrap">Day <span className="tabular-nums">{Math.min(day, total)}</span> of <span className="tabular-nums">{total}</span></span><span className="whitespace-nowrap text-ink-500">{c.endDate ? (day > total ? `ran over ${formatLocalDate(c.endDate)}` : `ends ${formatLocalDate(c.endDate)}`) : null}</span></div><div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-ink-100"><div className={`h-full rounded-full ${day > total ? 'bg-amber-500' : 'bg-brand-500'}`} style={{ width: `${pct}%` }} /></div></> : <span className="text-ink-500">Started {formatLocalDate(c.startDate)}</span>}</td>
+                <td className="text-[12px]">{total ? <><div className="flex flex-wrap items-baseline justify-between gap-x-2 text-ink-700"><span className="whitespace-nowrap">Day <span className="tabular-nums">{Math.min(day, total)}</span> of <span className="tabular-nums">{total}</span></span><span className="whitespace-nowrap text-ink-500">{c.endDate ? (day > total ? `ran over ${formatLocalDate(c.endDate)}` : `ends ${formatLocalDate(c.endDate)}`) : null}</span></div><div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-ink-100"><div className={`h-full rounded-full ${day > total ? 'bg-amber-500' : ''}`} style={{ width: `${pct}%`, background: day > total ? undefined : barColour((pct ?? 0) / 100) }} /></div></> : <span className="text-ink-500">Started {formatLocalDate(c.startDate)}</span>}</td>
                 <td className="text-[12.5px] tabular-nums text-ink-700">{touchesTotal ? <><span className="text-ink-900">{c.touches.done.toLocaleString('en-US')}</span> of {touchesTotal.toLocaleString('en-US')}</> : <Empty />}</td>
                 <td className="num"><Count value={c.counts.total} /></td>
                 <td className="num"><Count value={c.counts.replied} /></td>

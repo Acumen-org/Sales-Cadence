@@ -6,9 +6,8 @@
  * mark; and a table beside every chart, so nothing is colour-alone.
  */
 import type { ReactNode } from 'react';
+import { barColour } from '@/lib/bar-colour';
 
-/** One hue, light to dark, for magnitude. */
-export const GREEN_RAMP = ['#e3efe3', '#b9d8c0', '#7fb894', '#3f8f66', '#24735e', '#17493d'];
 const INK_MUTED = '#6b7a74';
 const GRID = '#e3e8e2';
 
@@ -57,7 +56,7 @@ export function Funnel({ stages }: { stages: { label: string; value: number; hin
             <span className="text-ink-800" title={s.hint}>{s.label}</span>
             <svg height={14} className="w-full min-w-0" viewBox="0 0 100 14" preserveAspectRatio="none" role="img" aria-label={`${s.label}: ${s.value.toLocaleString('en-US')}`}>
               <rect x={0} y={0} width={100} height={14} fill={GRID} opacity={0.4} rx={3} />
-              {s.value > 0 ? <rect x={0} y={0} width={Math.max(1.5, (s.value / top) * 100)} height={14} fill={GREEN_RAMP[Math.min(GREEN_RAMP.length - 1, 2 + i)]} rx={3}><title>{`${s.label}: ${s.value.toLocaleString('en-US')}${rate !== null ? ` · ${rate}% of ${stages[i - 1].label.toLowerCase()}` : ''}`}</title></rect> : null}
+              {s.value > 0 ? <rect x={0} y={0} width={Math.max(1.5, (s.value / top) * 100)} height={14} fill={barColour(s.value / top)} rx={3}><title>{`${s.label}: ${s.value.toLocaleString('en-US')}${rate !== null ? ` · ${rate}% of ${stages[i - 1].label.toLowerCase()}` : ''}`}</title></rect> : null}
             </svg>
             <span className="text-right tabular-nums text-ink-900">{s.value.toLocaleString('en-US')}{prev !== null ? <span className="ml-1 text-[11.5px] text-ink-500">of {prev.toLocaleString('en-US')}</span> : null}</span>
           </div>
@@ -71,7 +70,7 @@ export function Funnel({ stages }: { stages: { label: string; value: number; hin
 /** A day-of-window bar for a running campaign. */
 export function ProgressBar({ value, total, over = false }: { value: number; total: number; over?: boolean }) {
   const pct = total ? Math.min(100, Math.round((Math.min(value, total) / total) * 100)) : 0;
-  return <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: GRID }}><div className="h-full rounded-full" style={{ width: `${pct}%`, background: over ? '#c98500' : '#24735e' }} /></div>;
+  return <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: GRID }}><div className="h-full rounded-full" style={{ width: `${pct}%`, background: over ? '#c98500' : barColour(pct / 100) }} /></div>;
 }
 
 export function Figure({ title, children, aside }: { title: string; children: ReactNode; aside?: ReactNode }) {
