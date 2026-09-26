@@ -284,9 +284,9 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                 <Card
                   title="Next action"
                   actions={nextAccess.canSet ? <span className="flex items-center gap-2">
-                    {openNext && mayWorkNext ? <ActionButton action={completeNextActionAction} payload={{ id: openNext.id }} className="btn-primary btn-sm">Done</ActionButton> : null}
+                    {openNext && mayWorkNext ? <ActionButton action={completeNextActionAction} payload={{ id: openNext.id }} className="btn-primary btn-sm" refresh>Done</ActionButton> : null}
                     <NextActionButton personIds={[id]} today={today} fos={nextAccess.fos} canAssign={nextAccess.canAssign} label={openNext ? 'Change' : 'Set next action'} initial={openNext ? { label: openNext.label, action: openNext.action, dueDate: openNext.dueDate < today ? today : openNext.dueDate, repeat: openNext.repeat, foUserId: openNext.foUserId } : undefined} />
-                    {openNext && mayWorkNext ? <ActionButton action={stopNextActionAction} payload={{ id: openNext.id }} className="btn-ghost btn-sm" confirm="Stop this next action? It is cleared in Twenty too.">Stop</ActionButton> : null}
+                    {openNext && mayWorkNext ? <ActionButton action={stopNextActionAction} payload={{ id: openNext.id }} className="btn-ghost btn-sm" confirm="Stop this next action? It is cleared in Twenty too." refresh>Stop</ActionButton> : null}
                   </span> : null}
                 >
                   {openNext ? (

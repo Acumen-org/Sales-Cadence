@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import { saveNextActionAction } from '@/lib/actions/next-actions';
 import { Modal } from '@/components/modal';
@@ -36,6 +37,7 @@ export function NextActionButton({ personIds, today, fos, canAssign, initial, la
   className?: string;
   onDone?: (message: string) => void;
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<NextActionDraft>(initial ?? { label: '', action: 'EMAIL', dueDate: today, repeat: 'NONE', foUserId: '' });
   const [error, setError] = useState<string | null>(null);
@@ -51,8 +53,7 @@ export function NextActionButton({ personIds, today, fos, canAssign, initial, la
       if (!r.ok) { setError(r.error); return; }
       setError(null);
       setOpen(false);
-      // The action revalidates the pages this form lives on, and its answer carries them. A second
-      // refresh on top raced the next click: a Stop right after saving never showed.
+      router.refresh();
       onDone?.(r.message ?? 'Next action set.');
     });
 

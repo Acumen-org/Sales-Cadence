@@ -71,6 +71,7 @@ export function ActionButton({
   className = 'btn-secondary btn-sm',
   confirm,
   title,
+  refresh = false,
 }: {
   action: (formData: FormData) => Promise<ActionResult>;
   payload: Record<string, string>;
@@ -78,6 +79,8 @@ export function ActionButton({
   className?: string;
   confirm?: string;
   title?: string;
+  /** Re-read the page after it worked, for a page whose answer to the action can arrive late. */
+  refresh?: boolean;
 }) {
   const [pending, start] = useTransition();
   const [result, setResult] = useState<ActionResult | null>(null);
@@ -100,6 +103,7 @@ export function ActionButton({
               // Deleting a record leaves the user on a URL that no longer resolves, so an action
               // that says where to go next is followed here rather than only by forms.
               if (r.ok && r.redirectTo) router.push(r.redirectTo);
+              else if (r.ok && refresh) router.refresh();
             } catch (err) {
               setResult({ ok: false, error: err instanceof Error ? err.message : String(err) });
             }
