@@ -52,7 +52,7 @@ export type PlannerPerson = { id: string; name: string; ownerMemberId: string | 
 export type PlannerFo = { id: string; name: string; twentyMemberId: string | null };
 export type PlannedBatch = { id: string; foId: string; flowId: string; personIds: string[]; dates: string[]; priority: number };
 /** `kind` says which part of the plan stands in the way, so the page can point at it. */
-export type PlanIssue = { title: string; detail: string; foId?: string; date?: string; kind?: 'window' | 'few' | 'many' | 'search' | 'people' };
+export type PlanIssue = { title: string; detail: string; foId?: string; date?: string; kind?: 'window' | 'many' | 'search' | 'people' };
 export type CampaignCalendar = { version: 1; days: string[]; batches: PlannedBatch[]; people: PlannerPerson[]; fos: PlannerFo[]; issues: PlanIssue[]; valid: boolean; exhausted: boolean };
 export const PRIORITY_LABELS = ['Clients', 'MIP', 'Tier 1', 'Tier 2', 'Tier 3', 'Unclassified'];
 const normal = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -180,8 +180,24 @@ export function campaignBatches(draft: CampaignDraft, people: PlannerPerson[], f
   return { batches: all, issues };
 }
 
+/** Working days on which an FO has nothing to send, for each FO who has any. */
+export function quietDays(c: Pick<CampaignCalendar, 'days' | 'batches'>) {
+  const busy = new Map<string, Set<string>>();
+  for (const b of c.batches) { const on = busy.get(b.foId) ?? new Set<string>(); for (const d of b.dates) on.add(d); busy.set(b.foId, on); }
+  const out = new Map<string, number>();
+  for (const [id, on] of busy) { const n = c.days.filter(d => !on.has(d)).length; if (n) out.set(id, n); }
+  return out;
+}
+
+/**
+ * How full each FO's days must be. 'every': something to send on every working day, or no plan.
+ * 'fewest': the fewest days with nothing to send, without looking for none first. 'best' (the
+ * default): every working day when that is possible, otherwise the fewest empty days.
+ */
+export type CalendarFill = 'every' | 'fewest' | 'best';
+
 /** Deterministic bounded constraint search. No access to other campaigns or global workload. */
-export function buildCampaignCalendar(draft: CampaignDraft, people: PlannerPerson[], fos: PlannerFo[], nodeLimit = 120000): CampaignCalendar {
+export function buildCampaignCalendar(draft: CampaignDraft, people: PlannerPerson[], fos: PlannerFo[], nodeLimit = 120000, fill: CalendarFill = 'best'): CampaignCalendar {
   const days = calendarDays(draft.startDate, draft.endDate);
   const result: CampaignCalendar = { version: 1, days, batches: [], people, fos, issues: [], valid: false, exhausted: false };
   const issue = (title: string, detail: string, foId?: string, date?: string) => result.issues.push({ title, detail, foId, date });
@@ -197,8 +213,8 @@ export function buildCampaignCalendar(draft: CampaignDraft, people: PlannerPerso
     if (!batches.length) { issue(`${name} has no people assigned.`, 'Assign people to this FO or remove them from the campaign.', fo.id); continue; }
     const slots = new Map(days.map(d => [d, [] as number[]]));
     const totalTouches = batches.reduce((n, b) => n + draft.flows.find(f => f.id === b.flowId)!.steps.length, 0);
-    if (totalTouches < days.length || totalTouches > days.length * 2 || batches.length > days.length) {
-      issue(`${name} needs a different campaign window or batch size.`, `${totalTouches} batch touchpoints must cover ${days.length} working days with one or two per day. Adjust the audience, batch size or dates.`, fo.id); continue;
+    if ((fill === 'every' && totalTouches < days.length) || totalTouches > days.length * 2 || batches.length > days.length) {
+      issue(`${name} needs a different campaign window or batch size.`, `${totalTouches} batch touchpoints must fit ${days.length} working days with at most two per day${fill === 'every' ? ' and at least one' : ''}. Adjust the audience, batch size or dates.`, fo.id); continue;
     }
     const options = batches.map(b => {
       const cached = optionCache.get(b.flowId);
@@ -229,8 +245,95 @@ export function buildCampaignCalendar(draft: CampaignDraft, people: PlannerPerso
       }
       failed.add(key); return false;
     };
-    if (search(0, -1)) result.batches.push(...batches);
-    else issue(result.exhausted ? 'This plan needs a smaller search.' : `${name}’s current steps cannot cover every working day.`, result.exhausted ? 'The search limit was reached; this does not mean the plan is impossible. Reduce the window or simplify the outreach groups and try again.' : `No valid arrangement fits ${calendarDateLabel(days[0])} through ${calendarDateLabel(days.at(-1)!)}. Review the suggested adjustments; publishing stays blocked.`, fo.id, days[0]);
+    // Days with nothing to send are allowed when every day cannot be filled. Batches still start in
+    // priority order on days of their own, at most two a day and never two on one step. `upTo(k)` is
+    // the search above with at most k empty days: a batch may start after an empty day while no
+    // more than k are left behind. A quick greedy pass (or, failing it, any arrangement) bounds k,
+    // then halving lowers it while the search budget lasts.
+    let spent = false;
+    const fewest = () => {
+      // Each batch's latest start that still leaves a later start for every batch after it.
+      const latest = new Array<number>(batches.length);
+      for (let i = batches.length - 1, room = Infinity; i >= 0; i--) latest[i] = room = Math.min(room - 1, options[i].at(-1)!.index);
+      const open = (o: { dates: string[] }) => !o.dates.some((d, step) => { const s = slots.get(d)!; return s.length >= 2 || s.includes(step); });
+      const take = (i: number, o: { dates: string[] }) => { o.dates.forEach((d, step) => slots.get(d)!.push(step)); batches[i].dates = o.dates; };
+      const drop = (i: number) => { batches[i].dates.forEach(d => slots.get(d)!.pop()); batches[i].dates = []; };
+      const lift = () => {
+        const plan = batches.map(b => b.dates);
+        const quiet = days.filter(d => !slots.get(d)!.length).length;
+        for (let i = batches.length - 1; i >= 0; i--) drop(i);
+        return { plan, quiet };
+      };
+      let steps = 0;
+      // Greedy: each batch at the start that leaves the fewest days empty for good plus the fewest
+      // touchpoints on days that already have one. No backtracking.
+      const greedy = () => {
+        let after = -1;
+        for (let i = 0; i < batches.length; i++) {
+          let pick: { o: { index: number; dates: string[] }; cost: number } | null = null, skipped = 0, last = after;
+          for (const o of options[i]) {
+            if (o.index <= after) continue;
+            if (o.index > latest[i] || (pick && skipped >= pick.cost)) break;
+            steps++;
+            for (let d = last + 1; d < o.index; d++) if (!slots.get(days[d])!.length) skipped++;
+            last = Math.max(last, o.index - 1);
+            if (!open(o)) continue;
+            const cost = skipped + o.dates.reduce((n, d) => n + (slots.get(d)!.length ? 1 : 0), 0);
+            if (!pick || cost < pick.cost) pick = { o, cost };
+          }
+          if (!pick) { for (let j = i - 1; j >= 0; j--) drop(j); return null; }
+          take(i, pick.o); after = pick.o.index;
+        }
+        return lift();
+      };
+      const upTo = (k: number, limit: number) => {
+        const tried = new Set<string>();
+        let out = false;
+        const place = (i: number, after: number): boolean => {
+          if (++steps > limit) { out = true; return false; }
+          const empty: number[] = [];
+          days.forEach((d, n) => { if (!slots.get(d)!.length) empty.push(n); });
+          if (i === batches.length) return empty.length <= k;
+          if (empty.length - k > suffix[i] || latest[i] <= after) return false;
+          const last = Math.min(latest[i], empty.length > k ? empty[k] : days.length - 1);
+          const key = `${i}/${after}/${days.map(d => slots.get(d)!.join(',')).join(';')}`;
+          if (tried.has(key)) return false;
+          for (const o of options[i]) {
+            if (o.index <= after) continue;
+            if (o.index > last) break;
+            if (!open(o)) continue;
+            take(i, o);
+            if (place(i + 1, o.index)) return true;
+            drop(i);
+            if (out) return false;
+          }
+          tried.add(key); return false;
+        };
+        const ok = place(0, -1);
+        return { found: ok ? lift() : null, out };
+      };
+      let best = greedy();
+      if (!best) {
+        const any = upTo(days.length, nodeLimit >> 1);
+        if (!any.found) { spent = any.out; return false; }
+        best = any.found;
+      }
+      const floor = Math.max(0, days.length - suffix[0]);
+      let lo = floor, hi = best.quiet - 1;
+      while (lo <= hi && steps < nodeLimit) {
+        const k = lo === floor ? lo : (lo + hi) >> 1;
+        const r = upTo(k, steps + Math.max(500, (nodeLimit - steps) >> 1));
+        if (r.found) { best = r.found; hi = r.found.quiet - 1; } else lo = k + 1;
+      }
+      for (let i = 0; i < batches.length; i++) take(i, { dates: best.plan[i] });
+      return true;
+    };
+    if ((fill !== 'fewest' && totalTouches >= days.length && search(0, -1)) || (fill !== 'every' && fewest())) result.batches.push(...batches);
+    else {
+      if (spent) result.exhausted = true;
+      const limited = fill === 'every' ? result.exhausted : spent;
+      issue(limited ? 'This plan needs a smaller search.' : `${name}’s current steps do not fit these dates.`, limited ? 'The search limit was reached; this does not mean the plan is impossible. Reduce the window or simplify the outreach groups and try again.' : `No valid arrangement fits ${calendarDateLabel(days[0])} through ${calendarDateLabel(days.at(-1)!)}. Review the suggested adjustments; publishing stays blocked.`, fo.id, days[0]);
+    }
   }
   result.valid = !result.issues.length && result.batches.reduce((n, b) => n + b.personIds.length, 0) === people.length;
   return result;

@@ -4,7 +4,7 @@ import type { SessionUser } from '@/lib/auth/current-user';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 import { campaignAudienceIssues } from '@/lib/campaign-audience';
 import { outreachInWords, planCampaign, previewCampaignCalendar, saveCampaignCalendar } from '@/lib/campaign-planning-service';
-import type { CampaignDraft } from '@/lib/campaign-planner';
+import { quietDays, type CampaignDraft } from '@/lib/campaign-planner';
 import { outreachRecipe } from '@/lib/campaign-starter';
 import { pickAllIdsAction, pickPeopleAction } from '@/lib/actions/people-picker';
 
@@ -92,24 +92,30 @@ describe('who a campaign can reach', () => {
     expect(plan.paces).toEqual([{ foId: b.users.alisa.id, name: b.users.alisa.name, from: 1, to: 4 }]);
   });
 
-  it('says once, in plain words, why an edited outreach cannot take everyone, and offers the studio’s own outreach first', async () => {
+  it('plans an edited outreach with empty days, says once in plain words why one cannot finish, and offers the studio’s own outreach first', async () => {
     const karsons = Array.from({ length: 4 }, (_, i) => `aud-k${i}`);
     await prisma.personCache.createMany({ data: karsons.map(id => ({ id, firstName: 'Aud', lastName: id, podOwner: 'ALISA', ownerMemberId: b.users.karson.twentyMemberId })) });
+    const team = { personIds: [...ids, ...karsons], fos: [{ id: b.users.alisa.id, batchSize: 1 }, { id: b.users.karson.id, batchSize: 1 }], outreachEdited: true };
+    // Two days apart, these people cannot fill every working day: the plan keeps days empty instead of asking.
     const spaced = [outreachRecipe(2)[0], { ...outreachRecipe(2)[1], day: 3 }];
-    const plan = await planCampaign(draft({ personIds: [...ids, ...karsons], fos: [{ id: b.users.alisa.id, batchSize: 1 }, { id: b.users.karson.id, batchSize: 1 }], flows: [{ id: 'default', name: 'Default', steps: spaced }], outreachEdited: true }), admin, undefined, { reshapeOutreach: false });
+    const gaps = await planCampaign(draft({ ...team, flows: [{ id: 'default', name: 'Default', steps: spaced }] }), admin, undefined, { reshapeOutreach: false });
+    expect(gaps.calendar.valid).toBe(true); expect(gaps.draft.flows[0].steps).toEqual(spaced);
+    expect(quietDays(gaps.calendar).size).toBeGreaterThan(0);
+    // A week between steps cannot finish by Friday.
+    const late = [outreachRecipe(2)[0], { ...outreachRecipe(2)[1], day: 8 }];
+    const plan = await planCampaign(draft({ ...team, flows: [{ id: 'default', name: 'Default', steps: late }] }), admin, undefined, { reshapeOutreach: false });
     expect(plan.calendar.valid).toBe(false); expect(plan.stage).toBe('outreach');
-    const names = [b.users.alisa.name, b.users.karson.name].sort((x, y) => plan.calendar.issues[0].title.indexOf(x) - plan.calendar.issues[0].title.indexOf(y));
-    expect(plan.calendar.issues).toEqual([{ title: `${names[0]} and ${names[1]} would have working days with nothing to send.`, detail: 'The waits between steps leave gaps. Every FO needs something to send each working day.', kind: 'search' }]);
+    expect(plan.calendar.issues).toEqual([{ title: 'The steps run past Fri, Jan 8.', detail: 'Even starting on the first day, the last step would go out too late.', kind: 'window' }]);
     expect(plan.suggestions[0]).toMatchObject({ label: 'Let the studio set the outreach', studio: true });
     expect(plan.suggestions[0].detail).toMatch(/^(It sends \d+ steps?[^.]*\. All 8 people fit by Fri, Jan 8\.|(One step [^.]+\. )?All 8 people fit by Fri, Jan 8\. .+ sends? .+\.)$/);
     expect(plan.suggestions[0].draft.outreachEdited).toBe(false);
   });
 
   it('offers the studio outreach for a single person in the singular', async () => {
-    const spaced = [outreachRecipe(2)[0], { ...outreachRecipe(2)[1], day: 3 }];
-    const plan = await planCampaign(draft({ personIds: ['aud-1'], flows: [{ id: 'default', name: 'Default', steps: spaced }], outreachEdited: true }), admin, undefined, { reshapeOutreach: false });
+    const late = [outreachRecipe(2)[0], { ...outreachRecipe(2)[1], day: 8 }];
+    const plan = await planCampaign(draft({ personIds: ['aud-1'], flows: [{ id: 'default', name: 'Default', steps: late }], outreachEdited: true }), admin, undefined, { reshapeOutreach: false });
     expect(plan.calendar.valid).toBe(false);
-    expect(plan.calendar.issues[0]).toMatchObject({ kind: 'few', title: `${b.users.alisa.name} doesn't have enough people to fill every working day.` });
+    expect(plan.calendar.issues[0]).toMatchObject({ kind: 'window', title: 'The steps run past Fri, Jan 8.' });
     expect(plan.suggestions[0]).toMatchObject({ studio: true, detail: 'It sends 5 steps, one each working day. The 1 person fits by Fri, Jan 8.' });
   });
 

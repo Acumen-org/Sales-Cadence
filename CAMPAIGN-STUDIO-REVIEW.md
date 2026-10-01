@@ -23,7 +23,7 @@ The studio creates outreach inside each campaign, with a calendar planned around
 
 ## Operational boundaries
 
-Published plans cover every working day within their campaign dates and allow at most two batches per FO per day. Human completion, replies, opt-outs and subsequent removals can change actual coverage; overdue work remains visible rather than silently moving. Existing legacy campaigns retain their execution rules. New studio campaigns execute their published dates.
+Published plans give each FO something to send on every working day within their campaign dates when the people and outreach allow it, otherwise on as many days as possible, and allow at most two batches per FO per day. Human completion, replies, opt-outs and subsequent removals can change actual coverage; overdue work remains visible rather than silently moving. Existing legacy campaigns retain their execution rules. New studio campaigns execute their published dates.
 
 Planner search is bounded and reports search exhaustion separately from infeasibility. Suggested adjustments are verified before being offered. These checks cover the specified requirements and representative stress cases, not every possible future integration or input.
 

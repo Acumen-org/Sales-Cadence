@@ -95,11 +95,11 @@ export async function planAddFo(user: SessionUser, campaignId: string, input: Ad
   let fit = fitCampaign(base, people, team, { reshapeOutreach: false });
   let flow: AddFoPreview['flow'] = { ...stored.flows[0], created: false };
   if (!isFit(fit) || fit.droppedFos.some((d) => d.id === fo.id)) {
-    // The campaign's outreach cannot fill this FO's days. An outreach the studio built may be built again for them.
+    // The campaign's outreach cannot take this FO's people. An outreach the studio built may be built again for them.
     const automatic = stored.outreachEdited === false || (stored.request?.outreachEdited === false);
-    if (!automatic) return { ok: false, error: `With this campaign’s outreach, ${fo.name}’s ${accepted.length} ${accepted.length === 1 ? 'person' : 'people'} cannot fill every working day to ${shortDateLabel(c.endDate ?? c.startDate)}. Try more people, or another pace.`, leftOut };
+    if (!automatic) return { ok: false, error: `With this campaign’s outreach, ${fo.name}’s ${accepted.length} ${accepted.length === 1 ? 'person' : 'people'} do not fit by ${shortDateLabel(c.endDate ?? c.startDate)}. Try another pace.`, leftOut };
     const own = fitCampaign({ ...base, flows: [{ id: 'default', name: 'Default', steps: stored.flows[0].steps.slice(0, 1) }] }, people, team, { reshapeOutreach: true });
-    if (!isFit(own) || own.droppedFos.some((d) => d.id === fo.id)) return { ok: false, error: `${fo.name}’s ${accepted.length} ${accepted.length === 1 ? 'person' : 'people'} cannot fill every working day to ${shortDateLabel(c.endDate ?? c.startDate)}. Choose more people.`, leftOut };
+    if (!isFit(own) || own.droppedFos.some((d) => d.id === fo.id)) return { ok: false, error: `${fo.name}’s ${accepted.length} ${accepted.length === 1 ? 'person' : 'people'} do not fit by ${shortDateLabel(c.endDate ?? c.startDate)}. Choose other people.`, leftOut };
     fit = own;
     const id = uniqueFlowId(stored, `fo-${fo.id}`);
     flow = { id, name: `For ${fo.name}`.slice(0, 80), steps: own.draft.flows[0].steps, created: true };

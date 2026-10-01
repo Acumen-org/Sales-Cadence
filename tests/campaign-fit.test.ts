@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { fitCampaign, isFit, MAX_PACE, startDaysFor, type CampaignFit } from '@/lib/campaign-fit';
 import { outreachRecipe } from '@/lib/campaign-starter';
 import { addDays } from '@/lib/dates';
-import { buildCampaignCalendar, calendarDays, contactPriority, outreachDates, priorityGroups, workingDay, type CampaignDraft, type PlannerPerson } from '@/lib/campaign-planner';
+import { buildCampaignCalendar, quietDays, calendarDays, contactPriority, outreachDates, priorityGroups, workingDay, type CampaignDraft, type PlannerPerson } from '@/lib/campaign-planner';
 
 const fos = [{ id: 'fo', name: 'Alisa', twentyMemberId: 'wm' }];
 const people = (n: number, owner: string | null = 'wm', prefix = 'p'): PlannerPerson[] => Array.from({ length: n }, (_, i) => ({ id: `${prefix}${i}`, name: `${prefix} ${String(i).padStart(4, '0')}`, ownerMemberId: owner, tags: [], contactType: [], tier: null }));
@@ -14,9 +14,11 @@ function covered(fit: CampaignFit) {
   const { draft: d, calendar: c } = fit;
   expect(c.valid).toBe(true);
   expect(c.batches.flatMap(b => b.personIds).sort()).toEqual([...d.personIds].sort());
+  // A day with nothing to send only when this outreach and these paces cannot fill every day.
+  if (quietDays(c).size) expect(buildCampaignCalendar(d, c.people, c.fos, 120000, 'every').valid).toBe(false);
   for (const f of d.fos) for (const day of c.days) {
     const onDay = c.batches.filter(b => b.foId === f.id && b.dates.includes(day));
-    expect(onDay.length).toBeGreaterThanOrEqual(1); expect(onDay.length).toBeLessThanOrEqual(2);
+    expect(onDay.length).toBeLessThanOrEqual(2);
     expect(new Set(onDay.map(b => b.dates.indexOf(day))).size).toBe(onDay.length);
   }
   for (const b of c.batches) {
@@ -72,9 +74,11 @@ describe('fitting a campaign to its dates', () => {
     expect([fit.draft.startDate, fit.draft.endDate]).toEqual([d.startDate, d.endDate]);
     expect(fit.draft.flows).toEqual(d.flows);
   });
-  it('says why an edited outreach cannot take everyone, instead of changing it', () => {
+  it('plans an edited outreach that cannot fill every day with the fewest empty days, and says why one that cannot finish fails', () => {
+    // Two days apart, these four people cannot fill Monday to Friday: one day stays empty.
     const gap2 = draft(people(4).map(p => p.id), { flows: [{ id: 'default', name: 'Default', steps: [outreachRecipe(2)[0], { ...outreachRecipe(2)[1], day: 3 }] }], outreachEdited: true });
-    expect(fitCampaign(gap2, people(4), fos, { reshapeOutreach: false })).toEqual({ problems: [{ foId: 'fo', name: 'Alisa', reason: 'search' }] });
+    const fit = fitted(fitCampaign(gap2, people(4), fos, { reshapeOutreach: false }));
+    covered(fit); expect(fit.draft.flows).toEqual(gap2.flows); expect(quietDays(fit.calendar)).toEqual(new Map([['fo', 1]]));
     const long = draft(people(4).map(p => p.id), { flows: [{ id: 'default', name: 'Default', steps: outreachRecipe(8, 2) }], outreachEdited: true });
     expect(fitCampaign(long, people(4), fos, { reshapeOutreach: false })).toEqual({ problems: [{ foId: 'fo', name: 'Alisa', reason: 'window' }] });
   });
@@ -86,28 +90,26 @@ describe('fitting a campaign to its dates', () => {
     const rank = new Map(audience.map(p => [p.id, contactPriority(p)]));
     expect(Math.max(...fit.draft.personIds.map(id => rank.get(id)!))).toBeLessThanOrEqual(Math.min(...fit.overflow.map(id => rank.get(id)!)));
   });
-  it('gives an FO with few contacts an outreach of their own rather than slowing the others', () => {
+  it('keeps an FO with few contacts on the shared outreach, with empty days rather than an outreach of their own', () => {
     const team = [{ id: 'alyssa', name: 'Alyssa', twentyMemberId: 'wm-alyssa' }, { id: 'avani', name: 'Avani', twentyMemberId: 'wm-avani' }];
     const audience = [...people(88, 'wm-alyssa', 'al'), ...people(2, 'wm-avani', 'av')];
     const d = draft(audience.map(p => p.id), { startDate: '2026-09-23', endDate: '2026-09-30', defaultBatchSize: 20, fos: team.map(f => ({ id: f.id, batchSize: 20 })) });
     const fit = fitted(fitCampaign(d, audience, team, { reshapeOutreach: true }));
     covered(fit);
-    expect(fit.draft.flows.map(f => f.name)).toEqual(['Default', 'For Avani']);
-    expect(fit.draft.assignments).toEqual({ av0: 'fo-avani', av1: 'fo-avani' });
+    expect(fit.draft.flows.map(f => f.name)).toEqual(['Default']); expect(fit.draft.assignments).toEqual({});
     expect(fit.paces.every(p => p.to <= 20)).toBe(true); expect(fit.droppedFos).toEqual([]);
+    expect([...quietDays(fit.calendar).keys()]).toEqual(['avani']);
   });
-  it('leaves an FO off only when no outreach can fill the window with their contacts, and moves their unowned contacts', () => {
+  it('keeps an FO whose one contact cannot fill the window, without stretching the outreach for them', () => {
     const team = [...fos, { id: 'b', name: 'Bea', twentyMemberId: 'wm-b' }];
     // Fourteen weeks: more working days than the sixty touchpoints one contact could take.
     const long = { endDate: '2027-04-09', defaultBatchSize: 20, fos: [{ id: 'fo', batchSize: 20 }, { id: 'b', batchSize: 20 }] };
     const owned = [...people(200), ...people(1, 'wm-b', 'b')];
     const fit = fitted(fitCampaign(draft(owned.map(p => p.id), long), owned, team, { reshapeOutreach: true }));
     covered(fit);
-    expect(fit.droppedFos).toEqual([{ id: 'b', name: 'Bea', personIds: ['b0'], reason: 'few' }]);
-    const unowned = [...people(200), ...people(1, null, 'u')];
-    const moved = fitted(fitCampaign(draft(unowned.map(p => p.id), long), unowned, team, { reshapeOutreach: true }));
-    covered(moved);
-    expect(moved.droppedFos).toEqual([{ id: 'b', name: 'Bea', personIds: [], reason: 'few' }]); expect(moved.draft.personIds).toContain('u0');
+    expect(fit.droppedFos).toEqual([]); expect(fit.draft.personIds).toContain('b0');
+    expect(fit.draft.flows.map(f => f.steps.length)).toEqual([8]);
+    expect(quietDays(fit.calendar).get('b')).toBe(fit.calendar.days.length - 8);
   });
   it('leaves off an FO with no contacts here, and pins unowned contacts so the published plan cannot drift', () => {
     const team = [...fos, { id: 'b', name: 'Bea', twentyMemberId: 'wm-b' }, { id: 'c', name: 'Cy', twentyMemberId: 'wm-c' }];

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { addDays } from '@/lib/dates';
-import { buildCampaignCalendar, outreachDates, contactPriority, CampaignDraftSchema, suggestCampaignCalendar, type CampaignDraft, type PlannerPerson, type CampaignCalendar, workingDay, calendarMonths, monthGrid, weekday, dateRangeLabel, numberInWords } from '@/lib/campaign-planner';
+import { buildCampaignCalendar, calendarDays, quietDays, outreachDates, contactPriority, CampaignDraftSchema, suggestCampaignCalendar, type CampaignDraft, type PlannerPerson, type CampaignCalendar, workingDay, calendarMonths, monthGrid, weekday, dateRangeLabel, numberInWords } from '@/lib/campaign-planner';
 import type { SequenceStep } from '@/lib/sequences/steps';
 import { CAMPAIGN_DEFAULT_STEPS } from '@/lib/sequences/campaign-default';
 
@@ -11,9 +11,11 @@ const draft = (count = 5, days = [1], batchSize = 1): CampaignDraft => ({ name: 
 function invariants(d: CampaignDraft, p: CampaignCalendar) {
   expect(p.valid).toBe(true);
   expect(p.batches.flatMap(b => b.personIds).sort()).toEqual([...d.personIds].sort());
+  // A day with nothing to send only when no arrangement fills every day.
+  if (quietDays(p).size) expect(buildCampaignCalendar(d, p.people, p.fos, 120000, 'every').valid).toBe(false);
   for (const f of d.fos) for (const day of p.days) {
     const onDay = p.batches.filter(b => b.foId === f.id && b.dates.includes(day));
-    expect(onDay.length).toBeGreaterThanOrEqual(1); expect(onDay.length).toBeLessThanOrEqual(2);
+    expect(onDay.length).toBeLessThanOrEqual(2);
     expect(new Set(onDay.map(b => b.dates.indexOf(day))).size).toBe(onDay.length);
     expect(onDay.reduce((n, b) => n + b.personIds.length, 0)).toBeLessThanOrEqual(2 * f.batchSize);
   }
@@ -37,10 +39,34 @@ describe('campaign calendar constraints', () => {
     const d = draft(4, [1, 2]); const p = buildCampaignCalendar(d, people(4), fos); invariants(d, p);
     expect(p.batches.map(b => b.dates[0])).toEqual(['2026-10-05','2026-10-06','2026-10-07','2026-10-08']);
   });
-  it('blocks empty days and steps beyond the deadline', () => {
-    expect(buildCampaignCalendar(draft(1), people(1), fos).valid).toBe(false);
+  it('leaves days empty only when they cannot be filled, and blocks steps beyond the deadline and a third send a day', () => {
+    const one = buildCampaignCalendar(draft(1), people(1), fos); invariants(draft(1), one);
+    expect(quietDays(one)).toEqual(new Map([['fo', 4]]));
+    expect(buildCampaignCalendar(draft(1), people(1), fos, 120000, 'every').valid).toBe(false);
+    expect(quietDays(buildCampaignCalendar(draft(5), people(5), fos)).size).toBe(0);
     expect(buildCampaignCalendar(draft(5, [1, 8]), people(5), fos).valid).toBe(false);
     expect(buildCampaignCalendar(draft(6), people(6), fos).valid).toBe(false);
+  });
+  it('leaves exactly the fewest days empty that an exhaustive search finds, in 900 small plans', () => {
+    const shapes = [[1, 3], [1, 4], [1, 2, 3], [1, 3, 5], [1, 5, 9], [1, 2]];
+    for (let offset = 0; offset < 5; offset++) for (let count = 1; count <= 5; count++) for (const shape of shapes) for (let window = 6; window <= 16; window += 2) {
+      const d = draft(count, shape); d.startDate = addDays(d.startDate, offset); d.endDate = addDays(d.startDate, window);
+      const days = calendarDays(d.startDate, d.endDate);
+      let fewest = Infinity;
+      const enumerate = (k: number, after: number, used: Map<string, number[]>) => {
+        if (k === count) { fewest = Math.min(fewest, days.filter(x => !used.get(x)?.length).length); return; }
+        for (let start = after + 1; start < days.length; start++) {
+          const dates = outreachDates(days[start], d.flows[0].steps);
+          if (!dates || dates.at(-1)! > d.endDate || dates.some((x, i) => (used.get(x) ?? []).length >= 2 || (used.get(x) ?? []).includes(i))) continue;
+          const next = new Map(used); dates.forEach((x, i) => next.set(x, [...(next.get(x) ?? []), i]));
+          enumerate(k + 1, start, next);
+        }
+      };
+      enumerate(0, -1, new Map());
+      const p = buildCampaignCalendar(d, people(count), fos);
+      expect(p.valid).toBe(fewest < Infinity);
+      if (p.valid) { invariants(d, p); expect(quietDays(p).get('fo') ?? 0).toBe(fewest); }
+    }
   });
   it('prioritizes Clients, MIP, Tier 1, Tier 2, Tier 3 with overlap taking the highest', () => {
     const p = people(5); p[0].tier = 'TIER_3'; p[1].tier = 'TIER_2'; p[2].tier = 'LEVEL_1'; p[3].tags = ['mIp']; p[4].contactType = ['CLIENT']; p[4].tags = ['MIP'];
@@ -64,7 +90,7 @@ describe('campaign calendar constraints', () => {
     expect(suggestions.length).toBeGreaterThan(0); for (const s of suggestions) invariants(s.draft, s.calendar);
     // Said the way the outreach editor shows it: the wait between two steps, old and new.
     expect(suggestions.map(s => s.label)).toContain('Send step 2 one day after step 1, not two');
-    const limit = buildCampaignCalendar(draft(4,[1,2]), people(4), fos, 0); expect(limit.exhausted).toBe(true); expect(limit.valid).toBe(false);
+    const limit = buildCampaignCalendar(draft(4,[1,2]), people(4), fos, 0, 'every'); expect(limit.exhausted).toBe(true); expect(limit.valid).toBe(false);
   });
   it('rejects tampered dates, duplicate FO IDs, invalid assignments and nonpositive gaps', () => {
     const d = draft(); expect(CampaignDraftSchema.safeParse(d).success).toBe(true);
@@ -109,7 +135,7 @@ describe('campaign calendar constraints', () => {
         }
         return false;
       };
-      expect(buildCampaignCalendar(d, people(count), fos).valid).toBe(enumerate([], -1));
+      expect(buildCampaignCalendar(d, people(count), fos, 120000, 'every').valid).toBe(enumerate([], -1));
     }
   });
   it('offers an explicitly described pacing adjustment for the hosted default', () => {

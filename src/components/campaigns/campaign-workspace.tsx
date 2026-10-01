@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { CampaignDraftSaveSchema, CampaignDraftSchema, calendarDays, outreachIsAutomatic, shortDateLabel, workingDay, type CalendarSuggestion, type CampaignDraft } from '@/lib/campaign-planner';
+import { CampaignDraftSaveSchema, CampaignDraftSchema, calendarDays, outreachIsAutomatic, quietDays, shortDateLabel, workingDay, type CalendarSuggestion, type CampaignDraft } from '@/lib/campaign-planner';
 import { addDays } from '@/lib/dates';
 import type { LeftOut } from '@/lib/campaign-planning-service';
 import { prepareStudioAction, previewCalendarAction, saveCalendarAction } from '@/lib/actions/campaign-planner';
@@ -21,7 +21,7 @@ type SaveState = 'idle' | 'saving' | 'saved' | 'failed';
 /**
  * The campaign studio. `draft` is what the campaign owner asked for - their audience, their
  * paces, their outreach. `review` is the plan the server fitted from it: the people who can be
- * reached, the paces that cover every working day, and who was left out and why. Publishing
+ * reached, the paces that fill the most working days, and who was left out and why. Publishing
  * sends the request again and the server refits it; the fingerprint proves it is the plan shown.
  */
 export function CampaignWorkspace({ initial, pods, products, campaignId, revision: initialRevision, canPublish = true, status, today }: { initial: CampaignDraft; pods: WorkspacePod[]; products: string[]; campaignId?: string; revision?: string; canPublish?: boolean; status?: string; today: string }) {
@@ -303,12 +303,14 @@ function PlanSummary({ review, pod, onAddFo, onUntick, onApply, busy, undo }: { 
   const [open, setOpen] = useState(false);
   const [paces, setPaces] = useState(false);
   const planned = review.draft.personIds.length;
+  const quiet = [...quietDays(review.calendar)].map(([id, days]) => ({ id, days, name: review.calendar.fos.find(f => f.id === id)?.name ?? 'FO' }));
   return <section className="surface" aria-label="Plan">
     <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-5 py-3 text-sm text-ink-600">
       <span>{review.leftOut.length > 0 ? <><span className="font-medium text-ink-900 tabular-nums">{planned.toLocaleString('en-US')}</span> of <span className="tabular-nums">{(planned + review.leftOut.length).toLocaleString('en-US')}</span> planned</> : <><span className="font-medium text-ink-900 tabular-nums">{planned.toLocaleString('en-US')}</span> {planned === 1 ? 'person' : 'people'} planned</>}</span>
       {review.leftOut.length > 0 && <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="inline-flex items-center gap-1 text-ink-900 hover:underline"><span className="font-medium tabular-nums">{review.leftOut.length.toLocaleString('en-US')}</span> left out<IconChevronRight size={13} className={open ? 'rotate-90' : undefined} /></button>}
       {review.paces.length > 4 ? <button type="button" aria-expanded={paces} onClick={() => setPaces(!paces)} className="inline-flex items-center gap-1 text-ink-600 hover:underline"><span className="text-ink-500">New people a day:</span> <span className="tabular-nums text-ink-900">{Math.min(...review.paces.map(p => p.to))}{Math.min(...review.paces.map(p => p.to)) !== Math.max(...review.paces.map(p => p.to)) ? `–${Math.max(...review.paces.map(p => p.to))}` : ''}</span> across <span className="tabular-nums">{review.paces.length}</span> FOs<IconChevronRight size={13} className={paces ? 'rotate-90' : undefined} /></button>
         : <span className="flex flex-wrap items-center gap-x-4 gap-y-1"><span className="text-ink-500">New people a day:</span>{[...new Set(review.paces.map(p => `${p.from}>${p.to}`))].map(key => { const group = review.paces.filter(p => `${p.from}>${p.to}` === key); const [from, to] = [group[0].from, group[0].to]; return <span key={key}>{list(group.map(p => p.name))} <span className="tabular-nums">{from !== to && <span className="text-ink-400">{from} → </span>}<span className={`font-medium ${to > from ? 'text-amber-700' : 'text-ink-900'}`}>{to}</span></span></span>; })}</span>}
+      {quiet.length > 0 && <span className="flex flex-wrap items-center gap-x-4 gap-y-1"><span className="text-ink-500">Days with nothing to send:</span>{quiet.map(q => <span key={q.id}>{q.name} <span className="tabular-nums text-ink-900">{q.days}</span></span>)}</span>}
       {[...new Set(review.droppedFos.map(f => f.reason))].map(reason => { const off = review.droppedFos.filter(f => f.reason === reason); return <span key={reason} className="flex flex-wrap items-center gap-2 text-ink-900">{list(off.map(f => f.name))} {off.length > 1 ? 'are' : 'is'} not in this plan: {reason}.<button type="button" className="btn-ghost btn-sm" disabled={busy} onClick={() => onUntick(off.map(f => f.id))}>Remove {off.length > 1 ? 'them' : off[0].name}</button></span>; })}
       {undo && <span className="ml-auto">{undo}</span>}
     </div>
@@ -341,7 +343,6 @@ function lastResort(review: Review) {
   const kinds = new Set(review.calendar.issues.map(i => i.kind));
   if (kinds.has('window')) return 'Try removing a step, shortening the waits, or choosing a later end date.';
   if (kinds.has('many')) return 'Try a later end date, or fewer steps.';
-  if (kinds.has('few')) return 'Try adding steps, an earlier end date, or more people in People.';
   return 'Try different waits between steps, or a later end date.';
 }
 

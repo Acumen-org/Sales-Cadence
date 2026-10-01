@@ -241,12 +241,15 @@ describe('adding an FO to a running campaign', () => {
     expect(plan.batches.filter((x) => x.foId === b.users.karson.id).flatMap((x) => x.personIds)).toHaveLength(4);
   });
 
-  it('keeps an edited outreach as it is, and gives the FO their own when the studio built it', async () => {
-    // One person cannot fill five working days with a two-step outreach.
+  it('adds an FO whose people cannot fill every working day on the campaign’s own outreach, edited or built', async () => {
+    // One person on a two-step outreach leaves three of the five working days with nothing to send.
     const edited = await planAddFo(admin, campaignId, input(['person-05']), { now: START });
-    expect(edited).toEqual({ ok: false, error: expect.stringMatching(/With this campaign’s outreach/), leftOut: [] });
+    expect(edited.ok).toBe(true);
+    if (!edited.ok) return;
+    expect(edited.preview.flow).toEqual(expect.objectContaining({ id: 'default', created: false }));
+    expect(edited.preview.batches.map((x) => x.dates)).toEqual([['2027-01-04', '2027-01-05']]);
 
-    // The same campaign, had its outreach been built by the studio.
+    // The same campaign, had its outreach been built by the studio: still its own outreach, not a longer one for this FO.
     const c = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
     const stored = c.plannerDraft as unknown as CampaignDraft & { request?: CampaignDraft; sequenceIds: Record<string, string> };
     await prisma.campaign.update({ where: { id: campaignId }, data: { plannerDraft: { ...stored, outreachEdited: false, ...(stored.request ? { request: { ...stored.request, outreachEdited: false } } : {}) } as unknown as Prisma.InputJsonValue } });
@@ -254,22 +257,13 @@ describe('adding an FO to a running campaign', () => {
     const r = await planAddFo(admin, campaignId, input(['person-05']), { now: START });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.preview.flow).toEqual(expect.objectContaining({ id: `fo-${b.users.karson.id}`, name: 'For Karson Reed', created: true }));
-    expect(r.preview.flow.steps.length).toBeGreaterThan(2);
+    expect(r.preview.flow).toEqual(expect.objectContaining({ id: 'default', created: false }));
     await applyAddFo(admin, campaignId, input(['person-05']), r.preview.fingerprint, { now: START, skipSync: true });
     expect(await snapshot()).toEqual(before);
     const after = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-    const draft = after.plannerDraft as unknown as CampaignDraft & { sequenceIds: Record<string, string> };
-    const plan = after.publishedPlan as unknown as PublishedCalendar;
-    const flowId = `fo-${b.users.karson.id}`;
-    expect(draft.flows.map((f) => f.id)).toEqual(['default', flowId]);
-    expect(draft.assignments['person-05']).toBe(flowId);
-    expect(plan.sequenceIds[flowId]).toBe(draft.sequenceIds[flowId]);
-    expect(plan.sequenceIds.default).toBe(stored.sequenceIds.default);
-    const sequence = await prisma.sequence.findUniqueOrThrow({ where: { id: draft.sequenceIds[flowId] } });
-    expect(sequence).toEqual(expect.objectContaining({ name: 'For Karson Reed', campaignOwned: true }));
+    expect((after.plannerDraft as unknown as CampaignDraft).flows.map((f) => f.id)).toEqual(['default']);
     const e = await prisma.enrollment.findFirstOrThrow({ where: { campaignId, personId: 'person-05' } });
-    expect(e.sequenceId).toBe(sequence.id);
-    expect(e.scheduleDates).toEqual(['2027-01-04', '2027-01-05', '2027-01-06', '2027-01-07', '2027-01-08']);
+    expect(e.sequenceId).toBe(stored.sequenceIds.default);
+    expect(e.scheduleDates).toEqual(['2027-01-04', '2027-01-05']);
   });
 });

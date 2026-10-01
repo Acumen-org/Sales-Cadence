@@ -36,7 +36,6 @@ export type CampaignPlan = {
 
 /** "Alyssa", "Alyssa and Avani", "Alyssa, Avani and Rahul". */
 export const nameList = (names: string[]) => names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 export { spacingInWords } from './campaign-planner';
 
@@ -96,8 +95,8 @@ export async function planCampaign(input: unknown, user: SessionUser, campaignId
   const keepsAll = (r: ReturnType<typeof fitCampaign>): r is CampaignFit => isFit(r) && r.overflow.length === 0 && r.droppedFos.every(d => d.personIds.length === 0);
   const fitted = (d: CampaignDraft, reshape: boolean) => { const r = fitCampaign({ ...d, personIds: target.personIds }, people, fos, { reshapeOutreach: reshape, allowTrim: false }); return keepsAll(r) ? r : null; };
   const verified = (d: CampaignDraft, reshape: boolean) => fitted(d, reshape)?.calendar ?? null;
-  /** Verified ways to take everyone reachable, as the request Apply makes: the studio's own outreach, spacing, leaving an FO off, then dates. */
-  const alternatives = (leaveOff: { foId: string; name: string }[] = []): CalendarSuggestion[] => {
+  /** Verified ways to take everyone reachable, as the request Apply makes: the studio's own outreach, spacing, then dates. */
+  const alternatives = (): CalendarSuggestion[] => {
     const out: CalendarSuggestion[] = [];
     if (!options.reshapeOutreach) {
       const auto: CampaignDraft = { ...team, flows: [{ id: 'default', name: 'Default', steps: outreachRecipe(1) }], assignments: {}, outreachEdited: false };
@@ -113,14 +112,6 @@ export async function planCampaign(input: unknown, user: SessionUser, campaignId
         out.push({ label: 'Let the studio set the outreach', detail, draft: auto, calendar: built.calendar, studio: true });
       }
     }
-    for (const fo of leaveOff) {
-      const member = fos.find(f => f.id === fo.foId)?.twentyMemberId;
-      const rest = people.filter(p => !member || p.ownerMemberId !== member);
-      const without = { ...team, fos: team.fos.filter(f => f.id !== fo.foId) };
-      const r = without.fos.length && rest.length ? fitCampaign({ ...without, personIds: rest.map(p => p.id) }, rest, fos, { reshapeOutreach: options.reshapeOutreach, allowTrim: false }) : null;
-      const waiting = people.length - rest.length;
-      if (isFit(r)) out.push({ label: `Take ${fo.name} off this campaign`, detail: waiting ? `${fo.name}'s ${plural(waiting, 'person', 'people')} ${waiting === 1 ? 'stays' : 'stay'} free for another campaign.` : 'Everyone stays in.', draft: without, calendar: r.calendar });
-    }
     const rest = suggestCampaignCalendar(team, people, fos, { paces: false, outreach: !options.reshapeOutreach, verify: d => verified(d, options.reshapeOutreach) });
     return [...out, ...rest].slice(0, 3).map(x => ({ ...x, draft: { ...x.draft, personIds: intent.personIds, outreachEdited: x.draft.outreachEdited ?? intent.outreachEdited } }));
   };
@@ -131,7 +122,7 @@ export async function planCampaign(input: unknown, user: SessionUser, campaignId
     fit.draft = CampaignDraftSchema.parse(fit.draft);
     for (const id of fit.overflow) leftOut.push(describe(id, 'dates', `No room by ${endLabel}, even at 500 new people a day`));
     for (const fo of fit.droppedFos) {
-      droppedFos.push({ id: fo.id, name: fo.name, reason: fo.reason === 'few' ? 'too few people to fill every working day' : 'they own none of the people you picked' });
+      droppedFos.push({ id: fo.id, name: fo.name, reason: fo.reason === 'unfit' ? 'their people do not fit these dates' : 'they own none of the people you picked' });
       for (const id of fo.personIds) leftOut.push(describe(id, 'fo', `Owned by ${fo.name}, who is not in this plan`));
     }
     const trimmed = fit.overflow.length > 0 || fit.droppedFos.some(f => f.personIds.length > 0);
@@ -157,14 +148,13 @@ export async function planCampaign(input: unknown, user: SessionUser, campaignId
   else if (!days.length) planIssues.push({ title: intent.startDate === intent.endDate ? `${range} is not a working day.` : `There are no working days from ${range}.`, detail: 'Outreach goes out Monday to Friday only.', kind: 'people' });
   else if (problems.length) {
     stage = 'outreach';
-    const window = by('window'), few = by('few'), many = by('many'), search = by('search');
+    const window = by('window'), many = by('many'), search = by('search');
     const who = (list: FitProblem[]) => list.length < team.fos.length ? ` This affects ${nameList(list.map(p => p.name))}.` : '';
     if (window.length) planIssues.push({ title: `The steps run past ${endLabel}.`, detail: `Even starting on the first day, the last step would go out too late.${who(window)}`, kind: 'window' });
-    if (few.length) planIssues.push({ title: `${nameList(few.map(p => p.name))} ${few.length > 1 ? "don't" : "doesn't"} have enough people to fill every working day.`, detail: 'Add steps, or pick more people.', kind: 'few' });
     if (many.length) planIssues.push({ title: `${nameList(many.map(p => p.name))} would need more than 500 new people a day.`, detail: 'Choose a later end date, or remove steps.', kind: 'many' });
-    if (search.length) planIssues.push({ title: `${nameList(search.map(p => p.name))} would have working days with nothing to send.`, detail: 'The waits between steps leave gaps. Every FO needs something to send each working day.', kind: 'search' });
-  } else planIssues.push({ title: `There aren't enough people to fill every working day from ${range}.`, detail: 'Pick more people, or choose a shorter date range.', kind: 'people' });
-  const suggestions = stage === 'outreach' && !options.forPublish ? alternatives(by('few')) : [];
+    if (search.length) planIssues.push({ title: `${nameList(search.map(p => p.name))}'s steps can't be arranged in these dates.`, detail: 'Some working days would need more than two sends. Change the waits between steps, or choose a later end date.', kind: 'search' });
+  } else planIssues.push({ title: `These people can't be planned from ${range}.`, detail: 'Pick other people, or choose other dates.', kind: 'people' });
+  const suggestions = stage === 'outreach' && !options.forPublish ? alternatives() : [];
   const calendar: CampaignCalendar = { version: 1, days, batches: [], people, fos, issues: planIssues, valid: false, exhausted: false };
   return { draft: target, calendar, fingerprint: calendarFingerprint(target, calendar), paces: [], leftOut, droppedFos, limits: Object.fromEntries(intent.flows.map(f => [f.id, Math.min(60, days.length)])), suggestions, stage };
 }

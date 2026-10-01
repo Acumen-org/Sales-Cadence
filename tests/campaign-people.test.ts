@@ -131,18 +131,18 @@ describe('changing a studio campaign’s people from People', () => {
     expect(await prisma.enrollment.count({ where: { campaignId: id } })).toBe(5);
   });
 
-  it('sends a scheduled campaign back to draft when it cannot hold without the people taken out', async () => {
+  it('keeps a scheduled campaign when the people left cannot fill every working day', async () => {
     const id = await scheduled();
     const r = await removePeopleFromCampaignAction(form(id, ['person-06', 'person-07', 'person-08']));
-    expect(r).toEqual({ ok: true, message: expect.stringMatching(/^3 people removed\. Karson only is back in draft because /) });
+    expect(r).toEqual({ ok: true, message: '3 people removed from Karson only, and its calendar was updated.' });
     const c = await load(id);
-    expect(c.status).toBe('DRAFT');
-    expect(c.publishedPlan).toBeNull();
+    expect(c.status).toBe('SCHEDULED');
     expect(c.personIds).toEqual(['person-05']);
-    expect((await stored(id)).personIds).toEqual(['person-05']);
-    // Nothing launches from it.
+    const plan = c.publishedPlan as unknown as PublishedCalendar;
+    expect(plan.batches.flatMap((x) => x.personIds)).toEqual(['person-05']);
+    expect(plan.days.some((day) => !plan.batches.some((x) => x.dates.includes(day)))).toBe(true);
     await activateCampaign(id, { actor: SYSTEM_ACTOR, now: new Date('2027-01-04T16:00:00Z'), skipSync: true });
-    expect(await prisma.enrollment.count({ where: { campaignId: id } })).toBe(0);
+    expect(await prisma.enrollment.count({ where: { campaignId: id } })).toBe(1);
   });
 
   it('fixes the plan once it runs: nobody new, and taking someone out ends their outreach', async () => {

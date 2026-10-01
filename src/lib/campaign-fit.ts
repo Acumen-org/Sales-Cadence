@@ -1,5 +1,5 @@
 import { diffDays } from './dates';
-import { buildCampaignCalendar, calendarDays, campaignQueues, outreachDates, type CampaignCalendar, type CampaignDraft, type PlannerFo, type PlannerPerson } from './campaign-planner';
+import { buildCampaignCalendar, calendarDays, campaignQueues, outreachDates, quietDays, type CalendarFill, type CampaignCalendar, type CampaignDraft, type PlannerFo, type PlannerPerson } from './campaign-planner';
 import { outreachRecipe } from './campaign-starter';
 
 /**
@@ -9,21 +9,24 @@ import { outreachRecipe } from './campaign-starter';
  * - Everyone reachable is planned. Each FO keeps the new people/day they asked for when it works
  *   (balanced: the lowest pace giving the same number of batches); otherwise they get the lowest
  *   pace that works, with no ceiling but the draft's own 500.
+ * - Something to send every working day is preferred, not required: a pace at or under the request
+ *   that fills every day wins, otherwise the one with the fewest empty days. The outreach is never
+ *   bent (more steps, daily steps) only to fill days; empty days weigh against an outreach instead.
  * - An outreach nobody has edited is built here: the most touchpoints (eight is the reference) that
  *   those paces allow. When one shared outreach would push an FO's pace up because another FO has
  *   only a few contacts, that FO's contacts get an outreach of their own instead.
  * - An edited outreach is never changed; when it cannot take everyone the plan says why, per FO.
  * - Only beyond 500 new people a day are the lowest-priority people left out, and only an FO whose
- *   contacts cannot fill the window under any outreach is left off.
+ *   contacts no outreach can schedule is left off.
  *
  * For one outreach, whether a plan works depends only on how many batches it has, not on who is in
  * them; that is what `Window.canSchedule` caches, on stand-in contacts, for every FO at once.
  */
 
 export type FitPace = { foId: string; name: string; from: number; to: number };
-export type FitDroppedFo = { id: string; name: string; personIds: string[]; reason: 'none' | 'few' };
+export type FitDroppedFo = { id: string; name: string; personIds: string[]; reason: 'none' | 'unfit' };
 /** Why an edited outreach cannot take an FO's contacts. */
-export type FitProblem = { foId: string; name: string; reason: 'window' | 'few' | 'many' | 'search' };
+export type FitProblem = { foId: string; name: string; reason: 'window' | 'many' | 'search' };
 export type CampaignFit = { draft: CampaignDraft; calendar: CampaignCalendar; paces: FitPace[]; droppedFos: FitDroppedFo[]; overflow: string[] };
 export type FitFailure = { problems: FitProblem[] };
 /** The start-day count, exposed for its test. */
@@ -37,7 +40,13 @@ const GAPS = [4, 3, 2, 5, 7, 1];
 const GAP_PENALTY: Record<number, number> = { 4: 0, 3: 0.1, 5: 0.2, 2: 0.3, 7: 0.4, 1: 1 };
 /** Fewer than eight touchpoints loses reach quickly; more add little and crowd a small audience. */
 const stepPenalty = (s: number) => s <= 8 ? 8 / s : 1 + (s - 8) / 4;
+/** What a window of days with nothing to send costs an outreach: enough that a whole outreach that
+ *  fills every day beats one a step or two shorter, never enough to choose 16 daily steps over 8. */
+const QUIET_WEIGHT = 3;
 const SEARCH_LIMIT = 20000;
+/** The search for the fewest empty days while choosing: a smaller budget only ever finds fewer
+ *  plans or more empty days, and the final calendar searches again with the full one. */
+const FEWEST_LIMIT = 2000;
 /** Batch counts tried per outreach: a shape the studio is weighing, or the owner's own outreach. */
 const SHAPE_TRIES = 8, EDITED_TRIES = 40;
 /** A safety net only: the search stops on its own bounds long before this many planner searches. */
@@ -46,7 +55,9 @@ const SEARCH_BUDGET = 3000;
 type Flow = CampaignDraft['flows'][number];
 type Run = { flowId: string; length: number };
 type FoCase = { id: string; target: number; meta: PlannerFo; queue: PlannerPerson[] };
-type PaceResult = { pace: number } | { fail: 'window' | 'few' | 'many' | 'search' };
+type PaceResult = { pace: number; quiet: number } | { fail: 'window' | 'many' | 'search' };
+/** Working days with nothing to send under one count of batches, or null when it cannot be planned. */
+type Schedule = (pace: number, count: number, fill: Exclude<CalendarFill, 'best'>) => number | null;
 
 const flowShape = (f: Flow) => f.steps.map(s => s.day).join(',');
 
@@ -54,7 +65,7 @@ class Window {
   readonly days: string[];
   readonly D: number;
   private starts = new Map<string, number>();
-  private feasible = new Map<string, boolean>();
+  private feasible = new Map<string, number | null>();
   private gaveUp = new Map<string, number>();
   /** Planner searches run so far: the fitter's budget is counted, never timed, so it is deterministic. */
   searches = 0;
@@ -76,23 +87,23 @@ class Window {
     }
     return n;
   }
-  /** Whether `count` batches on one outreach cover every working day: the planner's own search, on stand-in contacts. */
-  canSchedule(f: Flow, count: number) {
-    const shape = flowShape(f), key = `${shape}|${count}`;
-    let ok = this.feasible.get(key);
-    if (ok === undefined) {
+  /** The days `count` batches on one outreach leave with nothing to send: the planner's own search, on stand-in contacts. */
+  canSchedule(f: Flow, count: number, fill: Exclude<CalendarFill, 'best'>) {
+    const shape = flowShape(f), key = `${shape}|${count}|${fill}`;
+    let quiet = this.feasible.get(key);
+    if (quiet === undefined) {
       // A long window can outrun the planner's search; after two such searches on one outreach,
       // the fitter moves on to an outreach the planner settles quickly.
-      if ((this.gaveUp.get(shape) ?? 0) >= 2) return false;
+      if (fill === 'every' && (this.gaveUp.get(shape) ?? 0) >= 2) return null;
       const people = Array.from({ length: count }, (_, i) => ({ id: `s${i}`, name: `s${String(i).padStart(5, '0')}`, ownerMemberId: 'fit', tags: [], contactType: [], tier: null }));
       const draft: CampaignDraft = { name: 'fit', podId: 'fit', startDate: this.startDate, endDate: this.endDate, productInterest: ['fit'], defaultBatchSize: 1, fos: [{ id: 'fit', batchSize: 1 }], personIds: people.map(p => p.id), assignments: {}, flows: [{ ...f, id: 'default', name: 'Default' }] };
       this.searches++;
-      const calendar = buildCampaignCalendar(draft, people, [{ id: 'fit', name: 'fit', twentyMemberId: 'fit' }], SEARCH_LIMIT);
-      ok = calendar.valid;
-      if (calendar.exhausted) this.gaveUp.set(shape, (this.gaveUp.get(shape) ?? 0) + 1);
-      this.feasible.set(key, ok);
+      const calendar = buildCampaignCalendar(draft, people, [{ id: 'fit', name: 'fit', twentyMemberId: 'fit' }], fill === 'every' ? SEARCH_LIMIT : FEWEST_LIMIT, fill);
+      quiet = calendar.valid ? quietDays(calendar).get('fit') ?? 0 : null;
+      if (fill === 'every' && calendar.exhausted) this.gaveUp.set(shape, (this.gaveUp.get(shape) ?? 0) + 1);
+      this.feasible.set(key, quiet);
     }
-    return ok;
+    return quiet;
   }
 }
 
@@ -123,9 +134,11 @@ function measure(w: Window, flows: Map<string, Flow>, runs: Run[], pace: number)
 /**
  * The pace for one FO's queue: at or under the request, the highest balanced pace that works
  * (fewest batches, so the calmest days); above it, the lowest that works. Same batch count, same
- * schedule, so each count is tried once, at the lowest pace that produces it.
+ * schedule, so each count is tried once, at the lowest pace that produces it. A pace that fills
+ * every working day comes first; otherwise the fewest empty days, still at or under the request
+ * whenever the request can work.
  */
-function choosePace(w: Window, flows: Map<string, Flow>, runs: Run[], target: number, schedule: (pace: number, count: number) => boolean, maxTries: number): PaceResult {
+function choosePace(w: Window, flows: Map<string, Flow>, runs: Run[], target: number, schedule: Schedule, maxTries: number): PaceResult {
   if ([...new Set(runs.map(r => r.flowId))].some(id => w.startsFor(flows.get(id)!) === 0)) return { fail: 'window' };
   const top = Math.min(MAX_PACE, Math.max(...runs.map(r => r.length)));
   const lowest = new Map<number, number>();
@@ -139,9 +152,19 @@ function choosePace(w: Window, flows: Map<string, Flow>, runs: Run[], target: nu
     const m = measure(w, flows, runs, pace);
     if (m.crowded || m.sparse) continue;
     if (++tries > maxTries) break;
-    if (schedule(pace, c)) return { pace };
+    if (schedule(pace, c, 'every') === 0) return { pace, quiet: 0 };
   }
-  if (measure(w, flows, runs, 1).sparse) return { fail: 'few' };
+  let best: { pace: number; quiet: number } | null = null;
+  tries = 0;
+  for (const c of order) {
+    if (best && c < at) break;
+    const pace = lowest.get(c)!;
+    if (measure(w, flows, runs, pace).crowded) continue;
+    if (++tries > maxTries) break;
+    const quiet = schedule(pace, c, 'fewest');
+    if (quiet !== null && (!best || quiet < best.quiet)) best = { pace, quiet };
+  }
+  if (best) return best;
   if (measure(w, flows, runs, top).crowded) return { fail: 'many' };
   return { fail: 'search' };
 }
@@ -155,18 +178,22 @@ function subDraft(input: CampaignDraft, c: FoCase, kept: PlannerPerson[], pace: 
 function fitEdited(w: Window, input: CampaignDraft, c: FoCase, kept: PlannerPerson[]): PaceResult {
   const flows = new Map(input.flows.map(f => [f.id, f]));
   const runs = runsOf(kept, input.assignments);
-  const tried = new Map<number, boolean>();
-  const schedule = (pace: number, count: number) => {
-    if (runs.length === 1) return w.canSchedule(flows.get(runs[0].flowId)!, count);
-    let ok = tried.get(count);
-    if (ok === undefined) { ok = buildCampaignCalendar(subDraft(input, c, kept, pace), kept, [c.meta], SEARCH_LIMIT).valid; tried.set(count, ok); }
-    return ok;
+  const tried = new Map<string, number | null>();
+  const schedule: Schedule = (pace, count, fill) => {
+    if (runs.length === 1) return w.canSchedule(flows.get(runs[0].flowId)!, count, fill);
+    let quiet = tried.get(`${count}|${fill}`);
+    if (quiet === undefined) {
+      const calendar = buildCampaignCalendar(subDraft(input, c, kept, pace), kept, [c.meta], fill === 'every' ? SEARCH_LIMIT : FEWEST_LIMIT, fill);
+      quiet = calendar.valid ? quietDays(calendar).get(c.id) ?? 0 : null;
+      tried.set(`${count}|${fill}`, quiet);
+    }
+    return quiet;
   };
   return choosePace(w, flows, runs, c.target, schedule, EDITED_TRIES);
 }
 
 type Choice = { flow: Flow; q: number; s: number };
-type Evaluation = { pace: number; excess: number } | null;
+type Evaluation = { pace: number; excess: number; quiet: number } | null;
 
 export function fitCampaign(input: CampaignDraft, people: PlannerPerson[], fos: PlannerFo[], options: { reshapeOutreach: boolean; allowTrim?: boolean }): CampaignFit | FitFailure | null {
   const w = new Window(input.startDate, input.endDate);
@@ -231,8 +258,8 @@ export function fitCampaign(input: CampaignDraft, people: PlannerPerson[], fos: 
       const key = `${c.id}|${i}`;
       if (!cache.has(key)) {
         const ch = choices[i];
-        const r = choosePace(w, new Map([['default', ch.flow]]), [{ flowId: 'default', length: c.queue.length }], c.target, (_pace, count) => w.canSchedule(ch.flow, count), SHAPE_TRIES);
-        cache.set(key, 'fail' in r ? null : { pace: r.pace, excess: Math.max(0, r.pace - c.target) / c.target });
+        const r = choosePace(w, new Map([['default', ch.flow]]), [{ flowId: 'default', length: c.queue.length }], c.target, (_pace, count, fill) => w.canSchedule(ch.flow, count, fill), SHAPE_TRIES);
+        cache.set(key, 'fail' in r ? null : { pace: r.pace, excess: Math.max(0, r.pace - c.target) / c.target, quiet: r.quiet });
       }
       return cache.get(key)!;
     };
@@ -240,62 +267,64 @@ export function fitCampaign(input: CampaignDraft, people: PlannerPerson[], fos: 
     // or room for touchpoints. It orders the search, so the search can stop exactly when nothing
     // untried could do better.
     const floorPace = (c: FoCase, ch: Choice) => {
-      if (c.queue.length * ch.s < w.D) return Infinity;
       const most = Math.min(w.D, w.startsFor(ch.flow), Math.floor((2 * w.D - 1) / ch.s), c.queue.length);
       return most < 1 ? Infinity : Math.ceil(c.queue.length / most);
     };
     const floorExcess = (c: FoCase, ch: Choice) => Math.max(0, floorPace(c, ch) - c.target) / c.target;
     const spent = () => w.searches > SEARCH_BUDGET;
     const indexes = choices.map((_, i) => i);
-    // An FO whose contacts could not fill every working day even at sixty touchpoints each is not searched.
-    const servable = (c: FoCase) => c.queue.length * Math.min(60, w.D) >= w.D;
+    // An outreach's quality with the days it leaves empty: never below its own q, so a search in
+    // order of q stops once q alone reaches the best score.
+    const score = (i: number, quiet: number) => choices[i].q + QUIET_WEIGHT * quiet / w.D;
+    type Best = { i: number; excess: number; pace: number; quiet: number; score: number };
     // Each FO on their own: the lowest excess any outreach gives them, then the best outreach at it.
-    const alone = new Map<string, { i: number; excess: number; pace: number }>();
-    for (const c of live.filter(servable)) {
-      let best: { i: number; excess: number; pace: number } | null = null;
+    const alone = new Map<string, Best>();
+    for (const c of live) {
+      let best: Best | null = null;
       for (const i of [...indexes].sort((a, b) => floorExcess(c, choices[a]) - floorExcess(c, choices[b]) || choices[a].q - choices[b].q)) {
         if (floorExcess(c, choices[i]) === Infinity) break;
-        if (best && (floorExcess(c, choices[i]) > best.excess || (best.excess === 0 && choices[i].q >= choices[best.i].q) || spent())) break;
+        if (best && (floorExcess(c, choices[i]) > best.excess || (best.excess === 0 && choices[i].q >= best.score) || spent())) break;
         const e = one(c, i);
-        if (e && (!best || e.excess < best.excess || (e.excess === best.excess && choices[i].q < choices[best.i].q))) best = { i, ...e };
+        if (e && (!best || e.excess < best.excess || (e.excess === best.excess && score(i, e.quiet) < best.score))) best = { i, ...e, score: score(i, e.quiet) };
       }
       if (best) alone.set(c.id, best);
     }
     // Within 10% of an FO's lowest pace (or at the request), the outreach with more touchpoints.
     const allowance = (c: FoCase) => { const b = alone.get(c.id)!; return b.excess === 0 ? c.target : Math.max(c.target, Math.floor(b.pace * 1.1)); };
     const roomy = (c: FoCase) => {
-      const b = alone.get(c.id)!, allow = allowance(c);
+      let b = alone.get(c.id)!;
+      const allow = allowance(c);
       for (const i of [...indexes].sort((x, y) => choices[x].q - choices[y].q)) {
-        if (choices[i].q >= choices[b.i].q || spent()) break;
+        if (choices[i].q >= b.score || spent()) break;
         if (floorPace(c, choices[i]) > allow) continue;
         const e = one(c, i);
-        if (e && e.pace <= allow) return { i, ...e };
+        if (e && e.pace <= allow && score(i, e.quiet) < b.score) b = { i, ...e, score: score(i, e.quiet) };
       }
       return b;
     };
-    // An FO no outreach can serve (too few contacts for the window) is left off; their unowned
-    // contacts are balanced again across the FOs who stay.
+    // An FO no outreach can schedule is left off; their unowned contacts are balanced again across
+    // the FOs who stay.
     const unserved = live.filter(c => !alone.has(c.id));
     if (unserved.length) {
       if (unserved.length === live.length) return null;
       const owned = new Set(unserved.flatMap(c => c.queue.filter(p => p.ownerMemberId).map(p => p.id)));
       const again = fitCampaign({ ...input, fos: input.fos.filter(f => !unserved.some(c => c.id === f.id)), personIds: input.personIds.filter(id => !owned.has(id)) }, people.filter(p => !owned.has(p.id)), fos, options);
       if (!isFit(again)) return again;
-      return { ...again, overflow: [...overflow, ...again.overflow], droppedFos: [...droppedFos, ...unserved.map(c => ({ id: c.id, name: c.meta.name, personIds: c.queue.filter(p => p.ownerMemberId).map(p => p.id), reason: 'few' as const })), ...again.droppedFos.filter(d => !droppedFos.some(x => x.id === d.id))] };
+      return { ...again, overflow: [...overflow, ...again.overflow], droppedFos: [...droppedFos, ...unserved.map(c => ({ id: c.id, name: c.meta.name, personIds: c.queue.filter(p => p.ownerMemberId).map(p => p.id), reason: 'unfit' as const })), ...again.droppedFos.filter(d => !droppedFos.some(x => x.id === d.id))] };
     }
     // Everyone on one outreach: the lowest worst excess, then the least excess overall, then the best outreach.
-    type Shared = { i: number; worst: number; total: number; paces: number[] };
+    type Shared = { i: number; worst: number; total: number; paces: number[]; score: number };
     const together = (i: number): Shared | null => {
       const es = live.map(c => one(c, i));
       if (!es.every(Boolean)) return null;
-      return { i, worst: Math.max(...es.map(e => e!.excess)), total: es.reduce((n: number, e) => n + e!.excess, 0), paces: es.map(e => e!.pace) };
+      return { i, worst: Math.max(...es.map(e => e!.excess)), total: es.reduce((n: number, e) => n + e!.excess, 0), paces: es.map(e => e!.pace), score: score(i, es.reduce((n: number, e) => n + e!.quiet, 0) / live.length) };
     };
     const worstFloor = (i: number) => Math.max(...live.map(c => floorExcess(c, choices[i])));
     let star: Shared | null = null;
     for (const i of [...indexes].sort((a, b) => worstFloor(a) - worstFloor(b) || choices[a].q - choices[b].q)) {
-      if (worstFloor(i) === Infinity || spent() || (star && (worstFloor(i) > star.worst || (star.worst === 0 && choices[i].q >= choices[star.i].q)))) break;
+      if (worstFloor(i) === Infinity || spent() || (star && (worstFloor(i) > star.worst || (star.worst === 0 && choices[i].q >= star.score)))) break;
       const t = together(i);
-      if (t && (!star || t.worst < star.worst || (t.worst === star.worst && (t.total < star.total || (t.total === star.total && choices[i].q < choices[star.i].q))))) star = t;
+      if (t && (!star || t.worst < star.worst || (t.worst === star.worst && (t.total < star.total || (t.total === star.total && t.score < star.score))))) star = t;
     }
     // When paces must rise, a pace within 10% of the lowest is as good as the lowest and the outreach
     // with more touchpoints wins: 11 a day with two touchpoints over 10 a day with one.
@@ -303,10 +332,10 @@ export function fitCampaign(input: CampaignDraft, people: PlannerPerson[], fos: 
     if (star && star.worst > 0) {
       const allow = live.map((c, k) => Math.max(c.target, Math.floor(star!.paces[k] * 1.1)));
       for (const i of [...indexes].sort((a, b) => choices[a].q - choices[b].q)) {
-        if (choices[i].q >= choices[star.i].q || spent()) break;
+        if (choices[i].q >= shared!.score || spent()) break;
         if (live.some((c, k) => floorPace(c, choices[i]) > allow[k])) continue;
         const t = together(i);
-        if (t && t.paces.every((pace, k) => pace <= allow[k])) { shared = t; break; }
+        if (t && t.paces.every((pace, k) => pace <= allow[k]) && t.score < shared!.score) shared = t;
       }
     }
     const splitWorst = Math.max(...live.map(c => alone.get(c.id)!.excess));
