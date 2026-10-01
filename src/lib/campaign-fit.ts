@@ -46,7 +46,7 @@ const QUIET_WEIGHT = 3;
 const SEARCH_LIMIT = 20000;
 /** The search for the fewest empty days while choosing: a smaller budget only ever finds fewer
  *  plans or more empty days, and the final calendar searches again with the full one. */
-const FEWEST_LIMIT = 2000;
+const FEWEST_LIMIT = 1000;
 /** Batch counts tried per outreach: a shape the studio is weighing, or the owner's own outreach. */
 const SHAPE_TRIES = 8, EDITED_TRIES = 40;
 /** A safety net only: the search stops on its own bounds long before this many planner searches. */

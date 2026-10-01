@@ -196,6 +196,9 @@ export function quietDays(c: Pick<CampaignCalendar, 'days' | 'batches'>) {
  */
 export type CalendarFill = 'every' | 'fewest' | 'best';
 
+/** Search steps spent lowering the number of empty days once a plan with some is found. */
+const REFINE_LIMIT = 4000;
+
 /** Deterministic bounded constraint search. No access to other campaigns or global workload. */
 export function buildCampaignCalendar(draft: CampaignDraft, people: PlannerPerson[], fos: PlannerFo[], nodeLimit = 120000, fill: CalendarFill = 'best'): CampaignCalendar {
   const days = calendarDays(draft.startDate, draft.endDate);
@@ -318,11 +321,13 @@ export function buildCampaignCalendar(draft: CampaignDraft, people: PlannerPerso
         if (!any.found) { spent = any.out; return false; }
         best = any.found;
       }
-      const floor = Math.max(0, days.length - suffix[0]);
+      // Lowering k is worth a bounded effort only: small plans settle well within it, and on long
+      // windows the halving mostly runs out of budget without finding fewer.
+      const floor = Math.max(0, days.length - suffix[0]), budget = steps + Math.min(nodeLimit, REFINE_LIMIT);
       let lo = floor, hi = best.quiet - 1;
-      while (lo <= hi && steps < nodeLimit) {
+      while (lo <= hi && steps < budget) {
         const k = lo === floor ? lo : (lo + hi) >> 1;
-        const r = upTo(k, steps + Math.max(500, (nodeLimit - steps) >> 1));
+        const r = upTo(k, steps + Math.max(500, (budget - steps) >> 1));
         if (r.found) { best = r.found; hi = r.found.quiet - 1; } else lo = k + 1;
       }
       for (let i = 0; i < batches.length; i++) take(i, { dates: best.plan[i] });
