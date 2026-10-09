@@ -15,19 +15,19 @@ export const SESSION_COOKIE = 'cadence_session';
 const SESSION_HOURS = 24;
 const REMEMBERED_DAYS = 30;
 
-export async function createSession(userId: string, remember = false): Promise<string> {
+/** A new session row and the cookie that carries it, for a caller that sets cookies on its own response. */
+export async function startSession(userId: string, remember = false) {
   const token = randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + (remember ? REMEMBERED_DAYS * 86_400_000 : SESSION_HOURS * 3_600_000));
   await prisma.session.create({ data: { token, userId, expiresAt } });
+  return { name: SESSION_COOKIE, value: token, options: { httpOnly: true, sameSite: 'lax' as const, secure: env().COOKIE_SECURE, path: '/', expires: expiresAt } };
+}
+
+export async function createSession(userId: string, remember = false): Promise<string> {
+  const session = await startSession(userId, remember);
   const jar = await cookies();
-  jar.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: env().COOKIE_SECURE,
-    path: '/',
-    expires: expiresAt,
-  });
-  return token;
+  jar.set(session.name, session.value, session.options);
+  return session.value;
 }
 
 export async function readSessionToken(): Promise<string | null> {

@@ -11,7 +11,11 @@ export default defineConfig({
   testDir: 'e2e',
   // The fresh-install check needs a workspace seeded with `core` alone, so it runs on its own
   // through `pnpm test:fresh` rather than against this suite's sample data.
-  testIgnore: process.env.E2E_INCLUDE_FRESH ? [] : ['**/fresh-install.spec.ts'],
+  // Microsoft sign-in runs the same way, against a stand-in for Microsoft that its spec serves.
+  testIgnore: [
+    ...(process.env.E2E_INCLUDE_FRESH ? [] : ['**/fresh-install.spec.ts']),
+    ...(process.env.E2E_MICROSOFT_LOGIN_URL ? [] : ['**/microsoft-sign-in.spec.ts']),
+  ],
   timeout: 90_000,
   expect: { timeout: 15_000 },
   // One retry on CI only, and never locally. This is a mitigation, not a cure: the suite runs
@@ -47,6 +51,12 @@ export default defineConfig({
       CADENCE_ALLOW_MOCK: '1',
       TWENTY_API_URL: 'http://twenty.local:3000',
       APP_URL: `http://localhost:${PORT}`,
+      ...(process.env.E2E_MICROSOFT_LOGIN_URL ? {
+        MICROSOFT_CLIENT_ID: '0f0f0f0f-0000-4000-8000-00000000c1d0',
+        MICROSOFT_TENANT_ID: '0e0e0e0e-0000-4000-8000-0000000071d0',
+        MICROSOFT_CLIENT_SECRET: 'stand-in-secret',
+        MICROSOFT_LOGIN_URL: process.env.E2E_MICROSOFT_LOGIN_URL,
+      } : {}),
     },
   },
   projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],

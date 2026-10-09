@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { backfillMeetingsToCrm } from '../lib/meetings/crm';
+import { backfillMeetingsToCrm, missingMeetingTags } from '../lib/meetings/crm';
 import { retryFailedWrites } from '../lib/engine/sync-retry';
 import { prisma } from '../lib/db';
 import { env } from '../lib/env';
@@ -59,10 +59,19 @@ async function evidenceRescan(now:Date){
 let meetingsBackfillChecked=false;
 async function meetingsBackfill(){
  if(meetingsBackfillChecked)return;meetingsBackfillChecked=true;
- // The second key writes every meeting again once: the first pass linked team members as contacts.
- const key='meetingsToTwenty20261010b';
+ // Each new key writes every meeting again once: b dropped team members from the contacts, c
+ // counts acumen-talent.com as our own and names each Meeting contact for its meeting.
+ const key='meetingsToTwenty20261010c';
  if(await prisma.setting.findUnique({where:{key}}))return;
  try{const written=await backfillMeetingsToCrm({all:true});if(written===null)return;log('meetings written to Twenty',written);await prisma.setting.upsert({where:{key},create:{key,value:{at:new Date().toISOString(),written}},update:{value:{at:new Date().toISOString(),written}}});}catch(error){log('meetings backfill failed',error);}
+}
+// While some tag is missing in Twenty, write the meetings again each hour, so a tag an admin adds
+// by hand fills in without anyone asking.
+let meetingTagsRetryAt=Date.now()+3_600_000;
+async function meetingTagsRetry(now:number){
+ if(now<meetingTagsRetryAt)return;meetingTagsRetryAt=now+3_600_000;
+ if(!(await missingMeetingTags()).length)return;
+ try{const written=await backfillMeetingsToCrm({all:true});if(written!==null)log('meetings written again for missing tags',written);}catch(error){log('meetings tag retry failed',error);}
 }
 async function tick(){
  if(running||stopping)return;running=true;
@@ -74,6 +83,7 @@ async function tick(){
    await nightly(new Date(now));
    await evidenceRescan(new Date(now));
    await meetingsBackfill();
+   await meetingTagsRetry(now);
    try{await launchScheduledCampaigns({actor:SYSTEM_ACTOR});}catch(error){log('campaign launch failed',error);}
    const stats=await runSchedulerTick({actor:SYSTEM_ACTOR});
    if(stats.generated||stats.completed)log('scheduler',stats);

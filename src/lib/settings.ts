@@ -56,7 +56,7 @@ export const RulesSettingsSchema = z.object({
    */
   internalDomains: z
     .array(z.string().trim().toLowerCase())
-    .default(['acumen-strategy.com', 'prairie-hill.com', 'glynac.ai', 'acubooth.com']),
+    .default(['acumen-strategy.com', 'acumen-talent.com', 'prairie-hill.com', 'glynac.ai', 'acubooth.com']),
   internalCompanyNames: z.array(z.string().trim().min(1)).default(['Acumen Strategy', 'Glynac', 'Prairie Hill', 'Prairie Hill Holdings', 'Acumen Talent']),
   /**
    * Organisations that are never prospects - vendors and platforms Twenty holds because someone
@@ -153,11 +153,22 @@ export const SyncSettingsSchema = z.object({
   writeCadenceTaskIdField: z.boolean().default(false),
 });
 
+/** How the team signs in: the Microsoft app an admin saved, and when passwords stopped working. */
+export const SignInSettingsSchema = z.object({
+  microsoftClientId: z.string().trim().default(''),
+  microsoftTenantId: z.string().trim().default(''),
+  /** Stored in the database in plain text, like the Twenty key; never shown again once saved. */
+  microsoftClientSecret: z.string().trim().default(''),
+  /** Set by the first sign-in through Microsoft: from then on there is no password sign-in. */
+  passwordRetiredAt: z.string().nullable().default(null),
+});
+
 export const SettingsSchema = z.object({
   twenty: TwentySettingsSchema.default({}),
   matching: MatchingSettingsSchema.default({}),
   rules: RulesSettingsSchema.default({}),
   sync: SyncSettingsSchema.default({}),
+  signIn: SignInSettingsSchema.default({}),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;

@@ -7,6 +7,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { requireAdmin } from '../auth/current-user';
 import { hashPassword, validatePasswordStrength } from '../auth/password';
+import { signInMethods } from '../auth/microsoft';
 import { logAudit, userActor } from '../audit';
 import { getTwentyClient } from '../twenty';
 import { workspaceTimezone } from '../workspace';
@@ -54,10 +55,13 @@ export async function createUserAction(formData: FormData): Promise<ActionResult
   const parsed = UserFields.safeParse(formValues(formData));
   if (!parsed.success) return { ok: false, error: parsed.error.issues.map((i) => i.message).join('; ') };
   const d = parsed.data;
-  const weak = validatePasswordStrength(d.password ?? '');
+  // With Microsoft sign-in the new member signs in with their work account: no password to set.
+  const password = !d.password && (await signInMethods()).microsoft ? null : d.password ?? '';
+  const weak = password === null ? null : validatePasswordStrength(password);
   if (weak) return { ok: false, error: weak };
   if (needsPod(d.role) && !d.podIds.length) return { ok: false, error: 'This role works in a pod: choose at least one.' };
   const existing = await prisma.user.findUnique({ where: { email: d.email } });
+  const passwordHash = password === null ? '' : await hashPassword(password);
   if (existing?.active) return { ok: false, error: 'That email already belongs to a team member.' };
   if (!(await validPods(d.podIds))) return { ok: false, error: 'Choose existing, active pods.' };
   if (existing) {
@@ -65,7 +69,7 @@ export async function createUserAction(formData: FormData): Promise<ActionResult
     // sets everything an enabled account needs rather than sending the admin to Restore and Edit.
     await prisma.user.update({
       where: { id: existing.id },
-      data: { name: d.name, role: d.role, passwordHash: await hashPassword(d.password!), active: true, timezone: workspaceTimezone(), dailyCap: null, twentyMemberId: existing.twentyMemberId ?? await resolveMember(d.email), pods: { deleteMany: {}, create: d.podIds.map((podId) => ({ podId })) } },
+      data: { name: d.name, role: d.role, roleAssigned: true, passwordHash, active: true, timezone: workspaceTimezone(), dailyCap: null, twentyMemberId: existing.twentyMemberId ?? await resolveMember(d.email), pods: { deleteMany: {}, create: d.podIds.map((podId) => ({ podId })) } },
     });
     await logAudit({ entityType: 'user', entityId: existing.id, action: 'enabled', actor: userActor(admin), details: { role: d.role, pods: d.podIds } });
     refresh();
@@ -73,7 +77,7 @@ export async function createUserAction(formData: FormData): Promise<ActionResult
   }
   const twentyMemberId = await resolveMember(d.email);
   if (twentyMemberId && await prisma.user.findUnique({ where: { twentyMemberId } })) return { ok: false, error: 'That CRM email is already linked to another team member.' };
-  const user = await prisma.user.create({ data: { email: d.email, name: d.name, role: d.role, passwordHash: await hashPassword(d.password!), timezone: workspaceTimezone(), twentyMemberId, pods: { create: d.podIds.map((podId) => ({ podId })) } } });
+  const user = await prisma.user.create({ data: { email: d.email, name: d.name, role: d.role, passwordHash, timezone: workspaceTimezone(), twentyMemberId, pods: { create: d.podIds.map((podId) => ({ podId })) } } });
   await logAudit({ entityType: 'user', entityId: user.id, action: 'created', actor: userActor(admin), details: { role: d.role, pods: d.podIds } });
   refresh();
   return { ok: true, message: 'Team member added.' };
@@ -107,7 +111,7 @@ export async function updateUserAction(formData: FormData): Promise<ActionResult
     if (!(await validPods(d.podIds, tx))) return { ok: false, error: 'Choose existing, active pods.' };
     const stranded = await tx.enrollment.count({ where: { foUserId: userId, status: { in: ['ACTIVE', 'PAUSED'] }, podId: { not: null, notIn: d.podIds } } });
     if (stranded) return { ok: false, error: 'Transfer live enrollments before removing this team member from their pod.' };
-    await tx.user.update({ where: { id: userId }, data: { email: d.email, name: d.name, role: d.role, timezone: workspaceTimezone(), twentyMemberId, dailyCap: null, ...(passwordHash ? { passwordHash } : {}) } });
+    await tx.user.update({ where: { id: userId }, data: { email: d.email, name: d.name, role: d.role, roleAssigned: true, timezone: workspaceTimezone(), twentyMemberId, dailyCap: null, ...(passwordHash ? { passwordHash } : {}) } });
     await tx.userPod.deleteMany({ where: { userId } });
     if (d.podIds.length) await tx.userPod.createMany({ data: d.podIds.map((podId) => ({ userId, podId })) });
     if (passwordHash || current.role !== d.role || current.email !== d.email) await tx.session.deleteMany({ where: { userId } });

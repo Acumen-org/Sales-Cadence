@@ -7,6 +7,7 @@ import { verifyPassword } from '../auth/password';
 import { createSession, destroySession } from '../auth/session';
 import { safeReturnPath } from '../auth/redirect';
 import { logAudit, userActor } from '../audit';
+import { signInMethods } from '../auth/microsoft';
 
 const LoginSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
@@ -24,6 +25,8 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
     remember: formData.get('remember') || undefined,
     next: formData.get('next') || undefined,
   });
+  // Once Microsoft sign-in has worked, a password opens nothing.
+  if (!(await signInMethods()).password) return { error: 'Sign in with Microsoft.' };
   if (!parsed.success) return { error: 'Enter your email and password.' };
   const { email, password, remember, next } = parsed.data;
 

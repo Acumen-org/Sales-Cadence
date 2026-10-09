@@ -140,6 +140,11 @@ model User {
   /// Per-user override of the daily action cap. Null = use the global setting.
   dailyCap       Int?
   active         Boolean   @default(true)
+  /// False for someone who joined by signing in with Microsoft: they work as a Junior FO and show
+  /// no title until an admin gives them one.
+  roleAssigned   Boolean   @default(true)
+  /// The Microsoft account (its object id) this user signs in with.
+  microsoftId    String?   @unique
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 

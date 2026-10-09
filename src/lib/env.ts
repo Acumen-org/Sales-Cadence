@@ -23,6 +23,14 @@ const EnvSchema = z.object({
   /** 1 lets a production deployment accept unsigned webhooks. Off unless you mean it. */
   CADENCE_WEBHOOK_OPEN: z.string().optional(),
   CADENCE_DRY_RUN: BoolString,
+  /** Microsoft sign-in. Each overrides what an admin saved under Settings > Sign-in. */
+  MICROSOFT_CLIENT_ID: z.string().optional(),
+  MICROSOFT_TENANT_ID: z.string().optional(),
+  MICROSOFT_CLIENT_SECRET: z.string().optional(),
+  /** Where Microsoft's sign-in pages live. Only a test points it elsewhere. */
+  MICROSOFT_LOGIN_URL: z.string().default('https://login.microsoftonline.com'),
+  /** true brings password sign-in back after Microsoft took over, if Microsoft sign-in ever fails. */
+  PASSWORD_SIGN_IN: BoolString,
   WORKER_TICK_SECONDS: z.coerce.number().int().positive().default(300),
   CRM_SYNC_SECONDS: z.coerce.number().int().min(15).max(300).default(60),
   RECONCILE_HOUR: z.coerce.number().int().min(0).max(23).default(2),

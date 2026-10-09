@@ -1118,3 +1118,28 @@ Meeting contact is named "<meeting> · <person>", so the row reads as which meet
 record and which person on the meeting's; the Meetings record itself is named after the meeting.
 Every meeting is written to Twenty once more after deploy (Setting `meetingsToTwenty20261010b`),
 which drops teammates from the contacts and renames the rows already there.
+
+## Signing in with Microsoft (9 October 2026)
+
+The owner wanted the team to sign in with their Microsoft accounts and passwords gone. Someone
+already on the team signs in as themselves, matched by their Microsoft account once known, else by
+their sign-in address or an alias; their role and pods do not change. Someone new joins as a Junior
+FO with no title until an admin gives one (Team & pods shows "No title", the sidebar nothing, and
+the admin's saving a role is the title), and only with
+an address at one of our own domains: the app is single-tenant, but a tenant can hold guests. A
+colleague the CRM sync found and who never had access joins the same way; someone an admin removed
+stays out. An admin saves the app registration under Settings > Sign-in rather than in the server's
+environment, so the secret never goes through the public repository or its pipeline, and saving
+checks with Microsoft that the three values belong together. Passwords keep working until the first
+sign-in through Microsoft succeeds, so a missing redirect URI cannot lock the team out; from then on
+the login page offers Microsoft alone, and `PASSWORD_SIGN_IN=true` is the way back if it ever breaks.
+The id token comes straight from Microsoft's token endpoint for our secret, so its claims are checked
+(app, tenant, issuer, nonce, expiry) and its signature is not (OpenID Connect Core 3.1.3.7). The flow
+is tested end to end against a stand-in for Microsoft (`e2e/microsoft-sign-in.spec.ts`, run by
+`pnpm test:fresh`).
+
+acumen-talent.com is one of our own domains too, so Arjun (a sales leader there) is team, not a
+guest, in Cadence and on the Meetings record. Every meeting is written to Twenty once more. A tag
+Twenty lacks and Cadence cannot add (its key may not change the data model) used to leave Booked by
+or Team on the call empty without a word; Settings > Twenty now lists those names, and the worker
+writes the meetings again each hour while any is missing, so a tag added by hand fills in.

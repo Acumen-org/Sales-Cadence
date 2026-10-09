@@ -83,6 +83,7 @@ docker compose up -d --build                # deploy an update
 
 ## Gotchas
 
+- Sign-in is Microsoft once an admin saves the app registration under Settings > Sign-in (or the server sets `MICROSOFT_CLIENT_ID`, `MICROSOFT_TENANT_ID`, `MICROSOFT_CLIENT_SECRET`). The registration needs `<APP_URL>/api/auth/microsoft/callback` as a Web redirect URI. Passwords keep working until the first Microsoft sign-in succeeds, then stop. If Microsoft sign-in ever breaks (an expired client secret is the usual cause), set `PASSWORD_SIGN_IN=true` to let the old passwords in while it is fixed.
 - The webhook endpoint is public. Set `TWENTY_WEBHOOK_SECRET` (HMAC) or at least `CADENCE_WEBHOOK_TOKEN`, otherwise anything can POST to it.
 - `SEED_PROFILE=core` in production. Leaving `demo` in creates sixteen "Dummy" people.
 - Node 20 in the image; the host's Node version is irrelevant since everything runs in Docker.

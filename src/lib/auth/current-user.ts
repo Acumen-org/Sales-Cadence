@@ -11,6 +11,8 @@ export type SessionUser = {
   email: string;
   name: string;
   role: Role;
+  /** False until an admin gives someone who joined through Microsoft their title; absent means they have one. */
+  roleAssigned?: boolean;
   timezone: string;
   twentyMemberId: string | null;
   dailyCap: number | null;
@@ -33,6 +35,7 @@ export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
     email: u.email,
     name: u.name,
     role: u.role,
+    roleAssigned: u.roleAssigned,
     timezone: workspaceTimezone(),
     twentyMemberId: u.twentyMemberId,
     dailyCap: u.dailyCap,

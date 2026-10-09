@@ -47,30 +47,58 @@ export function meetingNote(m: MeetingForCrm, prefix: string): { title: string; 
 const cadenceUrl = (id: string) => `${env().APP_URL.replace(/\/$/, '')}/meetings/${id}`;
 const link = (url: string, label = '') => ({ primaryLinkUrl: url, primaryLinkLabel: label, secondaryLinks: [] });
 
+/** Whether a tag could be set: the ones that could not are listed in Settings > Twenty. */
+export type TagOutcome = { field: string; name: string; ok: boolean };
+
 /** A tag's value for a name: the tag with that label, else a new one when Twenty allows it. */
-async function tagValue(client: TwentyClient, field: TwentyTagField, label: string): Promise<string | null> {
+async function tagValue(client: TwentyClient, field: TwentyTagField, label: string, outcomes: TagOutcome[], fieldLabel: string): Promise<string | null> {
   const key = label.trim().toLowerCase();
   if (!key) return null;
   const hit = field.options.find((o) => o.label.trim().toLowerCase() === key || o.value.toLowerCase() === key);
-  if (hit) return hit.value;
-  const added = await client.addSelectOption(field, label.trim());
+  const added = hit ? null : await client.addSelectOption(field, label.trim());
   if (added) field.options.push({ value: added, label: label.trim() });
-  return added;
+  outcomes.push({ field: fieldLabel, name: label.trim(), ok: Boolean(hit ?? added) });
+  return hit?.value ?? added;
+}
+
+const MISSING_TAGS = 'meetingTagsMissing';
+
+/**
+ * Keep the list of tags Twenty lacks and Cadence could not add (its key may not change the data
+ * model): a name set this time comes off the list, a name that failed goes on it.
+ */
+async function rememberTags(outcomes: TagOutcome[]): Promise<void> {
+  if (!outcomes.length) return;
+  const key = (t: { field: string; name: string }) => `${t.field}|${t.name.toLowerCase()}`;
+  const row = await prisma.setting.findUnique({ where: { key: MISSING_TAGS } });
+  const before = ((row?.value as { items?: { field: string; name: string }[] } | null)?.items ?? []);
+  const settled = new Set(outcomes.map(key));
+  const items = [...before.filter((t) => !settled.has(key(t))), ...outcomes.filter((t) => !t.ok).map(({ field, name }) => ({ field, name }))]
+    .filter((t, i, all) => all.findIndex((u) => key(u) === key(t)) === i);
+  if (items.length === before.length && items.every((t, i) => key(t) === key(before[i]))) return;
+  await prisma.setting.upsert({ where: { key: MISSING_TAGS }, create: { key: MISSING_TAGS, value: { items } }, update: { value: { items } } });
+}
+
+/** The tags Settings > Twenty lists as missing. */
+export async function missingMeetingTags(): Promise<{ field: string; name: string }[]> {
+  const row = await prisma.setting.findUnique({ where: { key: MISSING_TAGS } });
+  return (row?.value as { items?: { field: string; name: string }[] } | null)?.items ?? [];
 }
 
 /** The record's field values and the contacts to link, in the names this workspace gave its fields. */
-export async function meetingRecord(m: MeetingForCrm, schema: TwentyMeetingSchema, client: TwentyClient): Promise<{ data: Record<string, unknown>; contacts: { personId: string; name: string }[] }> {
+export async function meetingRecord(m: MeetingForCrm, schema: TwentyMeetingSchema, client: TwentyClient): Promise<{ data: Record<string, unknown>; contacts: { personId: string; name: string }[]; tags: TagOutcome[] }> {
   const f = schema.fields;
+  const tags: TagOutcome[] = [];
   const data: Record<string, unknown> = { name: m.title };
   // The day only, whether Twenty's field is a date or a date and time.
   if (f.date) data[f.date.name] = f.date.dateOnly ? meetingDay(m.occurredAt) : meetingDayInstant(meetingDay(m.occurredAt)).toISOString();
   if (f.bookedBy) {
-    const value = m.bookedBy ? await tagValue(client, f.bookedBy, m.bookedBy.name) : null;
+    const value = m.bookedBy ? await tagValue(client, f.bookedBy, m.bookedBy.name, tags, 'Booked by') : null;
     data[f.bookedBy.name] = f.bookedBy.multi ? (value ? [value] : []) : value;
   }
   if (f.products) {
     const values: string[] = [];
-    for (const p of m.products) { const v = await tagValue(client, f.products, optionLabel(p)); if (v) values.push(v); }
+    for (const p of m.products) { const v = await tagValue(client, f.products, optionLabel(p), tags, 'Products'); if (v) values.push(v); }
     data[f.products.name] = f.products.multi ? values : values[0] ?? null;
   }
   // Who is on the team: a Cadence login, matched by id, address or name, or an address at one of
@@ -94,7 +122,7 @@ export async function meetingRecord(m: MeetingForCrm, schema: TwentyMeetingSchem
   }
   if (f.team) {
     const values: string[] = [];
-    for (const n of team) { const v = await tagValue(client, f.team, n); if (v && !values.includes(v)) values.push(v); }
+    for (const n of team) { const v = await tagValue(client, f.team, n, tags, 'Team on the call'); if (v && !values.includes(v)) values.push(v); }
     data[f.team.name] = values;
   }
   if (f.recording) data[f.recording] = link(m.sourceUrl ?? '');
@@ -111,7 +139,7 @@ export async function meetingRecord(m: MeetingForCrm, schema: TwentyMeetingSchem
   // The single "People" link on the meeting holds its first contact; all of them are Meeting contacts.
   if (f.personId) data[f.personId] = contacts[0]?.personId ?? null;
   if (f.assigneeId) data[f.assigneeId] = m.bookedBy?.twentyMemberId ?? null;
-  return { data, contacts };
+  return { data, contacts, tags };
 }
 
 const meetingSelect = {
@@ -130,7 +158,8 @@ export async function syncMeetingToCrm(meetingId: string): Promise<string | null
   const client = await getTwentyClient();
   const schema = await client.meetingSchema();
   if (schema) {
-    const record = await meetingRecord(meeting, schema, client);
+    const { tags, ...record } = await meetingRecord(meeting, schema, client);
+    await rememberTags(tags);
     const { id } = await client.saveMeetingRecord(schema, { id: meeting.twentyMeetingId, cadenceId: meeting.id, ...record });
     if (id !== meeting.twentyMeetingId) await prisma.meeting.update({ where: { id: meetingId }, data: { twentyMeetingId: id } });
     return id;

@@ -27,12 +27,16 @@ import { getMeetingAnalyzer } from '@/lib/meetings/analysis';
 import { ASSISTANT_NAME, ASSISTANT_SETTINGS_TAB } from '@/lib/workspace';
 import { IconAssistant } from '@/components/icons';
 import { describeEventResult } from '@/lib/event-results';
+import { microsoftRedirectUri, signInMethods } from '@/lib/auth/microsoft';
+import { SignInForm } from '@/components/settings/sign-in-form';
+import { missingMeetingTags } from '@/lib/meetings/crm';
 
 const TABS = [
   { key: 'twenty', label: 'Twenty' },
   { key: 'rules', label: 'Rules and matching' },
   { key: 'sync', label: 'Sync out' },
   { key: 'users', label: 'Team & pods' },
+  { key: 'signin', label: 'Sign-in' },
   { key: 'blocked', label: 'Blocked accounts' },
   { key: ASSISTANT_SETTINGS_TAB, label: ASSISTANT_NAME },
   { key: 'activity', label: 'Activity log' },
@@ -65,6 +69,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       ) : null}
       {tab === 'sync' ? <SyncForm sync={settings.sync} /> : null}
       {tab === 'users' ? <UsersTab selfId={user.id} /> : null}
+      {tab === 'signin' ? <SignInTab /> : null}
       {tab === 'blocked' ? <BlockedTab timezone={user.timezone} /> : null}
       {tab === ASSISTANT_SETTINGS_TAB ? <AssistantTab /> : null}
       {tab === 'activity' ? <ActivityTab /> : null}
@@ -112,14 +117,17 @@ async function UsersTab({ selfId }: { selfId: string }) {
     prisma.personCache.groupBy({ by: ['podOwner'], where: { deletedAt: null }, _count: { _all: true } }),
   ]);
   const peopleCount = new Map(peopleByPod.map((r) => [r.podOwner, r._count._all]));
+  const { microsoft } = await signInMethods();
   return (
     <UsersPanel
       selfId={selfId}
+      passwords={!microsoft}
       users={users.map((u) => ({
         id: u.id,
         email: u.email,
         name: u.name,
         role: u.role,
+        roleAssigned: u.roleAssigned,
         active: u.active,
         openWork: u._count.enrollments,
         openPodIds: [...new Set(u.enrollments.flatMap((e) => e.podId ? [e.podId] : []))],
@@ -134,6 +142,27 @@ async function UsersTab({ selfId }: { selfId: string }) {
         archived: p.archived,
       }))}
     />
+  );
+}
+
+/** How the team signs in: Microsoft once an admin saves the app here (or the server sets it). */
+async function SignInTab() {
+  const e = env();
+  const [{ signIn }, methods] = await Promise.all([getSettings(), signInMethods()]);
+  const fromServer = Boolean(e.MICROSOFT_CLIENT_ID || e.MICROSOFT_TENANT_ID || e.MICROSOFT_CLIENT_SECRET);
+  const passwords = !methods.password ? `Off since ${formatInstant(new Date(signIn.passwordRetiredAt!), workspaceTimezone())}` : methods.microsoft && !signIn.passwordRetiredAt ? 'On until the first Microsoft sign-in' : 'On';
+  return (
+    <Card title="Microsoft sign-in">
+      <div className="p-4">
+        <KeyValue items={[
+          { k: 'Microsoft', v: methods.microsoft ? <Badge tone="green">On</Badge> : <Badge>Off</Badge> },
+          { k: 'Passwords', v: passwords },
+          { k: 'Redirect URI', v: <code className="text-[12px]">{microsoftRedirectUri()}</code> },
+          ...(fromServer ? [{ k: 'Set by', v: 'The server' }] : []),
+        ]} />
+      </div>
+      {fromServer ? null : <SignInForm clientId={signIn.microsoftClientId} tenantId={signIn.microsoftTenantId} hasSecret={Boolean(signIn.microsoftClientSecret)} />}
+    </Card>
   );
 }
 
@@ -158,6 +187,8 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
     ['Account', meetings.fields.companyId], ['Recording', meetings.fields.recording], ['In Cadence', meetings.fields.cadenceLink], ['Cadence ID', meetings.fields.cadenceId], ['Contacts', meetings.contact],
   ] as const) : [];
   const meetingsMissing = meetingParts.filter(([, found]) => !found).map(([name]) => name);
+  // Names Twenty has no tag for and Cadence could not add one: an admin adds them in Twenty.
+  const missingTags = meetings ? await missingMeetingTags() : [];
   const [settings, schema, lastReconcile, continuous, cachedPeople, cachedCompanies, webhooks24h] = await Promise.all([
     getSettings(),
     getTwentySchema(),
@@ -204,6 +235,7 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
                     ? <span className="flex flex-wrap items-center gap-2"><Badge tone="amber">No Meetings object</Badge><span className="text-[12px] text-ink-500">meetings are written as notes</span></span>
                     : <span className="flex flex-wrap items-center gap-2"><Badge tone={meetingsMissing.length ? 'amber' : 'green'}>{meetingsMissing.length ? 'Connected, fields missing' : 'Connected'}</Badge>{meetingsMissing.length ? <span className="text-[12px] text-ink-500">missing: {meetingsMissing.join(', ')}</span> : null}{meetings.fields.date?.dateOnly ? <span className="text-[12px] text-ink-500">Meeting date holds the day only</span> : null}</span>,
               },
+              ...(missingTags.length ? [{ k: 'Tags missing', v: <span className="text-[12px] text-red-700">{missingTags.map((t) => `${t.field}: ${t.name}`).join(' · ')}</span> }] : []),
               { k: 'Full refresh', v: sync?.lastFullRefresh ? formatInstant(new Date(sync.lastFullRefresh), workspaceTimezone()) : <Badge tone="gray">Not yet</Badge> },
               {
                 k: 'People',
