@@ -1,4 +1,4 @@
-import { formatInTimeZone, fromZonedTime, toZonedTime } from 'date-fns-tz';
+import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
 
 /** A calendar date in a person's local timezone, formatted YYYY-MM-DD. */
 export type LocalDate = string;
@@ -55,11 +55,23 @@ export function todayIn(timezone: string, now: Date = new Date()): LocalDate {
 
 /** Calendar date of an instant in the given timezone. */
 export function toLocalDate(instant: Date, timezone: string): LocalDate {
-  const zoned = toZonedTime(instant, safeTimezone(timezone));
-  const y = zoned.getFullYear();
-  const m = String(zoned.getMonth() + 1).padStart(2, '0');
-  const d = String(zoned.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  const parts = dayFormatter(safeTimezone(timezone)).formatToParts(instant);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+/**
+ * One formatter per timezone, made once. Building an Intl.DateTimeFormat costs far more than using
+ * one, and a report buckets thousands of instants into days: a fresh one per call is what hung it.
+ */
+const dayFormatters = new Map<string, Intl.DateTimeFormat>();
+function dayFormatter(timezone: string): Intl.DateTimeFormat {
+  let f = dayFormatters.get(timezone);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', calendar: 'gregory', numberingSystem: 'latn' });
+    dayFormatters.set(timezone, f);
+  }
+  return f;
 }
 
 /** The instant of `hour`:00 local time on `date` in `timezone`. */
@@ -73,14 +85,21 @@ export function startOfLocalDay(date: LocalDate, timezone: string): Date {
   return localDateToInstant(date, timezone, 0);
 }
 
+const timezoneChecks = new Map<string, string>();
+
 export function safeTimezone(tz: string | null | undefined): string {
   if (!tz) return 'UTC';
+  const known = timezoneChecks.get(tz);
+  if (known) return known;
+  let safe = 'UTC';
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: tz });
-    return tz;
+    safe = tz;
   } catch {
-    return 'UTC';
+    safe = 'UTC';
   }
+  timezoneChecks.set(tz, safe);
+  return safe;
 }
 
 /** A datetime-local field represents the user's wall clock, independent of the server clock. */
@@ -97,28 +116,36 @@ export function localDateTimeToInstant(value: string, timezone: string): Date | 
   return instant;
 }
 
-export function formatLocalDate(date: LocalDate, style: 'short' | 'long' = 'short'): string {
+const localDateFormats = new Map<string, Intl.DateTimeFormat>();
+
+export function formatLocalDate(date: LocalDate, style: 'short' | 'long' | 'month' | 'year' = 'short'): string {
   const d = parseLocalDate(date);
-  return new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'UTC',
-    weekday: style === 'long' ? 'short' : undefined,
-    day: 'numeric',
-    month: 'short',
-    year: style === 'long' ? 'numeric' : undefined,
-  }).format(d);
+  let f = localDateFormats.get(style);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'UTC',
+      weekday: style === 'long' ? 'short' : undefined,
+      day: style === 'month' ? undefined : 'numeric',
+      month: 'short',
+      year: style === 'short' ? undefined : 'numeric',
+    });
+    localDateFormats.set(style, f);
+  }
+  return f.format(d);
 }
 
 export function formatInstant(instant: Date | string | null | undefined, timezone = 'UTC'): string {
   if (!instant) return '';
   const d = typeof instant === 'string' ? new Date(instant) : instant;
-  return new Intl.DateTimeFormat('en-GB', {
-    timeZone: safeTimezone(timezone),
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(d);
+  const tz = safeTimezone(timezone);
+  let f = instantFormats.get(tz);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-GB', { timeZone: tz, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    instantFormats.set(tz, f);
+  }
+  return f.format(d);
 }
+const instantFormats = new Map<string, Intl.DateTimeFormat>();
 
 /** The Sunday that starts the week containing `date`. Weeks run Sunday to Saturday. */
 export function startOfWeekSunday(date: LocalDate): LocalDate {

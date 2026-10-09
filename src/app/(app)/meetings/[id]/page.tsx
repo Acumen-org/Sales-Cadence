@@ -9,10 +9,10 @@ import { FavouriteButton } from '@/components/meetings/favourite-button';
 import { formatInstant } from '@/lib/dates';
 import { parseAnalysis } from '@/lib/meetings/analysis';
 import { parseTranscript, talkShare } from '@/lib/meetings/transcript';
-import { parseMeetingLink, PROVIDER_LABELS } from '@/lib/meetings/providers';
-import { approveMeetingAction, canManageMeetingAction, deleteMeetingAction, saveTranscriptAction } from '@/lib/actions/meetings';
+import { parseMeetingLink, platformLabel } from '@/lib/meetings/providers';
+import { canManageMeetingAction, deleteMeetingAction, saveTranscriptAction } from '@/lib/actions/meetings';
 import { ActionButton, ActionForm } from '@/components/action-form';
-import { MEETING_EXISTS, attendeeIsExternal, mayReviewMeeting } from '@/lib/meetings-query';
+import { attendeeIsExternal } from '@/lib/meetings-query';
 import { MeetingAnalysisPanel } from '@/components/meetings/meeting-analysis';
 import { AttendeeEditor } from '@/components/meetings/attendee-editor';
 import { MeetingStage } from '@/components/meetings/meeting-stage';
@@ -23,9 +23,8 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
   const user = await requireUser();
   const { id } = await params;
   const meeting = await prisma.meeting.findFirst({
-    // Scoped, not merely fetched: a transcript is a prospect conversation.
-    // Approved, or waiting for approval (the pod manager opens it from "To approve"); never removed.
-    where: { AND: [{ id }, MEETING_EXISTS] },
+    // Scoped, not merely fetched: a transcript is a prospect conversation. Never one removed.
+    where: { id, review: 'APPROVED' },
     include: { attendees: { orderBy: [{ host: 'desc' }, { external: 'asc' }, { name: 'asc' }] }, createdBy: { select: { name: true } }, bookedBy: { select: { name: true } }, favourites: { where: { userId: user.id }, select: { userId: true } } },
   });
   if (!meeting) notFound();
@@ -34,8 +33,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
   const analysis = parseAnalysis(meeting.analysis);
   // Who spoke how much, from the transcript as it stands - the same normalised cues the reader sees.
   const liveTalk = meeting.transcript ? talkShare(parseTranscript(meeting.transcript, (meeting.transcriptFormat as never) ?? undefined).cues) : [];
-  const [mayEdit, mayReview] = await Promise.all([canManageMeetingAction(id), mayReviewMeeting(user, id)]);
-  const pending = meeting.review === 'PENDING';
+  const mayEdit = await canManageMeetingAction(id);
   const { rules } = await getSettings();
   // Externality follows the address and the current domain list, not the flag stored at creation.
   meeting.attendees = meeting.attendees.map((a) => ({ ...a, external: attendeeIsExternal(a, rules.internalDomains) }));
@@ -51,28 +49,24 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
             <>
               {externals.length ? <Badge tone="green" dot>{externals.length} external</Badge> : <Badge tone="gray">{meeting.attendees.length ? 'Internal only' : 'No attendees'}</Badge>}
               {meeting.transcript ? <Badge tone="blue">Transcript</Badge> : null}
-              {pending ? <Badge tone="amber">Waiting for approval</Badge> : null}
             </>
           }
           actions={
             <>
               <FavouriteButton meetingId={meeting.id} favourite={meeting.favourites.length > 0} />
-              <a href={meeting.sourceUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm">
-                <IconExternal size={13} /> Open original
-              </a>
+              {meeting.sourceUrl ? (
+                <a href={meeting.sourceUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm">
+                  <IconExternal size={13} /> Open original
+                </a>
+              ) : null}
               {mayEdit ? (
                 <Link href={`/meetings/${meeting.id}/edit`} className="btn-secondary btn-sm">
                   Edit
                 </Link>
               ) : null}
-              {pending && mayReview ? (
-                <ActionButton action={approveMeetingAction} payload={{ meetingId: meeting.id }} className="btn-primary btn-sm">
-                  Approve
-                </ActionButton>
-              ) : null}
-              {mayEdit || mayReview ? (
-                <ActionButton action={deleteMeetingAction} payload={{ meetingId: meeting.id }} className="btn-ghost btn-sm text-red-600" confirm={pending ? 'Remove this meeting? It will not come back from the calendar.' : 'Delete this meeting and its transcript?'}>
-                  {pending ? 'Remove' : 'Delete'}
+              {mayEdit ? (
+                <ActionButton action={deleteMeetingAction} payload={{ meetingId: meeting.id }} className="btn-ghost btn-sm text-red-600" confirm="Delete this meeting and its transcript? Its note in Twenty is removed too.">
+                  Delete
                 </ActionButton>
               ) : null}
               <Link href="/meetings" className="btn-ghost btn-sm">
@@ -88,7 +82,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
           <RecordFields className="lg:grid-cols-6" items={[
             { label: 'Date and time', value: formatInstant(meeting.occurredAt, user.timezone) },
             { label: 'Duration', value: meeting.durationSec !== null ? `${Math.round(meeting.durationSec / 60)} min` : null },
-            { label: 'Platform', value: meeting.sourceUrl ? PROVIDER_LABELS[meeting.provider] : null },
+            { label: 'Platform', value: meeting.sourceUrl ? platformLabel(meeting.provider, meeting.sourceUrl) : null },
             { label: 'Account', value: meeting.companyId ? <Link href={`/accounts/${meeting.companyId}`} className="text-brand-700 hover:underline">{meeting.companyName}</Link> : meeting.companyName ?? null },
             { label: 'Booked by', value: meeting.bookedBy?.name ?? null },
             { label: 'Added by', value: meeting.createdBy?.name ?? null },

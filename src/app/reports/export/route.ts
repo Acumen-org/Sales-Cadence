@@ -6,6 +6,8 @@ import { canViewReports, toActor } from '@/lib/auth/rbac';
 import { loadReportBundle } from '@/lib/reports-bundle';
 import { ReportDocument } from '@/components/reports/report-document';
 import { REPORT_EXPORT_STYLES as STYLES } from '@/lib/report-export-styles';
+import { workspaceTimezone } from '@/lib/workspace';
+import { formatLocalDate } from '@/lib/dates';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,10 +25,10 @@ export async function GET(request: Request) {
   const bundle = await loadReportBundle(user, sp);
   // Static markup, no client runtime: the document is server-only, so nothing needs hydrating.
   const { prelude } = await prerender(
-    createElement(ReportDocument, { reports: bundle.reports, previous: bundle.previous, range: { from: bundle.range.from, to: bundle.range.to }, compared: bundle.previousRange, scope: bundle.scope, campaigns: bundle.campaigns, generatedBy: user.name, generatedAt: new Date() }),
+    createElement(ReportDocument, { reports: bundle.reports, previous: bundle.previous, range: { from: bundle.range.from, to: bundle.range.to }, compared: bundle.previousRange, scope: bundle.scope, campaigns: bundle.campaigns, generatedBy: user.name, generatedAt: new Date(), timezone: workspaceTimezone() }),
   );
   const body = await new Response(prelude).text();
-  const title = `Cadence report ${bundle.range.from} to ${bundle.range.to}`;
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><style>${STYLES}</style></head><body><h1>${title}</h1><div class="space-y-5">${body}</div></body></html>`;
+  const title = `Cadence report, ${formatLocalDate(bundle.range.from, 'year')} to ${formatLocalDate(bundle.range.to, 'year')}`;
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><style>${STYLES}</style></head><body><h1>${title}</h1>${body}</body></html>`;
   return new NextResponse(html, { headers: { 'content-type': 'text/html; charset=utf-8', 'content-disposition': `inline; filename="cadence-report-${bundle.range.from}-to-${bundle.range.to}.html"`, 'cache-control': 'no-store' } });
 }

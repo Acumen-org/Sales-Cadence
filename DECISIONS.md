@@ -1038,3 +1038,57 @@ calendar's dots on the wrong cells; a new end reason; and next actions, "recurri
   from the day it was due; Snooze and Stop too. Cadence writes the two fields to Twenty on every
   change and clears them when it closes; the worker retries what did not reach Twenty and follows
   what people change there: a new date moves it, a cleared date closes it.
+
+
+## A board that adds up, reports that answer, tasks that close, meetings kept in Twenty (9 October 2026)
+
+The owner: Home's "0 of 22 steps done" came from nowhere and "isn't accurate"; Reports "got the
+website hung" switching periods, with no way to see how each product performed; meetings should
+be added by hand, not fetched, with the embed link found from the pasted link; the auto-close
+"still does not work"; meetings tied to the CRM; tasks created from the Tasks section, and "next
+action" renamed "Create task"; and a sweep of every button.
+
+- **Home board.** Each FO's week is Done, Overdue, Due today and Later this week, each a column,
+  and the bar reads "X of Y done" where Y is exactly those four added up. Overdue and Due today are
+  the FO's own Tasks tabs; Later this week adds the campaign-calendar steps dated this week that
+  have not opened. Tasks someone created count like steps, as in the sidebar badge. "Completed
+  today" counts steps, not their actions, and says how many are still due today. Meetings on Home
+  and in Reports are the meetings recorded in Meetings, credited to the FO who booked them.
+- **Reports.** The hang was the day-by-day series: every enrollment and task was turned into a
+  calendar day once per day of the period, twice over (this period and the one before), each time
+  building a new date formatter. Every read is now bounded by the period and every record is
+  bucketed once; a switch takes about a quarter of a second. The page: Sent, Replies, Meetings and
+  Reply rate against the period before; outreach sent per day or week by channel; a channel donut;
+  Product performance (sent, replies, meetings and both rates per product, from the campaign's
+  products and the meeting's own tags); meetings by product; the campaigns running; then the
+  breakdown by FO, campaign, pod and channel. Both rates are out of what was sent. Weeks run Monday
+  to Sunday, as on Home. The page and the exported file share one stylesheet.
+- **Tasks close from the CRM.** A step counts what happened from the start of its own day (or
+  when it opened, if earlier), not from when Cadence got round to opening it, which for a late step
+  was after the email. Two emails Twenty synced are always two emails. A step marked done by hand
+  takes only the one email or call nearest its Done (up to six hours before, half an hour after),
+  so the next email closes the next step. Each touch records the step it counted for, so it is
+  judged once. One enrollment that cannot advance no longer stops the scheduler's catch-up. A
+  second address with capitals matches, and an email to someone Twenty had not linked yet is read
+  again. On deploy the worker re-reads the last two weeks of notes and emails once.
+- **Meetings.** Nothing is fetched from calendars any more; meetings are added by hand. Pasting a
+  link fills the form at once: YouTube, Vimeo, Loom, Fathom, Google Drive and Dropbox links become
+  their player; a pasted embed code is reduced to its link. A SharePoint sharing link (Teams
+  recordings) cannot be framed and cannot be converted without signing in, so the (i) beside the
+  link plays the four clicks that get its embed code. "Recordings on people" and "To approve" are
+  gone. Each meeting is written to Twenty as a note on its contacts and its account (when, length,
+  booked by, products, attendees, recording, link back), rewritten on edit and removed on delete.
+- **Create task.** "Next action" is now "Create task" everywhere it is Cadence's own feature
+  (Twenty's own field keeps its name). Tasks has a Create task button that finds the person by
+  name, email or company and opens the new task once saved.
+- **Only Home, Tasks and Activity refresh themselves.** Every page used to re-run all of its reads
+  each minute that anything in the workspace changed, and on every return to the tab.
+- **The sweep.** Three agents clicked through every section as every role, twice, and found 63
+  bugs; a second round confirmed the fixes and found 27 more, most of them fixed the same day
+  (Skip's default reason ended the whole sequence; Activity called every step done "Finished the
+  sequence"; a stale tab's Done used up a repeating task's next date). Among them: Reports' date fields kept the old period, so
+  a pod, an FO or Apply snapped back to it; Snooze could move a step earlier; a step you cannot
+  act on opened blank instead of read-only; a junior FO could take over another FO's task; the
+  search boxes ate spaces; "Add to campaign" from People showed no result; a filter left hidden
+  rows selected; team members counted as external on meetings; raw codes and ISO dates in
+  messages; a Settings outcome could get a duplicate key.

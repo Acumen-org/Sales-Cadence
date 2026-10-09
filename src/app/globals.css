@@ -327,3 +327,50 @@
   .table-meetings td[data-label="Favourite"] { grid-column: 2; grid-row: 1; justify-self: end; z-index: 1; }
   .table-meetings td[data-label="Favourite"]::before, .table-meetings td[data-label="Meeting"]::before { display: none; }
 }
+
+/* ---------- the embed-link walkthrough (components/meetings/embed-guide.tsx), a 12s loop ---------- */
+.eg-stage { position: relative; height: 176px; overflow: hidden; border-radius: 10px; background: #f5f6f4; font-size: 10.5px; color: #3c4a44; }
+.eg-window { position: absolute; inset: 6px; border: 1px solid #e3e8e2; border-radius: 8px; background: #fff; }
+.eg-bar { display: flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-bottom: 1px solid #eef1ed; }
+.eg-bar span { width: 6px; height: 6px; border-radius: 999px; background: #d4dbd6; }
+.eg-bar em { margin-left: 6px; font-style: normal; color: #6b7a74; }
+.eg-video { position: absolute; left: 10px; top: 28px; width: 220px; height: 128px; border-radius: 6px; background: linear-gradient(135deg, #203e35, #2f5a4c); }
+.eg-play { position: absolute; left: 50%; top: 50%; width: 0; height: 0; margin: -10px 0 0 -6px; border-left: 16px solid rgba(255, 255, 255, 0.85); border-top: 10px solid transparent; border-bottom: 10px solid transparent; }
+.eg-tools { position: absolute; right: 10px; top: 28px; display: flex; gap: 6px; }
+.eg-tools span { padding: 3px 9px; border: 1px solid #e3e8e2; border-radius: 6px; background: #fff; }
+.eg-share { animation: eg-share 12s infinite; }
+.eg-menu { position: absolute; right: 10px; top: 52px; display: grid; width: 118px; padding: 4px; border: 1px solid #e3e8e2; border-radius: 8px; background: #fff; box-shadow: 0 6px 18px rgba(31, 42, 38, 0.12); opacity: 0; animation: eg-menu 12s infinite; }
+.eg-menu span { padding: 5px 8px; border-radius: 5px; }
+.eg-embed { animation: eg-embed 12s infinite; }
+.eg-dialog { position: absolute; left: 34px; top: 30px; display: grid; gap: 8px; width: 290px; padding: 12px; border: 1px solid #e3e8e2; border-radius: 10px; background: #fff; box-shadow: 0 10px 28px rgba(31, 42, 38, 0.16); opacity: 0; animation: eg-dialog 12s infinite; }
+.eg-dialog b { font-weight: 500; color: #1f2a26; }
+.eg-dialog code { overflow: hidden; padding: 6px 8px; border-radius: 6px; background: #f5f6f4; font-size: 10px; white-space: nowrap; text-overflow: ellipsis; }
+.eg-copy { justify-self: end; padding: 3px 12px; border-radius: 6px; background: #eef1ed; animation: eg-copy 12s infinite; }
+.eg-cadence { position: absolute; inset: 6px; display: grid; align-content: center; gap: 6px; padding: 0 18px; border: 1px solid #e3e8e2; border-radius: 8px; background: #fff; opacity: 0; animation: eg-cadence 12s infinite; }
+.eg-label { font-size: 11px; font-weight: 500; color: #6b7a74; }
+.eg-field { overflow: hidden; padding: 7px 9px; border: 1px solid #24735e; border-radius: 7px; white-space: nowrap; text-overflow: ellipsis; box-shadow: 0 0 0 3px rgba(36, 115, 94, 0.12); }
+.eg-badge { justify-self: start; padding: 2px 8px; border-radius: 6px; background: #e6f4ee; color: #1d5c4b; }
+.eg-cursor { position: absolute; left: 0; top: 0; animation: eg-cursor 12s infinite; }
+.eg-step { animation: eg-step-1 12s infinite; }
+.eg-step-2 { animation-name: eg-step-2; } .eg-step-3 { animation-name: eg-step-3; } .eg-step-4 { animation-name: eg-step-4; }
+@keyframes eg-cursor {
+  0% { transform: translate(70px, 150px); }
+  14% { transform: translate(298px, 34px); } 16% { transform: translate(298px, 34px) scale(0.82); } 18% { transform: translate(298px, 34px); }
+  30% { transform: translate(286px, 80px); } 32% { transform: translate(286px, 80px) scale(0.82); } 34% { transform: translate(286px, 80px); }
+  55% { transform: translate(300px, 128px); } 57% { transform: translate(300px, 128px) scale(0.82); } 59% { transform: translate(300px, 128px); }
+  72% { transform: translate(180px, 92px); } 75% { transform: translate(180px, 92px) scale(0.82); } 77%, 100% { transform: translate(180px, 92px); }
+}
+@keyframes eg-share { 0%, 13% { background: #fff; } 15%, 33% { background: #e6f4ee; border-color: #24735e; } 35%, 100% { background: #fff; } }
+@keyframes eg-menu { 0%, 16% { opacity: 0; transform: translateY(-4px); } 18%, 32% { opacity: 1; transform: none; } 34%, 100% { opacity: 0; } }
+@keyframes eg-embed { 0%, 27% { background: transparent; } 29%, 34% { background: #e6f4ee; color: #1d5c4b; } 36%, 100% { background: transparent; } }
+@keyframes eg-dialog { 0%, 33% { opacity: 0; transform: scale(0.97); } 35%, 71% { opacity: 1; transform: none; } 73%, 100% { opacity: 0; } }
+@keyframes eg-copy { 0%, 56% { background: #eef1ed; color: inherit; } 58%, 72% { background: #24735e; color: #fff; } 74%, 100% { background: #eef1ed; } }
+@keyframes eg-cadence { 0%, 73% { opacity: 0; } 76%, 97% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes eg-step-1 { 0%, 13% { color: #1f2a26; } 15%, 100% { color: #98a59f; } }
+@keyframes eg-step-2 { 0%, 13% { color: #98a59f; } 15%, 29% { color: #1f2a26; } 31%, 100% { color: #98a59f; } }
+@keyframes eg-step-3 { 0%, 29% { color: #98a59f; } 31%, 71% { color: #1f2a26; } 73%, 100% { color: #98a59f; } }
+@keyframes eg-step-4 { 0%, 71% { color: #98a59f; } 73%, 100% { color: #1f2a26; } }
+@media (prefers-reduced-motion: reduce) {
+  .eg-stage *, .eg-step { animation: none !important; }
+  .eg-dialog { opacity: 1; } .eg-cursor { display: none; } .eg-step { color: #3c4a44; }
+}

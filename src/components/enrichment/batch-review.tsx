@@ -82,7 +82,7 @@ export function EnrichmentBatchReview({ batchId, entity, rows, dryRun, readOnly 
             </tr>;
           })}</tbody>
         </table></div>
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-4"><DataValue>{filtered.length} records</DataValue><div className="flex items-center gap-3"><button type="button" className="btn-secondary btn-sm" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous</button><span className="text-[12px] text-ink-500">Page <DataValue>{currentPage + 1}</DataValue> / <DataValue>{pages}</DataValue></span><button type="button" className="btn-secondary btn-sm" disabled={currentPage + 1 >= pages} onClick={() => setPage(currentPage + 1)}>Next</button></div></div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-4"><DataValue>{filtered.length} {filtered.length === 1 ? 'record' : 'records'}</DataValue><div className="flex items-center gap-3"><button type="button" className="btn-secondary btn-sm" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous</button><span className="text-[12px] text-ink-500">Page <DataValue>{currentPage + 1}</DataValue> / <DataValue>{pages}</DataValue></span><button type="button" className="btn-secondary btn-sm" disabled={currentPage + 1 >= pages} onClick={() => setPage(currentPage + 1)}>Next</button></div></div>
       </Surface>
     </div>
   );

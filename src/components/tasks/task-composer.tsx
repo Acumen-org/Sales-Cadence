@@ -28,7 +28,7 @@ export function TaskComposer({ taskId, subject, body, html, label, channel, revi
     if (timer.current) clearTimeout(timer.current);
     queue.current = queue.current.then(async () => {
       const next = latest.current;
-      if (readOnly || (saved.current.subject === next.subject && saved.current.html === next.html)) return true;
+      if (readOnly || (saved.current.subject === next.subject && saved.current.html === next.html)) { if (alive.current && !readOnly) setState('Saved'); return true; }
       if (alive.current) setState('Saving');
       try {
         const result = await saveTaskDraftAction({ taskId, subject: next.subject, html: next.html, revision: rev.current });
@@ -58,7 +58,11 @@ export function TaskComposer({ taskId, subject, body, html, label, channel, revi
   const copy = async () => {
     try {
       const doc = new DOMParser().parseFromString(draft.html, 'text/html');
-      const plain = doc.body.textContent ?? draft.text;
+      // Plain text keeps the paragraphs and line breaks, for LinkedIn and anything else without formatting.
+      doc.body.querySelectorAll('br').forEach((br) => br.replaceWith('\n'));
+      doc.body.querySelectorAll('li').forEach((li) => li.prepend('- '));
+      doc.body.querySelectorAll('p, div, li, h1, h2, h3, blockquote').forEach((block) => block.append('\n'));
+      const plain = (doc.body.textContent ?? draft.text).replace(/\n{3,}/g, '\n\n').trim();
       if (typeof ClipboardItem !== 'undefined' && navigator.clipboard.write) await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([draft.html], { type: 'text/html' }), 'text/plain': new Blob([plain], { type: 'text/plain' }) })]);
       else await navigator.clipboard.writeText(plain);
       setCopied(true); setTimeout(() => setCopied(false), 1800);
@@ -75,7 +79,7 @@ export function TaskComposer({ taskId, subject, body, html, label, channel, revi
         </div> : null}
       </div>
     </div>}
-    {channel === 'EMAIL' && <label className="block text-xs text-ink-500">Subject<input aria-label="Email subject" value={draft.subject} readOnly={readOnly} className="mt-1 w-full !font-medium !text-ink-900" onChange={e => change({ subject: e.target.value })} onBlur={() => { void flush(); }} /></label>}
+    {channel === 'EMAIL' && <label className="block text-xs text-ink-500">Subject<input aria-label="Email subject" value={draft.subject} readOnly={readOnly} maxLength={300} className="mt-1 w-full !font-medium !text-ink-900" onChange={e => change({ subject: e.target.value })} onBlur={() => { void flush(); }} /></label>}
     <RichTextEditor value={draft.html} label={channel === 'CALL' ? 'Call script' : label + ' message'} disabled={readOnly} onChange={(nextHtml, text) => change({ html: nextHtml, text })} />
     {error && <p role="alert" className="text-sm font-medium text-red-700">{error}</p>}
   </section>;

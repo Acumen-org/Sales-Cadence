@@ -5,6 +5,9 @@ export function searchTerms(q: string): string[] {
   return q.trim().split(/\s+/).filter(Boolean).slice(0, 6);
 }
 
+/** A typed % or _ is a character to find, not a wildcard that matches everyone. */
+export const likeSafe = (term: string) => term.replace(/[\\%_]/g, (c) => `\\${c}`);
+
 const PERSON_FIELDS = ['firstName', 'lastName', 'companyName', 'email', 'jobTitle', 'phone', 'city'] as const;
 const COMPANY_FIELDS = ['name', 'domain', 'industry', 'city'] as const;
 
@@ -12,11 +15,11 @@ const COMPANY_FIELDS = ['name', 'domain', 'industry', 'city'] as const;
 export function personSearchWhere(q: string): Prisma.PersonCacheWhereInput | null {
   const terms = searchTerms(q);
   if (!terms.length) return null;
-  return { AND: terms.map((term) => ({ OR: PERSON_FIELDS.map((field) => ({ [field]: { contains: term, mode: 'insensitive' as const } })) })) };
+  return { AND: terms.map((term) => ({ OR: PERSON_FIELDS.map((field) => ({ [field]: { contains: likeSafe(term), mode: 'insensitive' as const } })) })) };
 }
 
 export function companySearchWhere(q: string): Prisma.CompanyCacheWhereInput | null {
   const terms = searchTerms(q);
   if (!terms.length) return null;
-  return { AND: terms.map((term) => ({ OR: COMPANY_FIELDS.map((field) => ({ [field]: { contains: term, mode: 'insensitive' as const } })) })) };
+  return { AND: terms.map((term) => ({ OR: COMPANY_FIELDS.map((field) => ({ [field]: { contains: likeSafe(term), mode: 'insensitive' as const } })) })) };
 }

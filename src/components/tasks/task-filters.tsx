@@ -24,6 +24,7 @@ export function TaskFilters({ pods, fos, podId, foUserId, mode }: Props) {
       else next.delete(k);
     }
     next.delete('task');
+    next.delete('next');
     next.delete('flash');
     });
   };

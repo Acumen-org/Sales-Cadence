@@ -6,6 +6,7 @@ import { logAudit, userActor } from '../audit';
 import { getSettings, MatchingSettingsSchema, RulesSettingsSchema, saveSettingsSection, SyncSettingsSchema, TwentySettingsSchema } from '../settings';
 import { applyNeverProspectRule } from '../non-prospects';
 import type { ActionResult } from './users';
+import { issueText } from '../form-errors';
 
 const bool = (v: FormDataEntryValue | null) => v === 'on' || v === 'true';
 const list = (v: FormDataEntryValue | null) =>
@@ -26,7 +27,7 @@ function jsonList(v: FormDataEntryValue | null): unknown {
 }
 
 function issues(err: { issues: Array<{ path: (string | number)[]; message: string }> }) {
-  return err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
+  return issueText(err.issues);
 }
 
 export async function saveTwentySettingsAction(formData: FormData): Promise<ActionResult> {

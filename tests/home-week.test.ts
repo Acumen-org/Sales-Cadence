@@ -3,7 +3,7 @@ import type { Role } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { SYSTEM_ACTOR } from '@/lib/audit';
 import type { SessionUser } from '@/lib/auth/current-user';
-import { buildHome } from '@/lib/home-query';
+import { buildHome, weekTotal } from '@/lib/home-query';
 import { myOwnershipCounts } from '@/lib/accounts-query';
 import { workWeekRange } from '@/lib/dates';
 import { enrollPeople } from '@/lib/engine';
@@ -95,10 +95,10 @@ describe('home', () => {
     const home = await buildHome(admin, TUESDAY);
     const row = home.team.find((t) => t.id === b.users.alisa.id)!;
     expect(row.name).toBe('Alisa Marsh');
-    expect(row.doneWeek).toBe(1); // the August one is last week
-    // The week's own work: the step done this week, and nothing else due by Sunday.
-    expect(row.dueWeek).toBe(1);
-    expect(row.peopleWeek).toBe(1);
+    expect(row.done).toBe(1); // the August one is last week
+    // The week's total is exactly its parts: done, overdue, due today and later this week.
+    expect(weekTotal(row)).toBe(row.done + row.overdue + row.today + row.later);
+    expect(weekTotal(row)).toBe(1);
     expect(home.team.length).toBeGreaterThan(1); // admins see everyone
     // FOs only: an admin carries no outreach and is not a row.
     expect(home.team.some((t) => t.id === b.users.ria.id)).toBe(false);
@@ -110,6 +110,9 @@ describe('home', () => {
       where: { id: enrollment.id },
       data: { repliedAt: new Date('2026-09-09T09:00:00Z'), meetingAt: new Date('2026-09-10T14:00:00Z'), status: 'MEETING' },
     });
+    // Meetings are the ones recorded in Meetings, credited to whoever booked them.
+    await prisma.meeting.create({ data: { title: 'Intro', sourceUrl: 'https://example.com/rec/home', occurredAt: new Date('2026-09-10T14:00:00Z'), bookedById: b.users.alisa.id } });
+    await prisma.meeting.create({ data: { title: 'Last week', sourceUrl: 'https://example.com/rec/old', occurredAt: new Date('2026-09-03T14:00:00Z'), bookedById: b.users.alisa.id } });
     await prisma.touch.create({ data: { personId: 'person-01', channel: 'EMAIL', direction: 'INBOUND', occurredAt: new Date('2026-09-09T09:00:00Z'), summary: 'Reply: Re: intro', externalId: 'message:home-week:person:person-01' } });
     const admin = sessionUser(b.users.ria, []);
     const home = await buildHome(admin, TUESDAY);

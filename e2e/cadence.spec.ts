@@ -180,8 +180,8 @@ test('answered call finishes the sequence as replied and shows on Home', async (
   await page.goto('/home');
   await expect(page.getByRole('heading', { name: /this week/ })).toBeVisible();
   // The enrollment's own FO gets the credit, so somebody in the pod table has a reply this week.
-  // FO, This week, Reached, Due today, Overdue, Replies: the sixth column.
-  const replyCells = await page.locator('table tbody tr td:nth-child(6)').allTextContents();
+  // FO, This week, Done, Overdue, Due today, Later this week, Replies: the seventh column.
+  const replyCells = await page.locator('table tbody tr td:nth-child(7)').allTextContents();
   expect(replyCells.some((v) => Number(v.trim()) > 0)).toBe(true);
   // And the person is finished as replied.
   await page.goto('/people?q=' + encodeURIComponent(person.split(' ')[1] ?? person));
@@ -240,12 +240,12 @@ test('reports and people pages render with data', async ({ page }) => {
   // One page: no picture/table switch, the retired views gone, the breakdown in tabs.
   for (const gone of ['Picture', 'Table', 'By sequence', 'By FO and channel', 'Leaderboard', 'When the work happens']) await expect(page.locator('main').getByText(gone, { exact: true })).toHaveCount(0);
   for (const tab of ['By FO', 'By pod', 'By campaign', 'By channel']) await expect(page.getByRole('link', { name: tab, exact: true })).toBeVisible();
-  // The funnel's stages are nested and say what they are out of.
-  await expect(page.getByText(/^of \d+$/).first()).toBeVisible();
+  // What was sent, what came back and the meetings, over time, by channel and by product.
+  for (const figure of ['Outreach sent', 'By channel', 'Product performance', 'Meetings by product', 'Campaigns running']) await expect(page.locator('main').getByText(figure, { exact: true }).first()).toBeVisible();
   await expect(page.locator('main').getByText('Touches by channel', { exact: true })).toHaveCount(0);
   await page.goto('/reports?view=table&tab=pods');
   // Scoped to the table: the pod filter above it lists every pod as an option.
-  await expect(page.locator('table:visible').first().getByRole('cell', { name: "Alisa's pod" })).toBeVisible();
+  await expect(page.locator('main table:visible').getByRole('cell', { name: "Alisa's pod" }).first()).toBeVisible();
   // The people list is filtered on what Twenty holds, and shows it as Twenty's own labels.
   await page.goto('/people?tier=LEVEL_1');
   await expect(page.locator('table').getByText('Tier 1', { exact: true }).first()).toBeVisible();

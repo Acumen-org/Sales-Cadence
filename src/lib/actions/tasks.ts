@@ -7,10 +7,10 @@ import { prisma } from '../db';
 import { requireUser, toActor, type SessionUser } from '../auth/current-user';
 import { canActOnTask, canManageEnrollment, canSnoozeFreely } from '../auth/rbac';
 import { userActor } from '../audit';
-import { isLocalDate, todayIn } from '../dates';
+import { formatLocalDate, isLocalDate, todayIn } from '../dates';
 import { exitEnrollment, finishEnrollment, reassignEnrollment } from '../engine/enrollment';
 import { applyExitConsequence, completeCall, moveToStep, skipWithReason } from '../engine/outcomes';
-import { completeTask, nextWorkingDaySnooze, skipTask, snoozeTask } from '../engine/tasks';
+import { completeTask, skipTask, snoozeDefault, snoozeTask } from '../engine/tasks';
 import { ACTION_TYPES } from '../sequences/steps';
 import { getSettings } from '../settings';
 import type { ActionResult } from './users';
@@ -104,14 +104,14 @@ export async function snoozeTaskAction(formData: FormData): Promise<ActionResult
   if (!task) return { ok: false, error: error ?? 'Task not found.' };
   const settings = await getSettings();
   const today = todayIn(user.timezone);
-  const nextDay = nextWorkingDaySnooze(today, settings.rules.workingDays);
+  const nextDay = snoozeDefault(today, task.snoozedTo ?? task.dueDate, settings.rules.workingDays);
   let toDate = parsed.data.toDate === 'next' ? nextDay : parsed.data.toDate;
   if (!isLocalDate(toDate)) return { ok: false, error: 'Pick a valid date.' };
   if (!canSnoozeFreely(toActor(user)) && toDate !== nextDay) toDate = nextDay;
   const r = await snoozeTask({ taskId: task.id, toDate }, { actor: userActor(user) });
   revalidate();
   if (!r.ok) return { ok: false, error: describeFailure(r.reason, r.detail) };
-  return { ok: true, message: `Snoozed to ${toDate}.` };
+  return { ok: true, message: `Snoozed to ${formatLocalDate(r.task.snoozedTo ?? toDate, 'long')}.` };
 }
 
 // ---------------------------------------------------------------------------
@@ -209,6 +209,8 @@ export async function bulkTasksAction(formData: FormData): Promise<ActionResult>
   const settings = await getSettings();
   const ctx = { actor: userActor(user) };
   let done = 0;
+  // What people selected are steps; one step can hold an email and a LinkedIn touch.
+  const steps = new Set<string>();
   const problems: string[] = [];
   const touchedEnrollments = new Set<string>();
 
@@ -226,26 +228,27 @@ export async function bulkTasksAction(formData: FormData): Promise<ActionResult>
             continue;
           }
           const r = await completeCall({ taskId, disposition: d.disposition, chosenAction: 'CALL' }, ctx);
-          if (r.ok) done += 1;
-          else problems.push(`${task.label}: ${r.reason}`);
+          if (r.ok) { done += 1; steps.add(`${task.enrollment.id}:${task.stepId}`); }
+          else problems.push(`${task.label}: ${describeFailure(r.reason, r.detail)}`);
         } else {
           const r = await completeTask({ taskId, source: 'MANUAL' }, ctx);
-          if (r.ok) done += 1;
-          else problems.push(`${task.label}: ${r.reason}`);
+          if (r.ok) { done += 1; steps.add(`${task.enrollment.id}:${task.stepId}`); }
+          else problems.push(`${task.label}: ${describeFailure(r.reason, r.detail)}`);
         }
       } else if (d.op === 'skip') {
         if (!d.reasonKey) return { ok: false, error: 'Pick a skip reason.' };
         const r = await skipWithReason({ taskId, reasonKey: d.reasonKey }, ctx);
-        if (r.ok) done += 1;
-        else problems.push(`${task.label}: ${r.reason}`);
+        if (r.ok) { done += 1; steps.add(`${task.enrollment.id}:${task.stepId}`); }
+        else problems.push(`${task.label}: ${describeFailure(r.reason, r.detail)}`);
       } else if (d.op === 'snooze') {
         const today = todayIn(user.timezone);
-        const nextDay = nextWorkingDaySnooze(today, settings.rules.workingDays);
+        const nextDay = snoozeDefault(today, task.snoozedTo ?? task.dueDate, settings.rules.workingDays);
         let toDate = d.toDate && isLocalDate(d.toDate) ? d.toDate : nextDay;
-        if (!canSnoozeFreely(toActor(user))) toDate = nextDay;
+        // One day for a mixed selection: a step already due on or after it goes to the day after its own.
+        if (!canSnoozeFreely(toActor(user)) || toDate <= (task.snoozedTo ?? task.dueDate)) toDate = nextDay;
         const r = await snoozeTask({ taskId, toDate }, ctx);
-        if (r.ok) done += 1;
-        else problems.push(`${task.label}: ${r.reason}`);
+        if (r.ok) { done += 1; steps.add(`${task.enrollment.id}:${task.stepId}`); }
+        else problems.push(`${task.label}: ${describeFailure(r.reason, r.detail)}`);
       } else if (d.op === 'reassign') {
         if (!d.foUserId) return { ok: false, error: 'Pick an FO.' };
         if (touchedEnrollments.has(task.enrollment.id)) {
@@ -259,6 +262,7 @@ export async function bulkTasksAction(formData: FormData): Promise<ActionResult>
         }
         await reassignEnrollment(e.id, d.foUserId, ctx);
         touchedEnrollments.add(e.id);
+        steps.add(`${task.enrollment.id}:${task.stepId}`);
         done += 1;
       }
     } catch (err) {
@@ -267,8 +271,10 @@ export async function bulkTasksAction(formData: FormData): Promise<ActionResult>
   }
   revalidate();
   const verb = { complete: 'completed', skip: 'skipped', snooze: 'snoozed', reassign: 'reassigned' }[d.op];
-  if (!done) return { ok: false, error: problems.slice(0, 3).join('; ') || 'Nothing changed.' };
-  return { ok: true, message: `${done} ${verb}${problems.length ? `; ${problems.length} skipped: ${problems.slice(0, 3).join('; ')}` : '.'}` };
+  const unique = [...new Set(problems)];
+  if (!done) return { ok: false, error: unique.slice(0, 3).join('; ') || 'Nothing changed.' };
+  const n = steps.size || done;
+  return { ok: true, message: `${n} ${n === 1 ? 'step' : 'steps'} ${verb}${unique.length ? `; not changed: ${unique.slice(0, 3).join('; ')}` : '.'}` };
 }
 
 function describeFailure(reason: string, detail?: string): string {

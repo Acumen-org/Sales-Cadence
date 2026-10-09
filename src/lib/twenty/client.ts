@@ -14,6 +14,7 @@ import type {
   TwentyView,
   TwentyWorkspaceMember,
   UpdateTaskInput,
+  UpdateNoteInput,
   EnrichPersonInput,
   EnrichCompanyInput,TwentyWebhook, CreateWebhookInput } from './types';
 
@@ -74,6 +75,9 @@ export interface TwentyClient {
 
   // ---- writes (Cadence only edits records it created) ----
   createNote(input: CreateNoteInput): Promise<{ id: string }>;
+  /** Only ever a note Cadence wrote (a meeting's record). */
+  updateNote(id: string, patch: UpdateNoteInput): Promise<void>;
+  deleteNote(id: string): Promise<void>;
   createTask(input: CreateTaskInput): Promise<{ id: string }>;
   updateTask(id: string, patch: UpdateTaskInput): Promise<void>;
   deleteTask(id: string): Promise<void>;

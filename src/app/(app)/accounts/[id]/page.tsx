@@ -28,7 +28,8 @@ const TABS = [
 export default async function AccountPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string }> }) {
   const user = await requireUser();
   const { id } = await params;
-  const { tab = 'overview' } = await searchParams;
+  const asked = (await searchParams).tab;
+  const tab = TABS.some((t) => t.key === asked) ? asked! : 'overview';
   const detail = await accountDetail(id, user);
   if (!detail) notFound();
   const { company, people, meetings, campaigns, timeline, openTasks, stats, ownerName, blocked } = detail;
@@ -205,7 +206,8 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
               <EmptyState title="Nobody at this account yet" />
             ) : (
               <div className="overflow-x-auto scroll-thin">
-                <table className="table">
+                <table className="table table-fixed">
+                  <colgroup><col style={{ width: '22%' }} /><col style={{ width: '9%' }} /><col style={{ width: '10%' }} /><col style={{ width: '15%' }} /><col style={{ width: '15%' }} /><col style={{ width: '11%' }} /><col style={{ width: '8%' }} /><col style={{ width: '10%' }} /></colgroup>
                   <thead>
                     <tr>
                       <th>Person</th>

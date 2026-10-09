@@ -245,9 +245,13 @@ export type TwentyIntrospection = {
 export type CreateNoteInput = {
   title: string;
   bodyMarkdown: string;
-  personId: string;
+  personId?: string | null;
+  /** More people the note is about (a meeting's contacts), each linked to it. */
+  personIds?: string[];
   companyId?: string | null;
 };
+
+export type UpdateNoteInput = { title?: string; bodyMarkdown?: string };
 
 export type CreateTaskInput = {
   title: string;

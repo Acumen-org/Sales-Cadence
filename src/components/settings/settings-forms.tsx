@@ -152,6 +152,17 @@ const slug = (s: string) =>
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_|_$/g, '') || 'item';
 
+/** A key no other row has: the base, then base_2, base_3... */
+const uniqueKey = (base: string, taken: string[]) => {
+  if (!taken.includes(base)) return base;
+  let n = 2;
+  while (taken.includes(`${base}_${n}`)) n++;
+  return `${base}_${n}`;
+};
+/** A key Cadence made up for a new row follows its label until someone types a key of their own. */
+const AUTO_KEY = /^(outcome|reason)_\d+(_\d+)?$/;
+const keyFor = (rows: { key: string }[], i: number, label: string) => (!rows[i].key || AUTO_KEY.test(rows[i].key) ? uniqueKey(slug(label), rows.filter((_, k) => k !== i).map((r) => r.key)) : rows[i].key);
+
 /** Editable list of call outcomes; serialised as JSON for the server action. */
 function DispositionsEditor({ initial }: { initial: Disposition[] }) {
   const [rows, setRows] = useState<Disposition[]>(initial);
@@ -174,7 +185,7 @@ function DispositionsEditor({ initial }: { initial: Disposition[] }) {
           {rows.map((d, i) => (
             <tr key={i}>
               <td>
-                <input value={d.label} onChange={(e) => update(i, { label: e.target.value, key: rows[i].key || slug(e.target.value) })} className="w-full py-1 text-xs" />
+                <input value={d.label} onChange={(e) => update(i, { label: e.target.value, key: keyFor(rows, i, e.target.value) })} className="w-full py-1 text-xs" />
               </td>
               <td>
                 <input value={d.key} onChange={(e) => update(i, { key: slug(e.target.value) })} className="w-32 py-1 font-mono text-xs" />
@@ -194,7 +205,7 @@ function DispositionsEditor({ initial }: { initial: Disposition[] }) {
           ))}
         </tbody>
       </table>
-      <button type="button" className="btn-secondary btn-sm mt-2" onClick={() => setRows((r) => [...r, { key: `outcome_${r.length + 1}`, label: 'New outcome', answered: false, badPhone: false }])}>
+      <button type="button" className="btn-secondary btn-sm mt-2" onClick={() => setRows((r) => [...r, { key: uniqueKey(`outcome_${r.length + 1}`, r.map((x) => x.key)), label: 'New outcome', answered: false, badPhone: false }])}>
         Add outcome
       </button>
     </div>
@@ -232,7 +243,7 @@ function SkipReasonsEditor({ initial }: { initial: SkipReason[] }) {
           {rows.map((r, i) => (
             <tr key={i}>
               <td>
-                <input value={r.label} onChange={(e) => update(i, { label: e.target.value, key: rows[i].key || slug(e.target.value) })} className="w-full py-1 text-xs" />
+                <input value={r.label} onChange={(e) => update(i, { label: e.target.value, key: keyFor(rows, i, e.target.value) })} className="w-full py-1 text-xs" />
               </td>
               <td>
                 <input value={r.key} onChange={(e) => update(i, { key: slug(e.target.value) })} className="w-32 py-1 font-mono text-xs" />
@@ -261,7 +272,7 @@ function SkipReasonsEditor({ initial }: { initial: SkipReason[] }) {
           ))}
         </tbody>
       </table>
-      <button type="button" className="btn-secondary btn-sm mt-2" onClick={() => setRows((x) => [...x, { key: `reason_${x.length + 1}`, label: 'New reason', exit: 'none', badEmail: false, badPhone: false }])}>
+      <button type="button" className="btn-secondary btn-sm mt-2" onClick={() => setRows((x) => [...x, { key: uniqueKey(`reason_${x.length + 1}`, x.map((y) => y.key)), label: 'New reason', exit: 'none', badEmail: false, badPhone: false }])}>
         Add reason
       </button>
     </div>

@@ -18,6 +18,7 @@ import type {
   TwentyView,
   TwentyWorkspaceMember,
   UpdateTaskInput,
+  UpdateNoteInput,
   EnrichPersonInput,
   EnrichCompanyInput,TwentyWebhook, CreateWebhookInput, TwentyCalendarEvent } from './types';
 
@@ -714,10 +715,28 @@ export class TwentyGraphqlClient implements TwentyClient {
     );
     const id = created[`create${n.typeName}`].id;
     const nt = this.s.objects.noteTarget;
-    await this.request(`mutation CreateNoteTarget($data: ${nt.typeName}CreateInput!) { create${nt.typeName}(data: $data) { id } }`, {
-      data: { [this.s.noteTarget.noteId]: id, [(await this.targetFields('noteTarget')).personId]: input.personId },
-    });
+    const fields = await this.targetFields('noteTarget');
+    const targets = [
+      ...[...new Set([input.personId, ...(input.personIds ?? [])].filter((p): p is string => Boolean(p)))].map((personId) => ({ [fields.personId]: personId })),
+      ...(input.companyId ? [{ [fields.companyId]: input.companyId }] : []),
+    ];
+    for (const target of targets) {
+      await this.request(`mutation CreateNoteTarget($data: ${nt.typeName}CreateInput!) { create${nt.typeName}(data: $data) { id } }`, {
+        data: { [this.s.noteTarget.noteId]: id, ...target },
+      });
+    }
     return { id };
+  }
+
+  async updateNote(id: string, patch: UpdateNoteInput): Promise<void> {
+    const n = this.s.objects.note;
+    const data: Raw = { ...(patch.title !== undefined ? { [this.s.note.title]: patch.title } : {}), ...this.richText(this.s.note.body, patch.bodyMarkdown) };
+    await this.request(`mutation UpdateNote($id: UUID!, $data: ${n.typeName}UpdateInput!) { update${n.typeName}(id: $id, data: $data) { id } }`, { id, data });
+  }
+
+  async deleteNote(id: string): Promise<void> {
+    const n = this.s.objects.note;
+    await this.request(`mutation DeleteNote($id: UUID!) { delete${n.typeName}(id: $id) { id } }`, { id });
   }
 
   async createTask(input: CreateTaskInput): Promise<{ id: string }> {

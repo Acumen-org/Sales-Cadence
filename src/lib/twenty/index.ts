@@ -5,7 +5,7 @@ import { getTwentyConnection, getTwentySchema } from '../settings';
 import type { TwentyClient } from './client';
 import { TwentyGraphqlClient } from './graphql-client';
 import { getMockTwentyClient } from './mock-client';
-import type { CreateNoteInput, CreateTaskInput, UpdateTaskInput, EnrichPersonInput, PersonNextActionInput, EnrichCompanyInput, TwentyPerson, TwentyCompany } from './types';
+import type { CreateNoteInput, UpdateNoteInput, CreateTaskInput, UpdateTaskInput, EnrichPersonInput, PersonNextActionInput, EnrichCompanyInput, TwentyPerson, TwentyCompany } from './types';
 
 /**
  * CADENCE_DRY_RUN=true: reads pass through, writes are logged (console + TwentyWrite
@@ -54,6 +54,12 @@ export class DryRunTwentyClient implements TwentyClient {
     const id = `dry-note-${randomUUID()}`;
     await this.record('createNote', 'note', input, id);
     return { id };
+  }
+  async updateNote(id: string, patch: UpdateNoteInput) {
+    await this.record('updateNote', 'note', { id, ...patch }, id);
+  }
+  async deleteNote(id: string) {
+    await this.record('deleteNote', 'note', { id }, id);
   }
   async createTask(input: CreateTaskInput) {
     const id = `dry-task-${randomUUID()}`;

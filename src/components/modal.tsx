@@ -15,6 +15,8 @@ export function Modal({ children, label, onClose, className }: { children: React
     const previous = document.activeElement as HTMLElement | null;
     const overflow = document.body.style.overflow;
     dialog.showModal();
+    // showModal focuses the first control, usually Close; a field marked to start on wins.
+    dialog.querySelector<HTMLElement>('[data-autofocus]')?.focus();
     document.body.style.overflow = 'hidden';
     return () => {
       dialog.close();

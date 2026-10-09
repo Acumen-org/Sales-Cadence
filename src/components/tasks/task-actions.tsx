@@ -7,6 +7,7 @@ import { flushTaskDrafts } from './draft-registry';
 import { completeTaskAction, delegateTaskAction, finishFromTaskAction, moveToStepAction, removeFromSequenceAction, skipTaskAction, snoozeTaskAction } from '@/lib/actions/tasks';
 import type { ActionResult } from '@/lib/actions/users';
 import { type ActionType } from '@/lib/sequences/steps';
+import { formatLocalDate } from '@/lib/dates';
 import { IconCheck, IconChevronLeft, IconChevronRight, IconClock, IconExternal, IconPhone, IconSkip } from '@/components/icons';
 
 export type DispositionOption = { key: string; label: string; answered: boolean };
@@ -401,7 +402,7 @@ export function TaskActions(p: Props) {
                     <input id={`snooze-${p.taskId}`} type="date" value={snoozeDate} min={p.nextWorkingDay} onChange={(e) => setSnoozeDate(e.target.value)} />
                   </div>
                 ) : (
-                  <p className="text-[13px] text-sky-900">Moves to the next working day, {p.nextWorkingDay}.</p>
+                  <p className="text-[13px] text-sky-900">Moves to {formatLocalDate(p.nextWorkingDay, 'long')}.</p>
                 )}
                 <button type="submit" disabled={pending} className="btn-secondary">
                   Snooze

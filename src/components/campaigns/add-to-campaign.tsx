@@ -8,6 +8,7 @@ import { Modal } from '@/components/modal';
 import { IconCampaigns, IconClose, IconPlus } from '@/components/icons';
 import { Badge, Count, EmptyState } from '@/components/ui';
 import { campaignSelectionUrl } from '@/lib/campaign-selection';
+import { formatLocalDate } from '@/lib/dates';
 
 type Choice = CampaignChoice & { placesLeft: number | null };
 
@@ -15,7 +16,7 @@ type Choice = CampaignChoice & { placesLeft: number | null };
  * "Add to campaign": the upcoming and running campaigns the reader may change, each with the
  * places it still has, and a new campaign at the end. Works for one person or a selection.
  */
-export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', label = 'Add to campaign', onDone, disabled = false, disabledTitle }: { personIds: string[]; className?: string; label?: string; onDone?: () => void; /** Greyed out, with the reason on hover: everyone chosen is already in a campaign. */ disabled?: boolean; disabledTitle?: string }) {
+export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', label = 'Add to campaign', onDone, disabled = false, disabledTitle }: { personIds: string[]; className?: string; label?: string; /** Gets the result, to show once this closes (the bulk bar unmounts it). */ onDone?: (message?: string) => void; /** Greyed out, with the reason on hover: everyone chosen is already in a campaign. */ disabled?: boolean; disabledTitle?: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [choices, setChoices] = useState<Choice[] | null>(null);
@@ -38,7 +39,7 @@ export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', lab
       fd.set('campaignId', campaignId);
       fd.set('personIds', JSON.stringify(personIds));
       const r = await addPeopleToCampaignAction(fd);
-      if (r.ok) { setMessage(r.message ?? 'Done.'); router.refresh(); onDone?.(); }
+      if (r.ok) { setMessage(r.message ?? 'Done.'); router.refresh(); onDone?.(r.message); }
       else setError(r.error);
     });
 
@@ -69,7 +70,7 @@ export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', lab
                           <span className="truncate text-[13.5px] font-medium text-ink-900">{c.name}</span>
                           <Badge tone={c.kind === 'upcoming' ? 'purple' : c.status === 'PAUSED' ? 'amber' : 'green'}>{c.kind === 'upcoming' ? (c.status === 'PENDING_APPROVAL' ? 'Awaiting approval' : 'Upcoming') : c.status === 'PAUSED' ? 'Paused' : 'Active'}</Badge>
                         </div>
-                        <div className="mt-0.5 text-[12px] text-ink-500">{c.podName} · {c.startDate}{c.endDate ? ` → ${c.endDate}` : ''} · <Count value={c.members} /> in it{c.placesLeft !== null ? <> · <span className={full ? 'text-red-700' : ''}><Count value={c.placesLeft} /> places left</span></> : null}</div>
+                        <div className="mt-0.5 text-[12px] text-ink-500">{c.podName} · {formatLocalDate(c.startDate)}{c.endDate ? ` → ${formatLocalDate(c.endDate)}` : ''} · <Count value={c.members} /> in it{c.placesLeft !== null ? <> · <span className={full ? 'text-red-700' : ''}><Count value={c.placesLeft} /> places left</span></> : null}</div>
                       </div>
                       {c.calendar && c.kind === 'running' ? <span className="text-[12.5px] text-ink-500">Started</span> : <button type="button" className="btn-secondary btn-sm" disabled={pending || full} onClick={() => add(c.id)} title={full ? 'Not enough room before the end date' : undefined}>
                         Add

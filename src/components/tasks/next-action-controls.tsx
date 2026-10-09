@@ -8,7 +8,7 @@ import type { ActionResult } from '@/lib/actions/users';
 import { IconCheck, IconClock, IconClose } from '@/components/icons';
 
 /** Done, Snooze and Stop for a next action in Tasks; each goes on to the next item with its result. */
-export function NextActionControls({ id, nextUrl, nextWorkingDay, repeats }: { id: string; nextUrl: string; nextWorkingDay: string; repeats: boolean }) {
+export function NextActionControls({ id, nextUrl, nextWorkingDay, repeats, dueDate }: { id: string; nextUrl: string; nextWorkingDay: string; repeats: boolean; /** The occurrence on screen: Done in a stale tab must not use up the next one. */ dueDate?: string }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [panel, setPanel] = useState<'none' | 'snooze'>('none');
@@ -38,9 +38,9 @@ export function NextActionControls({ id, nextUrl, nextWorkingDay, repeats }: { i
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" disabled={pending} className={primary} onClick={() => run(completeNextActionAction)}><IconCheck size={16} /> Done</button>
+        <button type="button" disabled={pending} className={primary} onClick={() => run(completeNextActionAction, dueDate ? { dueDate } : {})}><IconCheck size={16} /> Done</button>
         <button type="button" disabled={pending} className={clsx(secondary, panel === 'snooze' && 'border-ink-300 bg-canvas')} onClick={() => setPanel((p) => (p === 'snooze' ? 'none' : 'snooze'))}><IconClock size={16} /> Snooze</button>
-        <button type="button" disabled={pending} className="btn-ghost" onClick={() => { if (window.confirm(repeats ? 'Stop this next action? It stops repeating and is cleared in Twenty.' : 'Stop this next action? It is cleared in Twenty.')) run(stopNextActionAction); }}><IconClose size={15} /> Stop</button>
+        <button type="button" disabled={pending} className="btn-ghost" onClick={() => { if (window.confirm(repeats ? 'Stop this task? It stops repeating and is cleared in Twenty.' : 'Stop this task? It is cleared in Twenty.')) run(stopNextActionAction); }}><IconClose size={15} /> Stop</button>
       </div>
       {panel === 'snooze' ? (
         <form className="mt-3 flex flex-wrap items-end gap-2 rounded-xl border border-line bg-canvas/60 p-3" onSubmit={(e) => { e.preventDefault(); run(moveNextActionAction, { dueDate: date }); }}>

@@ -68,7 +68,7 @@ export default async function CampaignsPage({ searchParams }: { searchParams: Pr
             <tbody>{rows.map((c) => {
               const daysUntil = diffDays(today, c.startDate);
               return <tr key={c.id}>
-                <td><Link href={'/campaigns/' + c.id} className="block truncate text-[13px] font-medium text-ink-900 hover:text-brand-700">{c.name}</Link>{c.productInterest.length ? <div className="truncate text-[12px] text-ink-500">{c.productInterest.map(optionLabel).join(', ')}</div> : null}</td>
+                <td><Link href={'/campaigns/' + c.id} title={c.name} className="block truncate text-[13px] font-medium text-ink-900 hover:text-brand-700">{c.name}</Link>{c.productInterest.length ? <div className="truncate text-[12px] text-ink-500">{c.productInterest.map(optionLabel).join(', ')}</div> : null}</td>
                 <td className="truncate text-[12.5px]">{c.podName}</td>
                 <td className="truncate text-[12.5px]"><Link href={'/campaigns/' + c.id} className="hover:text-brand-700">{c.sequenceName}</Link></td>
                 <td className="text-[12.5px]"><div className="text-ink-900">{formatLocalDate(c.startDate)}</div><div className="text-[12px] text-ink-500">{daysUntil === 0 ? 'today' : daysUntil < 0 ? 'date passed' : daysUntil === 1 ? 'tomorrow' : `in ${daysUntil} days`}</div></td>
@@ -88,7 +88,7 @@ export default async function CampaignsPage({ searchParams }: { searchParams: Pr
               const pct = total ? Math.min(100, Math.round((Math.min(day, total) / total) * 100)) : null;
               const touchesTotal = c.touches.planned;
               return <tr key={c.id}>
-                <td><Link href={'/campaigns/' + c.id} className="block truncate text-[13px] font-medium text-ink-900 hover:text-brand-700">{c.name}</Link><div className="truncate text-[12px] text-ink-500">{c.sequenceName}</div></td>
+                <td><Link href={'/campaigns/' + c.id} title={c.name} className="block truncate text-[13px] font-medium text-ink-900 hover:text-brand-700">{c.name}</Link><div className="truncate text-[12px] text-ink-500">{c.sequenceName}</div></td>
                 <td className="truncate text-[12.5px]">{c.podName}</td>
                 <td className="text-[12px]">{total ? <><div className="flex flex-wrap items-baseline justify-between gap-x-2 text-ink-700"><span className="whitespace-nowrap">Day <span className="tabular-nums">{Math.min(day, total)}</span> of <span className="tabular-nums">{total}</span></span><span className="whitespace-nowrap text-ink-500">{c.endDate ? (day > total ? `ran over ${formatLocalDate(c.endDate)}` : `ends ${formatLocalDate(c.endDate)}`) : null}</span></div><div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-ink-100"><div className={`h-full rounded-full ${day > total ? 'bg-amber-500' : ''}`} style={{ width: `${pct}%`, background: day > total ? undefined : barColour((pct ?? 0) / 100) }} /></div></> : <span className="text-ink-500">Started {formatLocalDate(c.startDate)}</span>}</td>
                 <td className="text-[12.5px] tabular-nums text-ink-700">{touchesTotal ? <><span className="text-ink-900">{c.touches.done.toLocaleString('en-US')}</span> of {touchesTotal.toLocaleString('en-US')}</> : <Empty />}</td>
@@ -104,7 +104,7 @@ export default async function CampaignsPage({ searchParams }: { searchParams: Pr
             <colgroup>{['24%', '12%', '18%', '10%', '9%', '9%', '8%', '10%'].map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
             <thead><tr><th>Campaign</th><th>Pod</th><th>Ran</th><th className="num">People</th><th className="num">Replied</th><th className="num">Meetings</th><th className="num">Reply rate</th><th>Outcome</th></tr></thead>
             <tbody>{rows.map((c) => <tr key={c.id}>
-              <td><Link href={'/campaigns/' + c.id} className="block truncate text-[13px] font-medium text-ink-900 hover:text-brand-700">{c.name}</Link><div className="truncate text-[12px] text-ink-500">{c.sequenceName}</div></td>
+              <td><Link href={'/campaigns/' + c.id} title={c.name} className="block truncate text-[13px] font-medium text-ink-900 hover:text-brand-700">{c.name}</Link><div className="truncate text-[12px] text-ink-500">{c.sequenceName}</div></td>
               <td className="truncate text-[12.5px]">{c.podName}</td>
               <td className="text-[12.5px] text-ink-700">{formatLocalDate(c.startDate)}{c.endDate ? <> → {formatLocalDate(c.endDate)}</> : null}</td>
               <td className="num"><Count value={c.counts.total} /></td>

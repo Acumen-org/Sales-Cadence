@@ -1,16 +1,18 @@
 import type { ReactNode } from 'react';
 import type { Reports, GroupRow } from '@/lib/reports-query';
 import { formatLocalDate } from '@/lib/dates';
-import { Delta, Figure, Funnel, ProgressBar, Sparkline } from './charts';
+import { optionLabel } from '@/lib/twenty/labels';
+import { CHANNEL_COLOURS, ColumnChart, Delta, Donut, Figure, InlineBar, pct, productColour, ProgressBar, Sparkline } from './charts';
 
 /**
- * The picture of a period, for leadership: the headline numbers with what they were in the period
- * before, where the funnel narrows beside the campaigns running and how far along they are, then
- * the breakdown by FO, pod, campaign and channel. Rendered on the
- * Reports page (the breakdown as tabs) and, unchanged, into the exported HTML file (every
- * breakdown, one after another). No client code, so it prints.
+ * The picture of a period: what was sent, what came back and which meetings came of it, beside
+ * the period before; outreach over time and by channel; how each product did; the campaigns
+ * running; then the breakdown by FO, campaign, pod and channel. Rendered on the Reports page (the
+ * breakdown as tabs) and, unchanged, into the exported HTML file (every breakdown, one after
+ * another). No client code, so it prints.
  */
-export type RunningCampaign = { id: string; name: string; podName: string; startDate: string; endDate: string | null; day: number; total: number | null; touchesDone: number; touchesPlanned: number; replied: number; meetings: number };
+/** A campaign under way, by how far through its window it is. `day` is 0 or less before it starts. */
+export type RunningCampaign = { id: string; name: string; podName: string; products: string[]; paused: boolean; startDate: string; endDate: string | null; day: number; total: number | null; touchesDone: number; touchesPlanned: number };
 
 export type ReportDocumentProps = {
   reports: Reports;
@@ -24,182 +26,191 @@ export type ReportDocumentProps = {
   breakdown?: ReactNode;
   generatedBy?: string | null;
   generatedAt?: Date | null;
+  /** The workspace's clock, for when the export was made. */
+  timezone?: string;
 };
 
 export const BREAKDOWNS = [
   { key: 'fos', label: 'By FO' },
-  { key: 'pods', label: 'By pod' },
   { key: 'campaigns', label: 'By campaign' },
+  { key: 'pods', label: 'By pod' },
   { key: 'channels', label: 'By channel' },
 ] as const;
 export type BreakdownKey = (typeof BREAKDOWNS)[number]['key'];
 
-/** What the rates are out of, since it is not the Started column. */
-export const RATES_NOTE = 'Reply and meeting rates are out of the people who started in this period, not counting anyone taken out of outreach.';
+const fmt = (n: number) => n.toLocaleString('en-US');
+const plural = (n: number, one: string, many = `${one}s`) => `${fmt(n)} ${n === 1 ? one : many}`;
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
-
-function Tile({ label, value, previous, series, invert }: { label: string; value: number; previous: number | null; series: number[]; invert?: boolean }) {
+function Tile({ label, value, shown, previous, series, sub, rate }: { label: string; value: number; shown?: string; previous: number | null; series: number[]; sub?: ReactNode; rate?: boolean }) {
   return (
-    <div className="surface flex items-start justify-between gap-4 px-5 py-5">
-      <div className="min-w-0">
-        <div className="text-[11px] font-medium text-ink-500">{label}</div>
-        <div className={`mt-2 text-[30px] font-semibold leading-tight tracking-[-0.04em] tabular-nums ${value === 0 ? 'text-ink-400' : 'text-ink-900'}`}>{value.toLocaleString('en-US')}</div>
-        {previous !== null ? <div className="mt-1 flex flex-wrap items-center gap-x-1.5"><Delta current={value} previous={previous} invert={invert} />{value !== previous ? <span className="whitespace-nowrap text-[11.5px] text-ink-500">was {previous.toLocaleString('en-US')}</span> : null}</div> : null}
+    <div className="rp-card rp-tile">
+      <div style={{ minWidth: 0 }}>
+        <div className="rp-label">{label}</div>
+        <div className={`rp-value${value === 0 ? ' rp-zero' : ''}`}>{shown ?? fmt(value)}</div>
+        <div className="rp-sub">
+          {previous !== null ? <Delta current={value} previous={previous} rate={rate} /> : null}
+          {sub}
+        </div>
       </div>
-      <Sparkline values={series} label={`${label}, day by day`} />
+      <Sparkline values={series} label={`${label}, over the period`} />
     </div>
   );
 }
 
-export function ReportDocument({ reports, previous, range, compared, scope, campaigns, breakdown, generatedBy, generatedAt }: ReportDocumentProps) {
+export function ReportDocument({ reports, previous, range, compared, scope, campaigns, breakdown, generatedBy, generatedAt, timezone }: ReportDocumentProps) {
   const r = reports;
   const p = previous;
-  const funnel = [
-    { label: 'Started', value: r.funnel.enrolled },
-    { label: 'Contacted', value: r.funnel.touched },
-    { label: 'Responded', value: r.funnel.replied, hint: 'Replied, or booked a meeting' },
-    { label: 'Meeting booked', value: r.funnel.meeting },
-  ];
-  const days = r.daily.length;
+  const days = Math.round((Date.parse(range.to) - Date.parse(range.from)) / 86_400_000) + 1;
+  const t = r.totals;
+  // The year only where it is not the period's own.
+  const day = (d: string) => formatLocalDate(d, d.slice(0, 4) === range.to.slice(0, 4) ? 'short' : 'year');
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-baseline justify-between gap-3 text-[12.5px] text-ink-600">
-        <span><span className="font-medium text-ink-900">{formatLocalDate(range.from, 'long')}</span> → <span className="font-medium text-ink-900">{formatLocalDate(range.to, 'long')}</span> · {days} days · {scope}{compared ? <> · compared with {formatLocalDate(compared.from)} → {formatLocalDate(compared.to)}</> : null}</span>
-        {generatedAt ? <span>Generated {generatedAt.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}{generatedBy ? ` by ${generatedBy}` : ''}</span> : null}
+    <div className="rp">
+      <div className="rp-meta">
+        <span><span className="rp-strong">{formatLocalDate(range.from, 'long')}</span> → <span className="rp-strong">{formatLocalDate(range.to, 'long')}</span> · {plural(days, 'day')} · {scope}{compared ? <> · compared with {day(compared.from)} → {day(compared.to)}</> : null}</span>
+        {generatedAt ? <span>Generated {generatedAt.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short', ...(timezone ? { timeZone: timezone } : {}) })}{generatedBy ? ` by ${generatedBy}` : ''}</span> : null}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Tile label="People started" value={r.totals.enrollments} previous={p?.totals.enrollments ?? null} series={r.daily.map((d) => d.enrollments)} />
-        <Tile label="Touches done" value={r.totals.tasksDone} previous={p?.totals.tasksDone ?? null} series={r.daily.map((d) => d.tasksDone)} />
-        <Tile label="Replies" value={r.totals.replied} previous={p?.totals.replied ?? null} series={r.daily.map((d) => d.replies)} />
-        <Tile label="Meetings" value={r.totals.meeting} previous={p?.totals.meeting ?? null} series={r.daily.map((d) => d.meetings)} />
+      <div className="rp-tiles">
+        <Tile label="Sent" value={t.sent} previous={p?.totals.sent ?? null} series={r.series.map((b) => b.sent)} sub={t.reached ? <span>to {plural(t.reached, 'person', 'people')}</span> : null} />
+        <Tile label="Replies" value={t.replies} previous={p?.totals.replies ?? null} series={r.series.map((b) => b.replies)} sub={t.repliedPeople ? <span>from {plural(t.repliedPeople, 'person', 'people')}</span> : null} />
+        <Tile label="Meetings" value={t.meetings} previous={p?.totals.meetings ?? null} series={r.series.map((b) => b.meetings)} />
+        <Tile label="Reply rate" value={t.replyRate} shown={pct(t.replyRate)} previous={p ? p.totals.replyRate : null} series={r.series.map((b) => (b.sent ? b.replies / b.sent : 0))} rate sub={t.sent ? <span>meeting rate {pct(t.meetingRate)}</span> : null} />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-        <Figure title="From first touch to meeting" aside={r.funnel.enrolled ? `${Math.round((r.funnel.meeting / r.funnel.enrolled) * 100)}% booked a meeting` : undefined}>
-          <Funnel stages={funnel} />
+      <div className="rp-row">
+        <Figure title="Outreach sent" aside={r.unit === 'day' ? 'per day' : r.unit === 'week' ? 'per week' : 'per month'}>
+          {t.sent ? <ColumnChart buckets={r.series} unit={r.unit} /> : <p className="rp-empty">Nothing sent in this period</p>}
         </Figure>
-      {campaigns.length ? (
-        <Figure title="Campaigns running" aside={`${campaigns.length} active, to date`}>
-          <div className="space-y-3">
+        <Figure title="By channel">
+          <Donut slices={r.sentByChannel} colour={(k) => CHANNEL_COLOURS[k as keyof typeof CHANNEL_COLOURS]} centre="sent" />
+        </Figure>
+      </div>
+
+      <div className="rp-row">
+        <Figure title="Product performance">
+          <ProductTable rows={r.byProduct} previous={p?.byProduct ?? []} />
+        </Figure>
+        <Figure title="Meetings by product">
+          <Donut slices={r.meetingsByProduct} colour={productColour} centre={t.meetings === 1 ? 'meeting' : 'meetings'} />
+        </Figure>
+      </div>
+
+      <Figure title="Campaigns running" aside={campaigns.length ? `${campaigns.length} under way` : undefined}>
+        {campaigns.length ? (
+          <div className="rp-campaigns">
             {campaigns.map((c) => (
-              <div key={c.id} className="grid gap-2 text-[12.5px] md:grid-cols-[minmax(0,1fr)_minmax(0,14rem)_minmax(0,9rem)] md:items-center md:gap-4">
-                <div className="min-w-0"><div className="line-clamp-2 break-words font-medium text-ink-900" title={c.name}>{c.name}</div><div className="truncate text-[12px] text-ink-500">{c.podName}</div></div>
+              <div key={c.id} className="rp-campaign">
+                <div style={{ minWidth: 0 }}><div className="rp-clamp" title={c.name}>{c.name}</div><div className="rp-small">{[c.podName, c.products.map(optionLabel).join(', ')].filter(Boolean).join(' · ')}</div></div>
                 <div>
-                  <div className="flex justify-between text-[12px] text-ink-600"><span>{c.total ? <>Day <span className="tabular-nums">{Math.min(c.day, c.total)}</span> of {c.total}</> : c.day === 1 ? 'Started today' : `Since ${formatLocalDate(c.startDate)}`}</span><span className="tabular-nums">{c.touchesDone.toLocaleString('en-US')} of {plural(c.touchesPlanned, 'touch', 'touches')}</span></div>
-                  {c.total ? <div className="mt-1.5"><ProgressBar value={c.day} total={c.total} over={c.day > c.total} /></div> : null}
+                  <div className="rp-split"><span>{c.day < 1 ? `Starts ${formatLocalDate(c.startDate)}` : c.total ? <>Day {Math.min(c.day, c.total)} of {c.total}</> : c.day === 1 ? 'Started today' : `Since ${formatLocalDate(c.startDate)}`}</span><span className="rp-num">{fmt(c.touchesDone)} of {plural(c.touchesPlanned, 'touch', 'touches')}</span></div>
+                  {c.total ? <ProgressBar value={Math.max(0, c.day)} total={c.total} over={c.day > c.total} /> : null}
                 </div>
-                <div className="tabular-nums text-ink-700 md:text-right">{plural(c.replied, 'reply', 'replies')} · {plural(c.meetings, 'meeting')}</div>
+                <div className="rp-end">{c.paused ? 'Paused' : c.endDate ? `Ends ${formatLocalDate(c.endDate)}` : null}</div>
               </div>
             ))}
           </div>
-        </Figure>
-      ) : <Figure title="Campaigns running"><p className="text-[12.5px] text-ink-400">No campaign is running</p></Figure>}
-      </div>
+        ) : <p className="rp-empty">No campaign is running</p>}
+      </Figure>
 
       {breakdown ?? BREAKDOWNS.map((b) => (
-        <Figure key={b.key} title={b.label} aside="this period against the one before">
+        <Figure key={b.key} title={b.label} aside={p ? 'against the period before' : undefined}>
           <BreakdownTable tab={b.key} reports={r} previous={p} />
         </Figure>
       ))}
-      {breakdown ? null : <p className="text-[12px] text-ink-500">{RATES_NOTE}</p>}
     </div>
+  );
+}
+
+const none = <p className="rp-empty">No results in this period</p>;
+const withDelta = (key: string, value: number, before: number | undefined) => (
+  <td key={key} className="rp-r">{fmt(value)}{before !== undefined ? <> <Delta current={value} previous={before} /></> : null}</td>
+);
+
+/** Each product: what was sent, what came back and the meetings, each bar against the largest. */
+function ProductTable({ rows, previous }: { rows: GroupRow[]; previous: GroupRow[] }) {
+  const shown = rows.filter((x) => x.sent || x.replies || x.meetings);
+  if (!shown.length) return none;
+  const before = new Map(previous.map((x) => [x.key, x]));
+  const max = { sent: Math.max(...shown.map((x) => x.sent)), replies: Math.max(...shown.map((x) => x.replies)), meetings: Math.max(...shown.map((x) => x.meetings)) };
+  return (
+    <div className="rp-scroll"><table className="rp-table">
+      <thead><tr><th>Product</th><th>Sent</th><th>Replies</th><th>Meetings</th><th className="rp-r">Reply rate</th><th className="rp-r">Meeting rate</th></tr></thead>
+      <tbody>
+        {shown.map((x) => {
+          const b = before.get(x.key);
+          const colour = productColour(x.key);
+          return (
+            <tr key={x.key}>
+              <td><span className="rp-key rp-name"><span className="rp-swatch" style={{ background: colour }} />{x.label}</span></td>
+              <td><InlineBar value={x.sent} max={max.sent} colour={colour} label={`${x.label}, sent`} /></td>
+              <td><InlineBar value={x.replies} max={max.replies} colour={colour} label={`${x.label}, replies`} /></td>
+              <td><InlineBar value={x.meetings} max={max.meetings} colour={colour} label={`${x.label}, meetings`} /></td>
+              <td className="rp-r">{pct(x.replyRate)}{b ? <div className="rp-was">was {pct(b.replyRate)}</div> : null}</td>
+              <td className="rp-r">{pct(x.meetingRate)}{b ? <div className="rp-was">was {pct(b.meetingRate)}</div> : null}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table></div>
   );
 }
 
 /** One breakdown of the period, each figure beside the period before. */
 export function BreakdownTable({ tab, reports, previous }: { tab: BreakdownKey; reports: Reports; previous: Reports | null }) {
-  if (tab === 'fos') return <FoTable reports={reports} previous={previous} />;
   if (tab === 'channels') return <ChannelTable reports={reports} previous={previous} />;
-  const rows = (tab === 'pods' ? reports.byPod : reports.byCampaign).filter((x) => x.enrolled || x.replied || x.meeting || x.tasksDone);
-  return <GroupCompare rows={rows} previous={(tab === 'pods' ? previous?.byPod : previous?.byCampaign) ?? []} first={tab === 'pods' ? 'Pod' : 'Campaign'} />;
+  const rows = tab === 'fos' ? reports.byFo : tab === 'pods' ? reports.byPod : reports.byCampaign;
+  const before = tab === 'fos' ? previous?.byFo : tab === 'pods' ? previous?.byPod : previous?.byCampaign;
+  return <GroupTable rows={rows} previous={before ?? null} first={tab === 'fos' ? 'FO' : tab === 'pods' ? 'Pod' : 'Campaign'} channels={tab === 'fos'} />;
 }
 
-const none = <p className="text-[12.5px] text-ink-400">No results in this period</p>;
-const rate = (value: number, before: number | undefined) => <td className="num tabular-nums">{Math.round(value * 100)}%{before !== undefined ? <span className="ml-2 text-[12px] text-ink-500">was {Math.round(before * 100)}%</span> : null}</td>;
-const counted = (key: string, value: number, before: number | undefined) => (
-  <td key={key} className="num"><span className="tabular-nums">{value.toLocaleString('en-US')}</span>{before !== undefined ? <span className="ml-2 inline-block"><Delta current={value} previous={before} /></span> : null}</td>
-);
-
-/** Each FO: what they did, by channel, and what came of it - one row, one place. */
-function FoTable({ reports, previous }: { reports: Reports; previous: Reports | null }) {
-  const outcome = new Map(reports.byFo.map((r) => [r.key, r]));
-  const before = new Map((previous?.byFo ?? []).map((r) => [r.key, r]));
-  const beforeWork = new Map((previous?.activity ?? []).map((r) => [r.id, r.period]));
-  const rows = reports.activity.filter((a) => a.period.total || outcome.get(a.id)?.enrolled || outcome.get(a.id)?.replied || outcome.get(a.id)?.meeting);
-  if (!rows.length) return none;
+/** The roll-up: what went out (by channel, for FOs), to how many people, and what came back. */
+export function GroupTable({ rows, previous, first, channels }: { rows: GroupRow[]; previous: GroupRow[] | null; first: string; channels?: boolean }) {
+  const shown = rows.filter((x) => x.sent || x.replies || x.meetings);
+  if (!shown.length) return none;
+  const prev = new Map((previous ?? []).map((x) => [x.key, x]));
+  const has = (k: string) => (previous ? prev.get(k) : undefined);
   return (
-    <div className="overflow-x-auto">
-      <table className="table table-dense">
-        <thead><tr><th>FO</th><th className="num">Started</th><th className="num">Email</th><th className="num">Calls</th><th className="num">LinkedIn</th><th className="num">Touches</th><th className="num">Replies</th><th className="num">Meetings</th><th className="num">Reply rate</th><th className="num">Meeting rate</th></tr></thead>
-        <tbody>
-          {rows.map((a) => {
-            const o = outcome.get(a.id), b = before.get(a.id);
-            return (
-              <tr key={a.id}>
-                <td className="whitespace-nowrap text-[13px] text-ink-900">{a.name}</td>
-                {counted('s', o?.enrolled ?? 0, b?.enrolled)}
-                <td className="num tabular-nums">{a.period.emails.toLocaleString('en-US')}</td>
-                <td className="num tabular-nums">{a.period.calls.toLocaleString('en-US')}{a.period.calls ? <span className="ml-1.5 text-[12px] text-ink-500">({a.period.answered} answered)</span> : null}</td>
-                <td className="num tabular-nums">{a.period.linkedin.toLocaleString('en-US')}</td>
-                {counted('t', a.period.total, beforeWork.get(a.id)?.total)}
-                {counted('r', o?.replied ?? 0, b?.replied)}
-                {counted('m', o?.meeting ?? 0, b?.meeting)}
-                {rate(o?.replyRate ?? 0, b?.replyRate)}
-                {rate(o?.meetingRate ?? 0, b?.meetingRate)}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+    <div className="rp-scroll"><table className="rp-table">
+      <thead><tr><th>{first}</th>{channels ? <><th className="rp-r">Email</th><th className="rp-r">Calls</th><th className="rp-r">LinkedIn</th></> : null}<th className="rp-r">Sent</th><th className="rp-r">People</th><th className="rp-r">Replies</th><th className="rp-r">Meetings</th><th className="rp-r">Reply rate</th><th className="rp-r">Meeting rate</th></tr></thead>
+      <tbody>
+        {shown.map((x) => {
+          const b = has(x.key);
+          const zero = previous ? 0 : undefined;
+          return (
+            <tr key={x.key}>
+              <td className="rp-name">{x.label}</td>
+              {channels ? <>
+                <td className="rp-r">{fmt(x.emails)}</td>
+                <td className="rp-r">{fmt(x.calls)}{x.calls ? <span className="rp-muted"> · {fmt(x.answered)} answered</span> : null}</td>
+                <td className="rp-r">{fmt(x.linkedin)}</td>
+              </> : null}
+              {withDelta('s', x.sent, b?.sent ?? zero)}
+              <td className="rp-r">{fmt(x.reached)}</td>
+              {withDelta('r', x.replies, b?.replies ?? zero)}
+              {withDelta('m', x.meetings, b?.meetings ?? zero)}
+              <td className="rp-r">{pct(x.replyRate)}</td>
+              <td className="rp-r">{pct(x.meetingRate)}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table></div>
   );
 }
 
-/** Each channel: what is still to do, what was done and how we know, and what did not happen. */
+/** Each channel: what was done and how we know, what was skipped, and what is still open. */
 function ChannelTable({ reports, previous }: { reports: Reports; previous: Reports | null }) {
-  const rows = reports.channels.filter((c) => c.pending || c.done || c.skipped || c.cancelled);
+  const rows = reports.channels.filter((c) => c.done || c.skipped || c.open);
   if (!rows.length) return none;
   return (
-    <div className="overflow-x-auto">
-      <table className="table table-dense">
-        <thead><tr><th>Channel</th><th className="num">Still to do</th><th className="num">Done</th><th className="num">Logged in Twenty</th><th className="num">Marked done by FO</th><th className="num">Skipped</th><th className="num">Cancelled</th></tr></thead>
-        <tbody>{rows.map((c) => {
-          const b = previous?.channels.find((x) => x.action === c.action);
-          return <tr key={c.action}><td className="text-[13px] text-ink-900">{c.label}</td><td className="num tabular-nums">{c.pending.toLocaleString('en-US')}</td>{counted('d', c.done, b?.done)}<td className="num tabular-nums">{c.observed.toLocaleString('en-US')}</td><td className="num tabular-nums">{c.manual.toLocaleString('en-US')}</td><td className="num tabular-nums">{c.skipped.toLocaleString('en-US')}</td><td className="num tabular-nums">{c.cancelled.toLocaleString('en-US')}</td></tr>;
-        })}</tbody>
-      </table>
-    </div>
-  );
-}
-
-/** The roll-up table with the previous period beside each figure. */
-export function GroupCompare({ rows, previous, first }: { rows: GroupRow[]; previous: GroupRow[]; first: string }) {
-  const prev = new Map(previous.map((r) => [r.key, r]));
-  if (!rows.length) return none;
-  return (
-    <div className="overflow-x-auto">
-      <table className="table table-dense">
-        <thead><tr><th>{first}</th><th className="num">Started</th><th className="num">Touches</th><th className="num">Replies</th><th className="num">Meetings</th><th className="num">Reply rate</th><th className="num">Meeting rate</th></tr></thead>
-        <tbody>
-          {rows.map((r) => {
-            const b = prev.get(r.key);
-            return (
-              <tr key={r.key}>
-                <td className="text-[13px] text-ink-900">{r.label}</td>
-                {counted('e', r.enrolled, b?.enrolled)}
-                {counted('t', r.tasksDone, b?.tasksDone)}
-                {counted('r', r.replied, b?.replied)}
-                {counted('m', r.meeting, b?.meeting)}
-                {rate(r.replyRate, b?.replyRate)}
-                {rate(r.meetingRate, b?.meetingRate)}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+    <div className="rp-scroll"><table className="rp-table">
+      <thead><tr><th>Channel</th><th className="rp-r">Done</th><th className="rp-r">Closed from Twenty</th><th className="rp-r">Marked done</th><th className="rp-r">Skipped</th><th className="rp-r">Still open</th><th className="rp-r">Overdue</th></tr></thead>
+      <tbody>{rows.map((c) => {
+        const b = previous?.channels.find((x) => x.action === c.action);
+        return <tr key={c.action}><td className="rp-name">{c.label}</td>{withDelta('d', c.done, previous ? b?.done ?? 0 : undefined)}<td className="rp-r">{fmt(c.observed)}</td><td className="rp-r">{fmt(c.manual)}</td><td className="rp-r">{fmt(c.skipped)}</td><td className="rp-r">{fmt(c.open)}</td><td className="rp-r">{fmt(c.overdue)}</td></tr>;
+      })}</tbody>
+    </table></div>
   );
 }

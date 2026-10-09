@@ -81,6 +81,12 @@ export function describeAudit(action: string, details: Details, actorLabel: stri
       return { title: label, fields: closed };
     }
     case 'completed':
+      // A step done (it carries how it was done) is not the sequence finishing.
+      if (str(d.source)) {
+        const how = str(d.source)!.startsWith('OBSERVED') ? 'seen in Twenty' : str(d.source) === 'MANUAL' ? 'marked done' : null;
+        const channel = str(d.chosenAction);
+        return { title: `Step done${how ? `: ${how}` : ''}${by}`, fields: channel ? [{ label: 'How', value: words(channel).replace(/^./, (c) => c.toUpperCase()) }] : [] };
+      }
       return { title: 'Finished the sequence (no reply)', fields: Number.isFinite(num(d.steps)) ? [{ label: 'Steps in the plan', value: String(num(d.steps)) }] : [] };
     case 'finished':
       return { title: str(d.kind) === 'replied' ? `Marked as replied${by}` : `Finished by hand${by}`, fields: closed };
@@ -115,6 +121,20 @@ export function describeAudit(action: string, details: Details, actorLabel: stri
         title: `${action === 'product_added' ? 'Product tagged' : 'Product removed'}${by}`,
         fields: str(d.product) ? [{ label: 'Product', value: optionLabel(str(d.product)!) }] : [],
       };
+    // A task created for a person (stored under its old name, next action).
+    case 'next_action_set':
+    case 'next_action_done':
+    case 'next_action_moved':
+    case 'next_action_stopped': {
+      const verb = { next_action_set: 'Task created', next_action_done: 'Task done', next_action_moved: 'Task moved', next_action_stopped: 'Task stopped' }[action];
+      const fields: AuditField[] = [];
+      if (str(d.label)) fields.push({ label: 'Task', value: str(d.label)! });
+      const day = (v: string) => (isLocalDate(v) ? formatLocalDate(v, 'long') : v);
+      if (str(d.dueDate)) fields.push({ label: 'Due', value: day(str(d.dueDate)!) });
+      if (str(d.to)) fields.push({ label: 'Moved to', value: day(str(d.to)!) });
+      if (str(d.reason)) fields.push({ label: 'Why', value: str(d.reason)! });
+      return { title: `${verb}${by}`, fields };
+    }
     default:
       return { title: `${words(action).replace(/^./, (c) => c.toUpperCase())}${by}`, fields: [] };
   }

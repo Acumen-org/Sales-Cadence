@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 /**
  * The owner, 25 September 2026: "Snooze is not working either. Please test all buttons especially
  * in the tasks section." The buttons the other specs do not press - Snooze, bulk Snooze, Delegate -
- * and next actions, from People to Tasks. Runs late: it snoozes and hands work around.
+ * and tasks created for a person, from People and from Tasks. Runs late: it snoozes and hands work around.
  */
 test.describe.configure({ mode: 'serial' });
 
@@ -33,7 +33,7 @@ test('Snooze moves a step to the day picked, and the list says so', async ({ pag
   await snooze.click();
   await expect(page.getByText('Come back to this task later')).toBeVisible();
   await page.locator('form').filter({ hasText: 'Come back to this task later' }).getByRole('button', { name: 'Snooze' }).click();
-  await expect(page.getByText(/Snoozed to \d{4}-\d{2}-\d{2}/)).toBeVisible();
+  await expect(page.getByText(/Snoozed to \w{3}, \d{1,2} \w{3,4} \d{4}/)).toBeVisible();
 });
 
 test('bulk Snooze moves every step selected', async ({ page }) => {
@@ -45,8 +45,8 @@ test('bulk Snooze moves every step selected', async ({ page }) => {
   await boxes.nth(1).check();
   await page.locator('select').filter({ has: page.locator('option[value="snooze"]') }).selectOption('snooze');
   await page.getByRole('button', { name: 'Apply' }).click();
-  // Counted by the parts of each step: two steps of two parts read "4 snoozed."
-  await expect(page.getByText(/^\d+ snoozed\.$/)).toBeVisible();
+  // Counted in steps, whatever each step holds: two steps read "2 steps snoozed."
+  await expect(page.getByText(/^\d+ steps? snoozed\.$/)).toBeVisible();
 });
 
 test('Delegate hands a step to a pod-mate', async ({ page }) => {
@@ -61,42 +61,57 @@ test('Delegate hands a step to a pod-mate', async ({ page }) => {
   await expect(page.getByText(/Delegated to /)).toBeVisible();
 });
 
-test('a next action set for two people in People is worked in Tasks and moves on when it repeats', async ({ page }) => {
+test('a task created for two people in People is worked in Tasks and moves on when it repeats', async ({ page }) => {
   await signIn(page, 'admin@cadence.local', 'admin12345');
   await page.goto('/people');
   // People already in a campaign cannot be selected; the first two who can.
   const rows = page.locator('tbody input[type="checkbox"]:enabled');
   await rows.nth(0).check();
   await rows.nth(1).check();
-  await page.getByRole('button', { name: 'Next action' }).click();
+  await page.getByRole('button', { name: 'Create task' }).click();
   await page.getByLabel('What to do').fill('E2E send the one-pager');
   await page.getByLabel('Repeats').selectOption('WEEKLY');
-  await page.getByRole('button', { name: 'Save next action' }).click();
-  await expect(page.getByText('Next action set for 2 people.')).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Create task' }).click();
+  await expect(page.getByText('Task created for 2 people.')).toBeVisible();
 
   await page.goto('/tasks?tab=today&pod=&fo=');
-  await expect(page.getByText('Next actions', { exact: false }).first()).toBeVisible();
+  await expect(page.getByText('Created tasks', { exact: false }).first()).toBeVisible();
   await page.locator('a[href*="next="]').filter({ hasText: 'E2E send the one-pager' }).first().click();
-  await expect(page.getByText('Next action', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Task', { exact: true }).first()).toBeVisible();
   await page.getByRole('button', { name: 'Done', exact: true }).click();
-  await expect(page.getByText(/Done\. Next one on \d{4}-\d{2}-\d{2}\./)).toBeVisible();
+  await expect(page.getByText(/Done\. Next one on \w{3}, \d{1,2} \w{3,4} \d{4}\./)).toBeVisible();
   // The other one: snoozed, then stopped.
   await page.locator('a[href*="next="]').filter({ hasText: 'E2E send the one-pager' }).first().click();
   await page.getByRole('button', { name: 'Snooze', exact: true }).click();
   await page.locator('form').getByRole('button', { name: 'Snooze' }).click();
-  await expect(page.getByText(/Moved to \d{4}-\d{2}-\d{2}\./)).toBeVisible();
+  await expect(page.getByText(/Moved to \w{3}, \d{1,2} \w{3,4} \d{4}\./)).toBeVisible();
 });
 
-test("a person's page sets, shows and stops their next action", async ({ page }) => {
+test("a person's page creates, shows and stops their task", async ({ page }) => {
   await signIn(page, 'admin@cadence.local', 'admin12345');
   await page.goto('/people');
   await page.locator('tbody a[href^="/people/"]').nth(3).click();
-  await page.getByRole('button', { name: /Set next action|Change/ }).click();
+  await page.getByRole('button', { name: /Create task|Change/ }).click();
   await page.getByLabel('What to do').fill('E2E call about the pilot');
   await page.getByLabel('How').selectOption('CALL');
-  await page.getByRole('button', { name: 'Save next action' }).click();
-  await expect(page.getByText('E2E call about the pilot')).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: /Create task|Save task/ }).click();
+  // On the Task card, and in what Twenty will hold for the person.
+  await expect(page.getByText('E2E call about the pilot').first()).toBeVisible();
   page.once('dialog', (d) => d.accept());
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
   await expect(page.getByText('E2E call about the pilot')).toHaveCount(0);
+});
+
+test('Tasks creates a task for a person found by name, and opens it', async ({ page }) => {
+  await signIn(page, 'admin@cadence.local', 'admin12345');
+  await page.goto('/tasks?tab=today&pod=&fo=');
+  await page.getByRole('button', { name: 'Create task' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('combobox', { name: 'Person' }).fill('a');
+  await dialog.getByRole('combobox', { name: 'Person' }).fill('an');
+  await dialog.locator('[role=option] button:enabled').first().click();
+  await dialog.getByLabel('What to do').fill('E2E send the pricing sheet');
+  await dialog.getByRole('button', { name: 'Create task' }).click();
+  await expect(page).toHaveURL(/next=/);
+  await expect(page.getByText('E2E send the pricing sheet').first()).toBeVisible();
 });

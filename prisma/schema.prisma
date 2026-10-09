@@ -363,6 +363,9 @@ model Task {
   twentyTaskId      String?
   /// Twenty Note written on completion.
   twentyNoteId      String?
+  /// The emails and calls counted for this step: the one that closed it, a second record of it, or
+  /// the one behind a Done clicked by hand.
+  countedTouches    Touch[]           @relation("TouchCountedFor")
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 
@@ -559,6 +562,8 @@ model Meeting {
   createdBy        User?           @relation("MeetingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   /// The Twenty calendar event this meeting was made from, when it came from a calendar.
   calendarEventId  String?         @unique
+  /// The note in Twenty that records this meeting on its contacts and account (Twenty keeps the record).
+  twentyNoteId     String?
   /// When someone last edited it by hand: after that only its time follows the calendar.
   editedAt         DateTime?
   /// The FO who booked it: mandatory on a new meeting, set on older ones when someone edits them.
@@ -628,9 +633,13 @@ model Touch {
   externalId  String         @unique
   actorUserId String?
   actorLabel  String?
+  /// The step this email or call counted for, once one has claimed it. A touch counts once.
+  countedForTaskId String?
+  countedForTask   Task?          @relation("TouchCountedFor", fields: [countedForTaskId], references: [id], onDelete: SetNull)
   createdAt   DateTime       @default(now())
 
   @@index([personId, occurredAt])
+  @@index([countedForTaskId])
   @@index([occurredAt])
   @@index([createdAt])
 }

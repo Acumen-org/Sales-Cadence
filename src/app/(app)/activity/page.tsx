@@ -62,8 +62,8 @@ async function ActivityContent({ searchParams }: { searchParams: Promise<Search>
   }
   const pageHref = (cursor?: string | null) => {
     const params = new URLSearchParams({ from: range.from, to: range.to });
-    if (actorId) params.set('actor', actorId);
-    if (podId) params.set('pod', podId);
+    params.set('actor', actorId ?? '');
+    params.set('pod', podId ?? '');
     if (channel) params.set('channel', channel);
     if (kinds.length) params.set('kind', kinds.join(','));
     if (q) params.set('q', q);
@@ -101,7 +101,7 @@ async function ActivityContent({ searchParams }: { searchParams: Promise<Search>
           ))}</div>
         )}
       </Surface>
-      <div className="flex justify-center gap-3">{before ? <Link href={pageHref()} className="btn-secondary">Newest in this view</Link> : null}{page.hasMore ? <Link href={pageHref(page.nextCursor)} className="btn-secondary">Load older activity</Link> : null}</div>
+      <div className="flex justify-center gap-3">{before ? <a href={pageHref()} className="btn-secondary">Newest in this view</a> : null}{page.hasMore ? <a href={pageHref(page.nextCursor)} className="btn-secondary">Load older activity</a> : null}</div>
     </div>
   );
 }

@@ -11,15 +11,17 @@ import { prisma } from '../db';
 import { requireUser, toActor, type SessionUser } from '../auth/current-user';
 import { isAdmin, isPodLeader, canCreateMeeting, ROLES_NEEDING_POD } from '../auth/rbac';
 import { logAudit, userActor } from '../audit';
-import { mayReviewMeeting } from '../meetings-query';
 import { inspectLink } from '../meetings/resolve-media';
 import { resolveAttendees } from '../meetings/attendees';
-import { calendarEventForLink, linkKey, linkNeedle } from '../meetings/calendar-import';
+import { linkKey, linkNeedle } from '../meetings/link-key';
+import { pushMeetingToCrm, removeMeetingFromCrm } from '../meetings/crm';
+import { afterResponse } from '../engine/sync-out';
 import { extractRecordingUrl, parseMeetingLink } from '../meetings/providers';
 import { detectTranscriptFormat, parseTranscript } from '../meetings/transcript';
 import { getMeetingAnalyzer, MeetingAnalysisSchema } from '../meetings/analysis';
 import { localDateTimeToInstant } from '../dates';
 import type { ActionResult } from './users';
+import { issueText } from '../form-errors';
 
 export type AttendeeSelection = { personId?: string | null; userId?: string | null; name: string | null; email: string | null };
 export type AttendeeOption = AttendeeSelection & { key: string; kind: 'contact' | 'team'; detail: string | null };
@@ -71,6 +73,7 @@ export async function toggleMeetingProductAction(formData: FormData): Promise<Ac
   await prisma.meeting.update({ where: { id }, data: { products: ordered } });
   if (want !== meeting.products.includes(product)) {
     await logAudit({ entityType: 'meeting', entityId: id, action: want ? 'product_added' : 'product_removed', actor: userActor(user), details: { product } });
+    await afterResponse(() => pushMeetingToCrm(id));
   }
   revalidatePath(`/meetings/${id}`);
   revalidatePath('/meetings');
@@ -151,7 +154,7 @@ export async function createMeetingAction(formData: FormData): Promise<ActionRes
   const user = await requireUser();
   if (!canCreateMeeting(user)) return { ok: false, error: 'Biz Ops has read-only access to meetings.' };
   const parsed = readForm(formData);
-  if (!parsed.success) return { ok: false, error: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') };
+  if (!parsed.success) return { ok: false, error: issueText(parsed.error.issues) };
   const d = parsed.data;
   if (!(await prisma.user.findFirst({ where: { id: d.bookedById, active: true, role: { in: ROLES_NEEDING_POD } }, select: { id: true } }))) return { ok: false, error: 'Choose who booked the meeting.' };
   const occurredAt = localDateTimeToInstant(d.occurredAt, user.timezone);
@@ -190,6 +193,8 @@ export async function createMeetingAction(formData: FormData): Promise<ActionRes
     },
   });
   await logAudit({ entityType: 'meeting', entityId: meeting.id, action: 'created', actor: userActor(user), details: { title: meeting.title, provider: meeting.provider, attendees: attendees.length } });
+  // Twenty keeps the record: a note on the meeting's contacts and account.
+  await afterResponse(() => pushMeetingToCrm(meeting.id));
   revalidatePath('/meetings');
   revalidatePath('/home');
   if (company?.id) revalidatePath(`/accounts/${company.id}`);
@@ -203,7 +208,7 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
   if (!existing) return { ok: false, error: 'Meeting not found.' };
   if (!(await mayManageMeeting(user, existing))) return { ok: false, error: 'You do not have permission to edit this meeting.' };
   const parsed = readForm(formData);
-  if (!parsed.success) return { ok: false, error: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') };
+  if (!parsed.success) return { ok: false, error: issueText(parsed.error.issues) };
   const d = parsed.data;
   if (!(await prisma.user.findFirst({ where: { id: d.bookedById, active: true, role: { in: ROLES_NEEDING_POD } }, select: { id: true } }))) return { ok: false, error: 'Choose who booked the meeting.' };
   const occurredAt = localDateTimeToInstant(d.occurredAt, user.timezone);
@@ -247,6 +252,7 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
     });
   });
   await logAudit({ entityType: 'meeting', entityId: id, action: 'updated', actor: userActor(user) });
+  await afterResponse(() => pushMeetingToCrm(id));
   revalidatePath('/meetings');
   revalidatePath(`/meetings/${id}`);
   revalidatePath('/accounts');
@@ -269,6 +275,7 @@ export async function updateMeetingAttendeesAction(formData: FormData): Promise<
     await tx.meeting.update({ where: { id }, data: { attendees: { create: attendees }, analysis: Prisma.DbNull, analysisStatus: 'NONE', analysedAt: null, analysisModel: null, analysisError: null } });
   });
   await logAudit({ entityType: 'meeting', entityId: id, action: 'attendees_updated', actor: userActor(user), details: { attendees: attendees.length } });
+  await afterResponse(() => pushMeetingToCrm(id));
   revalidatePath(`/meetings/${id}`);
   revalidatePath('/meetings');
   revalidatePath('/reports');
@@ -296,33 +303,14 @@ export async function deleteMeetingAction(formData: FormData): Promise<ActionRes
   const id = String(formData.get('meetingId') ?? '');
   const existing = await prisma.meeting.findUnique({ where: { id } });
   if (!existing || existing.review === 'DISMISSED') return { ok: false, error: 'Meeting not found.' };
-  if (!(await mayManageMeeting(user, existing)) && !(await mayReviewMeeting(user, id))) return { ok: false, error: 'You do not have permission to delete this meeting.' };
-  if (existing.calendarEventId) {
-    // From a calendar: kept as removed, so the next read of that calendar does not add it again.
-    await prisma.meeting.update({ where: { id }, data: { review: 'DISMISSED', reviewedById: user.id, reviewedAt: new Date() } });
-  } else {
-    await prisma.meeting.delete({ where: { id } });
-  }
-  await logAudit({ entityType: 'meeting', entityId: id, action: existing.review === 'PENDING' ? 'rejected' : 'deleted', actor: userActor(user), details: { title: existing.title } });
+  if (!(await mayManageMeeting(user, existing))) return { ok: false, error: 'You do not have permission to delete this meeting.' };
+  await prisma.meeting.delete({ where: { id } });
+  await logAudit({ entityType: 'meeting', entityId: id, action: 'deleted', actor: userActor(user), details: { title: existing.title } });
+  await afterResponse(() => removeMeetingFromCrm(existing.twentyNoteId));
   revalidatePath('/meetings');
   revalidatePath('/accounts');
   if (existing.companyId) revalidatePath(`/accounts/${existing.companyId}`);
   return { ok: true, message: 'Meeting deleted.', redirectTo: '/meetings' };
-}
-
-/** A pod manager approves a meeting from the calendar: it joins the other meetings. */
-export async function approveMeetingAction(formData: FormData): Promise<ActionResult> {
-  const user = await requireUser();
-  const id = String(formData.get('meetingId') ?? '');
-  const existing = await prisma.meeting.findUnique({ where: { id }, select: { id: true, title: true, review: true, companyId: true } });
-  if (!existing || existing.review === 'DISMISSED') return { ok: false, error: 'Meeting not found.' };
-  if (existing.review === 'APPROVED') return { ok: true, message: 'Already approved.' };
-  if (!(await mayReviewMeeting(user, id))) return { ok: false, error: 'Only a pod manager of this pod can approve this meeting.' };
-  await prisma.meeting.update({ where: { id }, data: { review: 'APPROVED', reviewedById: user.id, reviewedAt: new Date() } });
-  await logAudit({ entityType: 'meeting', entityId: id, action: 'approved', actor: userActor(user), details: { title: existing.title } });
-  revalidatePath('/meetings');
-  if (existing.companyId) revalidatePath(`/accounts/${existing.companyId}`);
-  return { ok: true, message: 'Approved.' };
 }
 
 /**
@@ -404,74 +392,42 @@ export type LinkSuggestion = {
   companyId: string | null;
   companyName: string | null;
   mediaUrl: string | null;
-  /** HH:mm, when the meeting's time is known (from its calendar event). */
-  time?: string | null;
-  durationMin?: number | null;
-  attendees?: AttendeeSelection[];
-  bookedById?: string | null;
+  /** What plays in the meeting page's player, when the link can be framed. */
+  embedUrl: string | null;
   /** The link belongs to a meeting Cadence already has. */
   existingMeetingId?: string | null;
-  fromCalendar?: boolean;
 };
 
 /** A sign-in page is not a meeting: its title must never become one. */
 const SIGN_IN = /\b(sign[\s-]?in|log[\s-]?in|sign on|single sign-on|authenticat|access denied|request access)\b/i;
+/** Nor is the service's own name for its page ("Join conversation", "Check out loom.com"). */
+const GENERIC = /^(join conversation|join (our )?(cloud hd )?video meeting|video conferencing|check out loom|loom|youtube|vimeo|zoom|fathom|microsoft teams|microsoft stream|google meet|google drive|onedrive|sharepoint|dropbox|untitled)\b/i;
 
-/** The local date and time of an instant, as a datetime-local input wants it. */
-function localDateTime(at: Date, timezone: string) {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(at);
-  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
-  return { date: `${get('year')}-${get('month')}-${get('day')}`, time: `${get('hour')}:${get('minute')}` };
-}
-
-/** Everything the link can tell us before anyone types: provider, title, date, the account it names. */
 /**
- * Everything a pasted link can tell us before anyone types. A join link from an invite finds its
- * event on the team's calendars in Twenty, which carries the lot: title, time, length, who booked
- * it, who is on it and the account. A link to a meeting Cadence already has says so. Anything else
- * is read as a page, for a title, a date and the account it names.
+ * Everything a pasted link can tell us before anyone types: which service it is, whether it plays
+ * here (and the player link it plays through), and from the page itself a title, a date and the
+ * account it names. A link to a meeting Cadence already has says so.
  */
-export async function inspectMeetingLinkAction(raw: string): Promise<{ ok: true; data: LinkSuggestion } | { ok: false; error: string }> {
+export async function inspectMeetingLinkAction(raw: string, exceptMeetingId?: string | null): Promise<{ ok: true; data: LinkSuggestion } | { ok: false; error: string }> {
   const user = await requireUser();
   if (!canCreateMeeting(user)) return { ok: false, error: 'Biz Ops has read-only access to meetings.' };
   const url = extractRecordingUrl(String(raw ?? ''));
   const link = parseMeetingLink(url);
   if (link.provider === 'OTHER' && link.note?.includes('does not look like a URL')) return { ok: false, error: link.note };
-  const base = { provider: link.provider, label: link.label, isJoinLink: link.isJoinLink, playsInline: Boolean(link.mediaUrl || link.embedUrl), mediaUrl: link.mediaUrl };
+  const base = { provider: link.provider, label: link.label, isJoinLink: link.isJoinLink, playsInline: Boolean(link.mediaUrl || link.embedUrl), mediaUrl: link.mediaUrl, embedUrl: link.embedUrl };
 
   // Already here: this link's meeting within a few hours of now. A personal room's other meetings,
   // earlier in the week or next week, are other meetings.
   const key = linkKey(url);
   const needle = linkNeedle(url);
   const around = 6 * 3_600_000;
-  const candidates = key && needle ? await prisma.meeting.findMany({ where: { review: { not: 'DISMISSED' }, sourceUrl: { contains: needle, mode: 'insensitive' }, occurredAt: { gte: new Date(Date.now() - around), lte: new Date(Date.now() + around) } }, orderBy: { occurredAt: 'desc' }, take: 20, select: { id: true, sourceUrl: true } }) : [];
+  const candidates = key && needle ? await prisma.meeting.findMany({ where: { review: { not: 'DISMISSED' }, ...(exceptMeetingId ? { id: { not: exceptMeetingId } } : {}), sourceUrl: { contains: needle, mode: 'insensitive' }, occurredAt: { gte: new Date(Date.now() - around), lte: new Date(Date.now() + around) } }, orderBy: { occurredAt: 'desc' }, take: 20, select: { id: true, sourceUrl: true } }) : [];
   const already = candidates.find((m) => linkKey(m.sourceUrl) === key);
   if (already) return { ok: true, data: { ...base, title: null, date: null, companyId: null, companyName: null, existingMeetingId: already.id } };
 
-  const event = await calendarEventForLink(url.trim());
-  if (event?.startsAt) {
-    const imported = await prisma.meeting.findUnique({ where: { calendarEventId: event.id }, select: { id: true, review: true } });
-    if (imported && imported.review !== 'DISMISSED') return { ok: true, data: { ...base, title: null, date: null, companyId: null, companyName: null, existingMeetingId: imported.id } };
-    const at = localDateTime(new Date(event.startsAt), user.timezone);
-    const team = await prisma.user.findMany({ where: { active: true }, select: { id: true, email: true, aliases: true, twentyMemberId: true, role: true } });
-    const member = (p: { handle: string; workspaceMemberId: string | null }) => (p.workspaceMemberId ? team.find((u) => u.twentyMemberId === p.workspaceMemberId) : undefined) ?? team.find((u) => [u.email, ...u.aliases].some((x) => x.toLowerCase() === p.handle.toLowerCase()));
-    const people = await prisma.personCache.findMany({ where: { deletedAt: null, OR: [{ id: { in: event.participants.flatMap((p) => (p.personId ? [p.personId] : [])) } }, { email: { in: event.participants.map((p) => p.handle).filter(Boolean), mode: 'insensitive' } }] }, select: { id: true, email: true, companyId: true, companyName: true } });
-    const attendees: AttendeeSelection[] = event.participants.map((p) => {
-      const u = member(p);
-      const person = u ? null : people.find((x) => x.id === p.personId) ?? people.find((x) => x.email?.toLowerCase() === p.handle.toLowerCase());
-      return { userId: u?.id ?? null, personId: person?.id ?? null, name: p.displayName, email: p.handle || null };
-    });
-    const fos = (ROLES_NEEDING_POD as readonly string[]);
-    const organiser = event.participants.find((p) => p.isOrganizer);
-    const booker = [organiser, ...event.participants].map((p) => (p ? member(p) : undefined)).find((u) => u && fos.includes(u.role));
-    const account = people.find((p) => p.companyId);
-    const durationMin = event.endsAt ? Math.max(1, Math.round((new Date(event.endsAt).getTime() - new Date(event.startsAt).getTime()) / 60_000)) : null;
-    return { ok: true, data: { ...base, title: event.title, date: at.date, time: at.time, durationMin, attendees, bookedById: booker?.id ?? null, companyId: account?.companyId ?? null, companyName: account?.companyName ?? null, fromCalendar: true } };
-  }
-
   const page = await inspectLink(url);
   const cleaned = page.title?.replace(/\s*[|·-]\s*(Microsoft Stream|SharePoint|Google Drive|Zoom|OneDrive|Google Meet|Microsoft Teams).*$/i, '').trim() || null;
-  const title = cleaned && !SIGN_IN.test(cleaned) ? cleaned : null;
+  const title = cleaned && !link.isJoinLink && !SIGN_IN.test(cleaned) && !GENERIC.test(cleaned) ? cleaned : null;
   // An account named in the title: the longest cached company name the title contains.
   const companies = await prisma.companyCache.findMany({ where: { deletedAt: null, name: { not: '' } }, select: { id: true, name: true }, orderBy: { name: 'asc' } });
   const haystack = `${title ?? ''} ${page.description ?? ''}`.toLowerCase();

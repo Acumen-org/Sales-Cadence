@@ -17,6 +17,8 @@ const STATE_LABELS: Record<string, string> = { DONE: 'Done', SKIPPED: 'Skipped',
 /** Serialisable row for the client list. */
 export type TaskListRow = {
   childActions?: Array<{ id: string; action: string; state: string }>;
+  /** Each action of the step and whether it is finished, so a step whose email closed itself shows it. */
+  parts?: Array<{ label: string; done: boolean }>;
   id: string;
   personName: string;
   companyName: string | null;
@@ -44,9 +46,11 @@ type Props = {
   nextWorkingDay: string;
   canPickSnoozeDate: boolean;
   bulkEnabled: boolean;
+  /** Reassign is for those who lead a pod. */
+  canReassign?: boolean;
 };
 
-export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispositions, skipReasons, fos, nextWorkingDay, canPickSnoozeDate, bulkEnabled }: Props) {
+export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispositions, skipReasons, fos, nextWorkingDay, canPickSnoozeDate, bulkEnabled, canReassign = true }: Props) {
   const router = useRouter();
   const hrefFor = (id: string) => hrefTemplate.replace('__ID__', encodeURIComponent(id));
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -101,7 +105,7 @@ export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispos
                 <option value="complete">Mark done</option>
                 <option value="skip">Skip</option>
                 <option value="snooze">Snooze</option>
-                {fos.length > 1 ? <option value="reassign">Reassign</option> : null}
+                {canReassign && fos.length > 1 ? <option value="reassign">Reassign</option> : null}
               </select>
               {op === 'complete' && selectedHasCalls ? (
                 <select value={disposition} onChange={(e) => setDisposition(e.target.value)} className="!w-auto !py-1 !text-[12px]" title="Call outcome for the selected calls">
@@ -117,6 +121,7 @@ export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispos
                   {skipReasons.map((r) => (
                     <option key={r.key} value={r.key}>
                       {r.label}
+                      {r.exit !== 'none' ? ' - ends the sequence' : ''}
                     </option>
                   ))}
                 </select>
@@ -163,7 +168,7 @@ export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispos
                   <span className="mt-0.5 flex items-center gap-1.5 text-[12.5px] text-ink-600">
                     <ActionIcon action={t.action} size={12} className="text-ink-400" />
                     <span className="truncate">
-                      {t.label}
+                      {t.state === 'PENDING' && t.parts && t.parts.some((p) => p.done) ? t.parts.map((p, i) => <span key={p.label}>{i ? ' + ' : ''}<span className={p.done ? 'text-emerald-700' : undefined}>{p.done ? '✓ ' : ''}{p.label}</span></span>) : t.label}
                     </span>
                   </span>
                   <span className="mt-0.5 flex items-center gap-2 text-[11.5px] text-ink-500">

@@ -130,6 +130,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     if (sort !== 'name') p.set('sort', sort);
     if (status) p.set('status', status);
     if (tier) p.set('tier', tier);
+    if (mip) p.set('mip', '1');
     if (contactType) p.set('type', contactType);
     p.set('page', String(n));
     return `/people?${p.toString()}`;
@@ -191,7 +192,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
     <PageFrame className="space-y-3 px-6 pb-8 pt-2">
       <Surface flush>
         <ViewHeader
-          title={q || pod || status || fo || product || tag || listCategory || tier || contactType || account || campaign ? 'Filtered people' : 'All people'}
+          title={q || pod || status || fo || product || tag || listCategory || tier || contactType || account || campaign || mip ? 'Filtered people' : 'All people'}
           caret
           meta={`${total} result${total === 1 ? '' : 's'}`}
           actions={<SyncNowButton />}

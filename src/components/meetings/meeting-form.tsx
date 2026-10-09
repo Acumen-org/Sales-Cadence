@@ -11,6 +11,7 @@ import { extractRecordingUrl, parseMeetingLink } from '@/lib/meetings/providers'
 import { ActionForm } from '@/components/action-form';
 import { Field, Badge } from '@/components/ui';
 import { AttendeePicker } from './attendee-picker';
+import { EmbedGuide } from './embed-guide';
 
 export type MeetingFormValues = {
   id?: string;
@@ -27,9 +28,10 @@ export type MeetingFormValues = {
 };
 
 /**
- * Add or edit a meeting. Paste the link first: Cadence reads what the page says about itself and
- * fills the title, the date and the account it names, and says whether the recording will play
- * here. Paste a transcript and the speakers become attendees. Everything filled in stays editable.
+ * Add or edit a meeting. Paste the link first: Cadence turns it into the player link on its own
+ * where the service allows, reads what the page says about itself - the title, the date, the
+ * account it names - and says whether the recording will play here. Paste a transcript and the
+ * speakers become attendees. Everything filled in stays editable.
  */
 export function MeetingForm({ companies, fos, initial, mode, timezone }: { companies: { id: string; name: string }[]; fos: { id: string; name: string }[]; initial: MeetingFormValues; mode: 'create' | 'edit'; timezone: string }) {
   const router = useRouter();
@@ -47,16 +49,16 @@ export function MeetingForm({ companies, fos, initial, mode, timezone }: { compa
   // Changing it starts the attendee list again from the form's own people.
   const [attendeesKey, setAttendeesKey] = useState(0);
   // What the last link put in the form, so a later answer can take back exactly that and nothing typed.
-  const [fromLink, setFromLink] = useState<{ title?: string; occurredAt?: string; durationMin?: number; companyId?: string; bookedById?: string; attendees?: boolean }>({});
+  const [fromLink, setFromLink] = useState<{ title?: string; occurredAt?: string; companyId?: string; attendees?: boolean }>({});
   const [pending, start] = useTransition();
   const parsed = url.trim() ? parseMeetingLink(url) : null;
 
-  const fillFromLink = () =>
+  const fillFromLink = (link = url) =>
     start(async () => {
       setNote(null);
       setExisting(null);
       setAdditions(null);
-      const r = await inspectMeetingLinkAction(url);
+      const r = await inspectMeetingLinkAction(link, initial.id ?? null);
       if (!r.ok) { setNote(r.error); return; }
       if (r.data.existingMeetingId) {
         setExisting(r.data.existingMeetingId);
@@ -64,9 +66,7 @@ export function MeetingForm({ companies, fos, initial, mode, timezone }: { compa
         // What another link filled does not stay under the answer; what the user typed does.
         if (fromLink.title !== undefined && title === fromLink.title) setTitle(initial.title);
         if (fromLink.occurredAt !== undefined && occurredAt === fromLink.occurredAt) setOccurredAt(initial.occurredAt);
-        if (fromLink.durationMin !== undefined && durationMin === fromLink.durationMin) setDurationMin(initial.durationMin);
         if (fromLink.companyId !== undefined && companyId === fromLink.companyId) setCompanyId(initial.companyId);
-        if (fromLink.bookedById !== undefined && bookedById === fromLink.bookedById) setBookedById(initial.bookedById);
         if (fromLink.attendees) { setAdditions(null); setAttendeesKey((k) => k + 1); }
         setFromLink({});
         setSuggestion(null);
@@ -76,28 +76,28 @@ export function MeetingForm({ companies, fos, initial, mode, timezone }: { compa
       const filled: string[] = [];
       const put: typeof fromLink = {};
       if (r.data.title && !title.trim()) { setTitle(put.title = r.data.title); filled.push('title'); }
-      if (r.data.date) { setOccurredAt(put.occurredAt = `${r.data.date}T${(r.data.time ?? occurredAt.split('T')[1] ?? '09:00').slice(0, 5)}`); filled.push(r.data.time ? 'date and time' : 'date'); }
-      if (r.data.durationMin && durationMin === '') { setDurationMin(put.durationMin = r.data.durationMin); filled.push('duration'); }
-      if (r.data.bookedById) { setBookedById(put.bookedById = r.data.bookedById); filled.push('booked by'); }
-      const guests = r.data.attendees ?? [];
-      if (guests.length) { setAdditions(guests); put.attendees = true; filled.push('attendees'); }
+      if (r.data.date) { setOccurredAt(put.occurredAt = `${r.data.date}T${(occurredAt.split('T')[1] ?? '09:00').slice(0, 5)}`); filled.push('date'); }
       if (r.data.companyId && !companyId) { setCompanyId(put.companyId = r.data.companyId); filled.push('account'); }
       if (r.data.transcript && !transcript.trim()) {
         setTranscript(r.data.transcript); filled.push('transcript');
         const people = await attendeesFromTranscriptAction(r.data.transcript);
         if (people.ok) {
-          if (people.attendees.length) {
-            const key = (a: AttendeeSelection) => a.userId ?? a.personId ?? a.email?.toLowerCase() ?? a.name ?? '';
-            setAdditions([...guests, ...people.attendees.filter((a) => !guests.some((g) => key(g) === key(a)))]);
-            put.attendees = true;
-            if (!filled.includes('attendees')) filled.push('attendees');
-          }
+          if (people.attendees.length) { setAdditions(people.attendees); put.attendees = true; filled.push('attendees'); }
           if (people.durationSec && durationMin === '') setDurationMin(Math.max(1, Math.round(people.durationSec / 60)));
         }
       }
       setFromLink(put);
-      setNote(filled.length ? `${r.data.fromCalendar ? 'From the calendar' : 'From the link'}: ${filled.join(', ')}.` : r.data.isJoinLink ? 'No calendar event has this link.' : 'The link gave nothing to fill.');
+      setNote(filled.length ? `From the link: ${filled.join(', ')}.` : null);
     });
+
+  /** A pasted link, or a pasted embed code, is read at once. */
+  const pasted = (text: string) => {
+    const next = extractRecordingUrl(text);
+    setUrl(next);
+    if (/^https?:\/\/\S+$/i.test(next)) fillFromLink(next);
+  };
+  const plays = Boolean(suggestion?.mediaUrl || suggestion?.embedUrl || parsed?.mediaUrl || parsed?.embedUrl);
+  const needsEmbed = Boolean(parsed && parsed.provider === 'SHAREPOINT' && !plays);
 
   const attendeesFromTranscript = () =>
     start(async () => {
@@ -121,19 +121,21 @@ export function MeetingForm({ companies, fos, initial, mode, timezone }: { compa
       {initial.id ? <input type="hidden" name="meetingId" value={initial.id} /> : null}
 
       <div className="grid gap-4 md:grid-cols-2">
-        <Field label="Recording or meeting link" className="md:col-span-2">
+        <div className="space-y-1.5 md:col-span-2">
+          <div className="flex items-center gap-2 text-[12px] font-medium text-ink-500"><label htmlFor="meeting-link">Recording or meeting link</label><EmbedGuide open={needsEmbed} /></div>
           <div className="flex flex-wrap items-center gap-2">
-            <input name="sourceUrl" aria-label="Recording or meeting link" value={url} onChange={(e) => setUrl(extractRecordingUrl(e.target.value))} placeholder="https://" className="!w-auto min-w-0 flex-1" />
-            <button type="button" className="btn-secondary" disabled={pending || !parsed || Boolean(parsed.note?.includes('does not look like a URL'))} onClick={fillFromLink}>{pending ? 'Reading…' : 'Fill from link'}</button>
+            <input id="meeting-link" name="sourceUrl" aria-label="Recording or meeting link" value={url} onChange={(e) => setUrl(extractRecordingUrl(e.target.value))} onPaste={(e) => { e.preventDefault(); pasted(e.clipboardData.getData('text')); }} placeholder="Paste the recording link or its embed code" className="!w-auto min-w-0 flex-1" />
+            <button type="button" className="btn-secondary" disabled={pending || !parsed || Boolean(parsed.note?.includes('does not look like a URL'))} onClick={() => fillFromLink()}>{pending ? 'Reading…' : 'Fill from link'}</button>
           </div>
-        </Field>
+        </div>
 
         {note ? <div role="status" className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-canvas/60 px-3 py-2 text-[13px] text-ink-700 md:col-span-2">{note}{existing ? <Link href={`/meetings/${existing}`} className="btn-secondary btn-sm">Open it</Link> : null}</div> : null}
 
         {parsed ? <div className="flex flex-wrap items-center gap-2 md:col-span-2">
           <Badge tone="blue">{parsed.label}</Badge>
-          <Badge tone={suggestion?.mediaUrl || parsed.mediaUrl ? 'green' : parsed.embedUrl ? 'blue' : 'gray'}>{suggestion?.mediaUrl || parsed.mediaUrl ? 'Plays here, transcript follows' : parsed.embedUrl ? 'Plays here' : 'Opens in a new tab'}</Badge>
+          <Badge tone={suggestion?.mediaUrl || parsed.mediaUrl ? 'green' : plays ? 'blue' : 'gray'}>{suggestion?.mediaUrl || parsed.mediaUrl ? 'Plays here, transcript follows' : plays ? 'Plays here' : 'Opens in a new tab'}</Badge>
           {parsed.note?.includes('does not look like a URL') ? <span className="text-[12.5px] text-red-700">{parsed.note}</span> : null}
+          {needsEmbed ? <span className="text-[12.5px] text-ink-600">Paste its embed code to play it here</span> : null}
         </div> : null}
 
         <Field label="Title" required className="md:col-span-2">
@@ -185,9 +187,9 @@ export function MeetingForm({ companies, fos, initial, mode, timezone }: { compa
         <button type="submit" className="btn-primary" disabled={mode === 'create' && Boolean(existing)}>
           {mode === 'create' ? 'Add meeting' : 'Save changes'}
         </button>
-        <button type="button" className="btn-secondary" onClick={() => router.back()}>
+        <Link href={initial.id ? `/meetings/${initial.id}` : '/meetings'} className="btn-secondary">
           Cancel
-        </button>
+        </Link>
       </div>
     </ActionForm>
   );

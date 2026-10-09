@@ -55,11 +55,14 @@ import type {
   TwentyView,
   TwentyWorkspaceMember,
   UpdateTaskInput,
+  UpdateNoteInput,
   EnrichPersonInput,
   EnrichCompanyInput,TwentyWebhook, CreateWebhookInput } from './types';
 
 export type MockWrite =
   | { op: 'createNote'; id: string; input: CreateNoteInput }
+  | { op: 'updateNote'; id: string; patch: UpdateNoteInput }
+  | { op: 'deleteNote'; id: string }
   | { op: 'createTask'; id: string; input: CreateTaskInput }
   | { op: 'updateTask'; id: string; patch: UpdateTaskInput }
   | { op: 'enrichPerson'; id: string; patch: EnrichPersonInput }
@@ -367,13 +370,30 @@ export class MockTwentyClient implements TwentyClient {
       createdByMemberId: null,
       createdByName: 'Cadence',
       createdBySource: 'API',
-      personIds: [input.personId],
+      personIds: [...new Set([input.personId, ...(input.personIds ?? [])].filter((p): p is string => Boolean(p)))],
       companyIds: input.companyId ? [input.companyId] : [],
       createdAt: now,
       updatedAt: now,
     });
     this.writes.push({ op: 'createNote', id, input });
     return { id };
+  }
+
+  async updateNote(id: string, patch: UpdateNoteInput) {
+    this.maybeFail();
+    const n = this.notes.find((x) => x.id === id);
+    if (n) {
+      if (patch.title !== undefined) n.title = patch.title;
+      if (patch.bodyMarkdown !== undefined) n.bodyMarkdown = patch.bodyMarkdown;
+      n.updatedAt = new Date().toISOString();
+    }
+    this.writes.push({ op: 'updateNote', id, patch });
+  }
+
+  async deleteNote(id: string) {
+    this.maybeFail();
+    this.notes = this.notes.filter((n) => n.id !== id);
+    this.writes.push({ op: 'deleteNote', id });
   }
 
   async createTask(input: CreateTaskInput) {

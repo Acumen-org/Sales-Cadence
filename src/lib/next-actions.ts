@@ -1,7 +1,7 @@
 import type { ActionType, NextAction, NextActionRepeat, Prisma } from '@prisma/client';
 import { prisma } from './db';
 import { logAudit, SYSTEM_ACTOR, type AuditActor } from './audit';
-import { addDays, isLocalDate, todayIn, type LocalDate } from './dates';
+import { addDays, formatLocalDate, isLocalDate, todayIn, type LocalDate } from './dates';
 import { nextWorkingDay } from './engine/clock';
 import { getSettings } from './settings';
 import { getTwentyClient } from './twenty';
@@ -65,8 +65,8 @@ export type NextActionInput = { label: string; action: ActionType; dueDate: Loca
 
 export function validateNextAction(raw: { label?: unknown; action?: unknown; dueDate?: unknown; repeat?: unknown; foUserId?: unknown }, today: LocalDate): { ok: true; value: NextActionInput } | { ok: false; error: string } {
   const label = String(raw.label ?? '').trim().replace(/\s+/g, ' ');
-  if (!label) return { ok: false, error: 'Say what the next action is.' };
-  if (label.length > 200) return { ok: false, error: 'Keep the next action under 200 characters.' };
+  if (!label) return { ok: false, error: 'Say what the task is.' };
+  if (label.length > 200) return { ok: false, error: 'Keep the task under 200 characters.' };
   const action = String(raw.action ?? 'EMAIL') as ActionType;
   if (!NEXT_ACTION_CHANNELS.includes(action)) return { ok: false, error: 'Pick how it is done.' };
   const dueDate = String(raw.dueDate ?? '');
@@ -96,9 +96,12 @@ export async function setNextActions(personIds: string[], input: NextActionInput
     const data = { label: input.label, action: input.action, dueDate: input.dueDate, repeat: input.repeat, foUserId, crmPending: true, crmError: null };
     const row = await prisma.$transaction(async (tx) => {
       const open = await tx.nextAction.findFirst({ where: { personId: id, state: 'OPEN' }, select: { id: true } });
-      return open
-        ? tx.nextAction.update({ where: { id: open.id }, data })
-        : tx.nextAction.create({ data: { ...data, personId: id, createdById: actor.id ?? null } });
+      const saved = open
+        ? await tx.nextAction.update({ where: { id: open.id }, data })
+        : await tx.nextAction.create({ data: { ...data, personId: id, createdById: actor.id ?? null } });
+      // What Twenty will hold once the write lands, shown at once rather than after it.
+      await tx.personCache.update({ where: { id }, data: { nextAction: saved.label, nextActionDueDate: saved.dueDate } });
+      return saved;
     });
     await logAudit({ entityType: 'person', entityId: id, action: 'next_action_set', actor, details: { label: row.label, dueDate: row.dueDate, repeat: row.repeat, foUserId } });
     set.push(row.id);
@@ -108,10 +111,12 @@ export async function setNextActions(personIds: string[], input: NextActionInput
 }
 
 /** Done: a one-off closes; a repeating one moves on to its next date. */
-export async function completeNextAction(id: string, actor: AuditActor & { id?: string | null }, now = new Date()): Promise<{ ok: true; next: LocalDate | null } | { ok: false; error: string }> {
+export async function completeNextAction(id: string, actor: AuditActor & { id?: string | null }, now = new Date(), expectedDue: string | null = null): Promise<{ ok: true; next: LocalDate | null } | { ok: false; error: string }> {
   const { rules } = await getSettings();
   const na = await prisma.nextAction.findUnique({ where: { id } });
-  if (!na || na.state !== 'OPEN') return { ok: false, error: 'This next action is already closed.' };
+  if (!na || na.state !== 'OPEN') return { ok: false, error: 'This task is already closed.' };
+  // Done on a screen showing an earlier date: that occurrence is already done.
+  if (expectedDue && expectedDue !== na.dueDate) return { ok: false, error: `This one is already done. The next is due ${formatLocalDate(na.dueDate, 'long')}.` };
   const today = todayIn((await prisma.user.findUnique({ where: { id: na.foUserId }, select: { timezone: true } }))?.timezone ?? 'America/Chicago', now);
   const next = nextOccurrence(na.dueDate, na.repeat, today, rules.workingDays);
   const claimed = await prisma.nextAction.updateMany({
@@ -120,7 +125,8 @@ export async function completeNextAction(id: string, actor: AuditActor & { id?: 
       ? { dueDate: next, doneCount: { increment: 1 }, lastDoneAt: now, completedById: actor.id ?? null, crmPending: true }
       : { state: 'DONE', doneCount: { increment: 1 }, lastDoneAt: now, closedAt: now, completedById: actor.id ?? null, crmPending: true },
   });
-  if (!claimed.count) return { ok: false, error: 'Someone else just changed this next action.' };
+  if (!claimed.count) return { ok: false, error: 'Someone else just changed this task.' };
+  await mirrorToPerson(na.personId, next ? { label: na.label, dueDate: next } : null);
   await logAudit({ entityType: 'person', entityId: na.personId, action: 'next_action_done', actor, details: { label: na.label, dueDate: na.dueDate, next } });
   await afterResponse(async () => { await pushNextAction(id); });
   return { ok: true, next };
@@ -130,7 +136,7 @@ export async function completeNextAction(id: string, actor: AuditActor & { id?: 
 export async function moveNextAction(id: string, dueDate: LocalDate, actor: AuditActor, today: LocalDate): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!isLocalDate(dueDate) || dueDate <= today) return { ok: false, error: 'Pick a later day.' };
   const na = await prisma.nextAction.findUnique({ where: { id } });
-  if (!na || na.state !== 'OPEN') return { ok: false, error: 'This next action is already closed.' };
+  if (!na || na.state !== 'OPEN') return { ok: false, error: 'This task is already closed.' };
   await prisma.nextAction.update({ where: { id }, data: { dueDate, crmPending: true } });
   await logAudit({ entityType: 'person', entityId: na.personId, action: 'next_action_moved', actor, details: { label: na.label, from: na.dueDate, to: dueDate } });
   await afterResponse(async () => { await pushNextAction(id); });
@@ -140,11 +146,21 @@ export async function moveNextAction(id: string, dueDate: LocalDate, actor: Audi
 /** Stop it: closed, and Twenty's two fields cleared. */
 export async function stopNextAction(id: string, actor: AuditActor, now = new Date()): Promise<{ ok: true } | { ok: false; error: string }> {
   const na = await prisma.nextAction.findUnique({ where: { id } });
-  if (!na || na.state !== 'OPEN') return { ok: false, error: 'This next action is already closed.' };
+  if (!na || na.state !== 'OPEN') return { ok: false, error: 'This task is already closed.' };
   await prisma.nextAction.update({ where: { id }, data: { state: 'CANCELLED', closedAt: now, crmPending: true } });
+  await mirrorToPerson(na.personId, null);
   await logAudit({ entityType: 'person', entityId: na.personId, action: 'next_action_stopped', actor, details: { label: na.label, dueDate: na.dueDate } });
   await afterResponse(async () => { await pushNextAction(id); });
   return { ok: true };
+}
+
+/**
+ * What Twenty will hold once the write lands, on the person at once: the open task, or nothing
+ * when none is left open. A newer open task for the same person keeps the fields.
+ */
+async function mirrorToPerson(personId: string, open: { label: string; dueDate: string } | null) {
+  if (!open && (await prisma.nextAction.count({ where: { personId, state: 'OPEN' } }))) return;
+  await prisma.personCache.updateMany({ where: { id: personId }, data: open ? { nextAction: open.label, nextActionDueDate: open.dueDate } : { nextAction: null, nextActionDueDate: null } });
 }
 
 /**

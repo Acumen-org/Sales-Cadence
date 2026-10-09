@@ -1,3 +1,4 @@
+import { canActOnTask } from '@/lib/auth/rbac';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { Role } from '@prisma/client';
 import { prisma } from '@/lib/db';
@@ -110,8 +111,9 @@ describe('tasks query and brief', () => {
     expect(brief).not.toHaveProperty('opportunities');
     expect(brief!.twentyUrl).toContain('/object/person/person-01');
 
-    // a junior from another pod may not see it
+    // a junior from another pod reads it (everyone reads everything) but cannot act on it
     const daniel = sessionUser(b.users.daniel, [b.pods.Leigh.id]);
-    expect(await getTaskBrief(email1.id, daniel)).toBeNull();
+    expect(await getTaskBrief(email1.id, daniel)).not.toBeNull();
+    expect(canActOnTask(daniel, { foUserId: email1.foUserId, podId: e.podId })).toBe(false);
   });
 });

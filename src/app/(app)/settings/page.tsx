@@ -41,7 +41,9 @@ const TABS = [
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const user = await requireUser();
   if (!isAdmin(user)) redirect('/tasks');
-  const { tab = 'twenty' } = await searchParams;
+  const asked = (await searchParams).tab;
+  // An unknown or empty tab opens the first one rather than a page with nothing on it.
+  const tab = TABS.some((t) => t.key === asked) ? asked! : 'twenty';
   const settings = await getSettings();
   const e = env();
   const reviewCount = await prisma.activityEvent.count({ where: { needsReview: true } });
@@ -62,7 +64,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         </div>
       ) : null}
       {tab === 'sync' ? <SyncForm sync={settings.sync} /> : null}
-      {tab === 'users' ? <UsersTab /> : null}
+      {tab === 'users' ? <UsersTab selfId={user.id} /> : null}
       {tab === 'blocked' ? <BlockedTab timezone={user.timezone} /> : null}
       {tab === ASSISTANT_SETTINGS_TAB ? <AssistantTab /> : null}
       {tab === 'activity' ? <ActivityTab /> : null}
@@ -103,7 +105,7 @@ async function BlockedTab({ timezone }: { timezone: string }) {
   );
 }
 
-async function UsersTab() {
+async function UsersTab({ selfId }: { selfId: string }) {
   const [users, pods, peopleByPod] = await Promise.all([
     prisma.user.findMany({ include: { pods: true, enrollments: { where: { status: { in: ['ACTIVE', 'PAUSED'] } }, select: { podId: true } }, _count: { select: { enrollments: { where: { status: { in: ['ACTIVE', 'PAUSED'] } } } } } }, orderBy: [{ role: 'asc' }, { name: 'asc' }] }),
     prisma.pod.findMany({ include: { _count: { select: { users: { where: { user: { active: true } } } } } }, orderBy: { name: 'asc' } }),
@@ -112,6 +114,7 @@ async function UsersTab() {
   const peopleCount = new Map(peopleByPod.map((r) => [r.podOwner, r._count._all]));
   return (
     <UsersPanel
+      selfId={selfId}
       users={users.map((u) => ({
         id: u.id,
         email: u.email,

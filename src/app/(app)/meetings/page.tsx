@@ -1,13 +1,12 @@
 import { hasAiAnalysis } from '@/lib/meetings/analysis';
 import { PageFrame } from '@/components/page-frame';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { optionLabel } from '@/lib/twenty/labels';
 import type { Prisma } from '@prisma/client';
 import { requireUser } from '@/lib/auth/current-user';
 import { canCreateMeeting, ROLES_NEEDING_POD } from '@/lib/auth/rbac';
-import { attendeeIsExternal, meetingReadWhere, meetingsToReviewWhere } from '@/lib/meetings-query';
-import { approveMeetingAction, deleteMeetingAction } from '@/lib/actions/meetings';
-import { ActionButton } from '@/components/action-form';
+import { attendeeIsExternal, meetingReadWhere } from '@/lib/meetings-query';
 import { getSettings } from '@/lib/settings';
 import { prisma } from '@/lib/db';
 import { addDays, formatInstant, isLocalDate, startOfLocalDay } from '@/lib/dates';
@@ -15,8 +14,8 @@ import { PRODUCTS } from '@/lib/workspace';
 import { MeetingsToolbar } from '@/components/meetings/meetings-toolbar';
 import { PillList } from '@/components/pill-list';
 import { FavouriteButton } from '@/components/meetings/favourite-button';
-import { PROVIDER_LABELS } from '@/lib/meetings/providers';
-import { IconCalendar, IconExternal, IconPlus } from '@/components/icons';
+import { platformLabel } from '@/lib/meetings/providers';
+import { IconCalendar, IconPlus } from '@/components/icons';
 import { Badge, Empty, EmptyState, IdentityCell, Surface, Toolbar, ViewHeader } from '@/components/ui';
 
 const PAGE_SIZE = 50;
@@ -54,16 +53,8 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
   const filtered = Boolean(who || product || from || to || favourites || booked);
 
   const { rules } = await getSettings();
-  // Meetings from the calendars wait here for the pod manager of their pod, soonest first.
-  const reviewScope = await meetingsToReviewWhere(user);
-  const toApprove = reviewScope ? await prisma.meeting.findMany({
-    where: { AND: [{ review: 'PENDING' }, reviewScope] },
-    orderBy: { occurredAt: 'asc' },
-    take: 50,
-    select: { id: true, title: true, provider: true, occurredAt: true, durationSec: true, companyId: true, companyName: true, bookedBy: { select: { name: true } }, attendees: { select: { email: true, external: true } } },
-  }) : [];
-  const externalCount = (attendees: { email: string | null; external: boolean }[]) => attendees.filter((a) => attendeeIsExternal(a, rules.internalDomains)).length;
-  const [meetings, total, recordingTotal, recordings] = await Promise.all([
+  const externalCount = (attendees: { email: string | null; external: boolean; userId: string | null }[]) => attendees.filter((a) => attendeeIsExternal(a, rules.internalDomains)).length;
+  const [meetings, total] = await Promise.all([
     prisma.meeting.findMany({
       where,
       orderBy: { occurredAt: 'desc' },
@@ -73,6 +64,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
         id: true,
         title: true,
         provider: true,
+        sourceUrl: true,
         occurredAt: true,
         durationSec: true,
         companyName: true,
@@ -85,25 +77,12 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
         analysis: true,
         analysisModel: true,
         _count: { select: { attendees: true } },
-        attendees: { select: { email: true, external: true } },
+        attendees: { select: { email: true, external: true, userId: true } },
         favourites: { where: { userId: user.id }, select: { userId: true } },
       },
     }),
     prisma.meeting.count({ where }),
-    // Recordings Twenty holds on a person record. Cadence does not invent a Meeting row from
-    // one, because a meeting here carries attendees and a transcript that only a human can
-    // supply - so these are listed for one-click adding instead.
-    prisma.personCache.count({ where: { deletedAt: null, recordingUrl: { not: null } } }),
-    prisma.personCache.findMany({
-      where: { deletedAt: null, recordingUrl: { not: null } },
-      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
-      take: 12,
-      select: { id: true, firstName: true, lastName: true, companyId: true, companyName: true, meetingUrl: true, recordingUrl: true },
-    }),
   ]);
-  const addedUrls = new Set(
-    (await prisma.meeting.findMany({ where: { sourceUrl: { in: recordings.map((r) => r.recordingUrl ?? '').filter(Boolean) } }, select: { sourceUrl: true } })).map((m) => m.sourceUrl),
-  );
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const pageHref = (n: number) => {
     const p = new URLSearchParams();
@@ -116,36 +95,11 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
     p.set('page', String(n));
     return `/meetings?${p.toString()}`;
   };
+  // A page past the end (an old link, fewer meetings now) opens the last page that has any.
+  if (page > pages) redirect(pageHref(pages));
 
   return (
     <PageFrame className="space-y-3 px-6 pb-8 pt-2">
-      {toApprove.length ? (
-        <Surface flush>
-          <ViewHeader title="To approve" meta={`${toApprove.length} from the calendars`} />
-          <div className="min-w-0">
-            <table className="table table-dense table-meetings w-full table-fixed">
-              <colgroup><col style={{width:'28%'}} /><col style={{width:'15%'}} /><col style={{width:'17%'}} /><col style={{width:'12%'}} /><col style={{width:'12%'}} /><col style={{width:'16%'}} /></colgroup>
-              <thead><tr><th>Meeting</th><th>When</th><th>Account</th><th>Attendees</th><th>Booked by</th><th aria-label="Approve or remove" /></tr></thead>
-              <tbody>
-                {toApprove.map((m) => (
-                  <tr key={m.id}>
-                    <td data-label="Meeting"><IdentityCell name={m.title} href={`/meetings/${m.id}`} sub={PROVIDER_LABELS[m.provider]} /></td>
-                    <td data-label="When" className="text-[12.5px]"><time className="block font-semibold">{formatInstant(m.occurredAt, user.timezone)}</time>{m.durationSec ? <span className="mt-1 block text-xs text-ink-600"><strong>{Math.round(m.durationSec / 60)}</strong> min</span> : null}</td>
-                    <td data-label="Account" className="break-words text-[12.5px]">{m.companyId ? <Link href={`/accounts/${m.companyId}`} className="text-brand-700 hover:underline">{m.companyName}</Link> : m.companyName ?? <span className="text-ink-300">-</span>}</td>
-                    <td data-label="Attendees" className="text-[12.5px]"><div className="flex items-center gap-1.5 whitespace-nowrap"><span className="font-medium tabular-nums text-ink-900">{m.attendees.length}</span>{externalCount(m.attendees) ? <Badge tone="green">{externalCount(m.attendees)} external</Badge> : null}</div></td>
-                    <td data-label="Booked by" className="break-words text-[12.5px]">{m.bookedBy?.name ?? <Empty />}</td>
-                    <td className="text-right"><span className="inline-flex gap-1.5">
-                      <ActionButton action={approveMeetingAction} payload={{ meetingId: m.id }} className="btn-primary btn-sm">Approve</ActionButton>
-                      <ActionButton action={deleteMeetingAction} payload={{ meetingId: m.id }} className="btn-secondary btn-sm" confirm="Remove this meeting? It will not come back from the calendar.">Remove</ActionButton>
-                    </span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Surface>
-      ) : null}
-
       <Surface flush>
         <ViewHeader
           title="All meetings"
@@ -192,9 +146,9 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                   <tr key={m.id}>
                     <td data-label="Favourite" className="!pr-0"><FavouriteButton meetingId={m.id} favourite={m.favourites.length > 0} compact /></td>
                     <td data-label="Meeting">
-                      <IdentityCell name={m.title} href={`/meetings/${m.id}`} sub={PROVIDER_LABELS[m.provider]} />
+                      <IdentityCell name={m.title} href={`/meetings/${m.id}`} sub={platformLabel(m.provider, m.sourceUrl)} />
                     </td>
-                    <td data-label="When" className="text-[12.5px]"><time className="block font-semibold">{formatInstant(m.occurredAt, user.timezone)}</time>{m.durationSec ? <span className="mt-1 block text-xs text-ink-600"><strong>{Math.round(m.durationSec / 60)}</strong> min</span> : null}</td>
+                    <td data-label="When" className="text-[12.5px]"><time className="block font-medium text-ink-900">{formatInstant(m.occurredAt, user.timezone)}</time>{m.durationSec ? <span className="mt-1 block text-xs text-ink-600">{Math.round(m.durationSec / 60)} min</span> : null}</td>
                     <td data-label="Account" className="break-words text-[12.5px]">
                       {m.companyId ? (
                         <Link href={`/accounts/${m.companyId}`} className="text-brand-700 hover:underline">
@@ -220,65 +174,6 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
           </div>
         )}
       </Surface>
-
-      {recordings.length ? (
-        <Surface flush>
-          <ViewHeader title="Recordings on people" caret meta={<><span className="font-medium text-ink-900">{recordingTotal}</span> on a person record{recordingTotal > recordings.length ? <> · showing <span className="font-medium text-ink-900">{recordings.length}</span></> : null}</>} />
-          <div className="min-w-0">
-            <table className="table table-dense table-meetings w-full table-fixed">
-              <thead>
-                <tr>
-                  <th>Person</th>
-                  <th>Account</th>
-                  <th>Links</th>
-                  <th className="w-1/4"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {recordings.map((b) => {
-                  const url = b.recordingUrl ?? '';
-                  const already = url ? addedUrls.has(url) : false;
-                  return (
-                    <tr key={b.id}>
-                      <td data-label="Person">
-                        <IdentityCell name={[b.firstName, b.lastName].filter(Boolean).join(' ') || '(no name)'} href={`/people/${b.id}`} shape="circle" />
-                      </td>
-                      <td data-label="Account" className="break-words text-[12.5px]">
-                        {b.companyId ? (
-                          <Link href={`/accounts/${b.companyId}`} className="text-brand-700 hover:underline">
-                            {b.companyName}
-                          </Link>
-                        ) : (
-                          b.companyName ?? <span className="text-ink-300">-</span>
-                        )}
-                      </td>
-                      <td data-label="Links">
-                        <div className="flex flex-wrap gap-1.5">
-                          {b.meetingUrl ? (
-                            <a href={b.meetingUrl} target="_blank" rel="noreferrer" className="chip-muted">
-                              <IconExternal size={12} /> Join
-                            </a>
-                          ) : null}
-                          {b.recordingUrl ? <Badge tone="blue">Recording</Badge> : null}
-                        </div>
-                      </td>
-                      <td data-label="Action" className="text-right">
-                        {already ? (
-                          <span className="text-[12px] text-ink-500">Already added</span>
-                        ) : (
-                          canCreateMeeting(user) && <Link href={`/meetings/new?personId=${b.id}`} className="btn-secondary btn-sm !whitespace-normal">
-                            <IconPlus size={12} /> Add with recording
-                          </Link>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </Surface>
-      ) : null}
 
       {pages > 1 ? (
         <div className="flex items-center justify-between text-[13px] text-ink-500">

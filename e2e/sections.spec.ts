@@ -56,13 +56,15 @@ test('the team board reports this week, with a total row', async ({ page }) => {
   const headers = page.locator('table thead th');
   await expect(headers.nth(0)).toHaveText('FO');
   await expect(headers.nth(1)).toHaveText('This week');
-  await expect(headers.nth(2)).toHaveText('Reached');
-  await expect(headers.nth(3)).toHaveText('Due today');
-  await expect(headers.nth(4)).toHaveText('Overdue');
-  await expect(headers.nth(5)).toHaveText('Replies');
-  await expect(headers.nth(6)).toHaveText('Meetings');
-  // Each FO's own week: steps done out of those due, never a bar scaled to somebody else.
-  await expect(page.locator('table tbody').getByText(/\d+ of \d+ steps done|Nothing planned/).first()).toBeVisible();
+  // The week's total is its four parts, each a column beside the bar.
+  await expect(headers.nth(2)).toHaveText('Done');
+  await expect(headers.nth(3)).toHaveText('Overdue');
+  await expect(headers.nth(4)).toHaveText('Due today');
+  await expect(headers.nth(5)).toHaveText('Later this week');
+  await expect(headers.nth(6)).toHaveText('Replies');
+  await expect(headers.nth(7)).toHaveText('Meetings');
+  // Each FO's own week: done out of what the week holds, never a bar scaled to somebody else.
+  await expect(page.locator('table tbody').getByText(/\d+ of \d+ done|Nothing planned/).first()).toBeVisible();
   await expect(page.getByText('In sequence')).toHaveCount(0);
   await expect(page.getByText(/\(7d\)/)).toHaveCount(0);
   // Everyone's totals, and a link into each person's tasks.
@@ -174,7 +176,7 @@ test('a meeting plays in the app with its transcript and no analysis until a mod
   }
   await page.goto('/meetings?fav=1');
   await expect(page.getByRole('link', { name: /E2E discovery call/ }).first()).toBeVisible();
-  // The first table is the list of meetings in Cadence; "Recordings on people" is a second one.
+  // The first table is the list of meetings in Cadence.
   await expect(page.locator('table').first()).toContainText(/\d external/);
   await logout(page);
 });
@@ -309,12 +311,12 @@ test('the person record shows the real Twenty fields, grouped as Twenty groups t
   await logout(page);
 });
 
-test('recordings Twenty holds are offered for adding, pre-filled', async ({ page }) => {
+test('a recording Twenty holds on a person is added from their page, pre-filled', async ({ page }) => {
   await loginAs(page, 'Alisa');
+  // Meetings lists the meetings people added; nothing is fetched or offered there by itself.
   await page.goto('/meetings');
-  await expect(page.getByText('Recordings on people')).toBeVisible();
-  const row = page.locator('table').filter({ hasText: 'Dummy Four' }).first();
-  await expect(row).toContainText('recording');
+  await expect(page.getByText('Recordings on people')).toHaveCount(0);
+  await expect(page.getByText('To approve')).toHaveCount(0);
 
   // Adding one starts from the person record: link, account and attendee are filled in. The FO
   // still says when it happened - Twenty has no meeting time and Cadence does not invent one.

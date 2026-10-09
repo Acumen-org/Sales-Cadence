@@ -9,7 +9,7 @@ import { activateCampaign, changeCampaignStatus } from '@/lib/engine/campaigns';
 import { advanceEnrollment, completeTask, runSchedulerTick } from '@/lib/engine/tasks';
 import { ingestEvent } from '@/lib/engine/ingest';
 import { rawFromMessage, rawFromNote } from '@/lib/engine/reconcile';
-import { completeFromEarlierEvidence, subjectKey } from '@/lib/engine/observed-evidence';
+import { completeFromEarlierEvidence, sameTouch, subjectKey } from '@/lib/engine/observed-evidence';
 import { SYSTEM_ACTOR, userActor } from '@/lib/audit';
 import { getSettings, saveSettingsSection } from '@/lib/settings';
 import { getMockTwentyClient } from '@/lib/twenty/mock-client';
@@ -96,7 +96,7 @@ describe('emails and calls close the step they belong to', () => {
     const personId = await firstDay();
     await email(personId, { handle: 'alisa@cadence.local', workspaceMemberId: b.users.alisa.twentyMemberId }, 'Following up from the PHH webinar', on('04', '15:00:00'));
     const dup = await note(personId, '[Email] Outbound email: Re: Following up from the PHH webinar', on('04', '15:02:00'));
-    expect(dup).toMatchObject({ result: 'note_outbound_email_touch', details: { [personId]: 'no_pending_task', loggedBy: 'crm-sales-glynac' } });
+    expect(dup).toMatchObject({ result: 'note_outbound_email_touch', details: { [personId]: 'same_touch', loggedBy: 'crm-sales-glynac' } });
     // Tuesday: Email 2 opens and stays open - the note was Email 1 again.
     const e0 = await enrollment(personId);
     await advanceEnrollment(e0.id, ctx('05', '09:00:00'));
@@ -116,7 +116,7 @@ describe('emails and calls close the step they belong to', () => {
     await completeTask({ taskId: e0.tasks[0].id, source: 'MANUAL' }, ctx('04', '15:30:00'));
     // Sent at 15:00, synced after the FO marked it done: it was Email 1.
     const late = await email(personId, { handle: 'karson@cadence.local', workspaceMemberId: b.users.karson.twentyMemberId }, 'Following up', on('04', '15:00:00'));
-    expect(late.details).toEqual({ [personId]: 'no_pending_task' });
+    expect(late.details).toEqual({ [personId]: 'same_touch' });
     await advanceEnrollment(e0.id, ctx('05'));
     expect((await enrollment(personId)).tasks.map((t) => t.state)).toEqual(['DONE', 'PENDING']);
     await runSchedulerTick(ctx('05', '17:00:00'));
@@ -131,7 +131,7 @@ describe('emails and calls close the step they belong to', () => {
     expect((await enrollment(personId)).tasks.map((t) => t.state)).toEqual(['DONE', 'PENDING']);
     // The team's tool logged that email twenty minutes after the Done; it reaches Cadence on Tuesday.
     const late = await note(personId, '[Email] Outbound email: Following up from the webinar', on('04', '15:20:00'));
-    expect(late.details).toMatchObject({ [personId]: 'before_step_opened' });
+    expect(late.details).toMatchObject({ [personId]: 'same_touch' });
     await runSchedulerTick(ctx('05', '12:30:00'));
     expect((await enrollment(personId)).tasks.map((t) => t.state)).toEqual(['DONE', 'PENDING']);
     // Tuesday's follow-up in the same thread is the next email, not the same one.
@@ -159,6 +159,56 @@ describe('emails and calls close the step they belong to', () => {
     expect(task).toEqual(expect.objectContaining({ state: 'DONE', completedById: null, completionSource: 'OBSERVED_MESSAGE' }));
     const audit = await prisma.auditLog.findFirstOrThrow({ where: { entityType: 'task', entityId: task.id, action: 'completed' } });
     expect(audit.actorType).toBe('SYSTEM');
+  });
+
+  it('closes two overdue steps from two emails sent the same morning, read newest first', async () => {
+    const personId = await firstDay();
+    // Monday's Email 1 is still open on Wednesday; Email 2 was due Tuesday and has not opened.
+    const subject = 'Following up from the webinar';
+    const second = await email(personId, { handle: 'karson@cadence.local', workspaceMemberId: b.users.karson.twentyMemberId }, subject, on('06', '15:30:00'));
+    expect(second.result).toBe('message_outbound_completed');
+    const first = await email(personId, { handle: 'karson@cadence.local', workspaceMemberId: b.users.karson.twentyMemberId }, subject, on('06', '15:00:00'));
+    await runSchedulerTick(ctx('06', '15:45:00'));
+    const e = await enrollment(personId);
+    expect(e.tasks.map((t) => t.state)).toEqual(['DONE', 'DONE']);
+    expect(first.result === 'message_outbound_completed' || e.tasks[1].completionSource === 'OBSERVED_MESSAGE').toBe(true);
+  });
+
+  it('closes a step that opened late from an email sent on its date, before Cadence opened it', async () => {
+    const personId = await firstDay();
+    await email(personId, { handle: 'karson@cadence.local', workspaceMemberId: b.users.karson.twentyMemberId }, 'Hello', on('04', '15:00:00'));
+    // Tuesday's email arrives while Email 2 has not been opened yet (the worker was down).
+    const early = await email(personId, { handle: 'karson@cadence.local', workspaceMemberId: b.users.karson.twentyMemberId }, 'Checking in', on('05', '15:00:00'));
+    expect(early.details).toEqual({ [personId]: 'no_pending_task' });
+    // Wednesday the scheduler opens it, and the email already in closes it.
+    await runSchedulerTick(ctx('06', '12:00:00'));
+    expect((await enrollment(personId)).tasks.map((t) => t.state)).toEqual(['DONE', 'DONE']);
+  });
+
+  it('lets a Done clicked by hand take only the email nearest it, so the next email closes the next step', async () => {
+    const personId = await firstDay();
+    const e0 = await enrollment(personId);
+    // Wednesday: Email 1 is marked done by hand, and Email 2 (due Tuesday) opens at once.
+    await completeTask({ taskId: e0.tasks[0].id, source: 'MANUAL' }, { actor: userActor(b.users.karson), now: on('06', '15:00:00'), skipSync: true });
+    await advanceEnrollment(e0.id, ctx('06', '15:01:00'));
+    expect((await enrollment(personId)).tasks.map((t) => t.state)).toEqual(['DONE', 'PENDING']);
+    // The email behind that Done, sent ten minutes after the click.
+    const behind = await email(personId, { handle: 'karson@cadence.local', workspaceMemberId: b.users.karson.twentyMemberId }, 'Hello', on('06', '15:10:00'));
+    expect(behind.details).toEqual({ [personId]: 'same_touch' });
+    expect((await enrollment(personId)).tasks.map((t) => t.state)).toEqual(['DONE', 'PENDING']);
+    // Email 2 an hour later closes Email 2.
+    const next = await email(personId, { handle: 'karson@cadence.local', workspaceMemberId: b.users.karson.twentyMemberId }, 'Following up', on('06', '16:10:00'));
+    expect(next.result).toBe('message_outbound_completed');
+    expect((await enrollment(personId)).tasks.map((t) => t.state)).toEqual(['DONE', 'DONE']);
+  });
+
+  it('matches a second address stored with capitals', async () => {
+    const personId = await firstDay();
+    await prisma.personCache.update({ where: { id: personId }, data: { additionalEmails: ['Second.Address@Prospect.Example'] } });
+    const m = mock.addMessage({ subject: 'Hello', receivedAt: on('04', '15:00:00').toISOString(), from: { handle: 'karson@cadence.local', workspaceMemberId: b.users.karson.twentyMemberId, personId: null }, to: [{ handle: 'second.address@prospect.example', personId: null }] });
+    const r = await ingestEvent({ source: 'WEBHOOK', objectType: 'message', eventName: 'message.created', record: rawFromMessage(m), now: on('04', '15:00:00'), skipSync: true });
+    expect(r.result).toBe('message_outbound_completed');
+    expect((await enrollment(personId)).tasks[0].state).toBe('DONE');
   });
 
   it('closes an open step from a touch already on file when the scheduler runs', async () => {
@@ -327,6 +377,19 @@ describe('a call logged twice', () => {
 });
 
 describe('the same email under two names', () => {
+  it('tells one touch logged twice from two touches', async () => {
+    const { matching } = await getSettings();
+    const at = (min: number) => new Date(Date.UTC(2027, 0, 4, 15, min));
+    const t = (externalId: string, channel: string, summary: string, occurredAt: Date) => ({ externalId, channel, summary, occurredAt });
+    // Two emails Twenty synced are two emails, even in one thread on one morning.
+    expect(sameTouch(t('message:a:person:p', 'EMAIL', 'Email sent: Hello', at(0)), t('message:b:person:p', 'EMAIL', 'Email sent: Re: Hello', at(30)), matching)).toBe(false);
+    // The note a tool logs for a synced email is that email.
+    expect(sameTouch(t('message:a:person:p', 'EMAIL', 'Email sent: Hello', at(0)), t('note:n:person:p', 'EMAIL', '[Email] Outbound email: Hello', at(5)), matching)).toBe(true);
+    // A call logged twice within minutes is one call; a call twenty minutes later is another.
+    expect(sameTouch(t('note:a:person:p', 'CALL', '[CALL] Outbound Call by Karson — 0m 10s', at(0)), t('note:b:person:p', 'CALL', '[CALL] Outbound Call by Karson — 0m 10s', at(5)), matching)).toBe(true);
+    expect(sameTouch(t('note:a:person:p', 'CALL', '[CALL] Outbound Call by Karson — 0m 10s', at(0)), t('note:b:person:p', 'CALL', '[CALL] Outbound Call by Karson — 2m 40s', at(20)), matching)).toBe(false);
+  });
+
   it('reads the synced subject and the logged note title as one email', () => {
     expect(subjectKey('Email sent: Re: Following up from the PHH webinar')).toBe(subjectKey('[Email] Outbound email: Following up from the PHH webinar'));
     expect(subjectKey('Email sent: FW: Re:  Q2   update')).toBe('q2 update');

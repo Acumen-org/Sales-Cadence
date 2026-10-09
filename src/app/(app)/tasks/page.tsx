@@ -5,7 +5,7 @@ import { filterParam, sectionDefaults } from '@/lib/default-filters';
 import { requireUser } from '@/lib/auth/current-user';
 import { canManageEnrollment, canSnoozeFreely, isAdmin, isPodLeader, canSeeAllPods, canActOnTask } from '@/lib/auth/rbac';
 import { getTaskBrief } from '@/lib/brief';
-import { nextWorkingDaySnooze } from '@/lib/engine/tasks';
+import { nextWorkingDaySnooze, snoozeDefault } from '@/lib/engine/tasks';
 import { cachedPersonName } from '@/lib/person-cache';
 import { getSettings } from '@/lib/settings';
 import { ACTION_LABELS, channelOf } from '@/lib/sequences/steps';
@@ -13,7 +13,8 @@ import { filterOptions, listTaskGroups, parseChannel, parseTab, TASK_CHANNELS, t
 import { ActionIcon, IconCampaigns, IconChevronLeft, IconChevronRight, IconRefresh } from '@/components/icons';
 import { prisma } from '@/lib/db';
 import { addDays, formatInstant, formatLocalDate, startOfLocalDay } from '@/lib/dates';
-import { nextActionInclude, nextActionWhere, REPEAT_LABELS } from '@/lib/next-actions';
+import { nextActionAccess, nextActionInclude, nextActionWhere, REPEAT_LABELS } from '@/lib/next-actions';
+import { CreateTaskButton } from '@/components/tasks/create-task-button';
 import { NextActionControls } from '@/components/tasks/next-action-controls';
 import { TaskActions } from '@/components/tasks/task-actions';
 import { PersonBadges, TaskBriefPanel } from '@/components/tasks/task-brief';
@@ -64,10 +65,10 @@ type NextItem = Awaited<ReturnType<typeof prisma.nextAction.findMany<{ include: 
 const personName = (p: { firstName: string; lastName: string; email: string | null }) => `${p.firstName} ${p.lastName}`.trim() || p.email || 'Unnamed';
 const dueLabel = (due: string, today: string) => (due === today ? 'Today' : formatLocalDate(due));
 
-/** Next actions at the top of a tab's list: whose, what, how and when. */
+/** Tasks created for a person, at the top of a tab's list: whose, what, how and when. */
 function NextActionList({ items, selectedId, today, showFo, href }: { items: NextItem[]; selectedId: string | null; today: string; showFo: boolean; href: (id: string) => string }) {
   return <div className="border-b border-line">
-    <div className="bg-canvas/60 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-500">Next actions <span className="tabular-nums">· {items.length}</span></div>
+    <div className="bg-canvas/60 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-500">Created tasks <span className="tabular-nums">· {items.length}</span></div>
     <ul className="divide-y divide-line">{items.map((n) => <li key={n.id}>
       <Link href={href(n.id)} aria-current={n.id === selectedId ? 'true' : undefined} className={`flex items-start gap-3 px-3 py-2.5 transition hover:bg-brand-50/50 ${n.id === selectedId ? 'bg-brand-50' : ''}`}>
         <Avatar name={personName(n.person)} shape="circle" size={30} />
@@ -81,26 +82,26 @@ function NextActionList({ items, selectedId, today, showFo, href }: { items: Nex
   </div>;
 }
 
-/** An open next action: the band says it is one and what it is; below, the person and the controls. */
-function NextActionPanel({ item: n, today, timezone, nextUrl, nextWorkingDay, mayWork }: { item: NextItem; today: string; timezone: string; nextUrl: string; nextWorkingDay: string; mayWork: boolean }) {
+/** An open created task: the band says it is one and what it is; below, the person and the controls. */
+function NextActionPanel({ item: n, today, timezone, nextUrl, nextWorkingDay, mayWork, done = false }: { item: NextItem; today: string; timezone: string; nextUrl: string; nextWorkingDay: string; mayWork: boolean; done?: boolean }) {
   const name = personName(n.person);
-  const overdue = n.state === 'OPEN' && n.dueDate < today;
+  const overdue = !done && n.state === 'OPEN' && n.dueDate < today;
   return <Surface flush>
     <div className="flex items-start gap-3 rounded-t-[inherit] bg-brand-900 px-5 py-3.5 text-white">
       <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/10 text-[#d5e9ad]"><IconRefresh size={16} /></span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-3">
-          <span className="flex-1 text-[10.5px] font-medium uppercase tracking-[0.14em] text-brand-200">Next action</span>
+          <span className="flex-1 text-[10.5px] font-medium uppercase tracking-[0.14em] text-brand-200">Task</span>
           <span className="flex shrink-0 items-center gap-1.5 text-[11px] leading-none"><span className="rounded-full bg-white/10 px-2 py-1 text-white">{REPEAT_LABELS[n.repeat]}</span></span>
         </div>
         <div className="mt-1 break-words text-[19px] font-semibold leading-snug tracking-[-0.01em]">{n.label}</div>
       </div>
     </div>
     <header className="border-b border-line bg-gradient-to-r from-brand-50/70 to-white p-5">
-      <div className="mb-4 flex items-center gap-3"><Avatar name={name} shape="circle" size={44} /><div><Link href={'/people/' + n.person.id} className="text-xl font-semibold tracking-tight hover:text-brand-700">{name}</Link><div className="mt-1 text-sm text-ink-500">{n.person.jobTitle ?? 'Title missing'}</div></div><div className="ml-auto"><Badge tone={n.state !== 'OPEN' ? 'gray' : overdue ? 'red' : n.dueDate === today ? 'green' : 'blue'}>{n.state !== 'OPEN' ? 'Done' : overdue ? 'Overdue' : n.dueDate === today ? 'Due today' : 'Upcoming'}</Badge></div></div>
+      <div className="mb-4 flex items-center gap-3"><Avatar name={name} shape="circle" size={44} /><div><Link href={'/people/' + n.person.id} className="text-xl font-semibold tracking-tight hover:text-brand-700">{name}</Link><div className="mt-1 text-sm text-ink-500">{n.person.jobTitle ?? 'Title missing'}</div></div><div className="ml-auto"><Badge tone={done || n.state !== 'OPEN' ? 'gray' : overdue ? 'red' : n.dueDate === today ? 'green' : 'blue'}>{done ? 'Done' : n.state !== 'OPEN' ? (n.state === 'CANCELLED' ? 'Stopped' : 'Done') : overdue ? 'Overdue' : n.dueDate === today ? 'Due today' : 'Upcoming'}</Badge></div></div>
       <RecordFields items={[{ label: 'Company', value: n.person.companyName }, { label: 'How', value: <span className="inline-flex items-center gap-1.5"><ActionIcon action={n.action} size={14} />{ACTION_LABELS[n.action]}</span> }, { label: 'Due', value: formatLocalDate(n.dueDate, 'long') }, { label: 'Assigned to', value: n.fo.name }, { label: 'Email', value: n.person.email }, { label: 'Phone', value: n.person.phone }, ...(n.lastDoneAt ? [{ label: 'Last done', value: formatInstant(n.lastDoneAt, timezone) }] : [])]} />
     </header>
-    {n.state === 'OPEN' && mayWork ? <div className="p-5"><NextActionControls id={n.id} nextUrl={nextUrl} nextWorkingDay={nextWorkingDay} repeats={n.repeat !== 'NONE'} /></div> : null}
+    {n.state === 'OPEN' && mayWork && !done ? <div className="p-5"><NextActionControls dueDate={n.dueDate} id={n.id} nextUrl={nextUrl} nextWorkingDay={nextWorkingDay} repeats={n.repeat !== 'NONE'} /></div> : null}
   </Surface>;
 }
 
@@ -115,12 +116,17 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const defaults = filters ? await sectionDefaults(user) : { podId: null, podOwnerValue: null, foUserId: null };
   const podId = filters ? filterParam(sp.pod, defaults.podId) : null; const foUserId = filters ? filterParam(sp.fo, defaults.foUserId) : null;
   const limit = Math.min(2000, Math.max(200, Number(sp.limit) || 200));
-  const [{ rows, counts, channelCounts, today, total, held }, options, settings] = await Promise.all([listTaskGroups(user, { tab, podId, foUserId, channel }, new Date(), limit), filterOptions(user), getSettings()]);
+  const [{ rows, counts, channelCounts, today, total, held }, options, settings, taskAccess] = await Promise.all([listTaskGroups(user, { tab, podId, foUserId, channel }, new Date(), limit), filterOptions(user), getSettings(), nextActionAccess(user)]);
+  // A filter on someone outside the pods' FOs (an admin's own tasks, from Home) still shows their name.
+  if (foUserId && !options.fos.some((f) => f.id === foUserId)) {
+    const who = await prisma.user.findUnique({ where: { id: foUserId }, select: { id: true, name: true } });
+    if (who) options.fos.push({ id: who.id, name: who.name, podIds: [] });
+  }
   // Next actions (outside any campaign) are work in these same tabs, counted with the tasks.
   const recentDone = startOfLocalDay(addDays(today, -30), user.timezone);
   const [openNext, doneNext] = await Promise.all([
     prisma.nextAction.findMany({ where: nextActionWhere({ podId, foUserId, channel: null }), include: nextActionInclude, orderBy: [{ dueDate: 'asc' }, { createdAt: 'asc' }], take: 500 }),
-    tab === 'done' ? prisma.nextAction.findMany({ where: { ...(foUserId ? { foUserId } : {}), ...(podId ? { fo: { pods: { some: { podId } } } } : {}), lastDoneAt: { gte: recentDone } }, include: nextActionInclude, orderBy: { lastDoneAt: 'desc' }, take: 100 }) : Promise.resolve([]),
+    prisma.nextAction.findMany({ where: { ...(foUserId ? { foUserId } : {}), ...(podId ? { fo: { pods: { some: { podId } } } } : {}), lastDoneAt: { gte: recentDone } }, include: nextActionInclude, orderBy: { lastDoneAt: 'desc' }, take: 100 }),
   ]);
   const nextTab = (n: { dueDate: string }): TaskTab => (n.dueDate < today ? 'overdue' : n.dueDate === today ? 'today' : 'upcoming');
   for (const n of openNext) {
@@ -151,7 +157,8 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const missing = Boolean(requested && !inView && !brief);
   const nextWorkingDay = nextWorkingDaySnooze(today, settings.rules.workingDays);
   const dispositions = settings.rules.callDispositions.map(d => ({ key: d.key, label: d.label, answered: d.answered }));
-  const skipReasons = settings.rules.skipReasons.map(r => ({ key: r.key, label: r.label, exit: r.exit }));
+  // Skipping one step must not end the sequence by default: reasons that end it come last.
+  const skipReasons = settings.rules.skipReasons.map(r => ({ key: r.key, label: r.label, exit: r.exit })).sort((a, b) => Number(a.exit !== 'none') - Number(b.exit !== 'none'));
   // A step holds several modules. With a channel filter on, the module for that channel is the
   // one the FO came here for, so it leads - otherwise filtering to LinkedIn opened an email
   // composer and the filter and the screen disagreed. Open modules still come before resolved ones.
@@ -167,10 +174,10 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   // The header badge says where this touch stands against today, not a state every open task shares.
   const dueOn = brief ? brief.task.snoozedTo ?? brief.task.dueDate : null;
   const dueState: { tone: BadgeTone; label: string } = !openModules.length ? { tone: 'gray', label: 'Resolved' } : dueOn && dueOn < today ? { tone: 'red', label: 'Overdue' } : dueOn === today ? { tone: 'green', label: 'Due today' } : { tone: 'blue', label: 'Upcoming' };
-  const listRows = rows.map(t => ({ id: t.id, childActions: t.childActions, personName: cachedPersonName(t.enrollment.person), companyName: t.enrollment.person.companyName, label: [...new Set(t.childActions.map(c => ACTION_LABELS[c.action]))].join(' + '), action: t.action, stepIndex: t.stepIndex, stepDay: t.stepDay, due: t.snoozedTo ?? t.dueDate, snoozed: Boolean(t.snoozedTo), state: t.state, foName: t.fo.name, campaignName: t.enrollment.campaign?.name ?? null }));
+  const listRows = rows.map(t => ({ id: t.id, childActions: t.childActions, personName: cachedPersonName(t.enrollment.person), companyName: t.enrollment.person.companyName, label: [...new Set(t.childActions.map(c => ACTION_LABELS[c.action]))].join(' + '), parts: [...new Set(t.childActions.map(c => c.action))].map(a => ({ label: ACTION_LABELS[a], done: t.childActions.filter(c => c.action === a).every(c => c.state !== 'PENDING') })), action: t.action, stepIndex: t.stepIndex, stepDay: t.stepDay, due: t.snoozedTo ?? t.dueDate, snoozed: Boolean(t.snoozedTo), state: t.state, foName: t.fo.name, campaignName: t.enrollment.campaign?.name ?? null }));
   return <PageFrame className="space-y-4 px-6 pb-8 pt-2">
     <Surface flush><Tabs inset={false} current={tab} tabs={(['today','overdue','upcoming','done'] as TaskTab[]).map(t => ({ key: t, label: TAB_LABELS[t], href: href({ tab: t, task: null }), count: counts[t] }))} />
-      <Toolbar><Link href={href({ type: null, task: null })} className={channel ? 'chip-muted' : 'chip'}>All types</Link>{TASK_CHANNELS.map(c => <Link key={c} href={href({ type: c, task: null })} className={channel === c ? 'chip' : 'chip-muted'}><ActionIcon action={c} size={13} />{CHANNEL_LABELS[c]}<strong className="ml-1">{channelCounts[c]}</strong></Link>)}<span className="w-full sm:ml-auto sm:w-auto"><TaskFilters pods={options.pods} fos={options.fos} podId={podId} foUserId={foUserId} mode={mode} /></span></Toolbar>
+      <Toolbar><Link href={href({ type: null, task: null })} className={channel ? 'chip-muted' : 'chip'}>All types</Link>{TASK_CHANNELS.map(c => <Link key={c} href={href({ type: c, task: null })} className={channel === c ? 'chip' : 'chip-muted'}><ActionIcon action={c} size={13} />{CHANNEL_LABELS[c]}<span className="ml-1 tabular-nums">{channelCounts[c]}</span></Link>)}<span className="flex w-full flex-wrap items-center gap-2 sm:ml-auto sm:w-auto"><TaskFilters pods={options.pods} fos={options.fos} podId={podId} foUserId={foUserId} mode={mode} />{taskAccess.canSet ? <CreateTaskButton today={today} fos={taskAccess.fos} canAssign={taskAccess.canAssign} query={base.toString()} selfId={user.id} /> : null}</span></Toolbar>
     </Surface>
     {/* A campaign that starts this week has no tasks yet; it is still on the screen its work will land on. */}
     {sp.flash && <TaskFlash message={sp.flash.slice(0,300)} />}
@@ -181,10 +188,10 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
       /* An empty Today with work sitting in Overdue is the one case where the FO must not be left
          looking at a clear screen: send them to the tab that actually has the work. */
       action={tab !== 'overdue' && counts.overdue ? <Link href={href({ tab: 'overdue', task: null })} className="btn-primary">View {counts.overdue} overdue {counts.overdue === 1 ? 'step' : 'steps'}</Link> : tab !== 'upcoming' && counts.upcoming ? <Link href={href({ tab: 'upcoming', task: null })} className="btn-secondary">View {counts.upcoming} upcoming</Link> : undefined} /></Surface> : <>
-      {mode === 'flow' && <div className="flex items-center gap-3 rounded-xl border border-brand-200 bg-brand-50 p-3"><strong>{index + 1} / {total}</strong><span className="text-sm text-ink-500">Task flow</span><div className="ml-auto flex gap-2">{prevUrl && <Link aria-label="Previous task" href={prevUrl} className="btn-secondary btn-sm"><IconChevronLeft size={14} /></Link>}{following && <Link href={nextUrl} className="btn-secondary btn-sm">Next<IconChevronRight size={14} /></Link>}<Link href={href({ mode: 'list', task: selected?.id ?? null })} className="btn-secondary btn-sm">Back to list</Link></div></div>}
+      {mode === 'flow' && <div className="flex items-center gap-3 rounded-xl border border-brand-200 bg-brand-50 p-3">{selectedNext && !brief ? <span className="font-medium">Created task</span> : <span className="font-medium tabular-nums">{index + 1} / {total}</span>}<span className="text-sm text-ink-500">Task flow</span><div className="ml-auto flex gap-2">{!selectedNext && prevUrl && <Link aria-label="Previous task" href={prevUrl} className="btn-secondary btn-sm"><IconChevronLeft size={14} /></Link>}{selectedNext && !brief ? <Link href={afterNext} className="btn-secondary btn-sm">Next<IconChevronRight size={14} /></Link> : following && <Link href={nextUrl} className="btn-secondary btn-sm">Next<IconChevronRight size={14} /></Link>}<Link href={href({ mode: 'list', task: selected?.id ?? null })} className="btn-secondary btn-sm">Back to list</Link></div></div>}
       <div className={mode === 'flow' ? 'grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_380px]' : 'grid items-start gap-4 xl:grid-cols-[300px_minmax(0,1fr)] 2xl:grid-cols-[300px_minmax(0,1fr)_360px]'}>
-        {mode === 'list' && <Surface flush className="max-h-[65vh] overflow-y-auto scroll-thin xl:sticky xl:top-4 xl:max-h-[calc(100vh-17rem)]">{nextInTab.length ? <NextActionList items={nextInTab} selectedId={selectedNext?.id ?? null} today={today} showFo={filters} href={(id) => href({ next: id, task: null })} /> : null}{rows.length ? <TaskList key={tab + '-' + (channel ?? '')} rows={listRows} selectedId={selected?.id ?? null} today={today} showFo={filters} hrefTemplate={href({ task: '__ID__' })} dispositions={dispositions} skipReasons={skipReasons} fos={options.fos} nextWorkingDay={nextWorkingDay} canPickSnoozeDate={canSnoozeFreely(user)} bulkEnabled={tab !== 'done'} /> : null}{rows.length < total && <Link href={href({ limit: String(limit + 200) })} className="btn-ghost m-3">Load more · <strong>{total - rows.length}</strong></Link>}</Surface>}
-        <div className="min-w-0 space-y-4">{selectedNext && <NextActionPanel item={selectedNext} today={today} timezone={user.timezone} nextUrl={afterNext} nextWorkingDay={nextWorkingDay} mayWork={canActOnTask(user, { foUserId: selectedNext.foUserId, podId: null }) || (isPodLeader(user) && (options.fos.find((f) => f.id === selectedNext.foUserId)?.podIds ?? []).some((id) => user.podIds.includes(id)))} />}{brief && <Surface flush>
+        {mode === 'list' && <Surface flush className="max-h-[65vh] overflow-y-auto scroll-thin xl:sticky xl:top-4 xl:max-h-[calc(100vh-17rem)]">{nextInTab.length ? <NextActionList items={nextInTab} selectedId={selectedNext?.id ?? null} today={today} showFo={filters} href={(id) => href({ next: id, task: null })} /> : null}{rows.length ? <TaskList key={tab + '-' + (channel ?? '')} rows={listRows} selectedId={selected?.id ?? null} today={today} showFo={filters} hrefTemplate={href({ task: '__ID__' })} dispositions={dispositions} skipReasons={skipReasons} fos={options.fos} nextWorkingDay={nextWorkingDay} canPickSnoozeDate={canSnoozeFreely(user)} bulkEnabled={tab !== 'done' && user.role !== 'BIZ_OPS'} canReassign={isAdmin(user) || isPodLeader(user)} /> : null}{rows.length < total && <Link href={href({ limit: String(limit + 200) })} className="btn-ghost m-3">Load more · <span className="tabular-nums">{total - rows.length}</span></Link>}</Surface>}
+        <div className="min-w-0 space-y-4">{selectedNext && <NextActionPanel done={tab === 'done'} item={selectedNext} today={today} timezone={user.timezone} nextUrl={afterNext} nextWorkingDay={snoozeDefault(today, selectedNext.dueDate, settings.rules.workingDays)} mayWork={canActOnTask(user, { foUserId: selectedNext.foUserId, podId: null }) || (isPodLeader(user) && (options.fos.find((f) => f.id === selectedNext.foUserId)?.podIds ?? []).some((id) => user.podIds.includes(id)))} />}{brief && <Surface flush>
           <CampaignBand brief={brief} />
           <header className="border-b border-line bg-gradient-to-r from-brand-50/70 to-white p-5"><div className="mb-4 flex items-center gap-3"><Avatar name={brief.personName} shape="circle" size={44} /><div><Link href={'/people/' + brief.person.id} className="text-xl font-semibold tracking-tight hover:text-brand-700">{brief.personName}</Link><div className="mt-1 text-sm text-ink-500">{brief.person.jobTitle ?? 'Title missing'}</div></div><div className="ml-auto flex flex-wrap items-center justify-end gap-1.5"><PersonBadges person={brief.person} /><Badge tone={dueState.tone}>{dueState.label}</Badge></div></div>
             <RecordFields items={[{ label:'Company', value:brief.person.companyName },{ label:'Outreach', value:<Link href={'/sequences/' + brief.task.enrollment.sequence.id}>{brief.enrollment.sequenceName}</Link> },{ label:'Day', value:brief.task.stepDay },{ label:'Due', value:brief.task.snoozedTo ?? brief.task.dueDate },{ label:'Assigned to', value:brief.enrollment.foName }]} />
@@ -193,9 +200,9 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
           <div className="divide-y divide-line">{modules.map(({task,action}) => <div key={task.id} className="space-y-4 p-5">
             {task.action === 'EMAIL' && (!brief.person.email || brief.person.badEmail) && <Notice tone="warn">Email needs verification. <Link href={'/enrichment?q=' + encodeURIComponent(brief.personName)} className="font-medium underline">Review contact data</Link></Notice>}
             <TaskComposer key={task.id} taskId={task.id} label={ACTION_LABELS[task.action]} subject={action.subject} body={action.body} html={action.html} channel={channelOf(task.action)} revision={task.draftRevision} readOnly={task.state !== 'PENDING' || !canActOnTask(user, { foUserId: task.foUserId, podId: task.enrollment.podId })} phone={brief.person.phone} callTemplate={settings.rules.clickToCallUrl} />
-            {task.state === 'PENDING' && canActOnTask(user, { foUserId: task.foUserId, podId: task.enrollment.podId }) ? <TaskActions fixedCalendar={brief.task.enrollment.scheduleDates.length > 0} taskId={task.id} action={task.action} nextUrl={nextUrl} variant={openModules.length > 1 ? 'module' : 'full'} prevUrl={prevUrl} twentyUrl={brief.twentyUrl} nextWorkingDay={nextWorkingDay} canPickSnoozeDate={canSnoozeFreely(user)} dispositions={dispositions} skipReasons={skipReasons} steps={brief.steps} currentStep={brief.currentStep} canManageEnrollment={canManageEnrollment(user, { foUserId: task.foUserId, podId: task.enrollment.podId })} delegates={delegatesFor(task.enrollment.podId)} currentFoId={task.foUserId} keyboardEnabled={openModules.length === 1} /> : <RecordFields items={[{label:'Result',value:task.state},{label:'Outcome',value:task.disposition ? dispositions.find(d => d.key === task.disposition)?.label ?? task.disposition : task.skipReason ?? task.cancelReason},{label:'Logged note',value:task.note}]} />}
+            {task.state === 'PENDING' && canActOnTask(user, { foUserId: task.foUserId, podId: task.enrollment.podId }) ? <TaskActions fixedCalendar={brief.task.enrollment.scheduleDates.length > 0} taskId={task.id} action={task.action} nextUrl={nextUrl} variant={openModules.length > 1 ? 'module' : 'full'} prevUrl={prevUrl} twentyUrl={brief.twentyUrl} nextWorkingDay={snoozeDefault(today, dueOn ?? today, settings.rules.workingDays)} canPickSnoozeDate={canSnoozeFreely(user)} dispositions={dispositions} skipReasons={skipReasons} steps={brief.steps} currentStep={brief.currentStep} canManageEnrollment={canManageEnrollment(user, { foUserId: task.foUserId, podId: task.enrollment.podId })} delegates={delegatesFor(task.enrollment.podId)} currentFoId={task.foUserId} keyboardEnabled={openModules.length === 1} /> : <RecordFields items={[{label:'Result',value:task.state === 'DONE' ? (task.completionSource?.startsWith('OBSERVED') ? 'Done: seen in Twenty' : 'Done') : task.state === 'SKIPPED' ? 'Skipped' : task.state === 'CANCELLED' ? 'Cancelled' : 'Open'},{label:'Outcome',value:task.disposition ? dispositions.find(d => d.key === task.disposition)?.label ?? task.disposition : task.skipReason ?? task.cancelReason},{label:'Logged note',value:task.note}]} />}
           </div>)}</div>
-          {openModules.length > 1 && canActOnTask(user, { foUserId: openModules[0].task.foUserId, podId: openModules[0].task.enrollment.podId }) ? <div className="border-t border-line p-5"><TaskActions fixedCalendar={brief.task.enrollment.scheduleDates.length > 0} variant="step" taskId={openModules[0].task.id} snoozeTaskIds={openModules.map(m => m.task.id)} action={openModules[0].task.action} nextUrl={nextUrl} prevUrl={prevUrl} twentyUrl={brief.twentyUrl} nextWorkingDay={nextWorkingDay} canPickSnoozeDate={canSnoozeFreely(user)} dispositions={dispositions} skipReasons={skipReasons} steps={brief.steps} currentStep={brief.currentStep} canManageEnrollment={canManageEnrollment(user, { foUserId: openModules[0].task.foUserId, podId: openModules[0].task.enrollment.podId })} delegates={delegatesFor(openModules[0].task.enrollment.podId)} currentFoId={openModules[0].task.foUserId} keyboardEnabled /></div> : null}
+          {openModules.length > 1 && canActOnTask(user, { foUserId: openModules[0].task.foUserId, podId: openModules[0].task.enrollment.podId }) ? <div className="border-t border-line p-5"><TaskActions fixedCalendar={brief.task.enrollment.scheduleDates.length > 0} variant="step" taskId={openModules[0].task.id} snoozeTaskIds={openModules.map(m => m.task.id)} action={openModules[0].task.action} nextUrl={nextUrl} prevUrl={prevUrl} twentyUrl={brief.twentyUrl} nextWorkingDay={snoozeDefault(today, dueOn ?? today, settings.rules.workingDays)} canPickSnoozeDate={canSnoozeFreely(user)} dispositions={dispositions} skipReasons={skipReasons} steps={brief.steps} currentStep={brief.currentStep} canManageEnrollment={canManageEnrollment(user, { foUserId: openModules[0].task.foUserId, podId: openModules[0].task.enrollment.podId })} delegates={delegatesFor(openModules[0].task.enrollment.podId)} currentFoId={openModules[0].task.foUserId} keyboardEnabled /></div> : null}
         </Surface>}</div>
         {brief && <aside className="min-w-0 space-y-4 xl:col-start-2 2xl:col-auto"><TaskBriefPanel brief={brief} timezone={user.timezone} callTemplate={settings.rules.clickToCallUrl} /><SuggestedApproach canConfigure={isAdmin(user)} /><Suspense key={brief.person.id} fallback={<div className="surface h-40" />}><CrmHistory personId={brief.person.id} timezone={user.timezone} baseHref={href({ task: brief.task.id })} notesAfter={sp.crmNotes} emailsAfter={sp.crmEmails} /></Suspense></aside>}
       </div>

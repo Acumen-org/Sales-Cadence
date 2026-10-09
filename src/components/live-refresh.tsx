@@ -11,11 +11,19 @@ import { usePathname, useRouter } from 'next/navigation';
  * the tree it is attaching to, which surfaced as an intermittent hydration error on the heaviest
  * page in the app. And it never interrupts someone mid-sentence: an open dialog or a focused input
  * means the refresh waits for the next tick.
+ *
+ * Only the screens where work arrives by itself refresh: Home, Tasks and Activity. Every other
+ * page (Reports, the directories, a campaign, Settings) re-ran all of its reads each minute that
+ * anything anywhere changed - which on a live workspace is every minute - and again on every return
+ * to the tab, competing with the clicks of everyone using it.
  */
+const LIVE = /^\/(home|tasks|activity)(\/|$)/;
+
 export function LiveRefresh() {
   const router = useRouter();
   const pathname = usePathname();
   useEffect(() => {
+    if (!LIVE.test(pathname)) return;
     let away = false;
     let version: number | null = null;
     const navigatedAt = Date.now();

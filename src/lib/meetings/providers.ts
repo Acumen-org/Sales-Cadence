@@ -77,7 +77,8 @@ export function parseMeetingLink(raw: string): ParsedMeetingLink {
     isHost(host, 'teams.live.com') ||
     isHost(host, 'zoom.us') ||
     isHost(host, 'zoom.com') ||
-    isHost(host, 'zoomgov.com');
+    isHost(host, 'zoomgov.com') ||
+    isHost(host, 'dropbox.com');
 
   // Direct media file: play it ourselves.
   if (!knownHost && MEDIA_EXT.test(path)) {
@@ -161,9 +162,45 @@ export function parseMeetingLink(raw: string): ParsedMeetingLink {
     };
   }
 
+  // Services whose share link turns into their own player link with nothing signed in.
+  const player = playerFor(url, host, path);
+  if (player) return { provider: 'OTHER', embedUrl: player.embedUrl, mediaUrl: player.mediaUrl ?? null, isJoinLink: false, label: player.label, note: null };
+
   // Anything else: try an iframe only if it is same-scheme https; most sites refuse, and the UI
   // shows a fallback link if the frame stays blank.
   return { provider: 'OTHER', embedUrl: null, mediaUrl: null, isJoinLink: false, label: host, note: 'Unknown provider: Cadence will link out rather than embed.' };
+}
+
+/**
+ * The player link behind a share link, for the services that hand one out to anyone with the link:
+ * YouTube, Vimeo, Loom and Fathom play in a frame, and a Dropbox file plays as the file itself.
+ */
+function playerFor(url: URL, host: string, path: string): { embedUrl: string | null; mediaUrl?: string; label: string } | null {
+  if (isHost(host, 'youtube.com') || host === 'youtu.be' || isHost(host, 'youtube-nocookie.com')) {
+    const id = host === 'youtu.be' ? path.slice(1).split('/')[0] : url.searchParams.get('v') ?? /^\/(?:embed|shorts|live|v)\/([^/?#]+)/.exec(path)?.[1];
+    return id ? { embedUrl: `https://www.youtube.com/embed/${encodeURIComponent(id)}`, label: 'YouTube' } : null;
+  }
+  if (isHost(host, 'vimeo.com')) {
+    const m = /^\/(?:video\/)?(\d+)(?:\/([0-9a-f]+))?/.exec(path);
+    if (!m) return null;
+    const hash = m[2] ?? url.searchParams.get('h');
+    return { embedUrl: `https://player.vimeo.com/video/${m[1]}${hash ? `?h=${hash}` : ''}`, label: 'Vimeo' };
+  }
+  if (isHost(host, 'loom.com')) {
+    const id = /^\/(?:share|embed)\/([0-9a-z]+)/i.exec(path)?.[1];
+    return id ? { embedUrl: `https://www.loom.com/embed/${id}`, label: 'Loom' } : null;
+  }
+  if (isHost(host, 'fathom.video')) {
+    const id = /^\/(?:share|embed)\/([^/?#]+)/.exec(path)?.[1];
+    return id ? { embedUrl: `https://fathom.video/embed/${id}`, label: 'Fathom' } : null;
+  }
+  if (isHost(host, 'dropbox.com') && MEDIA_EXT.test(path)) {
+    const file = new URL(url.toString());
+    file.searchParams.delete('dl');
+    file.searchParams.set('raw', '1');
+    return { embedUrl: null, mediaUrl: file.toString(), label: 'Dropbox' };
+  }
+  return null;
 }
 
 export const PROVIDER_LABELS: Record<MeetingProvider, string> = {
@@ -175,6 +212,14 @@ export const PROVIDER_LABELS: Record<MeetingProvider, string> = {
   FILE: 'Uploaded file',
   OTHER: 'Other link',
 };
+
+/** What a meeting's link is, for the list and the meeting page: the service by name, not "Other link". */
+export function platformLabel(provider: MeetingProvider, sourceUrl: string): string {
+  if (provider !== 'OTHER' && provider !== 'FILE') return PROVIDER_LABELS[provider];
+  if (!sourceUrl) return 'No link';
+  const parsed = parseMeetingLink(sourceUrl);
+  return parsed.provider === 'FILE' ? 'Media file' : parsed.label;
+}
 
 /** Guess a provider for the meeting itself (not the recording) from any of its links. */
 export function providerFromAny(links: string[]): MeetingProvider {

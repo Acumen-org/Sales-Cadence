@@ -282,11 +282,11 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
               // Grouped the way the record is grouped in Twenty, so the two read the same.
               <div className="space-y-3">
                 <Card
-                  title="Next action"
+                  title="Task"
                   actions={nextAccess.canSet ? <span className="flex items-center gap-2">
                     {openNext && mayWorkNext ? <ActionButton action={completeNextActionAction} payload={{ id: openNext.id }} className="btn-primary btn-sm" refresh>Done</ActionButton> : null}
-                    <NextActionButton personIds={[id]} today={today} fos={nextAccess.fos} canAssign={nextAccess.canAssign} label={openNext ? 'Change' : 'Set next action'} initial={openNext ? { label: openNext.label, action: openNext.action, dueDate: openNext.dueDate < today ? today : openNext.dueDate, repeat: openNext.repeat, foUserId: openNext.foUserId } : undefined} />
-                    {openNext && mayWorkNext ? <ActionButton action={stopNextActionAction} payload={{ id: openNext.id }} className="btn-ghost btn-sm" confirm="Stop this next action? It is cleared in Twenty too." refresh>Stop</ActionButton> : null}
+                    {person.dnd || (openNext && !mayWorkNext) ? null : <NextActionButton personIds={[id]} today={today} fos={nextAccess.fos} canAssign={nextAccess.canAssign} label={openNext ? 'Change' : 'Create task'} initial={openNext ? { label: openNext.label, action: openNext.action, dueDate: openNext.dueDate < today ? today : openNext.dueDate, repeat: openNext.repeat, foUserId: openNext.foUserId } : undefined} />}
+                    {openNext && mayWorkNext ? <ActionButton action={stopNextActionAction} payload={{ id: openNext.id }} className="btn-ghost btn-sm" confirm="Stop this task? It is cleared in Twenty too." refresh>Stop</ActionButton> : null}
                   </span> : null}
                 >
                   {openNext ? (

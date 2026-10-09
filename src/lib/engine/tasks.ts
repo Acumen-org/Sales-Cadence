@@ -3,7 +3,7 @@ import { Prisma, type CompletionSource, type Task, type TaskState } from '@prism
 import { personalizeAction } from '../sequences/personalize';
 import { prisma, type Tx } from '../db';
 import { logAudit, type AuditActor } from '../audit';
-import { addDays, isLocalDate, localDateToInstant, todayIn, toLocalDate, type LocalDate } from '../dates';
+import { addDays, formatLocalDate, isLocalDate, localDateToInstant, todayIn, toLocalDate, type LocalDate } from '../dates';
 import { channelOf, parseSteps, type ActionType } from '../sequences/steps';
 import { effectiveDailyCap, getSettings } from '../settings';
 import { findDateWithCapacity, loadFromRows, type DayLoad } from './caps';
@@ -331,6 +331,11 @@ export function nextWorkingDaySnooze(today: LocalDate, workingDays: number[]): L
   return followingWorkingDay(today, workingDays);
 }
 
+/** Where Snooze sends a step: the working day after today, or after its due day when that is later. */
+export function snoozeDefault(today: LocalDate, due: LocalDate, workingDays: number[]): LocalDate {
+  return followingWorkingDay(due > today ? due : today, workingDays);
+}
+
 export async function snoozeTask(input: { taskId: string; toDate: LocalDate }, ctx: EngineContext): Promise<ResolveResult> {
   const settings = await getSettings();
   if (!isLocalDate(input.toDate)) return { ok: false, reason: 'invalid', detail: 'Invalid date.' };
@@ -341,10 +346,13 @@ export async function snoozeTask(input: { taskId: string; toDate: LocalDate }, c
     if (task.enrollment.status === 'PAUSED') return HELD;
     const today = todayIn(workspaceTimezone(), ctx.now ?? new Date());
     if (input.toDate <= today) return { ok: false as const, reason: 'invalid' as const, detail: 'Snooze to a future date.' };
+    // Snooze moves a step later, never earlier than the day it is already due.
+    const due = task.snoozedTo ?? task.dueDate;
+    if (input.toDate <= due) return { ok: false as const, reason: 'invalid' as const, detail: `It is already due ${formatLocalDate(due, 'long')}. Snooze to a later day.` };
     const toDate = nextWorkingDay(input.toDate, settings.rules.workingDays);
     // A campaign's calendar keeps its dates; only this step waits. It cannot wait past the campaign.
     const endDate = task.enrollment.campaign?.endDate;
-    if (endDate && toDate > endDate) return { ok: false as const, reason: 'invalid' as const, detail: `The campaign ends on ${endDate}. Snooze to a day before then.` };
+    if (endDate && toDate > endDate) return { ok: false as const, reason: 'invalid' as const, detail: `The campaign ends on ${formatLocalDate(endDate, 'long')}. Snooze to a day before then.` };
     const claimed = await tx.task.updateMany({ where: { id: task.id, state: 'PENDING' }, data: { snoozedTo: toDate, dueAt: localDateToInstant(toDate, workspaceTimezone(), 9) } });
     if (claimed.count === 0) return { ok: false as const, reason: 'already_resolved' as const };
     const updated = await tx.task.findUniqueOrThrow({ where: { id: task.id } });
@@ -398,11 +406,17 @@ export async function runSchedulerTick(ctx: EngineContext): Promise<{ scanned: n
     if (!batch.length) break;
     for (const { id } of batch) {
       stats.scanned += 1;
-      const r = await advanceEnrollment(id, ctx);
-      if (r.outcome === 'generated') {
-        stats.generated += 1;
-        stats.tasks += r.taskIds.length;
-      } else if (r.outcome === 'completed') stats.completed += 1;
+      // One enrollment that cannot advance (a lock timeout, a bad plan) must not stop the rest of
+      // the tick, and above all not the catch-up below that closes steps from emails and calls.
+      try {
+        const r = await advanceEnrollment(id, ctx);
+        if (r.outcome === 'generated') {
+          stats.generated += 1;
+          stats.tasks += r.taskIds.length;
+        } else if (r.outcome === 'completed') stats.completed += 1;
+      } catch (err) {
+        console.warn('[scheduler] could not advance enrollment', id, err);
+      }
     }
     cursor = batch[batch.length - 1].id;
   }

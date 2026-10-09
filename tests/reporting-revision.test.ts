@@ -115,27 +115,46 @@ describe('scoped activity and performance', () => {
   it('counts events in a chosen period even for older enrollments, with no next-day leakage', async () => {
     // The leader reads every pod now, so Leigh's enrollment and its task count here too.
     const report = await buildReports(leader, '2026-09-09', { range });
-    expect(report.totals.enrollments).toBe(2);
-    expect(report.totals.tasksDone).toBe(3);
-    expect(report.totals.replied).toBe(1);
-    expect(report.totals.meeting).toBe(0);
-    expect(report.activity[0].period).toMatchObject({ emails: 3, total: 3, replies: 1, meetings: 0 });
+    expect(report.totals).toMatchObject({ sent: 3, emails: 3, reached: 3, replies: 1, meetings: 0 });
+    expect(report.byFo.find((f) => f.key === basics.users.karson.id)).toMatchObject({ sent: 3, emails: 3, replies: 1, meetings: 0 });
     expect(report.byPod).toHaveLength(2);
     expect(report.byPod.every((pod) => pod.meetingRate === 0)).toBe(true);
     // Filtered to their own pod, the figures are the pod's alone.
     const own = await buildReports(leader, '2026-09-09', { range, podId: basics.pods.Alisa.id });
-    expect(own.totals.enrollments).toBe(1);
-    expect(own.totals.tasksDone).toBe(2);
+    expect(own.totals.sent).toBe(2);
+    expect(own.totals.reached).toBe(2);
   });
 
   it('combines pod and FO filters inside viewer scope and allows long history', async () => {
     const wide = reportingRange('2026-01-01', '2026-09-08', '2026-09-09');
     const report = await buildReports(admin, '2026-09-09', { range: wide, podId: basics.pods.Alisa.id, foUserId: basics.users.karson.id });
-    expect(report.totals.tasksDone).toBe(3);
-    expect(report.totals.enrollments).toBe(2);
+    expect(report.totals.sent).toBe(3);
+    expect(report.totals.reached).toBe(2);
+    expect(report.unit).toBe('week');
+    expect(report.series.reduce((n, w) => n + w.sent, 0)).toBe(3);
     const other = await buildReports(leader, '2026-09-09', { range, podId: basics.pods.Leigh.id });
-    expect(other.totals.tasksDone).toBe(1);
+    expect(other.totals.sent).toBe(1);
     const own = await buildReports(junior, '2026-09-09', { range, foUserId: basics.users.karson.id });
-    expect(own.activity.every((item) => item.id === basics.users.karson.id)).toBe(true);
+    expect(own.byFo.every((item) => item.key === basics.users.karson.id)).toBe(true);
+  });
+
+  it('counts the meetings recorded in Meetings, by who booked them and by product', async () => {
+    const meeting = await prisma.meeting.create({ data: {
+      title: 'Intro call', sourceUrl: 'https://example.com/rec/1', occurredAt: at('2026-09-08T15:00:00Z'), bookedById: basics.users.karson.id,
+      products: ['GLYNAC'], attendees: { create: [{ personId: 'person-02', email: 'p2@example.com', name: 'Person Two', external: true }] },
+    } });
+    await prisma.meeting.create({ data: { title: 'Untagged', sourceUrl: 'https://example.com/rec/2', occurredAt: at('2026-09-08T16:00:00Z'), bookedById: basics.users.karson.id } });
+    await prisma.meeting.create({ data: { title: 'Next day', sourceUrl: 'https://example.com/rec/3', occurredAt: at('2026-09-09T05:00:00Z'), bookedById: basics.users.karson.id, products: ['PHH'] } });
+    const report = await buildReports(admin, '2026-09-09', { range });
+    expect(report.totals.meetings).toBe(2);
+    expect(report.byFo.find((f) => f.key === basics.users.karson.id)?.meetings).toBe(2);
+    expect(report.meetingsByProduct).toEqual([{ key: 'GLYNAC', label: 'Glynac', value: 1 }, { key: 'none', label: 'No product', value: 1 }]);
+    expect(report.byProduct.find((p) => p.key === 'GLYNAC')?.meetings).toBe(1);
+    // The meeting with a contact is credited to the outreach that was reaching them.
+    expect(report.byPod.find((p) => p.key === basics.pods.Alisa.id)?.meetings).toBe(2);
+    const otherFo = await buildReports(admin, '2026-09-09', { range, foUserId: basics.users.daniel.id });
+    expect(otherFo.totals.meetings).toBe(0);
+    await prisma.meeting.deleteMany({ where: { id: { not: '' } } });
+    expect(meeting.id).toBeTruthy();
   });
 });

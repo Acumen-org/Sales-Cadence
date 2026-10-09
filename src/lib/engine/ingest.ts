@@ -6,7 +6,6 @@ import { getSettings, getTwentySchema, type MatchingSettings, type Settings } fr
 import { getTwentyClient, type TwentyClient } from '../twenty';
 import {
   canonicalObjectType,
-  normalizeCalendarParticipant,
   normalizeCompany,
   normalizeMessage,
   normalizeNote,
@@ -20,8 +19,7 @@ import type { TwentyCompany, TwentyMessage, TwentyNote, TwentyOpportunity, Twent
 import { OCCUPYING_STATUSES, applyPersonFlags, markMeeting, markReplied } from './enrollment';
 import { actionTypesFor, classifyMessage, classifyNoteTitle, isInternalAddress, resolveNoteActor, type UserLike } from './matching';
 import { completeTask, type EngineContext } from './tasks';
-import { alreadyCounted, windowStart } from './observed-evidence';
-import { importCalendarEvent, readRecently, removeCalendarEvent, type CalendarImport } from '../meetings/calendar-import';
+import { closeFromTouch } from './observed-evidence';
 
 export type IngestInput = {
   source: EventSource;
@@ -35,6 +33,8 @@ export type IngestInput = {
   updatedAt?: string | null;
   now?: Date;
   skipSync?: boolean;
+  /** Read it again even if it was read before: idempotent, for a one-off pass after a rule change. */
+  reread?: boolean;
 };
 
 export type IngestResult = {
@@ -59,7 +59,7 @@ export function dedupeKeyFor(objectType: string, recordId: string, updatedAt: st
  * sync's next listing, a later webhook - is read again rather than skipped as done, or that call or
  * email would never close its step.
  */
-const INCOMPLETE = new Set(['ignored_note_no_person', 'ignored_note_not_found', 'ignored_outbound_no_person', 'ignored_message_not_found', 'ignored_message_unknown_direction']);
+const INCOMPLETE = new Set(['ignored_note_no_person', 'ignored_note_not_found', 'ignored_outbound_no_person', 'message_outbound_partial', 'ignored_message_not_found', 'ignored_message_unknown_direction']);
 export const isIncompleteResult = (result: string | null | undefined) => Boolean(result && (INCOMPLETE.has(result) || result.startsWith('error:')));
 
 /**
@@ -77,7 +77,7 @@ export async function ingestEvent(input: IngestInput, client?: TwentyClient): Pr
   const dedupeKey = dedupeKeyFor(canonical, recordId, updatedAt, input.eventName);
 
   const existing = await prisma.activityEvent.findUnique({ where: { dedupeKey }, select: { id: true, result: true } });
-  if (existing && !isIncompleteResult(existing.result)) return { status: 'duplicate', result: 'duplicate', eventId: existing.id, details: { dedupeKey } };
+  if (existing && !isIncompleteResult(existing.result) && !(input.reread && existing.result !== null)) return { status: 'duplicate', result: 'duplicate', eventId: existing.id, details: { dedupeKey } };
 
   let event: Pick<ActivityEvent, 'id'>;
   if (existing) {
@@ -173,29 +173,9 @@ async function process(type: CanonicalObject, input: IngestInput, ctx: EngineCon
     case 'opportunity':
       if (deleted) return { result: 'ignored_deleted' };
       return handleOpportunity(normalizeOpportunity(input.record, schema), ctx, settings);
-    case 'calendarEvent':
-      if (deleted) return fromCalendar(await removeCalendarEvent(String(input.record.id)));
-      return handleCalendarEvent(String(input.record.id), client);
-    case 'calendarEventParticipant': {
-      // A guest added or answering: the event is read again, whole.
-      const p = normalizeCalendarParticipant(input.record, schema);
-      if (!p.calendarEventId) return { result: 'ignored_no_event_id' };
-      if (readRecently(p.calendarEventId)) return { result: 'calendar_read_already' };
-      return handleCalendarEvent(p.calendarEventId, client);
-    }
     default:
       return { result: `ignored_object_${type}` };
   }
-}
-
-const fromCalendar = (r: CalendarImport): ProcessOutcome => ({ result: `calendar_${r.result}`, details: { ...(r.reason ? { reason: r.reason } : {}), ...(r.meetingId ? { meetingId: r.meetingId } : {}) } });
-
-/** A calendar event, read whole from Twenty (a webhook carries it without its guests), into a meeting. */
-async function handleCalendarEvent(id: string, client?: TwentyClient): Promise<ProcessOutcome> {
-  const c = client ?? (await getTwentyClient());
-  const event = await c.getCalendarEvent(id);
-  if (!event) return { result: 'ignored_event_not_found' };
-  return fromCalendar(await importCalendarEvent(event));
 }
 
 async function fetchMessage(id: string, client?: TwentyClient): Promise<TwentyMessage | null> {
@@ -275,11 +255,10 @@ async function recordTouch(data: { personId: string; channel: 'EMAIL' | 'CALL' |
 }
 
 /**
- * Complete the earliest pending task of one of `types` on the person's active enrollment. An
- * email or call from our side counts whoever made it: the FO, a colleague writing from their own
- * mailbox, or a note the team's tools logged (owner, 24 September 2026: tasks close "when emailing
- * or calling has happened"). A step not open yet is not closed by it, then or later (owner, 25
- * September 2026). Returns a result code.
+ * Close the earliest open step of one of `types` on the person's running campaign. An email or call
+ * from our side counts whoever made it: the FO, a colleague writing from their own or a shared
+ * mailbox, or a note the team's tools logged. A step counts what happened from its own date on, and
+ * a touch counts once (observed-evidence.ts). Returns a result code.
  */
 async function completeFromEvidence(params: {
   personId: string;
@@ -289,26 +268,19 @@ async function completeFromEvidence(params: {
   /** What the touch says (the note title or "Email sent: <subject>"), to know the same email seen twice. */
   summary: string;
   source: 'OBSERVED_NOTE' | 'OBSERVED_MESSAGE';
+  channel: 'EMAIL' | 'CALL';
   matching: MatchingSettings;
   ctx: EngineContext;
 }): Promise<{ code: string; taskId?: string }> {
-  const { personId, types, evidenceId, occurredAt, source, ctx } = params;
-  const enrollment = await prisma.enrollment.findFirst({ where: { personId, status: 'ACTIVE' } });
-  if (!enrollment) return { code: 'no_active_enrollment' };
-  const graceMs = params.matching.evidenceGraceDays * 86_400_000;
-  if (occurredAt.getTime() < enrollment.createdAt.getTime() - graceMs) return { code: 'stale_evidence' };
-  const task = await prisma.task.findFirst({
-    where: { enrollmentId: enrollment.id, state: 'PENDING', action: { in: types } },
-    orderBy: [{ stepIndex: 'asc' }, { actionIndex: 'asc' }],
+  const { channel } = params;
+  return closeFromTouch({
+    personId: params.personId,
+    types: params.types,
+    touch: { externalId: params.evidenceId, channel, occurredAt: params.occurredAt, summary: params.summary },
+    source: params.source,
+    matching: params.matching,
+    ctx: params.ctx,
   });
-  if (!task) return { code: 'no_pending_task' };
-  // Before this step opened, or before the step ahead of it was done: it was not this step.
-  if (occurredAt < (await windowStart(task, params.matching))) return { code: 'before_step_opened' };
-  // A second record of a touch already counted - the note logged for a synced email, the email behind a step marked done.
-  if (await alreadyCounted(personId, { externalId: evidenceId, channel: task.action === 'CALL' ? 'CALL' : 'EMAIL', occurredAt, summary: params.summary }, params.matching)) return { code: 'same_touch' };
-  const r = await completeTask({ taskId: task.id, source, evidenceId, chosenAction: task.action, occurredAt }, ctx);
-  if (!r.ok) return { code: r.reason, taskId: task.id };
-  return { code: 'completed', taskId: task.id };
 }
 
 async function handleNote(note: TwentyNote, ctx: EngineContext, settings: Settings): Promise<ProcessOutcome> {
@@ -340,7 +312,7 @@ async function handleNote(note: TwentyNote, ctx: EngineContext, settings: Settin
       outcomes[personId] = 'touch_only';
       continue;
     }
-    const r = await completeFromEvidence({ personId, types, evidenceId: `note:${note.id}:person:${personId}`, occurredAt, summary: note.title, source: 'OBSERVED_NOTE', matching: settings.matching, ctx });
+    const r = await completeFromEvidence({ personId, types, evidenceId: `note:${note.id}:person:${personId}`, occurredAt, summary: note.title, source: 'OBSERVED_NOTE', channel, matching: settings.matching, ctx });
     outcomes[personId] = r.code;
     if (r.code === 'completed') anyCompleted = true;
   }
@@ -359,20 +331,22 @@ async function handleNote(note: TwentyNote, ctx: EngineContext, settings: Settin
  * address): the person whose address it is, when exactly one person has it. Our own addresses
  * never count.
  */
-async function recipientsByAddress(message: TwentyMessage, users: UserLike[], internalDomains: readonly string[]): Promise<string[]> {
+async function recipientsByAddress(message: TwentyMessage, users: UserLike[], internalDomains: readonly string[]): Promise<{ ids: string[]; unresolved: number }> {
   const ours = new Set(users.flatMap((u) => [u.email, ...u.aliases]).map((a) => a.trim().toLowerCase()));
   const handles = [...new Set(message.participants.filter((p) => p.role !== 'from' && !p.personId && !p.workspaceMemberId).map((p) => (p.handle ?? '').trim().toLowerCase()))].filter(
     (h) => h.includes('@') && !ours.has(h) && !isInternalAddress(h, internalDomains),
   );
-  if (!handles.length) return [];
-  const people = await prisma.personCache.findMany({
-    where: { deletedAt: null, OR: [{ email: { in: handles, mode: 'insensitive' } }, { additionalEmails: { hasSome: handles } }] },
-    select: { id: true, email: true, additionalEmails: true },
-  });
-  return handles.flatMap((h) => {
+  if (!handles.length) return { ids: [], unresolved: 0 };
+  // Second addresses are stored as typed, so they are compared lower-cased on both sides.
+  const people = await prisma.$queryRaw<Array<{ id: string; email: string | null; additionalEmails: string[] }>>`
+    SELECT id, email, "additionalEmails" FROM "PersonCache"
+    WHERE "deletedAt" IS NULL
+      AND (lower(email) = ANY(${handles}::text[]) OR EXISTS (SELECT 1 FROM unnest("additionalEmails") a WHERE lower(a) = ANY(${handles}::text[])))`;
+  const ids = handles.flatMap((h) => {
     const owners = people.filter((p) => p.email?.toLowerCase() === h || p.additionalEmails.some((a) => a.toLowerCase() === h));
     return owners.length === 1 ? [owners[0].id] : [];
   });
+  return { ids, unresolved: handles.length - ids.length };
 }
 
 async function handleMessage(message: TwentyMessage, ctx: EngineContext, settings: Settings): Promise<ProcessOutcome> {
@@ -382,7 +356,8 @@ async function handleMessage(message: TwentyMessage, ctx: EngineContext, setting
   const subject = message.subject ?? '(no subject)';
 
   if (cls.direction === 'outbound') {
-    const recipientPersonIds = [...new Set([...cls.recipientPersonIds, ...(await recipientsByAddress(message, users, settings.rules.internalDomains))])];
+    const byAddress = await recipientsByAddress(message, users, settings.rules.internalDomains);
+    const recipientPersonIds = [...new Set([...cls.recipientPersonIds, ...byAddress.ids])];
     if (!recipientPersonIds.length) return { result: 'ignored_outbound_no_person' };
     const outcomes: Record<string, string> = {};
     let anyCompleted = false;
@@ -404,6 +379,7 @@ async function handleMessage(message: TwentyMessage, ctx: EngineContext, setting
         occurredAt,
         summary: `Email sent: ${subject}`,
         source: 'OBSERVED_MESSAGE',
+        channel: 'EMAIL',
         matching: settings.matching,
         ctx,
       });
@@ -411,6 +387,8 @@ async function handleMessage(message: TwentyMessage, ctx: EngineContext, setting
       if (r.code === 'completed') anyCompleted = true;
     }
     if (anyCompleted) return { result: 'message_outbound_completed', details: outcomes };
+    // Someone it went to is not a contact yet (Twenty links them a moment later): read it again then.
+    if (byAddress.unresolved) return { result: 'message_outbound_partial', details: { ...outcomes, unmatchedRecipients: byAddress.unresolved } };
     return { result: 'message_outbound_touch', details: outcomes };
   }
 

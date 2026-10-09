@@ -17,7 +17,9 @@ export function useSearchBox(current: string, commit: (value: string | null) => 
   const sent = useRef(current);
 
   useEffect(() => {
-    if (current === sent.current) return;
+    // The page trims what it is sent, so "Dummy " comes back as "Dummy": that is the box's own
+    // value returning, and adopting it deleted the space someone was still typing.
+    if (current.trim() === sent.current.trim()) return;
     sent.current = current;
     setText(current);
   }, [current]);

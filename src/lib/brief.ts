@@ -1,6 +1,5 @@
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
-import { canActOnTask, toActor } from './auth/rbac';
 import { formatLocalDate, todayIn, type LocalDate } from './dates';
 import { plannedDateForStep } from './engine/clock';
 import { previewNextStep } from './engine/sequence-plan';
@@ -97,7 +96,8 @@ function render(a: { type: StepAction['type']; label: string; subject?: string; 
 export async function getTaskBrief(taskId: string, user: SessionUser): Promise<TaskBrief | null> {
   const task = await prisma.task.findUnique({ where: { id: taskId }, include: taskRowInclude });
   if (!task) return null;
-  if (!canActOnTask(toActor(user), { foUserId: task.foUserId, podId: task.enrollment.podId })) return null;
+  // Everyone reads every task; who may act on it is decided where its buttons are drawn.
+  void user;
 
   const [settings, conn, enrollmentFull] = await Promise.all([
     getSettings(),
@@ -120,7 +120,7 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
     ? render(actionDef)
     : { type: task.action, label: task.label, subject: null, body: '', html: '<p></p>', rawTemplate: null };
   const siblings = await prisma.task.findMany({ where: { enrollmentId: task.enrollmentId, stepId: task.stepId }, include: taskRowInclude, orderBy: { actionIndex: 'asc' } });
-  const modules = siblings.filter(t => canActOnTask(user, { foUserId: t.foUserId, podId: t.enrollment.podId })).map(t => {
+  const modules = siblings.map(t => {
     const snapshot = StepActionSchema.safeParse(t.actionSnapshot);
     const def = snapshot.success ? snapshot.data : step?.actions.find(a => a.id === t.actionId);
     const rendered = def ? render(def) : { type: t.action, label: t.label, subject: null, body: '', html: '<p></p>', rawTemplate: null };

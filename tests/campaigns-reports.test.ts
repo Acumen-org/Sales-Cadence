@@ -37,7 +37,7 @@ describe('campaigns and reports', () => {
     await resetDb();
     b = await seedBasics();
     const campaign = await prisma.campaign.create({
-      data: { name: 'SaaStr follow-up', sequenceId: b.sequence.id, podId: b.pods.Alisa.id, startDate: '2026-09-07', status: 'ACTIVE', personIds: ['person-01', 'person-02', 'person-03', 'person-04'] },
+      data: { name: 'SaaStr follow-up', sequenceId: b.sequence.id, podId: b.pods.Alisa.id, startDate: '2026-09-07', status: 'ACTIVE', productInterest: ['PHH'], personIds: ['person-01', 'person-02', 'person-03', 'person-04'] },
     });
     campaignId = campaign.id;
     await enrollPeople(
@@ -102,30 +102,31 @@ describe('campaigns and reports', () => {
     expect(funnel[7].done).toBe(1);
   });
 
-  it('reports roll up by pod, FO, campaign and channel', async () => {
+  it('reports roll up by pod, FO, campaign, product and channel', async () => {
     const admin = sessionUser(b.users.ria, []);
     const r = await buildReports(admin, '2026-09-20');
-    expect(r.totals.enrollments).toBe(4);
-    expect(r.totals.replied).toBe(1);
+    expect(r.totals.replies).toBe(1);
+    expect(r.totals.sent).toBeGreaterThanOrEqual(13);
     const pod = r.byPod.find((p) => p.label === 'Pod Alisa')!;
-    expect(pod.enrolled).toBe(4);
-    expect(pod.replied).toBe(1);
-    expect(pod.completed).toBe(1);
-    expect(pod.replyRate).toBeCloseTo(0.25);
+    expect(pod.replies).toBe(1);
+    expect(pod.sent).toBe(r.totals.sent);
+    expect(pod.replyRate).toBeCloseTo(1 / pod.sent);
     expect(r.byCampaign[0].label).toBe('SaaStr follow-up');
-    expect(r.byFo.reduce((n, f) => n + f.tasksDone, 0)).toBeGreaterThanOrEqual(13);
-    expect('bySequence' in r).toBe(false);
-    // Nested stages: a meeting counts as a reply and a reply as contact, so the funnel never widens.
-    expect(r.funnel.enrolled).toBeGreaterThanOrEqual(r.funnel.touched);
-    expect(r.funnel.touched).toBeGreaterThanOrEqual(r.funnel.replied);
-    expect(r.funnel.replied).toBeGreaterThanOrEqual(r.funnel.meeting);
-    expect(r.funnel.replied).toBeGreaterThanOrEqual(1);
+    expect(r.byFo.reduce((n, f) => n + f.sent, 0)).toBe(r.totals.sent);
+    expect(r.byProduct.map((p) => p.key)).toEqual(['PHH']);
+    expect(r.byProduct[0]).toMatchObject({ label: 'PHH', sent: r.totals.sent, replies: 1 });
+    // Every day of the period is a bar, and the bars add up to the total.
+    expect(r.unit).toBe('day');
+    expect(r.series).toHaveLength(28);
+    expect(r.series.reduce((n, d) => n + d.sent, 0)).toBe(r.totals.sent);
+    expect(r.sentByChannel.reduce((n, c) => n + c.value, 0)).toBe(r.totals.sent);
     const email = r.channels.find((c) => c.action === 'EMAIL')!;
     expect(email.manual).toBeGreaterThanOrEqual(4);
 
-    // A junior sees only their own enrollments
+    // A junior sees only their own outreach
     const karson = sessionUser(b.users.karson, [b.pods.Alisa.id]);
     const rk = await buildReports(karson, '2026-09-20');
-    expect(rk.totals.enrollments).toBeLessThan(4);
+    expect(rk.totals.sent).toBeLessThan(r.totals.sent);
+    expect(rk.byFo.every((f) => f.key === b.users.karson.id)).toBe(true);
   });
 });

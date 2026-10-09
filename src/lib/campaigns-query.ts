@@ -1,5 +1,5 @@
 import type { CampaignDraft } from './campaign-planner';
-import type { Prisma } from '@prisma/client';
+import type { CampaignStatus, Prisma } from '@prisma/client';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
 import { visiblePodIds } from './auth/rbac';
@@ -48,7 +48,7 @@ export function campaignScope(user: SessionUser): Prisma.CampaignWhereInput {
   return pods === null ? {} : { podId: { in: pods } };
 }
 
-export type CampaignListFilters = { q?: string; podId?: string | null; sequenceId?: string | null; product?: string | null; foUserId?: string | null; from?: string | null; to?: string | null };
+export type CampaignListFilters = { q?: string; podId?: string | null; sequenceId?: string | null; product?: string | null; foUserId?: string | null; from?: string | null; to?: string | null; statuses?: CampaignStatus[] };
 
 /**
  * Touches done, still open, and "planned" per campaign. Tasks are generated step by step, so a
@@ -84,6 +84,7 @@ export async function listCampaigns(user: SessionUser, filters: CampaignListFilt
   if (filters.q?.trim()) and.push({ OR: filters.q.trim().split(/\s+/).slice(0, 6).map((term) => ({ name: { contains: term, mode: 'insensitive' as const } })) });
   if (filters.podId) and.push({ podId: filters.podId });
   if (filters.sequenceId) and.push({ sequenceId: filters.sequenceId });
+  if (filters.statuses?.length) and.push({ status: { in: filters.statuses } });
   if (filters.product) and.push({ productInterest: { has: filters.product } });
   // Before launch a campaign has no enrollments: it is the FO's when they own anyone in it.
   const foPeople = filters.foUserId ? new Set((await prisma.personCache.findMany({ where: foPeopleWhere(filters.foUserId, (await prisma.user.findUnique({ where: { id: filters.foUserId }, select: { twentyMemberId: true } }))?.twentyMemberId), select: { id: true } })).map((p) => p.id)) : null;

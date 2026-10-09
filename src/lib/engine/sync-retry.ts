@@ -90,6 +90,15 @@ async function replay(client: TwentyClient, row: TwentyWrite): Promise<string | 
       await client.updateTask(id, patch as TaskPatch);
       return id;
     }
+    case 'syncMeeting': {
+      const { syncMeetingToCrm } = await import('../meetings/crm');
+      return syncMeetingToCrm(String(payload.meetingId));
+    }
+    case 'deleteNote': {
+      const id = String(payload.id);
+      await client.deleteNote(id);
+      return id;
+    }
     case 'deleteTask': {
       const id = String(payload.id);
       await client.deleteTask(id);

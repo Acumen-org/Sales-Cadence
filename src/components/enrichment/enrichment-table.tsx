@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRef, useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { markEnrichmentAction, unmarkEnrichmentAction } from '@/lib/actions/enrichment';
 import type { EnrichmentEntity } from '@/lib/enrichment';
@@ -44,6 +44,13 @@ export function EnrichmentTable({ entity, rows, fields, assignees, canMark, notF
   const [error, setError] = useState('');
   const [pending, start] = useTransition();
   const exportForm = useRef<HTMLFormElement>(null);
+  // A filter that hides a row takes it out of the selection: Export, Assign and Not found only reach what is shown.
+  useEffect(() => {
+    setSelected((s) => {
+      const kept = new Set([...s].filter((id) => rows.some((r) => r.id === id)));
+      return kept.size === s.size ? s : kept;
+    });
+  }, [rows]);
   const allSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(rows.map((r) => r.id)));
   const toggle = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });

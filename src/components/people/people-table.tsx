@@ -64,6 +64,15 @@ export function PeopleTable({ rows, canMove = true, nextActions }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(null), 8000); return () => clearTimeout(timer); }, [notice]);
+  // A filter that hides someone takes them out of the selection: actions only ever reach who is shown.
+  useEffect(() => {
+    setSelected((s) => {
+      const kept = new Set([...s].filter((id) => rows.some((r) => r.id === id)));
+      return kept.size === s.size ? s : kept;
+    });
+  }, [rows]);
+  // Somebody who can do nothing with a selection (Biz Ops) gets no checkboxes.
+  const canSelect = canMove || Boolean(nextActions?.canSet);
   const selectable = rows.filter((r) => !r.dnd && !r.optedOut);
   const allSelected = selectable.length > 0 && selectable.every((r) => selected.has(r.id));
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(selectable.map((r) => r.id)));
@@ -82,10 +91,10 @@ export function PeopleTable({ rows, canMove = true, nextActions }: Props) {
   return (
     <div>
       {notice && <div role="status" className="fixed bottom-6 right-6 z-50 max-w-[min(90vw,28rem)] rounded-lg bg-ink-900 px-4 py-3 text-sm text-white shadow-lg">{notice}<button type="button" aria-label="Dismiss campaign notification" className="ml-3" onClick={() => setNotice(null)}>&times;</button></div>}
-      {selected.size ? (
+      {chosen.length ? (
         <div className="flex flex-wrap items-center gap-3 border-y border-brand-100 bg-brand-50/70 px-4 py-2 text-[12.5px] text-brand-800">
-          <span className="font-medium">{selected.size} selected</span>
-          {canMove ? <><AddToCampaign personIds={chosenRows.filter(r => !r.inCampaign).map(r => r.id)} onDone={() => setSelected(new Set())} disabled={chosenRows.every((r) => r.inCampaign)} disabledTitle={chosenRows.every((r) => r.inCampaign) ? (chosen.length === 1 ? 'Already in a campaign' : 'Everyone chosen is already in a campaign') : undefined} />
+          <span className="font-medium">{chosen.length} selected</span>
+          {canMove ? <><AddToCampaign personIds={chosenRows.filter(r => !r.inCampaign).map(r => r.id)} onDone={(message) => { setSelected(new Set()); if (message) setNotice(message); }} disabled={chosenRows.every((r) => r.inCampaign)} disabledTitle={chosenRows.every((r) => r.inCampaign) ? (chosen.length === 1 ? 'Already in a campaign' : 'Everyone chosen is already in a campaign') : undefined} />
           <RemoveFromCampaigns people={inCampaigns} onDone={message => { setSelected(new Set()); setNotice(message ?? 'People removed from campaign.'); }} /></> : null}
           {nextActions?.canSet ? <NextActionButton personIds={chosen} today={nextActions.today} fos={nextActions.fos} canAssign={nextActions.canAssign} onDone={(message) => { setSelected(new Set()); setNotice(message); }} /> : null}
           <button type="button" className="btn-ghost btn-sm" onClick={() => setSelected(new Set())}>
@@ -108,7 +117,7 @@ export function PeopleTable({ rows, canMove = true, nextActions }: Props) {
           <thead>
             <tr>
               <th className="w-9 pl-4 pr-0">
-                <input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={!selectable.length} aria-label="Select people" />
+                {canSelect ? <input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={!selectable.length} aria-label="Select people" /> : null}
               </th>
               <th>Name</th>
               <th>Tags in Twenty</th>
@@ -122,7 +131,7 @@ export function PeopleTable({ rows, canMove = true, nextActions }: Props) {
             {rows.map((p) => (
               <tr key={p.id} className={selected.has(p.id) ? 'bg-brand-50/70' : undefined}>
                 <td className="pl-4 pr-0">
-                  <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)} disabled={p.dnd || p.optedOut} aria-label={`Select ${p.name}`} />
+                  {canSelect ? <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)} disabled={p.dnd || p.optedOut} aria-label={`Select ${p.name}`} /> : null}
                 </td>
                 <td>
                   <IdentityCell name={p.name} href={`/people/${p.id}`} shape="circle" sub={[p.jobTitle, p.companyName].filter(Boolean).join(' · ') || null} />

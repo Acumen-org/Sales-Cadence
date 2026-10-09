@@ -34,6 +34,7 @@ const EXACT: Record<string, string> = {
   ignored_message_not_found: 'Email no longer in Twenty',
   ignored_no_message_id: 'Not an email',
   ignored_outbound_no_person: 'Email to no contact',
+  message_outbound_partial: 'Email to someone not a contact yet; read again on the next sync',
   ignored_inbound_unknown_sender: 'Email from an unknown sender',
   ignored_message_unknown_direction: 'Email with no sender',
   inbound_no_active_enrollment: 'Reply from someone not in a campaign',
@@ -51,14 +52,6 @@ const EXACT: Record<string, string> = {
   ignored_opportunity_no_contact: 'Opportunity with no contact',
   ignored_opportunity_disabled: 'Opportunities do not book meetings',
   no_record_id: 'No record',
-  calendar_created: 'Meeting added from the calendar',
-  calendar_updated: 'Meeting updated from the calendar',
-  calendar_linked: 'Matched to a meeting added by hand',
-  calendar_removed: 'Removed: event cancelled',
-  calendar_read_already: 'Read with the rest of the event',
-  calendar_skipped: 'Not a meeting with a contact',
-  ignored_event_not_found: 'Event deleted from the calendar',
-  ignored_no_event_id: 'Not a calendar event',
 };
 
 /** One line for the row. Given the outcome per person (from ingestEvent), an email or note says what it did for each. */
