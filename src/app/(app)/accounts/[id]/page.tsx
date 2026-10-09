@@ -1,3 +1,4 @@
+import { meetingDay } from '@/lib/meetings/day';
 import { canCreateMeeting, isAdmin } from '@/lib/auth/rbac';
 import { ActionButton } from '@/components/action-form';
 import { blockAccountAction, unblockAccountAction } from '@/lib/actions/blocked-accounts';
@@ -343,7 +344,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                           {m.title}
                         </Link>
                         <span className="block text-[11.5px] text-ink-500">
-                          {formatInstant(m.occurredAt, user.timezone)} · {m.attendees.filter((a) => a.external).length} external
+                          {formatLocalDate(meetingDay(m.occurredAt), 'long')} · {m.attendees.filter((a) => a.external).length} external
                         </span>
                       </span>
                       {m.transcript ? <Badge tone="blue">transcript</Badge> : null}
@@ -366,7 +367,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                   <tbody>
                     {meetings.map((m) => <tr key={m.id}>
                       <td><Link href={`/meetings/${m.id}`} className="block truncate text-[13px] font-medium text-ink-900 hover:text-brand-700">{m.title}</Link></td>
-                      <td className="text-[12.5px]">{formatInstant(m.occurredAt, user.timezone)}</td>
+                      <td className="text-[12.5px]">{formatLocalDate(meetingDay(m.occurredAt), 'long')}</td>
                       <td className="text-[12.5px]"><span className="flex items-center gap-2 whitespace-nowrap"><span className="tabular-nums text-ink-900">{m.attendees.length}</span>{m.attendees.filter((a) => a.external).length ? <Badge tone="green">{m.attendees.filter((a) => a.external).length} external</Badge> : null}</span></td>
                       <td>{m.transcript ? <Badge tone="blue">Transcript</Badge> : <Empty />}</td>
                       <td className="text-[12.5px] tabular-nums">{m.durationSec ? `${Math.round(m.durationSec / 60)} min` : <Empty />}</td>

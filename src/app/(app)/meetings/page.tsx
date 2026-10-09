@@ -9,7 +9,8 @@ import { canCreateMeeting, ROLES_NEEDING_POD } from '@/lib/auth/rbac';
 import { attendeeIsExternal, meetingReadWhere } from '@/lib/meetings-query';
 import { getSettings } from '@/lib/settings';
 import { prisma } from '@/lib/db';
-import { addDays, formatInstant, isLocalDate, startOfLocalDay } from '@/lib/dates';
+import { addDays, formatLocalDate, isLocalDate, startOfLocalDay } from '@/lib/dates';
+import { meetingDay } from '@/lib/meetings/day';
 import { PRODUCTS } from '@/lib/workspace';
 import { MeetingsToolbar } from '@/components/meetings/meetings-toolbar';
 import { PillList } from '@/components/pill-list';
@@ -148,7 +149,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                     <td data-label="Meeting">
                       <IdentityCell name={m.title} href={`/meetings/${m.id}`} sub={platformLabel(m.provider, m.sourceUrl)} />
                     </td>
-                    <td data-label="When" className="text-[12.5px]"><time className="block font-medium text-ink-900">{formatInstant(m.occurredAt, user.timezone)}</time>{m.durationSec ? <span className="mt-1 block text-xs text-ink-600">{Math.round(m.durationSec / 60)} min</span> : null}</td>
+                    <td data-label="When" className="text-[12.5px]"><time className="block font-medium text-ink-900">{formatLocalDate(meetingDay(m.occurredAt), 'long')}</time>{m.durationSec ? <span className="mt-1 block text-xs text-ink-600">{Math.round(m.durationSec / 60)} min</span> : null}</td>
                     <td data-label="Account" className="break-words text-[12.5px]">
                       {m.companyId ? (
                         <Link href={`/accounts/${m.companyId}`} className="text-brand-700 hover:underline">

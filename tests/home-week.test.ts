@@ -110,8 +110,10 @@ describe('home', () => {
       where: { id: enrollment.id },
       data: { repliedAt: new Date('2026-09-09T09:00:00Z'), meetingAt: new Date('2026-09-10T14:00:00Z'), status: 'MEETING' },
     });
-    // Meetings are the ones recorded in Meetings, credited to whoever booked them.
-    await prisma.meeting.create({ data: { title: 'Intro', sourceUrl: 'https://example.com/rec/home', occurredAt: new Date('2026-09-10T14:00:00Z'), bookedById: b.users.alisa.id } });
+    // Meetings are the ones recorded in Meetings, credited to whoever booked them, held this week
+    // up to today: a meeting carries its day only (midday, Central time).
+    await prisma.meeting.create({ data: { title: 'Intro', sourceUrl: 'https://example.com/rec/home', occurredAt: new Date('2026-09-08T17:00:00Z'), bookedById: b.users.alisa.id } });
+    await prisma.meeting.create({ data: { title: 'Thursday', sourceUrl: 'https://example.com/rec/thu', occurredAt: new Date('2026-09-10T17:00:00Z'), bookedById: b.users.alisa.id } });
     await prisma.meeting.create({ data: { title: 'Last week', sourceUrl: 'https://example.com/rec/old', occurredAt: new Date('2026-09-03T14:00:00Z'), bookedById: b.users.alisa.id } });
     await prisma.touch.create({ data: { personId: 'person-01', channel: 'EMAIL', direction: 'INBOUND', occurredAt: new Date('2026-09-09T09:00:00Z'), summary: 'Reply: Re: intro', externalId: 'message:home-week:person:person-01' } });
     const admin = sessionUser(b.users.ria, []);

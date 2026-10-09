@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { backfillMeetingsToCrm } from '../lib/meetings/crm';
 import { retryFailedWrites } from '../lib/engine/sync-retry';
 import { prisma } from '../lib/db';
 import { env } from '../lib/env';
@@ -54,6 +55,14 @@ async function evidenceRescan(now:Date){
  if(await prisma.setting.findUnique({where:{key}}))return;
  try{const stats=await reconcile({days:14,only:['notes','messages'],reread:true,actor:SYSTEM_ACTOR,now});log('evidence rescan',stats);await prisma.setting.upsert({where:{key},create:{key,value:{at:now.toISOString(),stats}},update:{value:{at:now.toISOString(),stats}}});}catch(error){log('evidence rescan failed',error);}
 }
+/** Once, after the team made the Meetings object in Twenty: every meeting already in Cadence is written to it. */
+let meetingsBackfillChecked=false;
+async function meetingsBackfill(){
+ if(meetingsBackfillChecked)return;meetingsBackfillChecked=true;
+ const key='meetingsToTwenty20261010';
+ if(await prisma.setting.findUnique({where:{key}}))return;
+ try{const written=await backfillMeetingsToCrm();if(written===null)return;log('meetings written to Twenty',written);await prisma.setting.upsert({where:{key},create:{key,value:{at:new Date().toISOString(),written}},update:{value:{at:new Date().toISOString(),written}}});}catch(error){log('meetings backfill failed',error);}
+}
 async function tick(){
  if(running||stopping)return;running=true;
  try{
@@ -63,6 +72,7 @@ async function tick(){
    }
    await nightly(new Date(now));
    await evidenceRescan(new Date(now));
+   await meetingsBackfill();
    try{await launchScheduledCampaigns({actor:SYSTEM_ACTOR});}catch(error){log('campaign launch failed',error);}
    const stats=await runSchedulerTick({actor:SYSTEM_ACTOR});
    if(stats.generated||stats.completed)log('scheduler',stats);

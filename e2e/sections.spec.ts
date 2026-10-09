@@ -109,7 +109,7 @@ test('a meeting plays in the app with its transcript and no analysis until a mod
   await page.getByLabel('Recording or meeting link').fill('https://files.example.com/e2e/recording.mp4');
   // The form says what it can do with the link before saving.
   await expect(page.getByText(/Media file/)).toBeVisible();
-  await page.getByLabel('Date and time').fill('2026-09-08T10:00');
+  await page.getByLabel('Date', { exact: true }).fill('2026-09-08');
   await page.getByLabel('Duration (minutes)').fill('18');
 
   // Attendees are picked from the CRM directory and the team, and guests can be typed in.
@@ -187,7 +187,7 @@ test('a Zoom recording link is offered as a link-out, not a broken frame', async
   await page.getByLabel('Title').fill('E2E zoom review');
   await page.getByLabel('Recording or meeting link').fill('https://acme.zoom.us/rec/share/e2e');
   await expect(page.getByText('Opens in a new tab', { exact: true })).toBeVisible();
-  await page.getByLabel('Date and time').fill('2026-09-08T14:00');
+  await page.getByLabel('Date', { exact: true }).fill('2026-09-08');
   await page.getByRole('button', { name: /Add meeting|Save/ }).click();
   await expect(page).toHaveURL(/\/meetings\/[0-9a-f-]+$/);
   await expect(page.locator('video')).toHaveCount(0);

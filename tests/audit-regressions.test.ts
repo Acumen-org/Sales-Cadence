@@ -147,14 +147,15 @@ describe('meeting forms', () => {
   const form = (url = 'https://files.example.com/call.mp4') => {
     const fd = new FormData(); fd.set('title', 'Timezone review'); fd.set('sourceUrl', url); fd.set('occurredAt', '2026-09-08T14:30'); fd.set('bookedById', b.users.alisa.id); return fd;
   };
-  it('creates and edits meetings using the viewer timezone', async () => {
+  it('creates and edits meetings by their day alone, whatever the viewer timezone', async () => {
     auth.requireUser.mockResolvedValue({ ...session(b.users.ria), timezone: 'America/New_York' });
     const result = await createMeetingAction(form()); expect(result.ok).toBe(true);
     const meeting = await prisma.meeting.findFirstOrThrow();
-    expect(meeting.occurredAt.toISOString()).toBe('2026-09-08T18:30:00.000Z');
-    const fd = form(); fd.set('meetingId', meeting.id); fd.set('occurredAt', '2026-09-08T16:00');
+    // Midday on the workspace's clock (Central): the same date anywhere the team is.
+    expect(meeting.occurredAt.toISOString()).toBe('2026-09-08T17:00:00.000Z');
+    const fd = form(); fd.set('meetingId', meeting.id); fd.set('occurredAt', '2026-09-09');
     expect((await updateMeetingAction(fd)).ok).toBe(true);
-    expect((await prisma.meeting.findUniqueOrThrow({ where: { id: meeting.id } })).occurredAt.toISOString()).toBe('2026-09-08T20:00:00.000Z');
+    expect((await prisma.meeting.findUniqueOrThrow({ where: { id: meeting.id } })).occurredAt.toISOString()).toBe('2026-09-09T17:00:00.000Z');
   });
   it('validates recording URLs on both creation and editing', async () => {
     expect((await createMeetingAction(form('javascript:alert(1)'))).ok).toBe(false);

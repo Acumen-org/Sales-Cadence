@@ -56,6 +56,9 @@ import type {
   TwentyWorkspaceMember,
   UpdateTaskInput,
   UpdateNoteInput,
+  TwentyMeetingSchema,
+  TwentyMeetingRecordInput,
+  TwentyTagField,
   EnrichPersonInput,
   EnrichCompanyInput,TwentyWebhook, CreateWebhookInput } from './types';
 
@@ -63,12 +66,34 @@ export type MockWrite =
   | { op: 'createNote'; id: string; input: CreateNoteInput }
   | { op: 'updateNote'; id: string; patch: UpdateNoteInput }
   | { op: 'deleteNote'; id: string }
+  | { op: 'saveMeetingRecord'; id: string; input: TwentyMeetingRecordInput }
+  | { op: 'deleteMeetingRecord'; id: string }
+  | { op: 'addSelectOption'; field: string; label: string }
   | { op: 'createTask'; id: string; input: CreateTaskInput }
   | { op: 'updateTask'; id: string; patch: UpdateTaskInput }
   | { op: 'enrichPerson'; id: string; patch: EnrichPersonInput }
   | { op: 'enrichCompany'; id: string; patch: EnrichCompanyInput }
   | { op: 'setPersonNextAction'; id: string; patch: PersonNextActionInput }
   | { op: 'deleteTask'; id: string };
+
+/** The Meetings object as the team set it up in Twenty (October 2026), for the demo workspace and the tests. */
+export const MOCK_MEETING_SCHEMA = (): TwentyMeetingSchema => ({
+  meeting: { typeName: 'Meeting', plural: 'meetings' },
+  fields: {
+    date: { name: 'meetingDate', dateOnly: true },
+    bookedBy: { id: 'field-booked-by', name: 'bookedBy', multi: false, options: [] },
+    products: { id: 'field-products', name: 'products', multi: true, options: [{ value: 'PHH', label: 'PHH' }, { value: 'ACUBOOTH', label: 'Acubooth' }, { value: 'GLYNAC', label: 'Glynac' }] },
+    team: { id: 'field-team', name: 'teamOnTheCall', multi: true, options: [] },
+    recording: 'recording',
+    cadenceLink: 'inCadence',
+    cadenceId: 'cadenceId',
+    guests: 'guestsOptional',
+    companyId: 'companiesId',
+    personId: 'peopleId',
+    assigneeId: 'assignedToId',
+  },
+  contact: { typeName: 'MeetingContact', plural: 'meetingContacts', meetingId: 'meetingsId', personId: 'peopleId' },
+});
 
 function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T;
@@ -99,6 +124,9 @@ export class MockTwentyClient implements TwentyClient {
   companies: TwentyCompany[] = [];
   members: TwentyWorkspaceMember[] = [];
   notes: TwentyNote[] = [];
+  /** The demo workspace's Meetings object; null makes it a workspace without one. */
+  meetingObject: TwentyMeetingSchema | null = MOCK_MEETING_SCHEMA();
+  meetingRecords = new Map<string, { data: Record<string, unknown>; contacts: { personId: string; name: string }[]; cadenceId: string }>();
   messages: TwentyMessage[] = [];
   calendarEvents: TwentyCalendarEvent[] = [];
   tasks: TwentyTask[] = [];
@@ -125,6 +153,8 @@ export class MockTwentyClient implements TwentyClient {
     this.members = clone(d.members);
     this.notes = clone(d.notes);
     this.messages = clone(d.messages);
+    this.meetingObject = MOCK_MEETING_SCHEMA();
+    this.meetingRecords = new Map();
     this.calendarEvents = kind === 'demo' ? demoCalendarEvents() : [];
     this.tasks = clone(d.tasks);
     this.opportunities = clone(d.opportunities);
@@ -388,6 +418,33 @@ export class MockTwentyClient implements TwentyClient {
       n.updatedAt = new Date().toISOString();
     }
     this.writes.push({ op: 'updateNote', id, patch });
+  }
+
+  async meetingSchema() {
+    return this.meetingObject ? clone(this.meetingObject) : null;
+  }
+
+  async saveMeetingRecord(_schema: TwentyMeetingSchema, input: TwentyMeetingRecordInput) {
+    this.maybeFail();
+    const existing = input.id && this.meetingRecords.has(input.id) ? input.id : [...this.meetingRecords.entries()].find(([, r]) => r.cadenceId === input.cadenceId)?.[0];
+    const id = existing ?? this.nextId('meeting');
+    this.meetingRecords.set(id, { data: clone(input.data), contacts: clone(input.contacts), cadenceId: input.cadenceId });
+    this.writes.push({ op: 'saveMeetingRecord', id, input: clone(input) });
+    return { id };
+  }
+
+  async deleteMeetingRecord(_schema: TwentyMeetingSchema, id: string) {
+    this.maybeFail();
+    this.meetingRecords.delete(id);
+    this.writes.push({ op: 'deleteMeetingRecord', id });
+  }
+
+  async addSelectOption(field: TwentyTagField, label: string) {
+    const value = label.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    const target = this.meetingObject ? Object.values(this.meetingObject.fields).find((f) => f && typeof f === 'object' && 'id' in f && f.id === field.id) as TwentyTagField | undefined : undefined;
+    if (target && !target.options.some((o) => o.value === value)) target.options.push({ value, label });
+    this.writes.push({ op: 'addSelectOption', field: field.name, label });
+    return value;
   }
 
   async deleteNote(id: string) {

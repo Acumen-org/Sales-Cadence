@@ -19,7 +19,7 @@ import { afterResponse } from '../engine/sync-out';
 import { extractRecordingUrl, parseMeetingLink } from '../meetings/providers';
 import { detectTranscriptFormat, parseTranscript } from '../meetings/transcript';
 import { getMeetingAnalyzer, MeetingAnalysisSchema } from '../meetings/analysis';
-import { localDateTimeToInstant } from '../dates';
+import { meetingDayInstant, parseMeetingDay } from '../meetings/day';
 import type { ActionResult } from './users';
 import { issueText } from '../form-errors';
 
@@ -157,8 +157,9 @@ export async function createMeetingAction(formData: FormData): Promise<ActionRes
   if (!parsed.success) return { ok: false, error: issueText(parsed.error.issues) };
   const d = parsed.data;
   if (!(await prisma.user.findFirst({ where: { id: d.bookedById, active: true, role: { in: ROLES_NEEDING_POD } }, select: { id: true } }))) return { ok: false, error: 'Choose who booked the meeting.' };
-  const occurredAt = localDateTimeToInstant(d.occurredAt, user.timezone);
-  if (!occurredAt) return { ok: false, error: `Pick a valid date and time in ${user.timezone}.` };
+  const day = parseMeetingDay(d.occurredAt);
+  if (!day) return { ok: false, error: 'Pick a valid date.' };
+  const occurredAt = meetingDayInstant(day);
   // No link is a meeting without a recording; a SharePoint, OneDrive or Drive link often hands out
   // the file itself when asked, and then the recording plays natively and the transcript follows it.
   const link = d.sourceUrl ? parseMeetingLink(d.sourceUrl) : null;
@@ -211,8 +212,9 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
   if (!parsed.success) return { ok: false, error: issueText(parsed.error.issues) };
   const d = parsed.data;
   if (!(await prisma.user.findFirst({ where: { id: d.bookedById, active: true, role: { in: ROLES_NEEDING_POD } }, select: { id: true } }))) return { ok: false, error: 'Choose who booked the meeting.' };
-  const occurredAt = localDateTimeToInstant(d.occurredAt, user.timezone);
-  if (!occurredAt) return { ok: false, error: `Pick a valid date and time in ${user.timezone}.` };
+  const day = parseMeetingDay(d.occurredAt);
+  if (!day) return { ok: false, error: 'Pick a valid date.' };
+  const occurredAt = meetingDayInstant(day);
   // No link is a meeting without a recording; a SharePoint, OneDrive or Drive link often hands out
   // the file itself when asked, and then the recording plays natively and the transcript follows it.
   const link = d.sourceUrl ? parseMeetingLink(d.sourceUrl) : null;
@@ -306,7 +308,7 @@ export async function deleteMeetingAction(formData: FormData): Promise<ActionRes
   if (!(await mayManageMeeting(user, existing))) return { ok: false, error: 'You do not have permission to delete this meeting.' };
   await prisma.meeting.delete({ where: { id } });
   await logAudit({ entityType: 'meeting', entityId: id, action: 'deleted', actor: userActor(user), details: { title: existing.title } });
-  await afterResponse(() => removeMeetingFromCrm(existing.twentyNoteId));
+  await afterResponse(() => removeMeetingFromCrm(existing));
   revalidatePath('/meetings');
   revalidatePath('/accounts');
   if (existing.companyId) revalidatePath(`/accounts/${existing.companyId}`);
@@ -420,7 +422,7 @@ export async function inspectMeetingLinkAction(raw: string, exceptMeetingId?: st
   // earlier in the week or next week, are other meetings.
   const key = linkKey(url);
   const needle = linkNeedle(url);
-  const around = 6 * 3_600_000;
+  const around = 24 * 3_600_000;
   const candidates = key && needle ? await prisma.meeting.findMany({ where: { review: { not: 'DISMISSED' }, ...(exceptMeetingId ? { id: { not: exceptMeetingId } } : {}), sourceUrl: { contains: needle, mode: 'insensitive' }, occurredAt: { gte: new Date(Date.now() - around), lte: new Date(Date.now() + around) } }, orderBy: { occurredAt: 'desc' }, take: 20, select: { id: true, sourceUrl: true } }) : [];
   const already = candidates.find((m) => linkKey(m.sourceUrl) === key);
   if (already) return { ok: true, data: { ...base, title: null, date: null, companyId: null, companyName: null, existingMeetingId: already.id } };

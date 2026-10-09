@@ -94,6 +94,12 @@ async function replay(client: TwentyClient, row: TwentyWrite): Promise<string | 
       const { syncMeetingToCrm } = await import('../meetings/crm');
       return syncMeetingToCrm(String(payload.meetingId));
     }
+    case 'deleteMeetingRecord': {
+      const id = String(payload.id);
+      const schema = await client.meetingSchema();
+      if (schema) await client.deleteMeetingRecord(schema, id);
+      return id;
+    }
     case 'deleteNote': {
       const id = String(payload.id);
       await client.deleteNote(id);

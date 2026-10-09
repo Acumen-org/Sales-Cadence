@@ -1,20 +1,22 @@
 import { prisma } from '../db';
 import { env } from '../env';
 import { getSettings } from '../settings';
-import { getTwentyClient } from '../twenty';
+import { getTwentyClient, type TwentyClient } from '../twenty';
+import type { TwentyMeetingSchema, TwentyTagField } from '../twenty/types';
 import { optionLabel } from '../twenty/labels';
 import { workspaceTimezone } from '../workspace';
+import { meetingDay, meetingDayInstant } from './day';
 import { retryDelayMs } from '../engine/sync-out';
 
 /**
- * Twenty keeps the record. Every meeting added in Cadence is written there as a note on its
- * contacts and its account - when, how long, who booked it, the products, who was on it and the
- * recording - and kept in step: an edit replaces the note (so a contact added later is linked
- * too), a delete removes it. The title starts with Cadence's own prefix, so reading Twenty back
- * never mistakes it for an email or a call.
+ * Twenty keeps the record. Every meeting added in Cadence is written to the workspace's own
+ * Meetings object: its title and date, who booked it, the products and the team on the call as
+ * tags, the account, the recording, a link back, and one Meeting contact per contact who attended,
+ * so the meeting shows on each of their records. An edit updates the same record; a delete removes
+ * it. A workspace without a Meetings object gets a note on the contacts and account instead.
  */
 
-type MeetingForNote = {
+type MeetingForCrm = {
   id: string;
   title: string;
   sourceUrl: string;
@@ -23,12 +25,13 @@ type MeetingForNote = {
   products: string[];
   companyId: string | null;
   companyName: string | null;
-  bookedBy: { name: string } | null;
-  attendees: { name: string | null; email: string | null; personId: string | null; external: boolean }[];
+  bookedBy: { name: string; twentyMemberId?: string | null } | null;
+  attendees: { name: string | null; email: string | null; personId: string | null; userId?: string | null; external: boolean; person?: { firstName: string; lastName: string } | null }[];
 };
 
-export function meetingNote(m: MeetingForNote, prefix: string): { title: string; bodyMarkdown: string } {
-  const when = new Intl.DateTimeFormat('en-US', { timeZone: workspaceTimezone(), weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(m.occurredAt);
+/** The note for a workspace with no Meetings object: plain lines, readable anywhere it is shown. */
+export function meetingNote(m: MeetingForCrm, prefix: string): { title: string; bodyMarkdown: string } {
+  const when = new Intl.DateTimeFormat('en-US', { timeZone: workspaceTimezone(), weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }).format(m.occurredAt);
   const minutes = m.durationSec ? Math.max(1, Math.round(m.durationSec / 60)) : null;
   const people = m.attendees.map((a) => [a.name, a.email ? `(${a.email})` : null].filter(Boolean).join(' ')).filter(Boolean);
   const lines = [
@@ -38,27 +41,87 @@ export function meetingNote(m: MeetingForNote, prefix: string): { title: string;
     m.companyName ? `Account: ${m.companyName}` : null,
     people.length ? `Attendees: ${people.join(', ')}` : null,
     m.sourceUrl ? `Recording: ${m.sourceUrl}` : null,
-    `In Cadence: ${env().APP_URL.replace(/\/$/, '')}/meetings/${m.id}`,
+    `In Cadence: ${cadenceUrl(m.id)}`,
   ].filter(Boolean);
   return { title: `${prefix} Meeting: ${m.title}`.trim(), bodyMarkdown: lines.join('\n\n') };
 }
 
+const cadenceUrl = (id: string) => `${env().APP_URL.replace(/\/$/, '')}/meetings/${id}`;
+const link = (url: string, label = '') => ({ primaryLinkUrl: url, primaryLinkLabel: label, secondaryLinks: [] });
+
+/** A tag's value for a name: the tag with that label, else a new one when Twenty allows it. */
+async function tagValue(client: TwentyClient, field: TwentyTagField, label: string): Promise<string | null> {
+  const key = label.trim().toLowerCase();
+  if (!key) return null;
+  const hit = field.options.find((o) => o.label.trim().toLowerCase() === key || o.value.toLowerCase() === key);
+  if (hit) return hit.value;
+  const added = await client.addSelectOption(field, label.trim());
+  if (added) field.options.push({ value: added, label: label.trim() });
+  return added;
+}
+
+/** The record's field values and the contacts to link, in the names this workspace gave its fields. */
+export async function meetingRecord(m: MeetingForCrm, schema: TwentyMeetingSchema, client: TwentyClient): Promise<{ data: Record<string, unknown>; contacts: { personId: string; name: string }[] }> {
+  const f = schema.fields;
+  const data: Record<string, unknown> = { name: m.title };
+  // The day only, whether Twenty's field is a date or a date and time.
+  if (f.date) data[f.date.name] = f.date.dateOnly ? meetingDay(m.occurredAt) : meetingDayInstant(meetingDay(m.occurredAt)).toISOString();
+  if (f.bookedBy) {
+    const value = m.bookedBy ? await tagValue(client, f.bookedBy, m.bookedBy.name) : null;
+    data[f.bookedBy.name] = f.bookedBy.multi ? (value ? [value] : []) : value;
+  }
+  if (f.products) {
+    const values: string[] = [];
+    for (const p of m.products) { const v = await tagValue(client, f.products, optionLabel(p)); if (v) values.push(v); }
+    data[f.products.name] = f.products.multi ? values : values[0] ?? null;
+  }
+  if (f.team) {
+    const ids = [...new Set(m.attendees.flatMap((a) => (a.userId ? [a.userId] : [])))];
+    const users = ids.length ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { name: true } }) : [];
+    const values: string[] = [];
+    for (const u of users) { const v = await tagValue(client, f.team, u.name); if (v && !values.includes(v)) values.push(v); }
+    data[f.team.name] = values;
+  }
+  if (f.recording) data[f.recording] = link(m.sourceUrl ?? '');
+  if (f.cadenceLink) data[f.cadenceLink] = link(cadenceUrl(m.id), 'Open in Cadence');
+  if (f.cadenceId) data[f.cadenceId] = m.id;
+  if (f.guests) data[f.guests] = m.attendees.filter((a) => !a.personId && !a.userId).map((a) => a.name || a.email).filter(Boolean).join(', ');
+  if (f.companyId) data[f.companyId] = m.companyId;
+  const contacts: { personId: string; name: string }[] = [];
+  for (const a of m.attendees) {
+    if (!a.personId || contacts.some((c) => c.personId === a.personId)) continue;
+    const name = a.person ? `${a.person.firstName} ${a.person.lastName}`.trim() : '';
+    contacts.push({ personId: a.personId, name: name || a.name || a.email || 'Contact' });
+  }
+  // The single "People" link on the meeting holds its first contact; all of them are Meeting contacts.
+  if (f.personId) data[f.personId] = contacts[0]?.personId ?? null;
+  if (f.assigneeId) data[f.assigneeId] = m.bookedBy?.twentyMemberId ?? null;
+  return { data, contacts };
+}
+
 const meetingSelect = {
-  id: true, title: true, sourceUrl: true, occurredAt: true, durationSec: true, products: true, companyId: true, companyName: true, twentyNoteId: true, review: true,
-  bookedBy: { select: { name: true } },
-  attendees: { select: { name: true, email: true, personId: true, external: true } },
+  id: true, title: true, sourceUrl: true, occurredAt: true, durationSec: true, products: true, companyId: true, companyName: true, twentyNoteId: true, twentyMeetingId: true, review: true,
+  bookedBy: { select: { name: true, twentyMemberId: true } },
+  attendees: { select: { name: true, email: true, personId: true, userId: true, external: true, person: { select: { firstName: true, lastName: true } } } },
 } as const;
 
 /**
- * Write the meeting to Twenty, or rewrite it after an edit. Throws when Twenty refuses, so the
- * caller can keep it for a retry. A meeting with no contact and no account has nothing to sit on
- * in Twenty, and is left until it has one.
+ * Write the meeting to Twenty, or update what was written. Throws when Twenty refuses, so the
+ * caller can keep it for a retry. Returns the record's id (or the note's, without a Meetings object).
  */
 export async function syncMeetingToCrm(meetingId: string): Promise<string | null> {
   const meeting = await prisma.meeting.findUnique({ where: { id: meetingId }, select: meetingSelect });
   if (!meeting || meeting.review !== 'APPROVED') return null;
-  const personIds = [...new Set(meeting.attendees.flatMap((a) => (a.personId ? [a.personId] : [])))];
   const client = await getTwentyClient();
+  const schema = await client.meetingSchema();
+  if (schema) {
+    const record = await meetingRecord(meeting, schema, client);
+    const { id } = await client.saveMeetingRecord(schema, { id: meeting.twentyMeetingId, cadenceId: meeting.id, ...record });
+    if (id !== meeting.twentyMeetingId) await prisma.meeting.update({ where: { id: meetingId }, data: { twentyMeetingId: id } });
+    return id;
+  }
+  // No Meetings object: a note on its contacts and account, rewritten so a new contact is linked too.
+  const personIds = [...new Set(meeting.attendees.flatMap((a) => (a.personId ? [a.personId] : [])))];
   if (meeting.twentyNoteId) {
     await client.deleteNote(meeting.twentyNoteId).catch(() => undefined);
     await prisma.meeting.update({ where: { id: meetingId }, data: { twentyNoteId: null } });
@@ -71,24 +134,44 @@ export async function syncMeetingToCrm(meetingId: string): Promise<string | null
   return id;
 }
 
+function keepForRetry(operation: string, payload: Record<string, unknown>, err: unknown, twentyId: string | null = null) {
+  const message = err instanceof Error ? err.message : String(err);
+  return prisma.twentyWrite.create({ data: { operation, objectType: 'meeting', twentyId, payload: payload as object, status: 'FAILED', error: message, attempts: 1, nextAttemptAt: new Date(Date.now() + retryDelayMs(1)) } }).catch(() => undefined);
+}
+
 /** Write it now, or keep it in the outbox the worker retries with backoff. */
 export async function pushMeetingToCrm(meetingId: string): Promise<void> {
   try {
     await syncMeetingToCrm(meetingId);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[meetings] could not write meeting ${meetingId} to Twenty: ${message}`);
-    await prisma.twentyWrite.create({ data: { operation: 'syncMeeting', objectType: 'note', payload: { meetingId }, status: 'FAILED', error: message, attempts: 1, nextAttemptAt: new Date(Date.now() + retryDelayMs(1)) } }).catch(() => undefined);
+    console.warn(`[meetings] could not write meeting ${meetingId} to Twenty: ${err instanceof Error ? err.message : String(err)}`);
+    await keepForRetry('syncMeeting', { meetingId }, err);
   }
 }
 
-/** A deleted meeting's note goes too. */
-export async function removeMeetingFromCrm(noteId: string | null): Promise<void> {
-  if (!noteId) return;
+/** A deleted meeting's record in Twenty goes too (or its note, from before the Meetings object). */
+export async function removeMeetingFromCrm(meeting: { twentyMeetingId: string | null; twentyNoteId: string | null }): Promise<void> {
   try {
-    await (await getTwentyClient()).deleteNote(noteId);
+    const client = await getTwentyClient();
+    if (meeting.twentyMeetingId) {
+      const schema = await client.meetingSchema();
+      if (schema) await client.deleteMeetingRecord(schema, meeting.twentyMeetingId);
+    }
+    if (meeting.twentyNoteId) await client.deleteNote(meeting.twentyNoteId);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    await prisma.twentyWrite.create({ data: { operation: 'deleteNote', objectType: 'note', twentyId: noteId, payload: { id: noteId }, status: 'FAILED', error: message, attempts: 1, nextAttemptAt: new Date(Date.now() + retryDelayMs(1)) } }).catch(() => undefined);
+    if (meeting.twentyMeetingId) await keepForRetry('deleteMeetingRecord', { id: meeting.twentyMeetingId }, err, meeting.twentyMeetingId);
+    else if (meeting.twentyNoteId) await keepForRetry('deleteNote', { id: meeting.twentyNoteId }, err, meeting.twentyNoteId);
   }
+}
+
+/**
+ * Once the workspace has a Meetings object, every meeting already in Cadence goes into it. Returns
+ * null when there is no Meetings object yet (try again later), else how many were written.
+ */
+export async function backfillMeetingsToCrm(): Promise<number | null> {
+  const client = await getTwentyClient();
+  if (!(await client.meetingSchema())) return null;
+  const pending = await prisma.meeting.findMany({ where: { review: 'APPROVED', twentyMeetingId: null }, orderBy: { occurredAt: 'asc' }, select: { id: true } });
+  for (const m of pending) await pushMeetingToCrm(m.id);
+  return pending.length;
 }

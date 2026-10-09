@@ -141,15 +141,23 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
   let ping: string;
   let ok = true;
   let counts: { people?: number; companies?: number; members?: number } = {};
+  let meetings: Awaited<ReturnType<Awaited<ReturnType<typeof getTwentyClient>>['meetingSchema']>> | undefined;
   try {
     const client = await getTwentyClient();
-    const [result, companies] = await Promise.all([client.ping(), client.countRecords('company')]);
+    const [result, companies, meetingSchema] = await Promise.all([client.ping(), client.countRecords('company'), client.meetingSchema().catch(() => undefined)]);
     ping = result.detail;
     counts = { people: result.people, companies: companies ?? undefined, members: result.members };
+    meetings = meetingSchema;
   } catch (err) {
     ok = false;
     ping = err instanceof Error ? err.message : String(err);
   }
+  // What Cadence found of the Meetings object, field by field, so a missing one is plain to see.
+  const meetingParts = meetings ? ([
+    ['Meeting date', meetings.fields.date], ['Booked by', meetings.fields.bookedBy], ['Products', meetings.fields.products], ['Team on the call', meetings.fields.team],
+    ['Account', meetings.fields.companyId], ['Recording', meetings.fields.recording], ['In Cadence', meetings.fields.cadenceLink], ['Cadence ID', meetings.fields.cadenceId], ['Contacts', meetings.contact],
+  ] as const) : [];
+  const meetingsMissing = meetingParts.filter(([, found]) => !found).map(([name]) => name);
   const [settings, schema, lastReconcile, continuous, cachedPeople, cachedCompanies, webhooks24h] = await Promise.all([
     getSettings(),
     getTwentySchema(),
@@ -188,6 +196,14 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
                       : <Badge tone="gray">Not run yet</Badge>,
               },
               ...stageErrors.map(([stage, message]) => ({ k: `Stage ${stage}`, v: <span className="text-[12px] text-red-700">{message}</span> })),
+              {
+                k: 'Meetings in Twenty',
+                v: meetings === undefined
+                  ? <Badge tone="gray">Not checked</Badge>
+                  : meetings === null
+                    ? <span className="flex flex-wrap items-center gap-2"><Badge tone="amber">No Meetings object</Badge><span className="text-[12px] text-ink-500">meetings are written as notes</span></span>
+                    : <span className="flex flex-wrap items-center gap-2"><Badge tone={meetingsMissing.length ? 'amber' : 'green'}>{meetingsMissing.length ? 'Connected, fields missing' : 'Connected'}</Badge>{meetingsMissing.length ? <span className="text-[12px] text-ink-500">missing: {meetingsMissing.join(', ')}</span> : null}{meetings.fields.date?.dateOnly ? <span className="text-[12px] text-ink-500">Meeting date holds the day only</span> : null}</span>,
+              },
               { k: 'Full refresh', v: sync?.lastFullRefresh ? formatInstant(new Date(sync.lastFullRefresh), workspaceTimezone()) : <Badge tone="gray">Not yet</Badge> },
               {
                 k: 'People',

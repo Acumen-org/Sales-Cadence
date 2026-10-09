@@ -5,9 +5,7 @@ import { companiesInScope } from '@/lib/meetings-query';
 import { prisma } from '@/lib/db';
 import { MeetingForm } from '@/components/meetings/meeting-form';
 import { PageHeader, Surface } from '@/components/ui';
-import { dateTimeInputValue } from '@/lib/dates';
-
-/** `datetime-local` wants "YYYY-MM-DDTHH:mm" in the viewer's own clock. */
+import { meetingDay } from '@/lib/meetings/day';
 
 /**
  * `personId` pre-fills this form from a recording Twenty already holds: the link, the account and
@@ -32,14 +30,13 @@ export default async function NewMeetingPage({ searchParams }: { searchParams: P
         <Surface>
           <MeetingForm
             mode="create"
-            timezone={user.timezone}
             companies={companies}
             fos={fos}
             initial={{
               bookedById: needsPod(user.role) ? user.id : '',
               title: person ? `Meeting - ${personName}${person.companyName ? ` (${person.companyName})` : ''}` : '',
               sourceUrl: url ?? person?.recordingUrl ?? person?.meetingUrl ?? '',
-              occurredAt: dateTimeInputValue(new Date(), user.timezone),
+              occurredAt: meetingDay(new Date()),
               durationMin: '',
               companyId: account ?? person?.companyId ?? '',
               attendees: [{ userId: user.id, name: user.name, email: user.email }, ...(person ? [{ personId: person.id, name: personName, email: person.email }] : [])],

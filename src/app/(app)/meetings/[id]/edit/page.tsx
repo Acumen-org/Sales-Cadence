@@ -6,9 +6,7 @@ import { prisma } from '@/lib/db';
 import { canManageMeetingAction } from '@/lib/actions/meetings';
 import { MeetingForm } from '@/components/meetings/meeting-form';
 import { PageHeader, Surface } from '@/components/ui';
-import { dateTimeInputValue } from '@/lib/dates';
-
-/** Render an instant as the `datetime-local` value for the viewer's clock. */
+import { meetingDay } from '@/lib/meetings/day';
 
 export default async function EditMeetingPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
@@ -28,7 +26,6 @@ export default async function EditMeetingPage({ params }: { params: Promise<{ id
         <Surface>
           <MeetingForm
             mode="edit"
-            timezone={user.timezone}
             companies={companies}
             fos={fos}
             initial={{
@@ -36,7 +33,7 @@ export default async function EditMeetingPage({ params }: { params: Promise<{ id
               bookedById: meeting.bookedById ?? '',
               title: meeting.title,
               sourceUrl: meeting.sourceUrl,
-              occurredAt: dateTimeInputValue(meeting.occurredAt, user.timezone),
+              occurredAt: meetingDay(meeting.occurredAt),
               durationMin: meeting.durationSec ? Math.round(meeting.durationSec / 60) : '',
               companyId: meeting.companyId ?? '',
               attendees: meeting.attendees.map((a) => ({ name: a.name, email: a.email, personId: a.personId, userId: a.userId })),

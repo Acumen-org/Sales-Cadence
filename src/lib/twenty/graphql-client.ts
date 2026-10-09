@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { ListOptions, ListPeopleOptions, TwentyClient } from './client';
 import { normalizeCalendarEvent, normalizeCompany, normalizeMessage, normalizeNote, normalizeOpportunity, normalizePerson, normalizeTask, normalizeWorkspaceMember, connectionToArray } from './normalize';
 import type { TwentySchema } from './twenty-schema';
@@ -19,6 +20,9 @@ import type {
   TwentyWorkspaceMember,
   UpdateTaskInput,
   UpdateNoteInput,
+  TwentyMeetingSchema,
+  TwentyMeetingRecordInput,
+  TwentyTagField,
   EnrichPersonInput,
   EnrichCompanyInput,TwentyWebhook, CreateWebhookInput, TwentyCalendarEvent } from './types';
 
@@ -845,7 +849,7 @@ export class TwentyGraphqlClient implements TwentyClient {
   // ---------------------------------------------------------------------------
 
   /** Objects and fields from the metadata API (includes select options). */
-  private async metadataObjects(): Promise<Array<{ id: string; nameSingular: string; namePlural: string; fields: Array<{ id: string; name: string; type: string; label?: string; isCustom?: boolean; options?: string[]; optionLabels?: Record<string, string> }> }>> {
+  private async metadataObjects(): Promise<Array<{ id: string; nameSingular: string; namePlural: string; fields: Array<{ id: string; name: string; type: string; label?: string; isCustom?: boolean; options?: string[]; optionLabels?: Record<string, string>; rawOptions?: Raw[] }> }>> {
     const data = await this.request<{ objects: Connection }>(
       `query Objects {
         objects(paging: { first: 500 }) {
@@ -866,6 +870,7 @@ export class TwentyGraphqlClient implements TwentyClient {
         label: typeof f.label === 'string' ? f.label : undefined,
         isCustom: Boolean(f.isCustom),
         options: Array.isArray(f.options) ? (f.options as Array<Raw | string>).map((opt) => (typeof opt === 'string' ? opt : String(opt.value ?? opt.label ?? ''))).filter(Boolean) : undefined,
+        rawOptions: Array.isArray(f.options) ? (f.options as Array<Raw | string>).filter((opt): opt is Raw => typeof opt === 'object' && opt !== null) : undefined,
         optionLabels: Array.isArray(f.options)
           ? Object.fromEntries(
               (f.options as Array<Raw | string>)
@@ -875,6 +880,148 @@ export class TwentyGraphqlClient implements TwentyClient {
           : undefined,
       })),
     }));
+  }
+
+  // ---------------------------------------------------------------------------
+  // meetings: the workspace's own Meetings object
+  // ---------------------------------------------------------------------------
+
+  private meetingSchemaCache: { at: number; value: TwentyMeetingSchema | null } | null = null;
+
+  /** The fields of a GraphQL type, with the object each link field points to. */
+  private async typeFields(typeName: string): Promise<Array<{ name: string; objectType: string | null }>> {
+    const data = await this.request<{ __type: { fields: Array<{ name: string; type: { kind: string; name: string | null; ofType: { kind: string; name: string | null } | null } }> } | null }>(
+      `query TypeFields($name: String!) { __type(name: $name) { fields { name type { kind name ofType { kind name } } } } }`,
+      { name: typeName },
+    );
+    return (data.__type?.fields ?? []).map((f) => ({ name: f.name, objectType: f.type.kind === 'OBJECT' ? f.type.name : f.type.ofType?.kind === 'OBJECT' ? f.type.ofType.name : null }));
+  }
+
+  /**
+   * The Meetings object and its contacts object, read from the workspace's data model. Fields are
+   * found by their label and type, links by the object they point to, so a field named a little
+   * differently from the setup sheet still works. Read again every ten minutes.
+   */
+  async meetingSchema(): Promise<TwentyMeetingSchema | null> {
+    if (this.meetingSchemaCache && Date.now() - this.meetingSchemaCache.at < 600_000) return this.meetingSchemaCache.value;
+    const objects = await this.metadataObjects();
+    const meeting = objects.find((o) => /^meetings?$/i.test(o.nameSingular)) ?? objects.find((o) => /meeting/i.test(o.nameSingular) && !/contact|attendee|calendar/i.test(o.nameSingular));
+    if (!meeting) {
+      this.meetingSchemaCache = { at: Date.now(), value: null };
+      return null;
+    }
+    const contactObject = objects.find((o) => o !== meeting && /meeting.?(contact|attendee)/i.test(o.nameSingular));
+    const typeOf = (nameSingular: string) => nameSingular.charAt(0).toUpperCase() + nameSingular.slice(1);
+    const meetingType = typeOf(meeting.nameSingular);
+    const label = (f: { name: string; label?: string }) => (f.label ?? f.name).toLowerCase();
+    // Twenty's own fields (Creation date, Last update...) are never the team's: theirs come first.
+    const SYSTEM = new Set(['id', 'createdAt', 'updatedAt', 'deletedAt', 'createdBy', 'updatedBy', 'position', 'searchVector']);
+    const candidates = meeting.fields.filter((f) => !SYSTEM.has(f.name)).sort((a, b) => Number(Boolean(b.isCustom)) - Number(Boolean(a.isCustom)));
+    const find = (test: RegExp, types: string[]) => candidates.find((f) => types.includes(f.type) && test.test(label(f)));
+    const tag = (test: RegExp, types: string[]) => {
+      const f = find(test, types);
+      return f ? { id: f.id, name: f.name, multi: f.type === 'MULTI_SELECT', options: (f.rawOptions ?? []).map((o) => ({ value: String(o.value ?? ''), label: String(o.label ?? o.value ?? '') })).filter((o) => o.value) } : null;
+    };
+    const fields = await this.typeFields(meetingType);
+    const idFor = (list: typeof fields, target: string) => {
+      const link = list.find((f) => f.objectType === target && list.some((x) => x.name === `${f.name}Id`));
+      return link ? `${link.name}Id` : null;
+    };
+    const date = find(/date|when/, ['DATE_TIME', 'DATE']);
+    let contact: TwentyMeetingSchema['contact'] = null;
+    if (contactObject) {
+      const contactFields = await this.typeFields(typeOf(contactObject.nameSingular));
+      const meetingId = idFor(contactFields, meetingType);
+      const personId = idFor(contactFields, this.s.objects.person.typeName);
+      if (meetingId && personId) contact = { typeName: typeOf(contactObject.nameSingular), plural: contactObject.namePlural, meetingId, personId };
+    }
+    const value: TwentyMeetingSchema = {
+      meeting: { typeName: meetingType, plural: meeting.namePlural },
+      fields: {
+        date: date ? { name: date.name, dateOnly: date.type === 'DATE' } : null,
+        bookedBy: tag(/booked/, ['SELECT', 'MULTI_SELECT']),
+        products: tag(/product/, ['MULTI_SELECT', 'SELECT']),
+        team: tag(/team/, ['MULTI_SELECT']),
+        recording: find(/recording/, ['LINKS'])?.name ?? null,
+        cadenceLink: find(/cadence/, ['LINKS'])?.name ?? null,
+        cadenceId: find(/cadence/, ['TEXT'])?.name ?? null,
+        guests: find(/guest/, ['TEXT'])?.name ?? null,
+        companyId: idFor(fields, this.s.objects.company.typeName),
+        personId: idFor(fields, this.s.objects.person.typeName),
+        assigneeId: idFor(fields, 'WorkspaceMember'),
+      },
+      contact,
+    };
+    this.meetingSchemaCache = { at: Date.now(), value };
+    return value;
+  }
+
+  async saveMeetingRecord(schema: TwentyMeetingSchema, input: TwentyMeetingRecordInput): Promise<{ id: string }> {
+    const t = schema.meeting.typeName;
+    let id = input.id;
+    // A record Cadence wrote but never heard back about (a timeout, a retry) is found by its Cadence ID.
+    if (!id && schema.fields.cadenceId) {
+      const found = await this.request<Record<string, Connection>>(
+        `query FindMeeting($filter: ${t}FilterInput) { ${schema.meeting.plural}(filter: $filter, first: 1) { edges { node { id } } } }`,
+        { filter: { [schema.fields.cadenceId]: { eq: input.cadenceId } } },
+      );
+      id = (connectionToArray(found[schema.meeting.plural])[0]?.id as string | undefined) ?? null;
+    }
+    if (id) {
+      try {
+        await this.request(`mutation UpdateMeeting($id: UUID!, $data: ${t}UpdateInput!) { update${t}(id: $id, data: $data) { id } }`, { id, data: input.data });
+      } catch (err) {
+        // Deleted in Twenty since: write it again.
+        if (!/not found|does not exist|no record/i.test(err instanceof Error ? err.message : String(err))) throw err;
+        id = null;
+      }
+    }
+    if (!id) {
+      const created = await this.request<Record<string, { id: string }>>(`mutation CreateMeeting($data: ${t}CreateInput!) { create${t}(data: $data) { id } }`, { data: input.data });
+      id = created[`create${t}`].id;
+    }
+    if (schema.contact) await this.syncMeetingContacts(schema.contact, id, input.contacts);
+    return { id };
+  }
+
+  /** The meeting's contact rows follow its attendees: missing ones added, removed ones deleted. */
+  private async syncMeetingContacts(c: NonNullable<TwentyMeetingSchema['contact']>, meetingId: string, wanted: { personId: string; name: string }[]) {
+    const rows = await this.request<Record<string, Connection>>(
+      `query MeetingContacts($filter: ${c.typeName}FilterInput) { ${c.plural}(filter: $filter, first: 200) { edges { node { id ${c.personId} } } } }`,
+      { filter: { [c.meetingId]: { eq: meetingId } } },
+    );
+    const have = connectionToArray(rows[c.plural]).map((r) => ({ id: String(r.id), personId: String(r[c.personId] ?? '') }));
+    for (const row of have) {
+      if (!wanted.some((w) => w.personId === row.personId)) await this.request(`mutation DeleteMeetingContact($id: UUID!) { delete${c.typeName}(id: $id) { id } }`, { id: row.id });
+    }
+    for (const w of wanted) {
+      if (have.some((h) => h.personId === w.personId)) continue;
+      await this.request(`mutation CreateMeetingContact($data: ${c.typeName}CreateInput!) { create${c.typeName}(data: $data) { id } }`, { data: { name: w.name, [c.meetingId]: meetingId, [c.personId]: w.personId } });
+    }
+  }
+
+  async deleteMeetingRecord(schema: TwentyMeetingSchema, id: string): Promise<void> {
+    if (schema.contact) await this.syncMeetingContacts(schema.contact, id, []);
+    const t = schema.meeting.typeName;
+    await this.request(`mutation DeleteMeeting($id: UUID!) { delete${t}(id: $id) { id } }`, { id });
+  }
+
+  /** A new tag on a Select or Multi-select field, when the API key may change the data model. */
+  async addSelectOption(field: TwentyTagField, label: string): Promise<string | null> {
+    const value = label.normalize('NFKD').replace(/[^\w\s-]/g, '').trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'OPTION';
+    try {
+      const objects = await this.metadataObjects();
+      const current = objects.flatMap((o) => o.fields).find((f) => f.id === field.id);
+      const raw = current?.rawOptions ?? [];
+      if (raw.some((o) => String(o.value) === value)) return value;
+      const options = [...raw, { id: randomUUID(), label, value, color: 'gray', position: raw.length }];
+      await this.request(`mutation AddOption($input: UpdateOneFieldMetadataInput!) { updateOneField(input: $input) { id } }`, { input: { id: field.id, update: { options } } }, 'metadata');
+      this.meetingSchemaCache = null;
+      return value;
+    } catch (err) {
+      console.warn(`[twenty] could not add the tag "${label}": ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
   }
 
   async introspect(): Promise<TwentyIntrospection> {

@@ -40,7 +40,7 @@ export async function buildHome(user: SessionUser, now = new Date()) {
   const [mine, ownership, team, needsReview, doneToday] = await Promise.all([
     myOpenTasks(mineTasks, today, user, day),
     myOwnershipCounts(user),
-    teamThisWeek(user, today, week, now),
+    teamThisWeek(user, today, week),
     isAdmin(user) ? prisma.activityEvent.count({ where: { needsReview: true } }) : Promise.resolve(0),
     prisma.task.findMany({ where: { AND: [mineTasks, { state: 'DONE', completedAt: day }] }, select: { enrollmentId: true, stepId: true } }),
   ]);
@@ -188,7 +188,7 @@ export const weekTotal = (r: Pick<TeamRow, 'done' | 'overdue' | 'today' | 'later
  * Replies are messages that came back this week; meetings are those recorded in Meetings this week,
  * credited to the FO who booked them.
  */
-async function teamThisWeek(user: SessionUser, today: LocalDate, week: { from: LocalDate; to: LocalDate; fromInstant: Date; toInstant: Date }, now: Date): Promise<TeamRow[]> {
+async function teamThisWeek(user: SessionUser, today: LocalDate, week: { from: LocalDate; to: LocalDate; fromInstant: Date; toInstant: Date }): Promise<TeamRow[]> {
   const leads = canSeeAllPods(user) || isPodLeader(user);
   const pods = visiblePodIds(user);
   const users = leads
@@ -209,7 +209,7 @@ async function teamThisWeek(user: SessionUser, today: LocalDate, week: { from: L
     prisma.task.findMany({ where: { AND: [taskScope, { foUserId: { in: ids }, state: 'DONE', completedAt: inWeek }] }, select: { foUserId: true, enrollmentId: true, stepId: true } }),
     // Replies: what came back this week, credited to the FO whose outreach it answers - see reply-credit.ts.
     prisma.touch.findMany({ where: { ...REPLY_TOUCH_WHERE, occurredAt: inWeek, person: { deletedAt: null } }, select: { id: true, occurredAt: true, personId: true, person: { select: { ownerMemberId: true } } } }),
-    prisma.meeting.findMany({ where: { review: 'APPROVED', occurredAt: { gte: week.fromInstant, lt: new Date(Math.min(week.toInstant.getTime(), Math.max(now.getTime(), Date.now()))) }, OR: [{ bookedById: { in: ids } }, { bookedById: null, createdById: { in: ids } }] }, select: { bookedById: true, createdById: true } }),
+    prisma.meeting.findMany({ where: { review: 'APPROVED', occurredAt: { gte: week.fromInstant, lt: new Date(Math.min(week.toInstant.getTime(), startOfLocalDay(addDays(today, 1), user.timezone).getTime())) }, OR: [{ bookedById: { in: ids } }, { bookedById: null, createdById: { in: ids } }] }, select: { bookedById: true, createdById: true } }),
     // Campaign calendars: every step dated this week, open yet or not.
     prisma.enrollment.findMany({ where: { AND: [enrollmentScope, { foUserId: { in: ids }, status: 'ACTIVE', scheduleDates: { isEmpty: false } }] }, select: { id: true, foUserId: true, currentStep: true, scheduleDates: true } }),
     prisma.nextAction.findMany({ where: { foUserId: { in: ids }, OR: [{ state: 'OPEN', dueDate: { lte: week.to } }, { lastDoneAt: inWeek }] }, select: { id: true, foUserId: true, dueDate: true, state: true, lastDoneAt: true } }),

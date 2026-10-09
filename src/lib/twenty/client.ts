@@ -15,6 +15,9 @@ import type {
   TwentyWorkspaceMember,
   UpdateTaskInput,
   UpdateNoteInput,
+  TwentyMeetingSchema,
+  TwentyMeetingRecordInput,
+  TwentyTagField,
   EnrichPersonInput,
   EnrichCompanyInput,TwentyWebhook, CreateWebhookInput } from './types';
 
@@ -78,6 +81,15 @@ export interface TwentyClient {
   /** Only ever a note Cadence wrote (a meeting's record). */
   updateNote(id: string, patch: UpdateNoteInput): Promise<void>;
   deleteNote(id: string): Promise<void>;
+
+  // ---- meetings: the workspace's own Meetings object, when it has one ----
+  /** Null when the workspace has no Meetings object. */
+  meetingSchema(): Promise<TwentyMeetingSchema | null>;
+  /** Create the meeting's record, or update the one Cadence wrote, and link its contacts. */
+  saveMeetingRecord(schema: TwentyMeetingSchema, input: TwentyMeetingRecordInput): Promise<{ id: string }>;
+  deleteMeetingRecord(schema: TwentyMeetingSchema, id: string): Promise<void>;
+  /** Add a tag to a Select or Multi-select field; returns its value, or null if Twenty refused. */
+  addSelectOption(field: TwentyTagField, label: string): Promise<string | null>;
   createTask(input: CreateTaskInput): Promise<{ id: string }>;
   updateTask(id: string, patch: UpdateTaskInput): Promise<void>;
   deleteTask(id: string): Promise<void>;

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { TranscriptInput } from './transcript-input';
 import { optionLabel } from '@/lib/twenty/labels';
-import { PRODUCTS, timezoneLabel } from '@/lib/workspace';
+import { PRODUCTS } from '@/lib/workspace';
 import { useState, useTransition } from 'react';
 import { attendeesFromTranscriptAction, createMeetingAction, inspectMeetingLinkAction, updateMeetingAction, type AttendeeSelection, type LinkSuggestion } from '@/lib/actions/meetings';
 import { extractRecordingUrl, parseMeetingLink } from '@/lib/meetings/providers';
@@ -19,7 +19,8 @@ export type MeetingFormValues = {
   sourceUrl: string;
   /** The FO who booked it. */
   bookedById: string;
-  occurredAt: string; // datetime-local value
+  /** The meeting's day, YYYY-MM-DD. */
+  occurredAt: string;
   durationMin: number | '';
   companyId: string;
   products?: string[];
@@ -33,7 +34,7 @@ export type MeetingFormValues = {
  * account it names - and says whether the recording will play here. Paste a transcript and the
  * speakers become attendees. Everything filled in stays editable.
  */
-export function MeetingForm({ companies, fos, initial, mode, timezone }: { companies: { id: string; name: string }[]; fos: { id: string; name: string }[]; initial: MeetingFormValues; mode: 'create' | 'edit'; timezone: string }) {
+export function MeetingForm({ companies, fos, initial, mode }: { companies: { id: string; name: string }[]; fos: { id: string; name: string }[]; initial: MeetingFormValues; mode: 'create' | 'edit' }) {
   const router = useRouter();
   const [url, setUrl] = useState(initial.sourceUrl);
   const [title, setTitle] = useState(initial.title);
@@ -76,7 +77,7 @@ export function MeetingForm({ companies, fos, initial, mode, timezone }: { compa
       const filled: string[] = [];
       const put: typeof fromLink = {};
       if (r.data.title && !title.trim()) { setTitle(put.title = r.data.title); filled.push('title'); }
-      if (r.data.date) { setOccurredAt(put.occurredAt = `${r.data.date}T${(occurredAt.split('T')[1] ?? '09:00').slice(0, 5)}`); filled.push('date'); }
+      if (r.data.date) { setOccurredAt(put.occurredAt = r.data.date); filled.push('date'); }
       if (r.data.companyId && !companyId) { setCompanyId(put.companyId = r.data.companyId); filled.push('account'); }
       if (r.data.transcript && !transcript.trim()) {
         setTranscript(r.data.transcript); filled.push('transcript');
@@ -142,8 +143,8 @@ export function MeetingForm({ companies, fos, initial, mode, timezone }: { compa
           <input name="title" required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Meeting title" />
         </Field>
 
-        <Field label="Date and time" required hint={timezoneLabel(timezone)}>
-          <input name="occurredAt" type="datetime-local" required value={occurredAt} onChange={(e) => setOccurredAt(e.target.value)} />
+        <Field label="Date" required>
+          <input name="occurredAt" type="date" required value={occurredAt} onChange={(e) => setOccurredAt(e.target.value)} />
         </Field>
         <Field label="Duration (minutes)">
           <input name="durationMin" type="number" min={0} max={1440} value={durationMin} onChange={(e) => setDurationMin(e.target.value === '' ? '' : Number(e.target.value))} />

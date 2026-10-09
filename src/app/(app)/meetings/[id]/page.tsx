@@ -6,7 +6,8 @@ import { requireUser } from '@/lib/auth/current-user';
 import { prisma } from '@/lib/db';
 import { getSettings } from '@/lib/settings';
 import { FavouriteButton } from '@/components/meetings/favourite-button';
-import { formatInstant } from '@/lib/dates';
+import { formatLocalDate } from '@/lib/dates';
+import { meetingDay } from '@/lib/meetings/day';
 import { parseAnalysis } from '@/lib/meetings/analysis';
 import { parseTranscript, talkShare } from '@/lib/meetings/transcript';
 import { parseMeetingLink, platformLabel } from '@/lib/meetings/providers';
@@ -80,7 +81,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
       <div className="px-6 pt-3">
         <div className="space-y-5 rounded-xl border border-line bg-white p-5">
           <RecordFields className="lg:grid-cols-6" items={[
-            { label: 'Date and time', value: formatInstant(meeting.occurredAt, user.timezone) },
+            { label: 'Date', value: formatLocalDate(meetingDay(meeting.occurredAt), 'long') },
             { label: 'Duration', value: meeting.durationSec !== null ? `${Math.round(meeting.durationSec / 60)} min` : null },
             { label: 'Platform', value: meeting.sourceUrl ? platformLabel(meeting.provider, meeting.sourceUrl) : null },
             { label: 'Account', value: meeting.companyId ? <Link href={`/accounts/${meeting.companyId}`} className="text-brand-700 hover:underline">{meeting.companyName}</Link> : meeting.companyName ?? null },

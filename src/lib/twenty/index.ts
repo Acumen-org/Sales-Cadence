@@ -5,7 +5,7 @@ import { getTwentyConnection, getTwentySchema } from '../settings';
 import type { TwentyClient } from './client';
 import { TwentyGraphqlClient } from './graphql-client';
 import { getMockTwentyClient } from './mock-client';
-import type { CreateNoteInput, UpdateNoteInput, CreateTaskInput, UpdateTaskInput, EnrichPersonInput, PersonNextActionInput, EnrichCompanyInput, TwentyPerson, TwentyCompany } from './types';
+import type { CreateNoteInput, UpdateNoteInput, TwentyMeetingSchema, TwentyMeetingRecordInput, TwentyTagField, CreateTaskInput, UpdateTaskInput, EnrichPersonInput, PersonNextActionInput, EnrichCompanyInput, TwentyPerson, TwentyCompany } from './types';
 
 /**
  * CADENCE_DRY_RUN=true: reads pass through, writes are logged (console + TwentyWrite
@@ -60,6 +60,19 @@ export class DryRunTwentyClient implements TwentyClient {
   }
   async deleteNote(id: string) {
     await this.record('deleteNote', 'note', { id }, id);
+  }
+  meetingSchema: TwentyClient['meetingSchema'] = () => this.inner.meetingSchema();
+  async saveMeetingRecord(_schema: TwentyMeetingSchema, input: TwentyMeetingRecordInput) {
+    const id = input.id ?? `dry-meeting-${randomUUID()}`;
+    await this.record('saveMeetingRecord', 'meeting', input, id);
+    return { id };
+  }
+  async deleteMeetingRecord(_schema: TwentyMeetingSchema, id: string) {
+    await this.record('deleteMeetingRecord', 'meeting', { id }, id);
+  }
+  async addSelectOption(field: TwentyTagField, label: string) {
+    await this.record('addSelectOption', 'field', { field: field.name, label });
+    return null;
   }
   async createTask(input: CreateTaskInput) {
     const id = `dry-task-${randomUUID()}`;

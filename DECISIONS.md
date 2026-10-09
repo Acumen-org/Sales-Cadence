@@ -1092,3 +1092,20 @@ action" renamed "Create task"; and a sweep of every button.
   search boxes ate spaces; "Add to campaign" from People showed no result; a filter left hidden
   rows selected; team members counted as external on meetings; raw codes and ISO dates in
   messages; a Settings outcome could get a duplicate key.
+
+## Meetings in Twenty's own Meetings object (10 October 2026)
+
+The owner wanted meetings kept in Twenty as their own object, with who booked it, the products
+and the team on the call as tags, and had the team create it from a setup sheet. Cadence finds the
+object and its fields by what they are (label and type, and what each link points to), not by a
+fixed API name, so the names Twenty generated ("Companies", "People", "Guests (optional)") work as
+created. Each meeting is one Meetings record; each contact who attended is a Meeting contact, so
+the meeting shows on their record; the single People link holds the first contact and Assigned to
+the FO who booked it. A tag missing for an FO or team member is added when the API key may change
+the data model. An edit updates the same record (found again by its Cadence ID if Cadence lost
+track of it); a delete removes it. Meetings already in Cadence are written once, after deploy. A
+workspace without a Meetings object still gets the note. Settings > Twenty shows what Cadence found.
+
+A meeting has a day, not a time ("I don't want to store time, only date"): the form asks for a
+date, every screen shows the date alone, and the day is kept as midday on the workspace's clock so
+it reads as the same date wherever the team is. Meetings saved before keep their day.

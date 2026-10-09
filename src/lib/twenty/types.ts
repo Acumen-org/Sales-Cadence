@@ -253,6 +253,45 @@ export type CreateNoteInput = {
 
 export type UpdateNoteInput = { title?: string; bodyMarkdown?: string };
 
+/** A tag a Select or Multi-select field offers: its stored value and the label people see. */
+export type TwentySelectOption = { value: string; label: string };
+/** `multi` when the field holds several tags (Multi-select), else one (Select). */
+export type TwentyTagField = { id: string; name: string; multi?: boolean; options: TwentySelectOption[] };
+
+/**
+ * Where Cadence writes meetings in Twenty: the workspace's own Meetings object and its Meeting
+ * contacts object, found by what each field is (its label and type, and what a link points to), not
+ * by a fixed API name. Null fields are ones the workspace does not have; Cadence leaves them out.
+ */
+export type TwentyMeetingSchema = {
+  meeting: { typeName: string; plural: string };
+  fields: {
+    date: { name: string; dateOnly: boolean } | null;
+    bookedBy: TwentyTagField | null;
+    products: TwentyTagField | null;
+    team: TwentyTagField | null;
+    recording: string | null;
+    cadenceLink: string | null;
+    cadenceId: string | null;
+    guests: string | null;
+    /** The id field of each link: the company, one person, the workspace member it is assigned to. */
+    companyId: string | null;
+    personId: string | null;
+    assigneeId: string | null;
+  };
+  /** The in-between object that links one meeting to each of its contacts. */
+  contact: { typeName: string; plural: string; meetingId: string; personId: string } | null;
+};
+
+/** One meeting as Cadence writes it: the field values, ready, and the contacts to link. */
+export type TwentyMeetingRecordInput = {
+  /** The record Cadence wrote before, if any. */
+  id: string | null;
+  cadenceId: string;
+  data: Record<string, unknown>;
+  contacts: { personId: string; name: string }[];
+};
+
 export type CreateTaskInput = {
   title: string;
   bodyMarkdown?: string;
