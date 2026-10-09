@@ -1,6 +1,6 @@
 import { prisma } from '../db';
 import { env } from '../env';
-import { getSettings } from '../settings';
+import { getSettings, isExternalEmail } from '../settings';
 import { getTwentyClient, type TwentyClient } from '../twenty';
 import type { TwentyMeetingSchema, TwentyTagField } from '../twenty/types';
 import { optionLabel } from '../twenty/labels';
@@ -21,7 +21,6 @@ type MeetingForCrm = {
   title: string;
   sourceUrl: string;
   occurredAt: Date;
-  durationSec: number | null;
   products: string[];
   companyId: string | null;
   companyName: string | null;
@@ -32,10 +31,9 @@ type MeetingForCrm = {
 /** The note for a workspace with no Meetings object: plain lines, readable anywhere it is shown. */
 export function meetingNote(m: MeetingForCrm, prefix: string): { title: string; bodyMarkdown: string } {
   const when = new Intl.DateTimeFormat('en-US', { timeZone: workspaceTimezone(), weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }).format(m.occurredAt);
-  const minutes = m.durationSec ? Math.max(1, Math.round(m.durationSec / 60)) : null;
   const people = m.attendees.map((a) => [a.name, a.email ? `(${a.email})` : null].filter(Boolean).join(' ')).filter(Boolean);
   const lines = [
-    `When: ${when}${minutes ? ` (${minutes} min)` : ''}`,
+    `When: ${when}`,
     m.bookedBy ? `Booked by: ${m.bookedBy.name}` : null,
     m.products.length ? `Products: ${m.products.map(optionLabel).join(', ')}` : null,
     m.companyName ? `Account: ${m.companyName}` : null,
@@ -75,23 +73,40 @@ export async function meetingRecord(m: MeetingForCrm, schema: TwentyMeetingSchem
     for (const p of m.products) { const v = await tagValue(client, f.products, optionLabel(p)); if (v) values.push(v); }
     data[f.products.name] = f.products.multi ? values : values[0] ?? null;
   }
+  // Who is on the team: a Cadence login, matched by id, address or name, or an address at one of
+  // our domains. Team members are tags, never contacts, even when Twenty also has a People record
+  // for them (Alisa is both).
+  const [{ rules }, users] = await Promise.all([getSettings(), prisma.user.findMany({ select: { id: true, name: true, email: true, aliases: true } })]);
+  const personName = (a: MeetingForCrm['attendees'][number]) => (a.person ? `${a.person.firstName} ${a.person.lastName}`.trim() : '') || a.name || a.email || '';
+  const userOf = (a: MeetingForCrm['attendees'][number]) => {
+    const email = a.email?.trim().toLowerCase();
+    const name = personName(a).trim().toLowerCase();
+    return users.find((u) => u.id === a.userId)
+      ?? (email ? users.find((u) => [u.email, ...u.aliases].some((x) => x.trim().toLowerCase() === email)) : undefined)
+      ?? (name ? users.find((u) => u.name.trim().toLowerCase() === name) : undefined);
+  };
+  const team: string[] = [];
+  const external: MeetingForCrm['attendees'] = [];
+  for (const a of m.attendees) {
+    const user = userOf(a);
+    if (user || (a.email && !isExternalEmail(a.email, rules.internalDomains))) { const n = user?.name ?? personName(a); if (n && !team.includes(n)) team.push(n); }
+    else external.push(a);
+  }
   if (f.team) {
-    const ids = [...new Set(m.attendees.flatMap((a) => (a.userId ? [a.userId] : [])))];
-    const users = ids.length ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { name: true } }) : [];
     const values: string[] = [];
-    for (const u of users) { const v = await tagValue(client, f.team, u.name); if (v && !values.includes(v)) values.push(v); }
+    for (const n of team) { const v = await tagValue(client, f.team, n); if (v && !values.includes(v)) values.push(v); }
     data[f.team.name] = values;
   }
   if (f.recording) data[f.recording] = link(m.sourceUrl ?? '');
   if (f.cadenceLink) data[f.cadenceLink] = link(cadenceUrl(m.id), 'Open in Cadence');
   if (f.cadenceId) data[f.cadenceId] = m.id;
-  if (f.guests) data[f.guests] = m.attendees.filter((a) => !a.personId && !a.userId).map((a) => a.name || a.email).filter(Boolean).join(', ');
+  if (f.guests) data[f.guests] = external.filter((a) => !a.personId).map((a) => a.name || a.email).filter(Boolean).join(', ');
   if (f.companyId) data[f.companyId] = m.companyId;
   const contacts: { personId: string; name: string }[] = [];
-  for (const a of m.attendees) {
+  for (const a of external) {
     if (!a.personId || contacts.some((c) => c.personId === a.personId)) continue;
-    const name = a.person ? `${a.person.firstName} ${a.person.lastName}`.trim() : '';
-    contacts.push({ personId: a.personId, name: name || a.name || a.email || 'Contact' });
+    // Named for both sides: on the person it says which meeting, on the meeting which person.
+    contacts.push({ personId: a.personId, name: `${m.title} · ${personName(a) || 'Contact'}` });
   }
   // The single "People" link on the meeting holds its first contact; all of them are Meeting contacts.
   if (f.personId) data[f.personId] = contacts[0]?.personId ?? null;
@@ -100,7 +115,7 @@ export async function meetingRecord(m: MeetingForCrm, schema: TwentyMeetingSchem
 }
 
 const meetingSelect = {
-  id: true, title: true, sourceUrl: true, occurredAt: true, durationSec: true, products: true, companyId: true, companyName: true, twentyNoteId: true, twentyMeetingId: true, review: true,
+  id: true, title: true, sourceUrl: true, occurredAt: true, products: true, companyId: true, companyName: true, twentyNoteId: true, twentyMeetingId: true, review: true,
   bookedBy: { select: { name: true, twentyMemberId: true } },
   attendees: { select: { name: true, email: true, personId: true, userId: true, external: true, person: { select: { firstName: true, lastName: true } } } },
 } as const;
@@ -168,10 +183,10 @@ export async function removeMeetingFromCrm(meeting: { twentyMeetingId: string | 
  * Once the workspace has a Meetings object, every meeting already in Cadence goes into it. Returns
  * null when there is no Meetings object yet (try again later), else how many were written.
  */
-export async function backfillMeetingsToCrm(): Promise<number | null> {
+export async function backfillMeetingsToCrm(options: { all?: boolean } = {}): Promise<number | null> {
   const client = await getTwentyClient();
   if (!(await client.meetingSchema())) return null;
-  const pending = await prisma.meeting.findMany({ where: { review: 'APPROVED', twentyMeetingId: null }, orderBy: { occurredAt: 'asc' }, select: { id: true } });
+  const pending = await prisma.meeting.findMany({ where: { review: 'APPROVED', ...(options.all ? {} : { twentyMeetingId: null }) }, orderBy: { occurredAt: 'asc' }, select: { id: true } });
   for (const m of pending) await pushMeetingToCrm(m.id);
   return pending.length;
 }

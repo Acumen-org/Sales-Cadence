@@ -82,7 +82,6 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
         <div className="space-y-5 rounded-xl border border-line bg-white p-5">
           <RecordFields className="lg:grid-cols-6" items={[
             { label: 'Date', value: formatLocalDate(meetingDay(meeting.occurredAt), 'long') },
-            { label: 'Duration', value: meeting.durationSec !== null ? `${Math.round(meeting.durationSec / 60)} min` : null },
             { label: 'Platform', value: meeting.sourceUrl ? platformLabel(meeting.provider, meeting.sourceUrl) : null },
             { label: 'Account', value: meeting.companyId ? <Link href={`/accounts/${meeting.companyId}`} className="text-brand-700 hover:underline">{meeting.companyName}</Link> : meeting.companyName ?? null },
             { label: 'Booked by', value: meeting.bookedBy?.name ?? null },

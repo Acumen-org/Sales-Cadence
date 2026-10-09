@@ -987,15 +987,17 @@ export class TwentyGraphqlClient implements TwentyClient {
   /** The meeting's contact rows follow its attendees: missing ones added, removed ones deleted. */
   private async syncMeetingContacts(c: NonNullable<TwentyMeetingSchema['contact']>, meetingId: string, wanted: { personId: string; name: string }[]) {
     const rows = await this.request<Record<string, Connection>>(
-      `query MeetingContacts($filter: ${c.typeName}FilterInput) { ${c.plural}(filter: $filter, first: 200) { edges { node { id ${c.personId} } } } }`,
+      `query MeetingContacts($filter: ${c.typeName}FilterInput) { ${c.plural}(filter: $filter, first: 200) { edges { node { id name ${c.personId} } } } }`,
       { filter: { [c.meetingId]: { eq: meetingId } } },
     );
-    const have = connectionToArray(rows[c.plural]).map((r) => ({ id: String(r.id), personId: String(r[c.personId] ?? '') }));
+    const have = connectionToArray(rows[c.plural]).map((r) => ({ id: String(r.id), name: String(r.name ?? ''), personId: String(r[c.personId] ?? '') }));
     for (const row of have) {
       if (!wanted.some((w) => w.personId === row.personId)) await this.request(`mutation DeleteMeetingContact($id: UUID!) { delete${c.typeName}(id: $id) { id } }`, { id: row.id });
     }
     for (const w of wanted) {
-      if (have.some((h) => h.personId === w.personId)) continue;
+      const row = have.find((h) => h.personId === w.personId);
+      if (row && row.name !== w.name) await this.request(`mutation RenameMeetingContact($id: UUID!, $data: ${c.typeName}UpdateInput!) { update${c.typeName}(id: $id, data: $data) { id } }`, { id: row.id, data: { name: w.name } });
+      if (row) continue;
       await this.request(`mutation CreateMeetingContact($data: ${c.typeName}CreateInput!) { create${c.typeName}(data: $data) { id } }`, { data: { name: w.name, [c.meetingId]: meetingId, [c.personId]: w.personId } });
     }
   }

@@ -127,7 +127,6 @@ const MeetingSchema = z.object({
   sourceUrl: z.preprocess((v) => (typeof v === 'string' && v.trim() ? extractRecordingUrl(v) : ''), z.string().trim().max(8192).refine((url) => url === '' || /^https?:\/\/\S+$/i.test(url), 'Use an http or https recording link, or leave it blank.')),
   bookedById: z.string().trim().min(1, 'Choose who booked the meeting.'),
   occurredAt: z.string().trim().min(1),
-  durationSec: z.coerce.number().int().min(0).max(86_400).optional().nullable(),
   companyId: z.string().trim().optional().nullable(),
   // A meeting can be about more than one product, so unknown values are dropped rather than
   // rejected: the list is ours, and a stale form should not lose the rest of the edit.
@@ -142,7 +141,6 @@ function readForm(formData: FormData) {
     sourceUrl: formData.get('sourceUrl') ?? '',
     bookedById: formData.get('bookedById'),
     occurredAt: formData.get('occurredAt'),
-    durationSec: formData.get('durationMin') ? Number(formData.get('durationMin')) * 60 : null,
     companyId: formData.get('companyId') || null,
     products: formData.getAll('products').map(String),
     attendees: formData.get('attendees') ?? '',
@@ -183,7 +181,6 @@ export async function createMeetingAction(formData: FormData): Promise<ActionRes
       embedUrl: link?.embedUrl ?? null,
       mediaUrl,
       occurredAt,
-      durationSec: d.durationSec ?? null,
       companyId: company?.id ?? null,
       companyName: company?.name ?? null,
       products: d.products,
@@ -241,7 +238,6 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
         embedUrl: link?.embedUrl ?? null,
         mediaUrl,
         occurredAt,
-        durationSec: d.durationSec ?? null,
         companyId: company?.id ?? null,
         companyName: company?.name ?? null,
         products: d.products,

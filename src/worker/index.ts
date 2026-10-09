@@ -59,9 +59,10 @@ async function evidenceRescan(now:Date){
 let meetingsBackfillChecked=false;
 async function meetingsBackfill(){
  if(meetingsBackfillChecked)return;meetingsBackfillChecked=true;
- const key='meetingsToTwenty20261010';
+ // The second key writes every meeting again once: the first pass linked team members as contacts.
+ const key='meetingsToTwenty20261010b';
  if(await prisma.setting.findUnique({where:{key}}))return;
- try{const written=await backfillMeetingsToCrm();if(written===null)return;log('meetings written to Twenty',written);await prisma.setting.upsert({where:{key},create:{key,value:{at:new Date().toISOString(),written}},update:{value:{at:new Date().toISOString(),written}}});}catch(error){log('meetings backfill failed',error);}
+ try{const written=await backfillMeetingsToCrm({all:true});if(written===null)return;log('meetings written to Twenty',written);await prisma.setting.upsert({where:{key},create:{key,value:{at:new Date().toISOString(),written}},update:{value:{at:new Date().toISOString(),written}}});}catch(error){log('meetings backfill failed',error);}
 }
 async function tick(){
  if(running||stopping)return;running=true;

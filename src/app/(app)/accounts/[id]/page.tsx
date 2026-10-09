@@ -362,15 +362,14 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
             ) : (
               <div className="overflow-x-auto scroll-thin">
                 <table className="table table-dense w-full table-fixed">
-                  <colgroup>{['40%', '20%', '16%', '12%', '12%'].map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
-                  <thead><tr><th>Meeting</th><th>When</th><th>Attendees</th><th>Transcript</th><th>Length</th></tr></thead>
+                  <colgroup>{['46%', '22%', '18%', '14%'].map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
+                  <thead><tr><th>Meeting</th><th>Date</th><th>Attendees</th><th>Transcript</th></tr></thead>
                   <tbody>
                     {meetings.map((m) => <tr key={m.id}>
                       <td><Link href={`/meetings/${m.id}`} className="block truncate text-[13px] font-medium text-ink-900 hover:text-brand-700">{m.title}</Link></td>
                       <td className="text-[12.5px]">{formatLocalDate(meetingDay(m.occurredAt), 'long')}</td>
                       <td className="text-[12.5px]"><span className="flex items-center gap-2 whitespace-nowrap"><span className="tabular-nums text-ink-900">{m.attendees.length}</span>{m.attendees.filter((a) => a.external).length ? <Badge tone="green">{m.attendees.filter((a) => a.external).length} external</Badge> : null}</span></td>
                       <td>{m.transcript ? <Badge tone="blue">Transcript</Badge> : <Empty />}</td>
-                      <td className="text-[12.5px] tabular-nums">{m.durationSec ? `${Math.round(m.durationSec / 60)} min` : <Empty />}</td>
                     </tr>)}
                   </tbody>
                 </table>

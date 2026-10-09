@@ -34,7 +34,6 @@ export default async function EditMeetingPage({ params }: { params: Promise<{ id
               title: meeting.title,
               sourceUrl: meeting.sourceUrl,
               occurredAt: meetingDay(meeting.occurredAt),
-              durationMin: meeting.durationSec ? Math.round(meeting.durationSec / 60) : '',
               companyId: meeting.companyId ?? '',
               attendees: meeting.attendees.map((a) => ({ name: a.name, email: a.email, personId: a.personId, userId: a.userId })),
               products: meeting.products,

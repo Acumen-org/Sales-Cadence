@@ -1109,3 +1109,12 @@ workspace without a Meetings object still gets the note. Settings > Twenty shows
 A meeting has a day, not a time ("I don't want to store time, only date"): the form asks for a
 date, every screen shows the date alone, and the day is kept as midday on the workspace's clock so
 it reads as the same date wherever the team is. Meetings saved before keep their day.
+
+Team members are never Meeting contacts. A teammate is a tag under "Team on the call" even when
+Twenty also has a People record for them (Alisa is both): a Cadence login matched by id, address
+or name, or an address at one of our domains, counts as team. Duration is gone from Cadence too:
+the form no longer asks for it and no screen shows it (the column stays, so nothing is lost). Each
+Meeting contact is named "<meeting> · <person>", so the row reads as which meeting on the person's
+record and which person on the meeting's; the Meetings record itself is named after the meeting.
+Every meeting is written to Twenty once more after deploy (Setting `meetingsToTwenty20261010b`),
+which drops teammates from the contacts and renames the rows already there.

@@ -56,9 +56,25 @@ describe('meetings recorded in Twenty', () => {
     expect(record.data.teamOnTheCall).toEqual(expect.arrayContaining([tag(b.users.karson.name), tag(b.users.alisa.name)]));
     expect(mock.writes.filter((w) => w.op === 'addSelectOption').map((w) => (w as { label: string }).label)).toEqual(expect.arrayContaining([b.users.karson.name, b.users.alisa.name]));
     expect(record.contacts.map((c) => c.personId)).toEqual(['person-01', 'person-02']);
+    // Each Meeting contact is named for the meeting and the person, so both sides read well in Twenty.
+    const people = await prisma.personCache.findMany({ where: { id: { in: ['person-01', 'person-02'] } }, orderBy: { id: 'asc' } });
+    expect(record.contacts.map((c) => c.name)).toEqual(people.map((p) => `Pricing walk-through · ${p.firstName} ${p.lastName}`.trim()));
     expect((await prisma.meeting.findUniqueOrThrow({ where: { id: m.id } })).twentyMeetingId).toBe(id);
     // No note is written once the workspace has a Meetings object.
     expect(mock.writes.some((w) => w.op === 'createNote')).toBe(false);
+  });
+
+  it('keeps a team member who is also a person in the CRM on the team, not among the contacts', async () => {
+    const m = await meeting();
+    // Like Alisa: on the team in Cadence, and a People record in Twenty, added by that record.
+    await prisma.meetingAttendee.create({ data: { meetingId: m.id, personId: 'person-03', email: b.users.leigh.email, name: b.users.leigh.name, external: false } });
+    const id = await syncMeetingToCrm(m.id);
+    const record = mock.meetingRecords.get(id!)!;
+    expect(record.contacts.map((c) => c.personId)).toEqual(['person-01', 'person-02']);
+    const tag = (name: string) => name.toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+    expect(record.data.teamOnTheCall).toEqual(expect.arrayContaining([tag(b.users.leigh.name)]));
+    // The meeting's single People link is its first contact, never someone from the team.
+    expect(record.data.peopleId).toBe('person-01');
   });
 
   it('updates the same record when the meeting changes, and removes it when the meeting goes', async () => {
@@ -98,7 +114,7 @@ describe('meetings recorded in Twenty', () => {
   });
 
   it('says when and who in plain words', () => {
-    const note = meetingNote({ id: 'm1', title: 'Intro', sourceUrl: '', occurredAt: new Date('2027-03-04T16:00:00Z'), durationSec: null, products: [], companyId: null, companyName: null, bookedBy: null, attendees: [] }, '[Cadence]');
+    const note = meetingNote({ id: 'm1', title: 'Intro', sourceUrl: '', occurredAt: new Date('2027-03-04T16:00:00Z'), products: [], companyId: null, companyName: null, bookedBy: null, attendees: [] }, '[Cadence]');
     expect(note.title).toBe('[Cadence] Meeting: Intro');
     expect(note.bodyMarkdown).toMatch(/When: Thu, Mar 4, 2027/);
     expect(note.bodyMarkdown).not.toContain('Recording');

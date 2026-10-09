@@ -67,7 +67,6 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
         provider: true,
         sourceUrl: true,
         occurredAt: true,
-        durationSec: true,
         companyName: true,
         companyId: true,
         products: true,
@@ -134,7 +133,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                 <tr>
                   <th aria-label="Favourite" />
                   <th>Meeting</th>
-                  <th>When</th>
+                  <th>Date</th>
                   <th>Account</th>
                   <th>Products</th>
                   <th>Attendees</th>
@@ -149,7 +148,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                     <td data-label="Meeting">
                       <IdentityCell name={m.title} href={`/meetings/${m.id}`} sub={platformLabel(m.provider, m.sourceUrl)} />
                     </td>
-                    <td data-label="When" className="text-[12.5px]"><time className="block font-medium text-ink-900">{formatLocalDate(meetingDay(m.occurredAt), 'long')}</time>{m.durationSec ? <span className="mt-1 block text-xs text-ink-600">{Math.round(m.durationSec / 60)} min</span> : null}</td>
+                    <td data-label="When" className="text-[12.5px]"><time className="block font-medium text-ink-900">{formatLocalDate(meetingDay(m.occurredAt), 'long')}</time></td>
                     <td data-label="Account" className="break-words text-[12.5px]">
                       {m.companyId ? (
                         <Link href={`/accounts/${m.companyId}`} className="text-brand-700 hover:underline">

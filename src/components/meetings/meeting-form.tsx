@@ -21,7 +21,6 @@ export type MeetingFormValues = {
   bookedById: string;
   /** The meeting's day, YYYY-MM-DD. */
   occurredAt: string;
-  durationMin: number | '';
   companyId: string;
   products?: string[];
   attendees: AttendeeSelection[];
@@ -39,7 +38,6 @@ export function MeetingForm({ companies, fos, initial, mode }: { companies: { id
   const [url, setUrl] = useState(initial.sourceUrl);
   const [title, setTitle] = useState(initial.title);
   const [occurredAt, setOccurredAt] = useState(initial.occurredAt);
-  const [durationMin, setDurationMin] = useState<number | ''>(initial.durationMin);
   const [companyId, setCompanyId] = useState(initial.companyId);
   const [bookedById, setBookedById] = useState(initial.bookedById);
   const [suggestion, setSuggestion] = useState<LinkSuggestion | null>(null);
@@ -84,7 +82,6 @@ export function MeetingForm({ companies, fos, initial, mode }: { companies: { id
         const people = await attendeesFromTranscriptAction(r.data.transcript);
         if (people.ok) {
           if (people.attendees.length) { setAdditions(people.attendees); put.attendees = true; filled.push('attendees'); }
-          if (people.durationSec && durationMin === '') setDurationMin(Math.max(1, Math.round(people.durationSec / 60)));
         }
       }
       setFromLink(put);
@@ -106,7 +103,6 @@ export function MeetingForm({ companies, fos, initial, mode }: { companies: { id
       const r = await attendeesFromTranscriptAction(transcript);
       if (!r.ok) { setNote(r.error); return; }
       setAdditions(r.attendees);
-      if (r.durationSec && durationMin === '') setDurationMin(Math.max(1, Math.round(r.durationSec / 60)));
       setNote(r.attendees.length ? `${r.attendees.length} ${r.attendees.length === 1 ? 'speaker' : 'speakers'} added as attendees.` : 'No speakers found in the transcript.');
     });
 
@@ -145,9 +141,6 @@ export function MeetingForm({ companies, fos, initial, mode }: { companies: { id
 
         <Field label="Date" required>
           <input name="occurredAt" type="date" required value={occurredAt} onChange={(e) => setOccurredAt(e.target.value)} />
-        </Field>
-        <Field label="Duration (minutes)">
-          <input name="durationMin" type="number" min={0} max={1440} value={durationMin} onChange={(e) => setDurationMin(e.target.value === '' ? '' : Number(e.target.value))} />
         </Field>
 
         <Field label="Booked by" required>

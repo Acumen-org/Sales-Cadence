@@ -110,7 +110,6 @@ test('a meeting plays in the app with its transcript and no analysis until a mod
   // The form says what it can do with the link before saving.
   await expect(page.getByText(/Media file/)).toBeVisible();
   await page.getByLabel('Date', { exact: true }).fill('2026-09-08');
-  await page.getByLabel('Duration (minutes)').fill('18');
 
   // Attendees are picked from the CRM directory and the team, and guests can be typed in.
   const finder = page.getByLabel('Find a contact or team member');
