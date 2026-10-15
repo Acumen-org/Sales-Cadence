@@ -1143,3 +1143,18 @@ guest, in Cadence and on the Meetings record. Every meeting is written to Twenty
 Twenty lacks and Cadence cannot add (its key may not change the data model) used to leave Booked by
 or Team on the call empty without a word; Settings > Twenty now lists those names, and the worker
 writes the meetings again each hour while any is missing, so a tag added by hand fills in.
+
+## Anyone in a pod creates campaigns; a Pod Manager's audience can come from any pod (15 October 2026)
+
+The owner asked for two changes and no others. Every role that works in a pod now creates
+campaigns for the pods it is in; Biz Ops still only reads. Whoever created a campaign may change it
+in the studio, publish it and delete it while it is a draft, until it runs. Running it (pause, stop,
+another run, adding an FO on the start day) stays with the pod's leaders and admins, and a
+follow-up still waits for a Sales Leader or Pod Manager.
+
+A Pod Manager (and an admin) sees every pod's people in a campaign's audience. The filters are
+unchanged, so the picker still opens on the campaign's pod. A contact owned by someone who cannot
+work this pod's campaign stays out, and the reason names that person's pod ("Owned by Andrew
+Senior in Andrew's pod"). Everyone else still picks from the campaign's pod. Someone a Pod Manager
+brought in stays in when a Senior FO edits the campaign or an FO adds people from People: the
+check passes everyone the campaign already holds (`campaignMembers`) and applies only to new picks.

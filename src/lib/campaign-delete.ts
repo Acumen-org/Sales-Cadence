@@ -9,7 +9,7 @@ export async function deleteCampaignPermanently(id: string, name: string, user: 
     await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext('campaign-planner-publication'))`;
     await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`campaign:${id}`}))`;
     const c = await tx.campaign.findUniqueOrThrow({ where: { id }, include: { enrollments: { include: { tasks: true } } } });
-    if (!canDeleteCampaign(user, { status: c.status, podId: c.podId, everLaunched: c.enrollments.length > 0 })) {
+    if (!canDeleteCampaign(user, { status: c.status, podId: c.podId, createdById: c.createdById, everLaunched: c.enrollments.length > 0 })) {
       if (user.role === 'ADMIN') throw new Error('Stop this campaign before permanently deleting it.');
       throw new Error(['DRAFT', 'PENDING_APPROVAL'].includes(c.status) && c.enrollments.length ? 'This campaign has run before, so only an admin can delete it.' : ['DRAFT', 'PENDING_APPROVAL'].includes(c.status) ? 'You cannot delete campaigns in this pod.' : 'Only an admin can delete a campaign that has been published.');
     }

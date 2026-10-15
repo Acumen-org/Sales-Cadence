@@ -4,11 +4,11 @@ import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../db';
 import { requireUser } from '../auth/current-user';
-import { canEnroll, canManageCampaigns, needsPod, visiblePodIds } from '../auth/rbac';
+import { canAddFromAnyPod, canCreateCampaign, needsPod, visiblePodIds } from '../auth/rbac';
 import { foPeopleWhere, peopleScopeWhere } from '../people-scope';
 import { personSearchWhere } from '../search-terms';
 import { cachedPersonName } from '../person-cache';
-import { campaignAudienceIssues } from '../campaign-audience';
+import { campaignAudienceIssues, campaignMembers } from '../campaign-audience';
 import { valuePriorityGroups } from '../campaign-planner';
 import { defaultTwentySchema } from '../twenty/twenty-schema';
 
@@ -45,11 +45,11 @@ const PICKER_PAGE = 50;
 
 async function campaignContext(f: PickerFilters, user: Awaited<ReturnType<typeof requireUser>>) {
   if (!f.campaignPodId) return undefined;
-  if (!canManageCampaigns(user, f.campaignPodId)) throw new Error('You cannot select an audience for this pod.');
+  if (!canCreateCampaign(user, f.campaignPodId)) throw new Error('You cannot select an audience for this pod.');
   const pod = await prisma.pod.findUniqueOrThrow({ where: { id: f.campaignPodId } });
   const fos = await prisma.user.findMany({ where: { id: { in: f.campaignFoIds ?? [] }, active: true, pods: { some: { podId: pod.id } } }, select: { twentyMemberId: true } });
   // Owners are only checked once the team is chosen; before that nobody would be selectable.
-  return { podId: pod.id, podOwnerValue: pod.podOwnerValue, podName: pod.name, ownerMemberIds: fos.flatMap(f => f.twentyMemberId ? [f.twentyMemberId] : []), campaignId: f.campaignId, checkOwners: fos.length > 0 };
+  return { podId: pod.id, podOwnerValue: pod.podOwnerValue, podName: pod.name, ownerMemberIds: fos.flatMap(f => f.twentyMemberId ? [f.twentyMemberId] : []), campaignId: f.campaignId, checkOwners: fos.length > 0, anyPod: canAddFromAnyPod(user) };
 }
 
 /** The planner's priority groups as a directory filter, matched on the same normalised CRM labels as `priorityGroups`. */
@@ -80,7 +80,8 @@ async function pickerWhere(f: PickerFilters, user: Awaited<ReturnType<typeof req
   const values = defaultTwentySchema.personValues;
   const and: Prisma.PersonCacheWhereInput[] = [await peopleScopeWhere(user)];
   const context = await campaignContext(f, user);
-  if (context) and.push({ OR: [{ podOwner: context.podOwnerValue }, { ownerMemberId: { in: context.ownerMemberIds } }] });
+  // Pod Managers and admins see every pod's people; the rest see the campaign's pod, its FOs' own and whoever it already holds.
+  if (context && !context.anyPod) and.push({ OR: [{ podOwner: context.podOwnerValue }, { ownerMemberId: { in: context.ownerMemberIds } }, ...(context.campaignId ? [{ id: { in: [...await campaignMembers(context.campaignId)] } }] : [])] });
   if (f.withinIds) and.push({ id: { in: f.withinIds } });
   const search = personSearchWhere(f.q);
   if (search) and.push(search);
@@ -103,7 +104,7 @@ const ORDER: Prisma.PersonCacheOrderByWithRelationInput[] = [{ sortName: { sort:
 
 export async function pickPeopleAction(input: unknown): Promise<{ ok: true; rows: PickerRow[]; total: number; page: number; pageSize: number } | { ok: false; error: string }> {
   const user = await requireUser();
-  if (!canEnroll(user)) return { ok: false, error: 'You cannot create campaigns.' };
+  if (!canCreateCampaign(user)) return { ok: false, error: 'You cannot create campaigns.' };
   const parsed = Filters.safeParse(input ?? {});
   if (!parsed.success) return { ok: false, error: 'Invalid filters.' };
   const f = parsed.data;
@@ -132,7 +133,7 @@ export async function pickPeopleAction(input: unknown): Promise<{ ok: true; rows
 /** Every id the current filters match - what "Select all N matching" means, with no ceiling. */
 export async function pickAllIdsAction(input: unknown): Promise<{ ok: true; ids: string[]; skipped: number } | { ok: false; error: string }> {
   const user = await requireUser();
-  if (!canEnroll(user)) return { ok: false, error: 'You cannot create campaigns.' };
+  if (!canCreateCampaign(user)) return { ok: false, error: 'You cannot create campaigns.' };
   const parsed = Filters.safeParse(input ?? {});
   if (!parsed.success) return { ok: false, error: 'Invalid filters.' };
   const rows = await prisma.personCache.findMany({ where: await pickerWhere(parsed.data, user), select: { id: true }, orderBy: ORDER });

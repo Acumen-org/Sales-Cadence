@@ -8,7 +8,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '../db';
 import { requireUser, toActor } from '../auth/current-user';
-import { canApproveCampaign, canChangeCampaignPeople, canManageCampaigns } from '../auth/rbac';
+import { canApproveCampaign, canChangeCampaignPeople, canCreateCampaign, canManageCampaigns } from '../auth/rbac';
 import { addPeopleToCalendarCampaign, campaignTeam, removePeopleFromUpcomingCalendar } from '../campaign-people';
 import { logAudit, userActor } from '../audit';
 import { parsePersonIds } from '../csv';
@@ -127,7 +127,7 @@ export async function planCampaignAction(formData: FormData): Promise<ActionResu
   const rateRaw = String(formData.get('startsPerFoPerDay') ?? '').trim();
   const maxRate = rateRaw ? Number(rateRaw) : null;
   if (!sequenceId || !podId) return { ok: false, error: 'Choose a sequence and a pod.' };
-  if (!canManageCampaigns(toActor(user), podId)) return { ok: false, error: 'You cannot create campaigns for this pod.' };
+  if (!canCreateCampaign(toActor(user), podId)) return { ok: false, error: 'You cannot create campaigns for this pod.' };
   const windowError = checkWindow({ startDate, endDate });
   if (windowError) return { ok: false, error: windowError };
   const plan = await planCampaignCapacity({ sequenceId, podId, startDate, endDate, maxRate: maxRate && maxRate > 0 ? maxRate : null });
@@ -144,7 +144,7 @@ export async function previewCampaignAction(formData: FormData): Promise<ActionR
   const parsed = readCampaignForm(formData);
   if (!parsed.success) return formError(parsed);
   const d = parsed.data;
-  if (!canManageCampaigns(toActor(user), d.podId)) return { ok: false, error: 'You cannot create campaigns for this pod.' };
+  if (!canCreateCampaign(toActor(user), d.podId)) return { ok: false, error: 'You cannot create campaigns for this pod.' };
   const windowError = checkWindow(d);
   if (windowError) return { ok: false, error: windowError };
   try {

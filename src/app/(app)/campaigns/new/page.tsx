@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { requireUser } from '@/lib/auth/current-user';
-import { canEnroll } from '@/lib/auth/rbac';
+import { canCreateCampaign } from '@/lib/auth/rbac';
 import { campaignWorkspaceData } from '@/lib/campaign-workspace-data';
 import { addDays, todayIn } from '@/lib/dates';
 import { defaultTwentySchema } from '@/lib/twenty/twenty-schema';
@@ -13,7 +13,7 @@ import { workspaceTimezone } from '@/lib/workspace';
 
 export default async function NewCampaignPage({ searchParams }: { searchParams: Promise<{ ids?: string; restart?: string }> }) {
   const user = await requireUser();
-  if (!canEnroll(user)) redirect('/campaigns');
+  if (!canCreateCampaign(user)) redirect('/campaigns');
   const { ids, restart } = await searchParams;
   const data = await campaignWorkspaceData(user);
   // The studio and the planner read the same clock: the workspace's.

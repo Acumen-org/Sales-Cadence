@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma, type Tx } from './db';
 import type { SessionUser } from './auth/current-user';
-import { canManageCampaigns, ROLES_NEEDING_POD } from './auth/rbac';
+import { canAddFromAnyPod, canManageCampaigns, ROLES_NEEDING_POD } from './auth/rbac';
 import { campaignAudienceIssues } from './campaign-audience';
 import { CampaignDraftSchema, shortDateLabel, type CampaignDraft, type PlannedBatch, type PlannerPerson } from './campaign-planner';
 import { fitCampaign, isFit } from './campaign-fit';
@@ -79,7 +79,7 @@ export async function planAddFo(user: SessionUser, campaignId: string, input: Ad
   const ids = [...new Set(input.personIds)];
   if (!ids.length) return { ok: false, error: `Choose the people ${fo.name} will reach.` };
   const members = new Set([...c.personIds, ...(await db.enrollment.findMany({ where: { campaignId, personId: { in: ids } }, select: { personId: true } })).map((e) => e.personId)]);
-  const issues = await campaignAudienceIssues(ids.filter((id) => !members.has(id)), { podId: c.podId, podOwnerValue: c.pod.podOwnerValue, podName: c.pod.name, ownerMemberIds: fo.twentyMemberId ? [fo.twentyMemberId] : [], checkOwners: true }, db);
+  const issues = await campaignAudienceIssues(ids.filter((id) => !members.has(id)), { podId: c.podId, podOwnerValue: c.pod.podOwnerValue, podName: c.pod.name, ownerMemberIds: fo.twentyMemberId ? [fo.twentyMemberId] : [], checkOwners: true, anyPod: canAddFromAnyPod(user) }, db);
   const rows = await db.personCache.findMany({ where: { id: { in: ids } } });
   const byId = new Map(rows.map((p) => [p.id, p]));
   const describe = (id: string, reason: string): LeftOut => { const p = byId.get(id); return { id, name: p ? cachedPersonName(p) : 'Unknown contact', company: p?.companyName ?? null, kind: 'busy', reason }; };

@@ -2,6 +2,7 @@ import { Prisma, type Campaign } from '@prisma/client';
 import { prisma, type Tx } from './db';
 import type { SessionUser } from './auth/current-user';
 import { campaignAudienceIssues } from './campaign-audience';
+import { canAddFromAnyPod } from './auth/rbac';
 import type { CampaignDraft } from './campaign-planner';
 import { replanScheduledCampaign, type PublishedCalendar } from './campaign-planning-service';
 import { logAudit, userActor } from './audit';
@@ -47,7 +48,7 @@ export async function addPeopleToCalendarCampaign(user: SessionUser, campaign: C
   const draft = campaign.plannerDraft as unknown as CampaignDraft & { request?: CampaignDraft };
   const fos = await prisma.user.findMany({ where: { id: { in: (draft.request ?? draft).fos.map((f) => f.id) } }, select: { twentyMemberId: true } });
   const ownerMemberIds = fos.flatMap((f) => (f.twentyMemberId ? [f.twentyMemberId] : []));
-  const issues = await campaignAudienceIssues(fresh, { podId: pod.id, podOwnerValue: pod.podOwnerValue, podName: pod.name, ownerMemberIds, campaignId: campaign.id, checkOwners: ownerMemberIds.length > 0 });
+  const issues = await campaignAudienceIssues(fresh, { podId: pod.id, podOwnerValue: pod.podOwnerValue, podName: pod.name, ownerMemberIds, campaignId: campaign.id, checkOwners: ownerMemberIds.length > 0, anyPod: canAddFromAnyPod(user) });
   const refused = new Set(issues.map((i) => i.id));
   const accepted = fresh.filter((id) => !refused.has(id));
   const note = skipped(issues.map((i) => i.reason));

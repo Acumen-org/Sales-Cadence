@@ -3,7 +3,7 @@ import { PageFrame } from '@/components/page-frame';
 import { barColour } from '@/lib/bar-colour';
 import { formatLocalDate, todayIn, diffDays } from '@/lib/dates';
 import { requireUser } from '@/lib/auth/current-user';
-import { canEnroll, canApproveCampaign, needsPod, visiblePodIds } from '@/lib/auth/rbac';
+import { canCreateCampaign, canApproveCampaign, needsPod, visiblePodIds } from '@/lib/auth/rbac';
 import { listCampaigns, type CampaignSummary } from '@/lib/campaigns-query';
 import { prisma } from '@/lib/db';
 import { defaultTwentySchema } from '@/lib/twenty/twenty-schema';
@@ -50,7 +50,7 @@ export default async function CampaignsPage({ searchParams }: { searchParams: Pr
   return (
     <PageFrame className="space-y-3 px-6 pb-8 pt-2">
       <Surface flush>
-        <ViewHeader title="All campaigns" actions={canEnroll(user) ? <Link href="/campaigns/new" className="btn-primary"><IconPlus size={14} />New campaign</Link> : null} />
+        <ViewHeader title="All campaigns" actions={canCreateCampaign(user) ? <Link href="/campaigns/new" className="btn-primary"><IconPlus size={14} />New campaign</Link> : null} />
         <Tabs inset={false} current={tab} tabs={[
           { key: 'upcoming', label: 'Upcoming', href: tabHref('upcoming'), count: byTab.upcoming.length },
           { key: 'active', label: 'Active', href: tabHref('active'), count: byTab.active.length },
@@ -60,7 +60,7 @@ export default async function CampaignsPage({ searchParams }: { searchParams: Pr
           <CampaignsToolbar q={sp.q ?? ''} pods={pods.map((p) => ({ id: p.id, name: p.name }))} sequences={sequences} fos={fos} products={[...values.productInterest]} pod={sp.pod ?? ''} sequence={sp.sequence ?? ''} fo={sp.fo ?? ''} product={product} from={sp.from ?? ''} to={sp.to ?? ''} />
         </Toolbar>
         {!rows.length ? (
-          <EmptyState icon={<IconCampaigns size={22} />} title={filtered ? 'No campaigns match' : !byTab.upcoming.length && !byTab.active.length && !byTab.finished.length ? 'No campaigns yet' : tab === 'upcoming' ? 'Nothing scheduled' : tab === 'active' ? 'Nothing running' : 'Nothing finished yet'} action={!filtered && canEnroll(user) ? <Link href="/campaigns/new" className="btn-primary"><IconPlus size={14} />New campaign</Link> : undefined} />
+          <EmptyState icon={<IconCampaigns size={22} />} title={filtered ? 'No campaigns match' : !byTab.upcoming.length && !byTab.active.length && !byTab.finished.length ? 'No campaigns yet' : tab === 'upcoming' ? 'Nothing scheduled' : tab === 'active' ? 'Nothing running' : 'Nothing finished yet'} action={!filtered && canCreateCampaign(user) ? <Link href="/campaigns/new" className="btn-primary"><IconPlus size={14} />New campaign</Link> : undefined} />
         ) : tab === 'upcoming' ? (
           <div key="upcoming" className="overflow-x-auto"><table className="table table-dense w-full table-fixed">
             <colgroup>{['24%', '12%', '15%', '13%', '12%', '9%', '15%'].map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>

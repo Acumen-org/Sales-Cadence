@@ -105,16 +105,36 @@ export const canCreateMeeting = (a: Actor) => !isBizOps(a);
 export const canManageSettings = (a: Actor) => isAdmin(a);
 export const canManageUsers = (a: Actor) => isAdmin(a);
 export const canManageCampaigns = (a: Actor, podId?: string | null) => canEnroll(a, podId);
+/**
+ * Who may start a campaign (owner, 15 October 2026): anyone who works in a pod, for the pods they
+ * are in, and admins for any pod. Biz Ops reads. Running it stays with canManageCampaigns.
+ */
+export function canCreateCampaign(a: Actor, podId?: string | null): boolean {
+  if (isAdmin(a)) return true;
+  if (!needsPod(a.role)) return false;
+  return podId ? a.podIds.includes(podId) : a.podIds.length > 0;
+}
+/** Who may change a campaign's plan before it starts: the pod's campaign managers, and whoever created it. */
+export function canEditCampaign(a: Actor, c: { podId: string | null; createdById: string | null }): boolean {
+  return canManageCampaigns(a, c.podId) || (!!c.createdById && c.createdById === a.id && canCreateCampaign(a, c.podId));
+}
+/**
+ * Who may put contacts from any pod in a campaign's audience (owner, 15 October 2026): Pod
+ * Managers, and admins. Everyone else picks from the campaign's pod. A contact owned by an FO who
+ * cannot work this pod's campaign stays out whoever picks them.
+ */
+export const canAddFromAnyPod = (a: Actor) => isAdmin(a) || isPodManager(a);
 /** Reports stay with the roles that run pods and the ones that oversee them. */
 export const canViewReports = (a: Actor) => isAdmin(a) || isBizOps(a) || isPodLeader(a);
 /**
- * Who may erase a campaign. The pod's campaign managers may delete a draft (or one waiting for
- * approval) that never put anyone in outreach; an admin may also erase one that was stopped or
- * finished. A published or running campaign is stopped first; history is an admin's call.
+ * Who may erase a campaign. The pod's campaign managers, and whoever created it, may delete a
+ * draft (or one waiting for approval) that never put anyone in outreach; an admin may also erase
+ * one that was stopped or finished. A published or running campaign is stopped first; history is
+ * an admin's call.
  */
-export function canDeleteCampaign(a: Actor, c: { status: string; podId: string | null; everLaunched: boolean }): boolean {
+export function canDeleteCampaign(a: Actor, c: { status: string; podId: string | null; createdById: string | null; everLaunched: boolean }): boolean {
   if (isAdmin(a)) return ['DRAFT', 'PENDING_APPROVAL', 'STOPPED', 'COMPLETED'].includes(c.status);
-  return canManageCampaigns(a, c.podId) && ['DRAFT', 'PENDING_APPROVAL'].includes(c.status) && !c.everLaunched;
+  return canEditCampaign(a, c) && ['DRAFT', 'PENDING_APPROVAL'].includes(c.status) && !c.everLaunched;
 }
 export const canApproveCampaign = (a: Actor, podId: string | null) => isAdmin(a) || ((isSalesLeader(a) || isPodManager(a)) && canManagePod(a, podId));
 

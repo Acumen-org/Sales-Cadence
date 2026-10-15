@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { prisma, type Tx } from './db';
 import type { SessionUser } from './auth/current-user';
-import { canManageCampaigns, canApproveCampaign, ROLES_NEEDING_POD } from './auth/rbac';
+import { canAddFromAnyPod, canApproveCampaign, canCreateCampaign, canEditCampaign, ROLES_NEEDING_POD } from './auth/rbac';
 import { campaignAudienceIssues, type AudienceIssueKind } from './campaign-audience';
 import { cachedPersonName } from './person-cache';
 import { cleanRichText } from './rich-text';
@@ -63,7 +63,7 @@ export const calendarFingerprint = (draft: CampaignDraft, calendar: CampaignCale
 export async function planCampaign(input: unknown, user: SessionUser, campaignId: string | undefined, options: { reshapeOutreach: boolean; forPublish?: boolean; /** The caller checked who may change this campaign's people. */ authorized?: boolean }, db: Tx = prisma): Promise<CampaignPlan> {
   const intent = CampaignDraftSchema.parse(input);
   if (intent.productInterest.some(p => !(defaultTwentySchema.personValues.productInterest as readonly string[]).includes(p))) throw new Error('Choose an available product.');
-  if (!options.authorized && !canManageCampaigns(user, intent.podId)) throw new Error('You cannot manage campaigns for this pod.');
+  if (!options.authorized && !canCreateCampaign(user, intent.podId)) throw new Error('You cannot manage campaigns for this pod.');
   const pod = await db.pod.findUnique({ where: { id: intent.podId } });
   if (!pod || pod.archived) throw new Error('Choose an available pod.');
   const fos = await db.user.findMany({ where: { id: { in: intent.fos.map(f => f.id) }, active: true, role: { in: ROLES_NEEDING_POD }, pods: { some: { podId: pod.id } } }, select: { id: true, name: true, twentyMemberId: true }, orderBy: { id: 'asc' } });
@@ -72,7 +72,7 @@ export async function planCampaign(input: unknown, user: SessionUser, campaignId
   const team = { ...intent, fos: intent.fos.filter(f => fos.some(x => x.id === f.id)) };
   if (!team.fos.length) throw new Error('Select at least one FO who works in this pod.');
 
-  const issues = await campaignAudienceIssues(intent.personIds, { podId: pod.id, podOwnerValue: pod.podOwnerValue, podName: pod.name, ownerMemberIds: fos.flatMap(f => f.twentyMemberId ? [f.twentyMemberId] : []), campaignId, checkOwners: true }, db);
+  const issues = await campaignAudienceIssues(intent.personIds, { podId: pod.id, podOwnerValue: pod.podOwnerValue, podName: pod.name, ownerMemberIds: fos.flatMap(f => f.twentyMemberId ? [f.twentyMemberId] : []), campaignId, checkOwners: true, anyPod: canAddFromAnyPod(user) }, db);
   const leftOut: LeftOut[] = [...issues];
   const excluded = new Set(issues.map(i => i.id));
   const existing = campaignId ? await db.campaign.findUnique({ where: { id: campaignId }, select: { followupSourceId: true, followupWaitDays: true, followupSourceRun: true } }) : null;
@@ -172,7 +172,7 @@ export async function prepareCampaignStudio(input: unknown, user: SessionUser, c
 
 async function saveDraft(input: unknown, user: SessionUser, options: { id?: string; revision?: string; auto?: boolean }) {
   const d = CampaignDraftSaveSchema.parse(input);
-  if (!canManageCampaigns(user, d.podId)) throw new Error('You cannot manage campaigns for this pod.');
+  if (!canCreateCampaign(user, d.podId)) throw new Error('You cannot manage campaigns for this pod.');
   const pod = await prisma.pod.findUnique({ where: { id: d.podId } });
   if (!pod || pod.archived) throw new Error('Choose an available pod.');
   const id = options.id ?? randomUUID();
@@ -181,7 +181,7 @@ async function saveDraft(input: unknown, user: SessionUser, options: { id?: stri
     const existing = await tx.campaign.findUnique({ where: { id } });
     if (options.id && !existing) throw new Error('Campaign no longer exists.');
     if (existing) {
-      if (!canManageCampaigns(user, existing.podId)) throw new Error('You cannot edit this campaign.');
+      if (!canEditCampaign(user, existing)) throw new Error('You cannot edit this campaign.');
       if (!['DRAFT', 'SCHEDULED', 'PENDING_APPROVAL'].includes(existing.status) || await tx.enrollment.count({ where: { campaignId: id } })) throw new Error('This campaign has already started. Its plan is locked.');
       if (existing.updatedAt.toISOString() !== options.revision) throw new Error('Someone changed this campaign. Reload before saving to protect their changes.');
     }
@@ -192,7 +192,7 @@ async function saveDraft(input: unknown, user: SessionUser, options: { id?: stri
       const qualifying = new Set((await nonReplierCandidates(existing.followupSourceId, existing.followupWaitDays, new Date(), existing.followupSourceRun ?? undefined)).map(e => e.personId));
       const fos = await tx.user.findMany({ where: { id: { in: d.fos.map(f => f.id) }, active: true, pods: { some: { podId: pod.id } } }, select: { twentyMemberId: true } });
       const ownerMemberIds = fos.flatMap(f => f.twentyMemberId ? [f.twentyMemberId] : []);
-      const blocked = new Set((await campaignAudienceIssues(d.personIds, { podId: pod.id, podOwnerValue: pod.podOwnerValue, podName: pod.name, ownerMemberIds, campaignId: id, checkOwners: ownerMemberIds.length > 0 }, tx)).map(i => i.id));
+      const blocked = new Set((await campaignAudienceIssues(d.personIds, { podId: pod.id, podOwnerValue: pod.podOwnerValue, podName: pod.name, ownerMemberIds, campaignId: id, checkOwners: ownerMemberIds.length > 0, anyPod: canAddFromAnyPod(user) }, tx)).map(i => i.id));
       personIds = d.personIds.filter(p => !blocked.has(p) && qualifying.has(p));
     }
     const data = {
@@ -242,7 +242,7 @@ export async function saveCampaignCalendar(input: unknown, user: SessionUser, op
     const existing = await tx.campaign.findUnique({ where: { id } });
     if (options.id && !existing) throw new Error('Campaign no longer exists.');
     if (existing) {
-      if (!canManageCampaigns(user, existing.podId)) throw new Error('You cannot edit this campaign.');
+      if (!canEditCampaign(user, existing)) throw new Error('You cannot edit this campaign.');
       if (existing.followupSourceId && !canApproveCampaign(user, checked.draft.podId)) throw new Error('A Sales Leader, Pod Manager or admin must review and publish this follow-up campaign.');
       if (!['DRAFT', 'SCHEDULED', 'PENDING_APPROVAL'].includes(existing.status) || await tx.enrollment.count({ where: { campaignId: id } })) throw new Error('This campaign has already started. Its plan is locked.');
       if (existing.updatedAt.toISOString() !== options.revision) throw new Error('Someone changed this campaign. Reload before saving to protect their changes.');

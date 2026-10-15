@@ -17,8 +17,8 @@ import { campaignStatusLabel } from '@/lib/campaign-status';
 
 const daysLeft = (from: LocalDate, to: LocalDate) => { const n = diffDays(from, to); return `${n} ${n === 1 ? 'day' : 'days'}`; };
 
-export function PlannedCampaignDetail({ campaign: c, manager, people, q = '', launchError, canDelete = false, addFo }: {
-  campaign: Campaign; manager: boolean; people: CampaignPeoplePage; q?: string; canDelete?: boolean; launchError?: string | null; addFo?: ReactNode;
+export function PlannedCampaignDetail({ campaign: c, manager, editor = manager, people, q = '', launchError, canDelete = false, addFo }: {
+  campaign: Campaign; manager: boolean; /** May change the plan before it starts: a manager, or whoever created it. */ editor?: boolean; people: CampaignPeoplePage; q?: string; canDelete?: boolean; launchError?: string | null; addFo?: ReactNode;
 }) {
   const draft = c.plannerDraft as CampaignDraft;
   const plan = c.publishedPlan as unknown as PublishedCalendar | null;
@@ -39,7 +39,7 @@ export function PlannedCampaignDetail({ campaign: c, manager, people, q = '', la
           <p className="mt-4 flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-[#d5e9ad]"><IconCampaigns size={13} /> Campaign<span className={`rounded-full px-2 py-0.5 text-[10.5px] normal-case tracking-normal ${c.status === 'ACTIVE' ? 'bg-[#d5e9ad] text-[#203e35]' : 'bg-white/10 text-white'}`}>{campaignStatusLabel(c.status)}</span></p>
           <h1 className="mt-2 break-words text-[30px] font-semibold leading-tight tracking-[-0.03em]">{c.name}</h1>
         </div>
-        <div className="flex flex-wrap gap-2">{manager && editable && <Link className="btn-primary" href={`/campaigns/${c.id}/edit`}>Edit campaign</Link>}{canDelete && <DeleteCampaign id={c.id} name={c.name} simple={!people.launched} />}{manager && ['STOPPED', 'COMPLETED'].includes(c.status) && <Link className="btn-primary" href={`/campaigns/new?restart=${c.id}`}>Plan another run</Link>}{manager && c.status !== 'PENDING_APPROVAL' && <CampaignLifecycle campaignId={c.id} status={c.status} />}</div>
+        <div className="flex flex-wrap gap-2">{editor && editable && <Link className="btn-primary" href={`/campaigns/${c.id}/edit`}>Edit campaign</Link>}{canDelete && <DeleteCampaign id={c.id} name={c.name} simple={!people.launched} />}{manager && ['STOPPED', 'COMPLETED'].includes(c.status) && <Link className="btn-primary" href={`/campaigns/new?restart=${c.id}`}>Plan another run</Link>}{manager && c.status !== 'PENDING_APPROVAL' && <CampaignLifecycle campaignId={c.id} status={c.status} />}</div>
       </div>
       <div className="relative mt-6 grid gap-4 sm:grid-cols-[repeat(3,minmax(0,auto))_minmax(0,1fr)] sm:items-end sm:gap-8">
         <div><span className="block text-[11px] uppercase tracking-[0.08em] text-[#c1d4ca]">Starts</span><span className="text-[15px] font-medium">{calendarDateLabel(c.startDate)}</span></div>
@@ -51,7 +51,7 @@ export function PlannedCampaignDetail({ campaign: c, manager, people, q = '', la
         </div> : null}
       </div>
     </header>
-    {launchError && <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-5"><h2 className="font-semibold">Cadence planner · launch needs attention</h2><p className="mt-2 text-sm">{launchError}</p>{manager && editable && <Link href={`/campaigns/${c.id}/edit`} className="btn-secondary mt-3">Review campaign</Link>}</div>}
+    {launchError && <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-5"><h2 className="font-semibold">Cadence planner · launch needs attention</h2><p className="mt-2 text-sm">{launchError}</p>{editor && editable && <Link href={`/campaigns/${c.id}/edit`} className="btn-secondary mt-3">Review campaign</Link>}</div>}
     {late > 0 && <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-5"><p className="font-medium">{late} {late === 1 ? 'person has an overdue step' : 'people have overdue steps'}</p></div>}
     {people.launched && <div className="grid grid-cols-2 gap-3 lg:grid-cols-4"><Stat label="People" value={people.total} /><Stat label="Steps completed" value={completed} /><Stat label="Replies" value={replies} /><Stat label="Meetings" value={meetings} /></div>}
     {addFo}

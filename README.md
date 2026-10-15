@@ -165,7 +165,7 @@ The project review and its verification scope are recorded in [AUDIT.md](AUDIT.m
 | Own tasks: complete, skip with reason, snooze | yes | yes | yes | yes (snooze to next working day only) | no |
 | Pod tasks, pod filters | all pods | own pods | own pods | no | all pods, read only |
 | Enrol, bulk-enrol, pause, exit, reassign, delegate within pod | all pods | own pods | own pods | no | no |
-| Campaigns | all | own pods, approves re-enrolment | own pods | read own pod's | read all |
+| Campaigns | all; audience from any pod | own pods, approves re-enrolment; a Pod Manager's audience can come from any pod | own pods | create in own pods; change and delete their own until they run | read all |
 | Reports | all | own pods | own pods | no | all pods |
 | Sequences (edit the plan) | yes | yes | yes | view | view |
 | Settings, users, pods | yes | no | no | no | no |

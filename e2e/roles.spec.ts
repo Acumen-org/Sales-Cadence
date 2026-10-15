@@ -62,11 +62,13 @@ test.describe('Junior FO', () => {
     // Their own work renders, and every section they do have is sound.
     await visitAll(page, ['/home', '/tasks?tab=today', '/tasks?tab=overdue', '/people', '/accounts', '/meetings', '/activity', '/enrichment']);
 
-    // A junior cannot start a campaign.
+    // A junior starts campaigns too (owner, 15 October 2026), for their own pod only.
     await page.goto('/campaigns');
-    await expect(page.getByRole('link', { name: /New campaign/i })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: /New campaign/i }).first()).toBeVisible();
     await page.goto('/campaigns/new');
-    await expect(page).not.toHaveURL(/\/campaigns\/new/);
+    await expect(page).toHaveURL(/\/campaigns\/new/);
+    const pods = await page.getByLabel('Campaign pod', { exact: true }).locator('option').allTextContents();
+    expect(pods.join(' ')).not.toContain("Andrew's pod");
 
     await page.goto('/sequences');
     await expect(page).toHaveURL(/\/campaigns$/);

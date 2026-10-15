@@ -1,7 +1,7 @@
 import { notFound, redirect } from 'next/navigation';
 import { prisma } from '@/lib/db';
 import { requireUser } from '@/lib/auth/current-user';
-import { canManageCampaigns, canApproveCampaign } from '@/lib/auth/rbac';
+import { canEditCampaign, canApproveCampaign } from '@/lib/auth/rbac';
 import { campaignWorkspaceData } from '@/lib/campaign-workspace-data';
 import { CampaignWorkspace } from '@/components/campaigns/campaign-workspace';
 import type { CampaignDraft } from '@/lib/campaign-planner';
@@ -14,7 +14,7 @@ export default async function EditCampaignPage({ params, searchParams }: { param
   const user = await requireUser(), { id } = await params;
   const c = await prisma.campaign.findUnique({ where: { id }, include: { sequence: true, _count: { select: { enrollments: true } } } });
   if (!c) notFound();
-  if (!canManageCampaigns(user, c.podId) || !['DRAFT', 'SCHEDULED', 'PENDING_APPROVAL'].includes(c.status) || c._count.enrollments) redirect(`/campaigns/${id}`);
+  if (!canEditCampaign(user, c) || !['DRAFT', 'SCHEDULED', 'PENDING_APPROVAL'].includes(c.status) || c._count.enrollments) redirect(`/campaigns/${id}`);
   const data = await campaignWorkspaceData(user);
   // A published campaign keeps the owner's request beside the plan; the editor reopens the request.
   const saved = c.plannerDraft as (CampaignDraft & { request?: CampaignDraft }) | null;

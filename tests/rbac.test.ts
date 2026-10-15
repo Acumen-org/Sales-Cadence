@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   canActOnTask,
+  canAddFromAnyPod,
   canApproveCampaign,
+  canCreateCampaign,
+  canDeleteCampaign,
+  canEditCampaign,
+  canManageCampaigns,
   canEditSequences,
   canEnroll,
   canManageEnrollment,
@@ -109,5 +114,37 @@ describe('rbac', () => {
     expect(canSnoozeFreely(junior)).toBe(false);
     expect(canSnoozeFreely(senior)).toBe(true);
     expect(visiblePodIds(junior)).toBeNull(); // reads everything; works only their own tasks
+  });
+
+  it('anyone who works a pod may create a campaign there; Biz Ops reads (owner, 15 October 2026)', () => {
+    expect(canCreateCampaign(junior)).toBe(true);
+    expect(canCreateCampaign(junior, 'pod-a')).toBe(true);
+    expect(canCreateCampaign(junior, 'pod-b')).toBe(false);
+    expect(canCreateCampaign(senior, 'pod-a')).toBe(true);
+    expect(canCreateCampaign(admin, 'pod-b')).toBe(true);
+    expect(canCreateCampaign(ops)).toBe(false);
+    expect(canCreateCampaign({ ...junior, podIds: [] })).toBe(false);
+    // Running one does not come with it.
+    expect(canManageCampaigns(junior, 'pod-a')).toBe(false);
+  });
+
+  it('whoever created a campaign may change and discard it before it runs, and nobody else gains that', () => {
+    const own = { podId: 'pod-a', createdById: 'junior' };
+    const theirs = { podId: 'pod-a', createdById: 'senior' };
+    expect(canEditCampaign(junior, own)).toBe(true);
+    expect(canEditCampaign(junior, theirs)).toBe(false);
+    expect(canEditCampaign(senior, { podId: 'pod-a', createdById: 'junior' })).toBe(true);
+    // A creator who has left the pod no longer edits its campaigns.
+    expect(canEditCampaign({ ...junior, podIds: ['pod-b'] }, own)).toBe(false);
+    expect(canDeleteCampaign(junior, { ...own, status: 'DRAFT', everLaunched: false })).toBe(true);
+    expect(canDeleteCampaign(junior, { ...theirs, status: 'DRAFT', everLaunched: false })).toBe(false);
+    expect(canDeleteCampaign(junior, { ...own, status: 'SCHEDULED', everLaunched: false })).toBe(false);
+    expect(canDeleteCampaign(junior, { ...own, status: 'DRAFT', everLaunched: true })).toBe(false);
+  });
+
+  it('only Pod Managers and admins take contacts from any pod into a campaign', () => {
+    expect(canAddFromAnyPod(manager)).toBe(true);
+    expect(canAddFromAnyPod(admin)).toBe(true);
+    for (const a of [leader, senior, junior, ops]) expect(canAddFromAnyPod(a)).toBe(false);
   });
 });

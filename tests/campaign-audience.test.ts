@@ -34,7 +34,8 @@ describe('who a campaign can reach', () => {
     const context = { podId: b.pods.Alisa.id, podOwnerValue: 'ALISA', podName: 'Alisa', ownerMemberIds: [b.users.alisa.twentyMemberId!], checkOwners: true };
     const issues = await campaignAudienceIssues(['aud-1', 'dnd', 'optout', 'deleted', 'outside', 'karsons', 'andrews', 'seatless', 'missing'], context);
     const reason = Object.fromEntries(issues.map(i => [i.id, i.reason]));
-    expect(reason).toEqual({ dnd: 'Do not contact', optout: 'Opted out', deleted: 'No longer in Twenty', outside: 'Not in the Alisa pod', karsons: `Owned by ${b.users.karson.name}`, andrews: `Owned by ${b.users.andrew.name}`, seatless: 'Owner is not a Cadence user', missing: 'No longer in Twenty' });
+    // An owner in another pod is named with their pod, so it is plain why they cannot be added here.
+    expect(reason).toEqual({ dnd: 'Do not contact', optout: 'Opted out', deleted: 'No longer in Twenty', outside: 'Not in the Alisa pod', karsons: `Owned by ${b.users.karson.name}`, andrews: `Owned by ${b.users.andrew.name} in Pod Andrew`, seatless: 'Owner is not a Cadence user', missing: 'No longer in Twenty' });
     // Karson works this pod and could be added; Andrew does not.
     expect(issues.find(i => i.id === 'karsons')?.ownerId).toBe(b.users.karson.id);
     expect(issues.find(i => i.id === 'andrews')?.ownerId).toBeUndefined();
@@ -171,5 +172,62 @@ describe('choosing people by priority', () => {
     expect(all).toEqual({ ok: true, ids: ['pick-ok'], skipped: 2 });
     const early = await pickPeopleAction({ ...filters, campaignFoIds: [] }); if (!early.ok) throw new Error(early.error);
     expect(early.rows.find(x => x.id === 'pick-karson')?.ineligibleReason).toBeUndefined();
+  });
+});
+
+describe('contacts from other pods (owner, 15 October 2026)', () => {
+  let manager: SessionUser, senior: SessionUser;
+  const cross = async () => prisma.personCache.createMany({ data: [
+    { id: 'cross-free', firstName: 'Cross', lastName: 'Free', sortName: 'cross free', email: 'free@prospect.example', podOwner: 'ANDREW' },
+    { id: 'cross-free-2', firstName: 'Cross', lastName: 'Free Two', sortName: 'cross free two', email: 'free2@prospect.example', podOwner: 'ANDREW' },
+    { id: 'cross-andrew', firstName: 'Cross', lastName: 'Andrew', sortName: 'cross andrew', email: 'andrew@prospect.example', podOwner: 'ANDREW', ownerMemberId: b.users.andrew.twentyMemberId },
+  ] });
+  beforeEach(async () => {
+    const pm = await prisma.user.create({ data: { email: 'pm@cadence.local', name: 'Pat Manager', role: 'POD_MANAGER', passwordHash: 'x', timezone: 'Europe/London', pods: { create: [{ podId: b.pods.Alisa.id }] } } });
+    manager = { ...pm, podIds: [b.pods.Alisa.id], pods: [] };
+    senior = { ...b.users.alisa, podIds: [b.pods.Alisa.id], pods: [] };
+    await cross();
+  });
+
+  it('a Pod Manager sees every pod’s people, and one owned in another pod is blocked with that pod named', async () => {
+    auth.user.mockResolvedValue(manager);
+    const filters = { q: 'Cross', state: 'any' as const, campaignPodId: b.pods.Alisa.id, campaignFoIds: [b.users.alisa.id] };
+    const r = await pickPeopleAction(filters); if (!r.ok) throw new Error(r.error);
+    expect(Object.fromEntries(r.rows.map(x => [x.id, x.ineligibleReason ?? null]))).toEqual({ 'cross-andrew': `Owned by ${b.users.andrew.name} in Pod Andrew`, 'cross-free': null, 'cross-free-2': null });
+    // Before the team is chosen too: nobody on this pod could ever take Andrew's contact.
+    const early = await pickPeopleAction({ ...filters, campaignFoIds: [] }); if (!early.ok) throw new Error(early.error);
+    expect(early.rows.find(x => x.id === 'cross-andrew')?.ineligibleReason).toBe(`Owned by ${b.users.andrew.name} in Pod Andrew`);
+    // Everyone else still picks from the campaign's own pod.
+    auth.user.mockResolvedValue(senior);
+    const theirs = await pickPeopleAction(filters); if (!theirs.ok) throw new Error(theirs.error);
+    expect(theirs.rows).toEqual([]);
+  });
+
+  it('plans them in, and a later edit by someone who could not add them keeps them', async () => {
+    const intent = draft({ personIds: [...ids, 'cross-free', 'cross-andrew'] });
+    const plan = await planCampaign(intent, manager, undefined, { reshapeOutreach: true });
+    expect(plan.calendar.valid).toBe(true);
+    expect(plan.draft.personIds).toEqual(expect.arrayContaining([...ids, 'cross-free']));
+    expect(plan.leftOut.map(l => [l.id, l.reason])).toEqual([['cross-andrew', `Owned by ${b.users.andrew.name} in Pod Andrew`]]);
+    // A Senior FO of the pod opens the Pod Manager's draft: the contact stays, and they cannot add another.
+    const saved = await saveCampaignCalendar(intent, manager, {});
+    const edited = await planCampaign({ ...intent, personIds: [...intent.personIds, 'cross-free-2'] }, senior, saved.id, { reshapeOutreach: true });
+    expect(edited.draft.personIds).toContain('cross-free');
+    expect(edited.leftOut.find(l => l.id === 'cross-free-2')?.reason).toBe('Not in Pod Alisa');
+  });
+});
+
+describe('anyone in a pod creates campaigns (owner, 15 October 2026)', () => {
+  it('a Junior FO creates and edits their own draft, not someone else’s, and not in another pod', async () => {
+    const karson: SessionUser = { ...b.users.karson, podIds: [b.pods.Alisa.id], pods: [] };
+    const daniel: SessionUser = { ...b.users.daniel, podIds: [b.pods.Leigh.id], pods: [] };
+    const senior: SessionUser = { ...b.users.alisa, podIds: [b.pods.Alisa.id], pods: [] };
+    const own = await saveCampaignCalendar(draft(), karson, {});
+    expect(own.createdById).toBe(karson.id);
+    const renamed = await saveCampaignCalendar(draft({ name: 'Karson renamed' }), karson, { id: own.id, revision: own.updatedAt.toISOString() });
+    expect(renamed.name).toBe('Karson renamed');
+    const seniors = await saveCampaignCalendar(draft({ name: 'Senior draft' }), senior, {});
+    await expect(saveCampaignCalendar(draft({ name: 'Taken over' }), karson, { id: seniors.id, revision: seniors.updatedAt.toISOString() })).rejects.toThrow('You cannot edit this campaign.');
+    await expect(saveCampaignCalendar(draft(), daniel, {})).rejects.toThrow('You cannot manage campaigns for this pod.');
   });
 });
