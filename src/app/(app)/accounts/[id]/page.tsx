@@ -74,7 +74,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
             <>
               {detail.mine ? <Badge tone="blue">mine</Badge> : null}
               <Badge tone="gray">{stats.people} people</Badge>
-              {stats.inSequence ? <Badge tone="green" dot>{stats.inSequence} in a campaign</Badge> : null}
+              {stats.inSequence ? <Badge tone="green">{stats.inSequence} in a campaign</Badge> : null}
             </>
           }
           actions={
@@ -168,7 +168,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                     {timeline.slice(0, 8).map((it, i) => (
                       <li key={i} className="flex items-start gap-2.5 px-4 py-2.5 text-[13px]">
                         <span className={it.tone === 'in' ? 'mt-0.5 text-emerald-600' : it.tone === 'out' ? 'mt-0.5 text-ink-500' : 'mt-0.5 text-ink-300'}>
-                          {it.icon === 'MEETING' || it.icon === 'STATE' ? <span className="inline-block h-3.5 w-3.5 rounded-full border border-current" /> : <ActionIcon action={it.icon} size={14} />}
+                          <ActionIcon action={it.icon} size={14} />
                         </span>
                         <span className="min-w-0 flex-1">
                           {it.href ? (
@@ -246,7 +246,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                           const label = m ? membershipLabel(m) : null;
                           return <>
                             <td className="text-[12.5px]">{m && label ? <><div className="truncate font-medium text-ink-900"><Link href={`/campaigns/${m.campaignId}`} className="hover:text-brand-700">{m.campaignName}</Link></div><Badge tone={label.tone}>{label.label}</Badge></> : <Empty />}</td>
-                            <td className="text-[12.5px]">{m ? <><div className="truncate text-ink-900"><Link href={`/sequences/${m.sequenceId}`} className="hover:text-brand-700">{m.sequenceName}</Link></div><div className="text-[12px] text-ink-500">{m.step === null ? 'Not started' : `Step ${m.step + 1} of ${m.steps}`}{p.enrollment?.foName ? ` · ${p.enrollment.foName}` : ''}</div></> : <Empty />}</td>
+                            <td className="text-[12.5px]">{m ? <><div className="truncate text-ink-900"><Link href={`/sequences/${m.sequenceId}`} className="hover:text-brand-700">{m.sequenceName}</Link></div><div className="text-[12px] text-ink-500">{m.step === null ? 'Not started' : `Step ${m.step + 1} of ${m.steps}`}{p.enrollment?.foName ? <> · <span className="whitespace-nowrap">{p.enrollment.foName}</span></> : null}</div></> : <Empty />}</td>
                           </>;
                         })()}
                         <td className="num"><Count value={p.touches} /></td>
@@ -269,7 +269,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                 {timeline.map((it, i) => (
                   <li key={i} className="flex items-start gap-3 px-4 py-3 text-[13px]">
                     <span className={it.tone === 'in' ? 'mt-0.5 text-emerald-600' : it.tone === 'out' ? 'mt-0.5 text-ink-500' : 'mt-0.5 text-ink-300'}>
-                      {it.icon === 'MEETING' || it.icon === 'STATE' ? <span className="inline-block h-3.5 w-3.5 rounded-full border border-current" /> : <ActionIcon action={it.icon} size={14} />}
+                      <ActionIcon action={it.icon} size={14} />
                     </span>
                     <span className="min-w-0 flex-1">
                       {it.href ? (

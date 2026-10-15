@@ -322,7 +322,7 @@ export function TaskActions(p: Props) {
                 if (disposition) submitComplete(pendingAction, disposition);
               }}
             >
-              <p className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-brand-700">How did the call go?</p>
+              <p className="mb-2 text-[12.5px] font-medium text-brand-700">How did the call go?</p>
               <div className="grid gap-1.5 [grid-template-columns:repeat(auto-fill,minmax(190px,1fr))]">
                 {p.dispositions.map((d, i) => (
                   <label
@@ -362,7 +362,7 @@ export function TaskActions(p: Props) {
                 submitSkip();
               }}
             >
-              <p className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-amber-800">Skip this one step</p>
+              <p className="mb-2 text-[12.5px] font-medium text-amber-800">Skip this one step</p>
               <div className="flex flex-wrap items-end gap-2">
                 <div className="min-w-[220px] space-y-1">
                   <label htmlFor={`reason-${p.taskId}`}>Why?</label>
@@ -394,7 +394,7 @@ export function TaskActions(p: Props) {
                 submitSnooze();
               }}
             >
-              <p className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-sky-800">Come back to this task later</p>
+              <p className="mb-2 text-[12.5px] font-medium text-sky-800">Come back to this task later</p>
               <div className="flex flex-wrap items-end gap-2">
                 {p.canPickSnoozeDate ? (
                   <div className="space-y-1">
@@ -412,7 +412,7 @@ export function TaskActions(p: Props) {
           ) : null}
 
           {panel === 'more' ? (
-            <div className={clsx('grid gap-3 rounded-xl border border-line bg-canvas/70 p-3.5', canDelegate ? 'md:grid-cols-3' : 'md:grid-cols-2')}>
+            <div className="grid gap-3 rounded-xl border border-line bg-canvas/70 p-3.5">
               <form
                 className="space-y-2"
                 onSubmit={(e) => {
@@ -420,28 +420,30 @@ export function TaskActions(p: Props) {
                   submitEnd();
                 }}
               >
-                <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-500">End the sequence</p>
-                <select value={endReason} onChange={(e) => setEndReason(e.target.value)} aria-label="Why are you ending the sequence?" className="w-full">
-                  {END_REASONS.map((r) => (
-                    <option key={r.key} value={r.key} title={r.detail}>
-                      {r.label}
-                    </option>
-                  ))}
-                </select>
-                <button type="submit" disabled={pending} className="btn-secondary btn-sm">
-                  End sequence
-                </button>
+                <p className="text-[12.5px] font-medium text-ink-700">End the sequence</p>
+                <div className="flex overflow-hidden rounded-[10px] border border-line bg-white focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100">
+                  <select value={endReason} onChange={(e) => setEndReason(e.target.value)} aria-label="Why are you ending the sequence?" className="min-w-0 flex-1 !rounded-none !border-0 !bg-transparent !ring-0">
+                    {END_REASONS.map((r) => (
+                      <option key={r.key} value={r.key} title={r.detail}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="submit" disabled={pending} className="shrink-0 border-l border-line px-3 text-[12.5px] font-medium text-ink-700 transition hover:bg-canvas hover:text-brand-700">
+                    End sequence
+                  </button>
+                </div>
               </form>
 
               {canDelegate ? (
                 <form
-                  className="space-y-2 md:border-l md:border-line md:pl-3.5"
+                  className="space-y-2 border-t border-line pt-3"
                   onSubmit={(e) => {
                     e.preventDefault();
                     submitDelegate();
                   }}
                 >
-                  <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-500">Delegate this step</p>
+                  <p className="text-[12.5px] font-medium text-ink-700">Delegate this step</p>
                   <div className="flex overflow-hidden rounded-[10px] border border-line bg-white focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100">
                     <select value={delegateTo} onChange={(e) => setDelegateTo(e.target.value)} aria-label="Delegate to" className="min-w-0 flex-1 !rounded-none !border-0 !bg-transparent !ring-0">
                       <option value="">Choose a pod-mate</option>
@@ -451,7 +453,7 @@ export function TaskActions(p: Props) {
                         </option>
                       ))}
                     </select>
-                    <button type="submit" disabled={pending || !delegateTo} className="btn-secondary btn-sm !rounded-none !border-0 !border-l !border-line">
+                    <button type="submit" disabled={pending || !delegateTo} className="shrink-0 border-l border-line px-3 text-[12.5px] font-medium text-ink-700 transition hover:bg-canvas hover:text-brand-700 disabled:opacity-50">
                       Delegate
                     </button>
                   </div>
@@ -460,13 +462,13 @@ export function TaskActions(p: Props) {
 
               {!p.fixedCalendar && p.canManageEnrollment && laterSteps.length ? (
                 <form
-                  className="space-y-2 md:border-l md:border-line md:pl-3.5"
+                  className="space-y-2 border-t border-line pt-3"
                   onSubmit={(e) => {
                     e.preventDefault();
                     submitMove();
                   }}
                 >
-                  <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-500">Jump to another step</p>
+                  <p className="text-[12.5px] font-medium text-ink-700">Jump to another step</p>
                   {/* One control, not a select sitting next to an unrelated button. */}
                   <div className="flex overflow-hidden rounded-[10px] border border-line bg-white focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100">
                     <select

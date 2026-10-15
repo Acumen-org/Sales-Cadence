@@ -5,7 +5,7 @@ import { delegateTasks } from '../engine/delegate';
 import { z } from 'zod';
 import { prisma } from '../db';
 import { requireUser, toActor, type SessionUser } from '../auth/current-user';
-import { canActOnTask, canManageEnrollment, canSnoozeFreely } from '../auth/rbac';
+import { canActOnTask, canManageEnrollment, canSnoozeFreely, whyNotManageEnrollment, whyNotWorkTask } from '../auth/rbac';
 import { userActor } from '../audit';
 import { formatLocalDate, isLocalDate, todayIn } from '../dates';
 import { exitEnrollment, finishEnrollment, reassignEnrollment } from '../engine/enrollment';
@@ -31,7 +31,8 @@ async function loadForUser(taskId: string, user?: SessionUser) {
   const task = await prisma.task.findUnique({ where: { id: taskId }, include: { enrollment: { select: { id: true, podId: true, personId: true } } } });
   if (!task) return { user: u, task: null, error: 'Task not found.' };
   if (!canActOnTask(toActor(u), { foUserId: task.foUserId, podId: task.enrollment.podId })) {
-    return { user: u, task: null, error: 'You cannot act on this task.' };
+    const [fo, pod] = await Promise.all([prisma.user.findUnique({ where: { id: task.foUserId }, select: { name: true } }), task.enrollment.podId ? prisma.pod.findUnique({ where: { id: task.enrollment.podId }, select: { name: true } }) : null]);
+    return { user: u, task: null, error: whyNotWorkTask(toActor(u), fo?.name ?? 'someone else', pod?.name) };
   }
   return { user: u, task, error: null };
 }
@@ -134,7 +135,7 @@ async function loadEnrollmentForTask(taskId: string, opts: { manage?: boolean } 
   const actor = toActor(user);
   const managed = canManageEnrollment(actor, task.enrollment);
   const allowed = opts.manage ? managed : managed || task.foUserId === user.id;
-  if (!allowed) return { user, enrollment: null, error: 'You cannot change this enrollment.' };
+  if (!allowed) return { user, enrollment: null, error: whyNotManageEnrollment(actor, (await prisma.pod.findUnique({ where: { id: task.enrollment.podId ?? '' }, select: { name: true } }))?.name ?? 'this pod', opts.manage ? null : (await prisma.user.findUnique({ where: { id: task.foUserId }, select: { name: true } }))?.name) };
   return { user, enrollment: task.enrollment, error: null };
 }
 

@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { requireUser, toActor, type SessionUser } from '../auth/current-user';
-import { isAdmin, isPodLeader, canCreateMeeting, ROLES_NEEDING_POD } from '../auth/rbac';
+import { isAdmin, isPodLeader, canCreateMeeting, ROLES_NEEDING_POD, whyNotManageMeeting } from '../auth/rbac';
 import { logAudit, userActor } from '../audit';
 import { inspectLink } from '../meetings/resolve-media';
 import { resolveAttendees } from '../meetings/attendees';
@@ -62,7 +62,7 @@ export async function toggleMeetingProductAction(formData: FormData): Promise<Ac
   if (!(PRODUCTS as readonly string[]).includes(product)) return { ok: false, error: 'Unknown product.' };
   const meeting = await prisma.meeting.findUnique({ where: { id }, select: { id: true, createdById: true, companyId: true, products: true } });
   if (!meeting) return { ok: false, error: 'Meeting not found.' };
-  if (!(await mayManageMeeting(user, meeting))) return { ok: false, error: 'You do not have permission to edit this meeting.' };
+  if (!(await mayManageMeeting(user, meeting))) return { ok: false, error: whyNotManageMeeting(toActor(user), 'edit this meeting') };
 
   // The caller says what it wants, not "flip it": two tabs open on the same meeting must not be
   // able to ask for opposite things and both be told they succeeded.
@@ -204,7 +204,7 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
   const id = String(formData.get('meetingId') ?? '');
   const existing = await prisma.meeting.findUnique({ where: { id } });
   if (!existing) return { ok: false, error: 'Meeting not found.' };
-  if (!(await mayManageMeeting(user, existing))) return { ok: false, error: 'You do not have permission to edit this meeting.' };
+  if (!(await mayManageMeeting(user, existing))) return { ok: false, error: whyNotManageMeeting(toActor(user), 'edit this meeting') };
   const parsed = readForm(formData);
   if (!parsed.success) return { ok: false, error: issueText(parsed.error.issues) };
   const d = parsed.data;
@@ -264,7 +264,7 @@ export async function updateMeetingAttendeesAction(formData: FormData): Promise<
   const id = String(formData.get('meetingId') ?? '');
   const meeting = await prisma.meeting.findUnique({ where: { id }, select: { id: true, createdById: true, companyId: true } });
   if (!meeting) return { ok: false, error: 'Meeting not found.' };
-  if (!(await mayManageMeeting(user, meeting))) return { ok: false, error: 'You do not have permission to edit attendees for this meeting.' };
+  if (!(await mayManageMeeting(user, meeting))) return { ok: false, error: whyNotManageMeeting(toActor(user), 'change who attended this meeting') };
   let attendees: Awaited<ReturnType<typeof resolveAttendees>>;
   try { attendees = await resolveAttendees(attendeeEntries(formData), meeting.createdById); }
   catch (error) { return { ok: false, error: error instanceof SyntaxError ? 'The attendee list is invalid.' : error instanceof Error ? error.message : 'Unable to resolve attendees.' }; }
@@ -301,7 +301,7 @@ export async function deleteMeetingAction(formData: FormData): Promise<ActionRes
   const id = String(formData.get('meetingId') ?? '');
   const existing = await prisma.meeting.findUnique({ where: { id } });
   if (!existing || existing.review === 'DISMISSED') return { ok: false, error: 'Meeting not found.' };
-  if (!(await mayManageMeeting(user, existing))) return { ok: false, error: 'You do not have permission to delete this meeting.' };
+  if (!(await mayManageMeeting(user, existing))) return { ok: false, error: whyNotManageMeeting(toActor(user), 'delete this meeting') };
   await prisma.meeting.delete({ where: { id } });
   await logAudit({ entityType: 'meeting', entityId: id, action: 'deleted', actor: userActor(user), details: { title: existing.title } });
   await afterResponse(() => removeMeetingFromCrm(existing));
@@ -322,7 +322,7 @@ export async function analyseMeetingAction(formData: FormData): Promise<ActionRe
   const meeting = await prisma.meeting.findUnique({ where: { id }, include: { attendees: true } });
   if (!meeting) return { ok: false, error: 'Meeting not found.' };
 
-  if (!(await mayManageMeeting(user, meeting))) return { ok: false, error: 'You do not have permission to analyse this meeting.' };
+  if (!(await mayManageMeeting(user, meeting))) return { ok: false, error: whyNotManageMeeting(toActor(user), 'analyse this meeting') };
   const analyzer = getMeetingAnalyzer();
   const input = {
     meetingId: meeting.id,
@@ -362,7 +362,7 @@ export async function saveTranscriptAction(formData: FormData): Promise<ActionRe
   if (raw.length > 2_000_000) return { ok: false, error: 'The transcript is too long (maximum 2 million characters).' };
   const meeting = await prisma.meeting.findUnique({ where: { id }, select: { id: true, createdById: true, companyId: true } });
   if (!meeting) return { ok: false, error: 'Meeting not found.' };
-  if (!(await mayManageMeeting(user, meeting))) return { ok: false, error: 'You do not have permission to edit this meeting.' };
+  if (!(await mayManageMeeting(user, meeting))) return { ok: false, error: whyNotManageMeeting(toActor(user), 'edit this meeting') };
   const format = raw ? detectTranscriptFormat(raw) : null;
   const cues = raw ? parseTranscript(raw, format ?? undefined).cues.length : 0;
   await prisma.meeting.update({

@@ -1,7 +1,7 @@
 import type { CompanyCache, PersonCache, Prisma } from '@prisma/client';
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
-import { assertAllowed, canSeeAllPods, isAdmin } from './auth/rbac';
+import { assertAllowed, canSeeAllPods, isAdmin, ENRICHMENT_ROLES } from './auth/rbac';
 import { cachedPersonName } from './person-cache';
 import { getSettings, getTwentyConnection, getTwentySchema } from './settings';
 import { blockedCompanyIds } from './blocked-accounts';
@@ -321,7 +321,7 @@ async function markableIds(user: SessionUser, entity: EnrichmentEntity, ids: str
 
 /** Leave a mark on gaps: who is researching them, or that they could not be found. */
 export async function markEnrichmentGaps(user: SessionUser, req: MarkRequest, mark: { kind: MarkKind; assigneeId?: string | null }): Promise<{ marked: number }> {
-  assertAllowed(canEnrich(user), 'Only a pod leader or administrator can mark gaps.');
+  assertAllowed(canEnrich(user), `Only ${ENRICHMENT_ROLES} can mark gaps.`);
   if (mark.kind === 'assigned' && !mark.assigneeId) throw new Error('Choose who researches it.');
   if (mark.kind === 'assigned') assertAllowed(Boolean(await prisma.user.findFirst({ where: { id: mark.assigneeId!, active: true }, select: { id: true } })), 'Choose an active team member.');
   const ids = await markableIds(user, req.entity, req.ids);
@@ -341,7 +341,7 @@ export async function markEnrichmentGaps(user: SessionUser, req: MarkRequest, ma
 
 /** Lift marks: take a gap back from research, or reopen one marked not found. */
 export async function clearEnrichmentMarks(user: SessionUser, req: MarkRequest, kind: MarkKind): Promise<{ cleared: number }> {
-  assertAllowed(canEnrich(user), 'Only a pod leader or administrator can change marks.');
+  assertAllowed(canEnrich(user), `Only ${ENRICHMENT_ROLES} can change marks.`);
   const ids = await markableIds(user, req.entity, req.ids);
   if (!ids.length) throw new Error('None of the chosen records is in your pods.');
   const result = await prisma.enrichmentMark.deleteMany({ where: { entity: req.entity, recordId: { in: ids }, kind, ...(req.fields ? { field: { in: req.fields } } : {}) } });

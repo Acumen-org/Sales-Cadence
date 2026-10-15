@@ -53,14 +53,14 @@ export function TaskFilters({ pods, fos, podId, foUserId, mode }: Props) {
           ))}
         </select>
       ) : null}
-      <div className="inline-flex overflow-hidden rounded-[10px] border border-line bg-white p-0.5 text-[12.5px]">
+      <div className="inline-flex h-[38px] items-stretch overflow-hidden rounded-[10px] border border-line bg-white p-0.5 text-[12.5px]">
         {(['list', 'flow'] as const).map((m) => (
           <button
             key={m}
             type="button"
             aria-pressed={mode === m}
             onClick={() => update({ mode: m === 'flow' ? 'flow' : null })}
-            className={clsx('rounded-lg px-2.5 py-1 font-medium transition', mode === m ? 'bg-brand-600 text-white' : 'text-ink-500 hover:text-ink-700')}
+            className={clsx('rounded-lg px-2.5 font-medium transition', mode === m ? 'bg-brand-600 text-white' : 'text-ink-500 hover:text-ink-700')}
           >
             {m === 'list' ? 'List' : 'Task flow'}
           </button>

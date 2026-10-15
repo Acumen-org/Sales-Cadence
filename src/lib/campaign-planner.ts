@@ -19,7 +19,7 @@ export const CampaignDraftSchema = z.object({
   outreachEdited: z.boolean().optional(),
 }).superRefine((d, ctx) => {
   const issue = (message: string) => ctx.addIssue({ code: 'custom', message });
-  if (d.endDate < d.startDate || diffDays(d.startDate, d.endDate) > 366) issue('Choose a campaign window of up to one year.');
+  if (d.endDate < d.startDate || diffDays(d.startDate, d.endDate) > 366) issue('The end date must be on or after the start date, and within a year of it.');
   if (new Set(d.personIds).size !== d.personIds.length) issue('A person can only appear once.');
   if (new Set(d.fos.map(f => f.id)).size !== d.fos.length) issue('Choose each FO once.');
   const flowIds = new Set(d.flows.map(f => f.id));

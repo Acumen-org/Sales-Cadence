@@ -56,11 +56,11 @@ export function CampaignsToolbar({ q, pods, sequences, fos, products, pod, seque
     <div className="flex flex-1 flex-wrap items-center gap-2">
       <div className="relative w-full max-w-xs">
         <IconSearch size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search campaigns" aria-label="Search campaigns" className="!pl-9" />
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search campaigns" aria-label="Search campaigns" className="!pl-9 !text-[12.5px]" />
       </div>
       {filterSelect({ name: 'pod', value: pod, label: 'Filter by pod', all: 'All pods', items: pods.map((p) => ({ value: p.id, label: p.name })) })}
       {fos.length ? filterSelect({ name: 'fo', value: fo, label: 'Filter by FO', all: 'All FOs', items: fos.map((f) => ({ value: f.id, label: f.name })) }) : null}
-      <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} aria-controls={panelId} className={`btn-secondary btn-sm ${showMore || chips.length ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
+      <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} aria-controls={panelId} className={`btn-secondary !text-[12.5px] ${showMore || chips.length ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
         <IconFilter size={14} /> Filters
         {chips.length ? <span className="rounded-full bg-brand-600 px-1.5 text-[11px] font-semibold leading-[17px] text-white">{chips.length}</span> : null}
       </button>

@@ -11,7 +11,7 @@ import type { PublishedCalendar } from '@/lib/campaign-planning-service';
 import { calendarDateLabel } from '@/lib/campaign-planner';
 import { CampaignCalendarView } from './campaign-calendar';
 import { CampaignLifecycle, CampaignControls } from './campaign-controls';
-import { Badge, Stat, enrollmentStatusLabel } from '@/components/ui';
+import { Badge, Empty, Stat, enrollmentStatusLabel } from '@/components/ui';
 import { CAMPAIGN_PEOPLE_PAGE, type CampaignPeoplePage } from '@/lib/campaign-people-page';
 import { campaignStatusLabel } from '@/lib/campaign-status';
 
@@ -51,7 +51,7 @@ export function PlannedCampaignDetail({ campaign: c, manager, editor = manager, 
         </div> : null}
       </div>
     </header>
-    {launchError && <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-5"><h2 className="font-semibold">Cadence planner · launch needs attention</h2><p className="mt-2 text-sm">{launchError}</p>{editor && editable && <Link href={`/campaigns/${c.id}/edit`} className="btn-secondary mt-3">Review campaign</Link>}</div>}
+    {launchError && <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-5"><h2 className="font-semibold">This campaign did not start</h2><p className="mt-2 text-sm">{launchError}</p>{editor && editable && <Link href={`/campaigns/${c.id}/edit`} className="btn-secondary mt-3">Review campaign</Link>}</div>}
     {late > 0 && <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-5"><p className="font-medium">{late} {late === 1 ? 'person has an overdue step' : 'people have overdue steps'}</p></div>}
     {people.launched && <div className="grid grid-cols-2 gap-3 lg:grid-cols-4"><Stat label="People" value={people.total} /><Stat label="Steps completed" value={completed} /><Stat label="Replies" value={replies} /><Stat label="Meetings" value={meetings} /></div>}
     {addFo}
@@ -61,9 +61,9 @@ export function PlannedCampaignDetail({ campaign: c, manager, editor = manager, 
       <div className="flex flex-wrap items-center justify-between gap-3 p-5"><h2 className="font-semibold">{people.launched ? 'People and progress' : 'People'} <span className="font-normal tabular-nums text-ink-500">{people.total.toLocaleString('en-US')}</span></h2><form><input name="q" defaultValue={q} placeholder="Search people" aria-label="Search people in the campaign" className="!w-72" /></form></div>
       {people.rows.length ? <div className="overflow-x-auto"><table className="table"><thead><tr><th>Person</th><th>FO</th><th>Outreach</th>{people.launched && <><th>Progress</th><th>Status</th></>}</tr></thead><tbody>{people.rows.map(r => {
         const flow = draft.flows.find(f => f.id === r.flowId) ?? draft.flows[0];
-        return <tr key={r.id}><td><Link href={`/people/${r.personId}`} className="font-medium">{r.name}</Link>{r.company ? <div className="text-[12px] text-ink-500">{r.company}</div> : null}</td><td>{r.fo ?? '–'}</td><td>{flow.name}</td>{people.launched && <><td className="tabular-nums">{r.step} of {flow.steps.length}</td><td><Badge>{r.status ? enrollmentStatusLabel({ status: r.status, exitReason: r.exitReason }) : ''}</Badge></td></>}</tr>;
+        return <tr key={r.id}><td><Link href={`/people/${r.personId}`} className="font-medium">{r.name}</Link>{r.company ? <div className="text-[12px] text-ink-500">{r.company}</div> : null}</td><td>{r.fo ?? <Empty />}</td><td>{flow.name}</td>{people.launched && <><td className="tabular-nums">{r.step} of {flow.steps.length}</td><td><Badge>{r.status ? enrollmentStatusLabel({ status: r.status, exitReason: r.exitReason }) : ''}</Badge></td></>}</tr>;
       })}</tbody></table></div> : <p className="px-5 pb-5 text-sm text-ink-500">Nobody matches “{q}”.</p>}
-      {people.pages > 1 ? <div className="flex items-center justify-between border-t border-line px-5 py-3 text-[12.5px] text-ink-500"><span className="tabular-nums">{first.toLocaleString('en-US')}–{last.toLocaleString('en-US')} of {people.total.toLocaleString('en-US')}</span><span className="flex items-center gap-2"><span className="tabular-nums">Page {people.page} of {people.pages}</span>{people.page > 1 ? <Link href={pageHref(people.page - 1)} className="btn-secondary btn-sm" scroll={false}>Previous</Link> : null}{people.page < people.pages ? <Link href={pageHref(people.page + 1)} className="btn-secondary btn-sm" scroll={false}>Next</Link> : null}</span></div> : null}
+      {people.pages > 1 ? <div className="flex items-center justify-between border-t border-line px-5 py-3 text-[12.5px] text-ink-500"><span className="tabular-nums">{first.toLocaleString('en-US')}-{last.toLocaleString('en-US')} of {people.total.toLocaleString('en-US')}</span><span className="flex items-center gap-2"><span className="tabular-nums">Page {people.page} of {people.pages}</span>{people.page > 1 ? <Link href={pageHref(people.page - 1)} className="btn-secondary btn-sm" scroll={false}>Previous</Link> : null}{people.page < people.pages ? <Link href={pageHref(people.page + 1)} className="btn-secondary btn-sm" scroll={false}>Next</Link> : null}</span></div> : null}
     </section>}
   </div>;
 }

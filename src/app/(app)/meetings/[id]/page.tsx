@@ -48,7 +48,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
           shape="square"
           badges={
             <>
-              {externals.length ? <Badge tone="green" dot>{externals.length} external</Badge> : <Badge tone="gray">{meeting.attendees.length ? 'Internal only' : 'No attendees'}</Badge>}
+              {externals.length ? <Badge tone="green">{externals.length} external</Badge> : <Badge tone="gray">{meeting.attendees.length ? 'Internal only' : 'No attendees'}</Badge>}
               {meeting.transcript ? <Badge tone="blue">Transcript</Badge> : null}
             </>
           }

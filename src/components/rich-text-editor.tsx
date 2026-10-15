@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
+import { IconRedo, IconUndo } from '@/components/icons';
 
 export function RichTextEditor({ value, onChange, label, disabled = false }: {
   value: string; onChange: (html: string, text: string) => void; label: string; disabled?: boolean;
@@ -31,17 +32,17 @@ export function RichTextEditor({ value, onChange, label, disabled = false }: {
     { label: 'Bold', text: <strong>B</strong>, active: editor.isActive('bold'), run: () => editor.chain().focus().toggleBold().run() },
     { label: 'Italic', text: <em>I</em>, active: editor.isActive('italic'), run: () => editor.chain().focus().toggleItalic().run() },
     { label: 'Underline', text: <u>U</u>, active: editor.isActive('underline'), run: () => editor.chain().focus().toggleUnderline().run() },
-    { label: 'Bulleted list', text: '• List', active: editor.isActive('bulletList'), run: () => editor.chain().focus().toggleBulletList().run() },
-    { label: 'Numbered list', text: '1. List', active: editor.isActive('orderedList'), run: () => editor.chain().focus().toggleOrderedList().run() },
+    { label: 'Bulleted list', text: 'Bullets', active: editor.isActive('bulletList'), run: () => editor.chain().focus().toggleBulletList().run() },
+    { label: 'Numbered list', text: 'Numbered', active: editor.isActive('orderedList'), run: () => editor.chain().focus().toggleOrderedList().run() },
   ];
   const touch = () => { used.current = true; };
   return <div onPointerDownCapture={touch} onKeyDownCapture={touch} onFocusCapture={touch} onPasteCapture={touch} onDropCapture={touch} className={`overflow-hidden rounded-xl border border-line ${disabled ? 'bg-canvas text-ink-500' : 'bg-white'}`}>
     {!disabled && <div role="toolbar" aria-label={`${label} formatting`} className="flex flex-wrap items-center gap-1 border-b border-line bg-canvas/60 px-2 py-1.5">
       {controls.map(c => <button type="button" key={c.label} title={c.label} aria-label={c.label} aria-pressed={c.active} onMouseDown={e => e.preventDefault()} onClick={c.run} className={`rounded px-2.5 py-1 text-sm ${c.active ? 'bg-brand-100 text-brand-900' : 'text-ink-700 hover:bg-white'}`}>{c.text}</button>)}
-      <button type="button" className="btn-ghost btn-sm" onClick={() => { setUrl(editor.getAttributes('link').href ?? ''); setLinkOpen(!linkOpen); }}>Link</button>
-      {editor.isActive('link') && <button type="button" className="btn-ghost btn-sm" onClick={() => editor.chain().focus().unsetLink().run()}>Unlink</button>}
-      <button type="button" className="btn-ghost btn-sm ml-auto" aria-label="Undo" onClick={() => editor.chain().focus().undo().run()}>↶</button>
-      <button type="button" className="btn-ghost btn-sm" aria-label="Redo" onClick={() => editor.chain().focus().redo().run()}>↷</button>
+      <button type="button" className="rounded px-2.5 py-1 text-sm text-ink-700 hover:bg-white" onClick={() => { setUrl(editor.getAttributes('link').href ?? ''); setLinkOpen(!linkOpen); }}>Link</button>
+      {editor.isActive('link') && <button type="button" className="rounded px-2.5 py-1 text-sm text-ink-700 hover:bg-white" onClick={() => editor.chain().focus().unsetLink().run()}>Unlink</button>}
+      <button type="button" className="ml-auto rounded px-2 py-1 text-ink-700 hover:bg-white" aria-label="Undo" title="Undo" onClick={() => editor.chain().focus().undo().run()}><IconUndo size={15} /></button>
+      <button type="button" className="rounded px-2 py-1 text-ink-700 hover:bg-white" aria-label="Redo" title="Redo" onClick={() => editor.chain().focus().redo().run()}><IconRedo size={15} /></button>
     </div>}
     {linkOpen && <div className="flex flex-wrap gap-2 border-b border-line p-2">
       <input aria-label="Link URL" className="min-w-0 flex-1" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://" />

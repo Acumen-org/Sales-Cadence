@@ -29,7 +29,7 @@ export function NonProspectRulesForm({ rules, exceptions }: { rules: Rules; exce
           </Field>
         ) : null}
         <div className="flex items-center gap-3">
-          <button type="submit" className="btn-primary btn-sm">Save rules</button>
+          <button type="submit" className="btn-primary">Save rules</button>
         </div>
       </ActionForm>
     </Card>

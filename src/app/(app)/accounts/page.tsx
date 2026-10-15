@@ -94,7 +94,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
                   <th>Pods</th>
                   <th>FOs</th>
                   <th>Product</th>
-                  <SortableHeader field="people" label="People at account" sort={sort} dir={dir} defaultValue={DEFAULT_ACCOUNT_SORT} className="num" />
+                  <SortableHeader field="people" label="People" sort={sort} dir={dir} defaultValue={DEFAULT_ACCOUNT_SORT} className="num" />
                   <SortableHeader field="inSequence" label="In a campaign" sort={sort} dir={dir} defaultValue={DEFAULT_ACCOUNT_SORT} />
                   <SortableHeader field="replied" label="Replies" sort={sort} dir={dir} defaultValue={DEFAULT_ACCOUNT_SORT} className="num" />
                   <th className="num">Meetings</th>
@@ -113,7 +113,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
                           <PillList
                             max={1}
                             noun={index === 0 ? 'pods' : index === 1 ? 'FOs' : 'products'}
-                            items={items.map((value) => ({ label: optionLabel(value), node: <Badge tone={index === 0 ? 'purple' : index === 1 ? 'blue' : 'green'}>{optionLabel(value)}</Badge> }))}
+                            items={items.map((value) => ({ label: optionLabel(value), node: <Badge tone={index === 2 ? 'green' : 'gray'}>{optionLabel(value)}</Badge> }))}
                           />
                         ) : <Empty />}
                       </td>

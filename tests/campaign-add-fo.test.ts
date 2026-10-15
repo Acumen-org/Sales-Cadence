@@ -161,7 +161,7 @@ describe('adding an FO to a running campaign', () => {
     const pod = [b.pods.Alisa.id];
     // An FO already on the campaign, or from another pod, cannot be added.
     for (const foId of [b.users.alisa.id, b.users.andrew.id, b.users.daniel.id, b.users.ria.id]) {
-      expect(await planAddFo(admin, campaignId, { ...input(), foId }, { now: START })).toEqual({ ok: false, error: expect.stringMatching(/not on the campaign yet/) });
+      expect(await planAddFo(admin, campaignId, { ...input(), foId }, { now: START })).toEqual({ ok: false, error: expect.stringMatching(/not on this campaign yet/) });
     }
     // An inactive FO is not offered.
     await prisma.user.update({ where: { id: b.users.karson.id }, data: { active: false } });
@@ -169,16 +169,16 @@ describe('adding an FO to a running campaign', () => {
     await prisma.user.update({ where: { id: b.users.karson.id }, data: { active: true } });
     // Who may add.
     const refused = [asUser(b.users.karson, pod), asUser(b.users.leigh, [b.pods.Leigh.id]), asUser(b.users.leigh, [b.pods.Leigh.id], 'POD_MANAGER'), asUser(b.users.daniel, [], 'BIZ_OPS')];
-    for (const who of refused) expect(await planAddFo(who, campaignId, input(), { now: START })).toEqual({ ok: false, error: expect.stringMatching(/leaders and admins/) });
+    for (const who of refused) expect(await planAddFo(who, campaignId, input(), { now: START })).toEqual({ ok: false, error: expect.stringMatching(/^(Only the Senior FOs, Sales Leaders and Pod Managers of Pod Alisa, and admins, can add an FO to a running campaign|Biz Ops can view campaigns but cannot change them)\.$/) });
     for (const who of [asUser(b.users.alisa, pod), asUser(b.users.leigh, pod, 'POD_MANAGER'), asUser(b.users.leigh, pod, 'SALES_LEADER'), admin]) expect((await planAddFo(who, campaignId, input(), { now: START })).ok).toBe(true);
     // A refused user cannot apply a plan someone else reviewed.
     const r = await planAddFo(admin, campaignId, input(), { now: START });
     if (!r.ok) throw new Error(r.error);
-    await expect(applyAddFo(asUser(b.users.karson, pod), campaignId, input(), r.preview.fingerprint, { now: START, skipSync: true })).rejects.toThrow(/leaders and admins/);
+    await expect(applyAddFo(asUser(b.users.karson, pod), campaignId, input(), r.preview.fingerprint, { now: START, skipSync: true })).rejects.toThrow("Only the Senior FOs, Sales Leaders and Pod Managers of Pod Alisa, and admins, can add an FO to a running campaign.");
     // The pace is a whole number from 1 to 500.
     for (const batchSize of [0, -1, 1.5, 501]) expect(await planAddFo(admin, campaignId, input(KARSON_PEOPLE, batchSize), { now: START })).toEqual({ ok: false, error: expect.stringMatching(/1 to 500/) });
     expect(await planAddFo(admin, campaignId, input([]), { now: START })).toEqual({ ok: false, error: expect.stringMatching(/Choose the people/) });
-    expect(await planAddFo(admin, 'missing', input(), { now: START })).toEqual({ ok: false, error: 'Campaign not found.' });
+    expect(await planAddFo(admin, 'missing', input(), { now: START })).toEqual({ ok: false, error: 'This campaign has been deleted.' });
   });
 
   it('leaves out people who cannot join, with the reason, and refuses when nobody can', async () => {
@@ -190,7 +190,7 @@ describe('adding an FO to a running campaign', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     const why = Object.fromEntries(r.preview.leftOut.map((l) => [l.id, l.reason]));
-    expect(why).toEqual({ 'person-01': 'Already in Calendar', 'person-09': expect.stringMatching(/^Owned by Alisa/), 'person-10': 'Do not contact', 'person-11': 'Already in Elsewhere' });
+    expect(why).toEqual({ 'person-01': 'Already in Calendar', 'person-09': `Owned by ${b.users.alisa.name}, not ${b.users.karson.name}`, 'person-10': 'Marked Do not contact in Twenty', 'person-11': 'Already in Elsewhere' });
     expect(r.preview.people.map((p) => p.id).sort()).toEqual(KARSON_PEOPLE);
     const applied = await applyAddFo(admin, campaignId, input([...KARSON_PEOPLE, 'person-01', 'person-09', 'person-10', 'person-11']), r.preview.fingerprint, { now: START, skipSync: true });
     expect(applied.enrolled).toBe(4);

@@ -40,11 +40,11 @@ describe('published campaign execution', () => {
   });
   it('invalidates stale previews, rejects unauthorized writes and protects concurrent edits', async () => {
     const p=await previewCampaignCalendar(d,user);
-    await expect(saveCampaignCalendar({...d,endDate:'2027-01-09'},user,{publish:true,fingerprint:p.fingerprint})).rejects.toThrow(/The plan changed since you last looked/);
-    await expect(saveCampaignCalendar(d,{...user,role:'BIZ_OPS'},{publish:false})).rejects.toThrow(/cannot/);
+    await expect(saveCampaignCalendar({...d,endDate:'2027-01-09'},user,{publish:true,fingerprint:p.fingerprint})).rejects.toThrow(/^Not published: something changed after you opened Schedule\./);
+    await expect(saveCampaignCalendar(d,{...user,role:'BIZ_OPS'},{publish:false})).rejects.toThrow('Biz Ops can view campaigns but cannot create them.');
     const c=await saveCampaignCalendar(d,user,{});
     const updated=await saveCampaignCalendar({...d,name:'Revised'},user,{id:c.id,revision:c.updatedAt.toISOString()});expect(updated.status).toBe('DRAFT');
-    await expect(saveCampaignCalendar(d,user,{id:c.id,revision:c.updatedAt.toISOString()})).rejects.toThrow(/Someone changed/);
+    await expect(saveCampaignCalendar(d,user,{id:c.id,revision:c.updatedAt.toISOString()})).rejects.toThrow(/^Someone else changed this campaign while you had it open/);
   });
   it('refuses duplicate campaign membership atomically and never partially launches an invalid audience', async () => {
     const p=await previewCampaignCalendar(d,user);
@@ -52,7 +52,7 @@ describe('published campaign execution', () => {
     expect(attempts.filter(r=>r.status==='fulfilled')).toHaveLength(1);
     const c=await prisma.campaign.findFirstOrThrow({where:{plannerDraft:{not:undefined}}});
     await prisma.personCache.update({where:{id:'person-01'},data:{optedOut:true}});
-    await expect(activateCampaign(c.id,{actor:SYSTEM_ACTOR,now:new Date('2027-01-04T16:00:00Z'),skipSync:true})).rejects.toThrow(/audience or team changed/);
+    await expect(activateCampaign(c.id,{actor:SYSTEM_ACTOR,now:new Date('2027-01-04T16:00:00Z'),skipSync:true})).rejects.toThrow(/^Not started, because things changed after it was published: .+ \(asked not to be contacted\)\. Nobody has been contacted\./);
     expect(await prisma.enrollment.count({where:{campaignId:c.id}})).toBe(0);
   });
   it('carries contact-specific outreach through membership and task generation', async () => {
@@ -68,7 +68,7 @@ describe('published campaign execution', () => {
     const p = await previewCampaignCalendar(d, user);
     const c = await saveCampaignCalendar(d, user, { publish: true, fingerprint: p.fingerprint });
     await prisma.personCache.update({ where: { id: 'person-01' }, data: { ownerMemberId: null } });
-    await expect(activateCampaign(c.id, { actor: SYSTEM_ACTOR, now: new Date('2027-01-04T16:00:00Z'), skipSync: true })).rejects.toThrow(/ownership/);
+    await expect(activateCampaign(c.id, { actor: SYSTEM_ACTOR, now: new Date('2027-01-04T16:00:00Z'), skipSync: true })).rejects.toThrow(/^Not started, because things changed after it was published: .+ \(has a different owner in Twenty now\)\./);
     expect(await prisma.enrollment.count({ where: { campaignId: c.id } })).toBe(0);
   });
   it('never generates overdue follow-ups on weekends or after the campaign end', async () => {
@@ -88,6 +88,6 @@ describe('published campaign execution', () => {
     const p = await previewCampaignCalendar(d, user, c.id);
     await saveCampaignCalendar(d, user, { id: c.id, revision: updated.updatedAt.toISOString(), publish: true, fingerprint: p.fingerprint });
     await changeCampaignStatus(c.id, 'PAUSED', SYSTEM_ACTOR, new Date('2027-01-03T16:00:00Z'));
-    await expect(changeCampaignStatus(c.id, 'ACTIVE', SYSTEM_ACTOR, new Date('2027-01-09T16:00:00Z'))).rejects.toThrow(/window has ended/);
+    await expect(changeCampaignStatus(c.id, 'ACTIVE', SYSTEM_ACTOR, new Date('2027-01-09T16:00:00Z'))).rejects.toThrow('Its end date has passed, so it cannot resume. Stop it, then use Plan another run to set new dates.');
   });
 });

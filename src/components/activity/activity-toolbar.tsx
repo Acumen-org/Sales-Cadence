@@ -72,7 +72,7 @@ export function ActivityToolbar({ users, pods, actorId, podId, kinds, channel, q
         </nav>
         <div className="relative w-full max-w-[220px]">
           <IconSearch size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
-          <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search activity" aria-label="Search activity" className="!pl-9" />
+          <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search activity" aria-label="Search activity" className="!pl-9 !text-[12.5px]" />
         </div>
         <select value={podId ?? ''} onChange={(e) => set({ pod: e.target.value, actor: '' })} aria-label="Filter by pod" className="!w-auto !py-2 !text-[12.5px]">
           <option value="">All visible pods</option>
@@ -82,7 +82,7 @@ export function ActivityToolbar({ users, pods, actorId, podId, kinds, channel, q
           <option value="">Everyone visible</option>
           {availableUsers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>
-        <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} aria-controls={panelId} className={`btn-secondary btn-sm ${showMore || more ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
+        <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} aria-controls={panelId} className={`btn-secondary !text-[12.5px] ${showMore || more ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
           <IconFilter size={14} /> Filters{more ? <span className="ml-1 tabular-nums">{more}</span> : null}
         </button>
         {active ? <Link href="/activity" onClick={() => reset()} className="btn-ghost btn-sm">Reset</Link> : null}

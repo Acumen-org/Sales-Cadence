@@ -91,7 +91,7 @@ function PersonPicker({ chosen, onChoose }: { chosen: TaskPersonOption | null; o
  * Action Due Date in Twenty, and shows up in Tasks on its day. A person has one open task at a
  * time (Twenty's fields hold one), so a new one replaces theirs.
  */
-export function NextActionButton({ personIds, today, fos, canAssign, initial, label = 'Create task', className = 'btn-secondary btn-sm', onDone, existing, icon = 'refresh' }: {
+export function NextActionButton({ personIds, today, fos, canAssign, initial, label = 'Create task', className = 'btn-secondary btn-sm', onDone, existing, icon = 'plus' }: {
   /** Who it is for; leave out to choose the person in the dialog. */
   personIds?: string[];
   today: string;

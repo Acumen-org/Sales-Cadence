@@ -1,8 +1,9 @@
 import { Prisma, type Campaign } from '@prisma/client';
 import { prisma, type Tx } from './db';
 import type { SessionUser } from './auth/current-user';
-import { campaignAudienceIssues } from './campaign-audience';
-import { canAddFromAnyPod } from './auth/rbac';
+import { campaignAudienceIssues, whoAndWhy } from './campaign-audience';
+import { canAddFromAnyPod, canApproveCampaign, canEditCampaign, canManageCampaigns } from './auth/rbac';
+import { addFoWindow } from './campaign-add-fo';
 import type { CampaignDraft } from './campaign-planner';
 import { replanScheduledCampaign, type PublishedCalendar } from './campaign-planning-service';
 import { logAudit, userActor } from './audit';
@@ -28,8 +29,15 @@ export async function campaignTeam(c: Pick<Campaign, 'id' | 'podId' | 'plannerDr
 }
 
 const people = (n: number) => `${n} ${n === 1 ? 'person' : 'people'}`;
-/** "2 skipped: Do not contact, Owned by Karson" - each reason once. */
-const skipped = (reasons: string[]) => (reasons.length ? `; ${reasons.length} skipped: ${[...new Set(reasons)].join(', ')}` : '');
+/** " Not added: Jane Doe (marked Do not contact in Twenty)." - each reason once, with who it stops. */
+const skipped = (items: { name: string; reason: string }[]) => (items.length ? ` Not added: ${whoAndWhy(items)}.` : '');
+
+/** A scheduled campaign that went back to draft: that it will not start, why, and who can put it right. */
+function backInDraft(user: SessionUser, campaign: Campaign, podName: string, why: string | null) {
+  const canPublish = canEditCampaign(user, campaign) && (!campaign.followupSourceId || canApproveCampaign(user, campaign.podId));
+  const fixer = canPublish ? 'Open it, fix this and publish it again.' : campaign.followupSourceId ? '' : `Ask whoever created it, or a Senior FO, Sales Leader or Pod Manager of ${podName}, to publish it again.`;
+  return `${campaign.name} is no longer scheduled and will not start until it is published again. ${why ?? ''} ${fixer}`.replace(/  +/g, ' ').trim();
+}
 
 /**
  * People added from People to a campaign planned in the studio.
@@ -40,7 +48,7 @@ const skipped = (reasons: string[]) => (reasons.length ? `; ${reasons.length} sk
  */
 export async function addPeopleToCalendarCampaign(user: SessionUser, campaign: Campaign, ids: string[]): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
   if (['STOPPED', 'COMPLETED'].includes(campaign.status)) return { ok: false, error: `${campaign.name} has ended.` };
-  if (!['DRAFT', 'PENDING_APPROVAL', 'SCHEDULED'].includes(campaign.status)) return { ok: false, error: `${campaign.name} has started, so its plan is fixed. On its start day a new FO can join with their people, from the campaign page.` };
+  if (!['DRAFT', 'PENDING_APPROVAL', 'SCHEDULED'].includes(campaign.status)) return { ok: false, error: `${campaign.name} has started, so its people can't change.${addFoWindow(campaign).open && canManageCampaigns(user, campaign.podId) ? ' Today is its start day, so you can still add a new FO with their own people from the campaign page.' : ''}` };
   if (campaign.followupSourceId) return { ok: false, error: `${campaign.name} is a follow-up: it holds only the people who did not reply to the campaign before it.` };
   const fresh = ids.filter((id) => !campaign.personIds.includes(id));
   if (!fresh.length) return { ok: true, message: 'Everyone chosen is already in this campaign.' };
@@ -51,17 +59,18 @@ export async function addPeopleToCalendarCampaign(user: SessionUser, campaign: C
   const issues = await campaignAudienceIssues(fresh, { podId: pod.id, podOwnerValue: pod.podOwnerValue, podName: pod.name, ownerMemberIds, campaignId: campaign.id, checkOwners: ownerMemberIds.length > 0, anyPod: canAddFromAnyPod(user) });
   const refused = new Set(issues.map((i) => i.id));
   const accepted = fresh.filter((id) => !refused.has(id));
-  const note = skipped(issues.map((i) => i.reason));
-  if (!accepted.length) return { ok: false, error: `Nobody could be added${note}.` };
+  const note = skipped(issues);
+  if (!accepted.length) return { ok: false, error: `Nobody could be added to ${campaign.name}: ${whoAndWhy(issues)}.` };
   const add = (d: CampaignDraft) => ({ ...d, personIds: [...new Set([...d.personIds, ...accepted])] });
 
   if (campaign.status === 'SCHEDULED') {
     const r = await replanScheduledCampaign(campaign.id, add, user, 'people_added');
-    if (r.outcome === 'withdrawn') return { ok: true, message: `${people(accepted.length)} added${note}. ${campaign.name} is back in draft because ${r.reason}; review and publish it before it starts.` };
+    if (r.outcome === 'withdrawn') return { ok: true, message: `${people(accepted.length)} added. ${backInDraft(user, campaign, pod.name, r.reason)}${note}` };
     const planned = new Set(r.plan!.draft.personIds);
     const out = accepted.filter((id) => !planned.has(id));
-    const why = r.plan!.leftOut.filter((l) => out.includes(l.id)).map((l) => l.reason);
-    return { ok: true, message: `${people(accepted.length - out.length)} added to ${campaign.name}, and its calendar was updated${skipped([...issues.map((i) => i.reason), ...why])}.` };
+    const why = r.plan!.leftOut.filter((l) => out.includes(l.id));
+    if (out.length === accepted.length) return { ok: false, error: `Nobody could be added to ${campaign.name}: ${whoAndWhy([...issues, ...why])}.` };
+    return { ok: true, message: `${people(accepted.length - out.length)} added to ${campaign.name}, and its calendar was updated.${skipped([...issues, ...why])}` };
   }
 
   await prisma.$transaction(async (tx) => {
@@ -72,7 +81,7 @@ export async function addPeopleToCalendarCampaign(user: SessionUser, campaign: C
     await tx.campaign.update({ where: { id: now.id }, data: { personIds: [...new Set([...now.personIds, ...accepted])], plannerDraft: { ...add(d), ...(d.request ? { request: add(d.request) } : {}) } as unknown as Prisma.InputJsonValue } });
     await logAudit({ entityType: 'campaign', entityId: now.id, action: 'people_added', actor: userActor(user), details: { added: accepted.length, skipped: issues.length } }, tx);
   });
-  return { ok: true, message: `${people(accepted.length)} added to ${campaign.name}${note}. They are planned when it is published.` };
+  return { ok: true, message: `${people(accepted.length)} added to ${campaign.name}. They are planned when it is published.${note}` };
 }
 
 /**
@@ -86,7 +95,7 @@ export async function removePeopleFromUpcomingCalendar(user: SessionUser, campai
   const without = (d: CampaignDraft) => ({ ...d, personIds: d.personIds.filter((id) => !drop.has(id)), assignments: Object.fromEntries(Object.entries(d.assignments).filter(([id]) => !drop.has(id))), ...(d.foAssignments ? { foAssignments: Object.fromEntries(Object.entries(d.foAssignments).filter(([id]) => !drop.has(id))) } : {}) });
   if (campaign.status === 'SCHEDULED') {
     const r = await replanScheduledCampaign(campaign.id, without, user, 'people_removed');
-    return { ok: true, message: r.outcome === 'republished' ? `${people(count)} removed from ${campaign.name}, and its calendar was updated.` : `${people(count)} removed. ${campaign.name} is back in draft because ${r.reason}; review and publish it before it starts.` };
+    return { ok: true, message: r.outcome === 'republished' ? `${people(count)} removed from ${campaign.name}, and its calendar was updated.` : `${people(count)} removed. ${backInDraft(user, campaign, (await prisma.pod.findUnique({ where: { id: campaign.podId }, select: { name: true } }))?.name ?? 'its pod', r.reason)}` };
   }
   await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext('campaign-planner-publication'))`;

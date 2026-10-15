@@ -74,8 +74,8 @@ describe('changing a studio campaign’s people from People', () => {
     const refused = [asUser(b.users.alisa, [b.pods.Alisa.id]), asUser(b.users.daniel, [b.pods.Leigh.id]), asUser(b.users.leigh, [b.pods.Leigh.id], 'POD_MANAGER'), asUser(b.users.daniel, [], 'BIZ_OPS')];
     for (const who of refused) {
       auth.user.mockResolvedValue(who);
-      expect(await addPeopleToCampaignAction(form(id, ['person-09']))).toEqual({ ok: false, error: expect.stringMatching(/Only the FOs on this campaign/) });
-      expect(await removePeopleFromCampaignAction(form(id, ['person-05']))).toEqual({ ok: false, error: expect.stringMatching(/Only the FOs on this campaign/) });
+      expect(await addPeopleToCampaignAction(form(id, ['person-09']))).toEqual({ ok: false, error: expect.stringMatching(/^(Only the FOs on this campaign, the Sales Leaders and Pod Managers of .+, and admins can change who is in it|Biz Ops can view campaigns but cannot change who is in them)\.$/) });
+      expect(await removePeopleFromCampaignAction(form(id, ['person-05']))).toEqual({ ok: false, error: expect.stringMatching(/^(Only the FOs on this campaign, the Sales Leaders and Pod Managers of .+, and admins can change who is in it|Biz Ops can view campaigns but cannot change who is in them)\.$/) });
     }
     expect((await load(id)).personIds).toEqual(KARSON);
     for (const who of allowed) {
@@ -97,8 +97,8 @@ describe('changing a studio campaign’s people from People', () => {
   it('adds to a draft’s audience, skipping who cannot be in it, and says why', async () => {
     const id = await draft();
     const r = await addPeopleToCampaignAction(form(id, ['person-09', 'person-10', 'person-01', 'person-05']));
-    expect(r).toEqual({ ok: true, message: expect.stringMatching(/^1 person added to Karson only; 2 skipped: .*Do not contact/) });
-    expect(r.ok && r.message).toMatch(/Owned by Alisa/);
+    expect(r).toEqual({ ok: true, message: expect.stringMatching(/^1 person added to Karson only\. They are planned when it is published\. Not added: .+\(marked Do not contact in Twenty\)/) });
+    expect(r.ok && r.message).toMatch(/\(owned by Alisa .*, who is not on this campaign\)/);
     const c = await load(id);
     expect(c.status).toBe('DRAFT');
     expect(c.personIds).toEqual([...KARSON, 'person-09']);
@@ -106,7 +106,7 @@ describe('changing a studio campaign’s people from People', () => {
     expect(saved.personIds).toEqual([...KARSON, 'person-09']);
     if (saved.request) expect(saved.request.personIds).toEqual([...KARSON, 'person-09']);
     // Nobody who can join: refused, and nothing changes.
-    expect(await addPeopleToCampaignAction(form(id, ['person-10']))).toEqual({ ok: false, error: expect.stringMatching(/Nobody could be added; 1 skipped: Do not contact/) });
+    expect(await addPeopleToCampaignAction(form(id, ['person-10']))).toEqual({ ok: false, error: expect.stringMatching(/^Nobody could be added to Karson only: .+ \(marked Do not contact in Twenty\)\.$/) });
     // Taking someone out of a draft drops them from its outreach choices too.
     const withChoice = { ...(await stored(id)), assignments: { 'person-09': 'default' } };
     await prisma.campaign.update({ where: { id }, data: { plannerDraft: withChoice } });
@@ -148,7 +148,7 @@ describe('changing a studio campaign’s people from People', () => {
   it('fixes the plan once it runs: nobody new, and taking someone out ends their outreach', async () => {
     const id = await scheduled();
     await activateCampaign(id, { actor: SYSTEM_ACTOR, now: new Date('2027-01-04T16:00:00Z'), skipSync: true });
-    expect(await addPeopleToCampaignAction(form(id, ['person-09']))).toEqual({ ok: false, error: expect.stringMatching(/has started, so its plan is fixed/) });
+    expect(await addPeopleToCampaignAction(form(id, ['person-09']))).toEqual({ ok: false, error: expect.stringMatching(/has started, so its people can't change\./) });
     expect((await load(id)).personIds).not.toContain('person-09');
     const removed = await removePeopleFromCampaignAction(form(id, ['person-05']));
     expect(removed.ok).toBe(true);
@@ -172,7 +172,7 @@ describe('changing a studio campaign’s people from People', () => {
     // Running: Alisa runs its enrollment, so Alisa may change it and Karson may not.
     await prisma.campaign.update({ where: { id: legacy.id }, data: { status: 'ACTIVE' } });
     await prisma.enrollment.create({ data: { campaignId: legacy.id, personId: 'person-01', foUserId: b.users.alisa.id, podId: b.pods.Alisa.id, sequenceId: b.sequence.id, startDate: '2027-01-04', status: 'ACTIVE' } });
-    expect(await removePeopleFromCampaignAction(form(legacy.id, ['person-01']))).toEqual({ ok: false, error: expect.stringMatching(/Only the FOs on this campaign/) });
+    expect(await removePeopleFromCampaignAction(form(legacy.id, ['person-01']))).toEqual({ ok: false, error: expect.stringMatching(/^(Only the FOs on this campaign, the Sales Leaders and Pod Managers of .+, and admins can change who is in it|Biz Ops can view campaigns but cannot change who is in them)\.$/) });
     expect((await membershipFor(['person-01'])).get('person-01')![0]).toEqual(expect.objectContaining({ foIds: [b.users.alisa.id], podWide: false }));
     auth.user.mockResolvedValue(asUser(b.users.alisa, [b.pods.Alisa.id]));
     expect((await removePeopleFromCampaignAction(form(legacy.id, ['person-01']))).ok).toBe(true);

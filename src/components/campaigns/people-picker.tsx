@@ -32,6 +32,7 @@ export function PeoplePicker({ campaignPodId, campaignFoIds, campaignId, value, 
   const [text, setText] = useState('');
   const [rows, setRows] = useState<PickerRow[]>([]);
   const [total, setTotal] = useState(0);
+  const [scopeNote, setScopeNote] = useState<string | undefined>();
   const [pageSize, setPageSize] = useState(100);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -53,7 +54,7 @@ export function PeoplePicker({ campaignPodId, campaignFoIds, campaignId, value, 
       const r = await pickPeopleAction({ ...filters, withinIds: scope, campaignPodId, campaignFoIds: JSON.parse(foKey), campaignId });
       // An older answer arriving after a newer one is dropped.
       if (id !== request.current) return;
-      if (r.ok) { setRows(r.rows); setTotal(r.total); setPageSize(r.pageSize); setError(null); }
+      if (r.ok) { setRows(r.rows); setTotal(r.total); setPageSize(r.pageSize); setScopeNote(r.scopeNote); setError(null); }
       else setError(r.error);
     });
     // scope is derived from withinIds and the selection (selectedKey) listed here.
@@ -81,7 +82,7 @@ export function PeoplePicker({ campaignPodId, campaignFoIds, campaignId, value, 
     setSelectingAll(true);
     try {
       const r = await pickAllIdsAction({ ...filters, withinIds, campaignPodId, campaignFoIds: JSON.parse(foKey), campaignId });
-      if (r.ok) { onChange([...new Set([...latest.current, ...r.ids.filter(id => !disabled.has(id))])]); setSelectionNotice(r.skipped ? `${r.skipped === 1 ? "1 person can't join this campaign and wasn't" : `${r.skipped.toLocaleString('en-US')} people can't join this campaign and weren't`} added` : ''); }
+      if (r.ok) { onChange([...new Set([...latest.current, ...r.ids.filter(id => !disabled.has(id))])]); setSelectionNotice(r.skipped ? `Not added: ${r.why}.` : ''); }
       else setError(r.error);
     } finally {
       setSelectingAll(false);
@@ -115,7 +116,7 @@ export function PeoplePicker({ campaignPodId, campaignFoIds, campaignId, value, 
             </select>
             {filterSelect({ name: 'tier', label: 'Filter by tier', all: 'Any tier', items: options.tiers.map((t) => ({ value: t, label: optionLabel(t) })) })}
             <button type="button" onClick={() => set({ mip: !filters.mip })} aria-pressed={filters.mip} className={filters.mip ? 'chip' : 'chip-muted !border !border-line'} title="Most-important people">MIP</button>
-            <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} className={`btn-secondary btn-sm ${showMore || moreCount ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
+            <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} className={`btn-secondary !text-[12.5px] ${showMore || moreCount ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
               <IconFilter size={14} /> Filters{moreCount ? <span className="ml-1 tabular-nums">{moreCount}</span> : null}
             </button>
             {showMore || moreCount ? <div className="flex w-full flex-wrap items-center gap-2 rounded-[10px] border border-line bg-canvas/70 p-2">
@@ -128,7 +129,7 @@ export function PeoplePicker({ campaignPodId, campaignFoIds, campaignId, value, 
       </div>
 
       <div className="flex flex-wrap items-center gap-3 text-[12.5px] text-ink-600">
-        <span><Count value={total} /> matching{total > 0 ? <span className="text-ink-400"> · {first.toLocaleString('en-US')}–{last.toLocaleString('en-US')}</span> : null}</span>
+        <span><Count value={total} /> matching{total > 0 ? <span className="text-ink-400"> · {first.toLocaleString('en-US')}-{last.toLocaleString('en-US')}</span> : null}{total > 0 && scopeNote ? <span className="ml-2 text-ink-700">{scopeNote}</span> : null}</span>
         {onlySelected ? <span className="font-medium text-ink-900">Showing the people you selected</span> : <button type="button" className="btn-secondary btn-sm" disabled={pending || selectingAll || total === 0} onClick={() => void selectAll()}>
           {selectingAll ? 'Selecting…' : 'Select all matching'}
         </button>}
@@ -169,7 +170,7 @@ export function PeoplePicker({ campaignPodId, campaignFoIds, campaignId, value, 
                   <td><Badge tone={STATE_TONE[r.state]}>{r.state}</Badge></td>
                 </tr>
               ))}
-              {!rows.length && !pending ? <tr><td colSpan={5} className="py-8 text-center text-[13px] text-ink-400">Nobody matches these filters</td></tr> : null}
+              {!rows.length && !pending ? <tr><td colSpan={5} className={`py-8 text-center text-[13px] ${scopeNote ? 'text-ink-700' : 'text-ink-400'}`}>{scopeNote ?? 'Nobody matches these filters'}</td></tr> : null}
             </tbody>
           </table>
         </div>

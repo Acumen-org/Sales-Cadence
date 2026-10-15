@@ -16,7 +16,7 @@ export function PersonBadges({ person }: { person: TaskBrief['person'] }) {
   const standing = crmStanding(person);
   const warnings = contactWarnings(person);
   return <>
-    <Badge tone={standing.tone} dot>{standing.label}</Badge>
+    <Badge tone={standing.tone}>{standing.label}</Badge>
     {person.tier ? <TierBadge tier={person.tier} /> : null}
     {warnings.map((warning) => <Badge key={warning.label} tone={warning.tone}>{warning.label}</Badge>)}
   </>;
@@ -28,8 +28,8 @@ const KIND_ICON: Record<BriefTimelineItem['kind'], string> = { email: 'EMAIL', c
 
 function TimelineRow({ item, timezone }: { item: BriefTimelineItem; timezone: string }) {
   const icon = KIND_ICON[item.kind];
-  return <li className="relative pl-7"><span aria-hidden className="absolute left-[7px] top-2 h-full w-px bg-line" /><span aria-hidden className="absolute left-0 top-1 rounded-full bg-white text-brand-700">{icon === 'NOTE' ? <IconNote size={15} /> : icon === 'STATE' || icon === 'MEETING' ? <span className="block h-3.5 w-3.5 rounded-full border-2 border-current" /> : <ActionIcon action={icon} size={15} />}</span>
-    <div className="space-y-2 pb-5"><div className="text-sm font-medium leading-relaxed text-ink-900">{item.title}</div>{item.detail ? <details><summary className="cursor-pointer text-xs font-medium text-brand-700">Details</summary><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed text-ink-800">{item.detail}</p></details> : null}<div className="flex flex-wrap gap-2"><time dateTime={item.at.toISOString()} className="text-xs text-ink-500">{formatInstant(item.at, timezone)}</time>{item.direction === 'in' ? <Badge tone="green">Inbound</Badge> : null}</div>{item.actor ? <div className="text-xs"><span className="text-ink-500">By</span><strong className="ml-2 text-ink-900">{item.actor}</strong></div> : null}</div>
+  return <li className="relative pl-7"><span aria-hidden className="absolute left-[7px] top-2 h-full w-px bg-line" /><span aria-hidden className="absolute left-0 top-1 rounded-full bg-white text-brand-700">{icon === 'NOTE' ? <IconNote size={15} /> : <ActionIcon action={icon} size={15} />}</span>
+    <div className="space-y-2 pb-5"><div className="text-sm font-medium leading-relaxed text-ink-900">{item.title}</div>{item.detail ? <details><summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden text-xs font-medium text-brand-700">Details</summary><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed text-ink-800">{item.detail}</p></details> : null}<div className="flex flex-wrap gap-2"><time dateTime={item.at.toISOString()} className="text-xs text-ink-500">{formatInstant(item.at, timezone)}</time>{item.direction === 'in' ? <Badge tone="green">Inbound</Badge> : null}</div>{item.actor ? <div className="text-xs"><span className="text-ink-500">By</span><strong className="ml-2 text-ink-900">{item.actor}</strong></div> : null}</div>
   </li>;
 }
 

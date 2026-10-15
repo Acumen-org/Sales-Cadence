@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma } from '../db';
 import { requireUser, toActor, type SessionUser } from '../auth/current-user';
-import { isAdmin, isBizOps, isJuniorFo, isPodLeader } from '../auth/rbac';
+import { isAdmin, isBizOps, isJuniorFo, isPodLeader, whyNotWorkTask } from '../auth/rbac';
 import { userActor } from '../audit';
 import { formatLocalDate, todayIn } from '../dates';
 import { completeNextAction, moveNextAction, setNextActions, stopNextAction, validateNextAction } from '../next-actions';
@@ -77,7 +77,7 @@ async function loadOwn(id: string) {
   const user = await requireUser();
   const na = await prisma.nextAction.findUnique({ where: { id }, select: { id: true, foUserId: true, personId: true, state: true } });
   if (!na) return { user, na: null, error: 'Task not found.' };
-  if (!(await mayWork(user, na.foUserId))) return { user, na: null, error: 'You cannot change this task.' };
+  if (!(await mayWork(user, na.foUserId))) return { user, na: null, error: whyNotWorkTask(toActor(user), (await prisma.user.findUnique({ where: { id: na.foUserId }, select: { name: true } }))?.name ?? 'someone else') };
   return { user, na, error: null };
 }
 

@@ -1158,3 +1158,26 @@ work this pod's campaign stays out, and the reason names that person's pod ("Own
 Senior in Andrew's pod"). Everyone else still picks from the campaign's pod. Someone a Pod Manager
 brought in stays in when a Senior FO edits the campaign or an FO adds people from People: the
 check passes everyone the campaign already holds (`campaignMembers`) and applies only to new picks.
+
+## Blockers that say why, and a consistency pass (15 October 2026)
+
+The owner asked for error and blocker messages that leave nobody guessing, above all in the
+campaign studio, and for a clean-up that keeps the look but removes what reads as generated.
+
+- **Every refusal says why and who can.** The `whyNot*` helpers in `rbac.ts` are the only source
+  of permission wording: they name the pod, the creator, and the roles that can act ("the Senior
+  FOs, Sales Leaders and Pod Managers of Alisa's pod"), never "pod leader". Biz Ops is told it reads.
+- **Contact reasons are one plain clause** that reads on its own under a name, as a group heading
+  and inside "Not added: ..." lists: "Marked Do not contact in Twenty", "Owned by X in another pod
+  (Y)", "In Y, so only a Pod Manager or admin can add them". `whoAndWhy` groups people by reason;
+  a reason is never repeated per person.
+- **Nothing blocks in silence.** Next and Publish say their reason beside the button; a failed
+  publish goes back to the step that needs fixing; a campaign that falls back to draft says it will
+  not start, why, and who can publish it; a launch failure names who changed and how, and is shown
+  only until the campaign is published again.
+- **Polish kept the incumbent design.** Removed: em and en dashes in visible text, the studio
+  kicker and the Home "Due today" kicker, the info icon on the meeting form, unicode glyphs used as
+  icons, decorative badge dots, a nested shadow card, the last bold weights. Aligned: toolbar
+  control heights, label style in the task panel, one icon per sidebar section. Kept on purpose:
+  the second "New campaign" in the empty state, the enrichment header counts, the chart palette.
+

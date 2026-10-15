@@ -16,7 +16,7 @@ type Choice = CampaignChoice & { placesLeft: number | null };
  * "Add to campaign": the upcoming and running campaigns the reader may change, each with the
  * places it still has, and a new campaign at the end. Works for one person or a selection.
  */
-export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', label = 'Add to campaign', onDone, disabled = false, disabledTitle }: { personIds: string[]; className?: string; label?: string; /** Gets the result, to show once this closes (the bulk bar unmounts it). */ onDone?: (message?: string) => void; /** Greyed out, with the reason on hover: everyone chosen is already in a campaign. */ disabled?: boolean; disabledTitle?: string }) {
+export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', label = 'Add to campaign', onDone, disabled = false, disabledTitle, alreadyIn = 0 }: { personIds: string[]; /** Chosen people left out because they are already in a campaign, said in the title. */ alreadyIn?: number; className?: string; label?: string; /** Gets the result, to show once this closes (the bulk bar unmounts it). */ onDone?: (message?: string) => void; /** Greyed out, with the reason on hover: everyone chosen is already in a campaign. */ disabled?: boolean; disabledTitle?: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [choices, setChoices] = useState<Choice[] | null>(null);
@@ -51,14 +51,14 @@ export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', lab
       {open ? (
         <Modal label="Add to campaign" onClose={() => setOpen(false)}>
           <div className="flex items-center gap-3 border-b border-line p-5">
-            <h2 className="text-lg font-semibold">Add <Count value={personIds.length} /> {personIds.length === 1 ? 'person' : 'people'} to a campaign</h2>
+            <h2 className="text-lg font-semibold">Add <Count value={personIds.length} /> {personIds.length === 1 ? 'person' : 'people'} to a campaign{alreadyIn ? <span className="ml-2 text-[13px] font-normal text-ink-500">{alreadyIn} already in a campaign {alreadyIn === 1 ? 'is' : 'are'} left out</span> : null}</h2>
             <button type="button" aria-label="Close" className="btn-icon-ghost ml-auto" onClick={() => setOpen(false)}><IconClose size={16} /></button>
           </div>
           <div className="max-h-[60vh] overflow-y-auto">
             {error ? <p role="alert" className="p-5 text-sm text-red-700">{error}</p> : null}
             {message ? <p role="status" className="p-5 text-sm text-emerald-700">{message}</p> : null}
             {!choices && !error ? <p role="status" className="p-5 text-sm text-ink-500">Loading campaigns…</p> : null}
-            {choices && !choices.length ? <EmptyState icon={<IconCampaigns size={20} />} title="No upcoming or active campaigns" /> : null}
+            {choices && !choices.length ? <EmptyState icon={<IconCampaigns size={20} />} title="No campaign you can add people to" hint="You can add people to upcoming or running campaigns you are an FO on. Sales Leaders and Pod Managers can add to any campaign in their pods." /> : null}
             {choices?.length ? (
               <ul className="divide-y divide-line">
                 {choices.map((c) => {
@@ -72,7 +72,7 @@ export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', lab
                         </div>
                         <div className="mt-0.5 text-[12px] text-ink-500">{c.podName} · {formatLocalDate(c.startDate)}{c.endDate ? ` → ${formatLocalDate(c.endDate)}` : ''} · <Count value={c.members} /> in it{c.placesLeft !== null ? <> · <span className={full ? 'text-red-700' : ''}><Count value={c.placesLeft} /> places left</span></> : null}</div>
                       </div>
-                      {c.calendar && c.kind === 'running' ? <span className="text-[12.5px] text-ink-500">Started</span> : <button type="button" className="btn-secondary btn-sm" disabled={pending || full} onClick={() => add(c.id)} title={full ? 'Not enough room before the end date' : undefined}>
+                      {c.calendar && c.kind === 'running' ? <span className="text-[12.5px] text-ink-500">Started, so its people can't change</span> : <button type="button" className="btn-secondary btn-sm" disabled={pending || full} onClick={() => add(c.id)} title={full ? 'Not enough room before the end date' : undefined}>
                         Add
                       </button>}
                     </li>

@@ -63,7 +63,7 @@ export function EnrichmentToolbar({ tab, q, fields, wanted, pods, fos, tiers, ty
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative w-full max-w-[220px]">
           <IconSearch size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
-          <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Name or account" aria-label="Search records to enrich" className="!pl-9" />
+          <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Name or account" aria-label="Search records to enrich" className="!pl-9 !text-[12.5px]" />
         </div>
         {filterSelect({ name: 'pod', value: values.pod, title: 'Filter by pod', all: 'All pods', options: pods.map((p) => ({ value: p.value, label: p.name })) })}
         {filterSelect({ name: 'fo', value: values.fo, title: 'Filter by FO', all: 'All FOs', options: fos.map((f) => ({ value: f.id, label: f.name })) })}
@@ -76,7 +76,7 @@ export function EnrichmentToolbar({ tab, q, fields, wanted, pods, fos, tiers, ty
             {label(field)} missing <span aria-hidden className="text-brand-500">×</span>
           </button>
         ))}
-        <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} aria-controls={panelId} className={`btn-secondary btn-sm ${showMore || more ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
+        <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} aria-controls={panelId} className={`btn-secondary !text-[12.5px] ${showMore || more ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
           <IconFilter size={14} /> Filters{more ? <span className="ml-1 tabular-nums">{more}</span> : null}
         </button>
         <SortControl

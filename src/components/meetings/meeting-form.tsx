@@ -119,7 +119,7 @@ export function MeetingForm({ companies, fos, initial, mode }: { companies: { id
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-1.5 md:col-span-2">
-          <div className="flex items-center gap-2 text-[12px] font-medium text-ink-500"><label htmlFor="meeting-link">Recording or meeting link</label><EmbedGuide open={needsEmbed} /></div>
+          <div className="flex items-center gap-2 text-[12px] font-medium text-ink-500"><label htmlFor="meeting-link">Recording or meeting link</label>{needsEmbed ? <EmbedGuide open /> : null}</div>
           <div className="flex flex-wrap items-center gap-2">
             <input id="meeting-link" name="sourceUrl" aria-label="Recording or meeting link" value={url} onChange={(e) => setUrl(extractRecordingUrl(e.target.value))} onPaste={(e) => { e.preventDefault(); pasted(e.clipboardData.getData('text')); }} placeholder="Paste the recording link or its embed code" className="!w-auto min-w-0 flex-1" />
             <button type="button" className="btn-secondary" disabled={pending || !parsed || Boolean(parsed.note?.includes('does not look like a URL'))} onClick={() => fillFromLink()}>{pending ? 'Reading…' : 'Fill from link'}</button>

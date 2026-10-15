@@ -56,7 +56,7 @@ test('an edited outreach that cannot take everyone says why in Outreach and offe
   // Typing while it is re-checked keeps the panel where it is instead of pulling it out from under the cursor.
   await page.getByLabel('Step 1 email subject').fill('Still here');expect(await fix.count()).toBe(1);await expect(fix.getByRole('button',{name:'Set it for me'})).toBeEnabled();
   // The studio's own outreach is the recommended fix, in the panel and beside Next; it can be taken back.
-  await expect(page.locator('footer')).toContainText('Fix the plan above to continue.');await expect(page.locator('footer').getByRole('button',{name:'See how to fix'})).toBeVisible();
+  await expect(page.locator('footer')).toContainText('Fix the problem above to continue.');await expect(page.locator('footer').getByRole('button',{name:'See how to fix'})).toBeVisible();
   await expect(fix).toContainText('Let the studio set the outreach');
   await fix.getByRole('button',{name:'Set it for me',exact:true}).click();
   await expect(page.getByRole('status').filter({hasText:'The studio set the outreach.'})).toBeVisible();
@@ -83,7 +83,7 @@ test('retired sequence URLs lead to campaigns and the studio fits a phone',async
   await login(page);await page.goto('/sequences');await expect(page).toHaveURL(/\/campaigns$/);
   await expect(page.getByRole('link',{name:'Sequences',exact:true})).toHaveCount(0);
   await page.setViewportSize({width:390,height:844});await page.goto('/campaigns/new');
-  await expect(page.getByRole('heading',{name:'Build your next conversation'})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'New campaign'})).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
   await beginStudio(page,'StudioMobile');expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2)).toBe(true);
 });
@@ -92,7 +92,7 @@ test('gates setup and leaves numeric inputs empty while editing',async({page})=>
  await login(page);await page.goto('/campaigns/new');
  // Next never waits in silence: it names everything still needed, once.
  await page.getByRole('button',{name:'Next: Outreach'}).click();
- await expect(page.locator('main').getByRole('alert')).toContainText('Still needed: a campaign name, a product, an FO and people.');
+ await expect(page.locator('main').getByRole('alert')).toContainText('To continue, add a campaign name, a product, an FO and at least one person in the audience.');
  const nav=page.getByRole('navigation',{name:'Campaign setup'});await expect(nav.getByRole('button').nth(2)).toBeDisabled();
  const rate=page.getByLabel('Default new people per day');await rate.fill('');await expect(rate).toHaveValue('');await rate.pressSequentially('25');await expect(rate).toHaveValue('25');
  await page.getByRole('checkbox',{name:'Alisa Senior',exact:true}).check();const own=page.getByLabel('Alisa Senior new people per day');await own.fill('');await expect(own).toHaveValue('');await own.pressSequentially('12');await expect(own).toHaveValue('12');
@@ -143,7 +143,7 @@ test('unreachable contacts are skipped in the picker and left out of the plan wi
  await db.personCache.createMany({data:[{id:'AudienceReview-dnd',firstName:'AudienceReview',lastName:'DoNotContact',sortName:'audiencereview donotcontact',podOwner:'ALISA',dnd:true},{id:'AudienceReview-optout',firstName:'AudienceReview',lastName:'OptedOut',sortName:'audiencereview optedout',podOwner:'ALISA',optedOut:true}]});
  await page.getByLabel('Search people to add').fill('AudienceReview');await expect(page.getByText('6 matching')).toBeVisible();await expect(page.getByRole('button',{name:'Select all matching',exact:true})).toBeEnabled();
  await expect(page.getByLabel('Select AudienceReview DoNotContact',{exact:true})).toBeDisabled();await expect(page.getByLabel('Select AudienceReview OptedOut',{exact:true})).toBeDisabled();
- await page.getByRole('button',{name:'Select all matching',exact:true}).click();await expect(page.getByRole('status').filter({hasText:"2 people can't join this campaign and weren't added"})).toBeVisible();
+ await page.getByRole('button',{name:'Select all matching',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'Not added: AudienceReview DoNotContact (marked Do not contact in Twenty); AudienceReview OptedOut (asked not to be contacted).'})).toBeVisible();
  // A CRM flag set after selection does not stop the campaign: that person is left out, by name.
  await db.personCache.update({where:{id:'AudienceReview-0'},data:{dnd:true}});
  await page.getByRole('button',{name:'Next: Outreach',exact:true}).click();await expect(page.getByRole('heading',{name:'Outreach groups',exact:true})).toBeVisible();
@@ -190,9 +190,9 @@ test('a campaign lists its people 50 to a page, before and after it starts',asyn
  const c=await db.campaign.findUniqueOrThrow({where:{id}});const ids=[...c.personIds,...extra.map(p=>p.id)];const d=c.plannerDraft as {personIds:string[];request?:{personIds:string[]}};
  await db.campaign.update({where:{id},data:{personIds:ids,plannerDraft:{...d,personIds:ids,...(d.request?{request:{...d.request,personIds:ids}}:{})}}});
  await page.goto(`/campaigns/${id}`);const people=page.locator('section',{has:page.getByRole('heading',{name:/^People \d/})});await expect(people.getByRole('heading')).toHaveText('People 60');
- await expect(people.getByText('1–50 of 60')).toBeVisible();await expect(people.locator('tbody tr')).toHaveCount(50);await expect(people.getByText('Page 1 of 2')).toBeVisible();
- await people.getByRole('link',{name:'Next',exact:true}).click();await expect(people.getByText('51–60 of 60')).toBeVisible();await expect(people.locator('tbody tr')).toHaveCount(10);
- await people.getByRole('link',{name:'Previous',exact:true}).click();await expect(people.getByText('1–50 of 60')).toBeVisible();
+ await expect(people.getByText('1-50 of 60')).toBeVisible();await expect(people.locator('tbody tr')).toHaveCount(50);await expect(people.getByText('Page 1 of 2')).toBeVisible();
+ await people.getByRole('link',{name:'Next',exact:true}).click();await expect(people.getByText('51-60 of 60')).toBeVisible();await expect(people.locator('tbody tr')).toHaveCount(10);
+ await people.getByRole('link',{name:'Previous',exact:true}).click();await expect(people.getByText('1-50 of 60')).toBeVisible();
  // Search narrows the list and the pages with it.
  await people.getByLabel('Search people in the campaign').fill('X05');await people.getByLabel('Search people in the campaign').press('Enter');await expect(people.locator('tbody tr')).toHaveCount(1);await expect(people.getByText('Page 1 of 2')).toHaveCount(0);
 });

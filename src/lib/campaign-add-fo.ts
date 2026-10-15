@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma, type Tx } from './db';
 import type { SessionUser } from './auth/current-user';
-import { canAddFromAnyPod, canManageCampaigns, ROLES_NEEDING_POD } from './auth/rbac';
+import { canAddFromAnyPod, ROLES_NEEDING_POD, whyNotManageCampaign } from './auth/rbac';
 import { campaignAudienceIssues } from './campaign-audience';
 import { CampaignDraftSchema, shortDateLabel, type CampaignDraft, type PlannedBatch, type PlannerPerson } from './campaign-planner';
 import { fitCampaign, isFit } from './campaign-fit';
@@ -65,21 +65,22 @@ export async function addFoCandidates(campaignId: string, db: Tx = prisma) {
 /** Plan the new FO's part without writing anything. The same function runs again inside apply. */
 export async function planAddFo(user: SessionUser, campaignId: string, input: AddFoInput, options: { now?: Date } = {}, db: Tx = prisma): Promise<AddFoResult> {
   const c = await db.campaign.findUnique({ where: { id: campaignId }, include: { pod: true } });
-  if (!c) return { ok: false, error: 'Campaign not found.' };
-  if (!canManageCampaigns(user, c.podId)) return { ok: false, error: 'Only the pod’s leaders and admins can add an FO to a running campaign.' };
+  if (!c) return { ok: false, error: 'This campaign has been deleted.' };
+  const refused = whyNotManageCampaign(user, c.podId, c.pod.name, 'add an FO to a running campaign');
+  if (refused) return { ok: false, error: refused };
   const window = addFoWindow(c, options.now);
   if (!window.open) return { ok: false, error: window.reason };
   const stored = c.plannerDraft as unknown as Stored;
   const plan = c.publishedPlan as unknown as PublishedCalendar;
   if (!Number.isInteger(input.batchSize) || input.batchSize < 1 || input.batchSize > 500) return { ok: false, error: 'New people a day must be a whole number from 1 to 500.' };
   const fo = (await addFoCandidates(campaignId, db)).find((f) => f.id === input.foId);
-  if (!fo) return { ok: false, error: 'Choose an FO of this pod who is not on the campaign yet.' };
+  if (!fo) return { ok: false, error: `Choose an FO from ${c.pod.name} who is not on this campaign yet.` };
 
   // Only people nobody holds: not in this campaign or any other, reachable, and the new FO's own or unowned.
   const ids = [...new Set(input.personIds)];
   if (!ids.length) return { ok: false, error: `Choose the people ${fo.name} will reach.` };
   const members = new Set([...c.personIds, ...(await db.enrollment.findMany({ where: { campaignId, personId: { in: ids } }, select: { personId: true } })).map((e) => e.personId)]);
-  const issues = await campaignAudienceIssues(ids.filter((id) => !members.has(id)), { podId: c.podId, podOwnerValue: c.pod.podOwnerValue, podName: c.pod.name, ownerMemberIds: fo.twentyMemberId ? [fo.twentyMemberId] : [], checkOwners: true, anyPod: canAddFromAnyPod(user) }, db);
+  const issues = await campaignAudienceIssues(ids.filter((id) => !members.has(id)), { podId: c.podId, podOwnerValue: c.pod.podOwnerValue, podName: c.pod.name, ownerMemberIds: fo.twentyMemberId ? [fo.twentyMemberId] : [], checkOwners: true, anyPod: canAddFromAnyPod(user), joining: fo.name }, db);
   const rows = await db.personCache.findMany({ where: { id: { in: ids } } });
   const byId = new Map(rows.map((p) => [p.id, p]));
   const describe = (id: string, reason: string): LeftOut => { const p = byId.get(id); return { id, name: p ? cachedPersonName(p) : 'Unknown contact', company: p?.companyName ?? null, kind: 'busy', reason }; };
@@ -97,14 +98,14 @@ export async function planAddFo(user: SessionUser, campaignId: string, input: Ad
   if (!isFit(fit) || fit.droppedFos.some((d) => d.id === fo.id)) {
     // The campaign's outreach cannot take this FO's people. An outreach the studio built may be built again for them.
     const automatic = stored.outreachEdited === false || (stored.request?.outreachEdited === false);
-    if (!automatic) return { ok: false, error: `With this campaign’s outreach, ${fo.name}’s ${accepted.length} ${accepted.length === 1 ? 'person' : 'people'} do not fit by ${shortDateLabel(c.endDate ?? c.startDate)}. Try another pace.`, leftOut };
+    if (!automatic) return { ok: false, error: `${fo.name}’s ${accepted.length} ${accepted.length === 1 ? 'person does' : 'people do'} not fit by ${shortDateLabel(c.endDate ?? c.startDate)} with this campaign’s outreach. Choose fewer people.`, leftOut };
     const own = fitCampaign({ ...base, flows: [{ id: 'default', name: 'Default', steps: stored.flows[0].steps.slice(0, 1) }] }, people, team, { reshapeOutreach: true });
-    if (!isFit(own) || own.droppedFos.some((d) => d.id === fo.id)) return { ok: false, error: `${fo.name}’s ${accepted.length} ${accepted.length === 1 ? 'person' : 'people'} do not fit by ${shortDateLabel(c.endDate ?? c.startDate)}. Choose other people.`, leftOut };
+    if (!isFit(own) || own.droppedFos.some((d) => d.id === fo.id)) return { ok: false, error: `${fo.name}’s ${accepted.length} ${accepted.length === 1 ? 'person does' : 'people do'} not fit by ${shortDateLabel(c.endDate ?? c.startDate)}, even with outreach built for them. Choose fewer people.`, leftOut };
     fit = own;
     const id = uniqueFlowId(stored, `fo-${fo.id}`);
     flow = { id, name: `For ${fo.name}`.slice(0, 80), steps: own.draft.flows[0].steps, created: true };
   }
-  if (!fit.calendar.valid) return { ok: false, error: 'No calendar fits this FO’s people. Try another pace or more people.', leftOut };
+  if (!fit.calendar.valid) return { ok: false, error: `${fo.name}’s people can’t be scheduled in this campaign’s dates. Choose fewer people.`, leftOut };
   const trimmed = new Set(fit.overflow);
   for (const id of trimmed) leftOut.push(describe(id, 'No room by the end date, even at 500 new people a day'));
   const batches = fit.calendar.batches.map((b) => ({ ...b, flowId: flow.id }));

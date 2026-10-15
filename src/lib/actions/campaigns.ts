@@ -8,7 +8,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { prisma } from '../db';
 import { requireUser, toActor } from '../auth/current-user';
-import { canApproveCampaign, canChangeCampaignPeople, canCreateCampaign, canManageCampaigns } from '../auth/rbac';
+import { canApproveCampaign, whyNotApproveCampaign, whyNotChangeCampaignPeople, whyNotCreateCampaign, whyNotManageCampaign } from '../auth/rbac';
 import { addPeopleToCalendarCampaign, campaignTeam, removePeopleFromUpcomingCalendar } from '../campaign-people';
 import { logAudit, userActor } from '../audit';
 import { parsePersonIds } from '../csv';
@@ -127,7 +127,8 @@ export async function planCampaignAction(formData: FormData): Promise<ActionResu
   const rateRaw = String(formData.get('startsPerFoPerDay') ?? '').trim();
   const maxRate = rateRaw ? Number(rateRaw) : null;
   if (!sequenceId || !podId) return { ok: false, error: 'Choose a sequence and a pod.' };
-  if (!canCreateCampaign(toActor(user), podId)) return { ok: false, error: 'You cannot create campaigns for this pod.' };
+  const refused = whyNotCreateCampaign(toActor(user), await prisma.pod.findUnique({ where: { id: podId } }));
+  if (refused) return { ok: false, error: refused };
   const windowError = checkWindow({ startDate, endDate });
   if (windowError) return { ok: false, error: windowError };
   const plan = await planCampaignCapacity({ sequenceId, podId, startDate, endDate, maxRate: maxRate && maxRate > 0 ? maxRate : null });
@@ -144,7 +145,8 @@ export async function previewCampaignAction(formData: FormData): Promise<ActionR
   const parsed = readCampaignForm(formData);
   if (!parsed.success) return formError(parsed);
   const d = parsed.data;
-  if (!canCreateCampaign(toActor(user), d.podId)) return { ok: false, error: 'You cannot create campaigns for this pod.' };
+  const refused = whyNotCreateCampaign(toActor(user), await prisma.pod.findUnique({ where: { id: d.podId } }));
+  if (refused) return { ok: false, error: refused };
   const windowError = checkWindow(d);
   if (windowError) return { ok: false, error: windowError };
   try {
@@ -177,14 +179,16 @@ export async function createCampaignAction(_data: FormData): Promise<ActionResul
 
 function failure(error: unknown): ActionResult { return { ok: false, error: error instanceof Error ? error.message : 'Campaign could not be updated.' }; }
 function refreshCampaign(id: string) { revalidatePath('/campaigns'); revalidatePath('/campaigns/' + id); revalidatePath('/tasks'); revalidatePath('/people'); }
-async function loadCampaignForUser(campaignId: string) {
-  const user = await requireUser(); const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
-  if (!campaign) return { user, campaign: null, error: 'Campaign not found.' };
-  if (!canManageCampaigns(user, campaign.podId)) return { user, campaign: null, error: 'You cannot manage this campaign.' };
+/** `what` names the action for the refusal, as in "pause, resume or stop this campaign". */
+async function loadCampaignForUser(campaignId: string, what: string, approving = false) {
+  const user = await requireUser(); const campaign = await prisma.campaign.findUnique({ where: { id: campaignId }, include: { pod: { select: { name: true } } } });
+  if (!campaign) return { user, campaign: null, error: 'This campaign has been deleted.' };
+  const refused = approving ? whyNotApproveCampaign(user, campaign.podId, campaign.pod.name) : whyNotManageCampaign(user, campaign.podId, campaign.pod.name, what);
+  if (refused) return { user, campaign: null, error: refused };
   return { user, campaign, error: null };
 }
 async function transition(formData: FormData, status: 'PAUSED' | 'ACTIVE' | 'STOPPED'): Promise<ActionResult> {
-  const { user, campaign, error } = await loadCampaignForUser(String(formData.get('campaignId') ?? ''));
+  const { user, campaign, error } = await loadCampaignForUser(String(formData.get('campaignId') ?? ''), 'pause, resume or stop this campaign');
   if (!campaign) return { ok: false, error: error ?? 'Not found.' };
   try { await changeCampaignStatus(campaign.id, status, userActor(user)); refreshCampaign(campaign.id); return { ok: true, message: status === 'PAUSED' ? 'Campaign paused.' : status === 'STOPPED' ? 'Campaign stopped.' : 'Campaign resumed.' }; } catch (error) { return failure(error); }
 }
@@ -193,9 +197,9 @@ export async function resumeCampaignAction(data: FormData) { return transition(d
 export async function stopCampaignAction(data: FormData) { return transition(data, 'STOPPED'); }
 
 export async function restartCampaignAction(data: FormData): Promise<ActionResult> {
-  const { user, campaign, error } = await loadCampaignForUser(String(data.get('campaignId') ?? ''));
+  const { user, campaign, error } = await loadCampaignForUser(String(data.get('campaignId') ?? ''), 'plan another run of this campaign');
   if (!campaign) return { ok: false, error: error ?? 'Not found.' };
-  if (campaign.plannerDraft) return { ok: false, error: 'Open the campaign editor to review and publish a complete calendar. Active campaign plans are locked.' };
+  if (campaign.plannerDraft) return { ok: false, error: 'Use Plan another run on this campaign: a campaign built in the studio starts again from a new calendar.' };
   const startDate = String(data.get('startDate') ?? todayIn(user.timezone));
   if (!isLocalDate(startDate)) return { ok: false, error: 'Pick a valid start date.' };
   try {
@@ -210,10 +214,10 @@ export async function restartCampaignAction(data: FormData): Promise<ActionResul
   } catch (error) { return failure(error); }
 }
 export async function approveCampaignAction(data: FormData): Promise<ActionResult> {
-  const { user, campaign, error } = await loadCampaignForUser(String(data.get('campaignId') ?? ''));
+  const { user, campaign, error } = await loadCampaignForUser(String(data.get('campaignId') ?? ''), 'approve this campaign', true);
   if (!campaign) return { ok: false, error: error ?? 'Not found.' };
-  if (campaign.plannerDraft) return { ok: false, error: 'Open the campaign editor to review and publish a complete calendar. Active campaign plans are locked.' };
-  if (!canApproveCampaign(user, campaign.podId)) return { ok: false, error: 'A Sales Leader for this pod or an admin must approve this campaign.' };
+  if (campaign.plannerDraft) return { ok: false, error: 'Open this campaign in the studio to review it. A campaign built in the studio is approved by publishing its calendar.' };
+  if (!canApproveCampaign(user, campaign.podId)) return { ok: false, error: whyNotApproveCampaign(user, campaign.podId, campaign.pod.name)! };
   try {
     const eligible = campaign.followupSourceId ? await nonReplierCandidates(campaign.followupSourceId, campaign.followupWaitDays, new Date(), campaign.followupSourceRun ?? undefined) : [];
     const ids = new Set(eligible.map(e => e.personId));
@@ -227,9 +231,9 @@ export async function approveCampaignAction(data: FormData): Promise<ActionResul
   } catch (error) { return failure(error); }
 }
 export async function rejectCampaignAction(data: FormData): Promise<ActionResult> {
-  const { user, campaign, error } = await loadCampaignForUser(String(data.get('campaignId') ?? ''));
+  const { user, campaign, error } = await loadCampaignForUser(String(data.get('campaignId') ?? ''), 'decline this campaign', true);
   if (!campaign) return { ok: false, error: error ?? 'Not found.' };
-  if (!canApproveCampaign(user, campaign.podId)) return { ok: false, error: 'A Sales Leader for this pod or an admin must review this request.' };
+  if (!canApproveCampaign(user, campaign.podId)) return { ok: false, error: whyNotApproveCampaign(user, campaign.podId, campaign.pod.name)! };
   const changed = await prisma.campaign.updateMany({ where: { id: campaign.id, status: 'PENDING_APPROVAL' }, data: { status: 'STOPPED' } });
   if (!changed.count) return { ok: false, error: 'This request was already handled.' };
   await logAudit({ entityType: 'campaign', entityId: campaign.id, action: 'rejected', actor: userActor(user) }); refreshCampaign(campaign.id);
@@ -241,7 +245,7 @@ export type FollowupPreview = { candidates: Array<{ id: string; name: string; co
 export async function reenrollNonRepliersAction(data: FormData): Promise<ActionResult> {
   const parsed = ReenrollSchema.safeParse(Object.fromEntries(data.entries()));
   if (!parsed.success || !isLocalDate(parsed.data.startDate)) return { ok: false, error: 'Choose a sequence, campaign name, wait time and start date.' };
-  const d = parsed.data; const { user, campaign, error } = await loadCampaignForUser(d.campaignId);
+  const d = parsed.data; const { user, campaign, error } = await loadCampaignForUser(d.campaignId, 'start a follow-up from this campaign');
   if (!campaign) return { ok: false, error: error ?? 'Not found.' };
   const sequence = await prisma.sequence.findFirst({ where: { id: d.sequenceId, archived: false } });
   if (!sequence) return { ok: false, error: 'Choose an available sequence.' };
@@ -299,9 +303,10 @@ export async function addPeopleToCampaignAction(formData: FormData): Promise<Act
   const campaignId = String(formData.get('campaignId') ?? '');
   const ids = idsField(formData);
   if (!ids.length) return { ok: false, error: 'Choose at least one person.' };
-  const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
-  if (!campaign) return { ok: false, error: 'Campaign not found.' };
-  if (!canChangeCampaignPeople(user, await campaignTeam(campaign))) return { ok: false, error: 'Only the FOs on this campaign, its pod\'s Sales Leader and Pod Manager, and admins can change who is in it.' };
+  const campaign = await prisma.campaign.findUnique({ where: { id: campaignId }, include: { pod: { select: { name: true } } } });
+  if (!campaign) return { ok: false, error: 'This campaign has been deleted.' };
+  const refused = whyNotChangeCampaignPeople(user, await campaignTeam(campaign), campaign.pod.name);
+  if (refused) return { ok: false, error: refused };
   try {
     if (campaign.plannerDraft) {
       const r = await addPeopleToCalendarCampaign(user, campaign, ids);
@@ -352,9 +357,10 @@ export async function removePeopleFromCampaignAction(formData: FormData): Promis
   const campaignId = String(formData.get('campaignId') ?? '');
   const ids = idsField(formData);
   if (!ids.length) return { ok: false, error: 'Choose at least one person.' };
-  const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
-  if (!campaign) return { ok: false, error: 'Campaign not found.' };
-  if (!canChangeCampaignPeople(user, await campaignTeam(campaign))) return { ok: false, error: 'Only the FOs on this campaign, its pod\'s Sales Leader and Pod Manager, and admins can change who is in it.' };
+  const campaign = await prisma.campaign.findUnique({ where: { id: campaignId }, include: { pod: { select: { name: true } } } });
+  if (!campaign) return { ok: false, error: 'This campaign has been deleted.' };
+  const refused = whyNotChangeCampaignPeople(user, await campaignTeam(campaign), campaign.pod.name);
+  if (refused) return { ok: false, error: refused };
   try {
     if (campaign.plannerDraft && ['DRAFT', 'SCHEDULED', 'PENDING_APPROVAL'].includes(campaign.status) && !(await prisma.enrollment.count({ where: { campaignId } }))) {
       const r = await removePeopleFromUpcomingCalendar(user, campaign, ids);
@@ -394,9 +400,9 @@ export async function removePeopleFromCampaignAction(formData: FormData): Promis
 
 /** The end-date switch: soft (people finish) or hard (what is left ends on the day). */
 export async function setHardStopAction(formData: FormData): Promise<ActionResult> {
-  const { user, campaign, error } = await loadCampaignForUser(String(formData.get('campaignId') ?? ''));
+  const { user, campaign, error } = await loadCampaignForUser(String(formData.get('campaignId') ?? ''), 'change when this campaign stops');
   if (!campaign) return { ok: false, error: error ?? 'Not found.' };
-  if (campaign.plannerDraft) return { ok: false, error: 'Open the campaign editor to review and publish a complete calendar. Active campaign plans are locked.' };
+  if (campaign.plannerDraft) return { ok: false, error: 'A campaign built in the studio always ends on its end date, so this setting does not apply to it.' };
   const on = String(formData.get('on') ?? '') === '1';
   await prisma.campaign.update({ where: { id: campaign.id }, data: { hardStopAtEnd: on } });
   await logAudit({ entityType: 'campaign', entityId: campaign.id, action: 'updated', actor: userActor(user), details: { hardStopAtEnd: on } });

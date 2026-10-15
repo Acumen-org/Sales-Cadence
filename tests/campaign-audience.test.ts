@@ -35,12 +35,15 @@ describe('who a campaign can reach', () => {
     const issues = await campaignAudienceIssues(['aud-1', 'dnd', 'optout', 'deleted', 'outside', 'karsons', 'andrews', 'seatless', 'missing'], context);
     const reason = Object.fromEntries(issues.map(i => [i.id, i.reason]));
     // An owner in another pod is named with their pod, so it is plain why they cannot be added here.
-    expect(reason).toEqual({ dnd: 'Do not contact', optout: 'Opted out', deleted: 'No longer in Twenty', outside: 'Not in the Alisa pod', karsons: `Owned by ${b.users.karson.name}`, andrews: `Owned by ${b.users.andrew.name} in Pod Andrew`, seatless: 'Owner is not a Cadence user', missing: 'No longer in Twenty' });
+    expect(reason).toEqual({ dnd: 'Marked Do not contact in Twenty', optout: 'Asked not to be contacted', deleted: 'Deleted in Twenty', outside: 'In Pod Andrew, so only a Pod Manager or admin can add them', karsons: `Owned by ${b.users.karson.name}, who is not on this campaign`, andrews: `Owned by ${b.users.andrew.name} in another pod (Pod Andrew)`, seatless: 'Their owner in Twenty is not a Cadence user', missing: 'Deleted in Twenty' });
     // Karson works this pod and could be added; Andrew does not.
     expect(issues.find(i => i.id === 'karsons')?.ownerId).toBe(b.users.karson.id);
     expect(issues.find(i => i.id === 'andrews')?.ownerId).toBeUndefined();
     // A pod named the way Twenty labels it is not called a pod twice.
-    expect((await campaignAudienceIssues(['outside'], { ...context, podName: "Alisa's pod" }))[0].reason).toBe("Not in Alisa's pod");
+    await prisma.pod.update({ where: { id: b.pods.Andrew.id }, data: { name: "Andrew's pod" } });
+    expect((await campaignAudienceIssues(['outside'], context))[0].reason).toBe("In Andrew's pod, so only a Pod Manager or admin can add them");
+    await prisma.pod.update({ where: { id: b.pods.Andrew.id }, data: { name: 'Andrew' } });
+    expect((await campaignAudienceIssues(['outside'], context))[0].reason).toBe('In the Andrew pod, so only a Pod Manager or admin can add them');
     // Before the team is chosen, ownership is not a reason yet.
     expect((await campaignAudienceIssues(['karsons'], { ...context, checkOwners: false }))).toEqual([]);
   });
@@ -88,7 +91,7 @@ describe('who a campaign can reach', () => {
     await prisma.personCache.createMany({ data: many.map(id => ({ id, firstName: 'Aud', lastName: id, podOwner: 'ALISA', ownerMemberId: b.users.alisa.twentyMemberId })) });
     const plan = await planCampaign(draft({ personIds: [...ids, ...many], fos: [{ id: b.users.alisa.id, batchSize: 1 }, { id: b.users.karson.id, batchSize: 1 }] }), admin, undefined, { reshapeOutreach: true });
     expect(plan.calendar.valid).toBe(true);
-    expect(plan.droppedFos).toEqual([{ id: b.users.karson.id, name: b.users.karson.name, reason: 'they own none of the people you picked' }]);
+    expect(plan.droppedFos).toEqual([{ id: b.users.karson.id, name: b.users.karson.name, reason: 'none of the people you picked are theirs' }]);
     expect(plan.leftOut).toEqual([]); expect(plan.draft.personIds).toHaveLength(16);
     expect(plan.paces).toEqual([{ foId: b.users.alisa.id, name: b.users.alisa.name, from: 1, to: 4 }]);
   });
@@ -167,9 +170,9 @@ describe('choosing people by priority', () => {
     ] });
     const filters = { q: 'Pick', state: 'any' as const, campaignPodId: b.pods.Alisa.id, campaignFoIds: [b.users.alisa.id] };
     const r = await pickPeopleAction(filters); if (!r.ok) throw new Error(r.error);
-    expect(Object.fromEntries(r.rows.map(x => [x.id, x.ineligibleReason ?? null]))).toEqual({ 'pick-dnd': 'Do not contact', 'pick-karson': `Owned by ${b.users.karson.name}`, 'pick-ok': null });
+    expect(Object.fromEntries(r.rows.map(x => [x.id, x.ineligibleReason ?? null]))).toEqual({ 'pick-dnd': 'Marked Do not contact in Twenty', 'pick-karson': `Owned by ${b.users.karson.name}, who is not on this campaign`, 'pick-ok': null });
     const all = await pickAllIdsAction(filters); if (!all.ok) throw new Error(all.error);
-    expect(all).toEqual({ ok: true, ids: ['pick-ok'], skipped: 2 });
+    expect(all).toEqual({ ok: true, ids: ['pick-ok'], skipped: 2, why: `Pick Dnd (marked Do not contact in Twenty); Pick Karson (owned by ${b.users.karson.name}, who is not on this campaign)` });
     const early = await pickPeopleAction({ ...filters, campaignFoIds: [] }); if (!early.ok) throw new Error(early.error);
     expect(early.rows.find(x => x.id === 'pick-karson')?.ineligibleReason).toBeUndefined();
   });
@@ -193,10 +196,10 @@ describe('contacts from other pods (owner, 15 October 2026)', () => {
     auth.user.mockResolvedValue(manager);
     const filters = { q: 'Cross', state: 'any' as const, campaignPodId: b.pods.Alisa.id, campaignFoIds: [b.users.alisa.id] };
     const r = await pickPeopleAction(filters); if (!r.ok) throw new Error(r.error);
-    expect(Object.fromEntries(r.rows.map(x => [x.id, x.ineligibleReason ?? null]))).toEqual({ 'cross-andrew': `Owned by ${b.users.andrew.name} in Pod Andrew`, 'cross-free': null, 'cross-free-2': null });
+    expect(Object.fromEntries(r.rows.map(x => [x.id, x.ineligibleReason ?? null]))).toEqual({ 'cross-andrew': `Owned by ${b.users.andrew.name} in another pod (Pod Andrew)`, 'cross-free': null, 'cross-free-2': null });
     // Before the team is chosen too: nobody on this pod could ever take Andrew's contact.
     const early = await pickPeopleAction({ ...filters, campaignFoIds: [] }); if (!early.ok) throw new Error(early.error);
-    expect(early.rows.find(x => x.id === 'cross-andrew')?.ineligibleReason).toBe(`Owned by ${b.users.andrew.name} in Pod Andrew`);
+    expect(early.rows.find(x => x.id === 'cross-andrew')?.ineligibleReason).toBe(`Owned by ${b.users.andrew.name} in another pod (Pod Andrew)`);
     // Everyone else still picks from the campaign's own pod.
     auth.user.mockResolvedValue(senior);
     const theirs = await pickPeopleAction(filters); if (!theirs.ok) throw new Error(theirs.error);
@@ -208,12 +211,12 @@ describe('contacts from other pods (owner, 15 October 2026)', () => {
     const plan = await planCampaign(intent, manager, undefined, { reshapeOutreach: true });
     expect(plan.calendar.valid).toBe(true);
     expect(plan.draft.personIds).toEqual(expect.arrayContaining([...ids, 'cross-free']));
-    expect(plan.leftOut.map(l => [l.id, l.reason])).toEqual([['cross-andrew', `Owned by ${b.users.andrew.name} in Pod Andrew`]]);
+    expect(plan.leftOut.map(l => [l.id, l.reason])).toEqual([['cross-andrew', `Owned by ${b.users.andrew.name} in another pod (Pod Andrew)`]]);
     // A Senior FO of the pod opens the Pod Manager's draft: the contact stays, and they cannot add another.
     const saved = await saveCampaignCalendar(intent, manager, {});
     const edited = await planCampaign({ ...intent, personIds: [...intent.personIds, 'cross-free-2'] }, senior, saved.id, { reshapeOutreach: true });
     expect(edited.draft.personIds).toContain('cross-free');
-    expect(edited.leftOut.find(l => l.id === 'cross-free-2')?.reason).toBe('Not in Pod Alisa');
+    expect(edited.leftOut.find(l => l.id === 'cross-free-2')?.reason).toBe('In Pod Andrew, so only a Pod Manager or admin can add them');
   });
 });
 
@@ -227,7 +230,7 @@ describe('anyone in a pod creates campaigns (owner, 15 October 2026)', () => {
     const renamed = await saveCampaignCalendar(draft({ name: 'Karson renamed' }), karson, { id: own.id, revision: own.updatedAt.toISOString() });
     expect(renamed.name).toBe('Karson renamed');
     const seniors = await saveCampaignCalendar(draft({ name: 'Senior draft' }), senior, {});
-    await expect(saveCampaignCalendar(draft({ name: 'Taken over' }), karson, { id: seniors.id, revision: seniors.updatedAt.toISOString() })).rejects.toThrow('You cannot edit this campaign.');
-    await expect(saveCampaignCalendar(draft(), daniel, {})).rejects.toThrow('You cannot manage campaigns for this pod.');
+    await expect(saveCampaignCalendar(draft({ name: 'Taken over' }), karson, { id: seniors.id, revision: seniors.updatedAt.toISOString() })).rejects.toThrow(`Only ${b.users.alisa.name}, who created this campaign, the Senior FOs, Sales Leaders and Pod Managers of Pod Alisa, and admins can change it.`);
+    await expect(saveCampaignCalendar(draft(), daniel, {})).rejects.toThrow('You are not in Pod Alisa, so you cannot create campaigns for it. You can create them only for the pods you are in.');
   });
 });

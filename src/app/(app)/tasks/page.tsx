@@ -49,7 +49,7 @@ function CampaignBand({ brief }: { brief: NonNullable<Awaited<ReturnType<typeof 
     <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/10 text-[#d5e9ad]"><IconCampaigns size={17} /></span>
     <div className="min-w-0 flex-1">
       <div className="flex items-center gap-3">
-        <span className="flex-1 text-[10.5px] font-medium uppercase tracking-[0.14em] text-brand-200">{campaign ? 'Campaign' : 'Outreach'}</span>
+        <span className="flex-1 text-[12px] text-brand-200">{campaign ? 'Campaign' : 'Outreach'}</span>
         <span className="flex shrink-0 items-center gap-1.5 text-[11px] leading-none">
           <span className="rounded-full bg-white/10 px-2 py-1 tabular-nums text-white">Step {brief.stepIndex + 1} of {brief.stepCount}</span>
           {ends ? <span className="rounded-full bg-white/10 px-2 py-1 text-brand-100">Ends {ends}</span> : null}
@@ -91,7 +91,7 @@ function NextActionPanel({ item: n, today, timezone, nextUrl, nextWorkingDay, ma
       <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/10 text-[#d5e9ad]"><IconRefresh size={16} /></span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-3">
-          <span className="flex-1 text-[10.5px] font-medium uppercase tracking-[0.14em] text-brand-200">Task</span>
+          <span className="flex-1 text-[12px] text-brand-200">Task</span>
           <span className="flex shrink-0 items-center gap-1.5 text-[11px] leading-none"><span className="rounded-full bg-white/10 px-2 py-1 text-white">{REPEAT_LABELS[n.repeat]}</span></span>
         </div>
         <div className="mt-1 break-words text-[19px] font-semibold leading-snug tracking-[-0.01em]">{n.label}</div>

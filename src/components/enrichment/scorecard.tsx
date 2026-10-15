@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { Scorecard, ScorecardGroup } from '@/lib/enrichment-work';
 import { formatLocalDate } from '@/lib/dates';
+import { Empty } from '@/components/ui';
 
 /**
  * How complete each field is: for everyone, then by pod, then by FO, as three blocks under
@@ -55,7 +56,7 @@ function Block({ title, groups, tab, foUserByMember }: { title: string; groups: 
                     const diff = before === null ? null : pct - before;
                     const gapHref = g.total && pct < 100 ? fieldHref(g, tab, c.field, foUserByMember) : null;
                     const body = <>
-                      <div className="text-[13px]">{g.total ? `${pct}%` : '–'}</div>
+                      <div className="text-[13px]">{g.total ? `${pct}%` : <Empty />}</div>
                       {diff !== null && g.total ? <div className={`text-[11px] ${diff > 0 ? 'text-emerald-800' : diff < 0 ? 'text-amber-800' : 'text-ink-500'}`}>{diff > 0 ? `+${diff}` : diff < 0 ? `${diff}` : 'same'}</div> : null}
                     </>;
                     const title = `${g.name} · ${c.label}: ${c.filled.toLocaleString('en-US')} of ${c.total.toLocaleString('en-US')}${before !== null ? ` · was ${before}%` : ''}${gapHref ? ' · open the records missing it' : ''}`;
@@ -90,7 +91,7 @@ function Section({ title, groups, tab, since, foUserByMember }: { title: string;
 export function EnrichmentScorecard({ scorecard, foUserByMember }: Props) {
   return (
     <div className="divide-y-4 divide-canvas">
-      <p className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 pt-4 text-[12px] text-ink-500"><span>Share of records with each field filled.</span><span className="flex items-center gap-1.5"><span className="h-3 w-4 rounded bg-amber-50 ring-1 ring-amber-200" />under 90%</span><span className="flex items-center gap-1.5"><span className="h-3 w-4 rounded bg-red-50 ring-1 ring-red-200" />under 70%</span><span>A cell under 100% opens the records missing that field.</span></p>
+      <p className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 pt-4 text-[12px] text-ink-500"><span className="flex items-center gap-1.5"><span className="h-3 w-4 rounded bg-amber-50 ring-1 ring-amber-200" />under 90%</span><span className="flex items-center gap-1.5"><span className="h-3 w-4 rounded bg-red-50 ring-1 ring-red-200" />under 70%</span></p>
       <Section title="People" groups={scorecard.contacts} tab="contacts" since={scorecard.since} foUserByMember={foUserByMember} />
       <Section title="Accounts" groups={scorecard.accounts} tab="accounts" since={scorecard.since} foUserByMember={foUserByMember} />
     </div>

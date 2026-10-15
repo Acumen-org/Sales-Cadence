@@ -18,7 +18,7 @@ export function CreateTaskButton({ today, fos, canAssign, query, selfId }: { tod
       fos={fos}
       canAssign={canAssign}
       icon="plus"
-      className="btn-primary btn-sm"
+      className="btn-primary"
       onDone={(_message, created) => {
         const params = new URLSearchParams(query);
         params.set('tab', created.dueDate < today ? 'overdue' : created.dueDate === today ? 'today' : 'upcoming');

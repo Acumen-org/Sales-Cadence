@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { approveCampaignAction, rejectCampaignAction, pauseCampaignAction, reenrollNonRepliersAction, restartCampaignAction, resumeCampaignAction, setHardStopAction, stopCampaignAction, type FollowupPreview } from '@/lib/actions/campaigns';
 import { ActionButton, ActionForm } from '@/components/action-form';
-import { Card, Field } from '@/components/ui';
+import { Card, Empty, Field } from '@/components/ui';
 
 type Props = { calendar?: boolean; campaignId: string; status: string; sequences: {id:string;name:string}[]; currentSequenceId:string; defaultName:string; today:string };
 export function CampaignControls({ calendar, campaignId,status,currentSequenceId,defaultName,today }: Props) {
@@ -13,7 +13,7 @@ export function CampaignControls({ calendar, campaignId,status,currentSequenceId
    {status !== 'PENDING_APPROVAL' && <Card title="Follow up with non-repliers"><div onChange={() => setPreview(null)}><ActionForm action={reenrollNonRepliersAction} className="space-y-4 p-5" onSuccess={r => { if(r.redirectTo) router.push(r.redirectTo); else if(r.data) setPreview(r.data as FollowupPreview); }}>
      <input type="hidden" name="campaignId" value={campaignId}/><input type="hidden" name="confirm" value={preview ? 'yes':'no'}/>
      <div className="grid gap-4 md:grid-cols-2"><input type="hidden" name="sequenceId" value={currentSequenceId} /><Field label="Campaign name"><input name="name" defaultValue={defaultName} className="w-full" required/></Field><Field label="Days since completion"><input name="days" type="number" min={0} max={365} defaultValue={14} className="w-full"/></Field><Field label="Requested start date"><input name="startDate" type="date" defaultValue={today} className="w-full" required/></Field></div>
-     {preview && <div className="overflow-x-auto rounded-xl border border-line"><div className="border-b border-line p-3 text-sm"><strong>{preview.candidates.length}</strong> eligible people</div><table className="table"><thead><tr><th>Person</th><th>Company</th><th>FO</th><th>Completed</th></tr></thead><tbody>{preview.candidates.map(c=><tr key={c.id}><td>{c.name}</td><td>{c.company ?? '—'}</td><td>{c.fo}</td><td>{c.completedAt?.slice(0,10) ?? '—'}</td></tr>)}</tbody></table>{!preview.candidates.length && <p className="p-4 text-sm">Nobody meets these conditions.</p>}</div>}
+     {preview && <div className="overflow-x-auto rounded-xl border border-line"><div className="border-b border-line p-3 text-sm"><strong>{preview.candidates.length}</strong> eligible people</div><table className="table"><thead><tr><th>Person</th><th>Company</th><th>FO</th><th>Completed</th></tr></thead><tbody>{preview.candidates.map(c=><tr key={c.id}><td>{c.name}</td><td>{c.company ?? <Empty />}</td><td>{c.fo}</td><td>{c.completedAt?.slice(0,10) ?? <Empty />}</td></tr>)}</tbody></table>{!preview.candidates.length && <p className="p-4 text-sm">Nobody meets these conditions.</p>}</div>}
      <div className="flex gap-2"><button type="submit" className={preview ? 'btn-primary':'btn-secondary'} disabled={Boolean(preview && !preview.candidates.length)}>{preview ? 'Submit for approval':'Find who qualifies'}</button>{preview && <button type="button" className="btn-ghost" onClick={()=>setPreview(null)}>Reset preview</button>}</div>
    </ActionForm></div></Card>}
  </div>;

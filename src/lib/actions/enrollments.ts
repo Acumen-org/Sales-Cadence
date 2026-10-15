@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma } from '../db';
 import { requireUser, toActor } from '../auth/current-user';
-import { canManageEnrollment } from '../auth/rbac';
+import { canManageEnrollment, whyNotManageEnrollment } from '../auth/rbac';
 import { userActor } from '../audit';
 import { exitEnrollment, pauseEnrollment, reassignEnrollment, resumeEnrollment } from '../engine/enrollment';
 import type { ActionResult } from './users';
@@ -19,8 +19,8 @@ function revalidateAll(campaignId?: string | null) {
 async function loadEnrollmentForUser(enrollmentId: string) {
   const user = await requireUser();
   const e = await prisma.enrollment.findUnique({ where: { id: enrollmentId } });
-  if (!e) return { user, e: null, error: 'Enrollment not found.' };
-  if (!canManageEnrollment(toActor(user), e)) return { user, e: null, error: 'You cannot manage this enrollment.' };
+  if (!e) return { user, e: null, error: 'This sequence no longer exists. Refresh the page.' };
+  if (!canManageEnrollment(toActor(user), e)) return { user, e: null, error: whyNotManageEnrollment(toActor(user), (await prisma.pod.findUnique({ where: { id: e.podId ?? '' }, select: { name: true } }))?.name ?? 'this pod') };
   return { user, e, error: null };
 }
 
@@ -36,7 +36,7 @@ export async function exitEnrollmentAction(formData: FormData): Promise<ActionRe
 export async function pauseEnrollmentAction(formData: FormData): Promise<ActionResult> {
   const { user, e, error } = await loadEnrollmentForUser(String(formData.get('enrollmentId') ?? ''));
   if (!e) return { ok: false, error: error ?? 'Not found.' };
-  if (e.status !== 'ACTIVE') return { ok: false, error: 'Only a live enrollment can be paused.' };
+  if (e.status !== 'ACTIVE') return { ok: false, error: 'This sequence is not running, so it cannot be paused.' };
   await pauseEnrollment(e.id, { reason: String(formData.get('reason') ?? 'manual').trim() || 'manual', actor: userActor(user) });
   revalidateAll(e.campaignId);
   return { ok: true, message: 'Paused.' };

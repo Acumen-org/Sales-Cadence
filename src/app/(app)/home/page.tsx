@@ -7,7 +7,7 @@ import { diffDays, formatLocalDate } from '@/lib/dates';
 import { buildHome, weekTotal, type TeamRow } from '@/lib/home-query';
 import { TASK_CHANNELS, type TaskChannel } from '@/lib/tasks-query';
 import { ACTION_LABELS } from '@/lib/sequences/steps';
-import { ActionIcon, IconBolt, IconCalendar, IconCheck, IconChevronRight, IconCompany, IconPeople } from '@/components/icons';
+import { ActionIcon, IconCalendar, IconCheck, IconChevronRight, IconCompany, IconPeople } from '@/components/icons';
 import { Avatar, EmptyState, Surface } from '@/components/ui';
 
 const CHANNEL_LABELS: Record<TaskChannel, string> = { CALL: 'Calls', EMAIL: 'Emails', LINKEDIN: 'LinkedIn' };
@@ -79,7 +79,6 @@ async function HomeContent() {
           <div className="relative flex-1 overflow-hidden bg-[#203e35] px-6 py-6 text-white">
             <div className="focus-art" aria-hidden />
             <div className="relative">
-              <p className="mb-3 flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-[#d5e9ad]"><IconBolt size={12} /> {h.my.overdueTotal ? 'Overdue first' : h.my.todayTotal ? 'Due today' : h.my.nextForTeam ? 'Nothing due for you' : 'Nothing due'}</p>
               <h2 className="flex items-baseline gap-3 text-[25px] font-medium leading-[1.25] tracking-[-0.035em]">
                 <span className="text-[46px] font-semibold leading-none tracking-[-0.04em]">{h.my.overdueTotal || h.my.todayTotal || h.my.peopleToReachToday}</span>
                 <span>{h.my.overdueTotal ? `overdue ${h.my.overdueTotal === 1 ? 'step' : 'steps'}` : h.my.todayTotal ? `${h.my.todayTotal === 1 ? 'step' : 'steps'} due today` : 'due today'}</span>
@@ -101,7 +100,7 @@ async function HomeContent() {
           {h.my.nextTasks.length ? <ul>{(['Overdue', 'Today', 'Coming up'] as const).map((when) => {
             const rows = h.my.nextTasks.filter((t) => (when === 'Overdue' ? t.due < h.today : when === 'Today' ? t.due === h.today : t.due > h.today));
             return rows.length ? <li key={when}>
-              <div className={`border-b border-line/70 bg-canvas/60 px-5 py-1.5 text-[11px] font-medium uppercase tracking-[0.08em] ${when === 'Overdue' ? 'text-red-700' : 'text-ink-500'}`}>{when}{!h.my.nextForTeam && when !== 'Coming up' ? <span className="tabular-nums"> · {when === 'Overdue' ? h.my.overdueTotal : h.my.todayTotal}</span> : null}</div>
+              <div className={`border-b border-line/70 bg-canvas/60 px-5 py-1.5 text-[11.5px] font-medium ${when === 'Overdue' ? 'text-red-700' : 'text-ink-500'}`}>{when}{!h.my.nextForTeam && when !== 'Coming up' ? <span className="tabular-nums"> · {when === 'Overdue' ? h.my.overdueTotal : h.my.todayTotal}</span> : null}</div>
               <ul className="divide-y divide-line/70">{rows.map((task) => <li key={task.id}><Link href={`/tasks?${task.kind === 'task' ? 'next' : 'task'}=${task.id}&mode=flow&tab=${task.due < h.today ? 'overdue' : task.due === h.today ? 'today' : 'upcoming'}&${h.my.nextForTeam ? 'fo=' : mine}`} className="flex items-center gap-3 px-5 py-2.5 transition hover:bg-brand-50/50">
                 <Avatar name={task.name} shape="circle" size={32} />
                 <span className="min-w-0 flex-1">
@@ -174,7 +173,7 @@ function TeamBoard({ rows, week, title }: { rows: TeamRow[]; week: { from: strin
       <table className="w-full table-fixed border-collapse text-[15px]">
         <colgroup><col className="w-[220px]" /><col /><col className="w-[84px]" /><col className="w-[96px]" /><col className="w-[104px]" /><col className="w-[150px]" /><col className="w-[96px]" /><col className="w-[104px]" /><col className="w-[48px]" /></colgroup>
         <thead>
-          <tr className="border-b border-line bg-[#fafbf9] text-[12px] uppercase tracking-[0.07em] text-ink-500">
+          <tr className="border-b border-line bg-[#fafbf9] text-[11.5px] text-ink-500">
             <th className="px-5 py-3 text-left font-medium">FO</th>
             <th className="px-3 py-3 text-left font-medium">This week</th>
             <th className={head}>Done</th>

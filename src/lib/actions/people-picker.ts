@@ -4,11 +4,11 @@ import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../db';
 import { requireUser } from '../auth/current-user';
-import { canAddFromAnyPod, canCreateCampaign, needsPod, visiblePodIds } from '../auth/rbac';
+import { canAddFromAnyPod, needsPod, visiblePodIds, whyNotCreateCampaign } from '../auth/rbac';
 import { foPeopleWhere, peopleScopeWhere } from '../people-scope';
 import { personSearchWhere } from '../search-terms';
 import { cachedPersonName } from '../person-cache';
-import { campaignAudienceIssues, campaignMembers } from '../campaign-audience';
+import { campaignAudienceIssues, campaignMembers, podLabel, whoAndWhy } from '../campaign-audience';
 import { valuePriorityGroups } from '../campaign-planner';
 import { defaultTwentySchema } from '../twenty/twenty-schema';
 
@@ -45,8 +45,9 @@ const PICKER_PAGE = 50;
 
 async function campaignContext(f: PickerFilters, user: Awaited<ReturnType<typeof requireUser>>) {
   if (!f.campaignPodId) return undefined;
-  if (!canCreateCampaign(user, f.campaignPodId)) throw new Error('You cannot select an audience for this pod.');
   const pod = await prisma.pod.findUniqueOrThrow({ where: { id: f.campaignPodId } });
+  const refused = whyNotCreateCampaign(user, pod);
+  if (refused) throw new Error(refused);
   const fos = await prisma.user.findMany({ where: { id: { in: f.campaignFoIds ?? [] }, active: true, pods: { some: { podId: pod.id } } }, select: { twentyMemberId: true } });
   // Owners are only checked once the team is chosen; before that nobody would be selectable.
   return { podId: pod.id, podOwnerValue: pod.podOwnerValue, podName: pod.name, ownerMemberIds: fos.flatMap(f => f.twentyMemberId ? [f.twentyMemberId] : []), campaignId: f.campaignId, checkOwners: fos.length > 0, anyPod: canAddFromAnyPod(user) };
@@ -102,11 +103,12 @@ async function pickerWhere(f: PickerFilters, user: Awaited<ReturnType<typeof req
 
 const ORDER: Prisma.PersonCacheOrderByWithRelationInput[] = [{ sortName: { sort: 'asc', nulls: 'last' } }, { email: { sort: 'asc', nulls: 'last' } }, { id: 'asc' }];
 
-export async function pickPeopleAction(input: unknown): Promise<{ ok: true; rows: PickerRow[]; total: number; page: number; pageSize: number } | { ok: false; error: string }> {
+export async function pickPeopleAction(input: unknown): Promise<{ ok: true; rows: PickerRow[]; total: number; page: number; pageSize: number; scopeNote?: string } | { ok: false; error: string }> {
   const user = await requireUser();
-  if (!canCreateCampaign(user)) return { ok: false, error: 'You cannot create campaigns.' };
+  const refused = whyNotCreateCampaign(user);
+  if (refused) return { ok: false, error: refused };
   const parsed = Filters.safeParse(input ?? {});
-  if (!parsed.success) return { ok: false, error: 'Invalid filters.' };
+  if (!parsed.success) return { ok: false, error: 'These filters could not be read. Reload the page and choose them again.' };
   const f = parsed.data;
   const where = await pickerWhere(f, user);
   const [people, total, pods] = await Promise.all([
@@ -127,18 +129,23 @@ export async function pickPeopleAction(input: unknown): Promise<{ ok: true; rows
     const state: PickerRow['state'] = p.dnd || p.optedOut ? 'Do not contact' : !e ? 'Never in a campaign' : e.status === 'ACTIVE' || e.status === 'PAUSED' ? 'In a campaign' : e.status === 'REPLIED' || e.status === 'MEETING' ? 'Replied' : 'Finished';
     return { ineligibleReason: issues.get(p.id), id: p.id, name: cachedPersonName(p), company: p.companyName, title: p.jobTitle, pod: p.podOwner ? podName.get(p.podOwner) ?? p.podOwner : null, tier: p.tier, state };
   });
-  return { ok: true, rows, total, page: f.page, pageSize: PICKER_PAGE };
+  // Another pod chosen by someone who may not take from it: say so, rather than an empty list.
+  const context = await campaignContext(f, user);
+  const scopeNote = context && !context.anyPod && f.pod && f.pod !== context.podOwnerValue ? `Only Pod Managers and admins can add people from other pods. You can add people in ${podLabel(context.podName)} and people owned by this campaign's FOs.` : undefined;
+  return { ok: true, rows, total, page: f.page, pageSize: PICKER_PAGE, scopeNote };
 }
 
 /** Every id the current filters match - what "Select all N matching" means, with no ceiling. */
-export async function pickAllIdsAction(input: unknown): Promise<{ ok: true; ids: string[]; skipped: number } | { ok: false; error: string }> {
+export async function pickAllIdsAction(input: unknown): Promise<{ ok: true; ids: string[]; skipped: number; why: string } | { ok: false; error: string }> {
   const user = await requireUser();
-  if (!canCreateCampaign(user)) return { ok: false, error: 'You cannot create campaigns.' };
+  const refused = whyNotCreateCampaign(user);
+  if (refused) return { ok: false, error: refused };
   const parsed = Filters.safeParse(input ?? {});
-  if (!parsed.success) return { ok: false, error: 'Invalid filters.' };
+  if (!parsed.success) return { ok: false, error: 'These filters could not be read. Reload the page and choose them again.' };
   const rows = await prisma.personCache.findMany({ where: await pickerWhere(parsed.data, user), select: { id: true }, orderBy: ORDER });
-  const issues = new Set((await campaignAudienceIssues(rows.map(r => r.id), await campaignContext(parsed.data, user))).map(i => i.id));
-  return { ok: true, ids: rows.map(r => r.id).filter(id => !issues.has(id)), skipped: issues.size };
+  const issues = await campaignAudienceIssues(rows.map(r => r.id), await campaignContext(parsed.data, user));
+  const out = new Set(issues.map(i => i.id));
+  return { ok: true, ids: rows.map(r => r.id).filter(id => !out.has(id)), skipped: out.size, why: whoAndWhy(issues) };
 }
 
 export type PickerOptions = { pods: { value: string; name: string }[]; fos: { id: string; name: string }[]; tiers: string[]; types: string[]; products: string[]; tags: string[] };

@@ -20,7 +20,7 @@ export function OutreachBuilder({ steps, onChange, maxSteps = 60 }: { maxSteps?:
   };
   return <div className="space-y-4">
     {steps.map((step, i) => <div key={step.id} data-outreach-step={i} className={drag === i ? 'opacity-60' : ''}>
-      {i > 0 && <div className="flex items-center gap-3 py-3 pl-6 text-sm text-ink-600"><IconClock size={15} className="text-ink-400" /><span>Wait</span><input aria-label={`Gap before step ${i + 1}`} type="number" min={1} max={366} className="!w-20 text-center !font-bold" value={step.day - steps[i - 1].day} onChange={e => {
+      {i > 0 && <div className="flex items-center gap-3 py-3 pl-6 text-sm text-ink-600"><IconClock size={15} className="text-ink-400" /><span>Wait</span><input aria-label={`Gap before step ${i + 1}`} type="number" min={1} max={366} className="!w-20 text-center !font-medium" value={step.day - steps[i - 1].day} onChange={e => {
         const gap = Number(e.target.value); if (!Number.isInteger(gap) || gap < 1 || gap > 366) return;
         const delta = gap - (step.day - steps[i - 1].day); onChange(steps.map((s, n) => ({ ...s, day: s.day + (n >= i ? delta : 0) })));
       }} /><span>{step.day - steps[i - 1].day === 1 ? 'calendar day' : 'calendar days'}</span></div>}
@@ -31,7 +31,7 @@ export function OutreachBuilder({ steps, onChange, maxSteps = 60 }: { maxSteps?:
             const to = target?.getAttribute('data-outreach-step');
             if (to !== null && to !== undefined) move(i, Number(to));
             e.currentTarget.releasePointerCapture(e.pointerId); setDrag(null);
-          }} onPointerCancel={() => setDrag(null)} aria-label={`Drag step ${i + 1}`} className="touch-none cursor-grab rounded-lg bg-brand-50 px-3 py-2 font-bold text-brand-800">{i + 1}</button>
+          }} onPointerCancel={() => setDrag(null)} aria-label={`Drag step ${i + 1}`} className="touch-none cursor-grab rounded-lg bg-brand-50 px-3 py-2 font-medium tabular-nums text-brand-800">{i + 1}</button>
           <button type="button" aria-expanded={open === step.id} onClick={() => setOpen(open === step.id ? null : step.id)} className="min-w-0 flex-1 text-left"><span className="block font-semibold text-ink-900">{step.title || `Step ${i + 1}`}</span><span className="mt-1 flex flex-wrap gap-3 text-sm text-ink-600">{step.actions.map(a => <span key={a.id} className="flex items-center gap-1.5"><ActionIcon action={a.type} size={14} />{ACTION_LABELS[a.type]}</span>)}</span></button>
           <button type="button" className="btn-ghost btn-sm" aria-label={`Move step ${i + 1} up`} disabled={i === 0} onClick={() => move(i, i - 1)}><IconArrowUp size={15} /></button>
           <button type="button" className="btn-ghost btn-sm" aria-label={`Move step ${i + 1} down`} disabled={i === steps.length - 1} onClick={() => move(i, i + 1)}><IconArrowDown size={15} /></button>
@@ -48,6 +48,6 @@ export function OutreachBuilder({ steps, onChange, maxSteps = 60 }: { maxSteps?:
         </div>}
       </section>
     </div>)}
-    <div className="flex flex-wrap gap-2 rounded-2xl border border-dashed border-brand-300 p-4">{ACTION_TYPES.map(type => <button key={type} type="button" className="btn-secondary btn-sm" disabled={steps.length >= maxSteps} title={steps.length >= maxSteps ? 'No room for another step with the current dates, audience and limits' : undefined} onClick={() => append(type)}><IconPlus size={14} />{ACTION_LABELS[type]}</button>)}</div>
+    <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-dashed border-brand-300 p-4">{ACTION_TYPES.map(type => <button key={type} type="button" className="btn-secondary btn-sm" disabled={steps.length >= maxSteps} onClick={() => append(type)}><IconPlus size={14} />{ACTION_LABELS[type]}</button>)}{steps.length >= maxSteps && <span className="text-[12.5px] text-ink-500">{steps.length >= 60 ? 'An outreach can have at most 60 steps.' : 'No room for another step: not everyone would finish by the end date. Choose a later end date on People, or fewer people.'}</span>}</div>
   </div>;
 }

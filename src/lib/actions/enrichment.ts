@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { requireUser } from '../auth/current-user';
-import { assertAllowed } from '../auth/rbac';
+import { assertAllowed, ENRICHMENT_ROLES } from '../auth/rbac';
 import { getTwentyClient } from '../twenty';
 import { applyEnrichmentChunk, canEnrich, ENRICHMENT_FIELDS, parseEnrichmentUpload, previewEnrichment, reviewEnrichmentRows, suggestEnrichmentMapping, type EnrichmentEntity } from '../enrichment';
 import { clearEnrichmentMarks, markEnrichmentGaps, rememberedMapping, rememberMapping, type MarkKind, type MarkRequest } from '../enrichment-work';
@@ -12,7 +12,7 @@ const message = (error: unknown) => error instanceof Error ? error.message : 'Th
 export async function inspectEnrichmentUploadAction(entity: EnrichmentEntity, source: string) {
   const user = await requireUser();
   try {
-    assertAllowed(canEnrich(user));
+    assertAllowed(canEnrich(user), `Only ${ENRICHMENT_ROLES} can import enrichment.`);
     if (!['person', 'company'].includes(entity)) throw new Error('Choose contacts or accounts.');
     const parsed = parseEnrichmentUpload(source);
     // A file shaped like one imported before maps itself the way it was mapped then.

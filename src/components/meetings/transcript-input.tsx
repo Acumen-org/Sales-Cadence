@@ -13,7 +13,7 @@ export function TranscriptInput({ name, label, defaultValue, value: providedValu
   const [fileName, setFileName] = useState<string | null>(null);
   return (
     <div className="space-y-2">
-      <textarea name={name} aria-label={label} rows={rows} value={value} onChange={(e) => setValue(e.target.value)} className="w-full font-mono !text-[12px]" placeholder={placeholder} />
+      <textarea name={name} aria-label={label} rows={rows} value={value} onChange={(e) => setValue(e.target.value)} className="w-full !text-[12.5px]" placeholder={placeholder} />
       <div className="flex flex-wrap items-center gap-3 text-[12px] text-ink-500">
         <label className="btn-secondary btn-sm cursor-pointer">
           Choose a file

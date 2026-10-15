@@ -3,9 +3,11 @@ import { lockAccounts } from '../account-lock';
 import { logAudit } from '../audit';
 import { todayIn } from '../dates';
 import { workspaceTimezone } from '../workspace';
-import { ROLES_NEEDING_POD } from '../auth/rbac';
+import { ROLE_LABELS, ROLES_NEEDING_POD } from '../auth/rbac';
 import { externalPeopleWhere } from '../internal-organizations';
 import { nonReplierCandidates } from '../campaigns-query';
+import { campaignAudienceIssues, whoAndWhy } from '../campaign-audience';
+import { shortDateLabel } from '../campaign-planner';
 import type { PublishedCalendar } from '../campaign-planning-service';
 import type { EngineContext } from './tasks';
 import { advanceEnrollment } from './tasks';
@@ -24,21 +26,35 @@ export async function activateCalendarCampaign(id: string, ctx: EngineContext) {
     const c = await tx.campaign.findUniqueOrThrow({ where: { id }, include: { pod: true } });
     if (c.status !== 'SCHEDULED' || c.startDate > todayIn(workspaceTimezone(), now)) return [];
     const plan = c.publishedPlan as unknown as PublishedCalendar | null;
-    if (!plan?.valid || plan.version !== 1 || c.pod.archived) throw new Error('Review and publish a valid calendar before launching.');
-    if (c.endDate && c.endDate < todayIn(workspaceTimezone(), now)) throw new Error('The campaign window has passed. Edit its dates and publish a new calendar.');
+    // Each refusal says what changed, by name, because the campaign page shows it to whoever fixes it.
+    if (c.pod.archived) throw new Error(`Not started: ${c.pod.name} has been archived. Edit the campaign, choose another pod and publish it again.`);
+    if (!plan?.valid || plan.version !== 1) throw new Error('Not started: this campaign has no finished calendar. Edit it and publish it again.');
+    if (c.endDate && c.endDate < todayIn(workspaceTimezone(), now)) throw new Error(`Not started: its end date, ${shortDateLabel(c.endDate)}, has passed. Edit its dates and publish it again.`);
     const ids = plan.batches.flatMap(b => b.personIds);
-    if (new Set(ids).size !== ids.length) throw new Error('The published audience contains duplicate people.');
+    if (new Set(ids).size !== ids.length) throw new Error('Not started: its calendar lists someone twice. Edit the campaign and publish it again.');
     const people = await tx.personCache.findMany({ where: { id: { in: ids }, dnd: false, optedOut: false, deletedAt: null, AND: [external] } });
     const blockedAccounts = new Set((await tx.blockedAccount.findMany({ select: { companyId: true } })).map(b => b.companyId));
-    const busy = await tx.enrollment.findMany({ where: { personId: { in: ids }, status: { in: ['ACTIVE', 'PAUSED'] } } });
+    const busy = await tx.enrollment.findMany({ where: { personId: { in: ids }, status: { in: ['ACTIVE', 'PAUSED'] } }, select: { personId: true, campaign: { select: { name: true } }, sequence: { select: { name: true } } } });
     const eligible = new Map(people.filter(p => !p.companyId || !blockedAccounts.has(p.companyId)).map(p => [p.id, p]));
     const fos = await tx.user.findMany({ where: { id: { in: plan.fos.map(f => f.id) }, active: true, role: { in: ROLES_NEEDING_POD }, pods: { some: { podId: c.podId } } } });
-    if (eligible.size !== ids.length || busy.length || fos.length !== plan.fos.length) throw new Error('The audience or team changed after publication. Review the campaign before it starts; no partial launch was made.');
+    const nameOf = new Map(plan.people.map(p => [p.id, p.name]));
+    const notStarted = (changes: string) => new Error(`Not started, because things changed after it was published: ${changes}. Nobody has been contacted. Edit the campaign and publish it again.`);
+    if (eligible.size !== ids.length || busy.length || fos.length !== plan.fos.length) {
+      const unreachable = await campaignAudienceIssues(ids.filter(id => !eligible.has(id)), undefined, tx);
+      const goneFos = await tx.user.findMany({ where: { id: { in: plan.fos.filter(f => !fos.some(x => x.id === f.id)).map(f => f.id) } }, select: { name: true, active: true, role: true } });
+      throw notStarted([
+        whoAndWhy([...unreachable, ...busy.map(e => ({ name: nameOf.get(e.personId) ?? 'Someone', reason: `Already in ${e.campaign?.name ?? `the ${e.sequence.name} sequence`}` }))]),
+        ...goneFos.map(f => !f.active ? `${f.name} no longer has access to Cadence` : !ROLES_NEEDING_POD.includes(f.role) ? `${f.name} is now ${ROLE_LABELS[f.role]} and does not run outreach` : `${f.name} is no longer in ${c.pod.name}`),
+      ].filter(Boolean).join('; '));
+    }
     const originalOwners = new Map(plan.people.map(p => [p.id, p.ownerMemberId]));
-    if (people.some(p => p.ownerMemberId !== originalOwners.get(p.id) || (followupIds && !followupIds.has(p.id))) || fos.some(f => f.twentyMemberId !== plan.fos.find(old => old.id === f.id)?.twentyMemberId)) throw new Error('Contact ownership or follow-up eligibility changed after publication. Review and republish the calendar before launching.');
+    const moved = people.filter(p => p.ownerMemberId !== originalOwners.get(p.id)).map(p => ({ name: nameOf.get(p.id) ?? 'Someone', reason: 'Has a different owner in Twenty now' }));
+    const lapsed = followupIds ? people.filter(p => !followupIds.has(p.id)).map(p => ({ name: nameOf.get(p.id) ?? 'Someone', reason: 'No longer due this follow-up' })) : [];
+    const renamed = fos.filter(f => f.twentyMemberId !== plan.fos.find(old => old.id === f.id)?.twentyMemberId).map(f => `${f.name} is linked to a different Twenty user now`);
+    if (moved.length || lapsed.length || renamed.length) throw notStarted([whoAndWhy([...moved, ...lapsed]), ...renamed].filter(Boolean).join('; '));
     const rows = [];
     for (const b of plan.batches) {
-      if (!plan.sequenceIds[b.flowId] || !b.dates.length) throw new Error('The published calendar is incomplete.');
+      if (!plan.sequenceIds[b.flowId] || !b.dates.length) throw new Error('Not started: its calendar is incomplete. Edit the campaign and publish it again.');
       for (const personId of b.personIds) rows.push({
         personId, companyId: eligible.get(personId)!.companyId, campaignId: id, campaignRun: c.runNumber,
         foUserId: b.foId, podId: c.podId, sequenceId: plan.sequenceIds[b.flowId], startDate: b.dates[0], scheduleDates: b.dates,

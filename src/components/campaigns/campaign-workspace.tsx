@@ -58,6 +58,7 @@ export function CampaignWorkspace({ initial, pods, products, campaignId, revisio
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The error a failed save showed, so the banner can say Not saved only for that one.
   const lastSaveError = useRef<string | null>(null);
+  const lastPublishError = useRef<string | null>(null);
   // The draft the plan on screen was made from; step 02 does not ask again for the same draft.
   const reviewedKey = useRef('');
   const canAutosave = !status || status === 'DRAFT' || status === 'PENDING_APPROVAL';
@@ -76,7 +77,7 @@ export function CampaignWorkspace({ initial, pods, products, campaignId, revisio
       const snapshot = latest.current, at = edits.current;
       if (!options.publish) setSaveState('saving');
       const r = await saveCalendarAction(snapshot, { id: idRef.current, revision: revRef.current, ...options });
-      if (!r.ok) { setSaveState('failed'); lastSaveError.current = r.error; setError(r.error); return false; }
+      if (!r.ok) { if (options.publish) lastPublishError.current = r.error; else { setSaveState('failed'); lastSaveError.current = r.error; } setError(r.error); return false; }
       idRef.current = r.id; revRef.current = r.revision; setId(r.id);
       if (at === edits.current) { dirty.current = false; setSaveState('saved'); } else setSaveState('idle');
       // The native call, not Next's patched one: a reload then opens this draft, while the studio
@@ -114,8 +115,9 @@ export function CampaignWorkspace({ initial, pods, products, campaignId, revisio
     !(draft.startDate && draft.endDate && draft.endDate >= draft.startDate) && 'an end date on or after the start',
     !draft.productInterest.length && 'a product',
     !draft.fos.length && 'an FO',
-    !(pace(draft.defaultBatchSize) && draft.fos.every(f => pace(f.batchSize))) && 'new people a day between 1 and 500',
-    !draft.personIds.length && 'people',
+    !pace(draft.defaultBatchSize) && 'a number from 1 to 500 in New people a day',
+    draft.fos.some(f => !pace(f.batchSize)) && `a number from 1 to 500 in New people a day for ${list(draft.fos.filter(f => !pace(f.batchSize)).map(f => pod?.fos.find(x => x.id === f.id)?.name ?? 'an FO'))}`,
+    !draft.personIds.length && 'at least one person in the audience',
   ].filter((m): m is string => !!m);
   const basicsValid = missing.length === 0;
   const startPassed = !!draft.startDate && draft.startDate < today;
@@ -148,7 +150,7 @@ export function CampaignWorkspace({ initial, pods, products, campaignId, revisio
     setError(null); setHold(null); setPlanning(true);
     const r = await prepareStudioAction(next, id, reshapes(next));
     setPlanning(false);
-    if (!r.ok) { setError(r.error); return null; }
+    if (!r.ok) { setError(r.error); if (tab === 0) setHold(r.error); return null; }
     // A built outreach comes with who is on which of its groups (an FO's own outreach, when one was needed).
     const merged = r.data.calendar.valid && reshapes(next) ? { ...next, flows: r.data.draft.flows, assignments: r.data.draft.assignments } : next;
     if (merged !== draft) change(merged);
@@ -160,9 +162,9 @@ export function CampaignWorkspace({ initial, pods, products, campaignId, revisio
   };
   // Why Next waits, said beside it.
   const nextOutreach = () => {
-    if (!basicsValid) { setHold(`Still needed: ${missing.length > 1 ? `${missing.slice(0, -1).join(', ')} and ${missing.at(-1)}` : missing[0]}.`); return; }
-    if (startPassed) { setHold('The start date has passed.'); return; }
-    if (noWorkingDays) { setHold('Pick dates with a working day to continue.'); return; }
+    if (!basicsValid) { setHold(`To continue, add ${missing.length > 1 ? `${missing.slice(0, -1).join(', ')} and ${missing.at(-1)}` : missing[0]}.`); return; }
+    if (startPassed) { setHold('The start date has passed. Choose today or a later date.'); return; }
+    if (noWorkingDays) { setHold('These dates have no working day, and outreach goes out Monday to Friday only. Choose a later end date.'); return; }
     void plan(draft, () => setTab(1));
   };
   const go = (to: number) => {
@@ -179,7 +181,7 @@ export function CampaignWorkspace({ initial, pods, products, campaignId, revisio
     if (ok) { router.push(`/campaigns/${idRef.current}`); router.refresh(); return; }
     // A changed CRM detail or another campaign moved the plan: show the new one to review.
     const r = await previewCalendarAction(latest.current, idRef.current);
-    if (r.ok) { setReview(r.data); checkedPeople.current = peopleKey(latest.current); }
+    if (r.ok) { setReview(r.data); checkedPeople.current = peopleKey(latest.current); if (!r.data.calendar.valid) setTab(r.data.stage === 'people' ? 0 : 1); }
   });
   const editOutreach = (part: Partial<CampaignDraft>) => patch({ ...part, outreachEdited: true });
   const commitGroup = () => {
@@ -224,13 +226,13 @@ export function CampaignWorkspace({ initial, pods, products, campaignId, revisio
   const quickWeekend = quickDraft ? weekendOnly(quickDraft.startDate, quickDraft.endDate) : null;
   const steps = ['People', 'Outreach', 'Schedule'];
   const savable = useMemo(() => CampaignDraftSaveSchema.safeParse(draft).success, [draft]);
-  const saveLabel = saveState === 'saving' || (canAutosave && dirty.current && savable && saveState !== 'failed') ? 'Saving draft…' : saveState === 'failed' || (canAutosave && dirty.current && !savable) ? 'Not saved' : saveState === 'saved' || (canAutosave && id && !dirty.current) ? 'Draft saved' : null;
+  const saveLabel = saveState === 'saving' || (canAutosave && dirty.current && savable && saveState !== 'failed') ? 'Saving draft…' : saveState === 'failed' ? 'Not saved' : canAutosave && dirty.current && !savable ? `Not saved: ${CampaignDraftSaveSchema.safeParse(draft).error?.issues[0]?.message ?? 'something is missing'}` : saveState === 'saved' || (canAutosave && id && !dirty.current) ? 'Draft saved' : null;
   return <div className="space-y-5 pb-4">
     <header className="surface p-5 sm:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-4"><div><span className="text-xs font-semibold uppercase tracking-widest text-brand-700">Campaign studio</span><h1 className="mt-2 text-2xl font-semibold tracking-tight text-ink-900">{draft.name || 'Build your next conversation'}</h1></div><div className="flex items-center gap-3">{saveLabel && <span role="status" className={`text-sm ${saveState === 'failed' ? 'text-red-700' : 'text-ink-500'}`}>{saveLabel}</span>}{(!canAutosave || saveState === 'failed') && <button type="button" className="btn-secondary" disabled={pending} onClick={saveDraft}>{canAutosave ? 'Retry save' : 'Save draft'}</button>}</div></div>
-      <nav aria-label="Campaign setup" className="mt-6 grid grid-cols-3 gap-1 sm:flex sm:gap-2">{steps.map((name, i) => <button type="button" key={name} disabled={pending || planning || (i === 2 && tab !== 2 && (tab !== 1 || !review?.calendar.valid || checking))} aria-current={tab === i ? 'step' : undefined} onClick={() => go(i)} className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-2.5 text-xs sm:gap-2 sm:px-4 sm:text-sm ${tab === i ? 'bg-ink-900 font-semibold text-white shadow-sm' : 'bg-white/70 font-medium text-ink-500 hover:bg-white'}`}><span className="opacity-60">0{i + 1}</span>{name}</button>)}</nav>
+      <div className="flex flex-wrap items-center justify-between gap-4"><div><h1 className="text-2xl font-semibold tracking-tight text-ink-900">{draft.name || 'New campaign'}</h1></div><div className="flex items-center gap-3">{saveLabel && <span role="status" className={`text-sm ${saveState === 'failed' ? 'text-red-700' : 'text-ink-500'}`}>{saveLabel}</span>}{(!canAutosave || saveState === 'failed') && <button type="button" className="btn-secondary" disabled={pending} onClick={saveDraft}>{canAutosave ? 'Retry save' : 'Save draft'}</button>}</div></div>
+      <nav aria-label="Campaign setup" className="mt-6 grid grid-cols-3 gap-1 sm:flex sm:gap-2">{steps.map((name, i) => <button type="button" key={name} disabled={pending || planning || (i === 2 && tab !== 2 && (tab !== 1 || !review?.calendar.valid || checking))} aria-current={tab === i ? 'step' : undefined} onClick={() => go(i)} className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-2.5 text-xs sm:gap-2 sm:px-4 sm:text-sm ${tab === i ? 'bg-brand-600 font-semibold text-white shadow-sm' : 'bg-white/70 font-medium text-ink-500 hover:bg-white'}`}><span className="opacity-60">0{i + 1}</span>{name}</button>)}</nav>
     </header>
-    {error && <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3"><div className="min-w-0 flex-1"><span className="block font-medium text-red-900">{error === lastSaveError.current ? 'Not saved' : "Can't continue yet"}</span><p className="mt-1 text-sm text-red-800">{error}</p></div></div>}
+    {error && <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3"><div className="min-w-0 flex-1"><span className="block font-medium text-red-900">{error === lastPublishError.current ? 'Not published' : error === lastSaveError.current ? 'Not saved' : "Can't continue yet"}</span><p className="mt-1 text-sm text-red-800">{error}</p></div></div>}
     {tab > 0 && planned && view && <PlanSummary review={view} pod={pod} onAddFo={addFo} onUntick={untick} onApply={applySuggestion} busy={pending || planning || stale} undo={undo && <UndoLine label={undo.label} busy={pending || planning} onUndo={() => { void undoFix(); }} />} />}
     {undo && !(tab > 0 && planned && view) && <div className="surface px-5 py-3 text-sm"><UndoLine label={undo.label} busy={pending || planning} onUndo={() => { void undoFix(); }} /></div>}
     <fieldset disabled={pending || planning} className="min-w-0 space-y-5">
@@ -242,7 +244,7 @@ export function CampaignWorkspace({ initial, pods, products, campaignId, revisio
         <Field label="End date" required><input aria-label="End date" type="date" value={draft.endDate} min={draft.startDate} onChange={e => patch({ endDate: e.target.value })} className={`w-full ${noWorkingDays ? '!border-amber-300' : ''}`} />{noWorkingDays && !startPassed && <p className="mt-1 text-xs text-amber-800">No working days in these dates. <button type="button" className="font-medium text-brand-700 hover:underline" onClick={() => patch({ endDate: firstWorkingDay })}>End on {shortDateLabel(firstWorkingDay)}</button></p>}</Field>
         <div className="md:col-span-2 lg:col-span-4"><span className="mb-2 block text-sm font-medium">Products</span><div className="flex flex-wrap gap-2">{products.map(p => <button key={p} type="button" aria-pressed={draft.productInterest.includes(p)} onClick={() => patch({ productInterest: draft.productInterest.includes(p) ? draft.productInterest.filter(x => x !== p) : [...draft.productInterest, p] })} className={draft.productInterest.includes(p) ? 'chip' : 'chip-muted !border !border-line'}>{optionLabel(p)}</button>)}</div></div>
       </section>
-      <section className="surface p-5"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">Who will run this campaign?</h2><label className="flex items-center gap-3 text-sm">New people a day<input aria-label="Default new people per day" className="!w-20 !font-medium" type="number" min={1} max={500} value={draft.defaultBatchSize || ''} onChange={e => { const n = Number(e.target.value); patch({ defaultBatchSize: n, fos: draft.fos.map(f => f.batchSize === draft.defaultBatchSize ? { ...f, batchSize: n } : f) }); }} /></label></div>{pod && !pod.fos.length && <p className="text-sm text-ink-500">No FOs work in {pod.name}.</p>}<div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{pod?.fos.map(fo => { const selected = draft.fos.find(f => f.id === fo.id); return <div key={fo.id} className={`flex items-center justify-between gap-2 rounded-xl border p-3 ${selected ? 'border-brand-200 bg-brand-50/40' : 'border-line'}`}><label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={!!selected} onChange={() => patch({ fos: selected ? draft.fos.filter(f => f.id !== fo.id) : [...draft.fos, { id: fo.id, batchSize: draft.defaultBatchSize }] })} />{fo.name}{selected && review?.droppedFos.some(d => d.id === fo.id) && <span className="text-xs font-normal text-ink-500">Not in this plan</span>}</label>{selected && <input type="number" aria-label={`${fo.name} new people per day`} min={1} max={500} value={selected.batchSize || ''} className="!w-20 !font-medium" onChange={e => patch({ fos: draft.fos.map(f => f.id === fo.id ? { ...f, batchSize: Number(e.target.value) } : f) })} />}</div>; })}</div></section>
+      <section className="surface p-5"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">Who will run this campaign?</h2><label className="flex items-center gap-3 text-sm">New people a day<input aria-label="Default new people per day" className="!w-20 !font-medium" type="number" min={1} max={500} value={draft.defaultBatchSize || ''} onChange={e => { const n = Number(e.target.value); patch({ defaultBatchSize: n, fos: draft.fos.map(f => f.batchSize === draft.defaultBatchSize ? { ...f, batchSize: n } : f) }); }} /></label></div>{pod && !pod.fos.length && <p className="text-sm text-ink-500">No FOs work in {pod.name}.</p>}<div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{pod?.fos.map(fo => { const selected = draft.fos.find(f => f.id === fo.id); return <div key={fo.id} className={`flex items-center justify-between gap-2 rounded-xl border p-3 ${selected ? 'border-brand-200 bg-brand-50/40' : 'border-line'}`}><label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={!!selected} onChange={() => patch({ fos: selected ? draft.fos.filter(f => f.id !== fo.id) : [...draft.fos, { id: fo.id, batchSize: draft.defaultBatchSize }] })} />{fo.name}{selected && review?.droppedFos.some(d => d.id === fo.id) && <span className="text-xs font-normal text-ink-500">Sends nothing: {review.droppedFos.find(d => d.id === fo.id)!.reason}</span>}</label>{selected && <input type="number" aria-label={`${fo.name} new people per day`} min={1} max={500} value={selected.batchSize || ''} className="!w-20 !font-medium" onChange={e => patch({ fos: draft.fos.map(f => f.id === fo.id ? { ...f, batchSize: Number(e.target.value) } : f) })} />}</div>; })}</div></section>
       <section className="surface p-5"><div className="mb-4 flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold">Your audience <span className="ml-2 rounded-full bg-brand-50 px-2 py-1 font-medium text-brand-800">{draft.personIds.length}</span></h2></div><PeoplePicker campaignPodId={draft.podId} campaignFoIds={draft.fos.map(f => f.id)} campaignId={id} key={draft.podId} initialPod={pod?.podOwnerValue} value={draft.personIds} onChange={personIds => { setSubset(s => s.filter(id => personIds.includes(id))); patch({ personIds, assignments: Object.fromEntries(Object.entries(draft.assignments).filter(([id]) => personIds.includes(id))) }); }} /></section>
     </>}
     {tab === 0 && review && !review.calendar.valid && review.stage === 'people' && <div ref={feedback} className="space-y-3"><PlannerFeedback review={review} onApply={applySuggestion} busy={pending || planning} />{review.leftOut.length > 0 && <LeftOutList leftOut={review.leftOut} pod={pod} onAddFo={addFo} busy={pending} />}</div>}
@@ -273,9 +275,10 @@ export function CampaignWorkspace({ initial, pods, products, campaignId, revisio
       <span className="min-w-0 flex-1 text-sm text-ink-600">{tab === 0
         ? hold ? <span role="alert" className="flex items-center gap-2 text-amber-800"><IconAlert size={15} />{hold}</span> : <FooterCount people={draft.personIds.length} fos={draft.fos.length} />
         : tab === 1 && (checking || (!review && !error)) ? 'Checking…'
-        : tab === 1 && review && !review.calendar.valid ? <span className="flex flex-wrap items-center gap-3"><span className="flex items-center gap-2 text-amber-800"><IconAlert size={15} />Fix the plan above to continue.</span><button type="button" className="btn-secondary btn-sm" onClick={() => feedback.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>See how to fix</button></span>
+        : tab > 0 && error && !(review && !review.calendar.valid) ? <span className="flex items-center gap-2 text-amber-800"><IconAlert size={15} />{error}</span>
+        : tab === 1 && review && !review.calendar.valid ? <span className="flex flex-wrap items-center gap-3"><span className="flex items-center gap-2 text-amber-800"><IconAlert size={15} />Fix the problem above to continue.</span><button type="button" className="btn-secondary btn-sm" onClick={() => feedback.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>See how to fix</button></span>
         : null}</span>
-      <div className="flex gap-2">{tab > 0 && <button type="button" disabled={pending || planning} className="btn-secondary" onClick={() => go(tab - 1)}>Back</button>}{tab === 0 ? <button type="button" className="btn-primary" disabled={pending || planning} onClick={nextOutreach}>{planning ? 'Planning…' : 'Next: Outreach'}</button> : tab === 1 ? <button type="button" disabled={pending || planning || checking || !review?.calendar.valid} className="btn-primary" onClick={() => go(2)}>{checking || planning ? 'Checking…' : 'Next: Schedule'}</button> : <button type="button" disabled={pending || planning || !review?.calendar.valid} className="btn-primary" onClick={canPublish ? publish : saveDraft}>{canPublish ? 'Publish campaign' : 'Save for leader review'}</button>}</div>
+      <div className="flex gap-2">{tab > 0 && <button type="button" disabled={pending || planning} className="btn-secondary" onClick={() => go(tab - 1)}>Back</button>}{tab === 0 ? <button type="button" className="btn-primary" disabled={pending || planning} onClick={nextOutreach}>{planning ? 'Planning…' : 'Next: Outreach'}</button> : tab === 1 ? <button type="button" disabled={pending || planning || checking || !review?.calendar.valid} className="btn-primary" onClick={() => go(2)}>{checking || planning ? 'Checking…' : 'Next: Schedule'}</button> : <button type="button" disabled={pending || planning || !review?.calendar.valid} className="btn-primary" onClick={canPublish ? publish : saveDraft}>{canPublish ? 'Publish campaign' : 'Save for approval'}</button>}</div>
     </footer>
   </div>;
 }
@@ -308,10 +311,10 @@ function PlanSummary({ review, pod, onAddFo, onUntick, onApply, busy, undo }: { 
     <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-5 py-3 text-sm text-ink-600">
       <span>{review.leftOut.length > 0 ? <><span className="font-medium text-ink-900 tabular-nums">{planned.toLocaleString('en-US')}</span> of <span className="tabular-nums">{(planned + review.leftOut.length).toLocaleString('en-US')}</span> planned</> : <><span className="font-medium text-ink-900 tabular-nums">{planned.toLocaleString('en-US')}</span> {planned === 1 ? 'person' : 'people'} planned</>}</span>
       {review.leftOut.length > 0 && <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="inline-flex items-center gap-1 text-ink-900 hover:underline"><span className="font-medium tabular-nums">{review.leftOut.length.toLocaleString('en-US')}</span> left out<IconChevronRight size={13} className={open ? 'rotate-90' : undefined} /></button>}
-      {review.paces.length > 4 ? <button type="button" aria-expanded={paces} onClick={() => setPaces(!paces)} className="inline-flex items-center gap-1 text-ink-600 hover:underline"><span className="text-ink-500">New people a day:</span> <span className="tabular-nums text-ink-900">{Math.min(...review.paces.map(p => p.to))}{Math.min(...review.paces.map(p => p.to)) !== Math.max(...review.paces.map(p => p.to)) ? `–${Math.max(...review.paces.map(p => p.to))}` : ''}</span> across <span className="tabular-nums">{review.paces.length}</span> FOs<IconChevronRight size={13} className={paces ? 'rotate-90' : undefined} /></button>
+      {review.paces.length > 4 ? <button type="button" aria-expanded={paces} onClick={() => setPaces(!paces)} className="inline-flex items-center gap-1 text-ink-600 hover:underline"><span className="text-ink-500">New people a day:</span> <span className="tabular-nums text-ink-900">{Math.min(...review.paces.map(p => p.to))}{Math.min(...review.paces.map(p => p.to)) !== Math.max(...review.paces.map(p => p.to)) ? `-${Math.max(...review.paces.map(p => p.to))}` : ''}</span> across <span className="tabular-nums">{review.paces.length}</span> FOs<IconChevronRight size={13} className={paces ? 'rotate-90' : undefined} /></button>
         : <span className="flex flex-wrap items-center gap-x-4 gap-y-1"><span className="text-ink-500">New people a day:</span>{[...new Set(review.paces.map(p => `${p.from}>${p.to}`))].map(key => { const group = review.paces.filter(p => `${p.from}>${p.to}` === key); const [from, to] = [group[0].from, group[0].to]; return <span key={key}>{list(group.map(p => p.name))} <span className="tabular-nums">{from !== to && <span className="text-ink-400">{from} → </span>}<span className={`font-medium ${to > from ? 'text-amber-700' : 'text-ink-900'}`}>{to}</span></span></span>; })}</span>}
       {quiet.length > 0 && <span className="flex flex-wrap items-center gap-x-4 gap-y-1"><span className="text-ink-500">Days with nothing to send:</span>{quiet.map(q => <span key={q.id}>{q.name} <span className="tabular-nums text-ink-900">{q.days}</span></span>)}</span>}
-      {[...new Set(review.droppedFos.map(f => f.reason))].map(reason => { const off = review.droppedFos.filter(f => f.reason === reason); return <span key={reason} className="flex flex-wrap items-center gap-2 text-ink-900">{list(off.map(f => f.name))} {off.length > 1 ? 'are' : 'is'} not in this plan: {reason}.<button type="button" className="btn-ghost btn-sm" disabled={busy} onClick={() => onUntick(off.map(f => f.id))}>Remove {off.length > 1 ? 'them' : off[0].name}</button></span>; })}
+      {[...new Set(review.droppedFos.map(f => f.reason))].map(reason => { const off = review.droppedFos.filter(f => f.reason === reason); return <span key={reason} className="flex flex-wrap items-center gap-2 text-ink-900">{list(off.map(f => f.name))} {off.length > 1 ? 'send' : 'sends'} nothing in this campaign: {reason}.<button type="button" className="btn-ghost btn-sm" disabled={busy} onClick={() => onUntick(off.map(f => f.id))}>Remove {off.length > 1 ? 'them' : off[0].name}</button></span>; })}
       {undo && <span className="ml-auto">{undo}</span>}
     </div>
     {paces && review.paces.length > 4 && <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-x-6 gap-y-1 border-t border-line px-5 py-3 text-sm">{review.paces.map(p => <div key={p.foId} className="flex items-center justify-between gap-3"><span className="truncate text-ink-800">{p.name}</span><span className="tabular-nums">{p.from !== p.to && <span className="text-ink-400">{p.from} → </span>}<span className={p.to > p.from ? 'text-amber-700' : 'text-ink-900'}>{p.to}</span></span></div>)}</div>}
@@ -336,7 +339,7 @@ function LeftOutGroup({ reason, people, owner, onAddFo, busy }: { reason: string
   </div>;
 }
 
-const feedbackHeading = (review: Review) => review.stage === 'outreach' ? "Your outreach doesn't fit these dates yet" : "This campaign can't be planned yet";
+const feedbackHeading = (review: Review) => review.stage === 'outreach' ? "Your outreach doesn't fit these dates yet" : "This campaign can't be scheduled yet";
 
 /** What to try when none of the checked fixes works, by what stands in the way. */
 function lastResort(review: Review) {

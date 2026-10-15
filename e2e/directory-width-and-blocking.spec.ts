@@ -47,7 +47,7 @@ test('the accounts search names what it searches and the columns sort themselves
     await expect(page.getByLabel('Search accounts')).not.toHaveAttribute('placeholder', new RegExp(gone, 'i'));
   }
   // Accounts open on most people first, so the first click on that column reverses it.
-  const header = page.getByRole('columnheader', { name: /People at account/ }).getByRole('button');
+  const header = page.getByRole('columnheader', { name: /^People/ }).getByRole('button');
   await header.click();
   await expect(page).toHaveURL(/dir=asc/);
   const ascending = await page.locator('tbody tr').evaluateAll(rows => rows.map(row => Number(row.children[4].textContent?.replace(/,/g, ''))));

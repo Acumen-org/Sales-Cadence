@@ -134,7 +134,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
           seed={id}
           badges={
             <>
-              <Badge tone={standing.tone} dot>
+              <Badge tone={standing.tone}>
                 {standing.label}
               </Badge>
               <TierBadge tier={person.tier} />
@@ -285,7 +285,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                   title="Task"
                   actions={nextAccess.canSet ? <span className="flex items-center gap-2">
                     {openNext && mayWorkNext ? <ActionButton action={completeNextActionAction} payload={{ id: openNext.id }} className="btn-primary btn-sm" refresh>Done</ActionButton> : null}
-                    {person.dnd || (openNext && !mayWorkNext) ? null : <NextActionButton personIds={[id]} today={today} fos={nextAccess.fos} canAssign={nextAccess.canAssign} label={openNext ? 'Change' : 'Create task'} initial={openNext ? { label: openNext.label, action: openNext.action, dueDate: openNext.dueDate < today ? today : openNext.dueDate, repeat: openNext.repeat, foUserId: openNext.foUserId } : undefined} />}
+                    {person.dnd || (openNext && !mayWorkNext) ? null : <NextActionButton personIds={[id]} today={today} fos={nextAccess.fos} canAssign={nextAccess.canAssign} label={openNext ? 'Change' : 'Create task'} icon={openNext ? 'refresh' : 'plus'} initial={openNext ? { label: openNext.label, action: openNext.action, dueDate: openNext.dueDate < today ? today : openNext.dueDate, repeat: openNext.repeat, foUserId: openNext.foUserId } : undefined} />}
                     {openNext && mayWorkNext ? <ActionButton action={stopNextActionAction} payload={{ id: openNext.id }} className="btn-ghost btn-sm" confirm="Stop this task? It is cleared in Twenty too." refresh>Stop</ActionButton> : null}
                   </span> : null}
                 >
@@ -465,7 +465,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                           {c.jobTitle ? <span className="block truncate text-[12px] leading-4 text-ink-500" title={c.jobTitle}>{c.jobTitle}</span> : null}
                         </span>
                       </Link>
-                      <Badge tone={st.tone} dot>
+                      <Badge tone={st.tone}>
                         {st.label}
                       </Badge>
                     </li>

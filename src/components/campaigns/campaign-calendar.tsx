@@ -18,11 +18,11 @@ const mondayOf = (day: string) => addDays(day, -((weekday(day) + 6) % 7));
 /** A campaign of up to six weeks is one page; longer ones page by month. */
 const ONE_PAGE_WEEKS = 6;
 
-/** "September 2026", or "September – October 2026" when a short campaign crosses a month. */
+/** "September 2026", or "September - October 2026" when a short campaign crosses a month. */
 function spanTitle(first: string, last: string) {
   if (first.slice(0, 7) === last.slice(0, 7)) return monthName(first.slice(0, 7));
   const name = (m: string) => new Intl.DateTimeFormat('en-US', { month: 'long', timeZone: 'UTC' }).format(new Date(`${m}-01T12:00:00Z`));
-  return first.slice(0, 4) === last.slice(0, 4) ? `${name(first.slice(0, 7))} – ${monthName(last.slice(0, 7))}` : `${monthName(first.slice(0, 7))} – ${monthName(last.slice(0, 7))}`;
+  return first.slice(0, 4) === last.slice(0, 4) ? `${name(first.slice(0, 7))} - ${monthName(last.slice(0, 7))}` : `${monthName(first.slice(0, 7))} - ${monthName(last.slice(0, 7))}`;
 }
 
 /**

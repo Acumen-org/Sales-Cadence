@@ -88,7 +88,7 @@ describe('durable enrichment imports', () => {
     await upsertPersonCache(mock.updatePerson('person-03', { podOwner: 'LEIGH', ownerMemberId: basics.users.leigh.twentyMemberId }));
     const outside = await previewEnrichment(leader, 'person', 'Outside pod', 'id,city\nperson-03,Paris', { id: 'recordId', city: 'city' });
     expect((await getEnrichmentBatch(leader, outside))!.rows[0].status).toBe('INVALID');
-    await expect(previewEnrichment(junior, 'person', 'Blocked', 'id,email\nperson-01,new@example.com', { id: 'recordId', email: 'email' })).rejects.toThrow(/pod leader/);
+    await expect(previewEnrichment(junior, 'person', 'Blocked', 'id,email\nperson-01,new@example.com', { id: 'recordId', email: 'email' })).rejects.toThrow('Only Senior FOs, Sales Leaders, Pod Managers and admins can import enrichment.');
   });
 
   it('keeps dry runs separate from applied writes and leaves the underlying CRM unchanged', async () => {

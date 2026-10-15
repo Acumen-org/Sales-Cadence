@@ -47,8 +47,12 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
     // Rendered all start day, even once nobody is left to add, so the last "joined" message stays.
     const joinable = manager && addFoWindow(campaign).open ? await addFoCandidates(id) : null;
     const addFo = joinable ? <AddFoPanel campaignId={id} campaignName={campaign.name} podId={campaign.podId} candidates={joinable.map((f) => ({ id: f.id, name: f.name }))} defaultPace={(campaign.plannerDraft as unknown as CampaignDraft).defaultBatchSize || 10} today={todayIn(workspaceTimezone())} /> : undefined;
-    const failed = campaign.status === 'SCHEDULED' ? await prisma.auditLog.findFirst({ where: { entityType: 'campaign', entityId: id, action: 'launch_failed' }, orderBy: { createdAt: 'desc' } }) : null;
-    const launchError = failed?.details && typeof failed.details === 'object' && 'error' in failed.details ? String(failed.details.error) : null;
+    // The last failed start, unless the campaign was published again after it.
+    const failed = campaign.status === 'SCHEDULED' ? await prisma.auditLog.findFirst({ where: { entityType: 'campaign', entityId: id, action: { in: ['launch_failed', 'calendar_published', 'calendar_republished'] } }, orderBy: { createdAt: 'desc' } }) : null;
+    const failure = failed?.action === 'launch_failed' && failed.details && typeof failed.details === 'object' && 'error' in failed.details ? String(failed.details.error) : null;
+    // Only someone who can edit gets the Review button; everyone else is told who can.
+    const launchError = failure && campaign.followupSourceId && !canApproveCampaign(user, campaign.podId) ? `${failure} Ask a Sales Leader or Pod Manager of ${campaign.pod.name} to fix it.`
+      : failure && !editor ? `${failure} Ask whoever created it, or a Senior FO, Sales Leader or Pod Manager of ${campaign.pod.name}, to fix it.` : failure;
     return <PlannedCampaignDetail canDelete={canDeleteCampaign(user, { status: campaign.status, podId: campaign.podId, createdById: campaign.createdById, everLaunched: people.launched })} campaign={campaign} manager={manager} editor={editor} people={people} q={sp.q ?? ''} launchError={launchError} addFo={addFo} />;
   }
   const proposed = ['PENDING_APPROVAL', 'SCHEDULED', 'DRAFT'].includes(campaign.status);
@@ -144,7 +148,7 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
         </Card>
       ) : null}
 
-      {manager && <CampaignControls campaignId={id} status={campaign.status} sequences={sequences} currentSequenceId={campaign.sequenceId} defaultName={campaign.name + ' — follow-up'} today={today} />}
+      {manager && <CampaignControls campaignId={id} status={campaign.status} sequences={sequences} currentSequenceId={campaign.sequenceId} defaultName={campaign.name + ' - follow-up'} today={today} />}
 
       {proposed && audienceAll.length > 0 ? (
         <Card title={`Audience · ${audienceAll.length.toLocaleString('en-US')}`} actions={<span className="flex items-center gap-2 text-[12px] text-ink-500">{previewError ? <Badge tone="red">Preview unavailable</Badge> : ready ? <><Badge tone="green">{ready.candidates.length} will start</Badge>{ready.conflicts.length ? <Badge tone="amber">{ready.conflicts.length} skipped</Badge> : null}</> : null}</span>}>

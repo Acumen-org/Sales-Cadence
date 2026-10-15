@@ -58,7 +58,7 @@ export function AccountsToolbar({ q, pods, fos, products, pod, fo, product, camp
     <div className="flex flex-wrap items-center gap-2">
       <div className="relative w-full max-w-xs">
         <IconSearch size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search name or domain" aria-label="Search accounts" className="!pl-9" />
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search name or domain" aria-label="Search accounts" className="!pl-9 !text-[12.5px]" />
       </div>
       <select value={pod} onChange={(e) => update({ pod: e.target.value || null })} aria-label="Filter by pod" className="!w-auto !py-2 !text-[12.5px]">
         <option value="">All pods</option>

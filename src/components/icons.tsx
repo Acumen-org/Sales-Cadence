@@ -237,6 +237,20 @@ export const IconColumns = (p: IconProps) => (
     <path d="M9 4v16M15 4v16" />
   </svg>
 );
+export const IconUndo = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M9 14L4 9l5-5" />
+    <path d="M4 9h10.5a5.5 5.5 0 010 11H11" />
+  </svg>
+);
+
+export const IconRedo = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M15 14l5-5-5-5" />
+    <path d="M20 9H9.5a5.5 5.5 0 000 11H13" />
+  </svg>
+);
+
 export const IconRefresh = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M21 12a9 9 0 01-9 9 9 9 0 01-8.5-6" />
@@ -272,5 +286,6 @@ export function ActionIcon({ action, size = 16, className }: { action: string; s
   if (action === 'EMAIL') return <IconMail size={size} className={className} />;
   if (action === 'CALL') return <IconPhone size={size} className={className} />;
   if (action === 'MEETING') return <IconCalendar size={size} className={className} />;
+  if (action === 'STATE') return <IconActivity size={size} className={className} />;
   return <IconLinkedin size={size} className={className} />;
 }

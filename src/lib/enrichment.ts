@@ -7,7 +7,7 @@ import { blockedCompanyIds } from './blocked-accounts';
 import { getSettings } from './settings';
 import type { SessionUser } from './auth/current-user';
 import { peopleScopeWhere, podPeopleWhere } from './people-scope';
-import { assertAllowed, isAdmin, isPodLeader, isBizOps, canSeeAllPods } from './auth/rbac';
+import { assertAllowed, isAdmin, isPodLeader, isBizOps, canSeeAllPods, ENRICHMENT_ROLES } from './auth/rbac';
 import { cachedPersonName, upsertCompanyCache, upsertPersonCache } from './person-cache';
 import type { TwentyClient } from './twenty/client';
 import type { EnrichCompanyInput, EnrichPersonInput, TwentyCompany, TwentyPerson } from './twenty/types';
@@ -198,7 +198,7 @@ const equal = (a: ChangeValue | undefined, b: ChangeValue | undefined) => (a ?? 
 const errText = (error: unknown) => error instanceof z.ZodError ? error.issues.map((issue) => issue.message).join(' ') : error instanceof Error ? error.message : 'The enrichment operation failed.';
 
 export async function previewEnrichment(user: SessionUser, entity: EnrichmentEntity, name: string, source: string, mapping: Record<string, string>) {
-  assertAllowed(canEnrich(user), 'Only a pod leader or administrator can import enrichment.');
+  assertAllowed(canEnrich(user), `Only ${ENRICHMENT_ROLES} can import enrichment.`);
   if (!['person', 'company'].includes(entity)) throw new Error('Choose contacts or accounts.');
   const parsed = parseEnrichmentUpload(source);
   const targets = Object.entries(mapping).filter(([header, target]) => parsed.headers.includes(header) && target);
@@ -264,9 +264,9 @@ export async function getEnrichmentBatch(user: SessionUser, id: string) {
 }
 
 export async function reviewEnrichmentRows(user: SessionUser, batchId: string, ids: string[], decision: 'approve' | 'skip' | 'retry') {
-  assertAllowed(canEnrich(user));
+  assertAllowed(canEnrich(user), `Only ${ENRICHMENT_ROLES} can review enrichment.`);
   const batch = await getEnrichmentBatch(user, batchId);
-  assertAllowed(!!batch, 'This import is not available to you.');
+  assertAllowed(!!batch, 'This import was deleted, or someone else uploaded it. Only the person who uploaded an import, and admins, can review it.');
   const statuses = decision === 'approve' ? ['CONFLICT'] : decision === 'retry' ? ['FAILED', 'DRY_RUN'] : ['READY', 'CONFLICT', 'FAILED', 'DRY_RUN'];
   const result = await prisma.enrichmentRow.updateMany({ where: { batchId, id: { in: ids.slice(0, MAX_ROWS) }, OR: [{ status: { in: statuses } }, ...(decision === 'retry' ? [{ status: 'APPLYING', updatedAt: { lt: new Date(Date.now() - 10 * 60_000) } }] : [])] }, data: { status: decision === 'skip' ? 'SKIPPED' : 'READY', error: null } });
   if (!result.count) throw new Error('No selected rows are ready for this action. Interrupted processing can be retried after ten minutes.');
@@ -274,9 +274,9 @@ export async function reviewEnrichmentRows(user: SessionUser, batchId: string, i
 
 /** Claim and process a small durable chunk. Closing the browser pauses between chunks. */
 export async function applyEnrichmentChunk(user: SessionUser, batchId: string, client: TwentyClient) {
-  assertAllowed(canEnrich(user));
+  assertAllowed(canEnrich(user), `Only ${ENRICHMENT_ROLES} can review enrichment.`);
   const batch = await prisma.enrichmentBatch.findFirst({ where: { id: batchId, ...(isAdmin(user) ? {} : { createdById: user.id }) } });
-  assertAllowed(!!batch, 'This import is not available to you.');
+  assertAllowed(!!batch, 'This import was deleted, or someone else uploaded it. Only the person who uploaded an import, and admins, can review it.');
   await prisma.enrichmentRow.updateMany({ where: { batchId, status: 'APPLYING', updatedAt: { lt: new Date(Date.now() - 10 * 60_000) } }, data: { status: 'FAILED', error: 'The previous attempt was interrupted. Retry to verify the CRM and resume.' } });
   const rows = await prisma.enrichmentRow.findMany({ where: { batchId, status: 'READY' }, orderBy: { rowNumber: 'asc' }, take: 10 });
   let applied = 0;
@@ -296,7 +296,7 @@ export async function applyEnrichmentChunk(user: SessionUser, batchId: string, c
         if (!current || current.deletedAt) throw new Error('The matched record was removed from Twenty.');
         if (batch.entity === 'person') await upsertPersonCache(current as TwentyPerson); else await upsertCompanyCache(current as TwentyCompany);
         const allowed = batch.entity === 'person' ? await prisma.personCache.count({ where: { AND: [await enrichmentWritePeopleScope(user), { id: row.recordId }] } }) : await prisma.companyCache.count({ where: { AND: [await enrichmentWriteCompanyScope(user), { id: row.recordId }] } });
-        assertAllowed(allowed > 0, 'This record has moved outside your scope.');
+        assertAllowed(allowed > 0, 'Not updated: this record now belongs to a pod you are not in, so only its own pod or an admin can change it.');
         const latest = Object.fromEntries(Object.keys(changes).map((field) => [field, fieldValue(current as unknown as Record<string, unknown>, field)]));
         const alreadyApplied = Object.keys(changes).every((field) => equal(latest[field], changes[field]));
         if (alreadyApplied && client.kind === 'dry-run') {

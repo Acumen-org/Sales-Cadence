@@ -6,7 +6,7 @@ import { prisma } from '@/lib/db';
 import { canEnrich } from '@/lib/enrichment';
 import { formatInstant } from '@/lib/dates';
 import { workspaceTimezone } from '@/lib/workspace';
-import { Surface, ViewHeader } from '@/components/ui';
+import { Empty, Surface, ViewHeader } from '@/components/ui';
 import { EnrichmentImportForm } from '@/components/enrichment/import-form';
 
 /** How a row's status reads in a one-line summary of an upload. */
@@ -37,7 +37,7 @@ export default async function ImportEnrichmentPage({ searchParams }: { searchPar
           <td><Link href={`/enrichment/${b.id}`} className="font-medium text-brand-700 hover:underline">{b.name}</Link></td>
           <td className="text-ink-700">{b.entity === 'company' ? 'Accounts' : 'People'}</td>
           <td className="num tabular-nums">{b._count.rows.toLocaleString('en-US')}</td>
-          <td className="text-[12.5px] text-ink-700">{summary(b.id) || '–'}</td>
+          <td className="text-[12.5px] text-ink-700">{summary(b.id) || <Empty />}</td>
           <td className="whitespace-nowrap text-[12.5px] text-ink-600">{formatInstant(b.createdAt, workspaceTimezone())} · {authors.find((a) => a.id === b.createdById)?.name ?? 'Someone'}</td>
         </tr>)}</tbody>
       </table></div> : <p className="px-5 pb-5 text-sm text-ink-500">Nothing uploaded yet. Export the records to enrich, fill in the file, and upload it here.</p>}

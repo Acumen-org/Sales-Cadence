@@ -41,16 +41,16 @@ export function MeetingsToolbar({ who, product, from, to, favourites, products, 
     <div className="flex flex-1 flex-wrap items-center gap-2">
       <div className="relative w-full max-w-[260px]">
         <IconSearch size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Attendee, title or account" aria-label="Search meetings" className="!pl-9" />
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Attendee, title or account" aria-label="Search meetings" className="!pl-9 !text-[12.5px]" />
       </div>
       <select value={booked} onChange={(e) => update({ booked: e.target.value || null })} aria-label="Booked by" className="!w-auto !max-w-[200px] !py-2 !text-[12.5px]">
         <option value="">Booked by anyone</option>
         {fos.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
       </select>
-      <button type="button" onClick={() => update({ fav: favourites ? null : '1' })} aria-pressed={favourites} className={favourites ? 'chip' : 'chip-muted'} title="Only the meetings you starred">
+      <button type="button" onClick={() => update({ fav: favourites ? null : '1' })} aria-pressed={favourites} className={`btn-secondary !text-[12.5px] ${favourites ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`} title="Only the meetings you starred">
         <IconStar size={13} filled={favourites} /> Favourites
       </button>
-      <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} aria-controls={panelId} className={`btn-secondary btn-sm ${showMore || chips.length ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
+      <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} aria-controls={panelId} className={`btn-secondary !text-[12.5px] ${showMore || chips.length ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
         <IconFilter size={14} /> Filters
         {chips.length ? <span className="rounded-full bg-brand-600 px-1.5 text-[11px] font-semibold leading-[17px] text-white">{chips.length}</span> : null}
       </button>

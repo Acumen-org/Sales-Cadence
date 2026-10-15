@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { prisma, type Tx } from './db';
 import type { SessionUser } from './auth/current-user';
-import { canAddFromAnyPod, canApproveCampaign, canCreateCampaign, canEditCampaign, ROLES_NEEDING_POD } from './auth/rbac';
+import { canAddFromAnyPod, canApproveCampaign, canEditCampaign, ROLE_LABELS, ROLES_NEEDING_POD, whyNotCreateCampaign, whyNotEditCampaign } from './auth/rbac';
 import { campaignAudienceIssues, type AudienceIssueKind } from './campaign-audience';
 import { cachedPersonName } from './person-cache';
 import { cleanRichText } from './rich-text';
@@ -62,15 +62,17 @@ export const calendarFingerprint = (draft: CampaignDraft, calendar: CampaignCale
  */
 export async function planCampaign(input: unknown, user: SessionUser, campaignId: string | undefined, options: { reshapeOutreach: boolean; forPublish?: boolean; /** The caller checked who may change this campaign's people. */ authorized?: boolean }, db: Tx = prisma): Promise<CampaignPlan> {
   const intent = CampaignDraftSchema.parse(input);
-  if (intent.productInterest.some(p => !(defaultTwentySchema.personValues.productInterest as readonly string[]).includes(p))) throw new Error('Choose an available product.');
-  if (!options.authorized && !canCreateCampaign(user, intent.podId)) throw new Error('You cannot manage campaigns for this pod.');
+  if (intent.productInterest.some(p => !(defaultTwentySchema.personValues.productInterest as readonly string[]).includes(p))) throw new Error('One of the products on this campaign is no longer in Twenty. Choose a product from the list.');
   const pod = await db.pod.findUnique({ where: { id: intent.podId } });
-  if (!pod || pod.archived) throw new Error('Choose an available pod.');
+  const refused = options.authorized ? null : whyNotCreateCampaign(user, pod);
+  if (refused) throw new Error(refused);
+  if (!pod || pod.archived) throw new Error(podUnavailable(pod));
   const fos = await db.user.findMany({ where: { id: { in: intent.fos.map(f => f.id) }, active: true, role: { in: ROLES_NEEDING_POD }, pods: { some: { podId: pod.id } } }, select: { id: true, name: true, twentyMemberId: true }, orderBy: { id: 'asc' } });
   const gone = intent.fos.filter(f => !fos.some(x => x.id === f.id));
-  const goneNames = gone.length ? new Map((await db.user.findMany({ where: { id: { in: gone.map(f => f.id) } }, select: { id: true, name: true } })).map(u => [u.id, u.name])) : new Map<string, string>();
+  const goneUsers = gone.length ? new Map((await db.user.findMany({ where: { id: { in: gone.map(f => f.id) } }, select: { id: true, name: true, active: true, role: true } })).map(u => [u.id, u])) : new Map<string, { id: string; name: string; active: boolean; role: (typeof ROLES_NEEDING_POD)[number] | 'ADMIN' | 'BIZ_OPS' }>();
+  const goneWhy = (id: string) => { const u = goneUsers.get(id); return !u ? 'they are no longer on the team' : !u.active ? 'they no longer have access to Cadence' : !ROLES_NEEDING_POD.includes(u.role) ? `they are now ${ROLE_LABELS[u.role]} and do not run outreach` : `they are no longer in ${pod.name}`; };
   const team = { ...intent, fos: intent.fos.filter(f => fos.some(x => x.id === f.id)) };
-  if (!team.fos.length) throw new Error('Select at least one FO who works in this pod.');
+  if (!team.fos.length) throw new Error(`None of the FOs you picked can run this campaign: ${gone.map(f => `${goneUsers.get(f.id)?.name ?? 'a former FO'} (${goneWhy(f.id)})`).join('; ')}. Choose at least one FO from ${pod.name}.`);
 
   const issues = await campaignAudienceIssues(intent.personIds, { podId: pod.id, podOwnerValue: pod.podOwnerValue, podName: pod.name, ownerMemberIds: fos.flatMap(f => f.twentyMemberId ? [f.twentyMemberId] : []), campaignId, checkOwners: true, anyPod: canAddFromAnyPod(user) }, db);
   const leftOut: LeftOut[] = [...issues];
@@ -78,7 +80,7 @@ export async function planCampaign(input: unknown, user: SessionUser, campaignId
   const existing = campaignId ? await db.campaign.findUnique({ where: { id: campaignId }, select: { followupSourceId: true, followupWaitDays: true, followupSourceRun: true } }) : null;
   if (existing?.followupSourceId) {
     const eligible = new Set((await nonReplierCandidates(existing.followupSourceId, existing.followupWaitDays, new Date(), existing.followupSourceRun ?? undefined)).map(e => e.personId));
-    for (const id of intent.personIds) if (!excluded.has(id) && !eligible.has(id)) { excluded.add(id); leftOut.push({ id, name: '', company: null, kind: 'followup', reason: 'No longer qualifies for this follow-up' }); }
+    for (const id of intent.personIds) if (!excluded.has(id) && !eligible.has(id)) { excluded.add(id); leftOut.push({ id, name: '', company: null, kind: 'followup', reason: 'No longer due this follow-up' }); }
   }
   const reachable = intent.personIds.filter(id => !excluded.has(id));
   const rows = await db.personCache.findMany({ where: { id: { in: [...reachable, ...leftOut.filter(l => !l.name).map(l => l.id)] } }, orderBy: { id: 'asc' } });
@@ -115,15 +117,15 @@ export async function planCampaign(input: unknown, user: SessionUser, campaignId
     const rest = suggestCampaignCalendar(team, people, fos, { paces: false, outreach: !options.reshapeOutreach, verify: d => verified(d, options.reshapeOutreach) });
     return [...out, ...rest].slice(0, 3).map(x => ({ ...x, draft: { ...x.draft, personIds: intent.personIds, outreachEdited: x.draft.outreachEdited ?? intent.outreachEdited } }));
   };
-  const droppedFos = gone.map(f => ({ id: f.id, name: goneNames.get(f.id) ?? 'Former FO', reason: 'no longer in this pod' }));
+  const droppedFos = gone.map(f => ({ id: f.id, name: goneUsers.get(f.id)?.name ?? 'Former FO', reason: goneWhy(f.id) }));
   if (fit) {
     // The same shape whichever way it was reached (a built outreach or the edited one it became),
     // so the fingerprint a review shows is the one publishing recomputes.
     fit.draft = CampaignDraftSchema.parse(fit.draft);
     for (const id of fit.overflow) leftOut.push(describe(id, 'dates', `No room by ${endLabel}, even at 500 new people a day`));
     for (const fo of fit.droppedFos) {
-      droppedFos.push({ id: fo.id, name: fo.name, reason: fo.reason === 'unfit' ? 'their people do not fit these dates' : 'they own none of the people you picked' });
-      for (const id of fo.personIds) leftOut.push(describe(id, 'fo', `Owned by ${fo.name}, who is not in this plan`));
+      droppedFos.push({ id: fo.id, name: fo.name, reason: fo.reason === 'unfit' ? `their people don't fit by ${endLabel}` : 'none of the people you picked are theirs' });
+      for (const id of fo.personIds) leftOut.push(describe(id, 'fo', `Owned by ${fo.name}, whose people don't fit by ${endLabel}`));
     }
     const trimmed = fit.overflow.length > 0 || fit.droppedFos.some(f => f.personIds.length > 0);
     const suggestions = fit.overflow.length && !options.forPublish ? alternatives() : [];
@@ -152,7 +154,7 @@ export async function planCampaign(input: unknown, user: SessionUser, campaignId
     const who = (list: FitProblem[]) => list.length < team.fos.length ? ` This affects ${nameList(list.map(p => p.name))}.` : '';
     if (window.length) planIssues.push({ title: `The steps run past ${endLabel}.`, detail: `Even starting on the first day, the last step would go out too late.${who(window)}`, kind: 'window' });
     if (many.length) planIssues.push({ title: `${nameList(many.map(p => p.name))} would need more than 500 new people a day.`, detail: 'Choose a later end date, or remove steps.', kind: 'many' });
-    if (search.length) planIssues.push({ title: `${nameList(search.map(p => p.name))}'s steps can't be arranged in these dates.`, detail: 'Some working days would need more than two sends. Change the waits between steps, or choose a later end date.', kind: 'search' });
+    if (search.length) planIssues.push({ title: `${nameList(search.map(p => p.name))}'s steps can't be arranged in these dates.`, detail: 'Cadence could not arrange them so that each FO works at most two steps a day. Change the waits between steps, or choose a later end date.', kind: 'search' });
   } else planIssues.push({ title: `These people can't be planned from ${range}.`, detail: 'Pick other people, or choose other dates.', kind: 'people' });
   const suggestions = stage === 'outreach' && !options.forPublish ? alternatives() : [];
   const calendar: CampaignCalendar = { version: 1, days, batches: [], people, fos, issues: planIssues, valid: false, exhausted: false };
@@ -172,18 +174,19 @@ export async function prepareCampaignStudio(input: unknown, user: SessionUser, c
 
 async function saveDraft(input: unknown, user: SessionUser, options: { id?: string; revision?: string; auto?: boolean }) {
   const d = CampaignDraftSaveSchema.parse(input);
-  if (!canCreateCampaign(user, d.podId)) throw new Error('You cannot manage campaigns for this pod.');
   const pod = await prisma.pod.findUnique({ where: { id: d.podId } });
-  if (!pod || pod.archived) throw new Error('Choose an available pod.');
+  const refused = whyNotCreateCampaign(user, pod);
+  if (refused) throw new Error(refused);
+  if (!pod || pod.archived) throw new Error(podUnavailable(pod));
   const id = options.id ?? randomUUID();
   return prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`campaign:${id}`}))`;
     const existing = await tx.campaign.findUnique({ where: { id } });
-    if (options.id && !existing) throw new Error('Campaign no longer exists.');
+    if (options.id && !existing) throw new Error(DELETED);
     if (existing) {
-      if (!canEditCampaign(user, existing)) throw new Error('You cannot edit this campaign.');
-      if (!['DRAFT', 'SCHEDULED', 'PENDING_APPROVAL'].includes(existing.status) || await tx.enrollment.count({ where: { campaignId: id } })) throw new Error('This campaign has already started. Its plan is locked.');
-      if (existing.updatedAt.toISOString() !== options.revision) throw new Error('Someone changed this campaign. Reload before saving to protect their changes.');
+      if (!canEditCampaign(user, existing)) throw new Error(await editRefusal(tx, user, existing));
+      if (!['DRAFT', 'SCHEDULED', 'PENDING_APPROVAL'].includes(existing.status) || await tx.enrollment.count({ where: { campaignId: id } })) throw new Error(STARTED);
+      if (existing.updatedAt.toISOString() !== options.revision) throw new Error(CHANGED);
     }
     const sequenceIds = await saveFlows(tx, d.flows, existing?.plannerDraft);
     // A follow-up waiting for review already reserves its people, so it holds only those who can be in it.
@@ -240,16 +243,16 @@ export async function saveCampaignCalendar(input: unknown, user: SessionUser, op
     await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext('campaign-planner-publication'))`;
     await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`campaign:${id}`}))`;
     const existing = await tx.campaign.findUnique({ where: { id } });
-    if (options.id && !existing) throw new Error('Campaign no longer exists.');
+    if (options.id && !existing) throw new Error(DELETED);
     if (existing) {
-      if (!canEditCampaign(user, existing)) throw new Error('You cannot edit this campaign.');
-      if (existing.followupSourceId && !canApproveCampaign(user, checked.draft.podId)) throw new Error('A Sales Leader, Pod Manager or admin must review and publish this follow-up campaign.');
-      if (!['DRAFT', 'SCHEDULED', 'PENDING_APPROVAL'].includes(existing.status) || await tx.enrollment.count({ where: { campaignId: id } })) throw new Error('This campaign has already started. Its plan is locked.');
-      if (existing.updatedAt.toISOString() !== options.revision) throw new Error('Someone changed this campaign. Reload before saving to protect their changes.');
+      if (!canEditCampaign(user, existing)) throw new Error(await editRefusal(tx, user, existing));
+      if (existing.followupSourceId && !canApproveCampaign(user, checked.draft.podId)) throw new Error(`This is a follow-up campaign, so only a Sales Leader or Pod Manager of ${(await tx.pod.findUnique({ where: { id: checked.draft.podId }, select: { name: true } }))?.name ?? 'its pod'}, or an admin, can publish it.`);
+      if (!['DRAFT', 'SCHEDULED', 'PENDING_APPROVAL'].includes(existing.status) || await tx.enrollment.count({ where: { campaignId: id } })) throw new Error(STARTED);
+      if (existing.updatedAt.toISOString() !== options.revision) throw new Error(CHANGED);
     }
     const fresh = await planCampaign(input, user, options.id, { reshapeOutreach: automatic, forPublish: true }, tx);
     const d = fresh.draft;
-    if (!fresh.calendar.valid || fresh.fingerprint !== options.fingerprint) throw new Error('The plan changed since you last looked, for example a contact was updated in Twenty or another campaign took someone. Check the new plan, then publish again.');
+    if (!fresh.calendar.valid || fresh.fingerprint !== options.fingerprint) throw new Error('Not published: something changed after you opened Schedule. A contact was updated in Twenty, or another campaign took someone. Check what changed, then publish again.');
     const sequenceIds = await saveFlows(tx, d.flows, existing?.plannerDraft);
     const data = {
       name: d.name, podId: d.podId, startDate: d.startDate, endDate: d.endDate, personIds: d.personIds,
@@ -264,6 +267,15 @@ export async function saveCampaignCalendar(input: unknown, user: SessionUser, op
     await logAudit({ entityType: 'campaign', entityId: id, action: 'calendar_published', actor: userActor(user), details: { people: d.personIds.length, batches: fresh.calendar.batches.length, leftOut: fresh.leftOut.length } }, tx);
     return campaign;
   }, { timeout: 60000 });
+}
+
+const DELETED = 'This campaign has been deleted.';
+const STARTED = 'This campaign has already started, so its plan can no longer be changed.';
+const CHANGED = 'Someone else changed this campaign while you had it open. Reload the page to see their changes, then make yours again.';
+const podUnavailable = (pod: { name: string } | null) => pod ? `${pod.name} has been archived, so it cannot run campaigns. Choose another pod.` : 'This pod no longer exists. Choose another pod.';
+async function editRefusal(tx: Tx, user: SessionUser, c: { podId: string; createdById: string | null }) {
+  const [pod, creator] = await Promise.all([tx.pod.findUnique({ where: { id: c.podId }, select: { name: true } }), c.createdById ? tx.user.findUnique({ where: { id: c.createdById }, select: { name: true } }) : null]);
+  return whyNotEditCampaign(user, c, pod?.name ?? 'its pod', creator?.name) ?? 'You cannot change this campaign.';
 }
 
 export type Replanned = { outcome: 'republished' | 'withdrawn'; plan: CampaignPlan | null; reason: string | null };
@@ -301,7 +313,8 @@ export async function replanScheduledCampaign(id: string, change: (request: Camp
     // says the same, so nothing still lists who was taken out.
     await tx.campaign.update({ where: { id }, data: { personIds: request.personIds, plannerDraft: json({ ...saved, ...change(saved), sequenceIds: saved.sequenceIds, request }), publishedPlan: Prisma.DbNull, approvedAt: null, approvedById: null, status: existing.followupSourceId ? 'PENDING_APPROVAL' : 'DRAFT' } });
     await logAudit({ entityType: 'campaign', entityId: id, action: reason, actor: userActor(user), details: { calendarNeedsReview: true } }, tx);
-    const why = !approvable ? 'a follow-up needs a Sales Leader or Pod Manager to approve its new plan' : plan ? plan.calendar.issues[0]?.title ?? 'the plan no longer holds' : 'its start date has passed';
+    // A whole sentence, because People shows it as the reason the campaign went back to draft.
+    const why = !approvable ? `Follow-up campaigns need a Sales Leader or Pod Manager of ${(await tx.pod.findUnique({ where: { id: existing.podId }, select: { name: true } }))?.name ?? 'their pod'}, or an admin, to publish them again.` : plan ? plan.calendar.issues[0]?.title ?? 'Its people no longer fit its dates.' : `Its start date, ${shortDateLabel(request.startDate)}, has passed.`;
     return { outcome: 'withdrawn', plan, reason: why };
   }, { timeout: 60000 });
 }

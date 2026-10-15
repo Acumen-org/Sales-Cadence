@@ -15,10 +15,10 @@ export async function changeCampaignStatus(id: string, status: 'PAUSED' | 'STOPP
   const result = await prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`campaign:${id}`}))`;
     const campaign = await tx.campaign.findUniqueOrThrow({ where: { id }, include: { pod: true } });
-    if (campaign.pod.archived && status === 'ACTIVE') throw new Error('Restore the pod before resuming this campaign.');
-    if (campaign.plannerDraft && status === 'ACTIVE' && campaign.endDate && campaign.endDate < todayIn(workspaceTimezone(), now)) throw new Error('This campaign window has ended. Stop this campaign and plan another run with new dates.');
+    if (campaign.pod.archived && status === 'ACTIVE') throw new Error(`${campaign.pod.name} has been archived, so this campaign cannot resume. An admin can restore the pod in Settings.`);
+    if (campaign.plannerDraft && status === 'ACTIVE' && campaign.endDate && campaign.endDate < todayIn(workspaceTimezone(), now)) throw new Error('Its end date has passed, so it cannot resume. Stop it, then use Plan another run to set new dates.');
     const allowed: CampaignStatus[] = status === 'PAUSED' ? ['ACTIVE','SCHEDULED'] : status === 'ACTIVE' ? ['PAUSED'] : ['ACTIVE','PAUSED','SCHEDULED','PENDING_APPROVAL','DRAFT'];
-    if (!allowed.includes(campaign.status)) throw new Error('Campaign state changed. Refresh and try again.');
+    if (!allowed.includes(campaign.status)) throw new Error('Someone else changed this campaign a moment ago. Refresh the page to see where it stands.');
     const cancelled: string[] = [];
     if (status === 'PAUSED') await tx.enrollment.updateMany({ where: { campaignId: id, status: 'ACTIVE' }, data: { status: 'PAUSED', pausedAt: now, pauseReason: 'campaign_paused' } });
     if (status === 'STOPPED') {
@@ -48,7 +48,7 @@ export async function activateCampaign(id: string, ctx: EngineContext = { actor:
   const campaign = await prisma.campaign.findUnique({ where: { id }, include: { sequence: true, pod: true } });
   if (!campaign || campaign.status !== 'SCHEDULED' || campaign.startDate > todayIn(workspaceTimezone(), now)) return { enrolled: 0, skipped: 0 };
   if (campaign.plannerDraft) return activateCalendarCampaign(id, ctx);
-  if (campaign.pod.archived || campaign.sequence.archived) throw new Error('Campaign needs an available pod and sequence.');
+  if (campaign.pod.archived || campaign.sequence.archived) throw new Error(campaign.pod.archived ? `Not started: ${campaign.pod.name} has been archived.` : `Not started: its sequence, ${campaign.sequence.name}, has been archived.`);
   let ids = campaign.personIds;
   if (campaign.followupSourceId) {
     const eligible = await nonReplierCandidates(campaign.followupSourceId, campaign.followupWaitDays, now, campaign.followupSourceRun ?? undefined);
@@ -78,7 +78,7 @@ export async function activateCampaign(id: string, ctx: EngineContext = { actor:
     await tx.$queryRaw`SELECT id FROM "Pod" WHERE id = ${current.podId} FOR UPDATE`;
     if (current.status !== 'SCHEDULED' || current.runNumber !== campaign.runNumber) return [];
     const lockedPod = await tx.pod.findUniqueOrThrow({ where: { id: current.podId } });
-    if (lockedPod.archived || current.sequence.archived) throw new Error('Pod or sequence is unavailable.');
+    if (lockedPod.archived || current.sequence.archived) throw new Error(lockedPod.archived ? `Not started: ${lockedPod.name} has been archived.` : `Not started: its sequence, ${current.sequence.name}, has been archived.`);
     const personIds = preview.candidates.map(c => c.personId);
     const people = await tx.personCache.findMany({ where: { id: { in: personIds }, dnd: false, optedOut: false, deletedAt: null } });
     const busy = await tx.enrollment.findMany({ where: { personId: { in: personIds }, status: { in: ['ACTIVE','PAUSED'] } }, select: { personId: true } });

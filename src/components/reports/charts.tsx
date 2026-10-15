@@ -10,6 +10,7 @@
 import type { ReactNode } from 'react';
 import { barColour } from '@/lib/bar-colour';
 import { NO_PRODUCT, SEVERAL_PRODUCTS, type Channel } from '@/lib/report-keys';
+import { IconArrowDown, IconArrowUp } from '@/components/icons';
 import type { SeriesBucket, Slice } from '@/lib/reports-query';
 
 const GRID = '#e3e8e2';
@@ -52,7 +53,7 @@ export function Delta({ current, previous, invert = false, rate = false }: { cur
     : `${diff > 0 ? '+' : ''}${fmt(diff)}${previous ? ` (${diff > 0 ? '+' : ''}${Math.round((diff / previous) * 100)}%)` : ''}`;
   return (
     <span className={`rp-delta ${tone}`} title={`Period before: ${rate ? pct(previous) : fmt(previous)}`}>
-      <span aria-hidden>{tone === 'rp-flat' ? '•' : diff > 0 ? '▲' : '▼'}</span>
+      {tone === 'rp-flat' ? null : diff > 0 ? <IconArrowUp size={12} aria-hidden /> : <IconArrowDown size={12} aria-hidden />}
       {tone === 'rp-flat' ? 'same' : text}
     </span>
   );

@@ -106,7 +106,7 @@ export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, p
     <div className="flex flex-1 flex-wrap items-center gap-2">
       <div className="relative w-full max-w-xs">
         <IconSearch size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search name, company, email, phone" aria-label="Search people" className="!pl-9" />
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search name, company, email, phone" aria-label="Search people" className="!pl-9 !text-[12.5px]" />
       </div>
 
       <select value={pod} onChange={(e) => update({ pod: e.target.value || null })} aria-label="Filter by pod" className="!w-auto !py-2 !text-[12.5px]">
@@ -133,8 +133,8 @@ export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, p
         {campaigns.some((c) => c.kind === 'running') ? <optgroup label="Active">{campaigns.filter((c) => c.kind === 'running').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup> : null}
         {campaigns.some((c) => c.kind === 'upcoming') ? <optgroup label="Upcoming">{campaigns.filter((c) => c.kind === 'upcoming').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup> : null}
       </select>
-      <button type="button" onClick={() => update({ mip: mip ? null : '1' })} aria-pressed={mip} className={mip ? 'chip' : 'chip-muted !border !border-line'} title="Most-important people">MIP</button>
-      <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} aria-controls={panelId} className={`btn-secondary btn-sm ${showMore || moreCount ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
+      <button type="button" onClick={() => update({ mip: mip ? null : '1' })} aria-pressed={mip} className={`btn-secondary !text-[12.5px] ${mip ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`} title="Most-important people">MIP</button>
+      <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} aria-controls={panelId} className={`btn-secondary !text-[12.5px] ${showMore || moreCount ? '!border-brand-300 !bg-brand-50 !text-brand-800' : ''}`}>
         <IconFilter size={14} /> Filters
         {moreCount ? <span className="rounded-full bg-brand-600 px-1.5 text-[11px] font-semibold leading-[17px] text-white">{moreCount}</span> : null}
       </button>

@@ -89,7 +89,7 @@ export function CampaignForm({ sequences, pods, products, defaultStartDate, defa
   const overCapacity = plan ? audience > plan.total : false;
   const canCreate = Boolean(preview && preview.candidates.length > 0 && noRoom === 0 && plan && !plan.tooShort && chosenProducts.length > 0 && fields.name.trim());
   const rates = plan ? [...new Set(plan.perFo.map((f) => f.rate))] : [];
-  const rateText = rates.length === 1 ? `${rates[0]} starts a day per FO` : rates.length ? `${Math.min(...rates)}–${Math.max(...rates)} starts a day per FO` : null;
+  const rateText = rates.length === 1 ? `${rates[0]} starts a day per FO` : rates.length ? `${Math.min(...rates)}-${Math.max(...rates)} starts a day per FO` : null;
 
   return (
     <form ref={formRef} onSubmit={(e) => e.preventDefault()} className="space-y-5">

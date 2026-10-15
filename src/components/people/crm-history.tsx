@@ -63,7 +63,7 @@ export async function CrmHistory({ personId, timezone, baseHref, notesAfter, ema
             <time dateTime={message.receivedAt} className="shrink-0 text-xs text-ink-600">{formatInstant(new Date(message.receivedAt), timezone)}</time>
           </summary>
           <div className="border-t border-line/70 px-4 pb-4 pt-3">
-            <dl className="grid gap-3 rounded-lg bg-canvas p-3 text-xs sm:grid-cols-2">{(['from', 'to', 'cc', 'bcc'] as const).map(role => {
+            <dl className="grid gap-3 text-xs sm:grid-cols-2">{(['from', 'to', 'cc', 'bcc'] as const).map(role => {
               const participants = message.participants.filter(participant => participant.role === role);
               return participants.length ? <div key={role}><dt className="uppercase text-ink-500">{role}</dt><dd className="mt-1 break-words font-medium text-ink-900">{participants.map(participant => participant.displayName ? `${participant.displayName} <${participant.handle}>` : participant.handle).join(', ')}</dd></div> : null;
             })}</dl>
