@@ -33,6 +33,7 @@ export default async function EditMeetingPage({ params }: { params: Promise<{ id
               bookedById: meeting.bookedById ?? '',
               title: meeting.title,
               sourceUrl: meeting.sourceUrl,
+              embedUrl: meeting.embedUrl,
               occurredAt: meetingDay(meeting.occurredAt),
               companyId: meeting.companyId ?? '',
               attendees: meeting.attendees.map((a) => ({ name: a.name, email: a.email, personId: a.personId, userId: a.userId })),

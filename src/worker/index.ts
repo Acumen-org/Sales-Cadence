@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { backfillMeetingsToCrm, missingMeetingTags } from '../lib/meetings/crm';
+import { backfillSharePointPlayers } from '../lib/meetings/sharepoint-player';
 import { retryFailedWrites } from '../lib/engine/sync-retry';
 import { prisma } from '../lib/db';
 import { env } from '../lib/env';
@@ -73,6 +74,17 @@ async function meetingTagsRetry(now:number){
  if(!(await missingMeetingTags()).length)return;
  try{const written=await backfillMeetingsToCrm({all:true});if(written!==null)log('meetings written again for missing tags',written);}catch(error){log('meetings tag retry failed',error);}
 }
+/**
+ * Once Microsoft lets Cadence read the team's files: meetings saved earlier with a SharePoint sharing
+ * link get SharePoint's player and play in Cadence too. Asked each hour until it does.
+ */
+let sharePointPlayersAt=0;
+async function sharePointPlayers(now:number){
+ if(now<sharePointPlayersAt)return;sharePointPlayersAt=now+3_600_000;
+ const key='sharePointPlayers20261029';
+ if(await prisma.setting.findUnique({where:{key}})){sharePointPlayersAt=Infinity;return;}
+ try{const played=await backfillSharePointPlayers();if(played===null)return;log('SharePoint recordings that now play',played);await prisma.setting.upsert({where:{key},create:{key,value:{at:new Date().toISOString(),played}},update:{value:{at:new Date().toISOString(),played}}});sharePointPlayersAt=Infinity;}catch(error){log('SharePoint players failed',error);}
+}
 async function tick(){
  if(running||stopping)return;running=true;
  try{
@@ -84,6 +96,7 @@ async function tick(){
    await evidenceRescan(new Date(now));
    await meetingsBackfill();
    await meetingTagsRetry(now);
+   await sharePointPlayers(now);
    try{await launchScheduledCampaigns({actor:SYSTEM_ACTOR});}catch(error){log('campaign launch failed',error);}
    const stats=await runSchedulerTick({actor:SYSTEM_ACTOR});
    if(stats.generated||stats.completed)log('scheduler',stats);

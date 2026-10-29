@@ -17,6 +17,8 @@ export type MeetingFormValues = {
   id?: string;
   title: string;
   sourceUrl: string;
+  /** The player the saved link plays through, when Cadence found one. */
+  embedUrl?: string | null;
   /** The FO who booked it. */
   bookedById: string;
   /** The meeting's day, YYYY-MM-DD. */
@@ -94,8 +96,10 @@ export function MeetingForm({ companies, fos, initial, mode }: { companies: { id
     setUrl(next);
     if (/^https?:\/\/\S+$/i.test(next)) fillFromLink(next);
   };
-  const plays = Boolean(suggestion?.mediaUrl || suggestion?.embedUrl || parsed?.mediaUrl || parsed?.embedUrl);
-  const needsEmbed = Boolean(parsed && parsed.provider === 'SHAREPOINT' && !plays);
+  const saved = Boolean(initial.embedUrl && url.trim() === initial.sourceUrl);
+  const plays = Boolean(saved || suggestion?.mediaUrl || suggestion?.embedUrl || parsed?.mediaUrl || parsed?.embedUrl);
+  // Not while the link is being read: Cadence may find SharePoint's player on its own.
+  const needsEmbed = Boolean(parsed && parsed.provider === 'SHAREPOINT' && !plays && !pending);
 
   const attendeesFromTranscript = () =>
     start(async () => {

@@ -1181,3 +1181,21 @@ campaign studio, and for a clean-up that keeps the look but removes what reads a
   control heights, label style in the task panel, one icon per sidebar section. Kept on purpose:
   the second "New campaign" in the empty state, the enrichment header counts, the chart palette.
 
+
+## SharePoint sharing links play in Cadence (29 October 2026)
+
+Teams recordings live in SharePoint, and a SharePoint sharing link refuses to load inside another
+site, so until now a recording played only when someone pasted its Share > Embed code. Cadence now
+asks Microsoft Graph which file a sharing link points to (`/shares/u!<link>/driveItem`) and builds
+the same player link Share > Embed gives: `<site>/_layouts/15/embed.aspx?UniqueId=<file id>`. It
+asks as the app saved under Settings > Sign-in, and only when that app holds a file permission
+(`Files.Read.All` is the least); until a Microsoft 365 admin grants it nothing is asked and the link
+opens in SharePoint, as before. Cadence stores the player's address, never the file, so whoever
+watches still needs access to the recording in their own Microsoft 365 session.
+
+It runs where a link is read: on paste or Fill from link (a Teams recording's file name also gives
+the title and the day), on save, and once in the worker for meetings saved earlier, retried each
+hour until Microsoft lets Cadence look (Setting `sharePointPlayers20261029`). Settings > Sign-in
+shows whether it works; Microsoft's last refusal is kept with the permissions the app had then, so
+granting another one clears it. Microsoft documents `Files.ReadWrite.All` for this call; the
+read-only permission is asked for first, and the refusal in Settings says if it is not enough.

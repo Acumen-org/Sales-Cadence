@@ -17,6 +17,7 @@ import { linkKey, linkNeedle } from '../meetings/link-key';
 import { pushMeetingToCrm, removeMeetingFromCrm } from '../meetings/crm';
 import { afterResponse } from '../engine/sync-out';
 import { extractRecordingUrl, parseMeetingLink } from '../meetings/providers';
+import { sharePointPlayer } from '../meetings/sharepoint-player';
 import { detectTranscriptFormat, parseTranscript } from '../meetings/transcript';
 import { getMeetingAnalyzer, MeetingAnalysisSchema } from '../meetings/analysis';
 import { meetingDayInstant, parseMeetingDay } from '../meetings/day';
@@ -160,8 +161,12 @@ export async function createMeetingAction(formData: FormData): Promise<ActionRes
   const occurredAt = meetingDayInstant(day);
   // No link is a meeting without a recording; a SharePoint, OneDrive or Drive link often hands out
   // the file itself when asked, and then the recording plays natively and the transcript follows it.
+  // A SharePoint sharing link that does not plays through SharePoint's own player, from Graph.
   const link = d.sourceUrl ? parseMeetingLink(d.sourceUrl) : null;
-  const resolved = link && !link.mediaUrl && !link.isJoinLink ? await inspectLink(d.sourceUrl) : null;
+  const [resolved, player] = await Promise.all([
+    link && !link.mediaUrl && !link.isJoinLink ? inspectLink(d.sourceUrl) : null,
+    link && !link.embedUrl ? sharePointPlayer(d.sourceUrl) : null,
+  ]);
   const mediaUrl = link?.mediaUrl ?? resolved?.mediaUrl ?? null;
   if (link && link.provider === 'OTHER' && link.note?.includes('does not look like a URL')) return { ok: false, error: link.note };
 
@@ -178,7 +183,7 @@ export async function createMeetingAction(formData: FormData): Promise<ActionRes
       bookedById: d.bookedById,
       provider: link?.provider ?? 'OTHER',
       sourceUrl: d.sourceUrl.trim(),
-      embedUrl: link?.embedUrl ?? null,
+      embedUrl: link?.embedUrl ?? player?.embedUrl ?? null,
       mediaUrl,
       occurredAt,
       companyId: company?.id ?? null,
@@ -216,7 +221,12 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
   // the file itself when asked, and then the recording plays natively and the transcript follows it.
   const link = d.sourceUrl ? parseMeetingLink(d.sourceUrl) : null;
   const sameLink = d.sourceUrl.trim() === existing.sourceUrl;
-  const resolved = !sameLink && link && !link.mediaUrl && !link.isJoinLink ? await inspectLink(d.sourceUrl) : null;
+  // The same link keeps the player it has; one saved before Microsoft let Cadence look gets one now.
+  const keptPlayer = sameLink && existing.embedUrl && parseMeetingLink(existing.embedUrl).embedUrl ? existing.embedUrl : null;
+  const [resolved, player] = await Promise.all([
+    !sameLink && link && !link.mediaUrl && !link.isJoinLink ? inspectLink(d.sourceUrl) : null,
+    link && !link.embedUrl && !keptPlayer ? sharePointPlayer(d.sourceUrl) : null,
+  ]);
   const mediaUrl = sameLink ? existing.mediaUrl : link?.mediaUrl ?? resolved?.mediaUrl ?? null;
   const company = d.companyId ? await prisma.companyCache.findFirst({ where: { id: d.companyId, deletedAt: null }, select: { id: true, name: true } }) : null;
   if (d.companyId && !company) return { ok: false, error: 'The selected account no longer exists.' };
@@ -235,7 +245,7 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
       bookedById: d.bookedById,
         provider: link?.provider ?? 'OTHER',
         sourceUrl: d.sourceUrl.trim(),
-        embedUrl: link?.embedUrl ?? null,
+        embedUrl: link?.embedUrl ?? keptPlayer ?? player?.embedUrl ?? null,
         mediaUrl,
         occurredAt,
         companyId: company?.id ?? null,
@@ -423,15 +433,20 @@ export async function inspectMeetingLinkAction(raw: string, exceptMeetingId?: st
   const already = candidates.find((m) => linkKey(m.sourceUrl) === key);
   if (already) return { ok: true, data: { ...base, title: null, date: null, companyId: null, companyName: null, existingMeetingId: already.id } };
 
-  const page = await inspectLink(url);
+  // A SharePoint page is a sign-in wall to the server; Graph names its file, and Teams names the
+  // file after the meeting and its day.
+  const [page, player] = await Promise.all([inspectLink(url), link.embedUrl ? null : sharePointPlayer(url)]);
+  const embedUrl = link.embedUrl ?? player?.embedUrl ?? null;
   const cleaned = page.title?.replace(/\s*[|·-]\s*(Microsoft Stream|SharePoint|Google Drive|Zoom|OneDrive|Google Meet|Microsoft Teams).*$/i, '').trim() || null;
-  const title = cleaned && !link.isJoinLink && !SIGN_IN.test(cleaned) && !GENERIC.test(cleaned) ? cleaned : null;
+  const named = cleaned && !link.isJoinLink && !SIGN_IN.test(cleaned) && !GENERIC.test(cleaned) ? cleaned : null;
+  const title = named ?? player?.title ?? null;
+  const date = named ? page.date : player?.date ?? null;
   // An account named in the title: the longest cached company name the title contains.
   const companies = await prisma.companyCache.findMany({ where: { deletedAt: null, name: { not: '' } }, select: { id: true, name: true }, orderBy: { name: 'asc' } });
   const haystack = `${title ?? ''} ${page.description ?? ''}`.toLowerCase();
   const match = companies.filter((c) => c.name.length >= 4 && haystack.includes(c.name.toLowerCase())).sort((a, b) => b.name.length - a.name.length)[0] ?? null;
   const mediaUrl = page.mediaUrl ?? link.mediaUrl;
-  return { ok: true, data: { ...base, playsInline: Boolean(mediaUrl || link.embedUrl), title, date: title ? page.date : null, companyId: match?.id ?? null, companyName: match?.name ?? null, mediaUrl, transcript: page.transcript } };
+  return { ok: true, data: { ...base, embedUrl, playsInline: Boolean(mediaUrl || embedUrl), title, date, companyId: match?.id ?? null, companyName: match?.name ?? null, mediaUrl, transcript: page.transcript } };
 }
 
 /** The people who spoke in a transcript, matched to the CRM and the team; guests stay guests. */

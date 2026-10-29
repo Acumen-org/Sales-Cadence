@@ -31,6 +31,8 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
   if (!meeting) notFound();
 
   const link = parseMeetingLink(meeting.sourceUrl);
+  // A sharing link Cadence found SharePoint's player for reads as that player, not as the link.
+  const player = meeting.embedUrl && !link.embedUrl ? parseMeetingLink(meeting.embedUrl) : link;
   const analysis = parseAnalysis(meeting.analysis);
   // Who spoke how much, from the transcript as it stands - the same normalised cues the reader sees.
   const liveTalk = meeting.transcript ? talkShare(parseTranscript(meeting.transcript, (meeting.transcriptFormat as never) ?? undefined).cues) : [];
@@ -99,7 +101,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
             embedUrl={meeting.embedUrl}
             mediaUrl={meeting.mediaUrl}
             providerLabel={link.label}
-            providerNote={link.note}
+            providerNote={player.note}
             isJoinLink={link.isJoinLink}
             transcript={meeting.transcript}
             transcriptFormat={meeting.transcriptFormat}

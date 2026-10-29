@@ -30,6 +30,7 @@ import { describeEventResult } from '@/lib/event-results';
 import { microsoftRedirectUri, signInMethods } from '@/lib/auth/microsoft';
 import { SignInForm } from '@/components/settings/sign-in-form';
 import { missingMeetingTags } from '@/lib/meetings/crm';
+import { sharePointPlayerStatus } from '@/lib/meetings/sharepoint-player';
 
 const TABS = [
   { key: 'twenty', label: 'Twenty' },
@@ -151,6 +152,7 @@ async function SignInTab() {
   const [{ signIn }, methods] = await Promise.all([getSettings(), signInMethods()]);
   const fromServer = Boolean(e.MICROSOFT_CLIENT_ID || e.MICROSOFT_TENANT_ID || e.MICROSOFT_CLIENT_SECRET);
   const passwords = !methods.password ? `Off since ${formatInstant(new Date(signIn.passwordRetiredAt!), workspaceTimezone())}` : methods.microsoft && !signIn.passwordRetiredAt ? 'On until the first Microsoft sign-in' : 'On';
+  const recordings = methods.microsoft ? await sharePointPlayerStatus() : null;
   return (
     <Card title="Microsoft sign-in">
       <div className="p-4">
@@ -158,6 +160,7 @@ async function SignInTab() {
           { k: 'Microsoft', v: methods.microsoft ? <Badge tone="green">On</Badge> : <Badge>Off</Badge> },
           { k: 'Passwords', v: passwords },
           { k: 'Redirect URI', v: <code className="text-[12px]">{microsoftRedirectUri()}</code> },
+          ...(recordings ? [{ k: 'SharePoint recordings', v: recordings.plays ? <Badge tone="green">Play in Cadence</Badge> : <span className="flex flex-wrap items-center gap-2"><Badge>Open in SharePoint</Badge><span className="text-[12.5px] text-ink-600">{recordings.why}</span></span> }] : []),
           ...(fromServer ? [{ k: 'Set by', v: 'The server' }] : []),
         ]} />
       </div>

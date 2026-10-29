@@ -29,6 +29,8 @@ const EnvSchema = z.object({
   MICROSOFT_CLIENT_SECRET: z.string().optional(),
   /** Where Microsoft's sign-in pages live. Only a test points it elsewhere. */
   MICROSOFT_LOGIN_URL: z.string().default('https://login.microsoftonline.com'),
+  /** Where Microsoft Graph lives, which names the file behind a SharePoint sharing link. Only a test points it elsewhere. */
+  MICROSOFT_GRAPH_URL: z.string().default('https://graph.microsoft.com'),
   /** true brings password sign-in back after Microsoft took over, if Microsoft sign-in ever fails. */
   PASSWORD_SIGN_IN: BoolString,
   WORKER_TICK_SECONDS: z.coerce.number().int().positive().default(300),
