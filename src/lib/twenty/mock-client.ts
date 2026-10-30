@@ -93,19 +93,8 @@ export const MOCK_MEETING_SCHEMA = (): TwentyMeetingSchema => ({
     assigneeId: 'assignedToId',
     meetingNumber: 'meetingNumber',
     firstMeeting: 'firstMeeting',
-    transcript: 'transcript',
   },
-  contact: {
-    typeName: 'MeetingContact', plural: 'meetingContacts', meetingId: 'meetingsId', personId: 'peopleId',
-    fields: {
-      meetingNumber: 'meetingNumber',
-      firstMeeting: 'firstMeeting',
-      date: { name: 'meetingDate', dateOnly: true },
-      bookedBy: { id: 'field-contact-booked-by', name: 'bookedBy', multi: false, options: [] },
-      products: { id: 'field-contact-products', name: 'products', multi: true, options: [{ value: 'PHH', label: 'PHH' }, { value: 'ACUBOOTH', label: 'Acubooth' }, { value: 'GLYNAC', label: 'Glynac' }] },
-      team: { id: 'field-contact-team', name: 'teamOnTheCall', multi: true, options: [] },
-    },
-  },
+  contact: { typeName: 'MeetingContact', plural: 'meetingContacts', meetingId: 'meetingsId', personId: 'peopleId' },
 });
 
 function clone<T>(v: T): T {

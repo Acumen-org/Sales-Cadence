@@ -282,21 +282,9 @@ export type TwentyMeetingSchema = {
     /** Which meeting with its prospects this is (the highest of theirs), and whether that is the first. */
     meetingNumber: string | null;
     firstMeeting: string | null;
-    transcript: string | null;
   };
-  /** The in-between object that links one meeting to each of its contacts, with that contact's count. */
-  contact: {
-    typeName: string; plural: string; meetingId: string; personId: string;
-    fields: {
-      /** Which meeting with this contact it is; 1 is their first. */
-      meetingNumber: string | null;
-      firstMeeting: string | null;
-      date: { name: string; dateOnly: boolean } | null;
-      bookedBy: TwentyTagField | null;
-      products: TwentyTagField | null;
-      team: TwentyTagField | null;
-    };
-  } | null;
+  /** The in-between object that links one meeting to each of its contacts; it holds no data of its own. */
+  contact: { typeName: string; plural: string; meetingId: string; personId: string } | null;
 };
 
 /** One meeting as Cadence writes it: the field values, ready, and the contacts to link. */
@@ -305,8 +293,7 @@ export type TwentyMeetingRecordInput = {
   id: string | null;
   cadenceId: string;
   data: Record<string, unknown>;
-  /** One row per contact: its name, and the values for that contact's own fields. */
-  contacts: { personId: string; name: string; data?: Record<string, unknown> }[];
+  contacts: { personId: string; name: string }[];
 };
 
 export type CreateTaskInput = {

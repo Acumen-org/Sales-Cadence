@@ -187,15 +187,10 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
     ping = err instanceof Error ? err.message : String(err);
   }
   // What Cadence found of the Meetings object, field by field, so a missing one is plain to see.
-  const contactFields = meetings?.contact?.fields;
   const meetingParts = meetings ? ([
     ['Meeting date', meetings.fields.date], ['Booked by', meetings.fields.bookedBy], ['Products', meetings.fields.products], ['Team on the call', meetings.fields.team],
     ['Account', meetings.fields.companyId], ['Recording', meetings.fields.recording], ['In Cadence', meetings.fields.cadenceLink], ['Cadence ID', meetings.fields.cadenceId],
-    ['Meeting Number', meetings.fields.meetingNumber], ['First Meeting', meetings.fields.firstMeeting], ['Transcript', meetings.fields.transcript], ['Meeting contacts', meetings.contact],
-    ...(contactFields ? ([
-      ['Meeting contacts: Meeting Number', contactFields.meetingNumber], ['Meeting contacts: First Meeting', contactFields.firstMeeting], ['Meeting contacts: Meeting Date', contactFields.date],
-      ['Meeting contacts: Booked By', contactFields.bookedBy], ['Meeting contacts: Products', contactFields.products], ['Meeting contacts: Team on the Call', contactFields.team],
-    ] as const) : []),
+    ['Meeting Number', meetings.fields.meetingNumber], ['First Meeting', meetings.fields.firstMeeting], ['Meeting contacts', meetings.contact],
   ] as const) : [];
   const meetingsMissing = meetingParts.filter(([, found]) => !found).map(([name]) => name);
   // Names Twenty has no tag for and Cadence could not add one: an admin adds them in Twenty.

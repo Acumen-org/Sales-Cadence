@@ -7,21 +7,20 @@ import { optionLabel } from '../twenty/labels';
 import { workspaceTimezone } from '../workspace';
 import { meetingDay, meetingDayInstant } from './day';
 import { retryDelayMs } from '../engine/sync-out';
-import { parseTranscript, type TranscriptFormat } from './transcript';
 import { ordinal } from './numbering';
 
 /**
  * Twenty keeps the record. Every meeting added in Cadence is written to the workspace's own
  * Meetings object: its title and date, who booked it, the products and the team on the call as
- * tags, the account, the recording, the transcript, a link back, which meeting with its prospects
- * it is, and one Meeting contact per prospect, so the meeting shows on each of their records.
+ * tags, the account, the recording, a link back, and which meeting with its prospects it is (and
+ * so whether it is a first meeting). All of a meeting's data lives on that one record, which is
+ * what a bonus dashboard reads: one row per meeting, credited to the FO who booked it.
  *
- * Each Meeting contact row carries that prospect's own count (their 1st, 2nd... meeting with us)
- * with the day, who booked it, the products and the team, so a dashboard reads the bonus numbers
- * straight from Twenty: first meetings and the 5th, 10th, 15th from the Meetings object (one per
- * meeting, credited to the FO who booked it), and each prospect's count from Meeting contacts.
- * An edit updates the same records; a delete removes them. A workspace without a Meetings object
- * gets a note on the contacts and account instead.
+ * Meeting contacts only link a meeting to each prospect on it, with no data of their own: Twenty
+ * links a record to one person, and a call with three prospects has to show on all three of their
+ * records. Counting a person's links gives their meeting history. The transcript stays in Cadence
+ * (owner, 29 October 2026). An edit updates the same records; a delete removes them. A workspace
+ * without a Meetings object gets a note on the contacts and account instead.
  */
 
 type MeetingForCrm = {
@@ -35,19 +34,8 @@ type MeetingForCrm = {
   bookedBy: { name: string; twentyMemberId?: string | null } | null;
   /** The highest of its prospects' numbers: 1 only when everyone on it is new. */
   meetingNumber?: number | null;
-  transcript?: string | null;
-  transcriptFormat?: string | null;
-  attendees: { name: string | null; email: string | null; personId: string | null; userId?: string | null; external: boolean; prospect?: boolean; meetingNumber?: number | null; person?: { firstName: string; lastName: string } | null }[];
+  attendees: { name: string | null; email: string | null; personId: string | null; userId?: string | null; external: boolean; prospect?: boolean; person?: { firstName: string; lastName: string } | null }[];
 };
-
-/** Twenty's text fields hold the transcript as lines of "Speaker: what they said", up to a limit. */
-const TRANSCRIPT_LIMIT = 100_000;
-export function transcriptText(raw: string | null | undefined, format?: string | null): string {
-  if (!raw?.trim()) return '';
-  const { cues } = parseTranscript(raw, (format as TranscriptFormat | null) ?? undefined);
-  const text = cues.length ? cues.map((c) => (c.speaker ? `${c.speaker}: ${c.text}` : c.text)).join('\n') : raw.trim();
-  return text.length > TRANSCRIPT_LIMIT ? `${text.slice(0, TRANSCRIPT_LIMIT)}\n[Cut short here: the full transcript is in Cadence]` : text;
-}
 
 /** The note for a workspace with no Meetings object: plain lines, readable anywhere it is shown. */
 export function meetingNote(m: MeetingForCrm, prefix: string): { title: string; bodyMarkdown: string } {
@@ -108,7 +96,7 @@ export async function missingMeetingTags(): Promise<{ field: string; name: strin
 }
 
 /** The record's field values and the contacts to link, in the names this workspace gave its fields. */
-export async function meetingRecord(m: MeetingForCrm, schema: TwentyMeetingSchema, client: TwentyClient): Promise<{ data: Record<string, unknown>; contacts: { personId: string; name: string; data: Record<string, unknown> }[]; tags: TagOutcome[] }> {
+export async function meetingRecord(m: MeetingForCrm, schema: TwentyMeetingSchema, client: TwentyClient): Promise<{ data: Record<string, unknown>; contacts: { personId: string; name: string }[]; tags: TagOutcome[] }> {
   const f = schema.fields;
   const tags: TagOutcome[] = [];
   const data: Record<string, unknown> = { name: m.title };
@@ -121,12 +109,9 @@ export async function meetingRecord(m: MeetingForCrm, schema: TwentyMeetingSchem
     return field.multi ? values : values[0] ?? null;
   };
   // The day only, whether Twenty's field is a date or a date and time.
-  const day = (field: { dateOnly: boolean }) => (field.dateOnly ? meetingDay(m.occurredAt) : meetingDayInstant(meetingDay(m.occurredAt)).toISOString());
-  if (f.date) data[f.date.name] = day(f.date);
-  const booked = m.bookedBy ? [m.bookedBy.name] : [];
-  const products = m.products.map(optionLabel);
-  if (f.bookedBy) data[f.bookedBy.name] = await named(f.bookedBy, booked, 'Booked by');
-  if (f.products) data[f.products.name] = await named(f.products, products, 'Products');
+  if (f.date) data[f.date.name] = f.date.dateOnly ? meetingDay(m.occurredAt) : meetingDayInstant(meetingDay(m.occurredAt)).toISOString();
+  if (f.bookedBy) data[f.bookedBy.name] = await named(f.bookedBy, m.bookedBy ? [m.bookedBy.name] : [], 'Booked by');
+  if (f.products) data[f.products.name] = await named(f.products, m.products.map(optionLabel), 'Products');
   // Who is on the team: a Cadence login, matched by id, address or name, or an address at one of
   // our domains. Team members are tags, never contacts, even when Twenty also has a People record
   // for them (Alisa is both).
@@ -149,29 +134,17 @@ export async function meetingRecord(m: MeetingForCrm, schema: TwentyMeetingSchem
   if (f.team) data[f.team.name] = await named(f.team, team, 'Team on the call');
   if (f.meetingNumber) data[f.meetingNumber] = m.meetingNumber ?? null;
   if (f.firstMeeting) data[f.firstMeeting] = m.meetingNumber === 1;
-  if (f.transcript) data[f.transcript] = transcriptText(m.transcript, m.transcriptFormat);
   if (f.recording) data[f.recording] = link(m.sourceUrl ?? '');
   if (f.cadenceLink) data[f.cadenceLink] = link(cadenceUrl(m.id), 'Open in Cadence');
   if (f.cadenceId) data[f.cadenceId] = m.id;
   if (f.guests) data[f.guests] = external.filter((a) => !a.personId).map((a) => a.name || a.email).filter(Boolean).join(', ');
   if (f.companyId) data[f.companyId] = m.companyId;
-  // What every contact row says alike, in that object's own fields (and its own tags).
-  // Only when there are rows to write: a meeting with no prospects asks Twenty for no tags here.
-  const cf = external.some((a) => a.personId && a.prospect !== false) ? schema.contact?.fields : undefined;
-  const shared: Record<string, unknown> = {};
-  if (cf?.date) shared[cf.date.name] = day(cf.date);
-  if (cf?.bookedBy) shared[cf.bookedBy.name] = await named(cf.bookedBy, booked, 'Meeting contacts: Booked by');
-  if (cf?.products) shared[cf.products.name] = await named(cf.products, products, 'Meeting contacts: Products');
-  if (cf?.team) shared[cf.team.name] = await named(cf.team, team, 'Meeting contacts: Team on the call');
-  const contacts: { personId: string; name: string; data: Record<string, unknown> }[] = [];
+  const contacts: { personId: string; name: string }[] = [];
   for (const a of external) {
-    // A prospect, each once. Older meetings mark none, so any contact from Twenty counts there.
+    // A prospect, each once. A contact from Twenty marked as something else (a guest) is not linked.
     if (!a.personId || a.prospect === false || contacts.some((c) => c.personId === a.personId)) continue;
-    const own: Record<string, unknown> = { ...shared };
-    if (cf?.meetingNumber) own[cf.meetingNumber] = a.meetingNumber ?? null;
-    if (cf?.firstMeeting) own[cf.firstMeeting] = a.meetingNumber === 1;
     // Named for both sides: on the person it says which meeting, on the meeting which person.
-    contacts.push({ personId: a.personId, name: `${m.title} · ${personName(a) || 'Contact'}`, data: own });
+    contacts.push({ personId: a.personId, name: `${m.title} · ${personName(a) || 'Contact'}` });
   }
   // The single "People" link on the meeting holds its first contact; all of them are Meeting contacts.
   if (f.personId) data[f.personId] = contacts[0]?.personId ?? null;
@@ -181,9 +154,9 @@ export async function meetingRecord(m: MeetingForCrm, schema: TwentyMeetingSchem
 
 const meetingSelect = {
   id: true, title: true, sourceUrl: true, occurredAt: true, products: true, companyId: true, companyName: true, twentyNoteId: true, twentyMeetingId: true, review: true,
-  meetingNumber: true, transcript: true, transcriptFormat: true,
+  meetingNumber: true,
   bookedBy: { select: { name: true, twentyMemberId: true } },
-  attendees: { select: { name: true, email: true, personId: true, userId: true, external: true, prospect: true, meetingNumber: true, person: { select: { firstName: true, lastName: true } } } },
+  attendees: { select: { name: true, email: true, personId: true, userId: true, external: true, prospect: true, person: { select: { firstName: true, lastName: true } } } },
 } as const;
 
 /**
@@ -247,12 +220,13 @@ export async function removeMeetingFromCrm(meeting: { twentyMeetingId: string | 
 }
 
 /**
- * Which fields Cadence found in Twenty's Meetings and Meeting contacts objects. When it changes (an
- * admin added "Meeting Number", say), every meeting is written again so the new field fills in.
+ * Which fields Cadence found in Twenty's Meetings object, and whether it found Meeting contacts.
+ * When it changes (an admin added "Meeting Number", say), every meeting is written again so the
+ * new field fills in.
  */
 export function meetingSchemaShape(schema: TwentyMeetingSchema): string {
-  const names = (fields: object) => Object.entries(fields).filter(([, v]) => v).map(([k]) => k).sort().join(',');
-  return `${names(schema.fields)}|${schema.contact ? names(schema.contact.fields) : 'no contacts'}`;
+  const names = Object.entries(schema.fields).filter(([, v]) => v).map(([k]) => k).sort().join(',');
+  return `${names}|${schema.contact ? 'contacts' : 'no contacts'}`;
 }
 
 /**

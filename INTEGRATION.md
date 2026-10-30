@@ -288,7 +288,7 @@ nor notes or tasks Cadence did not create, nor messages. The contact and account
 the last row above are the one exception, and only from an import a person reviewed and applied. In particular the CRM's own next action is read and
 displayed, never rewritten: the pod plans in Twenty and Cadence shows that plan beside its own. Opt-out and bad-data flags set in Cadence stay in Cadence; set `dnd` in Twenty yourself if it should apply everywhere. Every write appears in **Settings > Activity log > Writes to Twenty**; `CADENCE_DRY_RUN=true` logs them without writing.
 
-Meetings are written to the workspace's own **Meetings** object, one record per meeting, with one **Meeting contacts** row per prospect (see "Meetings in Twenty" below). Analysis stays in Cadence.
+Meetings are written to the workspace's own **Meetings** object, one record per meeting, with one **Meeting contacts** row linking it to each prospect (see "Meetings in Twenty" below). The transcript and any analysis stay in Cadence.
 
 ### Meetings in Twenty
 
@@ -307,24 +307,12 @@ Cadence finds each field by its label and type, so the names below need to match
 | Recording, In Cadence | Links | the recording and the meeting in Cadence |
 | Cadence ID | Text | Cadence's id, so the record is found again |
 | Guests (optional) | Text | anyone on the call not in Twenty |
-| Meeting Number | Number | the highest of its prospects' numbers |
+| Meeting Number | Number | the highest of its prospects' numbers; a prospect's earliest meeting in Cadence is their 1st |
 | First Meeting | Boolean | true only when everyone on it is meeting us for the first time |
-| Transcript | Text | "Speaker: what they said" lines, up to 100,000 characters |
 
-**Meeting contacts** (one row per prospect on a meeting):
+**Meeting contacts** (one row per prospect on a meeting) hold only the link: Name ("<meeting> · <person>"), Meetings and People. They exist because Twenty links a record to one person, and a meeting with several prospects has to show on each of their records. They carry no data of their own; everything about the meeting is on the Meetings record.
 
-| Field | Type | Cadence writes |
-|---|---|---|
-| Name | (built in) | "<meeting> · <person>" |
-| Meetings, People | Relations | the meeting and the prospect |
-| Meeting Number | Number | which meeting with this prospect it is: their earliest in Cadence is 1 |
-| First Meeting | Boolean | true on that prospect's 1st |
-| Meeting Date | Date | the day |
-| Booked By | Select or Text | the FO credited with the meeting |
-| Products | Multi-select or Text | as on the meeting |
-| Team on the Call | Multi-select or Text | as on the meeting |
-
-For a bonus dashboard: count first meetings and the 5th, 10th, 15th... from **Meetings** (one per meeting, by Booked By), and each prospect's count from **Meeting contacts**. Two new prospects on one call are one first meeting. Numbers move when a meeting is added with an earlier date, moved or deleted; Cadence writes every record whose number changed.
+For a bonus dashboard, read **Meetings** alone: first meetings are First Meeting = true, the 5th, 10th, 15th... are Meeting Number = 5, 10, 15..., each grouped by Booked By. One record is one meeting, so two new prospects on one call are one first meeting. A person's meeting history is their Meeting contacts rows joined to Meetings. Numbers move when a meeting is added with an earlier date, moved or deleted; Cadence writes every record whose number changed.
 
 Sync is immediate in both directions: webhooks are processed as Twenty sends them (people, companies, notes, messages, tasks and opportunities), every Cadence write happens right after the action that caused it, and opening a person in Cadence re-reads that person from Twenty. Opening an account re-reads that company and its people, so there is no sync button to press. The nightly reconcile only catches anything a webhook missed.
 

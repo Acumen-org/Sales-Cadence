@@ -953,18 +953,7 @@ export class TwentyGraphqlClient implements TwentyClient {
       const contactFields = await this.typeFields(typeOf(contactObject.nameSingular));
       const meetingId = idFor(contactFields, meetingType);
       const personId = idFor(contactFields, this.s.objects.person.typeName);
-      const c = finder(contactObject);
-      if (meetingId && personId) contact = {
-        typeName: typeOf(contactObject.nameSingular), plural: contactObject.namePlural, meetingId, personId,
-        fields: {
-          meetingNumber: c.find(/number|#/, ['NUMBER'])?.name ?? null,
-          firstMeeting: c.find(/first/, ['BOOLEAN'])?.name ?? null,
-          date: c.date(),
-          bookedBy: c.tag(/booked/, ['SELECT', 'MULTI_SELECT', 'TEXT']),
-          products: c.tag(/product/, ['MULTI_SELECT', 'SELECT', 'TEXT']),
-          team: c.tag(/team/, ['MULTI_SELECT', 'TEXT']),
-        },
-      };
+      if (meetingId && personId) contact = { typeName: typeOf(contactObject.nameSingular), plural: contactObject.namePlural, meetingId, personId };
     }
     const value: TwentyMeetingSchema = {
       meeting: { typeName: meetingType, plural: meeting.namePlural },
@@ -982,7 +971,6 @@ export class TwentyGraphqlClient implements TwentyClient {
         assigneeId: idFor(fields, 'WorkspaceMember'),
         meetingNumber: find(/number|#/, ['NUMBER'])?.name ?? null,
         firstMeeting: find(/first/, ['BOOLEAN'])?.name ?? null,
-        transcript: find(/transcript/, ['TEXT'])?.name ?? null,
       },
       contact,
     };
@@ -1018,33 +1006,21 @@ export class TwentyGraphqlClient implements TwentyClient {
     return { id };
   }
 
-  /**
-   * The meeting's contact rows follow its prospects: missing ones added, removed ones deleted, and
-   * each row's own values (its meeting number, the day, who booked it) kept current.
-   */
-  private async syncMeetingContacts(c: NonNullable<TwentyMeetingSchema['contact']>, meetingId: string, wanted: { personId: string; name: string; data?: Record<string, unknown> }[]) {
-    const own = [...new Set(wanted.flatMap((w) => Object.keys(w.data ?? {})))];
+  /** The meeting's contact rows follow its attendees: missing ones added, removed ones deleted. */
+  private async syncMeetingContacts(c: NonNullable<TwentyMeetingSchema['contact']>, meetingId: string, wanted: { personId: string; name: string }[]) {
     const rows = await this.request<Record<string, Connection>>(
-      `query MeetingContacts($filter: ${c.typeName}FilterInput) { ${c.plural}(filter: $filter, first: 200) { edges { node { id name ${c.personId} ${own.join(' ')} } } } }`,
+      `query MeetingContacts($filter: ${c.typeName}FilterInput) { ${c.plural}(filter: $filter, first: 200) { edges { node { id name ${c.personId} } } } }`,
       { filter: { [c.meetingId]: { eq: meetingId } } },
     );
-    const have = connectionToArray(rows[c.plural]).map((r) => ({ id: String(r.id), name: String(r.name ?? ''), personId: String(r[c.personId] ?? ''), raw: r }));
+    const have = connectionToArray(rows[c.plural]).map((r) => ({ id: String(r.id), name: String(r.name ?? ''), personId: String(r[c.personId] ?? '') }));
     for (const row of have) {
       if (!wanted.some((w) => w.personId === row.personId)) await this.request(`mutation DeleteMeetingContact($id: UUID!) { delete${c.typeName}(id: $id) { id } }`, { id: row.id });
     }
-    const same = (a: unknown, b: unknown) => {
-      const norm = (v: unknown) => (Array.isArray(v) ? [...v].map(String).sort().join('|') : v === undefined || v === null ? '' : typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v) ? new Date(v).toISOString() : String(v));
-      return norm(a) === norm(b);
-    };
     for (const w of wanted) {
       const row = have.find((h) => h.personId === w.personId);
-      const data = w.data ?? {};
-      if (row) {
-        const stale = row.name !== w.name || Object.entries(data).some(([k, v]) => !same(row.raw[k], v));
-        if (stale) await this.request(`mutation UpdateMeetingContact($id: UUID!, $data: ${c.typeName}UpdateInput!) { update${c.typeName}(id: $id, data: $data) { id } }`, { id: row.id, data: { name: w.name, ...data } });
-        continue;
-      }
-      await this.request(`mutation CreateMeetingContact($data: ${c.typeName}CreateInput!) { create${c.typeName}(data: $data) { id } }`, { data: { name: w.name, [c.meetingId]: meetingId, [c.personId]: w.personId, ...data } });
+      if (row && row.name !== w.name) await this.request(`mutation RenameMeetingContact($id: UUID!, $data: ${c.typeName}UpdateInput!) { update${c.typeName}(id: $id, data: $data) { id } }`, { id: row.id, data: { name: w.name } });
+      if (row) continue;
+      await this.request(`mutation CreateMeetingContact($data: ${c.typeName}CreateInput!) { create${c.typeName}(data: $data) { id } }`, { data: { name: w.name, [c.meetingId]: meetingId, [c.personId]: w.personId } });
     }
   }
 

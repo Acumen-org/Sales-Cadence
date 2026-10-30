@@ -1221,11 +1221,14 @@ people are never offered as prospects. Guests typed in on older meetings are kep
 no longer picked: it is the company most of the prospects work at. At least one product is
 required, and the last product cannot be untagged from the meeting page.
 
-Every Meeting contact row in Twenty carries that prospect's number, whether it is their first, the
-day, who booked it, the products and the team; the Meetings record carries the meeting's number,
-whether it is a first meeting, and the transcript. Fields are found by label and type, a Text field
-works where a Select was expected, and the worker writes every meeting again whenever Cadence finds
-a new field (Setting `meetingsToTwentyShape`), so the CRM admin can add them in any order.
+In Twenty all of it lives on the Meetings record: two new fields, Meeting Number and First Meeting,
+beside the date, Booked By, products and team it already had, so a dashboard reads one object, one
+row per meeting. Meeting contacts stay, as links only with no fields of their own: Twenty links a
+record to one person, and a call with three prospects has to show on all three of their records (and
+counting a person's links gives their history). The owner asked whether both objects are needed;
+that is the reason both stay. The transcript is not written to Twenty (owner, 29 October 2026). The
+worker writes every meeting again whenever Cadence finds a new field (Setting
+`meetingsToTwentyShape`), so the CRM admin can add the two fields at any time.
 
 The link is read as soon as it is pasted or typed, with no button: a recording that plays here
 plays in the form itself. A file name that is not a Teams one still gives the title, and the file's
