@@ -31,6 +31,7 @@ import { microsoftRedirectUri, signInMethods } from '@/lib/auth/microsoft';
 import { SignInForm } from '@/components/settings/sign-in-form';
 import { missingMeetingTags } from '@/lib/meetings/crm';
 import { sharePointPlayerStatus } from '@/lib/meetings/sharepoint-player';
+import { teamsTranscriptStatus } from '@/lib/meetings/teams-transcript';
 
 const TABS = [
   { key: 'twenty', label: 'Twenty' },
@@ -152,7 +153,7 @@ async function SignInTab() {
   const [{ signIn }, methods] = await Promise.all([getSettings(), signInMethods()]);
   const fromServer = Boolean(e.MICROSOFT_CLIENT_ID || e.MICROSOFT_TENANT_ID || e.MICROSOFT_CLIENT_SECRET);
   const passwords = !methods.password ? `Off since ${formatInstant(new Date(signIn.passwordRetiredAt!), workspaceTimezone())}` : methods.microsoft && !signIn.passwordRetiredAt ? 'On until the first Microsoft sign-in' : 'On';
-  const recordings = methods.microsoft ? await sharePointPlayerStatus() : null;
+  const [recordings, transcripts] = methods.microsoft ? await Promise.all([sharePointPlayerStatus(), teamsTranscriptStatus()]) : [null, null];
   return (
     <Card title="Microsoft sign-in">
       <div className="p-4">
@@ -161,6 +162,7 @@ async function SignInTab() {
           { k: 'Passwords', v: passwords },
           { k: 'Redirect URI', v: <code className="text-[12px]">{microsoftRedirectUri()}</code> },
           ...(recordings ? [{ k: 'SharePoint recordings', v: recordings.plays ? <Badge tone="green">Play in Cadence</Badge> : <span className="flex flex-wrap items-center gap-2"><Badge>Open in SharePoint</Badge><span className="text-[12.5px] text-ink-600">{recordings.why}</span></span> }] : []),
+          ...(transcripts ? [{ k: 'Teams transcripts', v: transcripts.fetches ? <Badge tone="green">Fetched automatically</Badge> : <span className="flex flex-wrap items-center gap-2"><Badge>Pasted by hand</Badge><span className="text-[12.5px] text-ink-600">{transcripts.why}</span></span> }] : []),
           ...(fromServer ? [{ k: 'Set by', v: 'The server' }] : []),
         ]} />
       </div>
@@ -185,9 +187,15 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
     ping = err instanceof Error ? err.message : String(err);
   }
   // What Cadence found of the Meetings object, field by field, so a missing one is plain to see.
+  const contactFields = meetings?.contact?.fields;
   const meetingParts = meetings ? ([
     ['Meeting date', meetings.fields.date], ['Booked by', meetings.fields.bookedBy], ['Products', meetings.fields.products], ['Team on the call', meetings.fields.team],
-    ['Account', meetings.fields.companyId], ['Recording', meetings.fields.recording], ['In Cadence', meetings.fields.cadenceLink], ['Cadence ID', meetings.fields.cadenceId], ['Contacts', meetings.contact],
+    ['Account', meetings.fields.companyId], ['Recording', meetings.fields.recording], ['In Cadence', meetings.fields.cadenceLink], ['Cadence ID', meetings.fields.cadenceId],
+    ['Meeting Number', meetings.fields.meetingNumber], ['First Meeting', meetings.fields.firstMeeting], ['Transcript', meetings.fields.transcript], ['Meeting contacts', meetings.contact],
+    ...(contactFields ? ([
+      ['Meeting contacts: Meeting Number', contactFields.meetingNumber], ['Meeting contacts: First Meeting', contactFields.firstMeeting], ['Meeting contacts: Meeting Date', contactFields.date],
+      ['Meeting contacts: Booked By', contactFields.bookedBy], ['Meeting contacts: Products', contactFields.products], ['Meeting contacts: Team on the Call', contactFields.team],
+    ] as const) : []),
   ] as const) : [];
   const meetingsMissing = meetingParts.filter(([, found]) => !found).map(([name]) => name);
   // Names Twenty has no tag for and Cadence could not add one: an admin adds them in Twenty.

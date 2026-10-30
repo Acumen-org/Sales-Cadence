@@ -1,10 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { personSearchWhere } from '@/lib/search-terms';
-import { peopleScopeWhere } from '@/lib/people-scope';
 import { optionLabel } from '../twenty/labels';
-import { PRODUCTS, type Product } from '../workspace';
+import { PRODUCTS } from '../workspace';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
@@ -12,20 +10,23 @@ import { requireUser, toActor, type SessionUser } from '../auth/current-user';
 import { isAdmin, isPodLeader, canCreateMeeting, ROLES_NEEDING_POD, whyNotManageMeeting } from '../auth/rbac';
 import { logAudit, userActor } from '../audit';
 import { inspectLink } from '../meetings/resolve-media';
-import { resolveAttendees } from '../meetings/attendees';
+import { resolveAttendees, type AttendeeSelection } from '../meetings/attendees';
+import { findProspects, findTeam, type ProspectOption, type TeamOption } from '../meetings/people-search';
+import { renumberProspects, upcomingNumbers, type ProspectNumber } from '../meetings/numbering';
+import { fetchMeetingTranscript, transcriptForRecording, mayReadTranscripts } from '../meetings/teams-transcript';
 import { linkKey, linkNeedle } from '../meetings/link-key';
 import { pushMeetingToCrm, removeMeetingFromCrm } from '../meetings/crm';
 import { afterResponse } from '../engine/sync-out';
 import { extractRecordingUrl, parseMeetingLink } from '../meetings/providers';
-import { sharePointPlayer } from '../meetings/sharepoint-player';
+import { sharePointPlayer, sharePointRecording, needsPlayer } from '../meetings/sharepoint-player';
 import { detectTranscriptFormat, parseTranscript } from '../meetings/transcript';
 import { getMeetingAnalyzer, MeetingAnalysisSchema } from '../meetings/analysis';
 import { meetingDayInstant, parseMeetingDay } from '../meetings/day';
 import type { ActionResult } from './users';
 import { issueText } from '../form-errors';
+import { externalPeopleWhere } from '../internal-organizations';
 
-export type AttendeeSelection = { personId?: string | null; userId?: string | null; name: string | null; email: string | null };
-export type AttendeeOption = AttendeeSelection & { key: string; kind: 'contact' | 'team'; detail: string | null };
+export type { AttendeeSelection, ProspectOption, TeamOption, ProspectNumber };
 
 async function mayManageMeeting(user: SessionUser, meeting: { id: string; createdById: string | null; companyId: string | null }): Promise<boolean> {
   if (!canCreateMeeting(user)) return false;
@@ -69,6 +70,7 @@ export async function toggleMeetingProductAction(formData: FormData): Promise<Ac
   // able to ask for opposite things and both be told they succeeded.
   const want = String(formData.get('on') ?? '') === 'true';
   const products = want ? [...meeting.products, product] : meeting.products.filter((p) => p !== product);
+  if (!products.length) return { ok: false, error: `${optionLabel(product)} is the only product on this meeting, and a meeting needs one. Add the right product first, then remove ${optionLabel(product)}.` };
   // Stored in the order the list defines, so two meetings with the same tags read the same.
   const ordered = PRODUCTS.filter((p) => products.includes(p));
   await prisma.meeting.update({ where: { id }, data: { products: ordered } });
@@ -82,44 +84,93 @@ export async function toggleMeetingProductAction(formData: FormData): Promise<Ac
   return { ok: true, message: want ? `${optionLabel(product)} added.` : `${optionLabel(product)} removed.`, data: { products: ordered } };
 }
 
-const AttendeeSchema = z.object({
-  personId: z.string().trim().min(1).max(200).nullable().optional(),
-  userId: z.string().trim().min(1).max(200).nullable().optional(),
-  name: z.string().trim().max(200).nullable(),
-  email: z.string().trim().email().max(254).nullable(),
-}).refine((a) => Boolean(a.personId || a.userId || a.name || a.email), 'Choose a person or enter a name.');
+/** Prospects: anyone in Twenty, by a few letters of their name, their address or their company. */
+export async function searchProspectsAction(query: string): Promise<ProspectOption[]> {
+  await requireUser();
+  return findProspects(String(query ?? ''));
+}
 
-export async function searchMeetingAttendeesAction(query: string): Promise<AttendeeOption[]> {
-  const user = await requireUser();
-  const q = query.trim().slice(0, 120);
-  const [people, users] = await Promise.all([
-    prisma.personCache.findMany({ where: { AND: [await peopleScopeWhere(user), personSearchWhere(q) ?? {}] }, orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }], take: 20, select: { id: true, firstName: true, lastName: true, email: true, companyName: true } }),
-    prisma.user.findMany({ where: { active: true, ...(q ? { OR: [{ name: { contains: q, mode: 'insensitive' as const } }, { email: { contains: q, mode: 'insensitive' as const } }] } : {}) }, orderBy: { name: 'asc' }, take: 20, select: { id: true, name: true, email: true } }),
+/** Our own team, for who was on the call. */
+export async function searchTeamAction(query: string): Promise<TeamOption[]> {
+  await requireUser();
+  return findTeam(String(query ?? ''));
+}
+
+/** Which meeting with each prospect this one will be, counting itself, for the form to show. */
+export async function prospectNumbersAction(personIds: string[], day: string, meetingId: string | null): Promise<ProspectNumber[]> {
+  await requireUser();
+  const ids = z.array(z.string().trim().min(1).max(200)).max(100).safeParse(personIds);
+  return ids.success ? upcomingNumbers(ids.data, String(day ?? ''), meetingId || null) : [];
+}
+
+const IdList = z.array(z.string().trim().min(1).max(200)).max(200);
+
+/** The ids a picker sends as JSON; anything malformed reads as none, which the form then asks for. */
+function idList(formData: FormData, field: string): string[] {
+  try {
+    const parsed = IdList.safeParse(JSON.parse(String(formData.get(field) ?? '[]')));
+    return parsed.success ? [...new Set(parsed.data)] : [];
+  } catch {
+    return [];
+  }
+}
+
+type Attendee = Awaited<ReturnType<typeof resolveAttendees>>[number] & { prospect: boolean };
+
+/**
+ * Who was there, as the form gives it: the team on the call and the prospects, both required.
+ * Anyone else already on the meeting (a guest typed in before the form had these two lists) stays.
+ */
+async function meetingPeople(formData: FormData, hostUserId: string | null, keep: AttendeeSelection[] = []): Promise<{ attendees: Attendee[]; prospectIds: string[] } | { error: string }> {
+  const teamIds = idList(formData, 'teamJson');
+  const prospectIds = idList(formData, 'prospectsJson');
+  if (!teamIds.length) return { error: 'Choose who from the team was on the call.' };
+  if (!prospectIds.length) return { error: 'Choose the prospects the meeting was with.' };
+  const [users, people] = await Promise.all([
+    prisma.user.findMany({ where: { id: { in: teamIds }, active: true }, select: { id: true } }),
+    prisma.personCache.findMany({ where: { id: { in: prospectIds }, deletedAt: null }, select: { id: true } }),
   ]);
-  return [...users.map((u): AttendeeOption => ({ key: `user:${u.id}`, userId: u.id, name: u.name, email: u.email, kind: 'team', detail: 'Your team' })), ...people.map((p): AttendeeOption => ({ key: `person:${p.id}`, personId: p.id, name: `${p.firstName} ${p.lastName}`.trim() || p.email, email: p.email, kind: 'contact', detail: p.companyName }))];
+  if (users.length !== teamIds.length) return { error: 'Someone chosen from the team no longer has access to Cadence. Remove them and try again.' };
+  if (people.length !== prospectIds.length) return { error: 'A prospect chosen is no longer in Twenty. Remove them and try again.' };
+  let resolved: Awaited<ReturnType<typeof resolveAttendees>>;
+  try {
+    resolved = await resolveAttendees([
+      ...teamIds.map((userId) => ({ userId, name: null, email: null })),
+      ...prospectIds.map((personId) => ({ personId, name: null, email: null })),
+      ...keep,
+    ], hostUserId);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Unable to resolve who was there.' };
+  }
+  const attendees = resolved.map((a) => ({ ...a, prospect: Boolean(a.personId && !a.userId && prospectIds.includes(a.personId)) }));
+  const prospects = attendees.filter((a) => a.prospect).map((a) => a.personId!);
+  if (!prospects.length) return { error: 'Everyone chosen as a prospect is on our team. Choose the people the meeting was with.' };
+  return { attendees, prospectIds: prospects };
 }
 
-function attendeeEntries(formData: FormData): AttendeeSelection[] {
-  const json = formData.get('attendeesJson');
-  const raw = typeof json === 'string' ? JSON.parse(json) : parseAttendees(String(formData.get('attendees') ?? ''));
-  const parsed = z.array(AttendeeSchema).max(200).safeParse(raw);
-  if (!parsed.success) throw new Error('Choose valid attendees; use a valid email address for guests. Maximum 200 attendees.');
-  return parsed.data;
+/** The account a meeting is with: the one most of its prospects work at. */
+async function meetingCompany(prospectIds: string[]): Promise<{ id: string | null; name: string | null }> {
+  const people = await prisma.personCache.findMany({ where: { id: { in: prospectIds } }, select: { id: true, companyId: true, companyName: true } });
+  const ordered = prospectIds.map((id) => people.find((p) => p.id === id)).filter((p): p is (typeof people)[number] => Boolean(p?.companyId));
+  if (!ordered.length) return { id: null, name: people.find((p) => p.companyName)?.companyName ?? null };
+  const counts = new Map<string, number>();
+  for (const p of ordered) counts.set(p.companyId!, (counts.get(p.companyId!) ?? 0) + 1);
+  const top = ordered.reduce((best, p) => ((counts.get(p.companyId!) ?? 0) > (counts.get(best.companyId!) ?? 0) ? p : best), ordered[0]);
+  const company = await prisma.companyCache.findFirst({ where: { id: top.companyId!, deletedAt: null }, select: { id: true, name: true } });
+  return company ? { id: company.id, name: company.name } : { id: null, name: top.companyName };
 }
 
-/** "Name <a@b.com>", "a@b.com", or a bare name; one per line or comma separated. */
-function parseAttendees(raw: string): Array<{ name: string | null; email: string | null }> {
-  return raw
-    .split(/[\n,;]+/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((entry) => {
-      const angle = /^(.*?)<([^>]+)>$/.exec(entry);
-      if (angle) return { name: angle[1].trim() || null, email: angle[2].trim().toLowerCase() };
-      if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(entry)) return { name: null, email: entry.toLowerCase() };
-      return { name: entry, email: null };
-    })
-    .filter((a, i, arr) => (a.email ? arr.findIndex((x) => x.email === a.email) === i : true));
+/**
+ * After a meeting's prospects, date or existence change: number again everyone it touched, and
+ * write to Twenty this meeting and every other one whose numbers moved. A SharePoint recording
+ * without a transcript gets its Teams transcript first, so Twenty hears about that too.
+ */
+async function afterMeetingChange(meetingId: string | null, personIds: Iterable<string>, fetchTranscript = false) {
+  const changed = await renumberProspects(personIds);
+  await afterResponse(async () => {
+    if (meetingId && fetchTranscript) await fetchMeetingTranscript(meetingId).catch(() => false);
+    for (const id of new Set([...(meetingId ? [meetingId] : []), ...changed])) await pushMeetingToCrm(id);
+  });
 }
 
 const MeetingSchema = z.object({
@@ -128,11 +179,10 @@ const MeetingSchema = z.object({
   sourceUrl: z.preprocess((v) => (typeof v === 'string' && v.trim() ? extractRecordingUrl(v) : ''), z.string().trim().max(8192).refine((url) => url === '' || /^https?:\/\/\S+$/i.test(url), 'Use an http or https recording link, or leave it blank.')),
   bookedById: z.string().trim().min(1, 'Choose who booked the meeting.'),
   occurredAt: z.string().trim().min(1),
-  companyId: z.string().trim().optional().nullable(),
   // A meeting can be about more than one product, so unknown values are dropped rather than
-  // rejected: the list is ours, and a stale form should not lose the rest of the edit.
-  products: z.array(z.string()).default([]).transform((v) => v.filter((p): p is Product => (PRODUCTS as readonly string[]).includes(p))),
-  attendees: z.string().optional().default(''),
+  // rejected: the list is ours, and a stale form should not lose the rest of the edit. At least
+  // one is required (owner, 29 October 2026).
+  products: z.array(z.string()).default([]).transform((v) => PRODUCTS.filter((p) => v.includes(p))).refine((v) => v.length > 0, 'Choose the products the meeting was about.'),
   transcript: z.string().max(2_000_000).optional().nullable(),
 });
 
@@ -142,12 +192,16 @@ function readForm(formData: FormData) {
     sourceUrl: formData.get('sourceUrl') ?? '',
     bookedById: formData.get('bookedById'),
     occurredAt: formData.get('occurredAt'),
-    companyId: formData.get('companyId') || null,
     products: formData.getAll('products').map(String),
-    attendees: formData.get('attendees') ?? '',
     transcript: formData.get('transcript') || null,
   });
 }
+
+/** Who on a saved meeting is neither on the team nor a prospect: guests typed in by name. */
+function guestsOf(attendees: { personId: string | null; userId: string | null; name: string | null; email: string | null; prospect: boolean }[]): AttendeeSelection[] {
+  return attendees.filter((a) => !a.userId && !a.prospect).map((a) => ({ name: a.name, email: a.email }));
+}
+const prospectsOf = (attendees: { personId: string | null; prospect: boolean }[]) => attendees.flatMap((a) => (a.prospect && a.personId ? [a.personId] : []));
 
 export async function createMeetingAction(formData: FormData): Promise<ActionResult> {
   const user = await requireUser();
@@ -170,11 +224,11 @@ export async function createMeetingAction(formData: FormData): Promise<ActionRes
   const mediaUrl = link?.mediaUrl ?? resolved?.mediaUrl ?? null;
   if (link && link.provider === 'OTHER' && link.note?.includes('does not look like a URL')) return { ok: false, error: link.note };
 
-  const company = d.companyId ? await prisma.companyCache.findFirst({ where: { id: d.companyId, deletedAt: null }, select: { id: true, name: true } }) : null;
-  if (d.companyId && !company) return { ok: false, error: 'The selected account no longer exists.' };
-  let attendees: Awaited<ReturnType<typeof resolveAttendees>>;
-  try { attendees = await resolveAttendees(attendeeEntries(formData), user.id); }
-  catch (error) { return { ok: false, error: error instanceof SyntaxError ? 'The attendee list is invalid.' : error instanceof Error ? error.message : 'Unable to resolve attendees.' }; }
+  const people = await meetingPeople(formData, user.id);
+  if ('error' in people) return { ok: false, error: people.error };
+  const { attendees, prospectIds } = people;
+  // No account to pick: the meeting is with the company its prospects work at.
+  const company = await meetingCompany(prospectIds);
   const transcript = d.transcript?.trim() || resolved?.transcript || null;
 
   const meeting = await prisma.meeting.create({
@@ -186,8 +240,8 @@ export async function createMeetingAction(formData: FormData): Promise<ActionRes
       embedUrl: link?.embedUrl ?? player?.embedUrl ?? null,
       mediaUrl,
       occurredAt,
-      companyId: company?.id ?? null,
-      companyName: company?.name ?? null,
+      companyId: company.id,
+      companyName: company.name,
       products: d.products,
       transcript,
       transcriptFormat: transcript ? detectTranscriptFormat(transcript) : null,
@@ -195,19 +249,19 @@ export async function createMeetingAction(formData: FormData): Promise<ActionRes
       attendees: { create: attendees },
     },
   });
-  await logAudit({ entityType: 'meeting', entityId: meeting.id, action: 'created', actor: userActor(user), details: { title: meeting.title, provider: meeting.provider, attendees: attendees.length } });
-  // Twenty keeps the record: a note on the meeting's contacts and account.
-  await afterResponse(() => pushMeetingToCrm(meeting.id));
+  await logAudit({ entityType: 'meeting', entityId: meeting.id, action: 'created', actor: userActor(user), details: { title: meeting.title, provider: meeting.provider, attendees: attendees.length, prospects: prospectIds.length } });
+  // Numbered, then written to Twenty with the meetings whose numbers it moved.
+  await afterMeetingChange(meeting.id, prospectIds, !transcript && needsPlayer(meeting.sourceUrl));
   revalidatePath('/meetings');
   revalidatePath('/home');
-  if (company?.id) revalidatePath(`/accounts/${company.id}`);
+  if (company.id) revalidatePath(`/accounts/${company.id}`);
   return { ok: true, message: 'Meeting added.', redirectTo: `/meetings/${meeting.id}` };
 }
 
 export async function updateMeetingAction(formData: FormData): Promise<ActionResult> {
   const user = await requireUser();
   const id = String(formData.get('meetingId') ?? '');
-  const existing = await prisma.meeting.findUnique({ where: { id } });
+  const existing = await prisma.meeting.findUnique({ where: { id }, include: { attendees: true } });
   if (!existing) return { ok: false, error: 'Meeting not found.' };
   if (!(await mayManageMeeting(user, existing))) return { ok: false, error: whyNotManageMeeting(toActor(user), 'edit this meeting') };
   const parsed = readForm(formData);
@@ -228,11 +282,10 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
     link && !link.embedUrl && !keptPlayer ? sharePointPlayer(d.sourceUrl) : null,
   ]);
   const mediaUrl = sameLink ? existing.mediaUrl : link?.mediaUrl ?? resolved?.mediaUrl ?? null;
-  const company = d.companyId ? await prisma.companyCache.findFirst({ where: { id: d.companyId, deletedAt: null }, select: { id: true, name: true } }) : null;
-  if (d.companyId && !company) return { ok: false, error: 'The selected account no longer exists.' };
-  let attendees: Awaited<ReturnType<typeof resolveAttendees>>;
-  try { attendees = await resolveAttendees(attendeeEntries(formData), existing.createdById); }
-  catch (error) { return { ok: false, error: error instanceof SyntaxError ? 'The attendee list is invalid.' : error instanceof Error ? error.message : 'Unable to resolve attendees.' }; }
+  const people = await meetingPeople(formData, existing.createdById, guestsOf(existing.attendees));
+  if ('error' in people) return { ok: false, error: people.error };
+  const { attendees, prospectIds } = people;
+  const company = await meetingCompany(prospectIds);
   const transcript = d.transcript?.trim() || resolved?.transcript || null;
 
   await prisma.$transaction(async (tx) => {
@@ -248,8 +301,8 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
         embedUrl: link?.embedUrl ?? keptPlayer ?? player?.embedUrl ?? null,
         mediaUrl,
         occurredAt,
-        companyId: company?.id ?? null,
-        companyName: company?.name ?? null,
+        companyId: company.id,
+        companyName: company.name,
         products: d.products,
         transcript,
         transcriptFormat: transcript ? detectTranscriptFormat(transcript) : null,
@@ -260,30 +313,32 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
     });
   });
   await logAudit({ entityType: 'meeting', entityId: id, action: 'updated', actor: userActor(user) });
-  await afterResponse(() => pushMeetingToCrm(id));
+  // Everyone it was with before and after: a prospect taken off moves their later meetings down.
+  await afterMeetingChange(id, [...prospectIds, ...prospectsOf(existing.attendees)], !transcript && needsPlayer(d.sourceUrl));
   revalidatePath('/meetings');
   revalidatePath(`/meetings/${id}`);
   revalidatePath('/accounts');
   if (existing.companyId) revalidatePath(`/accounts/${existing.companyId}`);
-  if (company?.id) revalidatePath(`/accounts/${company.id}`);
+  if (company.id) revalidatePath(`/accounts/${company.id}`);
   return { ok: true, message: 'Saved.' };
 }
 
 export async function updateMeetingAttendeesAction(formData: FormData): Promise<ActionResult> {
   const user = await requireUser();
   const id = String(formData.get('meetingId') ?? '');
-  const meeting = await prisma.meeting.findUnique({ where: { id }, select: { id: true, createdById: true, companyId: true } });
+  const meeting = await prisma.meeting.findUnique({ where: { id }, select: { id: true, createdById: true, companyId: true, attendees: true } });
   if (!meeting) return { ok: false, error: 'Meeting not found.' };
   if (!(await mayManageMeeting(user, meeting))) return { ok: false, error: whyNotManageMeeting(toActor(user), 'change who attended this meeting') };
-  let attendees: Awaited<ReturnType<typeof resolveAttendees>>;
-  try { attendees = await resolveAttendees(attendeeEntries(formData), meeting.createdById); }
-  catch (error) { return { ok: false, error: error instanceof SyntaxError ? 'The attendee list is invalid.' : error instanceof Error ? error.message : 'Unable to resolve attendees.' }; }
+  const people = await meetingPeople(formData, meeting.createdById, guestsOf(meeting.attendees));
+  if ('error' in people) return { ok: false, error: people.error };
+  const { attendees, prospectIds } = people;
+  const company = await meetingCompany(prospectIds);
   await prisma.$transaction(async (tx) => {
     await tx.meetingAttendee.deleteMany({ where: { meetingId: id } });
-    await tx.meeting.update({ where: { id }, data: { attendees: { create: attendees }, analysis: Prisma.DbNull, analysisStatus: 'NONE', analysedAt: null, analysisModel: null, analysisError: null } });
+    await tx.meeting.update({ where: { id }, data: { companyId: company.id, companyName: company.name, attendees: { create: attendees }, analysis: Prisma.DbNull, analysisStatus: 'NONE', analysedAt: null, analysisModel: null, analysisError: null } });
   });
-  await logAudit({ entityType: 'meeting', entityId: id, action: 'attendees_updated', actor: userActor(user), details: { attendees: attendees.length } });
-  await afterResponse(() => pushMeetingToCrm(id));
+  await logAudit({ entityType: 'meeting', entityId: id, action: 'attendees_updated', actor: userActor(user), details: { attendees: attendees.length, prospects: prospectIds.length } });
+  await afterMeetingChange(id, [...prospectIds, ...prospectsOf(meeting.attendees)]);
   revalidatePath(`/meetings/${id}`);
   revalidatePath('/meetings');
   revalidatePath('/reports');
@@ -309,12 +364,14 @@ export async function toggleMeetingFavouriteAction(formData: FormData): Promise<
 export async function deleteMeetingAction(formData: FormData): Promise<ActionResult> {
   const user = await requireUser();
   const id = String(formData.get('meetingId') ?? '');
-  const existing = await prisma.meeting.findUnique({ where: { id } });
+  const existing = await prisma.meeting.findUnique({ where: { id }, include: { attendees: { select: { personId: true, prospect: true } } } });
   if (!existing || existing.review === 'DISMISSED') return { ok: false, error: 'Meeting not found.' };
   if (!(await mayManageMeeting(user, existing))) return { ok: false, error: whyNotManageMeeting(toActor(user), 'delete this meeting') };
   await prisma.meeting.delete({ where: { id } });
   await logAudit({ entityType: 'meeting', entityId: id, action: 'deleted', actor: userActor(user), details: { title: existing.title } });
   await afterResponse(() => removeMeetingFromCrm(existing));
+  // Its prospects' later meetings each move down one.
+  await afterMeetingChange(null, prospectsOf(existing.attendees));
   revalidatePath('/meetings');
   revalidatePath('/accounts');
   if (existing.companyId) revalidatePath(`/accounts/${existing.companyId}`);
@@ -395,13 +452,13 @@ export type LinkSuggestion = {
   isJoinLink: boolean;
   playsInline: boolean;
   title: string | null;
-  /** YYYY-MM-DD when the page or the link carries a date. */
+  /** YYYY-MM-DD when the page, the file or the link carries a date. */
   date: string | null;
-  companyId: string | null;
-  companyName: string | null;
   mediaUrl: string | null;
   /** What plays in the meeting page's player, when the link can be framed. */
   embedUrl: string | null;
+  /** A Teams recording whose transcript Microsoft may hand over: the form asks for it next. */
+  transcriptFromTeams: boolean;
   /** The link belongs to a meeting Cadence already has. */
   existingMeetingId?: string | null;
 };
@@ -413,8 +470,8 @@ const GENERIC = /^(join conversation|join (our )?(cloud hd )?video meeting|video
 
 /**
  * Everything a pasted link can tell us before anyone types: which service it is, whether it plays
- * here (and the player link it plays through), and from the page itself a title, a date and the
- * account it names. A link to a meeting Cadence already has says so.
+ * here (and the player link it plays through), and from the page or the file a title and a date.
+ * A link to a meeting Cadence already has says so.
  */
 export async function inspectMeetingLinkAction(raw: string, exceptMeetingId?: string | null): Promise<{ ok: true; data: LinkSuggestion } | { ok: false; error: string }> {
   const user = await requireUser();
@@ -422,7 +479,7 @@ export async function inspectMeetingLinkAction(raw: string, exceptMeetingId?: st
   const url = extractRecordingUrl(String(raw ?? ''));
   const link = parseMeetingLink(url);
   if (link.provider === 'OTHER' && link.note?.includes('does not look like a URL')) return { ok: false, error: link.note };
-  const base = { provider: link.provider, label: link.label, isJoinLink: link.isJoinLink, playsInline: Boolean(link.mediaUrl || link.embedUrl), mediaUrl: link.mediaUrl, embedUrl: link.embedUrl };
+  const base = { provider: link.provider, label: link.label, isJoinLink: link.isJoinLink, playsInline: Boolean(link.mediaUrl || link.embedUrl), mediaUrl: link.mediaUrl, embedUrl: link.embedUrl, transcriptFromTeams: false };
 
   // Already here: this link's meeting within a few hours of now. A personal room's other meetings,
   // earlier in the week or next week, are other meetings.
@@ -431,44 +488,59 @@ export async function inspectMeetingLinkAction(raw: string, exceptMeetingId?: st
   const around = 24 * 3_600_000;
   const candidates = key && needle ? await prisma.meeting.findMany({ where: { review: { not: 'DISMISSED' }, ...(exceptMeetingId ? { id: { not: exceptMeetingId } } : {}), sourceUrl: { contains: needle, mode: 'insensitive' }, occurredAt: { gte: new Date(Date.now() - around), lte: new Date(Date.now() + around) } }, orderBy: { occurredAt: 'desc' }, take: 20, select: { id: true, sourceUrl: true } }) : [];
   const already = candidates.find((m) => linkKey(m.sourceUrl) === key);
-  if (already) return { ok: true, data: { ...base, title: null, date: null, companyId: null, companyName: null, existingMeetingId: already.id } };
+  if (already) return { ok: true, data: { ...base, title: null, date: null, existingMeetingId: already.id } };
 
   // A SharePoint page is a sign-in wall to the server; Graph names its file, and Teams names the
   // file after the meeting and its day.
-  const [page, player] = await Promise.all([inspectLink(url), link.embedUrl ? null : sharePointPlayer(url)]);
-  const embedUrl = link.embedUrl ?? player?.embedUrl ?? null;
+  const [page, found] = await Promise.all([inspectLink(url), link.embedUrl ? null : sharePointRecording(url)]);
+  const recording = found?.recording ?? null;
+  const embedUrl = link.embedUrl ?? recording?.embedUrl ?? null;
   const cleaned = page.title?.replace(/\s*[|·-]\s*(Microsoft Stream|SharePoint|Google Drive|Zoom|OneDrive|Google Meet|Microsoft Teams).*$/i, '').trim() || null;
   const named = cleaned && !link.isJoinLink && !SIGN_IN.test(cleaned) && !GENERIC.test(cleaned) ? cleaned : null;
-  const title = named ?? player?.title ?? null;
-  const date = named ? page.date : player?.date ?? null;
-  // An account named in the title: the longest cached company name the title contains.
-  const companies = await prisma.companyCache.findMany({ where: { deletedAt: null, name: { not: '' } }, select: { id: true, name: true }, orderBy: { name: 'asc' } });
-  const haystack = `${title ?? ''} ${page.description ?? ''}`.toLowerCase();
-  const match = companies.filter((c) => c.name.length >= 4 && haystack.includes(c.name.toLowerCase())).sort((a, b) => b.name.length - a.name.length)[0] ?? null;
+  const title = named ?? recording?.title ?? null;
+  const date = named ? page.date : recording?.date ?? page.date ?? null;
   const mediaUrl = page.mediaUrl ?? link.mediaUrl;
-  return { ok: true, data: { ...base, embedUrl, playsInline: Boolean(mediaUrl || embedUrl), title, date, companyId: match?.id ?? null, companyName: match?.name ?? null, mediaUrl, transcript: page.transcript } };
+  const transcriptFromTeams = Boolean(!page.transcript && recording?.file && found && mayReadTranscripts(found.token.roles));
+  return { ok: true, data: { ...base, embedUrl, playsInline: Boolean(mediaUrl || embedUrl), title, date, mediaUrl, transcript: page.transcript, transcriptFromTeams } };
 }
 
-/** The people who spoke in a transcript, matched to the CRM and the team; guests stay guests. */
-export async function attendeesFromTranscriptAction(raw: string): Promise<{ ok: true; attendees: AttendeeSelection[]; durationSec: number | null } | { ok: false; error: string }> {
+/**
+ * The Teams transcript of a pasted SharePoint recording, asked after the link was read (a few
+ * seconds on Microsoft's side, so the player shows first). `teamUserIds` may have organized it.
+ */
+export async function linkTranscriptAction(raw: string, teamUserIds: string[] = []): Promise<{ ok: true; transcript: string | null } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (!canCreateMeeting(user)) return { ok: false, error: 'Biz Ops has read-only access to meetings.' };
+  const ids = IdList.safeParse(teamUserIds);
+  const found = await sharePointRecording(extractRecordingUrl(String(raw ?? '')));
+  return { ok: true, transcript: await transcriptForRecording(found?.recording.file ?? null, ids.success ? ids.data : []) };
+}
+
+/**
+ * The people who spoke in a transcript, where a speaker's name is someone on the team or someone
+ * in Twenty: offered for the two lists, never guessed beyond an exact name.
+ */
+export async function peopleFromTranscriptAction(raw: string): Promise<{ ok: true; team: TeamOption[]; prospects: ProspectOption[] } | { ok: false; error: string }> {
   const user = await requireUser();
   if (!canCreateMeeting(user)) return { ok: false, error: 'Biz Ops has read-only access to meetings.' };
   const { cues } = parseTranscript(String(raw ?? ''));
-  const speakers = [...new Set(cues.map((c) => c.speaker).filter((s): s is string => Boolean(s)))];
-  if (!speakers.length) return { ok: true, attendees: [], durationSec: cues.length ? Math.round(Math.max(...cues.map((c) => c.end ?? c.start))) || null : null };
   const bare = (name: string) => name.replace(/\s*\([^)]*\)\s*$/, '').trim();
-  const [users, people] = await Promise.all([
-    prisma.user.findMany({ where: { active: true }, select: { id: true, name: true, email: true } }),
-    prisma.personCache.findMany({ where: { deletedAt: null, OR: speakers.map((s) => { const [first, ...rest] = bare(s).split(/\s+/); return { firstName: { equals: first, mode: 'insensitive' as const }, lastName: { equals: rest.join(' '), mode: 'insensitive' as const } }; }) }, select: { id: true, firstName: true, lastName: true, email: true } }),
+  const speakers = [...new Set(cues.map((c) => c.speaker).filter((s): s is string => Boolean(s)).map(bare).filter(Boolean))].slice(0, 50);
+  if (!speakers.length) return { ok: true, team: [], prospects: [] };
+  const lower = new Set(speakers.map((s) => s.toLowerCase()));
+  const [team, people] = await Promise.all([
+    findTeam(''),
+    prisma.personCache.findMany({
+      where: { AND: [{ deletedAt: null, OR: speakers.map((s) => { const [first, ...rest] = s.split(/\s+/); return { firstName: { equals: first, mode: 'insensitive' as const }, lastName: { equals: rest.join(' '), mode: 'insensitive' as const } }; }) }, await externalPeopleWhere({ keepBlocked: true })] },
+      select: { id: true, firstName: true, lastName: true, email: true, companyName: true, jobTitle: true },
+      take: 50,
+    }),
   ]);
-  const attendees: AttendeeSelection[] = speakers.map((speaker) => {
-    const name = bare(speaker);
-    const team = users.find((u) => u.name.toLowerCase() === name.toLowerCase());
-    if (team) return { userId: team.id, personId: null, name: team.name, email: team.email };
-    const person = people.find((p) => `${p.firstName} ${p.lastName}`.trim().toLowerCase() === name.toLowerCase());
-    if (person) return { personId: person.id, userId: null, name: `${person.firstName} ${person.lastName}`.trim(), email: person.email };
-    return { personId: null, userId: null, name: speaker, email: null };
+  const onTeam = team.filter((u) => lower.has(u.name.toLowerCase()));
+  // One record per speaker: a name Twenty holds twice is left for the FO to pick.
+  const prospects = speakers.flatMap((s) => {
+    const hits = people.filter((p) => `${p.firstName} ${p.lastName}`.trim().toLowerCase() === s.toLowerCase());
+    return hits.length === 1 && !onTeam.some((u) => u.name.toLowerCase() === s.toLowerCase()) ? [hits[0]] : [];
   });
-  const last = cues.length ? Math.max(...cues.map((c) => c.end ?? c.start)) : 0;
-  return { ok: true, attendees, durationSec: last > 0 ? Math.round(last) : null };
+  return { ok: true, team: onTeam, prospects: prospects.map((p) => ({ personId: p.id, name: `${p.firstName} ${p.lastName}`.trim(), email: p.email, companyName: p.companyName, jobTitle: p.jobTitle })) };
 }

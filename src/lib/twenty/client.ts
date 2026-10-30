@@ -32,6 +32,8 @@ export type ListPeopleOptions = ListOptions & {
   ids?: string[];
   podOwner?: string;
   companyId?: string;
+  /** Words to find in a name, email address or job title; every word has to match. */
+  search?: string;
   includeDeleted?: boolean;
   /** Only records soft-deleted at or after this instant. Twenty does not bump updatedAt on delete. */
   deletedSince?: string;

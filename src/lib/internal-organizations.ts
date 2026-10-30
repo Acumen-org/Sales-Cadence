@@ -23,12 +23,13 @@ export function isInternalCompany(company: { name: string; domain: string | null
  * admin has blocked. Directory exclusions never remove CRM cache records needed to match mailbox
  * activity.
  */
-export async function externalPeopleWhere(): Promise<Prisma.PersonCacheWhereInput> {
+export async function externalPeopleWhere(options: { keepBlocked?: boolean } = {}): Promise<Prisma.PersonCacheWhereInput> {
   const [users, settings, companies, blocked] = await Promise.all([
     prisma.user.findMany({ select: { email: true, aliases: true, twentyMemberId: true } }),
     getSettings(),
     prisma.companyCache.findMany({ select: { id: true, name: true, domain: true } }),
-    blockedCompanyIds(),
+    // A meeting happened whatever an admin thinks of the account since: its prospects stay findable.
+    options.keepBlocked ? Promise.resolve([] as string[]) : blockedCompanyIds(),
   ]);
   const emails = [...new Set(users.flatMap((u) => [u.email, ...u.aliases]).filter((email) => email.includes('@')).map((email) => email.trim().toLowerCase()))];
   const excludedIds = [...new Set([...companies.filter((c) => isInternalCompany(c, settings.rules)).map((c) => c.id), ...blocked])];

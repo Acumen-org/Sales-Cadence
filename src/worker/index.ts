@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import { backfillMeetingsToCrm, missingMeetingTags } from '../lib/meetings/crm';
+import { backfillMeetingsToCrm, meetingSchemaShape, missingMeetingTags } from '../lib/meetings/crm';
+import { backfillTeamsTranscripts } from '../lib/meetings/teams-transcript';
 import { backfillSharePointPlayers } from '../lib/meetings/sharepoint-player';
 import { retryFailedWrites } from '../lib/engine/sync-retry';
 import { prisma } from '../lib/db';
@@ -56,15 +57,33 @@ async function evidenceRescan(now:Date){
  if(await prisma.setting.findUnique({where:{key}}))return;
  try{const stats=await reconcile({days:14,only:['notes','messages'],reread:true,actor:SYSTEM_ACTOR,now});log('evidence rescan',stats);await prisma.setting.upsert({where:{key},create:{key,value:{at:now.toISOString(),stats}},update:{value:{at:now.toISOString(),stats}}});}catch(error){log('evidence rescan failed',error);}
 }
-/** Once, after the team made the Meetings object in Twenty: every meeting already in Cadence is written to it. */
-let meetingsBackfillChecked=false;
-async function meetingsBackfill(){
- if(meetingsBackfillChecked)return;meetingsBackfillChecked=true;
- // Each new key writes every meeting again once: b dropped team members from the contacts, c
- // counts acumen-talent.com as our own and names each Meeting contact for its meeting.
- const key='meetingsToTwenty20261010c';
- if(await prisma.setting.findUnique({where:{key}}))return;
- try{const written=await backfillMeetingsToCrm({all:true});if(written===null)return;log('meetings written to Twenty',written);await prisma.setting.upsert({where:{key},create:{key,value:{at:new Date().toISOString(),written}},update:{value:{at:new Date().toISOString(),written}}});}catch(error){log('meetings backfill failed',error);}
+/**
+ * Every meeting already in Cadence is written to Twenty again whenever what Cadence writes changes:
+ * a new release (the version below) or a field the CRM admin added to Meetings or Meeting contacts.
+ * Checked at start and each hour, so a field added in Twenty fills in for old meetings within one.
+ */
+const MEETINGS_RELEASE='20261029';
+let meetingsBackfillAt=0;
+async function meetingsBackfill(now:number){
+ if(now<meetingsBackfillAt)return;meetingsBackfillAt=now+3_600_000;
+ const key='meetingsToTwentyShape';
+ try{
+  const schema=await (await getTwentyClient()).meetingSchema();
+  if(!schema)return;
+  const shape=`${MEETINGS_RELEASE}|${meetingSchemaShape(schema)}`;
+  const row=await prisma.setting.findUnique({where:{key}});
+  if((row?.value as {shape?:string}|null)?.shape===shape)return;
+  const written=await backfillMeetingsToCrm({all:true});if(written===null)return;
+  log('meetings written to Twenty',written);
+  const value={at:new Date().toISOString(),written,shape};
+  await prisma.setting.upsert({where:{key},create:{key,value},update:{value}});
+ }catch(error){log('meetings backfill failed',error);}
+}
+/** Each hour: recent Teams recordings without a transcript ask Microsoft for theirs. */
+let teamsTranscriptsAt=0;
+async function teamsTranscripts(now:number){
+ if(now<teamsTranscriptsAt)return;teamsTranscriptsAt=now+3_600_000;
+ try{const found=await backfillTeamsTranscripts();if(found)log('Teams transcripts fetched',found);}catch(error){log('Teams transcripts failed',error);}
 }
 // While some tag is missing in Twenty, write the meetings again each hour, so a tag an admin adds
 // by hand fills in without anyone asking.
@@ -94,9 +113,10 @@ async function tick(){
    }
    await nightly(new Date(now));
    await evidenceRescan(new Date(now));
-   await meetingsBackfill();
+   await meetingsBackfill(now);
    await meetingTagsRetry(now);
    await sharePointPlayers(now);
+   await teamsTranscripts(now);
    try{await launchScheduledCampaigns({actor:SYSTEM_ACTOR});}catch(error){log('campaign launch failed',error);}
    const stats=await runSchedulerTick({actor:SYSTEM_ACTOR});
    if(stats.generated||stats.completed)log('scheduler',stats);

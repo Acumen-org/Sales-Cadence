@@ -256,7 +256,8 @@ export type UpdateNoteInput = { title?: string; bodyMarkdown?: string };
 /** A tag a Select or Multi-select field offers: its stored value and the label people see. */
 export type TwentySelectOption = { value: string; label: string };
 /** `multi` when the field holds several tags (Multi-select), else one (Select). */
-export type TwentyTagField = { id: string; name: string; multi?: boolean; options: TwentySelectOption[] };
+/** A Select or Multi-select field; `text` when the workspace made it a plain Text field instead, written as names. */
+export type TwentyTagField = { id: string; name: string; multi?: boolean; text?: boolean; options: TwentySelectOption[] };
 
 /**
  * Where Cadence writes meetings in Twenty: the workspace's own Meetings object and its Meeting
@@ -278,9 +279,24 @@ export type TwentyMeetingSchema = {
     companyId: string | null;
     personId: string | null;
     assigneeId: string | null;
+    /** Which meeting with its prospects this is (the highest of theirs), and whether that is the first. */
+    meetingNumber: string | null;
+    firstMeeting: string | null;
+    transcript: string | null;
   };
-  /** The in-between object that links one meeting to each of its contacts. */
-  contact: { typeName: string; plural: string; meetingId: string; personId: string } | null;
+  /** The in-between object that links one meeting to each of its contacts, with that contact's count. */
+  contact: {
+    typeName: string; plural: string; meetingId: string; personId: string;
+    fields: {
+      /** Which meeting with this contact it is; 1 is their first. */
+      meetingNumber: string | null;
+      firstMeeting: string | null;
+      date: { name: string; dateOnly: boolean } | null;
+      bookedBy: TwentyTagField | null;
+      products: TwentyTagField | null;
+      team: TwentyTagField | null;
+    };
+  } | null;
 };
 
 /** One meeting as Cadence writes it: the field values, ready, and the contacts to link. */
@@ -289,7 +305,8 @@ export type TwentyMeetingRecordInput = {
   id: string | null;
   cadenceId: string;
   data: Record<string, unknown>;
-  contacts: { personId: string; name: string }[];
+  /** One row per contact: its name, and the values for that contact's own fields. */
+  contacts: { personId: string; name: string; data?: Record<string, unknown> }[];
 };
 
 export type CreateTaskInput = {

@@ -1199,3 +1199,41 @@ hour until Microsoft lets Cadence look (Setting `sharePointPlayers20261029`). Se
 shows whether it works; Microsoft's last refusal is kept with the permissions the app had then, so
 granting another one clears it. Microsoft documents `Files.ReadWrite.All` for this call; the
 read-only permission is asked for first, and the refusal in Settings says if it is not enough.
+
+## Meetings counted per prospect, and a form that fills itself (29 October 2026)
+
+The owner wants bonuses paid on first meetings and on the 5th, 10th, 15th... meetings an FO booked,
+read by a dashboard straight from Twenty. Each prospect's earliest meeting in Cadence is their 1st;
+the next is their 2nd, by date and then by when it was added. There is no checkbox to say "first":
+the owner chose Cadence's own history as the count. A meeting as a whole is the highest of its
+prospects' numbers, so a call with Grant Cook at 2 and Alex Metzker at 1 is a 2nd meeting, and two
+new prospects on one call are one first meeting, credited once to the FO who booked it. Numbers are
+stored (`MeetingAttendee.meetingNumber`, `Meeting.meetingNumber`) because Twenty keeps them too;
+adding a meeting with an earlier date, moving one, removing a prospect or deleting a meeting
+renumbers everyone it touched and writes every record whose number moved. The form shows each
+prospect's number as it will be, counting the meeting being added, with the earlier dates on hover.
+
+Who was there is three things now, all required: Booked by (the FO credited), Our team on the call,
+and Prospects. Prospects are anyone in Twenty: the search ignores pods and blocked accounts, ranks
+an exact name or address first and then what starts with the letters typed, and asks Twenty itself
+alongside Cadence's copy, so someone added in Twenty a moment ago is found and copied in. Our own
+people are never offered as prospects. Guests typed in on older meetings are kept. The account is
+no longer picked: it is the company most of the prospects work at. At least one product is
+required, and the last product cannot be untagged from the meeting page.
+
+Every Meeting contact row in Twenty carries that prospect's number, whether it is their first, the
+day, who booked it, the products and the team; the Meetings record carries the meeting's number,
+whether it is a first meeting, and the transcript. Fields are found by label and type, a Text field
+works where a Select was expected, and the worker writes every meeting again whenever Cadence finds
+a new field (Setting `meetingsToTwentyShape`), so the CRM admin can add them in any order.
+
+The link is read as soon as it is pasted or typed, with no button: a recording that plays here
+plays in the form itself. A file name that is not a Teams one still gives the title, and the file's
+date gives the day. A Teams recording's transcript is fetched from Microsoft Graph: the recording's
+OneDrive owner organized the meeting, `getAllTranscripts` lists their transcripts around the time
+the file was made, and the one that started and ended with the recording is taken, as WebVTT with
+speakers or, when the tenant withholds names, without. Speakers who are on the team or in Twenty
+join the lists. It needs `OnlineMeetingTranscript.Read.All`, a Teams application access policy and
+Graph transcript access turned on; Settings > Sign-in > Teams transcripts says which is missing, and
+the worker asks hourly for recent meetings still without one.
+

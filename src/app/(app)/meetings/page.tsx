@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { optionLabel } from '@/lib/twenty/labels';
 import type { Prisma } from '@prisma/client';
 import { requireUser } from '@/lib/auth/current-user';
+import { ordinal } from '@/lib/meetings/numbering';
 import { canCreateMeeting, ROLES_NEEDING_POD } from '@/lib/auth/rbac';
 import { attendeeIsExternal, meetingReadWhere } from '@/lib/meetings-query';
 import { getSettings } from '@/lib/settings';
@@ -70,6 +71,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
         companyName: true,
         companyId: true,
         products: true,
+        meetingNumber: true,
         transcript: true,
         createdBy: { select: { name: true } },
         bookedBy: { select: { name: true } },
@@ -148,7 +150,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                     <td data-label="Meeting">
                       <IdentityCell name={m.title} href={`/meetings/${m.id}`} sub={platformLabel(m.provider, m.sourceUrl)} />
                     </td>
-                    <td data-label="When" className="text-[12.5px]"><time className="block font-medium text-ink-900">{formatLocalDate(meetingDay(m.occurredAt), 'long')}</time></td>
+                    <td data-label="When" className="text-[12.5px]"><time className="block font-medium text-ink-900">{formatLocalDate(meetingDay(m.occurredAt), 'long')}</time>{m.meetingNumber ? <Badge tone={m.meetingNumber === 1 ? 'green' : 'gray'} className="mt-1">{m.meetingNumber === 1 ? 'First meeting' : `${ordinal(m.meetingNumber)} meeting`}</Badge> : null}</td>
                     <td data-label="Account" className="break-words text-[12.5px]">
                       {m.companyId ? (
                         <Link href={`/accounts/${m.companyId}`} className="text-brand-700 hover:underline">

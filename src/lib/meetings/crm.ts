@@ -7,13 +7,21 @@ import { optionLabel } from '../twenty/labels';
 import { workspaceTimezone } from '../workspace';
 import { meetingDay, meetingDayInstant } from './day';
 import { retryDelayMs } from '../engine/sync-out';
+import { parseTranscript, type TranscriptFormat } from './transcript';
+import { ordinal } from './numbering';
 
 /**
  * Twenty keeps the record. Every meeting added in Cadence is written to the workspace's own
  * Meetings object: its title and date, who booked it, the products and the team on the call as
- * tags, the account, the recording, a link back, and one Meeting contact per contact who attended,
- * so the meeting shows on each of their records. An edit updates the same record; a delete removes
- * it. A workspace without a Meetings object gets a note on the contacts and account instead.
+ * tags, the account, the recording, the transcript, a link back, which meeting with its prospects
+ * it is, and one Meeting contact per prospect, so the meeting shows on each of their records.
+ *
+ * Each Meeting contact row carries that prospect's own count (their 1st, 2nd... meeting with us)
+ * with the day, who booked it, the products and the team, so a dashboard reads the bonus numbers
+ * straight from Twenty: first meetings and the 5th, 10th, 15th from the Meetings object (one per
+ * meeting, credited to the FO who booked it), and each prospect's count from Meeting contacts.
+ * An edit updates the same records; a delete removes them. A workspace without a Meetings object
+ * gets a note on the contacts and account instead.
  */
 
 type MeetingForCrm = {
@@ -25,8 +33,21 @@ type MeetingForCrm = {
   companyId: string | null;
   companyName: string | null;
   bookedBy: { name: string; twentyMemberId?: string | null } | null;
-  attendees: { name: string | null; email: string | null; personId: string | null; userId?: string | null; external: boolean; person?: { firstName: string; lastName: string } | null }[];
+  /** The highest of its prospects' numbers: 1 only when everyone on it is new. */
+  meetingNumber?: number | null;
+  transcript?: string | null;
+  transcriptFormat?: string | null;
+  attendees: { name: string | null; email: string | null; personId: string | null; userId?: string | null; external: boolean; prospect?: boolean; meetingNumber?: number | null; person?: { firstName: string; lastName: string } | null }[];
 };
+
+/** Twenty's text fields hold the transcript as lines of "Speaker: what they said", up to a limit. */
+const TRANSCRIPT_LIMIT = 100_000;
+export function transcriptText(raw: string | null | undefined, format?: string | null): string {
+  if (!raw?.trim()) return '';
+  const { cues } = parseTranscript(raw, (format as TranscriptFormat | null) ?? undefined);
+  const text = cues.length ? cues.map((c) => (c.speaker ? `${c.speaker}: ${c.text}` : c.text)).join('\n') : raw.trim();
+  return text.length > TRANSCRIPT_LIMIT ? `${text.slice(0, TRANSCRIPT_LIMIT)}\n[Cut short here: the full transcript is in Cadence]` : text;
+}
 
 /** The note for a workspace with no Meetings object: plain lines, readable anywhere it is shown. */
 export function meetingNote(m: MeetingForCrm, prefix: string): { title: string; bodyMarkdown: string } {
@@ -35,6 +56,7 @@ export function meetingNote(m: MeetingForCrm, prefix: string): { title: string; 
   const lines = [
     `When: ${when}`,
     m.bookedBy ? `Booked by: ${m.bookedBy.name}` : null,
+    m.meetingNumber ? `Meeting: ${m.meetingNumber === 1 ? 'first meeting' : `${ordinal(m.meetingNumber)} meeting`}` : null,
     m.products.length ? `Products: ${m.products.map(optionLabel).join(', ')}` : null,
     m.companyName ? `Account: ${m.companyName}` : null,
     people.length ? `Attendees: ${people.join(', ')}` : null,
@@ -86,21 +108,25 @@ export async function missingMeetingTags(): Promise<{ field: string; name: strin
 }
 
 /** The record's field values and the contacts to link, in the names this workspace gave its fields. */
-export async function meetingRecord(m: MeetingForCrm, schema: TwentyMeetingSchema, client: TwentyClient): Promise<{ data: Record<string, unknown>; contacts: { personId: string; name: string }[]; tags: TagOutcome[] }> {
+export async function meetingRecord(m: MeetingForCrm, schema: TwentyMeetingSchema, client: TwentyClient): Promise<{ data: Record<string, unknown>; contacts: { personId: string; name: string; data: Record<string, unknown> }[]; tags: TagOutcome[] }> {
   const f = schema.fields;
   const tags: TagOutcome[] = [];
   const data: Record<string, unknown> = { name: m.title };
-  // The day only, whether Twenty's field is a date or a date and time.
-  if (f.date) data[f.date.name] = f.date.dateOnly ? meetingDay(m.occurredAt) : meetingDayInstant(meetingDay(m.occurredAt)).toISOString();
-  if (f.bookedBy) {
-    const value = m.bookedBy ? await tagValue(client, f.bookedBy, m.bookedBy.name, tags, 'Booked by') : null;
-    data[f.bookedBy.name] = f.bookedBy.multi ? (value ? [value] : []) : value;
-  }
-  if (f.products) {
+  // The value a tag field takes for these names: its tags, or the names written out in a text field.
+  const named = async (field: TwentyTagField | null, names: string[], fieldLabel: string): Promise<unknown> => {
+    if (!field) return undefined;
+    if (field.text) return names.join(', ');
     const values: string[] = [];
-    for (const p of m.products) { const v = await tagValue(client, f.products, optionLabel(p), tags, 'Products'); if (v) values.push(v); }
-    data[f.products.name] = f.products.multi ? values : values[0] ?? null;
-  }
+    for (const n of names) { const v = await tagValue(client, field, n, tags, fieldLabel); if (v && !values.includes(v)) values.push(v); }
+    return field.multi ? values : values[0] ?? null;
+  };
+  // The day only, whether Twenty's field is a date or a date and time.
+  const day = (field: { dateOnly: boolean }) => (field.dateOnly ? meetingDay(m.occurredAt) : meetingDayInstant(meetingDay(m.occurredAt)).toISOString());
+  if (f.date) data[f.date.name] = day(f.date);
+  const booked = m.bookedBy ? [m.bookedBy.name] : [];
+  const products = m.products.map(optionLabel);
+  if (f.bookedBy) data[f.bookedBy.name] = await named(f.bookedBy, booked, 'Booked by');
+  if (f.products) data[f.products.name] = await named(f.products, products, 'Products');
   // Who is on the team: a Cadence login, matched by id, address or name, or an address at one of
   // our domains. Team members are tags, never contacts, even when Twenty also has a People record
   // for them (Alisa is both).
@@ -120,21 +146,32 @@ export async function meetingRecord(m: MeetingForCrm, schema: TwentyMeetingSchem
     if (user || (a.email && !isExternalEmail(a.email, rules.internalDomains))) { const n = user?.name ?? personName(a); if (n && !team.includes(n)) team.push(n); }
     else external.push(a);
   }
-  if (f.team) {
-    const values: string[] = [];
-    for (const n of team) { const v = await tagValue(client, f.team, n, tags, 'Team on the call'); if (v && !values.includes(v)) values.push(v); }
-    data[f.team.name] = values;
-  }
+  if (f.team) data[f.team.name] = await named(f.team, team, 'Team on the call');
+  if (f.meetingNumber) data[f.meetingNumber] = m.meetingNumber ?? null;
+  if (f.firstMeeting) data[f.firstMeeting] = m.meetingNumber === 1;
+  if (f.transcript) data[f.transcript] = transcriptText(m.transcript, m.transcriptFormat);
   if (f.recording) data[f.recording] = link(m.sourceUrl ?? '');
   if (f.cadenceLink) data[f.cadenceLink] = link(cadenceUrl(m.id), 'Open in Cadence');
   if (f.cadenceId) data[f.cadenceId] = m.id;
   if (f.guests) data[f.guests] = external.filter((a) => !a.personId).map((a) => a.name || a.email).filter(Boolean).join(', ');
   if (f.companyId) data[f.companyId] = m.companyId;
-  const contacts: { personId: string; name: string }[] = [];
+  // What every contact row says alike, in that object's own fields (and its own tags).
+  // Only when there are rows to write: a meeting with no prospects asks Twenty for no tags here.
+  const cf = external.some((a) => a.personId && a.prospect !== false) ? schema.contact?.fields : undefined;
+  const shared: Record<string, unknown> = {};
+  if (cf?.date) shared[cf.date.name] = day(cf.date);
+  if (cf?.bookedBy) shared[cf.bookedBy.name] = await named(cf.bookedBy, booked, 'Meeting contacts: Booked by');
+  if (cf?.products) shared[cf.products.name] = await named(cf.products, products, 'Meeting contacts: Products');
+  if (cf?.team) shared[cf.team.name] = await named(cf.team, team, 'Meeting contacts: Team on the call');
+  const contacts: { personId: string; name: string; data: Record<string, unknown> }[] = [];
   for (const a of external) {
-    if (!a.personId || contacts.some((c) => c.personId === a.personId)) continue;
+    // A prospect, each once. Older meetings mark none, so any contact from Twenty counts there.
+    if (!a.personId || a.prospect === false || contacts.some((c) => c.personId === a.personId)) continue;
+    const own: Record<string, unknown> = { ...shared };
+    if (cf?.meetingNumber) own[cf.meetingNumber] = a.meetingNumber ?? null;
+    if (cf?.firstMeeting) own[cf.firstMeeting] = a.meetingNumber === 1;
     // Named for both sides: on the person it says which meeting, on the meeting which person.
-    contacts.push({ personId: a.personId, name: `${m.title} · ${personName(a) || 'Contact'}` });
+    contacts.push({ personId: a.personId, name: `${m.title} · ${personName(a) || 'Contact'}`, data: own });
   }
   // The single "People" link on the meeting holds its first contact; all of them are Meeting contacts.
   if (f.personId) data[f.personId] = contacts[0]?.personId ?? null;
@@ -144,8 +181,9 @@ export async function meetingRecord(m: MeetingForCrm, schema: TwentyMeetingSchem
 
 const meetingSelect = {
   id: true, title: true, sourceUrl: true, occurredAt: true, products: true, companyId: true, companyName: true, twentyNoteId: true, twentyMeetingId: true, review: true,
+  meetingNumber: true, transcript: true, transcriptFormat: true,
   bookedBy: { select: { name: true, twentyMemberId: true } },
-  attendees: { select: { name: true, email: true, personId: true, userId: true, external: true, person: { select: { firstName: true, lastName: true } } } },
+  attendees: { select: { name: true, email: true, personId: true, userId: true, external: true, prospect: true, meetingNumber: true, person: { select: { firstName: true, lastName: true } } } },
 } as const;
 
 /**
@@ -206,6 +244,15 @@ export async function removeMeetingFromCrm(meeting: { twentyMeetingId: string | 
     if (meeting.twentyMeetingId) await keepForRetry('deleteMeetingRecord', { id: meeting.twentyMeetingId }, err, meeting.twentyMeetingId);
     else if (meeting.twentyNoteId) await keepForRetry('deleteNote', { id: meeting.twentyNoteId }, err, meeting.twentyNoteId);
   }
+}
+
+/**
+ * Which fields Cadence found in Twenty's Meetings and Meeting contacts objects. When it changes (an
+ * admin added "Meeting Number", say), every meeting is written again so the new field fills in.
+ */
+export function meetingSchemaShape(schema: TwentyMeetingSchema): string {
+  const names = (fields: object) => Object.entries(fields).filter(([, v]) => v).map(([k]) => k).sort().join(',');
+  return `${names(schema.fields)}|${schema.contact ? names(schema.contact.fields) : 'no contacts'}`;
 }
 
 /**

@@ -91,8 +91,21 @@ export const MOCK_MEETING_SCHEMA = (): TwentyMeetingSchema => ({
     companyId: 'companiesId',
     personId: 'peopleId',
     assigneeId: 'assignedToId',
+    meetingNumber: 'meetingNumber',
+    firstMeeting: 'firstMeeting',
+    transcript: 'transcript',
   },
-  contact: { typeName: 'MeetingContact', plural: 'meetingContacts', meetingId: 'meetingsId', personId: 'peopleId' },
+  contact: {
+    typeName: 'MeetingContact', plural: 'meetingContacts', meetingId: 'meetingsId', personId: 'peopleId',
+    fields: {
+      meetingNumber: 'meetingNumber',
+      firstMeeting: 'firstMeeting',
+      date: { name: 'meetingDate', dateOnly: true },
+      bookedBy: { id: 'field-contact-booked-by', name: 'bookedBy', multi: false, options: [] },
+      products: { id: 'field-contact-products', name: 'products', multi: true, options: [{ value: 'PHH', label: 'PHH' }, { value: 'ACUBOOTH', label: 'Acubooth' }, { value: 'GLYNAC', label: 'Glynac' }] },
+      team: { id: 'field-contact-team', name: 'teamOnTheCall', multi: true, options: [] },
+    },
+  },
 });
 
 function clone<T>(v: T): T {
@@ -126,7 +139,7 @@ export class MockTwentyClient implements TwentyClient {
   notes: TwentyNote[] = [];
   /** The demo workspace's Meetings object; null makes it a workspace without one. */
   meetingObject: TwentyMeetingSchema | null = MOCK_MEETING_SCHEMA();
-  meetingRecords = new Map<string, { data: Record<string, unknown>; contacts: { personId: string; name: string }[]; cadenceId: string }>();
+  meetingRecords = new Map<string, { data: Record<string, unknown>; contacts: TwentyMeetingRecordInput['contacts']; cadenceId: string }>();
   messages: TwentyMessage[] = [];
   calendarEvents: TwentyCalendarEvent[] = [];
   tasks: TwentyTask[] = [];
@@ -272,6 +285,10 @@ export class MockTwentyClient implements TwentyClient {
     }
     if (opts?.podOwner) items = items.filter((p) => p.podOwner === opts.podOwner);
     if (opts?.companyId) items = items.filter((p) => p.companyId === opts.companyId);
+    if (opts?.search) {
+      const terms = opts.search.toLowerCase().split(/\s+/).filter(Boolean);
+      items = items.filter((p) => terms.every((t) => [p.firstName, p.lastName, p.email, p.jobTitle].some((v) => v?.toLowerCase().includes(t))));
+    }
     items = since(items, opts);
     return page(clone(items), opts);
   }

@@ -2,6 +2,7 @@ import { prisma } from '../db';
 import { env } from '../env';
 import { microsoftConfig, type MicrosoftConfig } from '../auth/microsoft';
 import { parseMeetingLink } from './providers';
+import { meetingDay } from './day';
 
 /**
  * A SharePoint or OneDrive sharing link, turned into the player SharePoint itself hands out under
@@ -25,6 +26,8 @@ const MEDIA_NAME = /\.(mp4|webm|m4v|mov|wmv|avi|mkv|mpe?g|mp3|wav|m4a|aac)$/i;
 
 export type AppToken = { value: string; roles: string[] };
 export type Player = { embedUrl: string; title: string | null; date: string | null };
+/** Where the recording sits and when it was made: what finding its Teams transcript needs. */
+export type RecordingFile = { driveId: string; createdAt: string; durationMs: number | null };
 
 const graphUrl = () => env().MICROSOFT_GRAPH_URL.replace(/\/+$/, '');
 export const mayReadFiles = (roles: string[]) => roles.some((r) => FILE_ROLES.includes(r));
@@ -38,6 +41,21 @@ export function encodeSharingUrl(url: string): string {
 export function recordingName(name: string): { title: string | null; date: string | null } {
   const m = /^(.+?)-(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?:_\d{4,6})?[-\s]+Meeting Recording(?:\.[a-z0-9]+)?$/i.exec(name.trim());
   return m ? { title: m[1].trim(), date: `${m[2]}-${m[3]}-${m[4]}` } : { title: null, date: null };
+}
+
+/** A name nobody would call a meeting: "Recording", "video1", "IMG_2041", a bare id. */
+const GENERIC_FILE = /^(recording|meeting recording|video|audio|untitled|new recording|screen ?recording|img|vid|mov)[\s_-]*\d*$|^[0-9a-f-]{16,}$/i;
+
+/**
+ * The title and day a recording's file gives. A Teams name says both; any other name is the
+ * title as it stands, without its extension, and the day is when the file was made.
+ */
+export function fileMeeting(name: string, createdAt: string | null): { title: string | null; date: string | null } {
+  const teams = recordingName(name);
+  if (teams.title) return teams;
+  const bare = name.replace(/\.[a-z0-9]{2,5}$/i, '').replace(/[_]+/g, ' ').trim();
+  const made = createdAt ? new Date(createdAt) : null;
+  return { title: bare && !GENERIC_FILE.test(bare) ? bare : null, date: made && !Number.isNaN(made.getTime()) ? meetingDay(made) : null };
 }
 
 /** The app's own token, with the application permissions Microsoft granted it (its `roles` claim). */
@@ -64,18 +82,21 @@ export async function appToken(c: Pick<MicrosoftConfig, 'clientId' | 'tenantId' 
   }
 }
 
+export type Recording = Player & { file: RecordingFile | null };
+
 /**
- * The player for one sharing link, from Graph. Null when Graph cannot name the file or it is not a
- * recording; `refused` when Microsoft turns the app away, which Settings > Sign-in then shows.
+ * The recording behind one sharing link, from Graph: its player, and where the file sits for its
+ * transcript. Null when Graph cannot name the file or it is not a recording; `refused` when
+ * Microsoft turns the app away, which Settings > Sign-in then shows.
  */
-export async function playerFromGraph(url: string, token: string, fetchImpl: typeof fetch = fetch, base = graphUrl()): Promise<Player | { refused: string } | null> {
+export async function recordingFromGraph(url: string, token: string, fetchImpl: typeof fetch = fetch, base = graphUrl()): Promise<Recording | { refused: string } | null> {
   let res: Response;
   try {
-    res = await fetchImpl(`${base}/v1.0/shares/${encodeSharingUrl(url)}/driveItem?$select=name,file,sharepointIds`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    res = await fetchImpl(`${base}/v1.0/shares/${encodeSharingUrl(url)}/driveItem?$select=name,file,sharepointIds,createdDateTime,video,parentReference`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(TIMEOUT_MS) });
   } catch {
     return null;
   }
-  const body = (await res.json().catch(() => ({}))) as { name?: unknown; file?: { mimeType?: unknown }; sharepointIds?: { siteUrl?: unknown; listItemUniqueId?: unknown }; error?: { message?: unknown } };
+  const body = (await res.json().catch(() => ({}))) as { name?: unknown; file?: { mimeType?: unknown }; sharepointIds?: { siteUrl?: unknown; listItemUniqueId?: unknown }; createdDateTime?: unknown; video?: { duration?: unknown }; parentReference?: { driveId?: unknown }; error?: { message?: unknown } };
   if (res.status === 401 || res.status === 403) return { refused: String(body.error?.message ?? res.status).split(/\r?\n/)[0] };
   if (!res.ok) return null;
   const name = typeof body.name === 'string' ? body.name : '';
@@ -87,13 +108,27 @@ export async function playerFromGraph(url: string, token: string, fetchImpl: typ
   if (!GUID.test(id) || site.protocol !== 'https:' || !site.hostname.toLowerCase().endsWith('.sharepoint.com')) return null;
   const embed = new URL(`${site.origin}${site.pathname.replace(/\/+$/, '')}/_layouts/15/embed.aspx`);
   embed.searchParams.set('UniqueId', id);
-  return { embedUrl: embed.toString(), ...recordingName(name) };
+  const createdAt = typeof body.createdDateTime === 'string' ? body.createdDateTime : null;
+  const driveId = typeof body.parentReference?.driveId === 'string' ? body.parentReference.driveId : null;
+  const duration = Number(body.video?.duration);
+  return {
+    embedUrl: embed.toString(),
+    ...fileMeeting(name, createdAt),
+    file: driveId && createdAt ? { driveId, createdAt, durationMs: Number.isFinite(duration) && duration > 0 ? duration : null } : null,
+  };
+}
+
+/** The player alone, for the places that only frame the recording. */
+export async function playerFromGraph(url: string, token: string, fetchImpl: typeof fetch = fetch, base = graphUrl()): Promise<Player | { refused: string } | null> {
+  const found = await recordingFromGraph(url, token, fetchImpl, base);
+  if (!found || 'refused' in found) return found;
+  return { embedUrl: found.embedUrl, title: found.title, date: found.date };
 }
 
 // A granted permission reaches the app with its next token, so one is kept for minutes, not the hour.
 let kept: { key: string; token: AppToken; until: number } | null = null;
 
-async function currentToken(c: MicrosoftConfig, fresh = false): Promise<AppToken | { error: string }> {
+export async function currentToken(c: MicrosoftConfig, fresh = false): Promise<AppToken | { error: string }> {
   const key = `${c.tenantId}|${c.clientId}|${c.clientSecret}`;
   if (!fresh && kept?.key === key && kept.until > Date.now()) return kept.token;
   const token = await appToken(c);
@@ -104,24 +139,29 @@ async function currentToken(c: MicrosoftConfig, fresh = false): Promise<AppToken
 const sameRoles = (a: string[], b: string[]) => [...a].sort().join(' ') === [...b].sort().join(' ');
 
 /** Microsoft's refusal, while the app still has the permissions it was refused with. */
-async function standingRefusal(roles: string[]): Promise<string | null> {
-  const row = await prisma.setting.findUnique({ where: { key: REFUSED } });
+export async function standingRefusal(roles: string[], key = REFUSED): Promise<string | null> {
+  const row = await prisma.setting.findUnique({ where: { key } });
   const value = row?.value as { message?: unknown; roles?: unknown } | undefined;
   if (!value || !Array.isArray(value.roles) || !sameRoles(value.roles.map(String), roles)) return null;
   return String(value.message ?? '');
 }
 
 async function noteAnswer(answer: Player | { refused: string } | null, roles: string[]) {
-  if (answer && 'refused' in answer) {
+  return noteFor(REFUSED, answer, roles);
+}
+
+/** Keep Microsoft's refusal under `key` with the permissions it came under; any success clears it. */
+export async function noteFor(key: string, answer: object | null, roles: string[]) {
+  if (answer && 'refused' in answer && typeof answer.refused === 'string') {
     const value = { message: answer.refused, roles, at: new Date().toISOString() };
-    await prisma.setting.upsert({ where: { key: REFUSED }, create: { key: REFUSED, value }, update: { value } });
+    await prisma.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
   } else if (answer) {
-    await prisma.setting.deleteMany({ where: { key: REFUSED } });
+    await prisma.setting.deleteMany({ where: { key } });
   }
 }
 
 /** A sharing link SharePoint will not frame: its own player is the one that plays. */
-function needsPlayer(raw: string): boolean {
+export function needsPlayer(raw: string): boolean {
   const link = parseMeetingLink(raw);
   if (link.provider !== 'SHAREPOINT' || link.embedUrl) return false;
   try { return new URL(raw.trim()).hostname.toLowerCase().endsWith('.sharepoint.com'); } catch { return false; }
@@ -137,6 +177,21 @@ export async function sharePointPlayer(raw: string): Promise<Player | null> {
   const answer = await playerFromGraph(raw.trim(), token.value);
   await noteAnswer(answer, token.roles);
   return answer && 'refused' in answer ? null : answer;
+}
+
+/**
+ * The recording behind a pasted link, player and file both, when it is a SharePoint sharing link
+ * and Microsoft lets Cadence look. Its transcript is found from the file (teams-transcript.ts).
+ */
+export async function sharePointRecording(raw: string): Promise<{ recording: Recording; token: AppToken } | null> {
+  if (!needsPlayer(raw)) return null;
+  const c = await microsoftConfig();
+  if (!c) return null;
+  const token = await currentToken(c);
+  if ('error' in token || !mayReadFiles(token.roles)) return null;
+  const answer = await recordingFromGraph(raw.trim(), token.value);
+  await noteAnswer(answer, token.roles);
+  return answer && !('refused' in answer) ? { recording: answer, token } : null;
 }
 
 export type PlayerStatus = { plays: true } | { plays: false; why: string };

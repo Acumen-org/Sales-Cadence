@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ListOptions, ListPeopleOptions, TwentyClient } from './client';
 import { normalizeCalendarEvent, normalizeCompany, normalizeMessage, normalizeNote, normalizeOpportunity, normalizePerson, normalizeTask, normalizeWorkspaceMember, connectionToArray } from './normalize';
 import type { TwentySchema } from './twenty-schema';
+import { likeSafe, searchTerms } from '../search-terms';
 import type {
   PersonNextActionInput,
   CreateNoteInput,
@@ -404,6 +405,7 @@ export class TwentyGraphqlClient implements TwentyClient {
       opts.ids ? { id: { in: opts.ids } } : null,
       opts.podOwner ? { [p.podOwner]: { eq: opts.podOwner } } : null,
       opts.companyId ? { [p.companyId]: { eq: opts.companyId } } : null,
+      opts.search ? this.personSearchFilter(opts.search) : null,
       opts.deletedSince ? { [p.deletedAt]: { gte: opts.deletedSince } } : opts.includeDeleted ? { or: [{ [p.deletedAt]: { is: 'NULL' } }, { [p.deletedAt]: { is: 'NOT_NULL' } }] } : null,
     );
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.person.plural, this.s.objects.person.typeName, sel), {
@@ -417,6 +419,17 @@ export class TwentyGraphqlClient implements TwentyClient {
       after: opts.after ?? null,
     });
     return this.page(data[this.s.objects.person.plural], (n) => normalizePerson(n, this.s));
+  }
+
+  /** Each word typed, somewhere in the name, the primary email or the job title. */
+  private personSearchFilter(q: string): Raw | null {
+    const p = this.s.person;
+    const terms = searchTerms(q);
+    if (!terms.length) return null;
+    return { and: terms.map((term) => {
+      const like = { ilike: `%${likeSafe(term)}%` };
+      return { or: [{ [p.name]: { firstName: like } }, { [p.name]: { lastName: like } }, { [p.emails]: { primaryEmail: like } }, { [p.jobTitle]: like }] };
+    }) };
   }
 
   async getPerson(id: string): Promise<TwentyPerson | null> {
@@ -915,31 +928,49 @@ export class TwentyGraphqlClient implements TwentyClient {
     const meetingType = typeOf(meeting.nameSingular);
     const label = (f: { name: string; label?: string }) => (f.label ?? f.name).toLowerCase();
     // Twenty's own fields (Creation date, Last update...) are never the team's: theirs come first.
-    const SYSTEM = new Set(['id', 'createdAt', 'updatedAt', 'deletedAt', 'createdBy', 'updatedBy', 'position', 'searchVector']);
-    const candidates = meeting.fields.filter((f) => !SYSTEM.has(f.name)).sort((a, b) => Number(Boolean(b.isCustom)) - Number(Boolean(a.isCustom)));
-    const find = (test: RegExp, types: string[]) => candidates.find((f) => types.includes(f.type) && test.test(label(f)));
-    const tag = (test: RegExp, types: string[]) => {
-      const f = find(test, types);
-      return f ? { id: f.id, name: f.name, multi: f.type === 'MULTI_SELECT', options: (f.rawOptions ?? []).map((o) => ({ value: String(o.value ?? ''), label: String(o.label ?? o.value ?? '') })).filter((o) => o.value) } : null;
+    const SYSTEM = new Set(['id', 'createdAt', 'updatedAt', 'deletedAt', 'createdBy', 'updatedBy', 'position', 'searchVector', 'name']);
+    const finder = (object: (typeof objects)[number]) => {
+      const candidates = object.fields.filter((f) => !SYSTEM.has(f.name)).sort((a, b) => Number(Boolean(b.isCustom)) - Number(Boolean(a.isCustom)));
+      const find = (test: RegExp, types: string[]) => candidates.find((f) => types.includes(f.type) && test.test(label(f)));
+      const tag = (test: RegExp, types: string[]) => {
+        const f = find(test, types);
+        return f ? { id: f.id, name: f.name, multi: f.type === 'MULTI_SELECT', text: f.type === 'TEXT', options: (f.rawOptions ?? []).map((o) => ({ value: String(o.value ?? ''), label: String(o.label ?? o.value ?? '') })).filter((o) => o.value) } : null;
+      };
+      const date = () => {
+        const f = find(/date|when/, ['DATE_TIME', 'DATE']);
+        return f ? { name: f.name, dateOnly: f.type === 'DATE' } : null;
+      };
+      return { find, tag, date };
     };
+    const { find, tag } = finder(meeting);
     const fields = await this.typeFields(meetingType);
     const idFor = (list: typeof fields, target: string) => {
       const link = list.find((f) => f.objectType === target && list.some((x) => x.name === `${f.name}Id`));
       return link ? `${link.name}Id` : null;
     };
-    const date = find(/date|when/, ['DATE_TIME', 'DATE']);
     let contact: TwentyMeetingSchema['contact'] = null;
     if (contactObject) {
       const contactFields = await this.typeFields(typeOf(contactObject.nameSingular));
       const meetingId = idFor(contactFields, meetingType);
       const personId = idFor(contactFields, this.s.objects.person.typeName);
-      if (meetingId && personId) contact = { typeName: typeOf(contactObject.nameSingular), plural: contactObject.namePlural, meetingId, personId };
+      const c = finder(contactObject);
+      if (meetingId && personId) contact = {
+        typeName: typeOf(contactObject.nameSingular), plural: contactObject.namePlural, meetingId, personId,
+        fields: {
+          meetingNumber: c.find(/number|#/, ['NUMBER'])?.name ?? null,
+          firstMeeting: c.find(/first/, ['BOOLEAN'])?.name ?? null,
+          date: c.date(),
+          bookedBy: c.tag(/booked/, ['SELECT', 'MULTI_SELECT', 'TEXT']),
+          products: c.tag(/product/, ['MULTI_SELECT', 'SELECT', 'TEXT']),
+          team: c.tag(/team/, ['MULTI_SELECT', 'TEXT']),
+        },
+      };
     }
     const value: TwentyMeetingSchema = {
       meeting: { typeName: meetingType, plural: meeting.namePlural },
       fields: {
-        date: date ? { name: date.name, dateOnly: date.type === 'DATE' } : null,
-        bookedBy: tag(/booked/, ['SELECT', 'MULTI_SELECT']),
+        date: finder(meeting).date(),
+        bookedBy: tag(/booked/, ['SELECT', 'MULTI_SELECT', 'TEXT']),
         products: tag(/product/, ['MULTI_SELECT', 'SELECT']),
         team: tag(/team/, ['MULTI_SELECT']),
         recording: find(/recording/, ['LINKS'])?.name ?? null,
@@ -949,6 +980,9 @@ export class TwentyGraphqlClient implements TwentyClient {
         companyId: idFor(fields, this.s.objects.company.typeName),
         personId: idFor(fields, this.s.objects.person.typeName),
         assigneeId: idFor(fields, 'WorkspaceMember'),
+        meetingNumber: find(/number|#/, ['NUMBER'])?.name ?? null,
+        firstMeeting: find(/first/, ['BOOLEAN'])?.name ?? null,
+        transcript: find(/transcript/, ['TEXT'])?.name ?? null,
       },
       contact,
     };
@@ -984,21 +1018,33 @@ export class TwentyGraphqlClient implements TwentyClient {
     return { id };
   }
 
-  /** The meeting's contact rows follow its attendees: missing ones added, removed ones deleted. */
-  private async syncMeetingContacts(c: NonNullable<TwentyMeetingSchema['contact']>, meetingId: string, wanted: { personId: string; name: string }[]) {
+  /**
+   * The meeting's contact rows follow its prospects: missing ones added, removed ones deleted, and
+   * each row's own values (its meeting number, the day, who booked it) kept current.
+   */
+  private async syncMeetingContacts(c: NonNullable<TwentyMeetingSchema['contact']>, meetingId: string, wanted: { personId: string; name: string; data?: Record<string, unknown> }[]) {
+    const own = [...new Set(wanted.flatMap((w) => Object.keys(w.data ?? {})))];
     const rows = await this.request<Record<string, Connection>>(
-      `query MeetingContacts($filter: ${c.typeName}FilterInput) { ${c.plural}(filter: $filter, first: 200) { edges { node { id name ${c.personId} } } } }`,
+      `query MeetingContacts($filter: ${c.typeName}FilterInput) { ${c.plural}(filter: $filter, first: 200) { edges { node { id name ${c.personId} ${own.join(' ')} } } } }`,
       { filter: { [c.meetingId]: { eq: meetingId } } },
     );
-    const have = connectionToArray(rows[c.plural]).map((r) => ({ id: String(r.id), name: String(r.name ?? ''), personId: String(r[c.personId] ?? '') }));
+    const have = connectionToArray(rows[c.plural]).map((r) => ({ id: String(r.id), name: String(r.name ?? ''), personId: String(r[c.personId] ?? ''), raw: r }));
     for (const row of have) {
       if (!wanted.some((w) => w.personId === row.personId)) await this.request(`mutation DeleteMeetingContact($id: UUID!) { delete${c.typeName}(id: $id) { id } }`, { id: row.id });
     }
+    const same = (a: unknown, b: unknown) => {
+      const norm = (v: unknown) => (Array.isArray(v) ? [...v].map(String).sort().join('|') : v === undefined || v === null ? '' : typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v) ? new Date(v).toISOString() : String(v));
+      return norm(a) === norm(b);
+    };
     for (const w of wanted) {
       const row = have.find((h) => h.personId === w.personId);
-      if (row && row.name !== w.name) await this.request(`mutation RenameMeetingContact($id: UUID!, $data: ${c.typeName}UpdateInput!) { update${c.typeName}(id: $id, data: $data) { id } }`, { id: row.id, data: { name: w.name } });
-      if (row) continue;
-      await this.request(`mutation CreateMeetingContact($data: ${c.typeName}CreateInput!) { create${c.typeName}(data: $data) { id } }`, { data: { name: w.name, [c.meetingId]: meetingId, [c.personId]: w.personId } });
+      const data = w.data ?? {};
+      if (row) {
+        const stale = row.name !== w.name || Object.entries(data).some(([k, v]) => !same(row.raw[k], v));
+        if (stale) await this.request(`mutation UpdateMeetingContact($id: UUID!, $data: ${c.typeName}UpdateInput!) { update${c.typeName}(id: $id, data: $data) { id } }`, { id: row.id, data: { name: w.name, ...data } });
+        continue;
+      }
+      await this.request(`mutation CreateMeetingContact($data: ${c.typeName}CreateInput!) { create${c.typeName}(data: $data) { id } }`, { data: { name: w.name, [c.meetingId]: meetingId, [c.personId]: w.personId, ...data } });
     }
   }
 

@@ -27,12 +27,23 @@ const METADATA = {
         field('recording', 'Recording', 'LINKS'),
         field('teamOnTheCall', 'Team on the call', 'MULTI_SELECT', { options: [] }),
         field('transcription', 'Transcription', 'LINKS'),
+        // Added for the meeting counts (29 October 2026).
+        field('meetingNumber', 'Meeting Number', 'NUMBER'),
+        field('firstMeeting', 'First Meeting', 'BOOLEAN'),
+        field('transcript', 'Transcript', 'TEXT'),
         field('companies', 'Companies', 'RELATION'),
         field('people', 'People', 'RELATION'),
         field('assignedTo', 'Assigned to', 'RELATION'),
         field('meetingContacts', 'Meeting Contacts', 'RELATION'),
       ] } },
-      { node: { id: 'o-mc', nameSingular: 'meetingContact', namePlural: 'meetingContacts', isCustom: true, fieldsList: [system('name', 'Name', 'TEXT'), field('meetings', 'Meetings', 'RELATION'), field('people', 'People', 'RELATION')] } },
+      { node: { id: 'o-mc', nameSingular: 'meetingContact', namePlural: 'meetingContacts', isCustom: true, fieldsList: [
+        system('createdAt', 'Creation date', 'DATE_TIME'), system('name', 'Name', 'TEXT'), field('meetings', 'Meetings', 'RELATION'), field('people', 'People', 'RELATION'),
+        field('meetingNumber', 'Meeting Number', 'NUMBER'), field('firstMeeting', 'First Meeting', 'BOOLEAN'), field('meetingDate', 'Meeting Date', 'DATE'),
+        // A text field works as well as a select: the names are written out.
+        field('bookedBy', 'Booked By', 'TEXT'),
+        field('products', 'Products', 'MULTI_SELECT', { options: [{ id: 'p1', value: 'PHH', label: 'PHH' }] }),
+        field('teamOnTheCall', 'Team on the Call', 'MULTI_SELECT', { options: [] }),
+      ] } },
       { node: { id: 'o-person', nameSingular: 'person', namePlural: 'people', isCustom: false, fieldsList: [system('name', 'Name', 'FULL_NAME')] } },
     ],
   },
@@ -54,7 +65,7 @@ const TYPES: Record<string, Array<{ name: string; type: unknown }>> = {
   ],
 };
 
-function fakeTwenty() {
+function fakeTwenty(contactRows: Record<string, unknown>[] = []) {
   const calls: Call[] = [];
   const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)) as { query: string; variables: Record<string, unknown> };
@@ -66,7 +77,7 @@ function fakeTwenty() {
     if (call.query.includes('__type')) return reply({ __type: { fields: TYPES[String(call.variables.name)] ?? [] } });
     if (call.query.includes('FindMeeting')) return reply({ meetings: { edges: [] } });
     if (call.query.includes('createMeeting(')) return reply({ createMeeting: { id: 'rec-1' } });
-    if (call.query.includes('MeetingContacts')) return reply({ meetingContacts: { edges: [] } });
+    if (call.query.includes('MeetingContacts')) return reply({ meetingContacts: { edges: contactRows.map((node) => ({ node })) } });
     if (call.query.includes('createMeetingContact(')) return reply({ createMeetingContact: { id: `mc-${calls.length}` } });
     return reply({});
   }) as typeof fetch;
@@ -93,8 +104,35 @@ describe('the Meetings object the team made in Twenty', () => {
       companyId: 'companiesId',
       personId: 'peopleId',
       assigneeId: 'assignedToId',
+      meetingNumber: 'meetingNumber',
+      firstMeeting: 'firstMeeting',
+      // The Text field, not the old Transcription link.
+      transcript: 'transcript',
     });
-    expect(schema!.contact).toEqual({ typeName: 'MeetingContact', plural: 'meetingContacts', meetingId: 'meetingsId', personId: 'peopleId' });
+    expect(schema!.contact).toMatchObject({ typeName: 'MeetingContact', plural: 'meetingContacts', meetingId: 'meetingsId', personId: 'peopleId' });
+    expect(schema!.contact!.fields).toMatchObject({
+      meetingNumber: 'meetingNumber',
+      firstMeeting: 'firstMeeting',
+      date: { name: 'meetingDate', dateOnly: true },
+      bookedBy: { name: 'bookedBy', text: true },
+      products: { name: 'products', multi: true },
+      team: { name: 'teamOnTheCall', multi: true },
+    });
+  });
+
+  it("keeps each Meeting contact row's own values current, and leaves a current one alone", async () => {
+    const wanted = { meetingNumber: 2, firstMeeting: false, meetingDate: '2026-10-09', bookedBy: 'Karson Junior' };
+    const current = fakeTwenty([{ id: 'mc-1', name: 'Intro · Nina', peopleId: 'p-1', ...wanted }]);
+    const schema = (await current.client.meetingSchema())!;
+    await current.client.saveMeetingRecord(schema, { id: 'rec-1', cadenceId: 'm-1', data: { name: 'Intro' }, contacts: [{ personId: 'p-1', name: 'Intro · Nina', data: wanted }] });
+    expect(current.calls.some((c) => c.query.includes('UpdateMeetingContact'))).toBe(false);
+    // The query asked Twenty for the row's own fields, to compare them.
+    expect(current.calls.find((c) => c.query.includes('query MeetingContacts'))!.query).toContain('meetingNumber firstMeeting meetingDate bookedBy');
+
+    const stale = fakeTwenty([{ id: 'mc-1', name: 'Intro · Nina', peopleId: 'p-1', ...wanted, meetingNumber: 1, firstMeeting: true }]);
+    await stale.client.saveMeetingRecord(schema, { id: 'rec-1', cadenceId: 'm-1', data: { name: 'Intro' }, contacts: [{ personId: 'p-1', name: 'Intro · Nina', data: wanted }, { personId: 'p-2', name: 'Intro · Tomas', data: { ...wanted, meetingNumber: 1, firstMeeting: true } }] });
+    expect(stale.calls.find((c) => c.query.includes('UpdateMeetingContact'))!.variables).toEqual({ id: 'mc-1', data: { name: 'Intro · Nina', ...wanted } });
+    expect(stale.calls.find((c) => c.query.includes('CreateMeetingContact'))!.variables).toEqual({ data: { name: 'Intro · Tomas', meetingsId: 'rec-1', peopleId: 'p-2', ...wanted, meetingNumber: 1, firstMeeting: true } });
   });
 
   it('creates the record with its values and one Meeting contact per contact', async () => {

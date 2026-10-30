@@ -105,38 +105,41 @@ test('Settings is admin-only, in the sidebar and by URL', async ({ page }) => {
 test('a meeting plays in the app with its transcript and no analysis until a model is connected', async ({ page }) => {
   await loginAs(page, 'Alisa');
   await page.goto('/meetings/new');
-  await page.getByLabel('Title').fill('E2E discovery call');
+  // The link is read as it is typed: a media file plays here, and the form shows it playing.
   await page.getByLabel('Recording or meeting link').fill('https://files.example.com/e2e/recording.mp4');
-  // The form says what it can do with the link before saving.
+  await expect(page.getByText('Plays in Cadence', { exact: true })).toBeVisible();
   await expect(page.getByText(/Media file/)).toBeVisible();
+  await expect(page.locator('form video')).toHaveCount(1);
+  await page.getByLabel('Title').fill('E2E discovery call');
   await page.getByLabel('Date', { exact: true }).fill('2026-09-08');
 
-  // Attendees are picked from the CRM directory and the team, and guests can be typed in.
-  const finder = page.getByLabel('Find a contact or team member');
-  const results = page.getByRole('region', { name: 'Attendee search results' });
-  const pick = async (query: string, name: RegExp) => {
-    await finder.click();
-    await finder.fill(query);
-    await expect(results).toBeVisible();
-    await results.getByRole('button', { name }).first().click({ timeout: 20_000 });
-  };
-  // The organiser is already on the meeting, so they are not offered again.
-  await expect(page.locator('#main-content').getByRole('listitem').getByText('Alisa Senior')).toBeVisible();
-  await finder.click();
-  await finder.fill('Alisa');
-  await expect(results).toContainText('No matching people');
-  // A contact from the CRM directory, and a colleague from the team.
-  await pick('dummy.one@', /Dummy One/);
-  await pick('Karson', /Karson/);
-  await page.getByRole('button', { name: 'Add someone outside the directory' }).click();
-  await page.getByLabel('Guest name').fill('Outside Guest');
-  await page.getByLabel('Guest email').fill('guest@prospect.example');
-  await page.getByRole('button', { name: 'Add attendee' }).click();
-  // One of each kind, and any of them can be taken off again.
-  for (const kind of ['Contact', 'Team', 'Guest']) await expect(page.getByText(kind, { exact: true }).first(), kind).toBeVisible();
-  await page.getByRole('button', { name: 'Remove Outside Guest' }).click();
-  await expect(page.getByText('Outside Guest')).toHaveCount(0);
+  // Whoever adds it is on the team already; the rest of the team is found by name.
+  const team = page.getByRole('list', { name: 'Our team on the call' });
+  await expect(team).toContainText('Alisa Senior');
+  const teamFinder = page.getByRole('combobox', { name: 'Add someone from the team' });
+  await teamFinder.click();
+  await teamFinder.fill('Kar');
+  await page.getByRole('listbox', { name: 'Add someone from the team results' }).getByRole('option', { name: /Karson/ }).click();
+  await expect(team).toContainText('Karson');
 
+  // Prospects come from Twenty, by a few letters of a name or an address, never from the team.
+  const finder = page.getByRole('combobox', { name: 'Find a prospect in Twenty' });
+  await finder.fill('Karson');
+  await expect(page.getByRole('listbox', { name: 'Find a prospect in Twenty results' })).toContainText('No one in Twenty matches');
+  await finder.fill('dummy.one@');
+  await page.getByRole('listbox', { name: 'Find a prospect in Twenty results' }).getByRole('option', { name: /Dummy One/ }).click({ timeout: 20_000 });
+  const prospects = page.getByRole('list', { name: 'Prospects' });
+  await expect(prospects).toContainText('Dummy One');
+  // Which meeting with them this is, counting itself, and what the meeting counts as.
+  await expect(prospects.getByText(/^\d+(st|nd|rd|th) meeting$/)).toBeVisible();
+  await expect(page.getByText(/^(First meeting|Follow-up · \d+(st|nd|rd|th) meeting)$/)).toBeVisible();
+
+  // Not saved without a product, and the form says what is still needed.
+  await expect(page.getByRole('button', { name: 'Add meeting', exact: true })).toBeDisabled();
+  await expect(page.getByText('Still needed: products')).toBeVisible();
+  await page.getByRole('group', { name: 'Products' }).getByText('PHH', { exact: true }).click();
+
+  await page.getByRole('button', { name: 'Add a transcript' }).click();
   await page.getByLabel('Transcript', { exact: true }).fill('WEBVTT\n\n00:00:01.000 --> 00:00:06.000\n<v Alisa Senior>Thanks for making the time today.\n\n00:00:07.000 --> 00:00:12.000\n<v Dummy One>Happy to. Tell me about the reporting pack.\n');
   await page.getByRole('button', { name: /Add meeting|Save/ }).click();
   await expect(page).toHaveURL(/\/meetings\/[0-9a-f-]+$/);
@@ -185,8 +188,11 @@ test('a Zoom recording link is offered as a link-out, not a broken frame', async
   await page.goto('/meetings/new');
   await page.getByLabel('Title').fill('E2E zoom review');
   await page.getByLabel('Recording or meeting link').fill('https://acme.zoom.us/rec/share/e2e');
-  await expect(page.getByText('Opens in a new tab', { exact: true })).toBeVisible();
+  await expect(page.getByText('Opens in Zoom', { exact: true })).toBeVisible();
   await page.getByLabel('Date', { exact: true }).fill('2026-09-08');
+  await page.getByRole('combobox', { name: 'Find a prospect in Twenty' }).fill('Dummy Two');
+  await page.getByRole('listbox', { name: 'Find a prospect in Twenty results' }).getByRole('option', { name: /Dummy Two/ }).click({ timeout: 20_000 });
+  await page.getByRole('group', { name: 'Products' }).getByText('Glynac', { exact: true }).click();
   await page.getByRole('button', { name: /Add meeting|Save/ }).click();
   await expect(page).toHaveURL(/\/meetings\/[0-9a-f-]+$/);
   await expect(page.locator('video')).toHaveCount(0);
@@ -322,8 +328,9 @@ test('a recording Twenty holds on a person is added from their page, pre-filled'
   await page.goto('/meetings/new?personId=dummy-04');
   await expect(page.getByLabel('Title')).toHaveValue(/Dummy Four/);
   await expect(page.getByLabel('Recording or meeting link')).toHaveValue(/ForBiggerMeetings\.mp4/);
-  // The person is already on the attendee list, alongside the organiser.
-  await expect(page.locator('#main-content')).toContainText('Dummy Four');
+  // The person is already a prospect, and whoever adds it is on the team.
+  await expect(page.getByRole('list', { name: 'Prospects' })).toContainText('Dummy Four');
+  await expect(page.getByRole('list', { name: 'Our team on the call' })).toContainText('Alisa Senior');
   await expect(page.locator('#main-content')).toContainText('dummy.four@dummy-b.example');
   await expect(page.getByText(/Media file/)).toBeVisible();
   await logout(page);

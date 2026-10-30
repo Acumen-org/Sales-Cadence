@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '@/lib/db';
 import type { SessionUser } from '@/lib/auth/current-user';
-import { createMeetingAction, updateMeetingAction, updateMeetingAttendeesAction, canManageMeetingAction, searchMeetingAttendeesAction } from '@/lib/actions/meetings';
+import { createMeetingAction, updateMeetingAction, updateMeetingAttendeesAction, canManageMeetingAction, searchProspectsAction, searchTeamAction } from '@/lib/actions/meetings';
 import { createUserAction, updateUserAction, setUserAccessAction, createPodAction, deletePodAction, restorePodAction } from '@/lib/actions/users';
 import { ensurePod } from '@/lib/person-cache';
 import { WORKSPACE_TIMEZONE } from '@/lib/workspace';
@@ -15,7 +15,7 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 let b: Basics;
 const form = (values: Record<string, string>) => { const fd = new FormData(); for (const [key, value] of Object.entries(values)) fd.set(key, value); return fd; };
 const session = (user: Basics['users']['alisa'], podIds: string[] = []): SessionUser => ({ ...user, timezone: WORKSPACE_TIMEZONE, podIds, pods: podIds.map((id) => ({ id, name: id })) });
-const meetingForm = (attendees: unknown[] = []) => form({ title: 'Pilot meeting', sourceUrl: 'https://video.example.com/recording.mp4', occurredAt: '2026-09-09T10:30', bookedById: b.users.alisa.id, attendeesJson: JSON.stringify(attendees) });
+const meetingForm = (team: string[] = [b.users.ria.id], prospects: string[] = ['person-01']) => { const fd = form({ title: 'Pilot meeting', sourceUrl: 'https://video.example.com/recording.mp4', occurredAt: '2026-09-09T10:30', bookedById: b.users.alisa.id, teamJson: JSON.stringify(team), prospectsJson: JSON.stringify(prospects) }); fd.append('products', 'PHH'); return fd; };
 
 beforeEach(async () => { await resetDb(); b = await seedBasics(); auth.user.mockResolvedValue(session(b.users.ria)); });
 
@@ -28,41 +28,54 @@ describe('meeting attendees', () => {
     expect(await canManageMeetingAction(meeting.id)).toBe(false);
     const edit = meetingForm(); edit.set('meetingId', meeting.id);
     expect((await updateMeetingAction(edit)).ok).toBe(false);
-    expect((await updateMeetingAttendeesAction(form({ meetingId: meeting.id, attendeesJson: '[]' }))).ok).toBe(false);
+    expect((await updateMeetingAttendeesAction(form({ meetingId: meeting.id, teamJson: JSON.stringify([b.users.ria.id]), prospectsJson: '["person-02"]' }))).ok).toBe(false);
     expect(await prisma.meeting.count()).toBe(1);
   });
-  it('resolves contacts without email and internal members by ID, overriding supplied identities', async () => {
+  it('resolves prospects and team members by their records, and marks each prospect', async () => {
     await prisma.personCache.update({ where: { id: 'person-01' }, data: { email: null } });
-    expect((await createMeetingAction(meetingForm([{ personId: 'person-01', name: 'Forged name', email: 'forged@example.com' }, { userId: b.users.ria.id, name: 'Wrong', email: b.users.ria.email }]))).ok).toBe(true);
+    expect((await createMeetingAction(meetingForm([b.users.ria.id], ['person-01']))).ok).toBe(true);
     const attendees = await prisma.meetingAttendee.findMany();
-    expect(attendees.find((a) => a.personId === 'person-01')).toMatchObject({ external: true });
-    expect(attendees.find((a) => a.personId === 'person-01')?.name).not.toBe('Forged name');
-    expect(attendees.find((a) => a.userId === b.users.ria.id)).toMatchObject({ name: b.users.ria.name, external: false, host: true });
+    expect(attendees.find((a) => a.personId === 'person-01')).toMatchObject({ external: true, prospect: true, meetingNumber: 1 });
+    expect(attendees.find((a) => a.userId === b.users.ria.id)).toMatchObject({ name: b.users.ria.name, external: false, host: true, prospect: false });
   });
-  it('deduplicates a team member selected by ID and email, then persists removals', async () => {
-    await createMeetingAction(meetingForm([{ userId: b.users.ria.id, name: b.users.ria.name, email: b.users.ria.email }, { name: null, email: b.users.ria.email }, { personId: 'person-01', name: null, email: null }]));
-    const meeting = await prisma.meeting.findFirstOrThrow();
-    expect(await prisma.meetingAttendee.count()).toBe(2);
-    await prisma.meeting.update({ where: { id: meeting.id }, data: { analysisStatus: 'READY', analysisModel: 'previous' } });
-    const saved = await updateMeetingAttendeesAction(form({ meetingId: meeting.id, attendeesJson: JSON.stringify([{ userId: b.users.ria.id, name: b.users.ria.name, email: b.users.ria.email }]) }));
-    expect(saved.ok).toBe(true);
-    expect(await prisma.meetingAttendee.count()).toBe(1);
-    expect(await prisma.meeting.findUnique({ where: { id: meeting.id } })).toMatchObject({ analysisStatus: 'NONE', analysisModel: null });
-  });
-  it('rejects invalid attendee references and malformed emails without creating a meeting', async () => {
-    for (const attendee of [{ personId: 'missing', name: null, email: null }, { name: 'Guest', email: 'broken-address' }]) expect((await createMeetingAction(meetingForm([attendee]))).ok).toBe(false);
+  it('needs someone from the team, a prospect and a product, each said plainly', async () => {
+    const without = async (fd: FormData) => createMeetingAction(fd);
+    expect(await without(meetingForm([], ['person-01']))).toEqual({ ok: false, error: 'Choose who from the team was on the call.' });
+    expect(await without(meetingForm([b.users.ria.id], []))).toEqual({ ok: false, error: 'Choose the prospects the meeting was with.' });
+    const noProduct = meetingForm(); noProduct.delete('products');
+    expect(await without(noProduct)).toEqual({ ok: false, error: 'Choose the products the meeting was about.' });
+    expect((await without(meetingForm([b.users.ria.id], ['missing']))).ok).toBe(false);
     expect(await prisma.meeting.count()).toBe(0);
+  });
+  it('takes the account from the prospects, with no account to pick', async () => {
+    await prisma.companyCache.create({ data: { id: 'acme-co', name: 'Acme Co' } });
+    await prisma.personCache.updateMany({ where: { id: { in: ['person-01', 'person-02'] } }, data: { companyId: 'acme-co', companyName: 'Acme Co' } });
+    const fd = meetingForm([b.users.ria.id], ['person-01', 'person-02']); fd.set('companyId', 'something-else');
+    expect((await createMeetingAction(fd)).ok).toBe(true);
+    expect(await prisma.meeting.findFirstOrThrow()).toMatchObject({ companyId: 'acme-co', companyName: 'Acme Co' });
+  });
+  it('replaces who was there, keeps a guest typed in before, and clears the analysis', async () => {
+    await createMeetingAction(meetingForm([b.users.ria.id], ['person-01']));
+    const meeting = await prisma.meeting.findFirstOrThrow();
+    await prisma.meetingAttendee.create({ data: { meetingId: meeting.id, name: 'Old Guest', email: 'guest@outside.example', external: true } });
+    await prisma.meeting.update({ where: { id: meeting.id }, data: { analysisStatus: 'READY', analysisModel: 'previous' } });
+    const saved = await updateMeetingAttendeesAction(form({ meetingId: meeting.id, teamJson: JSON.stringify([b.users.alisa.id]), prospectsJson: '["person-02"]' }));
+    expect(saved.ok).toBe(true);
+    const rows = await prisma.meetingAttendee.findMany({ where: { meetingId: meeting.id } });
+    expect(rows.map((a) => a.userId ?? a.personId ?? a.email).sort()).toEqual([b.users.alisa.id, 'guest@outside.example', 'person-02'].sort());
+    expect(rows.find((a) => a.personId === 'person-02')).toMatchObject({ prospect: true, meetingNumber: 1 });
+    expect(await prisma.meeting.findUnique({ where: { id: meeting.id } })).toMatchObject({ analysisStatus: 'NONE', analysisModel: null });
   });
   it('allows a leader to edit meetings for their pod, while rejecting other pods', async () => {
     await prisma.personCache.update({ where: { id: 'person-01' }, data: { podOwner: 'ALISA' } });
-    await createMeetingAction(meetingForm([{ personId: 'person-01', name: null, email: null }]));
+    await createMeetingAction(meetingForm([b.users.ria.id], ['person-01']));
     const meeting = await prisma.meeting.findFirstOrThrow();
     auth.user.mockResolvedValue({ ...session(b.users.alisa, [b.pods.Alisa.id]), role: 'SALES_LEADER' });
     expect(await canManageMeetingAction(meeting.id)).toBe(true);
     auth.user.mockResolvedValue(session(b.users.leigh, [b.pods.Leigh.id]));
     expect(await canManageMeetingAction(meeting.id)).toBe(false);
-    expect((await updateMeetingAttendeesAction(form({ meetingId: meeting.id, attendeesJson: '[]' }))).ok).toBe(false);
-    expect(await prisma.meetingAttendee.count()).toBe(1);
+    expect((await updateMeetingAttendeesAction(form({ meetingId: meeting.id, teamJson: JSON.stringify([b.users.leigh.id]), prospectsJson: '["person-02"]' }))).ok).toBe(false);
+    expect(await prisma.meetingAttendee.count()).toBe(2);
   });
   it('keeps legacy notes stored when editing a meeting without a Notes field', async () => {
     await createMeetingAction(meetingForm());
@@ -76,16 +89,22 @@ describe('meeting attendees', () => {
     await prisma.companyCache.create({ data: { id: 'shared-company', name: 'Shared company' } });
     await prisma.personCache.update({ where: { id: 'person-01' }, data: { companyId: 'shared-company', podOwner: 'ALISA' } });
     await prisma.personCache.update({ where: { id: 'person-02' }, data: { companyId: 'shared-company', podOwner: 'LEIGH' } });
-    const fd = meetingForm([{ personId: 'person-02', name: null, email: null }]); fd.set('companyId', 'shared-company');
-    expect((await createMeetingAction(fd)).ok).toBe(true);
+    expect((await createMeetingAction(meetingForm([b.users.ria.id], ['person-02']))).ok).toBe(true);
     const meeting = await prisma.meeting.findFirstOrThrow();
+    expect(meeting.companyId).toBe('shared-company');
     auth.user.mockResolvedValue(session(b.users.alisa, [b.pods.Alisa.id]));
     expect(await canManageMeetingAction(meeting.id)).toBe(false);
   });
-  it('searches both the CRM directory and the actual team', async () => {
-    expect((await searchMeetingAttendeesAction(b.users.alisa.name.split(' ')[0])).some((a) => a.userId === b.users.alisa.id && a.kind === 'team')).toBe(true);
+  it('finds anyone in Twenty as a prospect, whatever pod they are in, and the team separately', async () => {
     const person = await prisma.personCache.findUniqueOrThrow({ where: { id: 'person-01' } });
-    expect((await searchMeetingAttendeesAction(person.email ?? person.firstName)).some((a) => a.personId === person.id)).toBe(true);
+    // A junior in another pod still finds them: a meeting can be with anyone in Twenty.
+    await prisma.personCache.update({ where: { id: 'person-01' }, data: { podOwner: 'LEIGH' } });
+    auth.user.mockResolvedValue({ ...session(b.users.karson, [b.pods.Alisa.id]), role: 'JUNIOR_FO' });
+    expect((await searchProspectsAction(person.firstName.slice(0, 3))).some((p) => p.personId === person.id)).toBe(true);
+    if (person.email) expect((await searchProspectsAction(person.email))[0]?.personId).toBe(person.id);
+    // Our own people are never offered as prospects; they are found as the team.
+    expect((await searchProspectsAction(b.users.alisa.email)).length).toBe(0);
+    expect((await searchTeamAction(b.users.alisa.name.split(' ')[0])).some((t) => t.userId === b.users.alisa.id)).toBe(true);
   });
 });
 

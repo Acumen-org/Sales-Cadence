@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '@/lib/db';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 import { getSettings, saveSettingsSection } from '@/lib/settings';
-import { appToken, backfillSharePointPlayers, encodeSharingUrl, playerFromGraph, recordingName, sharePointPlayer, sharePointPlayerStatus } from '@/lib/meetings/sharepoint-player';
+import { appToken, backfillSharePointPlayers, encodeSharingUrl, fileMeeting, playerFromGraph, recordingFromGraph, recordingName, sharePointPlayer, sharePointPlayerStatus } from '@/lib/meetings/sharepoint-player';
 
 /**
  * A Teams recording's SharePoint sharing link plays in Cadence (29 October 2026): Microsoft Graph
@@ -44,7 +44,7 @@ describe('asking Graph about a sharing link', () => {
   it("builds SharePoint's own player from the file's site and id", async () => {
     const ms = microsoft({ graph: { body: recording } });
     expect(await playerFromGraph(SHARING, 'tok', ms.impl, 'https://graph.example')).toEqual({ embedUrl: PLAYER, title: 'Alisa and Lloyd', date: '2026-08-11' });
-    expect(ms.asked[0]).toBe(`https://graph.example/v1.0/shares/${encodeSharingUrl(SHARING)}/driveItem?$select=name,file,sharepointIds`);
+    expect(ms.asked[0]).toBe(`https://graph.example/v1.0/shares/${encodeSharingUrl(SHARING)}/driveItem?$select=name,file,sharepointIds,createdDateTime,video,parentReference`);
   });
 
   it('frames nothing that is not a recording or not on SharePoint, and tells a refusal apart', async () => {
@@ -54,6 +54,17 @@ describe('asking Graph about a sharing link', () => {
     expect(await answer({ body: { ...recording, sharepointIds: { siteUrl: SITE, listItemUniqueId: 'not-an-id' } } })).toBeNull();
     expect(await answer({ status: 404, body: { error: { code: 'itemNotFound', message: 'The sharing link no longer exists' } } })).toBeNull();
     expect(await answer({ status: 403, body: { error: { code: 'accessDenied', message: 'Either scp or roles claim need to be present in the token.' } } })).toEqual({ refused: 'Either scp or roles claim need to be present in the token.' });
+  });
+
+  it('says where the file sits and when it was made, for its transcript', async () => {
+    const withFile = { ...recording, createdDateTime: '2026-08-11T15:31:00Z', video: { duration: 1_800_000 }, parentReference: { driveId: 'b!drive' } };
+    expect(await recordingFromGraph(SHARING, 'tok', microsoft({ graph: { body: withFile } }).impl, 'https://graph.example')).toMatchObject({ embedUrl: PLAYER, file: { driveId: 'b!drive', createdAt: '2026-08-11T15:31:00Z', durationMs: 1_800_000 } });
+  });
+
+  it('titles any other recording after its file, dated when the file was made', () => {
+    expect(fileMeeting('Acubooth demo with Lloyd.mp4', '2026-10-28T16:00:00Z')).toEqual({ title: 'Acubooth demo with Lloyd', date: '2026-10-28' });
+    expect(fileMeeting('Recording 3.mp4', '2026-10-28T16:00:00Z')).toEqual({ title: null, date: '2026-10-28' });
+    expect(fileMeeting('Alisa and Lloyd-20260811_143012-Meeting Recording.mp4', '2026-10-28T16:00:00Z')).toEqual({ title: 'Alisa and Lloyd', date: '2026-08-11' });
   });
 
   it("takes the meeting and its day from a Teams recording's file name, and nothing from another", () => {

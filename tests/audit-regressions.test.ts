@@ -7,6 +7,7 @@ import { buildHome } from '@/lib/home-query';
 import { enrollPeople, previewEnrollment } from '@/lib/engine/enrollment';
 import { completeTask, skipTask, snoozeTask } from '@/lib/engine/tasks';
 import { completeCall, skipWithReason } from '@/lib/engine/outcomes';
+import { withPeople } from './helpers/meeting-form';
 import { createMeetingAction, updateMeetingAction } from '@/lib/actions/meetings';
 import { globalSearchAction } from '@/lib/actions/search';
 import { createUserAction, updateUserAction } from '@/lib/actions/users';
@@ -145,7 +146,7 @@ describe('account security and validation', () => {
 
 describe('meeting forms', () => {
   const form = (url = 'https://files.example.com/call.mp4') => {
-    const fd = new FormData(); fd.set('title', 'Timezone review'); fd.set('sourceUrl', url); fd.set('occurredAt', '2026-09-08T14:30'); fd.set('bookedById', b.users.alisa.id); return fd;
+    const fd = new FormData(); fd.set('title', 'Timezone review'); fd.set('sourceUrl', url); fd.set('occurredAt', '2026-09-08T14:30'); fd.set('bookedById', b.users.alisa.id); return withPeople(fd, b.users.ria.id);
   };
   it('creates and edits meetings by their day alone, whatever the viewer timezone', async () => {
     auth.requireUser.mockResolvedValue({ ...session(b.users.ria), timezone: 'America/New_York' });

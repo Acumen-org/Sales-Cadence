@@ -16,6 +16,10 @@ test('an uploaded VTT follows real media playback and timestamps seek the player
   await page.getByLabel('Title', { exact: true }).fill('Playback regression');
   await page.getByLabel('Recording or meeting link').fill('https://recordings.example.test/sample.wav');
   await page.getByLabel('Date', { exact: true }).fill('2026-09-20');
+  await page.getByRole('combobox', { name: 'Find a prospect in Twenty' }).fill('Dummy One');
+  await page.getByRole('listbox', { name: 'Find a prospect in Twenty results' }).getByRole('option', { name: /Dummy One/ }).click({ timeout: 20_000 });
+  await page.getByRole('group', { name: 'Products' }).getByText('PHH', { exact: true }).click();
+  await page.getByRole('button', { name: 'Add a transcript' }).click();
   await page.locator('input[type=file]').setInputFiles({ name: 'meeting.vtt', mimeType: 'text/vtt', buffer: Buffer.from('WEBVTT\n\n00:00:00.000 --> 00:00:04.000\n<v Alisa>First statement.\n\n00:00:05.000 --> 00:00:11.000\n<v Prospect>Second statement.\n') });
   await page.getByRole('button', { name: 'Add meeting', exact: true }).click();
   await expect(page).toHaveURL(/meetings\/(?!new)/);

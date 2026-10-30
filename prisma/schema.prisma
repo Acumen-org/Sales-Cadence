@@ -557,6 +557,11 @@ model Meeting {
   /// Raw transcript as pasted or uploaded (WebVTT, SRT or plain text).
   transcript       String?
   transcriptFormat String?
+  /// When Cadence last asked Microsoft for this recording's Teams transcript.
+  transcriptTriedAt DateTime?
+  /// Which meeting this is with its prospects: the highest of their numbers, so 1 only when
+  /// everyone on it is meeting us for the first time. See src/lib/meetings/numbering.ts.
+  meetingNumber    Int?
   /// MeetingAnalysis - see src/lib/meetings/analysis.ts. Written by an analyzer, never by hand.
   analysis         Json?
   analysisStatus   AnalysisStatus  @default(NONE)
@@ -620,10 +625,15 @@ model MeetingAttendee {
   /// True when the address is outside settings.rules.internalDomains.
   external  Boolean      @default(false)
   host      Boolean      @default(false)
+  /// A prospect from Twenty the meeting was with: not one of the team, not a typed-in guest.
+  prospect  Boolean      @default(false)
+  /// Which meeting with this prospect it is: their earliest meeting in Cadence is 1.
+  meetingNumber Int?
 
   @@unique([meetingId, email])
   @@index([meetingId])
   @@index([personId])
+  @@index([personId, prospect])
   @@index([email])
 }
 

@@ -6,6 +6,7 @@ import { prisma } from '@/lib/db';
 import type { SessionUser } from '@/lib/auth/current-user';
 import { SYSTEM_ACTOR } from '@/lib/audit';
 import { canRate, isMip, mipStarsFor, ratablePodOwners, setMipStars } from '@/lib/mip';
+import { withPeople } from './helpers/meeting-form';
 import { createMeetingAction, updateMeetingAction } from '@/lib/actions/meetings';
 import { ingestEvent, isAutomaticReply } from '@/lib/engine/ingest';
 import { rawFromMessage } from '@/lib/engine/reconcile';
@@ -64,7 +65,7 @@ describe('most-important people', () => {
 });
 
 describe('meetings', () => {
-  const form = (values: Record<string, string>) => { const fd = new FormData(); for (const [k, v] of Object.entries(values)) fd.set(k, v); return fd; };
+  const form = (values: Record<string, string>) => { const fd = new FormData(); for (const [k, v] of Object.entries(values)) fd.set(k, v); return withPeople(fd, b.users.ria.id); };
   it('need the FO who booked them and no longer need a recording link', async () => {
     const missing = await createMeetingAction(form({ title: 'No booker', occurredAt: '2026-09-08T14:30' }));
     expect(missing.ok).toBe(false);
@@ -91,6 +92,7 @@ it('editing the booker preserves analysis, but changing the transcript invalidat
   } });
   const form = new FormData();
   for (const [key, value] of Object.entries({ meetingId: meeting.id, title: meeting.title, sourceUrl: '', occurredAt: '2026-09-08T10:00', bookedById: b.users.leigh.id, transcript: meeting.transcript! })) form.set(key, value);
+  withPeople(form, b.users.ria.id);
   expect((await updateMeetingAction(form)).ok).toBe(true);
   expect(await prisma.meeting.findUniqueOrThrow({ where: { id: meeting.id } })).toMatchObject({ bookedById: b.users.leigh.id, analysisStatus: 'READY', analysis: { outcome: 'Follow up agreed' } });
   form.set('transcript', 'Alisa: Updated decision.');
@@ -174,6 +176,7 @@ it('meeting creation retains media and captions discovered from a public page', 
   try {
     const form = new FormData();
     for (const [key, value] of Object.entries({ title: 'Public meeting', sourceUrl: 'https://meeting.example/watch', occurredAt: '2026-09-20T10:00', bookedById: b.users.alisa.id })) form.set(key, value);
+    withPeople(form, b.users.ria.id);
     expect((await createMeetingAction(form)).ok).toBe(true);
     expect(await prisma.meeting.findFirstOrThrow({ where: { title: 'Public meeting' } })).toMatchObject({ mediaUrl: 'https://cdn.example/meeting.mp4', transcript, transcriptFormat: 'vtt' });
   } finally { inspect.mockRestore(); }

@@ -1,16 +1,21 @@
 'use client';
 
 import { useState } from 'react';
-import { updateMeetingAttendeesAction, type AttendeeSelection } from '@/lib/actions/meetings';
+import { updateMeetingAttendeesAction, type ProspectOption, type TeamOption } from '@/lib/actions/meetings';
 import { ActionForm } from '@/components/action-form';
-import { AttendeePicker } from './attendee-picker';
+import { MeetingPeople, type PeopleValue } from './meeting-people';
 
-export function AttendeeEditor({ meetingId, attendees }: { meetingId: string; attendees: AttendeeSelection[] }) {
+/** Change who was there from the meeting's own page: the team on the call and the prospects. */
+export function AttendeeEditor({ meetingId, day, team, prospects }: { meetingId: string; day: string; team: TeamOption[]; prospects: ProspectOption[] }) {
   const [open, setOpen] = useState(false);
-  if (!open) return <button type="button" className="btn-secondary btn-sm" onClick={() => setOpen(true)}>Edit attendees</button>;
-  return <ActionForm action={updateMeetingAttendeesAction} onSuccess={() => setOpen(false)} className="space-y-3">
+  const [value, setValue] = useState<PeopleValue>({ bookedById: '', team, prospects });
+  if (!open) return <button type="button" className="btn-secondary btn-sm" onClick={() => setOpen(true)}>Edit who was there</button>;
+  return <ActionForm action={updateMeetingAttendeesAction} onSuccess={() => setOpen(false)} className="space-y-4">
     <input name="meetingId" type="hidden" value={meetingId} />
-    <AttendeePicker initial={attendees} />
-    <div className="flex gap-2"><button type="submit" className="btn-primary btn-sm">Save attendees</button><button type="button" className="btn-secondary btn-sm" onClick={() => setOpen(false)}>Cancel</button></div>
+    <MeetingPeople fos={[]} value={value} onChange={setValue} day={day} meetingId={meetingId} showBookedBy={false} />
+    <div className="flex gap-2">
+      <button type="submit" className="btn-primary btn-sm" disabled={!value.team.length || !value.prospects.length}>Save</button>
+      <button type="button" className="btn-secondary btn-sm" onClick={() => { setValue({ bookedById: '', team, prospects }); setOpen(false); }}>Cancel</button>
+    </div>
   </ActionForm>;
 }

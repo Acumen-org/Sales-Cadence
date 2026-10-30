@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { prisma } from '@/lib/db';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 import { getMockTwentyClient } from '@/lib/twenty/mock-client';
-import { backfillMeetingsToCrm, meetingNote, removeMeetingFromCrm, syncMeetingToCrm } from '@/lib/meetings/crm';
+import { backfillMeetingsToCrm, meetingNote, meetingSchemaShape, removeMeetingFromCrm, syncMeetingToCrm, transcriptText } from '@/lib/meetings/crm';
+import { renumberProspects } from '@/lib/meetings/numbering';
 import { classifyNoteTitle } from '@/lib/engine/matching';
 import { getSettings } from '@/lib/settings';
 
@@ -25,8 +26,8 @@ describe('meetings recorded in Twenty', () => {
     title: 'Pricing walk-through', sourceUrl: 'https://www.loom.com/share/abc123', occurredAt: new Date('2027-03-04T16:00:00Z'), durationSec: 1800,
     bookedById: b.users.karson.id, products: ['PHH', 'GLYNAC'], companyId: 'co-01', companyName: 'Acme',
     attendees: { create: [
-      { personId: 'person-01', email: 'p1@prospect.example', name: 'Pat One', external: true },
-      { personId: 'person-02', email: 'p2@prospect.example', name: 'Pam Two', external: true },
+      { personId: 'person-01', email: 'p1@prospect.example', name: 'Pat One', external: true, prospect: true },
+      { personId: 'person-02', email: 'p2@prospect.example', name: 'Pam Two', external: true, prospect: true },
       { userId: b.users.karson.id, email: b.users.karson.email, name: b.users.karson.name, external: false },
       { userId: b.users.alisa.id, email: b.users.alisa.email, name: b.users.alisa.name, external: false },
       { name: 'Guest Without Record', external: true },
@@ -98,6 +99,46 @@ describe('meetings recorded in Twenty', () => {
     expect(await backfillMeetingsToCrm()).toBe(1);
     expect((await prisma.meeting.findUniqueOrThrow({ where: { id: m.id } })).twentyMeetingId).toBeTruthy();
     expect(await backfillMeetingsToCrm()).toBe(0);
+  });
+
+  it("carries each prospect's count on their Meeting contact row, and the meeting's own on the record", async () => {
+    // Pat met us once before; Pam is new. The meeting is the higher of the two: a 2nd, not a first.
+    const earlier = await prisma.meeting.create({ data: { title: 'Intro', sourceUrl: '', occurredAt: new Date('2027-02-01T18:00:00Z'), bookedById: b.users.karson.id, products: ['PHH'], attendees: { create: [{ personId: 'person-01', email: 'p1@prospect.example', name: 'Pat One', external: true, prospect: true }] } } });
+    const m = await meeting();
+    await prisma.meeting.update({ where: { id: m.id }, data: { transcript: 'WEBVTT\n\n00:00:01.000 --> 00:00:03.000\n<v Pat One>Shall we start?\n', transcriptFormat: 'vtt' } });
+    await renumberProspects(['person-01', 'person-02']);
+    const id = await syncMeetingToCrm(m.id);
+    const record = mock.meetingRecords.get(id!)!;
+    expect(record.data).toMatchObject({ meetingNumber: 2, firstMeeting: false, transcript: 'Pat One: Shall we start?' });
+    const row = (personId: string) => record.contacts.find((c) => c.personId === personId)!.data!;
+    const tag = (name: string) => name.toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+    expect(row('person-01')).toMatchObject({ meetingNumber: 2, firstMeeting: false, meetingDate: '2027-03-04', bookedBy: tag(b.users.karson.name), products: ['PHH', 'GLYNAC'] });
+    expect(row('person-02')).toMatchObject({ meetingNumber: 1, firstMeeting: true, meetingDate: '2027-03-04' });
+    expect(row('person-02').teamOnTheCall).toEqual(expect.arrayContaining([tag(b.users.karson.name), tag(b.users.alisa.name)]));
+    // The earlier meeting with Pat alone was a first meeting.
+    const intro = mock.meetingRecords.get((await syncMeetingToCrm(earlier.id))!)!;
+    expect(intro.data).toMatchObject({ meetingNumber: 1, firstMeeting: true });
+  });
+
+  it('writes the names out when the workspace made a field plain text, and caps a long transcript', async () => {
+    const schema = (await import('@/lib/twenty/mock-client')).MOCK_MEETING_SCHEMA();
+    schema.contact!.fields.bookedBy = { id: 'text-booked', name: 'bookedBy', text: true, options: [] };
+    mock.meetingObject = schema;
+    const m = await meeting();
+    await renumberProspects(['person-01', 'person-02']);
+    const record = mock.meetingRecords.get((await syncMeetingToCrm(m.id))!)!;
+    expect(record.contacts[0].data!.bookedBy).toBe(b.users.karson.name);
+    expect(transcriptText('x'.repeat(150_000)).length).toBeLessThan(100_100);
+    expect(transcriptText('x'.repeat(150_000))).toMatch(/full transcript is in Cadence\]$/);
+  });
+
+  it('notices when the admin adds a field, so every meeting is written again', () => {
+    const schema = (async () => (await import('@/lib/twenty/mock-client')).MOCK_MEETING_SCHEMA())();
+    return schema.then((s) => {
+      const before = meetingSchemaShape({ ...s, fields: { ...s.fields, meetingNumber: null } });
+      expect(meetingSchemaShape(s)).not.toBe(before);
+      expect(meetingSchemaShape(s)).toBe(meetingSchemaShape(JSON.parse(JSON.stringify(s))));
+    });
   });
 
   it('falls back to a note on the contacts and account without a Meetings object', async () => {

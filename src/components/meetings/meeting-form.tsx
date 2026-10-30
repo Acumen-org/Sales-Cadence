@@ -1,17 +1,20 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import clsx from 'clsx';
 import { TranscriptInput } from './transcript-input';
 import { optionLabel } from '@/lib/twenty/labels';
 import { PRODUCTS } from '@/lib/workspace';
-import { useState, useTransition } from 'react';
-import { attendeesFromTranscriptAction, createMeetingAction, inspectMeetingLinkAction, updateMeetingAction, type AttendeeSelection, type LinkSuggestion } from '@/lib/actions/meetings';
+import { createMeetingAction, inspectMeetingLinkAction, linkTranscriptAction, peopleFromTranscriptAction, updateMeetingAction, type LinkSuggestion, type ProspectOption, type TeamOption } from '@/lib/actions/meetings';
 import { extractRecordingUrl, parseMeetingLink } from '@/lib/meetings/providers';
+import { parseTranscript } from '@/lib/meetings/transcript';
 import { ActionForm } from '@/components/action-form';
-import { Field, Badge } from '@/components/ui';
-import { AttendeePicker } from './attendee-picker';
+import { Badge } from '@/components/ui';
+import { IconCheck, IconClose, IconExternal } from '@/components/icons';
 import { EmbedGuide } from './embed-guide';
+import { MeetingPeople, type PeopleValue } from './meeting-people';
 
 export type MeetingFormValues = {
   id?: string;
@@ -19,101 +22,165 @@ export type MeetingFormValues = {
   sourceUrl: string;
   /** The player the saved link plays through, when Cadence found one. */
   embedUrl?: string | null;
-  /** The FO who booked it. */
+  mediaUrl?: string | null;
+  /** The FO who booked it, credited with it. */
   bookedById: string;
   /** The meeting's day, YYYY-MM-DD. */
   occurredAt: string;
-  companyId: string;
   products?: string[];
-  attendees: AttendeeSelection[];
+  team: TeamOption[];
+  prospects: ProspectOption[];
   transcript: string;
 };
 
+type Filled = { title?: string; occurredAt?: string; transcript?: string };
+type TranscriptFrom = 'teams' | 'recording' | null;
+
+/** Where a link that cannot play here opens. */
+const OPENS_IN: Record<string, string> = { TEAMS: 'Teams', ZOOM: 'Zoom', GOOGLE_MEET: 'Google Meet', SHAREPOINT: 'SharePoint', DRIVE: 'Google Drive' };
+
+const looksLikeUrl = (v: string) => /^https?:\/\/[^\s/]+\.[^\s/]+\S*$/i.test(v.trim());
+
+/** The recording as it will play: the player itself when Cadence can frame it. */
+function Preview({ embedUrl, mediaUrl, title }: { embedUrl: string | null; mediaUrl: string | null; title: string }) {
+  return (
+    <div className="aspect-video w-[300px] shrink-0 overflow-hidden rounded-lg bg-ink-900">
+      {mediaUrl
+        ? <video src={mediaUrl} controls preload="metadata" className="h-full w-full" aria-label={`Preview of ${title || 'the recording'}`} />
+        : embedUrl ? <iframe src={embedUrl} title={`Preview of ${title || 'the recording'}`} allow="autoplay; fullscreen; encrypted-media" allowFullScreen className="h-full w-full border-0" /> : null}
+    </div>
+  );
+}
+
 /**
- * Add or edit a meeting. Paste the link first: Cadence turns it into the player link on its own
- * where the service allows, reads what the page says about itself - the title, the date, the
- * account it names - and says whether the recording will play here. Paste a transcript and the
- * speakers become attendees. Everything filled in stays editable.
+ * Add or edit a meeting (owner, 29 October 2026: "super easy to do, and it does not look like a lot
+ * of work"). Paste the recording and it is read at once: whether it plays here (shown by playing it),
+ * the title and the day from the file or the page, and a Teams recording's transcript from
+ * Microsoft, whose speakers fill in who was there where they are known. Then three things only a
+ * person knows: who booked it, who was on the call from our side, and which prospects, each with
+ * which meeting with us this is. Products last. Everything filled in stays editable.
  */
-export function MeetingForm({ companies, fos, initial, mode }: { companies: { id: string; name: string }[]; fos: { id: string; name: string }[]; initial: MeetingFormValues; mode: 'create' | 'edit' }) {
+export function MeetingForm({ fos, initial, mode }: { fos: { id: string; name: string }[]; initial: MeetingFormValues; mode: 'create' | 'edit' }) {
   const router = useRouter();
   const [url, setUrl] = useState(initial.sourceUrl);
   const [title, setTitle] = useState(initial.title);
   const [occurredAt, setOccurredAt] = useState(initial.occurredAt);
-  const [companyId, setCompanyId] = useState(initial.companyId);
-  const [bookedById, setBookedById] = useState(initial.bookedById);
-  const [suggestion, setSuggestion] = useState<LinkSuggestion | null>(null);
-  const [additions, setAdditions] = useState<AttendeeSelection[] | null>(null);
+  const [people, setPeople] = useState<PeopleValue>({ bookedById: initial.bookedById, team: initial.team, prospects: initial.prospects });
+  const [products, setProducts] = useState<string[]>(initial.products ?? []);
   const [transcript, setTranscript] = useState(initial.transcript);
-  const [note, setNote] = useState<string | null>(null);
+  const [transcriptFrom, setTranscriptFrom] = useState<TranscriptFrom>(null);
+  const [transcriptOpen, setTranscriptOpen] = useState(false);
+  const [suggestion, setSuggestion] = useState<LinkSuggestion | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [existing, setExisting] = useState<string | null>(null);
-  // Changing it starts the attendee list again from the form's own people.
-  const [attendeesKey, setAttendeesKey] = useState(0);
-  // What the last link put in the form, so a later answer can take back exactly that and nothing typed.
-  const [fromLink, setFromLink] = useState<{ title?: string; occurredAt?: string; companyId?: string; attendees?: boolean }>({});
-  const [pending, start] = useTransition();
-  const parsed = url.trim() ? parseMeetingLink(url) : null;
+  const [filledNote, setFilledNote] = useState<string[]>([]);
+  const [fetchingTranscript, setFetchingTranscript] = useState(false);
+  // What the last link put in the form, so a later link can take back exactly that and nothing typed.
+  const filled = useRef<Filled>({});
+  const lastRead = useRef(initial.sourceUrl.trim());
+  const latest = useRef(0);
+  const [reading, start] = useTransition();
+  // Kept current for the async steps below, which outlive the render that started them.
+  const state = useRef({ title, occurredAt, transcript, people });
+  state.current = { title, occurredAt, transcript, people };
 
-  const fillFromLink = (link = url) =>
+  const parsed = url.trim() ? parseMeetingLink(url) : null;
+  const invalid = Boolean(parsed?.note?.includes('does not look like a URL'));
+  const saved = Boolean(initial.sourceUrl && url.trim() === initial.sourceUrl);
+  const embedUrl = suggestion?.embedUrl ?? parsed?.embedUrl ?? (saved ? initial.embedUrl ?? null : null);
+  const mediaUrl = suggestion?.mediaUrl ?? parsed?.mediaUrl ?? (saved ? initial.mediaUrl ?? null : null);
+  const plays = Boolean(embedUrl || mediaUrl);
+  const sharePointWithoutPlayer = Boolean(parsed && parsed.provider === 'SHAREPOINT' && !plays && !reading);
+
+  /** Fill the form from what speakers a transcript names: added to the lists, never removing anyone. */
+  const addSpeakers = async (text: string) => {
+    const found = await peopleFromTranscriptAction(text).catch(() => null);
+    if (!found?.ok || (!found.team.length && !found.prospects.length)) return [];
+    const { team, prospects } = state.current.people;
+    const newTeam = found.team.filter((t) => !team.some((x) => x.userId === t.userId));
+    const newProspects = found.prospects.filter((p) => !prospects.some((x) => x.personId === p.personId));
+    if (newTeam.length || newProspects.length) setPeople({ ...state.current.people, team: [...team, ...newTeam], prospects: [...prospects, ...newProspects] });
+    return [...newTeam, ...newProspects].map((x) => x.name);
+  };
+
+  const read = (link: string) => {
+    const target = link.trim();
+    if (!target || !looksLikeUrl(target)) return;
+    lastRead.current = target;
+    const ticket = ++latest.current;
+    setError(null);
+    setExisting(null);
     start(async () => {
-      setNote(null);
-      setExisting(null);
-      setAdditions(null);
-      const r = await inspectMeetingLinkAction(link, initial.id ?? null);
-      if (!r.ok) { setNote(r.error); return; }
-      if (r.data.existingMeetingId) {
-        setExisting(r.data.existingMeetingId);
-        setNote('This meeting is already in Cadence.');
-        // What another link filled does not stay under the answer; what the user typed does.
-        if (fromLink.title !== undefined && title === fromLink.title) setTitle(initial.title);
-        if (fromLink.occurredAt !== undefined && occurredAt === fromLink.occurredAt) setOccurredAt(initial.occurredAt);
-        if (fromLink.companyId !== undefined && companyId === fromLink.companyId) setCompanyId(initial.companyId);
-        if (fromLink.attendees) { setAdditions(null); setAttendeesKey((k) => k + 1); }
-        setFromLink({});
-        setSuggestion(null);
-        return;
-      }
+      const r = await inspectMeetingLinkAction(target, initial.id ?? null).catch(() => null);
+      if (ticket !== latest.current) return;
+      if (!r) { setError('The link could not be read. Check it and paste it again.'); return; }
+      if (!r.ok) { setError(r.error); return; }
+      const now = state.current;
+      // What the previous link filled and nobody changed since goes back first.
+      const was = filled.current;
+      if (was.title !== undefined && now.title === was.title) setTitle(initial.title);
+      if (was.occurredAt !== undefined && now.occurredAt === was.occurredAt) setOccurredAt(initial.occurredAt);
+      if (was.transcript !== undefined && now.transcript === was.transcript) { setTranscript(initial.transcript); setTranscriptFrom(null); }
+      filled.current = {};
+      if (r.data.existingMeetingId) { setExisting(r.data.existingMeetingId); setSuggestion(null); setFilledNote([]); return; }
       setSuggestion(r.data);
-      const filled: string[] = [];
-      const put: typeof fromLink = {};
-      if (r.data.title && !title.trim()) { setTitle(put.title = r.data.title); filled.push('title'); }
-      if (r.data.date) { setOccurredAt(put.occurredAt = r.data.date); filled.push('date'); }
-      if (r.data.companyId && !companyId) { setCompanyId(put.companyId = r.data.companyId); filled.push('account'); }
-      if (r.data.transcript && !transcript.trim()) {
-        setTranscript(r.data.transcript); filled.push('transcript');
-        const people = await attendeesFromTranscriptAction(r.data.transcript);
-        if (people.ok) {
-          if (people.attendees.length) { setAdditions(people.attendees); put.attendees = true; filled.push('attendees'); }
+      const put: Filled = {};
+      const note: string[] = [];
+      const titleNow = was.title !== undefined && now.title === was.title ? initial.title : now.title;
+      if (r.data.title && !titleNow.trim()) { setTitle(put.title = r.data.title); note.push('title'); }
+      if (r.data.date) { setOccurredAt(put.occurredAt = r.data.date); note.push('date'); }
+      const transcriptNow = was.transcript !== undefined && now.transcript === was.transcript ? initial.transcript : now.transcript;
+      if (r.data.transcript && !transcriptNow.trim()) { setTranscript(put.transcript = r.data.transcript); setTranscriptFrom('recording'); note.push('transcript'); }
+      filled.current = put;
+      setFilledNote(note);
+      if (put.transcript) { const names = await addSpeakers(put.transcript); if (names.length && ticket === latest.current) setFilledNote((n) => [...n, ...names]); }
+      if (r.data.transcriptFromTeams && !transcriptNow.trim()) {
+        setFetchingTranscript(true);
+        const t = await linkTranscriptAction(target, state.current.people.team.map((x) => x.userId)).catch(() => null);
+        if (ticket !== latest.current) return;
+        setFetchingTranscript(false);
+        if (t?.ok && t.transcript && !state.current.transcript.trim()) {
+          setTranscript(t.transcript);
+          setTranscriptFrom('teams');
+          filled.current = { ...filled.current, transcript: t.transcript };
+          setFilledNote((n) => [...n, 'transcript']);
+          const names = await addSpeakers(t.transcript);
+          if (names.length && ticket === latest.current) setFilledNote((n) => [...n, ...names]);
         }
       }
-      setFromLink(put);
-      setNote(filled.length ? `From the link: ${filled.join(', ')}.` : null);
     });
+  };
 
-  /** A pasted link, or a pasted embed code, is read at once. */
+  // Typing or editing the link reads it once it settles; pasting reads it straight away.
+  useEffect(() => {
+    const target = url.trim();
+    if (!target || target === lastRead.current || !looksLikeUrl(target)) return;
+    const timer = window.setTimeout(() => read(target), 700);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url]);
+
   const pasted = (text: string) => {
     const next = extractRecordingUrl(text);
     setUrl(next);
-    if (/^https?:\/\/\S+$/i.test(next)) fillFromLink(next);
+    if (looksLikeUrl(next)) read(next);
   };
-  const saved = Boolean(initial.embedUrl && url.trim() === initial.sourceUrl);
-  const plays = Boolean(saved || suggestion?.mediaUrl || suggestion?.embedUrl || parsed?.mediaUrl || parsed?.embedUrl);
-  // Not while the link is being read: Cadence may find SharePoint's player on its own.
-  const needsEmbed = Boolean(parsed && parsed.provider === 'SHAREPOINT' && !plays && !pending);
+  const clearLink = () => { setUrl(''); setSuggestion(null); setError(null); setExisting(null); setFilledNote([]); lastRead.current = ''; latest.current++; };
 
-  const attendeesFromTranscript = () =>
-    start(async () => {
-      setNote(null);
-      const r = await attendeesFromTranscriptAction(transcript);
-      if (!r.ok) { setNote(r.error); return; }
-      setAdditions(r.attendees);
-      setNote(r.attendees.length ? `${r.attendees.length} ${r.attendees.length === 1 ? 'speaker' : 'speakers'} added as attendees.` : 'No speakers found in the transcript.');
-    });
+  const lines = transcript.trim() ? parseTranscript(transcript).cues.length : 0;
+  const missing = [
+    !title.trim() && 'title',
+    !occurredAt && 'date',
+    !people.bookedById && 'booked by',
+    !people.team.length && 'our team on the call',
+    !people.prospects.length && 'prospects',
+    !products.length && 'products',
+  ].filter(Boolean) as string[];
 
   return (
     <ActionForm
       action={mode === 'create' ? createMeetingAction : updateMeetingAction}
-      className="space-y-4"
+      className="divide-y divide-line"
       onSuccess={(r) => {
         if (r.redirectTo) router.push(r.redirectTo);
         else router.refresh();
@@ -121,73 +188,115 @@ export function MeetingForm({ companies, fos, initial, mode }: { companies: { id
     >
       {initial.id ? <input type="hidden" name="meetingId" value={initial.id} /> : null}
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="space-y-1.5 md:col-span-2">
-          <div className="flex items-center gap-2 text-[12px] font-medium text-ink-500"><label htmlFor="meeting-link">Recording or meeting link</label>{needsEmbed ? <EmbedGuide open /> : null}</div>
-          <div className="flex flex-wrap items-center gap-2">
-            <input id="meeting-link" name="sourceUrl" aria-label="Recording or meeting link" value={url} onChange={(e) => setUrl(extractRecordingUrl(e.target.value))} onPaste={(e) => { e.preventDefault(); pasted(e.clipboardData.getData('text')); }} placeholder="Paste the recording link or its embed code" className="!w-auto min-w-0 flex-1" />
-            <button type="button" className="btn-secondary" disabled={pending || !parsed || Boolean(parsed.note?.includes('does not look like a URL'))} onClick={() => fillFromLink()}>{pending ? 'Reading…' : 'Fill from link'}</button>
-          </div>
+      <section className="space-y-3 pb-6">
+        <h2 id="recording-heading" className="text-[14px] font-medium text-ink-900">Recording</h2>
+        <div className="relative">
+          <input
+            id="meeting-link"
+            name="sourceUrl"
+            aria-label="Recording or meeting link"
+            value={url}
+            onChange={(e) => setUrl(extractRecordingUrl(e.target.value))}
+            onPaste={(e) => { e.preventDefault(); pasted(e.clipboardData.getData('text')); }}
+            onBlur={() => { if (url.trim() !== lastRead.current) read(url); }}
+            placeholder="Paste the recording link or its embed code"
+            className="!h-11 !pr-10 !text-[14px]"
+            autoFocus={mode === 'create' && !initial.sourceUrl}
+          />
+          {url ? <button type="button" aria-label="Clear the link" onClick={clearLink} className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-ink-400 hover:bg-canvas hover:text-ink-700"><IconClose size={14} /></button> : null}
         </div>
 
-        {note ? <div role="status" className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-canvas/60 px-3 py-2 text-[13px] text-ink-700 md:col-span-2">{note}{existing ? <Link href={`/meetings/${existing}`} className="btn-secondary btn-sm">Open it</Link> : null}</div> : null}
+        {error ? <p role="alert" className="text-[13px] text-red-700">{error}</p> : null}
+        {invalid ? <p role="alert" className="text-[13px] text-red-700">{parsed?.note}</p> : null}
 
-        {parsed ? <div className="flex flex-wrap items-center gap-2 md:col-span-2">
-          <Badge tone="blue">{parsed.label}</Badge>
-          <Badge tone={suggestion?.mediaUrl || parsed.mediaUrl ? 'green' : plays ? 'blue' : 'gray'}>{suggestion?.mediaUrl || parsed.mediaUrl ? 'Plays here, transcript follows' : plays ? 'Plays here' : 'Opens in a new tab'}</Badge>
-          {parsed.note?.includes('does not look like a URL') ? <span className="text-[12.5px] text-red-700">{parsed.note}</span> : null}
-          {needsEmbed ? <span className="text-[12.5px] text-ink-600">Paste its embed code to play it here</span> : null}
-        </div> : null}
+        {existing ? (
+          <div role="status" className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
+            <span className="flex-1">This meeting is already in Cadence.</span>
+            <Link href={`/meetings/${existing}`} className="btn-secondary btn-sm">Open it</Link>
+          </div>
+        ) : parsed && !invalid ? (
+          <div className={clsx('flex items-center gap-5 rounded-xl border p-3', plays ? 'border-emerald-200 bg-emerald-50/40' : 'border-line bg-canvas/50')} aria-live="polite" aria-busy={reading}>
+            {reading && !plays ? (
+              <div className="aspect-video w-[300px] shrink-0 animate-pulse rounded-lg bg-ink-100" />
+            ) : plays ? (
+              <Preview embedUrl={embedUrl} mediaUrl={mediaUrl} title={title} />
+            ) : (
+              <div className="grid aspect-video w-[300px] shrink-0 place-items-center rounded-lg border border-dashed border-ink-200 bg-white text-ink-400"><IconExternal size={22} /></div>
+            )}
+            <div className="min-w-0 flex-1 space-y-2">
+              {reading && !plays ? (
+                <div className="text-[15px] text-ink-600">Reading the link…</div>
+              ) : plays ? (
+                <div className="flex items-center gap-2 text-[15px] font-medium text-emerald-800"><span className="grid h-6 w-6 place-items-center rounded-full bg-emerald-600 text-white"><IconCheck size={13} /></span>Plays in Cadence</div>
+              ) : (
+                <div className="flex items-center gap-2 text-[15px] font-medium text-ink-800">{parsed.isJoinLink ? 'Meeting link, no recording' : `Opens in ${OPENS_IN[parsed.provider] ?? 'a new tab'}`}{sharePointWithoutPlayer ? <EmbedGuide /> : null}</div>
+              )}
+              <div className="text-[13px] text-ink-500">{parsed.label}</div>
+              {sharePointWithoutPlayer ? <div className="text-[13px] text-ink-600">Paste its embed code to play it here</div> : null}
+              {filledNote.length ? <div className="text-[13px] text-ink-600">Filled in: {filledNote.join(', ')}</div> : null}
+              {fetchingTranscript ? <div className="text-[13px] text-ink-600">Finding the transcript in Teams…</div> : null}
+            </div>
+          </div>
+        ) : null}
+      </section>
 
-        <Field label="Title" required className="md:col-span-2">
-          <input name="title" required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Meeting title" />
-        </Field>
+      <section className="grid gap-4 py-6 md:grid-cols-[1fr_200px]">
+        <div className="space-y-1.5">
+          <div className="flex items-center"><label htmlFor="meeting-title">Title</label><span className="ml-0.5 text-[12px] leading-4 text-red-600" aria-hidden>*</span></div>
+          <input id="meeting-title" name="title" required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Meeting title" />
+        </div>
+        <div className="space-y-1.5">
+          <div className="flex items-center"><label htmlFor="meeting-date">Date</label><span className="ml-0.5 text-[12px] leading-4 text-red-600" aria-hidden>*</span></div>
+          <input id="meeting-date" name="occurredAt" type="date" required value={occurredAt} onChange={(e) => setOccurredAt(e.target.value)} />
+        </div>
+      </section>
 
-        <Field label="Date" required>
-          <input name="occurredAt" type="date" required value={occurredAt} onChange={(e) => setOccurredAt(e.target.value)} />
-        </Field>
+      <section className="space-y-4 py-6">
+        <h2 id="people-heading" className="text-[14px] font-medium text-ink-900">Who was there</h2>
+        <MeetingPeople fos={fos} value={people} onChange={setPeople} day={occurredAt} meetingId={initial.id ?? null} />
+      </section>
 
-        <Field label="Booked by" required>
-          <select name="bookedById" required value={bookedById} onChange={(e) => setBookedById(e.target.value)}>
-            <option value="">Choose the FO</option>
-            {fos.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-          </select>
-        </Field>
-        <Field label="Account">
-          <select name="companyId" value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
-            <option value="">No account</option>
-            {companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-
-        <div className="space-y-2 md:col-span-2"><div className="text-[12px] font-medium text-ink-500">Attendees</div><AttendeePicker key={attendeesKey} initial={initial.attendees} additions={additions} /></div>
-
-        <Field label="Products" className="md:col-span-2">
-          <div className="flex flex-wrap gap-2">
-            {PRODUCTS.map((product) => (
-              <label key={product} className="flex cursor-pointer items-center gap-2 rounded-lg border border-line px-3 py-2 text-[13px] font-medium text-ink-800">
-                <input type="checkbox" name="products" value={product} defaultChecked={initial.products?.includes(product)} />
+      <section className="space-y-3 py-6">
+        <div className="flex items-center"><h2 id="products-heading" className="text-[14px] font-medium text-ink-900">Products</h2><span className="ml-0.5 text-[12px] leading-4 text-red-600" aria-hidden>*</span></div>
+        <div className="flex flex-wrap gap-2" role="group" aria-labelledby="products-heading">
+          {PRODUCTS.map((product) => {
+            const on = products.includes(product);
+            return (
+              <label key={product} className={clsx('flex cursor-pointer items-center gap-2 rounded-full border px-3.5 py-1.5 text-[13px] transition', on ? 'border-brand-300 bg-brand-50 text-brand-800' : 'border-line bg-white text-ink-700 hover:border-ink-300')}>
+                <input type="checkbox" name="products" value={product} checked={on} onChange={() => setProducts((list) => (on ? list.filter((p) => p !== product) : PRODUCTS.filter((p) => p === product || list.includes(p))))} className="sr-only" />
+                <span className={clsx('grid h-4 w-4 place-items-center rounded-full border', on ? 'border-brand-600 bg-brand-600 text-white' : 'border-ink-300')}>{on ? <IconCheck size={10} /> : null}</span>
                 {optionLabel(product)}
               </label>
-            ))}
-          </div>
-        </Field>
-        <Field label="Transcript" className="md:col-span-2" hint={<span className="flex flex-wrap items-center gap-2"><button type="button" className="btn-ghost btn-sm" disabled={pending || !transcript.trim()} onClick={attendeesFromTranscript}>Attendees from the speakers</button></span>}>
-          <TranscriptInput name="transcript" label="Transcript" defaultValue={initial.transcript} value={transcript} onChange={setTranscript} />
-        </Field>
-      </div>
+            );
+          })}
+        </div>
+      </section>
 
-      <div className="flex items-center gap-2">
-        <button type="submit" className="btn-primary" disabled={mode === 'create' && Boolean(existing)}>
+      <section className="space-y-3 py-6">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 id="transcript-heading" className="text-[14px] font-medium text-ink-900">Transcript</h2>
+          {lines ? <Badge tone="blue">{transcriptFrom === 'teams' ? 'From Teams' : transcriptFrom === 'recording' ? 'From the recording' : 'Added'}</Badge> : null}
+          {lines ? <span className="text-[13px] text-ink-500">{lines} {lines === 1 ? 'line' : 'lines'}</span> : null}
+          {fetchingTranscript ? <span className="text-[13px] text-ink-500">Finding it in Teams…</span> : null}
+          <span className="ml-auto flex gap-2">
+            {lines && !transcriptOpen ? <button type="button" className="btn-ghost btn-sm" onClick={() => setTranscriptOpen(true)}>Show</button> : null}
+            {!lines && !transcriptOpen ? <button type="button" className="btn-secondary btn-sm" onClick={() => setTranscriptOpen(true)}>Add a transcript</button> : null}
+            {lines ? <button type="button" className="btn-ghost btn-sm" onClick={() => void addSpeakers(transcript).then((names) => { if (names.length) setFilledNote((n) => [...n, ...names]); })}>Add the speakers</button> : null}
+          </span>
+        </div>
+        {transcriptOpen
+          ? <TranscriptInput name="transcript" label="Transcript" value={transcript} onChange={(v) => { setTranscript(v); setTranscriptFrom(null); }} rows={8} />
+          : <input type="hidden" name="transcript" value={transcript} />}
+      </section>
+
+      <div className="flex flex-wrap items-center gap-3 pt-6">
+        <button type="submit" className="btn-primary" disabled={(mode === 'create' && Boolean(existing)) || missing.length > 0 || invalid}>
           {mode === 'create' ? 'Add meeting' : 'Save changes'}
         </button>
         <Link href={initial.id ? `/meetings/${initial.id}` : '/meetings'} className="btn-secondary">
           Cancel
         </Link>
+        {missing.length ? <span className="text-[13px] text-ink-500">Still needed: {missing.join(', ')}</span> : null}
       </div>
     </ActionForm>
   );
