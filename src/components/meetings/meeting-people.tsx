@@ -3,9 +3,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { prospectNumbersAction, searchProspectsAction, searchTeamAction, type ProspectNumber, type ProspectOption, type TeamOption } from '@/lib/actions/meetings';
+import { raiseNumberCheckAction } from '@/lib/actions/number-checks';
 import { formatLocalDate } from '@/lib/dates';
 import { Avatar, Badge } from '@/components/ui';
-import { IconClose, IconSearch } from '@/components/icons';
+import { IconCheck, IconClose, IconSearch } from '@/components/icons';
 
 export type PeopleValue = { bookedById: string; team: TeamOption[]; prospects: ProspectOption[] };
 
@@ -137,6 +138,45 @@ function MeetingNumber({ name, info }: { name: string; info: ProspectNumber | un
 }
 
 /**
+ * "Think this is wrong?": what the number should be, or what the person knows, sent to Biz Ops
+ * with the prospect, the number shown, the day and the meeting. Two optional answers, one needed.
+ */
+function NumberCheck({ name, personId, info, day, meetingId, onRaised }: { name: string; personId: string; info: ProspectNumber; day: string; meetingId: string | null; onRaised: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [expected, setExpected] = useState('');
+  const [note, setNote] = useState('');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+  const [sent, setSent] = useState(false);
+  const send = async () => {
+    setSending(true); setError('');
+    const r = await raiseNumberCheckAction({ personId, meetingId, day, shownNumber: info.number, expectedNumber: expected.trim() ? Number(expected) : null, note }).catch(() => ({ ok: false as const, error: 'It did not send. Try again.' }));
+    setSending(false);
+    if (!r.ok) { setError(r.error); return; }
+    onRaised(r.id); setSent(true); setOpen(false);
+  };
+  // Enter sends this, never the meeting form around it.
+  const enter = (e: React.KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); void send(); } if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } };
+  if (sent) return <span className="flex items-center gap-1.5 text-[12px] text-ink-500"><IconCheck size={12} className="text-emerald-600" />Sent to Biz Ops</span>;
+  if (!open) return <button type="button" className="text-[12px] text-ink-500 underline-offset-2 hover:text-brand-700 hover:underline" onClick={() => setOpen(true)} aria-label={`Think the number for ${name} is wrong?`}>Think this is wrong?</button>;
+  return (
+    <div role="group" aria-label={`Number check for ${name}`} className="order-last mt-1 flex basis-full flex-wrap items-end gap-2 rounded-lg bg-canvas p-2.5">
+      <div className="space-y-1">
+        <label htmlFor={`check-n-${personId}`} className="block">What should it be?</label>
+        <input id={`check-n-${personId}`} type="number" min={1} inputMode="numeric" value={expected} onChange={(e) => setExpected(e.target.value)} onKeyDown={enter} className="!w-28" autoFocus />
+      </div>
+      <div className="min-w-[220px] flex-1 space-y-1">
+        <label htmlFor={`check-note-${personId}`} className="block">What do you know?</label>
+        <input id={`check-note-${personId}`} value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} onKeyDown={enter} />
+      </div>
+      <button type="button" className="btn-primary btn-sm" disabled={sending || (!expected.trim() && !note.trim())} onClick={() => void send()}>{sending ? 'Sending…' : 'Send to Biz Ops'}</button>
+      <button type="button" className="btn-ghost btn-sm" onClick={() => setOpen(false)}>Cancel</button>
+      {error ? <p role="alert" className="w-full text-[12.5px] text-red-700">{error}</p> : null}
+    </div>
+  );
+}
+
+/**
  * Who was there, in three parts: the FO who booked it (credited with it), the team on the call,
  * and the prospects. Every prospect shows which meeting with them this is, counted from Cadence's
  * own meetings as the date and the list change, and the meeting as a whole is the highest of
@@ -152,6 +192,8 @@ export function MeetingPeople({ fos, value, onChange, day, meetingId, showBooked
   showBookedBy?: boolean;
 }) {
   const [numbers, setNumbers] = useState<ProspectNumber[]>([]);
+  // Checks raised before the meeting exists: the meeting is attached to them when it is saved.
+  const [checks, setChecks] = useState<string[]>([]);
   const ids = value.prospects.map((p) => p.personId);
   const idsKey = ids.join(',');
   useEffect(() => {
@@ -175,6 +217,7 @@ export function MeetingPeople({ fos, value, onChange, day, meetingId, showBooked
     <div className="space-y-5">
       <input type="hidden" name="teamJson" value={JSON.stringify(value.team.map((t) => t.userId))} />
       <input type="hidden" name="prospectsJson" value={JSON.stringify(ids)} />
+      <input type="hidden" name="numberChecksJson" value={JSON.stringify(checks)} />
 
       {showBookedBy ? (
         <div className="grid gap-1.5 md:max-w-sm">
@@ -221,17 +264,23 @@ export function MeetingPeople({ fos, value, onChange, day, meetingId, showBooked
         <div className="flex items-center"><span id="prospects-label" className="text-[12px] font-medium text-ink-500">Prospects</span><span className="ml-0.5 text-[12px] leading-4 text-red-600" aria-hidden>*</span></div>
         {value.prospects.length ? (
           <ul aria-labelledby="prospects-label" className="divide-y divide-line rounded-xl border border-line bg-white">
-            {value.prospects.map((p) => (
-              <li key={p.personId} className="flex items-center gap-3 px-3 py-2.5">
-                <Avatar name={p.name} shape="circle" size={30} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13.5px] font-medium text-ink-900">{p.name}</span>
-                  <span className="block truncate text-[12px] text-ink-500">{[p.companyName, p.email].filter(Boolean).join(' · ')}</span>
-                </span>
-                <MeetingNumber name={p.name} info={numberOf(p.personId)} />
-                <button type="button" aria-label={`Remove ${p.name}`} onClick={() => set({ prospects: value.prospects.filter((x) => x.personId !== p.personId) })} className="grid h-7 w-7 place-items-center rounded-lg text-ink-400 hover:bg-canvas hover:text-ink-700"><IconClose size={14} /></button>
-              </li>
-            ))}
+            {value.prospects.map((p) => {
+              const info = numberOf(p.personId);
+              return (
+                <li key={p.personId} className="px-3 py-2.5">
+                  <div className="flex flex-wrap items-center gap-x-3">
+                    <Avatar name={p.name} shape="circle" size={30} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13.5px] font-medium text-ink-900">{p.name}</span>
+                      <span className="block truncate text-[12px] text-ink-500">{[p.companyName, p.email].filter(Boolean).join(' · ')}</span>
+                    </span>
+                    {info ? <NumberCheck key={`${p.personId}:${info.number}`} name={p.name} personId={p.personId} info={info} day={day} meetingId={meetingId} onRaised={(id) => { if (!meetingId) setChecks((c) => [...c, id]); }} /> : null}
+                    <MeetingNumber name={p.name} info={info} />
+                    <button type="button" aria-label={`Remove ${p.name}`} onClick={() => set({ prospects: value.prospects.filter((x) => x.personId !== p.personId) })} className="grid h-7 w-7 place-items-center rounded-lg text-ink-400 hover:bg-canvas hover:text-ink-700"><IconClose size={14} /></button>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         ) : null}
         <Finder<ProspectOption>

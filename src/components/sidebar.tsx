@@ -36,7 +36,7 @@ const GROUPS = [
   ] },
 ];
 
-type Props = { user: SessionUser; mode: 'mock' | 'graphql'; dryRun: boolean; todayCount: number; overdueCount: number };
+type Props = { user: SessionUser; mode: 'mock' | 'graphql'; dryRun: boolean; todayCount: number; overdueCount: number; /** Open meeting number checks, for Biz Ops and admins. */ checksCount?: number };
 
 export function Sidebar(props: Props) {
   const [open, setOpen] = useState(false);
@@ -47,7 +47,7 @@ export function Sidebar(props: Props) {
   </>;
 }
 
-function SidebarContent({ user, mode, dryRun, todayCount, overdueCount, close }: Props & { close?: () => void }) {
+function SidebarContent({ user, mode, dryRun, todayCount, overdueCount, checksCount = 0, close }: Props & { close?: () => void }) {
   const pathname = usePathname();
   return (
     <aside className="sidebar-shell">
@@ -66,6 +66,7 @@ function SidebarContent({ user, mode, dryRun, todayCount, overdueCount, close }:
               <Opening />
               <Icon size={18} /> <span>{item.label}</span>
               {item.href === '/tasks' && todayCount + overdueCount > 0 ? <span className={clsx('ml-auto rounded-md px-1.5 py-0.5 text-[10px] tabular-nums', overdueCount ? 'bg-red-400/20 text-red-200' : 'bg-white/10 text-[#dfefc1]')} title={overdueCount ? `${overdueCount} overdue` : undefined}>{todayCount + overdueCount}</span> : null}
+              {item.href === '/meetings' && checksCount > 0 ? <span className="ml-auto rounded-md bg-amber-300/20 px-1.5 py-0.5 text-[10px] tabular-nums text-amber-100" title={`${checksCount} meeting number ${checksCount === 1 ? 'check' : 'checks'} open`}>{checksCount}</span> : null}
             </Link>;
           })}</div>
         </div>)}

@@ -26,6 +26,8 @@ export const isSalesLeader = (a: Actor) => a.role === 'SALES_LEADER';
 export const isPodManager = (a: Actor) => a.role === 'POD_MANAGER';
 export const isJuniorFo = (a: Actor) => a.role === 'JUNIOR_FO';
 export const isBizOps = (a: Actor) => a.role === 'BIZ_OPS';
+/** Checks the meeting numbers people doubt, sets one when it is wrong, and closes the check. */
+export const canCheckMeetingNumbers = (a: Actor) => isBizOps(a) || a.role === 'ADMIN';
 /** Leads pods: every pod-level write in their own pods. */
 export const isPodLeader = (a: Actor) => isSeniorFo(a) || isSalesLeader(a) || isPodManager(a);
 /**

@@ -11,16 +11,22 @@ import { meetingDay, meetingDayInstant, parseMeetingDay } from './day';
  *
  * The numbers are stored, not worked out on read, because Twenty keeps them too: every meeting
  * whose numbers move is written there again.
+ *
+ * When someone thinks a number is wrong, Biz Ops checks it (src/lib/actions/number-checks.ts) and
+ * can set the number on one meeting with that prospect; the meetings after it count on from there.
  */
 
 /** One lock for all renumbering, so two saves never interleave their counts. */
 const LOCK = 7_290_291;
 
-type Row = { id: string; personId: string; meetingId: string; meetingNumber: number | null; occurredAt: Date; createdAt: Date; approved: boolean };
+type Row = { id: string; personId: string; meetingId: string; meetingNumber: number | null; numberSetTo?: number | null; occurredAt: Date; createdAt: Date; approved: boolean };
 
 const ordered = (a: Row, b: Row) => a.occurredAt.getTime() - b.occurredAt.getTime() || a.createdAt.getTime() - b.createdAt.getTime() || a.meetingId.localeCompare(b.meetingId);
 
-/** The numbers each prospect's meetings should carry, by attendee row: null on a meeting not approved. */
+/**
+ * The numbers each prospect's meetings should carry, by attendee row: null on a meeting not
+ * approved. A number Biz Ops set holds, and the meetings after it count on from it.
+ */
 export function numberRows(rows: Row[]): Map<string, number | null> {
   const out = new Map<string, number | null>();
   const byPerson = new Map<string, Row[]>();
@@ -28,7 +34,10 @@ export function numberRows(rows: Row[]): Map<string, number | null> {
     if (!r.approved) { out.set(r.id, null); continue; }
     byPerson.set(r.personId, [...(byPerson.get(r.personId) ?? []), r]);
   }
-  for (const list of byPerson.values()) list.sort(ordered).forEach((r, i) => out.set(r.id, i + 1));
+  for (const list of byPerson.values()) {
+    let n = 0;
+    for (const r of list.sort(ordered)) { n = r.numberSetTo ?? n + 1; out.set(r.id, n); }
+  }
   return out;
 }
 
@@ -43,9 +52,9 @@ export async function renumberProspects(personIds: Iterable<string | null | unde
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${LOCK})`;
     const found = await tx.meetingAttendee.findMany({
       where: { personId: { in: ids }, prospect: true },
-      select: { id: true, personId: true, meetingId: true, meetingNumber: true, meeting: { select: { occurredAt: true, createdAt: true, review: true } } },
+      select: { id: true, personId: true, meetingId: true, meetingNumber: true, numberSetTo: true, meeting: { select: { occurredAt: true, createdAt: true, review: true } } },
     });
-    const rows: Row[] = found.map((a) => ({ id: a.id, personId: a.personId!, meetingId: a.meetingId, meetingNumber: a.meetingNumber, occurredAt: a.meeting.occurredAt, createdAt: a.meeting.createdAt, approved: a.meeting.review === 'APPROVED' }));
+    const rows: Row[] = found.map((a) => ({ id: a.id, personId: a.personId!, meetingId: a.meetingId, meetingNumber: a.meetingNumber, numberSetTo: a.numberSetTo, occurredAt: a.meeting.occurredAt, createdAt: a.meeting.createdAt, approved: a.meeting.review === 'APPROVED' }));
     const numbers = numberRows(rows);
     const changed = new Set<string>();
     for (const r of rows) {
@@ -67,19 +76,13 @@ export async function renumberProspects(personIds: Iterable<string | null | unde
   });
 }
 
-/** A meeting with no prospects left (all removed) carries no number. */
-export async function clearMeetingNumber(meetingId: string): Promise<boolean> {
-  const { count } = await prisma.meeting.updateMany({ where: { id: meetingId, meetingNumber: { not: null }, attendees: { none: { prospect: true } } }, data: { meetingNumber: null } });
-  return count > 0;
-}
-
 export type ProspectNumber = {
   personId: string;
   /** Which meeting with this person the one being added or edited will be. */
   number: number;
   /** The days (YYYY-MM-DD) of the meetings before it, oldest first. */
   earlier: string[];
-  /** Meetings after it that move up one when it is saved. */
+  /** Meetings after it whose number moves when it is saved. */
   later: number;
 };
 
@@ -94,14 +97,19 @@ export async function upcomingNumbers(personIds: string[], day: string, exceptMe
   const at = meetingDayInstant(parsed);
   const self = exceptMeetingId ? await prisma.meeting.findUnique({ where: { id: exceptMeetingId }, select: { createdAt: true } }) : null;
   const addedAt = self?.createdAt ?? new Date();
-  const rows = await prisma.meetingAttendee.findMany({
-    where: { personId: { in: ids }, prospect: true, meeting: { review: 'APPROVED', ...(exceptMeetingId ? { id: { not: exceptMeetingId } } : {}) } },
-    select: { personId: true, meeting: { select: { occurredAt: true, createdAt: true } } },
+  const found = await prisma.meetingAttendee.findMany({
+    where: { personId: { in: ids }, prospect: true, meeting: { review: 'APPROVED' } },
+    select: { id: true, personId: true, meetingId: true, meetingNumber: true, numberSetTo: true, meeting: { select: { occurredAt: true, createdAt: true } } },
   });
   return ids.map((personId) => {
-    const theirs = rows.filter((r) => r.personId === personId).map((r) => r.meeting);
-    const before = theirs.filter((m) => m.occurredAt < at || (m.occurredAt.getTime() === at.getTime() && m.createdAt < addedAt)).sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
-    return { personId, number: before.length + 1, earlier: before.map((m) => meetingDay(m.occurredAt)), later: theirs.length - before.length };
+    const theirs: Row[] = found.filter((a) => a.personId === personId && a.meetingId !== exceptMeetingId).map((a) => ({ id: a.id, personId, meetingId: a.meetingId, meetingNumber: a.meetingNumber, numberSetTo: a.numberSetTo, occurredAt: a.meeting.occurredAt, createdAt: a.meeting.createdAt, approved: true }));
+    // The meeting as it will be saved, keeping a number Biz Ops set on it.
+    const own = exceptMeetingId ? found.find((a) => a.personId === personId && a.meetingId === exceptMeetingId) : undefined;
+    const draft: Row = { id: 'draft', personId, meetingId: exceptMeetingId ?? 'draft', meetingNumber: null, numberSetTo: own?.numberSetTo ?? null, occurredAt: at, createdAt: addedAt, approved: true };
+    const without = numberRows(theirs);
+    const withIt = numberRows([...theirs, draft]);
+    const before = theirs.filter((r) => ordered(r, draft) < 0).sort(ordered);
+    return { personId, number: withIt.get('draft')!, earlier: before.map((r) => meetingDay(r.occurredAt)), later: theirs.filter((r) => ordered(r, draft) > 0 && without.get(r.id) !== withIt.get(r.id)).length };
   });
 }
 

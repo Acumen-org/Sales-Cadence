@@ -249,6 +249,9 @@ export async function createMeetingAction(formData: FormData): Promise<ActionRes
       attendees: { create: attendees },
     },
   });
+  // A number someone doubted while adding it is checked against this meeting.
+  const checks = idList(formData, 'numberChecksJson');
+  if (checks.length) await prisma.meetingNumberTicket.updateMany({ where: { id: { in: checks }, raisedById: user.id, meetingId: null }, data: { meetingId: meeting.id } });
   await logAudit({ entityType: 'meeting', entityId: meeting.id, action: 'created', actor: userActor(user), details: { title: meeting.title, provider: meeting.provider, attendees: attendees.length, prospects: prospectIds.length } });
   // Numbered, then written to Twenty with the meetings whose numbers it moved.
   await afterMeetingChange(meeting.id, prospectIds, !transcript && needsPlayer(meeting.sourceUrl));

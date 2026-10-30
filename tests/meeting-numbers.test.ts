@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db';
 import type { SessionUser } from '@/lib/auth/current-user';
 import { createMeetingAction, deleteMeetingAction, prospectNumbersAction, toggleMeetingProductAction, updateMeetingAction } from '@/lib/actions/meetings';
 import { numberRows, ordinal } from '@/lib/meetings/numbering';
+import { closeNumberCheckAction, raiseNumberCheckAction, reopenNumberCheckAction, setMeetingNumberAction } from '@/lib/actions/number-checks';
 import { findProspects } from '@/lib/meetings/people-search';
 import { getMockTwentyClient } from '@/lib/twenty/mock-client';
 import { WORKSPACE_TIMEZONE } from '@/lib/workspace';
@@ -46,6 +47,8 @@ describe('which meeting with each prospect this is', () => {
       { id: 'e', personId: 'q', meetingId: 'm2', meetingNumber: null, occurredAt: at('2026-10-02'), createdAt: at('2026-10-01'), approved: true },
     ];
     expect(Object.fromEntries(numberRows(rows))).toEqual({ a: 2, b: 1, c: 3, d: null, e: 1 });
+    // A number Biz Ops set holds, and the ones after it count on from it.
+    expect(Object.fromEntries(numberRows(rows.map((r) => (r.id === 'a' ? { ...r, numberSetTo: 5 } : r))))).toMatchObject({ b: 1, a: 5, c: 6 });
     expect([1, 2, 3, 4, 11, 12, 13, 21, 22, 103].map(ordinal)).toEqual(['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '103rd']);
   });
 
@@ -136,5 +139,62 @@ describe('finding the prospect', () => {
     expect((await findProspects(`${nina.firstName} ${nina.lastName}`))[0].personId).toBe('person-01');
     await prisma.personCache.create({ data: { id: 'x-team', firstName: 'Karson', lastName: 'Junior', email: b.users.karson.email } });
     expect((await findProspects(b.users.karson.email)).some((p) => p.personId === 'x-team')).toBe(false);
+  });
+});
+
+describe('"Think this is wrong?"', () => {
+  const fd = (values: Record<string, string>) => { const f = new FormData(); for (const [k, v] of Object.entries(values)) f.set(k, v); return f; };
+
+  it('sends what the number should be or what they know, and needs one of them', async () => {
+    auth.user.mockResolvedValue(session(b.users.karson));
+    expect(await raiseNumberCheckAction({ personId: 'person-01', day: '2026-10-08', shownNumber: 1 })).toEqual({ ok: false, error: 'Say what the number should be, or what you know about it.' });
+    const raised = await raiseNumberCheckAction({ personId: 'person-01', day: '2026-10-08', shownNumber: 1, expectedNumber: 3, note: 'We met twice before Cadence' });
+    expect(raised.ok).toBe(true);
+    expect(await prisma.meetingNumberTicket.findFirstOrThrow()).toMatchObject({ personId: 'person-01', meetingId: null, meetingDay: '2026-10-08', shownNumber: 1, expectedNumber: 3, note: 'We met twice before Cadence', open: true, raisedById: b.users.karson.id });
+    // Biz Ops cannot add meetings, so they never raise one; they check them.
+    auth.user.mockResolvedValue({ ...session(b.users.karson), role: 'BIZ_OPS' });
+    expect((await raiseNumberCheckAction({ personId: 'person-01', day: '2026-10-08', shownNumber: 1, expectedNumber: 2 })).ok).toBe(false);
+  });
+
+  it('is attached to the meeting it was raised on once that meeting is saved', async () => {
+    auth.user.mockResolvedValue(session(b.users.alisa));
+    const raised = await raiseNumberCheckAction({ personId: 'person-01', day: '2026-10-08', shownNumber: 1, expectedNumber: 2 });
+    const form = new FormData();
+    for (const [k, v] of Object.entries({ title: 'Checked', sourceUrl: '', occurredAt: '2026-10-08', bookedById: b.users.karson.id, numberChecksJson: JSON.stringify([raised.ok ? raised.id : '']) })) form.set(k, v);
+    expect((await createMeetingAction(withPeople(form, b.users.alisa.id, ['person-01']))).ok).toBe(true);
+    const meeting = await prisma.meeting.findFirstOrThrow({ where: { title: 'Checked' } });
+    expect((await prisma.meetingNumberTicket.findFirstOrThrow()).meetingId).toBe(meeting.id);
+  });
+
+  it('lets Biz Ops set the number, counts the later meetings on from it, tells Twenty, and closes the check', async () => {
+    await add('First', '2026-10-01', ['person-01']);
+    const second = await add('Second', '2026-10-08', ['person-01']);
+    await add('Third', '2026-10-15', ['person-01']);
+    const row = await prisma.meetingAttendee.findFirstOrThrow({ where: { meetingId: second.id, personId: 'person-01' } });
+    const raised = await raiseNumberCheckAction({ personId: 'person-01', meetingId: second.id, day: '2026-10-08', shownNumber: 2, expectedNumber: 4, note: 'Two calls before Cadence' });
+
+    // An FO cannot set numbers or close checks.
+    auth.user.mockResolvedValue(session(b.users.karson));
+    expect(await setMeetingNumberAction(fd({ attendeeId: row.id, number: '4' }))).toEqual({ ok: false, error: 'Only Biz Ops and admins check meeting numbers.' });
+
+    auth.user.mockResolvedValue({ ...session(b.users.karson), role: 'BIZ_OPS' });
+    mock.writes = [];
+    expect((await setMeetingNumberAction(fd({ attendeeId: row.id, number: '4' }))).ok).toBe(true);
+    expect(await numbers()).toMatchObject({ First: { meeting: 1 }, Second: { meeting: 4 }, Third: { meeting: 5 } });
+    const saved = mock.writes.filter((w) => w.op === 'saveMeetingRecord') as Array<{ input: { data: Record<string, unknown> } }>;
+    expect(saved.map((w) => w.input.data.meetingNumber).sort()).toEqual([4, 5]);
+    // The form now counts on from the set number too.
+    expect((await prospectNumbersAction(['person-01'], '2026-10-20', null))[0]).toMatchObject({ number: 6 });
+
+    // Counted again from the meetings before it.
+    expect((await setMeetingNumberAction(fd({ attendeeId: row.id, number: '' }))).ok).toBe(true);
+    expect(await numbers()).toMatchObject({ Second: { meeting: 2 }, Third: { meeting: 3 } });
+
+    const id = raised.ok ? raised.id : '';
+    expect((await closeNumberCheckAction(fd({ ticketId: id, resolution: 'Checked with Karson: two calls in August. Set to 4.' }))).ok).toBe(true);
+    expect(await prisma.meetingNumberTicket.findUniqueOrThrow({ where: { id } })).toMatchObject({ open: false, resolution: 'Checked with Karson: two calls in August. Set to 4.' });
+    expect((await closeNumberCheckAction(fd({ ticketId: id }))).ok).toBe(false);
+    expect((await reopenNumberCheckAction(fd({ ticketId: id }))).ok).toBe(true);
+    expect((await prisma.meetingNumberTicket.findUniqueOrThrow({ where: { id } })).open).toBe(true);
   });
 });

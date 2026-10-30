@@ -121,6 +121,11 @@ export function describeAudit(action: string, details: Details, actorLabel: stri
         title: `${action === 'product_added' ? 'Product tagged' : 'Product removed'}${by}`,
         fields: str(d.product) ? [{ label: 'Product', value: optionLabel(str(d.product)!) }] : [],
       };
+    // Biz Ops set which meeting with a prospect this is, after a number check.
+    case 'number_set':
+      return { title: `Meeting number set${by}`, fields: Number.isFinite(num(d.to)) ? [{ label: 'Set to', value: String(num(d.to)) }] : [] };
+    case 'number_cleared':
+      return { title: `Meeting number counted again${by}`, fields: [] };
     // A task created for a person (stored under its old name, next action).
     case 'next_action_set':
     case 'next_action_done':

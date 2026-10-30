@@ -1240,3 +1240,14 @@ join the lists. It needs `OnlineMeetingTranscript.Read.All`, a Teams application
 Graph transcript access turned on; Settings > Sign-in > Teams transcripts says which is missing, and
 the worker asks hourly for recent meetings still without one.
 
+## "Think this is wrong?" on a meeting number (30 October 2026)
+
+Each prospect's number in the meeting form has a "Think this is wrong?" button. It asks two things,
+either enough: what the number should be, and what the person knows. Cadence adds the prospect, the
+number shown, the day, the meeting (attached once it is saved) and who raised it. Biz Ops and admins
+see open checks under Meetings > Number checks, with the count on Meetings in the sidebar. A check
+lists every meeting with that prospect in order; Biz Ops can set the number on any of them
+(`MeetingAttendee.numberSetTo`), the meetings after it count on from that number, and every meeting
+whose number moved is written to Twenty again. "Count it again" removes a set number. The check is
+closed with what was found, which the person who raised it sees; it can be opened again. Anyone who
+is not Biz Ops or an admin sees only the checks they raised.

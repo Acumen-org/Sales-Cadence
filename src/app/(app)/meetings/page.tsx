@@ -6,7 +6,7 @@ import { optionLabel } from '@/lib/twenty/labels';
 import type { Prisma } from '@prisma/client';
 import { requireUser } from '@/lib/auth/current-user';
 import { ordinal } from '@/lib/meetings/numbering';
-import { canCreateMeeting, ROLES_NEEDING_POD } from '@/lib/auth/rbac';
+import { canCheckMeetingNumbers, canCreateMeeting, ROLES_NEEDING_POD } from '@/lib/auth/rbac';
 import { attendeeIsExternal, meetingReadWhere } from '@/lib/meetings-query';
 import { getSettings } from '@/lib/settings';
 import { prisma } from '@/lib/db';
@@ -85,6 +85,13 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
     }),
     prisma.meeting.count({ where }),
   ]);
+  // Biz Ops and admins check doubted numbers; anyone else sees the checks they raised.
+  const checker = canCheckMeetingNumbers(user);
+  const [openChecks, mine] = await Promise.all([
+    prisma.meetingNumberTicket.count({ where: { open: true, ...(checker ? {} : { raisedById: user.id }) } }),
+    checker ? Promise.resolve(0) : prisma.meetingNumberTicket.count({ where: { raisedById: user.id } }),
+  ]);
+  const checks = { show: checker || mine > 0, open: openChecks };
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const pageHref = (n: number) => {
     const p = new URLSearchParams();
@@ -108,9 +115,12 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
           caret
           meta={`${total} meeting${total === 1 ? '' : 's'}`}
           actions={
-            canCreateMeeting(user) && <Link href="/meetings/new" className="btn-primary">
-              <IconPlus size={14} /> Add meeting
-            </Link>
+            <>
+              {checks.show ? <Link href="/meetings/checks" className="btn-secondary">Number checks{checks.open ? <Badge tone="amber">{checks.open}</Badge> : null}</Link> : null}
+              {canCreateMeeting(user) && <Link href="/meetings/new" className="btn-primary">
+                <IconPlus size={14} /> Add meeting
+              </Link>}
+            </>
           }
         />
         <Toolbar>

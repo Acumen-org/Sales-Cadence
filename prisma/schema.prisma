@@ -160,6 +160,8 @@ model User {
   enrichmentMarks EnrichmentMark[] @relation("EnrichmentAssignee")
   mipStars        MipStars[]       @relation("MipStarsBy")
   bookedMeetings  Meeting[]        @relation("MeetingBookedBy")
+  numberTicketsRaised   MeetingNumberTicket[] @relation("NumberTicketRaisedBy")
+  numberTicketsResolved MeetingNumberTicket[] @relation("NumberTicketResolvedBy")
 }
 
 model Session {
@@ -471,6 +473,7 @@ model PersonCache {
   nextActions      NextAction[]
   touches          Touch[]
   meetingAttendees MeetingAttendee[]
+  numberTickets    MeetingNumberTicket[]
 
   @@index([companyId])
   @@index([podOwner])
@@ -591,12 +594,42 @@ model Meeting {
   updatedAt        DateTime        @updatedAt
 
   attendees MeetingAttendee[]
+  numberTickets MeetingNumberTicket[]
 
   @@index([occurredAt])
   @@index([companyId, occurredAt])
   @@index([createdById])
   @@index([review, occurredAt])
   @@index([analysisStatus])
+}
+
+/// "Think this is wrong?": someone doubts which meeting with a prospect this is, and Biz Ops
+/// checks it, sets the number if it is wrong, and closes it. See src/lib/actions/number-checks.ts.
+model MeetingNumberTicket {
+  id             String       @id @default(uuid())
+  personId       String
+  person         PersonCache  @relation(fields: [personId], references: [id], onDelete: Cascade)
+  /// The meeting it was raised on; null while that meeting was still being added and was never saved.
+  meetingId      String?
+  meeting        Meeting?     @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+  /// The meeting's day as the form had it (YYYY-MM-DD), and the number Cadence showed for it.
+  meetingDay     String
+  shownNumber    Int
+  /// What the person raising it thinks it should be, and what they know.
+  expectedNumber Int?
+  note           String?
+  open           Boolean      @default(true)
+  raisedById     String?
+  raisedBy       User?        @relation("NumberTicketRaisedBy", fields: [raisedById], references: [id], onDelete: SetNull)
+  resolvedById   String?
+  resolvedBy     User?        @relation("NumberTicketResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+  resolvedAt     DateTime?
+  /// What Biz Ops found, for whoever raised it.
+  resolution     String?
+  createdAt      DateTime     @default(now())
+
+  @@index([open, createdAt])
+  @@index([personId])
 }
 
 /// A meeting somebody starred. Personal: each user keeps their own list.
@@ -629,6 +662,8 @@ model MeetingAttendee {
   prospect  Boolean      @default(false)
   /// Which meeting with this prospect it is: their earliest meeting in Cadence is 1.
   meetingNumber Int?
+  /// Set by Biz Ops after a number check: this meeting is this number, and later ones count on from it.
+  numberSetTo   Int?
 
   @@unique([meetingId, email])
   @@index([meetingId])
