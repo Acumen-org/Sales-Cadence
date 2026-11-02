@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { env } from '@/lib/env';
 import { ingestEvent, type IngestResult } from '@/lib/engine/ingest';
 import { parseWebhookEvent, verifyWebhook } from '@/lib/twenty/webhook-auth';
+import { noteMeetingsChangedInTwenty } from '@/lib/meetings/crm-check';
 
 export const runtime = 'nodejs';
 
@@ -37,6 +38,12 @@ export async function POST(req: NextRequest) {
     const parsed = parseWebhookEvent(ev);
     if (!parsed || !parsed.recordId) {
       results.push({ status: 'ignored', result: 'unparseable_event' });
+      continue;
+    }
+    // A meeting or a meeting contact: the worker checks Twenty still holds what Cadence wrote.
+    if (/^meeting/i.test(parsed.objectType)) {
+      await noteMeetingsChangedInTwenty().catch(() => undefined);
+      results.push({ status: 'ignored', result: 'meetings_checked_next_tick' });
       continue;
     }
     try {

@@ -265,7 +265,8 @@ export type TwentyTagField = { id: string; name: string; multi?: boolean; text?:
  * by a fixed API name. Null fields are ones the workspace does not have; Cadence leaves them out.
  */
 export type TwentyMeetingSchema = {
-  meeting: { typeName: string; plural: string };
+  /** `createdBy`: the record says who added it (Twenty's own actor field). */
+  meeting: { typeName: string; plural: string; createdBy?: boolean };
   fields: {
     date: { name: string; dateOnly: boolean } | null;
     bookedBy: TwentyTagField | null;
@@ -285,6 +286,20 @@ export type TwentyMeetingSchema = {
   };
   /** The in-between object that links one meeting to each of its contacts; it holds no data of its own. */
   contact: { typeName: string; plural: string; meetingId: string; personId: string } | null;
+};
+
+/**
+ * One record of the Meetings object as Twenty holds it: its fields by their API names (a link field
+ * as `{ primaryLinkUrl }`, a tag as its value), and the people its Meeting contacts link to.
+ */
+export type TwentyMeetingRecord = {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  /** The workspace member who added it in Twenty, when a person did. */
+  addedByMemberId: string | null;
+  data: Record<string, unknown>;
+  contactPersonIds: string[];
 };
 
 /** One meeting as Cadence writes it: the field values, ready, and the contacts to link. */

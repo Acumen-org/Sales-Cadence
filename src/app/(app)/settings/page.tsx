@@ -2,7 +2,7 @@ import { Suspense } from 'react';
 import { PageFrame } from '@/components/page-frame';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { formatInstant } from '@/lib/dates';
+import { formatInstant, formatLocalDate } from '@/lib/dates';
 import { workspaceTimezone } from '@/lib/workspace';
 import { requireUser } from '@/lib/auth/current-user';
 import { isAdmin } from '@/lib/auth/rbac';
@@ -30,6 +30,7 @@ import { describeEventResult } from '@/lib/event-results';
 import { microsoftRedirectUri, signInMethods } from '@/lib/auth/microsoft';
 import { SignInForm } from '@/components/settings/sign-in-form';
 import { missingMeetingTags } from '@/lib/meetings/crm';
+import { meetingsNotFromCadence } from '@/lib/meetings/crm-check';
 import { sharePointPlayerStatus } from '@/lib/meetings/sharepoint-player';
 import { teamsTranscriptStatus } from '@/lib/meetings/teams-transcript';
 
@@ -195,6 +196,8 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
   const meetingsMissing = meetingParts.filter(([, found]) => !found).map(([name]) => name);
   // Names Twenty has no tag for and Cadence could not add one: an admin adds them in Twenty.
   const missingTags = meetings ? await missingMeetingTags() : [];
+  // Records someone added in Twenty itself: Cadence neither numbers nor changes them.
+  const notFromCadence = meetings ? await meetingsNotFromCadence() : { count: 0, items: [] };
   const [settings, schema, lastReconcile, continuous, cachedPeople, cachedCompanies, webhooks24h] = await Promise.all([
     getSettings(),
     getTwentySchema(),
@@ -242,6 +245,7 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
                     : <span className="flex flex-wrap items-center gap-2"><Badge tone={meetingsMissing.length ? 'amber' : 'green'}>{meetingsMissing.length ? 'Connected, fields missing' : 'Connected'}</Badge>{meetingsMissing.length ? <span className="text-[12px] text-ink-500">missing: {meetingsMissing.join(', ')}</span> : null}{meetings.fields.date?.dateOnly ? <span className="text-[12px] text-ink-500">Meeting date holds the day only</span> : null}</span>,
               },
               ...(missingTags.length ? [{ k: 'Tags missing', v: <span className="text-[12px] text-red-700">{missingTags.map((t) => `${t.field}: ${t.name}`).join(' · ')}</span> }] : []),
+              ...(notFromCadence.count ? [{ k: 'Meetings not from Cadence', v: <span className="flex flex-wrap items-center gap-2"><Badge tone="amber"><Count value={notFromCadence.count} /></Badge><span className="text-[12px] text-ink-500">{notFromCadence.items.map((m) => [m.name || 'Untitled', m.day ? formatLocalDate(m.day) : null].filter(Boolean).join(', ')).join(' · ')}{notFromCadence.count > notFromCadence.items.length ? ' …' : ''}</span></span> }] : []),
               { k: 'Full refresh', v: sync?.lastFullRefresh ? formatInstant(new Date(sync.lastFullRefresh), workspaceTimezone()) : <Badge tone="gray">Not yet</Badge> },
               {
                 k: 'People',

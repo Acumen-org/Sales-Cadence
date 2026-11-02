@@ -23,6 +23,7 @@ import type {
   UpdateNoteInput,
   TwentyMeetingSchema,
   TwentyMeetingRecordInput,
+  TwentyMeetingRecord,
   TwentyTagField,
   EnrichPersonInput,
   EnrichCompanyInput,TwentyWebhook, CreateWebhookInput, TwentyCalendarEvent } from './types';
@@ -956,7 +957,7 @@ export class TwentyGraphqlClient implements TwentyClient {
       if (meetingId && personId) contact = { typeName: typeOf(contactObject.nameSingular), plural: contactObject.namePlural, meetingId, personId };
     }
     const value: TwentyMeetingSchema = {
-      meeting: { typeName: meetingType, plural: meeting.namePlural },
+      meeting: { typeName: meetingType, plural: meeting.namePlural, createdBy: fields.some((f) => f.name === 'createdBy') },
       fields: {
         date: finder(meeting).date(),
         bookedBy: tag(/booked/, ['SELECT', 'MULTI_SELECT', 'TEXT']),
@@ -969,7 +970,8 @@ export class TwentyGraphqlClient implements TwentyClient {
         companyId: idFor(fields, this.s.objects.company.typeName),
         personId: idFor(fields, this.s.objects.person.typeName),
         assigneeId: idFor(fields, 'WorkspaceMember'),
-        meetingNumber: find(/number|#/, ['NUMBER'])?.name ?? null,
+        // "Meeting Number", "Meeting Count", "Meeting #", "Meeting No.".
+        meetingNumber: find(/number|count|#|\bno\b/, ['NUMBER'])?.name ?? null,
         firstMeeting: find(/first/, ['BOOLEAN'])?.name ?? null,
       },
       contact,
@@ -1022,6 +1024,49 @@ export class TwentyGraphqlClient implements TwentyClient {
       if (row) continue;
       await this.request(`mutation CreateMeetingContact($data: ${c.typeName}CreateInput!) { create${c.typeName}(data: $data) { id } }`, { data: { name: w.name, [c.meetingId]: meetingId, [c.personId]: w.personId } });
     }
+  }
+
+  /** Every node of a listing, page by page. Too many to read whole is an error, never a partial list. */
+  private async everyNode(plural: string, typeName: string, selection: string): Promise<Raw[]> {
+    const nodes: Raw[] = [];
+    let after: string | null = null;
+    for (let pages = 0; pages < 100; pages++) {
+      const data: Record<string, Connection> = await this.request<Record<string, Connection>>(this.connectionQuery(plural, typeName, selection), { first: PAGE_SIZE, after });
+      const conn = data[plural];
+      nodes.push(...(conn?.edges ?? []).map((e) => e.node).filter((n): n is Raw => Boolean(n)));
+      if (!conn?.pageInfo?.hasNextPage || !conn.pageInfo.endCursor) return nodes;
+      after = conn.pageInfo.endCursor;
+    }
+    throw new TwentyApiError(`${plural}: more than ${100 * PAGE_SIZE} records to read`);
+  }
+
+  async listMeetingRecords(schema: TwentyMeetingSchema): Promise<TwentyMeetingRecord[]> {
+    const f = schema.fields;
+    const scalars = [f.date?.name, f.bookedBy?.name, f.products?.name, f.team?.name, f.cadenceId, f.guests, f.companyId, f.personId, f.assigneeId, f.meetingNumber, f.firstMeeting];
+    const links = [f.recording, f.cadenceLink].filter((n): n is string => Boolean(n)).map((n) => `${n} { primaryLinkUrl }`);
+    const selection = [...new Set(['id', 'createdAt', 'updatedAt', 'name', ...scalars.filter((n): n is string => Boolean(n))]), ...links, ...(schema.meeting.createdBy ? ['createdBy { workspaceMemberId }'] : [])].join(' ');
+    const c = schema.contact;
+    const [records, contacts] = await Promise.all([
+      this.everyNode(schema.meeting.plural, schema.meeting.typeName, selection),
+      c ? this.everyNode(c.plural, c.typeName, `id ${c.meetingId} ${c.personId}`) : Promise.resolve([]),
+    ]);
+    const linked = new Map<string, string[]>();
+    for (const row of contacts) {
+      const meetingId = c && typeof row[c.meetingId] === 'string' ? (row[c.meetingId] as string) : null;
+      const personId = c && typeof row[c.personId] === 'string' ? (row[c.personId] as string) : null;
+      if (meetingId && personId) linked.set(meetingId, [...(linked.get(meetingId) ?? []), personId]);
+    }
+    return records.map((r) => {
+      const { id, createdAt, updatedAt, createdBy, ...data } = r;
+      return {
+        id: String(id),
+        createdAt: String(createdAt ?? ''),
+        updatedAt: String(updatedAt ?? ''),
+        addedByMemberId: typeof (createdBy as Raw | null)?.workspaceMemberId === 'string' ? ((createdBy as Raw).workspaceMemberId as string) : null,
+        data,
+        contactPersonIds: [...new Set(linked.get(String(id)) ?? [])],
+      };
+    });
   }
 
   async deleteMeetingRecord(schema: TwentyMeetingSchema, id: string): Promise<void> {

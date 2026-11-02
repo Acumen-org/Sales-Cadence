@@ -62,6 +62,7 @@ export class DryRunTwentyClient implements TwentyClient {
     await this.record('deleteNote', 'note', { id }, id);
   }
   meetingSchema: TwentyClient['meetingSchema'] = () => this.inner.meetingSchema();
+  listMeetingRecords: TwentyClient['listMeetingRecords'] = (schema) => this.inner.listMeetingRecords(schema);
   async saveMeetingRecord(_schema: TwentyMeetingSchema, input: TwentyMeetingRecordInput) {
     const id = input.id ?? `dry-meeting-${randomUUID()}`;
     await this.record('saveMeetingRecord', 'meeting', input, id);

@@ -1251,3 +1251,33 @@ lists every meeting with that prospect in order; Biz Ops can set the number on a
 whose number moved is written to Twenty again. "Count it again" removes a set number. The check is
 closed with what was found, which the person who raised it sees; it can be opened again. Anyone who
 is not Biz Ops or an admin sees only the checks they raised.
+
+## Every meeting numbered, and Twenty always holding it (2 November 2026)
+
+Biz Ops found that 6 of the 10 October meetings in Twenty had no Meeting Number. Cadence numbered
+only prospects linked to a Twenty person, so an older meeting whose people were typed in had no
+number. Nothing checked afterwards that Twenty still held what Cadence wrote. The owner: "Cadence is
+not a record keeper, it writes the data to CRM. and CRM data is used for reports." Data flows one
+way. A first version that also read meetings and edits back from Twenty into Cadence was withdrawn
+the same day because it made two sources of data.
+
+`src/lib/meetings/crm-check.ts` runs in the worker every ten minutes, and at the next tick after a
+`meeting*` webhook (Setting `meetingsChangedInTwenty`):
+
+- A meeting with no prospect has its typed-in people linked to their Twenty person, by address or
+  by a name only one person in Twenty has.
+- Every prospect is counted again.
+- The Meetings object is read back (`listMeetingRecords`). Cadence keeps what it last wrote to each
+  record (`Meeting.twentySnapshot`, read with `meetingFacts` the same way as a record read back). A
+  meeting is written again, as Cadence has it, when its record is missing, its Meeting Number, First
+  Meeting or contacts differ from Cadence's, or any value differs from the snapshot because someone
+  changed it in Twenty. Nothing is taken from Twenty into Cadence. A record Cadence wrote whose id
+  never came back is found by its Cadence ID or link.
+- A record Cadence did not write is not numbered or changed. It is listed under Settings > Twenty >
+  Meetings not from Cadence (Setting `meetingsNotFromCadence`).
+- At most 60 writes go out per pass, and the next pass runs at the next tick while more are waiting.
+  The first pass writes every meeting once, to record its snapshot. A meeting with a write still
+  waiting in the outbox is left to the outbox.
+
+The Meeting Number field is also found when it is labelled "Count", "#" or "No.". A meeting with no
+prospect shows "No prospect, no number" on the list and on its page.

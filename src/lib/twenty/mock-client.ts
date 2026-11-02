@@ -58,6 +58,7 @@ import type {
   UpdateNoteInput,
   TwentyMeetingSchema,
   TwentyMeetingRecordInput,
+  TwentyMeetingRecord,
   TwentyTagField,
   EnrichPersonInput,
   EnrichCompanyInput,TwentyWebhook, CreateWebhookInput } from './types';
@@ -97,6 +98,8 @@ export const MOCK_MEETING_SCHEMA = (): TwentyMeetingSchema => ({
   contact: { typeName: 'MeetingContact', plural: 'meetingContacts', meetingId: 'meetingsId', personId: 'peopleId' },
 });
 
+type MockMeetingRecord = { data: Record<string, unknown>; contacts: TwentyMeetingRecordInput['contacts']; cadenceId: string | null; createdAt: string; updatedAt: string; addedByMemberId: string | null };
+
 function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T;
 }
@@ -128,7 +131,7 @@ export class MockTwentyClient implements TwentyClient {
   notes: TwentyNote[] = [];
   /** The demo workspace's Meetings object; null makes it a workspace without one. */
   meetingObject: TwentyMeetingSchema | null = MOCK_MEETING_SCHEMA();
-  meetingRecords = new Map<string, { data: Record<string, unknown>; contacts: TwentyMeetingRecordInput['contacts']; cadenceId: string }>();
+  meetingRecords = new Map<string, MockMeetingRecord>();
   messages: TwentyMessage[] = [];
   calendarEvents: TwentyCalendarEvent[] = [];
   tasks: TwentyTask[] = [];
@@ -434,9 +437,34 @@ export class MockTwentyClient implements TwentyClient {
     this.maybeFail();
     const existing = input.id && this.meetingRecords.has(input.id) ? input.id : [...this.meetingRecords.entries()].find(([, r]) => r.cadenceId === input.cadenceId)?.[0];
     const id = existing ?? this.nextId('meeting');
-    this.meetingRecords.set(id, { data: clone(input.data), contacts: clone(input.contacts), cadenceId: input.cadenceId });
+    const before = existing ? this.meetingRecords.get(existing) : undefined;
+    const now = new Date().toISOString();
+    // An update changes the fields it names, as Twenty's does.
+    this.meetingRecords.set(id, { data: { ...before?.data, ...clone(input.data) }, contacts: clone(input.contacts), cadenceId: input.cadenceId, createdAt: before?.createdAt ?? now, updatedAt: now, addedByMemberId: before?.addedByMemberId ?? null });
     this.writes.push({ op: 'saveMeetingRecord', id, input: clone(input) });
     return { id };
+  }
+
+  async listMeetingRecords(): Promise<TwentyMeetingRecord[]> {
+    this.maybeFail();
+    return [...this.meetingRecords.entries()].map(([id, r]) => ({ id, createdAt: r.createdAt, updatedAt: r.updatedAt, addedByMemberId: r.addedByMemberId, data: clone(r.data), contactPersonIds: [...new Set(r.contacts.map((c) => c.personId))] }));
+  }
+
+  /** A meeting someone added in Twenty itself, for the tests and the demo. */
+  addMeetingInTwenty(data: Record<string, unknown>, personIds: string[], addedByMemberId: string | null = null): string {
+    const id = this.nextId('meeting');
+    const now = new Date().toISOString();
+    this.meetingRecords.set(id, { data: clone(data), contacts: personIds.map((personId) => ({ personId, name: String(data.name ?? '') })), cadenceId: null, createdAt: now, updatedAt: now, addedByMemberId });
+    return id;
+  }
+
+  /** Someone changes a meeting in Twenty: its fields, and the people it links to when given. */
+  editMeetingInTwenty(id: string, data: Record<string, unknown>, personIds?: string[]) {
+    const r = this.meetingRecords.get(id);
+    if (!r) throw new Error(`no meeting ${id}`);
+    Object.assign(r.data, clone(data));
+    if (personIds) r.contacts = personIds.map((personId) => r.contacts.find((c) => c.personId === personId) ?? { personId, name: String(r.data.name ?? '') });
+    r.updatedAt = new Date().toISOString();
   }
 
   async deleteMeetingRecord(_schema: TwentyMeetingSchema, id: string) {

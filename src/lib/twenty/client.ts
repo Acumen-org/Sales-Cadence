@@ -17,6 +17,7 @@ import type {
   UpdateNoteInput,
   TwentyMeetingSchema,
   TwentyMeetingRecordInput,
+  TwentyMeetingRecord,
   TwentyTagField,
   EnrichPersonInput,
   EnrichCompanyInput,TwentyWebhook, CreateWebhookInput } from './types';
@@ -90,6 +91,8 @@ export interface TwentyClient {
   /** Create the meeting's record, or update the one Cadence wrote, and link its contacts. */
   saveMeetingRecord(schema: TwentyMeetingSchema, input: TwentyMeetingRecordInput): Promise<{ id: string }>;
   deleteMeetingRecord(schema: TwentyMeetingSchema, id: string): Promise<void>;
+  /** Every record of the Meetings object, with the people its Meeting contacts link to. */
+  listMeetingRecords(schema: TwentyMeetingSchema): Promise<TwentyMeetingRecord[]>;
   /** Add a tag to a Select or Multi-select field; returns its value, or null if Twenty refused. */
   addSelectOption(field: TwentyTagField, label: string): Promise<string | null>;
   createTask(input: CreateTaskInput): Promise<{ id: string }>;

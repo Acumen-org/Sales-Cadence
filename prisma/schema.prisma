@@ -579,6 +579,10 @@ model Meeting {
   twentyNoteId     String?
   /// The record in Twenty's own Meetings object, once the workspace has one.
   twentyMeetingId  String?
+  /// What Cadence last wrote to that record (src/lib/meetings/crm.ts meetingFacts), and when: a
+  /// value Twenty holds that differs from it was changed there, and Cadence writes its own again.
+  twentySnapshot   Json?
+  twentySyncedAt   DateTime?
   /// When someone last edited it by hand: after that only its time follows the calendar.
   editedAt         DateTime?
   /// The FO who booked it: mandatory on a new meeting, set on older ones when someone edits them.
@@ -601,6 +605,7 @@ model Meeting {
   @@index([createdById])
   @@index([review, occurredAt])
   @@index([analysisStatus])
+  @@index([twentyMeetingId])
 }
 
 /// "Think this is wrong?": someone doubts which meeting with a prospect this is, and Biz Ops

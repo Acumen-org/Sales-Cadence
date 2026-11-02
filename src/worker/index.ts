@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { backfillMeetingsToCrm, meetingSchemaShape, missingMeetingTags } from '../lib/meetings/crm';
 import { backfillTeamsTranscripts } from '../lib/meetings/teams-transcript';
+import { MEETINGS_CHANGED_KEY, checkMeetingsInCrm } from '../lib/meetings/crm-check';
 import { backfillSharePointPlayers } from '../lib/meetings/sharepoint-player';
 import { retryFailedWrites } from '../lib/engine/sync-retry';
 import { prisma } from '../lib/db';
@@ -79,6 +80,19 @@ async function meetingsBackfill(now:number){
   await prisma.setting.upsert({where:{key},create:{key,value},update:{value}});
  }catch(error){log('meetings backfill failed',error);}
 }
+/**
+ * Twenty holding every meeting as Cadence wrote it, numbered: every ten minutes, at the next tick
+ * after Twenty reports a change to a meeting, and tick after tick while writes are still waiting
+ * (src/lib/meetings/crm-check.ts).
+ */
+let meetingsTwentyAt=0;let meetingsTwentyRan=0;
+async function meetingsWithTwenty(now:number){
+ const flagged=await prisma.setting.findUnique({where:{key:MEETINGS_CHANGED_KEY}});
+ const changedAt=Date.parse(String((flagged?.value as {at?:string}|null)?.at??''));
+ if(now<meetingsTwentyAt&&!(changedAt>=meetingsTwentyRan))return;
+ meetingsTwentyRan=now;meetingsTwentyAt=now+600_000;
+ try{const stats=await checkMeetingsInCrm();if(stats&&(stats.linked||stats.written))log('meetings checked in Twenty',stats);if(stats?.waiting)meetingsTwentyAt=0;}catch(error){log('meetings check in Twenty failed',error);}
+}
 /** Each hour: recent Teams recordings without a transcript ask Microsoft for theirs. */
 let teamsTranscriptsAt=0;
 async function teamsTranscripts(now:number){
@@ -113,6 +127,7 @@ async function tick(){
    }
    await nightly(new Date(now));
    await evidenceRescan(new Date(now));
+   await meetingsWithTwenty(now);
    await meetingsBackfill(now);
    await meetingTagsRetry(now);
    await sharePointPlayers(now);

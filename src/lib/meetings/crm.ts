@@ -152,6 +152,36 @@ export async function meetingRecord(m: MeetingForCrm, schema: TwentyMeetingSchem
   return { data, contacts, tags };
 }
 
+/**
+ * What a Meetings record says, as plain values: the same reading for a record read back from Twenty
+ * and for the data Cadence wrote, so the two compare. Tags read as their names, the date as its day.
+ * A field the workspace lacks is null.
+ */
+export type MeetingFacts = { name: string | null; day: string | null; bookedBy: string[] | null; products: string[] | null; team: string[] | null; recording: string | null; contacts: string[] | null };
+
+export function meetingFacts(schema: TwentyMeetingSchema, data: Record<string, unknown>, contactIds: string[]): MeetingFacts {
+  const f = schema.fields;
+  const names = (field: TwentyTagField | null): string[] | null => {
+    if (!field || !(field.name in data)) return null;
+    const v = data[field.name];
+    const raw = field.text ? String(v ?? '').split(',') : Array.isArray(v) ? v.map(String) : v == null ? [] : [String(v)];
+    return [...new Set(raw.map((x) => (field.options.find((o) => o.value === x.trim())?.label ?? x).trim()).filter(Boolean))].sort();
+  };
+  const date = f.date ? data[f.date.name] : undefined;
+  const instant = typeof date === 'string' && date && !/^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(date) : null;
+  const link = f.recording && f.recording in data ? data[f.recording] : undefined;
+  return {
+    name: typeof data.name === 'string' ? data.name.trim() : null,
+    day: instant ? (Number.isNaN(instant.getTime()) ? null : meetingDay(instant)) : typeof date === 'string' && date ? date : null,
+    bookedBy: names(f.bookedBy),
+    products: names(f.products),
+    team: names(f.team),
+    recording: link === undefined ? null : String((link as { primaryLinkUrl?: unknown } | null)?.primaryLinkUrl ?? '').trim(),
+    // Without Meeting contacts, the one People link cannot say who else was there: not compared.
+    contacts: schema.contact ? [...new Set(contactIds)].sort() : null,
+  };
+}
+
 const meetingSelect = {
   id: true, title: true, sourceUrl: true, occurredAt: true, products: true, companyId: true, companyName: true, twentyNoteId: true, twentyMeetingId: true, review: true,
   meetingNumber: true,
@@ -172,7 +202,9 @@ export async function syncMeetingToCrm(meetingId: string): Promise<string | null
     const { tags, ...record } = await meetingRecord(meeting, schema, client);
     await rememberTags(tags);
     const { id } = await client.saveMeetingRecord(schema, { id: meeting.twentyMeetingId, cadenceId: meeting.id, ...record });
-    if (id !== meeting.twentyMeetingId) await prisma.meeting.update({ where: { id: meetingId }, data: { twentyMeetingId: id } });
+    // What Twenty now holds, so a later difference there is found and written over (meetings/crm-check.ts).
+    const snapshot = meetingFacts(schema, record.data, record.contacts.map((c) => c.personId));
+    await prisma.meeting.update({ where: { id: meetingId }, data: { twentyMeetingId: id, twentySnapshot: snapshot, twentySyncedAt: new Date() } });
     return id;
   }
   // No Meetings object: a note on its contacts and account, rewritten so a new contact is linked too.

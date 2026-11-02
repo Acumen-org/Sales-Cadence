@@ -160,7 +160,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                     <td data-label="Meeting">
                       <IdentityCell name={m.title} href={`/meetings/${m.id}`} sub={platformLabel(m.provider, m.sourceUrl)} />
                     </td>
-                    <td data-label="When" className="text-[12.5px]"><time className="block font-medium text-ink-900">{formatLocalDate(meetingDay(m.occurredAt), 'long')}</time>{m.meetingNumber ? <Badge tone={m.meetingNumber === 1 ? 'green' : 'gray'} className="mt-1">{m.meetingNumber === 1 ? 'First meeting' : `${ordinal(m.meetingNumber)} meeting`}</Badge> : null}</td>
+                    <td data-label="When" className="text-[12.5px]"><time className="block font-medium text-ink-900">{formatLocalDate(meetingDay(m.occurredAt), 'long')}</time>{m.meetingNumber ? <Badge tone={m.meetingNumber === 1 ? 'green' : 'gray'} className="mt-1">{m.meetingNumber === 1 ? 'First meeting' : `${ordinal(m.meetingNumber)} meeting`}</Badge> : <Badge tone="amber" className="mt-1">No prospect, no number</Badge>}</td>
                     <td data-label="Account" className="break-words text-[12.5px]">
                       {m.companyId ? (
                         <Link href={`/accounts/${m.companyId}`} className="text-brand-700 hover:underline">

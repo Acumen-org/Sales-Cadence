@@ -67,6 +67,14 @@ function fakeTwenty() {
     if (call.url.endsWith('/metadata') && call.query.includes('objects')) return reply(METADATA);
     if (call.url.endsWith('/metadata') && call.query.includes('updateOneField')) return reply({ updateOneField: { id: 'f-teamOnTheCall' } });
     if (call.query.includes('__type')) return reply({ __type: { fields: TYPES[String(call.variables.name)] ?? [] } });
+    // Two pages of meetings, one of their contacts.
+    if (call.query.startsWith('query List') && call.query.includes('meetingContacts(')) return reply({ meetingContacts: { edges: [{ node: { id: 'mc-1', meetingsId: 'rec-1', peopleId: 'p-1' } }, { node: { id: 'mc-2', meetingsId: 'rec-1', peopleId: 'p-2' } }, { node: { id: 'mc-3', meetingsId: 'rec-2', peopleId: 'p-1' } }], pageInfo: { hasNextPage: false } } });
+    if (call.query.startsWith('query List') && call.query.includes('meetings(')) {
+      const node = (id: string, extra: Record<string, unknown>) => ({ node: { id, createdAt: '2026-10-01T10:00:00.000Z', updatedAt: '2026-10-02T10:00:00.000Z', name: id, ...extra } });
+      return reply(call.variables.after
+        ? { meetings: { edges: [node('rec-2', { meetingNumber: null, createdBy: { workspaceMemberId: null } })], pageInfo: { hasNextPage: false, endCursor: null } } }
+        : { meetings: { edges: [node('rec-1', { meetingDate: '2026-10-01', meetingNumber: 2, recording: { primaryLinkUrl: 'https://loom.com/share/x' }, createdBy: { workspaceMemberId: 'wm-1' } })], pageInfo: { hasNextPage: true, endCursor: 'c1' } } });
+    }
     if (call.query.includes('FindMeeting')) return reply({ meetings: { edges: [] } });
     if (call.query.includes('createMeeting(')) return reply({ createMeeting: { id: 'rec-1' } });
     if (call.query.includes('MeetingContacts')) return reply({ meetingContacts: { edges: [] } });
@@ -82,7 +90,7 @@ describe('the Meetings object the team made in Twenty', () => {
     const { client } = fakeTwenty();
     const schema = await client.meetingSchema();
     expect(schema).not.toBeNull();
-    expect(schema!.meeting).toEqual({ typeName: 'Meeting', plural: 'meetings' });
+    expect(schema!.meeting).toEqual({ typeName: 'Meeting', plural: 'meetings', createdBy: true });
     expect(schema!.fields).toMatchObject({
       // The meeting's own date, not the record's creation date.
       date: { name: 'meetingDate', dateOnly: true },
@@ -112,6 +120,21 @@ describe('the Meetings object the team made in Twenty', () => {
     expect(calls.find((c) => c.query.includes('createMeeting('))!.variables).toEqual({ data: { name: 'Intro', meetingDate: '2026-10-09', companiesId: 'c-1' } });
     const links = calls.filter((c) => c.query.includes('createMeetingContact(')).map((c) => c.variables.data);
     expect(links).toEqual([{ name: 'Nina Halvorsen', meetingsId: 'rec-1', peopleId: 'p-1' }, { name: 'Tomas Berg', meetingsId: 'rec-1', peopleId: 'p-2' }]);
+  });
+
+  it('reads every meeting back, page by page, with the people its Meeting contacts link to', async () => {
+    const { client, calls } = fakeTwenty();
+    const schema = (await client.meetingSchema())!;
+    const records = await client.listMeetingRecords(schema);
+    expect(records).toEqual([
+      { id: 'rec-1', createdAt: '2026-10-01T10:00:00.000Z', updatedAt: '2026-10-02T10:00:00.000Z', addedByMemberId: 'wm-1', data: { name: 'rec-1', meetingDate: '2026-10-01', meetingNumber: 2, recording: { primaryLinkUrl: 'https://loom.com/share/x' } }, contactPersonIds: ['p-1', 'p-2'] },
+      { id: 'rec-2', createdAt: '2026-10-01T10:00:00.000Z', updatedAt: '2026-10-02T10:00:00.000Z', addedByMemberId: null, data: { name: 'rec-2', meetingNumber: null }, contactPersonIds: ['p-1'] },
+    ]);
+    const list = calls.find((c) => c.query.startsWith('query List') && c.query.includes('meetings('))!.query;
+    // Links read as their address, and who added it in Twenty.
+    expect(list).toContain('recording { primaryLinkUrl }');
+    expect(list).toContain('createdBy { workspaceMemberId }');
+    expect(calls.filter((c) => c.query.includes('meetings(') && c.query.startsWith('query List')).map((c) => c.variables.after)).toEqual([null, 'c1']);
   });
 
   it('adds a missing tag through the data model, keeping the ones already there', async () => {
