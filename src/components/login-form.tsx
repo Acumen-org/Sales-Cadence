@@ -1,10 +1,10 @@
 'use client';
 
 import { useActionState } from 'react';
-import { loginAction, type LoginState } from '@/lib/actions/auth';
+import { adminLoginAction, loginAction, type LoginState } from '@/lib/actions/auth';
 
-export function LoginForm({ next }: { next?: string }) {
-  const [state, action, pending] = useActionState<LoginState, FormData>(loginAction, undefined);
+export function LoginForm({ next, admin = false }: { next?: string; admin?: boolean }) {
+  const [state, action, pending] = useActionState<LoginState, FormData>(admin ? adminLoginAction : loginAction, undefined);
   return (
     <form action={action} className="space-y-4">
       {next ? <input type="hidden" name="next" value={next} /> : null}

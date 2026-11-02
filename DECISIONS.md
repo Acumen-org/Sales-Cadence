@@ -1281,3 +1281,12 @@ the same day because it made two sources of data.
 
 The Meeting Number field is also found when it is labelled "Count", "#" or "No.". A meeting with no
 prospect shows "No prospect, no number" on the list and on its page.
+
+## Admin sign-in with a password (2 November 2026)
+
+Once Microsoft sign-in has worked, /login takes no passwords. The owner asked for a way in for
+admin access that stays open: /login/admin takes an email and password and lets in an active
+admin only (`adminLoginAction`). Anyone else, and a wrong password, get the same "Email or password
+is incorrect." After five wrong passwords for an address in 15 minutes it refuses that address for
+15 minutes (audit rows `signin` / `admin_login_failed`). Nothing links to the page. Password hashes
+were never cleared when passwords retired, so an admin's existing password works.
