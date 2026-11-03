@@ -1,7 +1,7 @@
 # Cadence - one image for both the web app and the worker.
 # Built to fit a 1 vCPU / 2 GB server: the build is single-threaded with a heap ceiling, and
 # type checking is expected to have run already (pnpm typecheck / CI).
-FROM node:20-bookworm-slim AS base
+FROM node:22-bookworm-slim AS base
 ARG SKIP_TYPE_CHECK=false
 ARG NEXT_BUILD_CPUS=1
 ENV NEXT_TELEMETRY_DISABLED=1 \

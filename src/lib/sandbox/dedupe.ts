@@ -5,6 +5,8 @@ import { isInternalCompany } from '../internal-organizations';
 import { isNeverProspect } from '../non-prospects';
 import { normalizeDomain, normalizeFirmName, normalizeLinkedin, readExtraPhones, toE164, type ExtraPhone } from './normalize';
 import { findSuppressed, type SuppressionKey } from './suppression';
+import { markPersonDeleted, upsertPersonCache } from '../person-cache';
+import type { TwentyClient } from '../twenty/client';
 
 /**
  * The dedupe rules of the Bellwether contract (plan 14.6), in order; the first hit decides. Also
@@ -181,6 +183,58 @@ export async function dedupeContact(c: DedupeInput, tx: Tx = prisma): Promise<De
     if (tomb) return { kind: 'moved_tombstone', contact: tomb };
   }
   return { kind: 'new' };
+}
+
+/** Contacts per findPeople call: three keys each stay well inside Twenty's 60-row page. */
+const LIVE_CHUNK = 20;
+/** Bellwether waits 60 s for a push of up to 500; past this the copy decides for the rest. */
+export const LIVE_BUDGET_MS = 20_000;
+
+/**
+ * Ask Twenty itself before a push is judged. Cadence's copy follows Twenty by webhook and a nightly
+ * refresh, so a person added seconds ago, or whose webhook was lost, can be missing from it, and a
+ * person deleted there can linger. The people Twenty has for these emails, phones and LinkedIn
+ * profiles go into the copy, and a copy hit Twenty no longer has is marked deleted; crmMatch then
+ * decides as before. When Twenty cannot be reached the copy decides on its own.
+ */
+export async function refreshCrmCopyFor(contacts: DedupeInput[], client: TwentyClient, budgetMs = LIVE_BUDGET_MS): Promise<{ found: number; gone: number; asked: number } | null> {
+  const stats = { found: 0, gone: 0, asked: 0 };
+  const deadline = Date.now() + budgetMs;
+  // A call still running at the deadline (Twenty's own retries and rate-limit waits) is left behind.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`no answer within ${budgetMs} ms`)), budgetMs); });
+  late.catch(() => undefined);
+  const inTime = <T>(p: Promise<T>) => Promise.race([p, late]);
+  try {
+    for (let i = 0; i < contacts.length && Date.now() < deadline; i += LIVE_CHUNK) {
+      const chunk = contacts.slice(i, i + LIVE_CHUNK);
+      stats.asked += chunk.length;
+      const found = await inTime(client.findPeople({ emails: chunk.flatMap(emailsOf), phones: chunk.flatMap((c) => pushedPhones(c).map((p) => p.number)), linkedinUrls: chunk.flatMap((c) => (c.linkedinUrl ? [c.linkedinUrl] : [])) }));
+      for (const p of found) await upsertPersonCache(p);
+      stats.found += found.length;
+      // A copy hit Twenty did not return may be gone there, or matched on a field findPeople does not search.
+      const live = new Set(found.map((p) => p.id));
+      for (let round = 0; round < 3; round++) {
+        const hits = (await Promise.all(chunk.map((c) => crmMatch(c)))).flatMap((m) => (m && !live.has(m.person.id) ? [m.person.id] : []));
+        if (!hits.length) break;
+        const kept = new Map((await inTime(client.getPeopleByIds([...new Set(hits)]))).map((p) => [p.id, p]));
+        for (const id of new Set(hits)) {
+          live.add(id);
+          const p = kept.get(id);
+          if (p && !p.deletedAt) continue;
+          await markPersonDeleted(id, p?.deletedAt ? new Date(p.deletedAt) : new Date());
+          stats.gone++;
+        }
+      }
+    }
+    if (stats.asked < contacts.length) console.warn(`[bellwether] Twenty was slow: ${stats.asked} of ${contacts.length} contacts asked live; Cadence's copy decides for the rest`);
+    return stats;
+  } catch (err) {
+    console.warn('[bellwether] Twenty could not be asked; Cadence\'s copy decides', err);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** A Twenty person with the same first and last name at a company with the same domain or CRD. */

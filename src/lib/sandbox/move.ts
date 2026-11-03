@@ -1,4 +1,4 @@
-import type { Prisma, SandboxContact, SandboxMoveItem } from '@prisma/client';
+import type { ActionType, Prisma, SandboxContact, SandboxMoveItem } from '@prisma/client';
 import { prisma } from '../db';
 import { logAudit, SYSTEM_ACTOR, type AuditActor } from '../audit';
 import { addDays, formatLocalDate, toLocalDate } from '../dates';
@@ -14,6 +14,7 @@ import { findSuppressed } from './suppression';
 import { linkedinHref, normalizeDomain, normalizeEmail, normalizeFirmName, readExtraPhones } from './normalize';
 import { checkReady, type ReadyItem } from './ready';
 import { historyDrafts, writeNote } from './history-notes';
+import { setSandboxNextAction } from './work';
 
 /**
  * Move to CRM (plan section 8): one contact or up to 50. Preflight says, per contact, whether it is
@@ -79,14 +80,35 @@ export type PreflightItem = {
   reason: string | null;
   firm: FirmPlan;
   crmPerson: { id: string; name: string } | null;
+  /** The contact's open next action, offered as the move's next step. */
+  nextStep: MoveNextStep | null;
 };
+
+/** What happens after the move. It becomes the person's next action: in Tasks, and in Twenty. */
+export type MoveNextStep = { label: string; action: ActionType; dueDate: string };
 
 const contactInclude = { owner: { select: { id: true, name: true, twentyMemberId: true } }, pod: { select: { id: true, name: true, podOwnerValue: true } } } satisfies Prisma.SandboxContactInclude;
 type MoveContact = Prisma.SandboxContactGetPayload<{ include: typeof contactInclude }>;
 
-async function liveCrmPerson(client: TwentyClient | null, c: SandboxContact): Promise<{ id: string; name: string } | null> {
-  const local = await crmMatch({ bellwetherContactId: c.bellwetherContactId, firstName: c.firstName, lastName: c.lastName, email: c.email, additionalEmails: c.additionalEmails, phone: c.phone, phoneType: c.phoneType ?? 'unknown', additionalPhones: readExtraPhones(c.additionalPhones), linkedinUrl: c.linkedinUrl, individualCrd: c.individualCrd, companyName: c.companyName, companyDomain: c.companyDomain, companyCrd: c.companyCrd, companyPhone: c.companyPhone });
-  if (local) return { id: local.person.id, name: `${local.person.firstName} ${local.person.lastName}`.trim() };
+/**
+ * The person Twenty has for this contact now. Cadence's copy is asked first, but it can still hold
+ * someone Twenty no longer has: deleted or merged there since the last sync, removed by the sandbox
+ * CRM cleanup, or (with the built-in fake) held by one process only. A cached hit is therefore read
+ * live before the dialog offers to attach to it; a gone person is marked deleted in the copy and the
+ * next match is tried. Only when Twenty cannot be reached does the copy answer on its own.
+ */
+export async function liveCrmPerson(client: TwentyClient | null, c: SandboxContact): Promise<{ id: string; name: string } | null> {
+  const input = { bellwetherContactId: c.bellwetherContactId, firstName: c.firstName, lastName: c.lastName, email: c.email, additionalEmails: c.additionalEmails, phone: c.phone, phoneType: c.phoneType ?? 'unknown', additionalPhones: readExtraPhones(c.additionalPhones), linkedinUrl: c.linkedinUrl, individualCrd: c.individualCrd, companyName: c.companyName, companyDomain: c.companyDomain, companyCrd: c.companyCrd, companyPhone: c.companyPhone };
+  for (let tries = 0; tries < 3; tries++) {
+    const local = await crmMatch(input);
+    if (!local) break;
+    const cached = { id: local.person.id, name: `${local.person.firstName} ${local.person.lastName}`.trim() };
+    if (!client) return cached;
+    let live: Awaited<ReturnType<TwentyClient['getPerson']>>;
+    try { live = await client.getPerson(local.person.id); } catch { return cached; }
+    if (live && !live.deletedAt) return { id: live.id, name: `${live.firstName} ${live.lastName}`.trim() || cached.name };
+    await markPersonDeleted(local.person.id, live?.deletedAt ? new Date(live.deletedAt) : new Date());
+  }
   if (!client) return null;
   const phones = [c.phone, ...readExtraPhones(c.additionalPhones).filter((p) => p.type === 'direct' || p.type === 'mobile').map((p) => p.number)].filter((p): p is string => Boolean(p));
   const found = await client.findPeople({ emails: [c.email, ...c.additionalEmails].filter((e): e is string => Boolean(e)), phones: c.phoneType === 'direct' || c.phoneType === 'mobile' ? phones : phones.slice(1), linkedinUrls: c.linkedinUrl ? [c.linkedinUrl] : [] }).catch(() => []);
@@ -99,14 +121,14 @@ export async function preflightMove(contactIds: string[], actor: Actor): Promise
   const limit = Math.min(MOVE_LIMIT, settings.sandbox.moveBatchLimit);
   const ids = [...new Set(contactIds)];
   if (ids.length > limit) return { items: [], limit, refused: `You selected ${ids.length} contacts. Move at most ${limit} at a time.` };
-  const contacts = await prisma.sandboxContact.findMany({ where: { id: { in: ids } }, include: contactInclude });
+  const contacts = await prisma.sandboxContact.findMany({ where: { id: { in: ids } }, include: { ...contactInclude, nextActions: { where: { personId: null, state: 'OPEN' }, select: { label: true, action: true, dueDate: true }, take: 1 } } });
   let client: TwentyClient | null = null;
   try { client = await getTwentyClient(); } catch { client = null; }
   const items: PreflightItem[] = [];
   for (const c of contacts) {
     const name = `${c.firstName} ${c.lastName}`.trim();
     const ready = checkReady(c, { owner: c.owner, podName: c.pod?.name ?? null, settings: settings.sandbox });
-    const base = { contactId: c.id, name, missing: ready.missing, reason: null, firm: { action: 'none' } as FirmPlan, crmPerson: null };
+    const base = { contactId: c.id, name, missing: ready.missing, reason: null, firm: { action: 'none' } as FirmPlan, crmPerson: null, nextStep: c.nextActions[0] ?? null };
     if (!canMoveToCrm(actor, c)) { items.push({ ...base, state: 'refused', reason: 'Not yours to move' }); continue; }
     if (c.status !== 'ACTIVE') { items.push({ ...base, state: 'refused', reason: c.status === 'MOVED' ? 'Already in the CRM' : 'No longer in the sandbox' }); continue; }
     const dedupeInput = { bellwetherContactId: c.bellwetherContactId, firstName: c.firstName, lastName: c.lastName, email: c.email, additionalEmails: c.additionalEmails, phone: c.phone, phoneType: c.phoneType ?? 'unknown', additionalPhones: readExtraPhones(c.additionalPhones), linkedinUrl: c.linkedinUrl, individualCrd: c.individualCrd, companyName: c.companyName, companyDomain: c.companyDomain, companyCrd: c.companyCrd, companyPhone: c.companyPhone };
@@ -130,7 +152,12 @@ export async function preflightMove(contactIds: string[], actor: Actor): Promise
 
 export type MoveSelection = { contactId: string; mode: 'create' | 'attach'; attachPersonId?: string | null; companyId?: string | null };
 
-export async function queueMove(selection: MoveSelection[], actor: Actor, audit: AuditActor): Promise<{ ok: true; moveId: string; queued: number; left: { name: string; reason: string }[] } | { ok: false; error: string }> {
+/**
+ * The next step, when given, replaces each moved contact's open next action, for the contact's owner.
+ * The move hands that next action to the person, so it shows in Tasks and is written to Twenty. A
+ * person already in Twenty with an open next action keeps theirs (handOver).
+ */
+export async function queueMove(selection: MoveSelection[], actor: Actor, audit: AuditActor, nextStep?: MoveNextStep): Promise<{ ok: true; moveId: string; queued: number; left: { name: string; reason: string }[] } | { ok: false; error: string }> {
   const preflight = await preflightMove(selection.map((s) => s.contactId), actor);
   if (preflight.refused) return { ok: false, error: preflight.refused };
   const byId = new Map(preflight.items.map((i) => [i.contactId, i]));
@@ -140,18 +167,19 @@ export async function queueMove(selection: MoveSelection[], actor: Actor, audit:
     const item = byId.get(sel.contactId);
     if (!item) continue;
     if (item.state === 'refused') { left.push({ name: item.name, reason: item.reason ?? 'Cannot move' }); continue; }
-    if (item.state === 'attach' || sel.mode === 'attach') {
-      const personId = sel.attachPersonId ?? item.crmPerson?.id;
-      if (!personId) { left.push({ name: item.name, reason: 'No CRM person to attach to' }); continue; }
-      accepted.push({ sel: { ...sel, mode: 'attach', attachPersonId: personId }, item });
+    // This check, made now, decides: the dialog's answer may be minutes old, and the person it
+    // offered may have left Twenty since (the cleanup, a merge). Attach goes to whoever Twenty has now.
+    if (item.state === 'attach' && item.crmPerson) {
+      accepted.push({ sel: { ...sel, mode: 'attach', attachPersonId: item.crmPerson.id }, item });
       continue;
     }
     if (item.state === 'needs') { left.push({ name: item.name, reason: item.missing.map((m) => m.text).join(', ') }); continue; }
     if (item.firm.action === 'choose' && !sel.companyId) { left.push({ name: item.name, reason: 'Choose which firm in Twenty' }); continue; }
-    accepted.push({ sel, item });
+    accepted.push({ sel: { ...sel, mode: 'create', attachPersonId: null }, item });
   }
   if (!accepted.length) return { ok: false, error: left.length ? `Nothing to move. ${left.map((l) => `${l.name}: ${l.reason}`).join('; ')}.` : 'Select contacts to move.' };
   const contacts = await prisma.sandboxContact.findMany({ where: { id: { in: accepted.map((a) => a.sel.contactId) } } });
+  if (nextStep) for (const c of contacts) await setSandboxNextAction(c.id, { ...nextStep, foUserId: c.ownerId ?? actor.id }, { ...audit, id: actor.id });
   const snapshotOf = new Map(contacts.map((c) => [c.id, c]));
   const move = await prisma.sandboxMove.create({
     data: {
@@ -224,10 +252,24 @@ async function handOver(contactId: string, personId: string, actor: AuditActor, 
   });
 }
 
+/** A claim older than this belongs to a process that died mid-item; the queue takes the item back. */
+export const MOVE_CLAIM_STALE_MS = 10 * 60_000;
+
+/**
+ * Take the item for this process. The dialog's own request moves up to three at once while the
+ * worker works the queue; without a claim both took the same item, each with its own Twenty client.
+ */
+async function claimItem(itemId: string): Promise<boolean> {
+  const at = new Date();
+  const stale = new Date(at.getTime() - MOVE_CLAIM_STALE_MS);
+  const r = await prisma.sandboxMoveItem.updateMany({ where: { id: itemId, OR: [{ state: { in: ['QUEUED', 'FAILED'] } }, { state: 'RUNNING', claimedAt: { lt: stale } }] }, data: { state: 'RUNNING', claimedAt: at } });
+  return r.count === 1;
+}
+
 /** One item: idempotent, so a retry after a crash finds what the first attempt created. */
 export async function processMoveItem(itemId: string, now = new Date()): Promise<SandboxMoveItem['state']> {
+  if (!(await claimItem(itemId))) return (await prisma.sandboxMoveItem.findUniqueOrThrow({ where: { id: itemId }, select: { state: true } })).state;
   const item = await prisma.sandboxMoveItem.findUniqueOrThrow({ where: { id: itemId }, include: { move: true } });
-  if (item.state !== 'QUEUED' && item.state !== 'FAILED') return item.state;
   const contact = await prisma.sandboxContact.findUnique({ where: { id: item.sandboxContactId }, include: contactInclude });
   if (!contact || contact.status !== 'ACTIVE') { await fail(item, 'This contact is no longer in the sandbox.'); return 'FAILED'; }
   const settings = await getSettings();
@@ -241,12 +283,28 @@ export async function processMoveItem(itemId: string, now = new Date()): Promise
     let companyId = item.twentyCompanyId;
     let companyAction = item.companyAction;
     let personUpdatedAt = item.personUpdatedAt;
-    if (item.mode === 'attach') {
-      const person = item.attachPersonId ? await client.getPerson(item.attachPersonId) : null;
-      if (!person || person.deletedAt) { await fail(item, 'The CRM person to attach to no longer exists.'); return 'FAILED'; }
-      personId = person.id; companyId = person.companyId; companyAction = 'none'; personUpdatedAt = person.updatedAt;
-      if (!dryRun) await upsertPersonCache(person);
-    } else if (!personId) {
+    let mode = item.mode;
+    if (mode === 'attach') {
+      let person = item.attachPersonId ? await client.getPerson(item.attachPersonId) : null;
+      if (!person || person.deletedAt) {
+        // The person chosen at queue time has left Twenty since: whoever Twenty has for this contact
+        // now, or else the move creates them, as it would have if the dialog had found nobody.
+        if (item.attachPersonId) await markPersonDeleted(item.attachPersonId, person?.deletedAt ? new Date(person.deletedAt) : now);
+        const other = await liveCrmPerson(client, contact);
+        person = other ? await client.getPerson(other.id) : null;
+      }
+      if (person && !person.deletedAt) {
+        personId = person.id; companyId = person.companyId; companyAction = 'none'; personUpdatedAt = person.updatedAt;
+        if (person.id !== item.attachPersonId) await prisma.sandboxMoveItem.update({ where: { id: item.id }, data: { attachPersonId: person.id } });
+        if (!dryRun) await upsertPersonCache(person);
+      } else {
+        const ready = checkReady(contact, { owner: contact.owner, podName: contact.pod?.name ?? null, settings: settings.sandbox });
+        if (!ready.ready) { await fail(item, `The CRM person to attach to is no longer in Twenty, and Cadence cannot create them until the contact has ${ready.missing.map((m) => m.text.toLowerCase()).join(', ')}.`); return 'FAILED'; }
+        mode = 'create';
+        await prisma.sandboxMoveItem.update({ where: { id: item.id }, data: { mode, attachPersonId: null } });
+      }
+    }
+    if (mode === 'create' && !personId) {
       // A retry first looks for the person an earlier attempt created.
       const earlier = await client.findPeople({ emails: contact.email ? [contact.email] : [], cadenceSandboxId: contact.id });
       const ours = earlier.find((p) => (p.raw as Record<string, unknown> | undefined)?.cadenceSandboxId === contact.id || (p.createdBySource === 'API' && new Date(p.createdAt) >= item.move.createdAt && normalizeEmail(p.email) === contact.email));
@@ -294,7 +352,7 @@ export async function processMoveItem(itemId: string, now = new Date()): Promise
     }
     await prisma.sandboxContact.update({ where: { id: contact.id }, data: { status: 'MOVED', movedAt: now, movedById: item.move.createdById, twentyPersonId: personId, twentyCompanyId: companyId, statusChangedAt: now } });
     await prisma.sandboxMoveItem.update({ where: { id: item.id }, data: { state: 'DONE', twentyPersonId: personId, twentyCompanyId: companyId, companyAction, notesWritten: notes, personUpdatedAt, error: null, doneAt: now, attempts: { increment: 1 } } });
-    await logAudit({ entityType: 'sandbox_contact', entityId: contact.id, action: 'sandbox_moved', actor, details: { moveId: item.moveId, personId, companyId, companyAction, mode: item.mode, notes: notes.length } });
+    await logAudit({ entityType: 'sandbox_contact', entityId: contact.id, action: 'sandbox_moved', actor, details: { moveId: item.moveId, personId, companyId, companyAction, mode, notes: notes.length } });
     return 'DONE';
   } catch (err) {
     await fail(item, err instanceof Error ? err.message : String(err));
@@ -305,18 +363,25 @@ export async function processMoveItem(itemId: string, now = new Date()): Promise
 /** Every tick: queued items one at a time, paced under Twenty's 100 requests a minute. */
 export async function runMoveQueue(opts: { now?: Date; maxItems?: number; pauseMs?: number } = {}): Promise<{ done: number; failed: number; dryRun: number }> {
   const stats = { done: 0, failed: 0, dryRun: 0 };
-  const items = await prisma.sandboxMoveItem.findMany({ where: { state: 'QUEUED' }, orderBy: [{ move: { createdAt: 'asc' } }, { id: 'asc' }], take: opts.maxItems ?? 12, select: { id: true, moveId: true } });
+  const stale = new Date(Date.now() - MOVE_CLAIM_STALE_MS);
+  const items = await prisma.sandboxMoveItem.findMany({ where: { OR: [{ state: 'QUEUED' }, { state: 'RUNNING', claimedAt: { lt: stale } }] }, orderBy: [{ move: { createdAt: 'asc' } }, { id: 'asc' }], take: opts.maxItems ?? 12, select: { id: true, moveId: true } });
   const moves = new Set(items.map((i) => i.moveId));
   if (moves.size) await prisma.sandboxMove.updateMany({ where: { id: { in: [...moves] }, state: 'QUEUED' }, data: { state: 'RUNNING' } });
   for (const i of items) {
     const state = await processMoveItem(i.id, opts.now);
+    // RUNNING: another process holds it (the dialog's own request) and counts it there.
+    if (state === 'RUNNING') continue;
     if (state === 'DONE') stats.done++; else if (state === 'DRY_RUN') stats.dryRun++; else stats.failed++;
     if (opts.pauseMs) await new Promise((r) => setTimeout(r, opts.pauseMs));
   }
-  for (const id of moves) {
-    if (!(await prisma.sandboxMoveItem.count({ where: { moveId: id, state: 'QUEUED' } }))) await prisma.sandboxMove.update({ where: { id }, data: { state: 'DONE', finishedAt: opts.now ?? new Date() } });
-  }
+  for (const id of moves) await finishMoveIfSettled(id, opts.now ?? new Date());
   return stats;
+}
+
+/** A move is done when none of its items waits or runs. */
+export async function finishMoveIfSettled(moveId: string, now = new Date()): Promise<void> {
+  if (await prisma.sandboxMoveItem.count({ where: { moveId, state: { in: ['QUEUED', 'RUNNING'] } } })) return;
+  await prisma.sandboxMove.updateMany({ where: { id: moveId, state: { not: 'DONE' } }, data: { state: 'DONE', finishedAt: now } });
 }
 
 export async function retryFailedItems(moveId: string): Promise<number> {

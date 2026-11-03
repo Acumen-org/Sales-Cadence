@@ -49,6 +49,9 @@ export default defineConfig({
       ADMIN_PASSWORD: 'admin12345',
       TWENTY_MODE: 'mock',
       CADENCE_ALLOW_MOCK: '1',
+      // Each process keeps its own fake Twenty here, as before: with one shared fake the worker's
+      // five-minute sandbox cleanup could act between a spec's own steps (src/lib/twenty/mock-store.ts).
+      MOCK_TWENTY_SHARED: '0',
       TWENTY_API_URL: 'http://twenty.local:3000',
       APP_URL: `http://localhost:${PORT}`,
       // The outreach sandbox spec plays Bellwether (this key is a test value, not a secret) and

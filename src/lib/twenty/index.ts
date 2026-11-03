@@ -5,6 +5,7 @@ import { getTwentyConnection, getTwentySchema } from '../settings';
 import type { TwentyClient } from './client';
 import { TwentyGraphqlClient } from './graphql-client';
 import { getMockTwentyClient } from './mock-client';
+import { mockStoreEnabled, sharedMock } from './mock-store';
 import type { CreateNoteInput, UpdateNoteInput, TwentyMeetingSchema, TwentyMeetingRecordInput, TwentyTagField, CreateTaskInput, UpdateTaskInput, EnrichPersonInput, PersonNextActionInput, EnrichCompanyInput, TwentyPerson, TwentyCompany, CreatePersonInput, CreateCompanyInput } from './types';
 import { blankPerson } from './mock-client';
 
@@ -141,7 +142,8 @@ export async function getTwentyClient(): Promise<TwentyClient> {
     if (env().CADENCE_ALLOW_MOCK !== '1') {
       throw new Error('TWENTY_MODE=mock needs CADENCE_ALLOW_MOCK=1. Set TWENTY_MODE=graphql and configure TWENTY_API_URL and TWENTY_API_KEY.');
     }
-    base = getMockTwentyClient();
+    // Web and worker share the fake's records through the database (mock-store.ts).
+    base = mockStoreEnabled() ? sharedMock(getMockTwentyClient()) : getMockTwentyClient();
   } else {
     if (!conn.baseUrl || !conn.apiKey) {
       throw new Error('TWENTY_MODE=graphql but TWENTY_API_URL / TWENTY_API_KEY are not configured (env or Settings > Twenty).');

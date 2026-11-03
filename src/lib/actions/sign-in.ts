@@ -8,7 +8,8 @@ import { env } from '../env';
 import { getSettings, saveSettingsSection } from '../settings';
 import type { ActionResult } from './users';
 
-const guid = z.string().uuid();
+// Any 8-4-4-4-12 hex id, as Zod 3's uuid() took; Zod 4's uuid() also wants RFC version bits.
+const guid = z.guid();
 
 /** Microsoft accepts the app, tenant and secret together only when they belong together. */
 async function microsoftAccepts(clientId: string, tenantId: string, secret: string): Promise<string | null> {
