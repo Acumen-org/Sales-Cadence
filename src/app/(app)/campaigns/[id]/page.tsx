@@ -35,6 +35,8 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
   const { id } = await params;
   const sp = await searchParams;
   const today = todayIn(user.timezone);
+  // A sandbox campaign has its own page in the Sandbox section.
+  if ((await prisma.campaign.findUnique({ where: { id }, select: { audience: true } }))?.audience === 'SANDBOX') redirect(`/sandbox/campaigns/${id}`);
   const detail = await campaignDetail(id, today);
   if (!detail) notFound();
   const { campaign, history, summary, byStep, byFo, podFos, enrollments } = detail;

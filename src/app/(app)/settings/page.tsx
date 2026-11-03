@@ -33,6 +33,11 @@ import { missingMeetingTags } from '@/lib/meetings/crm';
 import { meetingsNotFromCadence } from '@/lib/meetings/crm-check';
 import { sharePointPlayerStatus } from '@/lib/meetings/sharepoint-player';
 import { teamsTranscriptStatus } from '@/lib/meetings/teams-transcript';
+import { graphMailState } from '@/lib/mail/graph-mail';
+import { getTwilioReader, twilioStatus } from '@/lib/calls/twilio';
+import { importStatus } from '@/lib/calls/import';
+import { toE164 } from '@/lib/sandbox/normalize';
+import { CallerNumberRow, CallingSettingsForm, ImportNowButton, SandboxSettingsForm, SuppressionForm } from '@/components/settings/sandbox-settings';
 
 const TABS = [
   { key: 'twenty', label: 'Twenty' },
@@ -40,6 +45,8 @@ const TABS = [
   { key: 'sync', label: 'Sync out' },
   { key: 'users', label: 'Team & pods' },
   { key: 'signin', label: 'Sign-in' },
+  { key: 'calling', label: 'Calling' },
+  { key: 'sandbox', label: 'Sandbox' },
   { key: 'blocked', label: 'Blocked accounts' },
   { key: ASSISTANT_SETTINGS_TAB, label: ASSISTANT_NAME },
   { key: 'activity', label: 'Activity log' },
@@ -73,6 +80,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       {tab === 'sync' ? <SyncForm sync={settings.sync} /> : null}
       {tab === 'users' ? <UsersTab selfId={user.id} /> : null}
       {tab === 'signin' ? <SignInTab /> : null}
+      {tab === 'calling' ? <CallingTab timezone={user.timezone} /> : null}
+      {tab === 'sandbox' ? <SandboxTab timezone={user.timezone} /> : null}
       {tab === 'blocked' ? <BlockedTab timezone={user.timezone} /> : null}
       {tab === ASSISTANT_SETTINGS_TAB ? <AssistantTab /> : null}
       {tab === 'activity' ? <ActivityTab /> : null}
@@ -155,6 +164,7 @@ async function SignInTab() {
   const fromServer = Boolean(e.MICROSOFT_CLIENT_ID || e.MICROSOFT_TENANT_ID || e.MICROSOFT_CLIENT_SECRET);
   const passwords = !methods.password ? `Off since ${formatInstant(new Date(signIn.passwordRetiredAt!), workspaceTimezone())}` : methods.microsoft && !signIn.passwordRetiredAt ? 'On until the first Microsoft sign-in' : 'On';
   const [recordings, transcripts] = methods.microsoft ? await Promise.all([sharePointPlayerStatus(), teamsTranscriptStatus()]) : [null, null];
+  const mail = await graphMailState();
   return (
     <Card title="Microsoft sign-in">
       <div className="p-4">
@@ -164,6 +174,7 @@ async function SignInTab() {
           { k: 'Redirect URI', v: <code className="text-[12px]">{microsoftRedirectUri()}</code> },
           ...(recordings ? [{ k: 'SharePoint recordings', v: recordings.plays ? <Badge tone="green">Play in Cadence</Badge> : <span className="flex flex-wrap items-center gap-2"><Badge>Open in SharePoint</Badge><span className="text-[12.5px] text-ink-600">{recordings.why}</span></span> }] : []),
           ...(transcripts ? [{ k: 'Teams transcripts', v: transcripts.fetches ? <Badge tone="green">Fetched automatically</Badge> : <span className="flex flex-wrap items-center gap-2"><Badge>Pasted by hand</Badge><span className="text-[12.5px] text-ink-600">{transcripts.why}</span></span> }] : []),
+          { k: 'Sales mailboxes (Mail.Read)', v: !mail.enabled ? <Badge>Off</Badge> : mail.refusal ? <span className="flex flex-wrap items-center gap-2"><Badge tone="amber">Refused</Badge><span className="text-[12.5px] text-ink-600">{mail.refusal}</span></span> : mail.lastRunAt ? <span className="flex items-center gap-2"><Badge tone="green">Read</Badge><span className="text-[12.5px] text-ink-600">{mail.mailboxes} mailboxes · {formatInstant(mail.lastRunAt, workspaceTimezone())}</span></span> : <Badge>Waiting for the first run</Badge> },
           ...(fromServer ? [{ k: 'Set by', v: 'The server' }] : []),
         ]} />
       </div>
@@ -401,4 +412,63 @@ async function ActivityTab() {
       </Card>
     </div>
   );
+}
+
+async function CallingTab({ timezone }: { timezone: string }) {
+  const settings = await getSettings();
+  const status = twilioStatus();
+  const [last, users] = await Promise.all([importStatus(), prisma.user.findMany({ where: { active: true }, select: { id: true, name: true, aliases: true, callerNumber: true }, orderBy: { name: 'asc' } })]);
+  let numbers: { phoneNumber: string; friendlyName: string }[] = [];
+  let numbersError: string | null = null;
+  try { numbers = status.configured ? (await getTwilioReader()?.listNumbers()) ?? [] : []; } catch (err) { numbersError = err instanceof Error ? err.message : String(err); }
+  // Suggested from the number's friendly name: the rep whose name or tw_ handle it carries.
+  const suggest = (friendly: string) => {
+    const f = friendly.toLowerCase();
+    return users.find((u) => u.aliases.some((a) => a && f.includes(a.toLowerCase().replace(/^tw_/, ''))) || f.includes(u.name.toLowerCase().split(' ')[0]))?.id ?? null;
+  };
+  return <div className="space-y-3">
+    <Card title="Twilio" actions={status.configured ? <ImportNowButton /> : null}>
+      <div className="p-4"><KeyValue items={[
+        { k: 'Connection', v: status.configured ? <Badge tone="green">{status.fake ? 'Stand-in (tests)' : 'Read only'}</Badge> : <span className="flex flex-wrap items-center gap-2"><Badge>Off</Badge><span className="text-[12.5px] text-ink-600">Missing {status.missing.join(', ')}</span></span> },
+        { k: 'Last import', v: last.lastRunAt ? formatInstant(new Date(last.lastRunAt), timezone) : <Empty /> },
+        ...(last.lastError ? [{ k: 'Twilio said', v: <span className="text-red-700">{last.lastError}</span> }] : []),
+      ]} /></div>
+    </Card>
+    <Card title="Numbers and reps">
+      <div className="space-y-2 p-4 text-[13px]">
+        {numbersError ? <p className="text-red-700">{numbersError}</p> : null}
+        {numbers.map((n) => { const e164 = toE164(n.phoneNumber) ?? n.phoneNumber; return <CallerNumberRow key={e164} number={e164} friendlyName={n.friendlyName} userId={users.find((u) => u.callerNumber === e164)?.id ?? null} suggestion={suggest(n.friendlyName)} users={users.map((u) => ({ id: u.id, name: u.name }))} />; })}
+        {!numbers.length && !numbersError ? <p className="text-ink-500">{status.configured ? 'No numbers on the account' : 'Connect Twilio to see its numbers'}</p> : null}
+      </div>
+    </Card>
+    <Card title="Calling hours and connects"><CallingSettingsForm c={settings.calling} /></Card>
+  </div>;
+}
+
+async function SandboxTab({ timezone }: { timezone: string }) {
+  const e = env();
+  const settings = await getSettings();
+  const week = new Date(Date.now() - 7 * 86_400_000);
+  const [lastPush, pushes, created, suppressions, suppressionCount] = await Promise.all([
+    prisma.bellwetherPush.findFirst({ orderBy: { createdAt: 'desc' }, select: { createdAt: true, pushedByEmail: true } }),
+    prisma.bellwetherPush.count({ where: { createdAt: { gte: week } } }),
+    prisma.sandboxContact.count({ where: { createdAt: { gte: week }, source: 'BELLWETHER' } }),
+    prisma.suppression.findMany({ orderBy: { createdAt: 'desc' }, take: 50 }),
+    prisma.suppression.count(),
+  ]);
+  return <div className="space-y-3">
+    <Card title="Bellwether">
+      <div className="p-4"><KeyValue items={[
+        { k: 'Key', v: e.BELLWETHER_API_KEY ? <Badge tone="green">Set</Badge> : <Badge>Not set</Badge> },
+        { k: 'Previous key', v: e.BELLWETHER_API_KEY_PREVIOUS ? 'Accepted during the rotation' : <Empty /> },
+        { k: 'Last push', v: lastPush ? `${formatInstant(lastPush.createdAt, timezone)} · ${lastPush.pushedByEmail}` : <Empty /> },
+        { k: 'Last 7 days', v: <span className="tabular-nums">{pushes} pushes · {created} contacts</span> },
+      ]} /></div>
+    </Card>
+    <Card title="Sandbox rules"><SandboxSettingsForm s={settings.sandbox} /></Card>
+    <Card title="Suppression list" actions={<Count value={suppressionCount} />}>
+      <SuppressionForm />
+      <table className="w-full text-[13px]"><tbody className="divide-y divide-line">{suppressions.map((s) => <tr key={s.id}><td className="px-4 py-2 tabular-nums">{s.label ?? s.kind}</td><td className="px-4 py-2 text-ink-600">{s.kind.replace('_', ' ')}</td><td className="px-4 py-2 text-ink-600">{s.reason.replace('_', ' ')}</td><td className="px-4 py-2 tabular-nums text-ink-500">{formatInstant(s.createdAt, timezone)}</td></tr>)}</tbody></table>
+    </Card>
+  </div>;
 }

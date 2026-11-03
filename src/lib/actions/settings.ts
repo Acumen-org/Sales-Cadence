@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { requireAdmin } from '../auth/current-user';
 import { logAudit, userActor } from '../audit';
-import { getSettings, MatchingSettingsSchema, RulesSettingsSchema, saveSettingsSection, SyncSettingsSchema, TwentySettingsSchema } from '../settings';
+import { CallingSettingsSchema, getSettings, MatchingSettingsSchema, RulesSettingsSchema, SandboxSettingsSchema, saveSettingsSection, SyncSettingsSchema, TwentySettingsSchema } from '../settings';
 import { applyNeverProspectRule } from '../non-prospects';
 import type { ActionResult } from './users';
 import { issueText } from '../form-errors';
@@ -149,4 +149,44 @@ export async function applyNeverProspectRuleAction(): Promise<ActionResult> {
   revalidatePath('/accounts');
   revalidatePath('/people');
   return { ok: true, message: applied.blocked.length ? `${applied.blocked.length} account${applied.blocked.length === 1 ? '' : 's'} blocked.` : 'Nothing new to block.' };
+}
+
+/** Settings > Sandbox: the CRM-ready rules, what Move to CRM writes, the bulk limit (at most 50), undo and retention. */
+export async function saveSandboxSettingsAction(formData: FormData): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  const num = (k: string) => (formData.get(k) ? Number(formData.get(k)) : undefined);
+  const parsed = SandboxSettingsSchema.safeParse({
+    enabled: bool(formData.get('enabled')),
+    moveBatchLimit: num('moveBatchLimit'),
+    undoDays: num('undoDays'),
+    retentionInactiveDays: num('retentionInactiveDays'),
+    retentionUnworkedDays: num('retentionUnworkedDays'),
+    leadSource: String(formData.get('leadSource') ?? '').trim() || undefined,
+    leadSourceFallback: String(formData.get('leadSourceFallback') ?? '').trim() || undefined,
+    contactType: list(formData.get('contactType')),
+    listCategory: String(formData.get('listCategory') ?? '').trim() || undefined,
+    pipelineStage: String(formData.get('pipelineStage') ?? '').trim() || undefined,
+    requireFirm: bool(formData.get('requireFirm')),
+    requireEmailOrPhone: bool(formData.get('requireEmailOrPhone')),
+    requireOwnerLogin: bool(formData.get('requireOwnerLogin')),
+    requirePod: bool(formData.get('requirePod')),
+  });
+  if (!parsed.success) return { ok: false, error: issues(parsed.error) };
+  await saveSettingsSection('sandbox', parsed.data);
+  await logAudit({ entityType: 'settings', entityId: 'sandbox', action: 'updated', actor: userActor(admin), details: parsed.data });
+  revalidatePath('/settings');
+  return { ok: true, message: 'Sandbox settings saved.' };
+}
+
+/** Settings > Calling: calling hours on Cadence's own Call button, and what counts as a connect. */
+export async function saveCallingSettingsAction(formData: FormData): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  const num = (k: string) => (formData.get(k) ? Number(formData.get(k)) : undefined);
+  const parsed = CallingSettingsSchema.safeParse({ callingHours: String(formData.get('callingHours') ?? 'block'), startHour: num('startHour'), endHour: num('endHour'), connectSeconds: num('connectSeconds'), conversationSeconds: num('conversationSeconds') });
+  if (!parsed.success) return { ok: false, error: issues(parsed.error) };
+  if (parsed.data.endHour <= parsed.data.startHour) return { ok: false, error: 'Calling hours must end after they start.' };
+  await saveSettingsSection('calling', parsed.data);
+  await logAudit({ entityType: 'settings', entityId: 'calling', action: 'updated', actor: userActor(admin), details: parsed.data });
+  revalidatePath('/settings');
+  return { ok: true, message: 'Calling settings saved.' };
 }

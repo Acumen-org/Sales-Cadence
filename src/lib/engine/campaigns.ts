@@ -47,6 +47,8 @@ export async function activateCampaign(id: string, ctx: EngineContext = { actor:
   const now = ctx.now ?? new Date();
   const campaign = await prisma.campaign.findUnique({ where: { id }, include: { sequence: true, pod: true } });
   if (!campaign || campaign.status !== 'SCHEDULED' || campaign.startDate > todayIn(workspaceTimezone(), now)) return { enrolled: 0, skipped: 0 };
+  // A sandbox campaign's people are sandbox contacts: the same engine, its own audience rules.
+  if (campaign.audience === 'SANDBOX') return (await import('../sandbox/campaigns')).activateSandboxCampaign(id, ctx);
   if (campaign.plannerDraft) return activateCalendarCampaign(id, ctx);
   if (campaign.pod.archived || campaign.sequence.archived) throw new Error(campaign.pod.archived ? `Not started: ${campaign.pod.name} has been archived.` : `Not started: its sequence, ${campaign.sequence.name}, has been archived.`);
   let ids = campaign.personIds;

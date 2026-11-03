@@ -10,6 +10,12 @@ import { Notice, Surface, ViewHeader } from '@/components/ui';
 import { BreakdownSwitch } from '@/components/reports/breakdown-switch';
 import { ReportToolbar } from '@/components/reports/report-toolbar';
 import { BREAKDOWNS, BreakdownTable, ReportDocument, type BreakdownKey } from '@/components/reports/report-document';
+import { Tabs } from '@/components/ui';
+import { CallsReport, SandboxAndPlatform } from '@/components/reports/calls-report';
+import { callReport, sandboxReport } from '@/lib/calls/analytics';
+import { canAttachCalls } from '@/lib/auth/rbac';
+import { startOfLocalDay } from '@/lib/dates';
+import { prisma } from '@/lib/db';
 
 /**
  * One page for one period: what was sent, what came back and the meetings, beside the period
@@ -17,7 +23,7 @@ import { BREAKDOWNS, BreakdownTable, ReportDocument, type BreakdownKey } from '@
  * and channel. The range presets are the ones a leader actually asks for; weeks run Monday to
  * Sunday, as on Home.
  */
-type Search = { tab?: string; from?: string; to?: string; pod?: string; fo?: string };
+type Search = { tab?: string; from?: string; to?: string; pod?: string; fo?: string; view?: string };
 
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<Search> }) {
   const user = await requireUser();
@@ -27,8 +33,15 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const tab: BreakdownKey = BREAKDOWNS.some((b) => b.key === sp.tab) ? (sp.tab as BreakdownKey) : 'fos';
   const bundle = await loadReportBundle(user, sp);
   const { today, range, podId, foUserId, pods, users, reports, previous, campaigns, scope } = bundle;
+  const view = sp.view === 'calls' ? 'calls' : 'outreach';
+  const period = { from: startOfLocalDay(range.from, reportingTimezone()), to: startOfLocalDay(addDays(range.to, 1), reportingTimezone()), podId, foUserId };
+  const [calls, sandbox, reps] = await Promise.all([
+    view === 'calls' ? callReport(period) : Promise.resolve(null),
+    view === 'outreach' ? sandboxReport(period) : Promise.resolve(null),
+    view === 'calls' ? prisma.user.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } }) : Promise.resolve([]),
+  ]);
   const query = (patch: Record<string, string | null | undefined>) => {
-    const params = new URLSearchParams({ tab, from: range.from, to: range.to });
+    const params = new URLSearchParams({ tab, from: range.from, to: range.to, ...(view === 'calls' ? { view } : {}) });
     params.set('pod', podId ?? '');
     params.set('fo', foUserId ?? '');
     for (const [k, v] of Object.entries(patch)) { if (v === null || v === undefined) params.delete(k); else params.set(k, v); }
@@ -56,12 +69,16 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         {range.error ? <div className="mt-3"><Notice tone="error">{range.error}</Notice></div> : null}
       </Surface>
 
-      <ReportDocument reports={reports} previous={previous} range={{ from: range.from, to: range.to }} compared={bundle.previousRange} scope={scope} campaigns={campaigns} breakdown={
+      <Surface flush><Tabs inset={false} current={view} tabs={[{ key: 'outreach', label: 'Outreach', href: query({ view: null }) }, { key: 'calls', label: 'Calls', href: query({ view: 'calls' }) }]} /></Surface>
+
+      {calls ? <CallsReport data={calls} timezone={user.timezone} reps={reps} mayAttach={canAttachCalls(toActor(user))} /> : null}
+      {view === 'outreach' ? <><ReportDocument reports={reports} previous={previous} range={{ from: range.from, to: range.to }} compared={bundle.previousRange} scope={scope} campaigns={campaigns} breakdown={
         <Surface flush>
           <ViewHeader title="Breakdown" />
           <BreakdownSwitch initial={tab} panels={BREAKDOWNS.map((b) => ({ key: b.key, label: b.label, href: query({ tab: b.key }), node: <BreakdownTable tab={b.key} reports={reports} previous={previous} /> }))} />
         </Surface>
       } />
+      {sandbox ? <SandboxAndPlatform data={sandbox} /> : null}</> : null}
     </PageFrame>
   );
 }
