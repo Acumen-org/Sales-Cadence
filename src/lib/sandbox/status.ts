@@ -120,14 +120,15 @@ export function decodeCursor(raw: string | null | undefined): Cursor | null | 'i
  */
 export async function statusChangedSince(since: Date, cursor: Cursor | null, limit: number): Promise<{ results: StatusRow[]; nextCursor: string | null }> {
   const after = cursor ? Prisma.sql`AND (s.at > ${new Date(cursor.at)} OR (s.at = ${new Date(cursor.at)} AND s.key > ${cursor.key}))` : Prisma.empty;
+  // Prisma keeps DateTime as UTC in timestamp columns; read them as UTC so the session's zone never shifts them.
   const keys = await prisma.$queryRaw<{ key: string; at: Date }[]>`
     SELECT s.key, s.at FROM (
       SELECT u.key, max(u.at) AS at FROM (
-        SELECT c."bellwetherContactId" AS key, c."statusChangedAt" AS at FROM "SandboxContact" c WHERE c."bellwetherContactId" IS NOT NULL
+        SELECT c."bellwetherContactId" AS key, c."statusChangedAt" AT TIME ZONE 'UTC' AS at FROM "SandboxContact" c WHERE c."bellwetherContactId" IS NOT NULL
         UNION ALL
-        SELECT a.alias AS key, c."statusChangedAt" AS at FROM "SandboxContact" c CROSS JOIN LATERAL unnest(c."bellwetherAliases") AS a(alias)
+        SELECT a.alias AS key, c."statusChangedAt" AT TIME ZONE 'UTC' AS at FROM "SandboxContact" c CROSS JOIN LATERAL unnest(c."bellwetherAliases") AS a(alias)
         UNION ALL
-        SELECT r."bellwetherContactId" AS key, r."statusChangedAt" AS at FROM "BellwetherRefusal" r
+        SELECT r."bellwetherContactId" AS key, r."statusChangedAt" AT TIME ZONE 'UTC' AS at FROM "BellwetherRefusal" r
       ) u GROUP BY u.key
     ) s
     WHERE s.at >= ${since} ${after}

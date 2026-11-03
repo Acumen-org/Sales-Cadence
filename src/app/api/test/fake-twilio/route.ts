@@ -20,7 +20,9 @@ export async function POST(req: Request) {
   if (body.action === 'addNumber') return NextResponse.json(fake.addNumber(String(body.phoneNumber), String(body.friendlyName ?? '')));
   if (body.action === 'addCall') {
     const parent = body.parentIdentity ? fake.addCall({ from: `client:${String(body.parentIdentity)}`, to: String(body.to), direction: 'inbound', durationSec: Number(body.durationSec ?? 95) }) : null;
-    const call = fake.addCall({ from: String(body.from), to: String(body.to), status: body.status ? String(body.status) : undefined, durationSec: body.durationSec != null ? Number(body.durationSec) : undefined, direction: parent ? 'outbound-dial' : String(body.direction ?? 'outbound-api'), parentCallSid: parent?.sid ?? null });
+    // Started now unless told otherwise, so it counts after the import's first run.
+    const startTime = new Date(Date.now() + Number(body.startOffsetSec ?? 0) * 1000);
+    const call = fake.addCall({ from: String(body.from), to: String(body.to), status: body.status ? String(body.status) : undefined, durationSec: body.durationSec != null ? Number(body.durationSec) : undefined, direction: parent ? 'outbound-dial' : String(body.direction ?? 'outbound-api'), parentCallSid: parent?.sid ?? null, startTime: startTime.toISOString(), endTime: new Date(startTime.getTime() + 1000).toISOString() });
     const recording = body.recording ? fake.addRecording(call.sid, Number(body.durationSec ?? 90)) : null;
     return NextResponse.json({ call, recording });
   }

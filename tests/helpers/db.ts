@@ -7,6 +7,20 @@ import { invalidateSettingsCache } from '@/lib/settings';
 import { getMockTwentyClient } from '@/lib/twenty/mock-client';
 
 const TABLES = [
+  'SandboxMoveItem',
+  'SandboxMove',
+  'BellwetherPushItem',
+  'BellwetherPush',
+  'BellwetherRefusal',
+  'CallForm',
+  'CallLog',
+  'CallIntent',
+  'SandboxEmail',
+  'SandboxNote',
+  'MailboxCursor',
+  'Suppression',
+  'NextAction',
+  'SandboxContact',
   'AuditLog',
   'TwentyWrite',
   'ActivityEvent',

@@ -50,6 +50,9 @@ const OPTIONAL = new Set([
   'person.bookingId',
   'person.city',
   'task.cadenceTaskId',
+  // Written by Move to CRM only when the workspace has them (docs/outreach-sandbox-plan.md 8.2, 8.4).
+  'person.cadenceSandboxId',
+  'company.crd',
   'workspaceMember.timeZone',
   'message.text',
   'message.messageThreadId',
