@@ -105,6 +105,39 @@ export const MOCK_MEETING_SCHEMA = (): TwentyMeetingSchema => ({
 
 type MockMeetingRecord = { data: Record<string, unknown>; contacts: TwentyMeetingRecordInput['contacts']; cadenceId: string | null; createdAt: string; updatedAt: string; addedByMemberId: string | null };
 
+/** The fake workspace's records (not its write log), as MockTwentyClient.snapshot returns them. */
+export type MockState = {
+  dataset: MockDataset;
+  seq: number;
+  people: TwentyPerson[];
+  companies: TwentyCompany[];
+  members: TwentyWorkspaceMember[];
+  notes: TwentyNote[];
+  meetingObject: TwentyMeetingSchema | null;
+  meetingRecords: Array<[string, MockMeetingRecord]>;
+  messages: TwentyMessage[];
+  calendarEvents: TwentyCalendarEvent[];
+  tasks: TwentyTask[];
+  opportunities: TwentyOpportunity[];
+  views: TwentyView[];
+  podOptions: Array<{ value: string; label: string }>;
+  webhooks: TwentyWebhook[];
+};
+
+/** Which fixtures a stored state grew from: a state kept from older fixtures is not reused. */
+const fingerprints = new Map<MockDataset, string>();
+export function mockFingerprint(kind: MockDataset = mockDataset()): string {
+  const known = fingerprints.get(kind);
+  if (known) return known;
+  const d = datasetFor(kind);
+  let h = 0;
+  const text = JSON.stringify([d.people, d.companies, d.members, d.notes, d.messages, d.tasks, d.opportunities, d.views, d.podOptions]);
+  for (let i = 0; i < text.length; i++) h = (Math.imul(h, 31) + text.charCodeAt(i)) | 0;
+  const print = `${kind}:${text.length}:${(h >>> 0).toString(16)}`;
+  fingerprints.set(kind, print);
+  return print;
+}
+
 /** A person with every field empty, for records Cadence creates. */
 export function blankPerson(id: string, now: string): TwentyPerson {
   return {
@@ -191,6 +224,27 @@ export class MockTwentyClient implements TwentyClient {
   nextId(prefix: string) {
     this.seq += 1;
     return `${prefix}-${String(this.seq).padStart(4, '0')}`;
+  }
+
+  /** Everything this fake workspace holds, as plain JSON (mock-store.ts shares it between processes). */
+  snapshot(): MockState {
+    return JSON.parse(this.stateText()) as MockState;
+  }
+
+  /** The snapshot as JSON text, for comparing before and after a call. */
+  stateText(): string {
+    return JSON.stringify({
+      dataset: this.dataset, seq: this.seq, people: this.people, companies: this.companies, members: this.members, notes: this.notes,
+      meetingObject: this.meetingObject, meetingRecords: [...this.meetingRecords.entries()], messages: this.messages, calendarEvents: this.calendarEvents,
+      tasks: this.tasks, opportunities: this.opportunities, views: this.views, podOptions: this.podOptions, webhooks: this.webhooks,
+    } satisfies MockState);
+  }
+
+  restore(s: MockState) {
+    const v = clone(s);
+    this.dataset = v.dataset; this.seq = v.seq; this.people = v.people; this.companies = v.companies; this.members = v.members; this.notes = v.notes;
+    this.meetingObject = v.meetingObject; this.meetingRecords = new Map(v.meetingRecords); this.messages = v.messages; this.calendarEvents = v.calendarEvents;
+    this.tasks = v.tasks; this.opportunities = v.opportunities; this.views = v.views; this.podOptions = v.podOptions; this.webhooks = v.webhooks;
   }
 
   private maybeFail() {
