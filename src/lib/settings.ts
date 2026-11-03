@@ -25,7 +25,7 @@ export const TwentySettingsSchema = z.object({
   /** Overrides env TWENTY_API_KEY when set. Stored in the database in plain text. */
   apiKey: z.string().trim().optional().nullable(),
   /** Field mapping overrides, merged over twenty-schema.ts defaults. */
-  schema: z.record(z.any()).optional().nullable(),
+  schema: z.record(z.string(), z.any()).optional().nullable(),
 });
 
 export const MatchingSettingsSchema = z.object({
@@ -204,14 +204,16 @@ export const CallingSettingsSchema = z.object({
   conversationSeconds: z.number().int().min(1).max(3600).default(120),
 });
 
+// .prefault, not .default: Zod 4 returns a default as given, so only a parsed {} fills in each
+// section's own defaults (what .default({}) did in Zod 3).
 export const SettingsSchema = z.object({
-  twenty: TwentySettingsSchema.default({}),
-  matching: MatchingSettingsSchema.default({}),
-  rules: RulesSettingsSchema.default({}),
-  sync: SyncSettingsSchema.default({}),
-  signIn: SignInSettingsSchema.default({}),
-  sandbox: SandboxSettingsSchema.default({}),
-  calling: CallingSettingsSchema.default({}),
+  twenty: TwentySettingsSchema.prefault({}),
+  matching: MatchingSettingsSchema.prefault({}),
+  rules: RulesSettingsSchema.prefault({}),
+  sync: SyncSettingsSchema.prefault({}),
+  signIn: SignInSettingsSchema.prefault({}),
+  sandbox: SandboxSettingsSchema.prefault({}),
+  calling: CallingSettingsSchema.prefault({}),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;

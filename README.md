@@ -52,7 +52,7 @@ The same thing from a terminal: `pnpm start:local`. Each launch builds the curre
 
 ## Stack
 
-TypeScript, Node 20+, Next.js 15 (App Router, server actions), Postgres 18, Prisma 6, Tailwind 3, Vitest 4, Playwright, Docker Compose. Tests run on an embedded Postgres 18, so no Docker is needed to run them. The existing integration targets Twenty 1.23; check your live workspace with `pnpm verify:schema`.
+TypeScript, Node 22.12+, Next.js 15 (App Router, server actions), Postgres 18, Prisma 6, Tailwind 3, Vitest 4, Playwright, Docker Compose. Tests run on an embedded Postgres 18, so no Docker is needed to run them. The existing integration targets Twenty 1.23; check your live workspace with `pnpm verify:schema`.
 
 ## Run on Windows with Docker Desktop
 
@@ -98,7 +98,7 @@ Put a reverse proxy (Caddy, nginx, Traefik) in front of port 3100 with TLS, then
 
 ## Local development (no Docker)
 
-You need Node 20+ and pnpm 9 (`corepack enable` or `npm i -g pnpm`). The app itself needs a Postgres: `docker compose up -d db` gives you one on port 5433, `pnpm dev:db` starts an embedded one on port 5434 with no Docker at all (data in `.pgdata-dev`), or point `DATABASE_URL` at your own.
+You need Node 22.12+ and pnpm 9 (`corepack enable` or `npm i -g pnpm`). The app itself needs a Postgres: `docker compose up -d db` gives you one on port 5433, `pnpm dev:db` starts an embedded one on port 5434 with no Docker at all (data in `.pgdata-dev`), or point `DATABASE_URL` at your own.
 
 ```bash
 pnpm install

@@ -4,7 +4,7 @@
   "private": true,
   "description": "Cadence: a self-hosted, multi-user sales sequencer that sits beside Twenty CRM. Humans do every touch.",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12"
   },
   "packageManager": "pnpm@9.15.9",
   "scripts": {
@@ -39,7 +39,8 @@
   "pnpm": {
     "overrides": {
       "next>postcss": "^8.5.23",
-      "@prisma/config>deepmerge-ts": "^8.0.0"
+      "@prisma/config>deepmerge-ts": "^8.0.0",
+      "brace-expansion@<1.1.21": "^1.1.21"
     }
   },
   "dependencies": {
@@ -51,13 +52,13 @@
     "date-fns": "^4.1.0",
     "date-fns-tz": "^3.2.0",
     "dotenv": "^16.4.7",
-    "next": "^15.3.0",
+    "next": "^15.5.28",
     "prisma": "^6.5.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "sanitize-html": "^2.17.5",
+    "sanitize-html": "^2.18.1",
     "tsx": "^4.19.3",
-    "zod": "^3.24.2"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.7",
@@ -70,10 +71,11 @@
     "autoprefixer": "^10.4.20",
     "embedded-postgres": "18.4.0-beta.17",
     "eslint": "^9",
-    "eslint-config-next": "^15",
+    "eslint-config-next": "^15.5.28",
     "postcss": "^8.5.0",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.0",
-    "vitest": "^4.1.11"
+    "vite": "^7.3.7",
+    "vitest": "^4.1.12"
   }
 }

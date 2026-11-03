@@ -27,7 +27,7 @@ function jsonList(v: FormDataEntryValue | null): unknown {
   }
 }
 
-function issues(err: { issues: Array<{ path: (string | number)[]; message: string }> }) {
+function issues(err: { issues: Array<{ path: PropertyKey[]; message: string }> }) {
   return issueText(err.issues);
 }
 
