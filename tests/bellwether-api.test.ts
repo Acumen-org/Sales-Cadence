@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '@/lib/db';
 import { MOCK_PEOPLE } from '@/lib/twenty/fixtures';
 import { getMockTwentyClient } from '@/lib/twenty/mock-client';
+import { refreshCrmCopyFor } from '@/lib/sandbox/dedupe';
 import { addSuppressions } from '@/lib/sandbox/suppression';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 import { bwContact, check, disableBellwether, enableBellwether, envelope, KEY, ping, push, status } from './helpers/sandbox';
@@ -140,6 +141,15 @@ describe('Bellwether push API (contract section 14)', () => {
       getMockTwentyClient().failNext = new Error('Twenty is down');
       const r = await push(envelope([bwContact({ email: person(0).email })]));
       expect(r.body.results[0]).toEqual(expect.objectContaining({ result: 'already_in_crm', crmPersonId: person(0).id }));
+    });
+
+    it('rule 4 stops asking Twenty at the time budget, so a slow Twenty cannot hold a push up', async () => {
+      const mock = getMockTwentyClient();
+      const never = vi.spyOn(mock, 'findPeople').mockImplementation(() => new Promise(() => undefined));
+      const started = Date.now();
+      expect(await refreshCrmCopyFor([{ ...bwContact(), additionalEmails: [], additionalPhones: [], phoneType: 'unknown' } as never], mock, 50)).toBeNull();
+      expect(Date.now() - started).toBeLessThan(2_000);
+      never.mockRestore();
     });
 
     it('warns of a possible CRM match by name at the same firm', async () => {
