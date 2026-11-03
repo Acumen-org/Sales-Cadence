@@ -5,7 +5,7 @@ import { prisma } from '../db';
 import { requireUser, toActor } from '../auth/current-user';
 import { canUndoMove } from '../auth/rbac';
 import { userActor } from '../audit';
-import { preflightMove, processMoveItem, queueMove, retryFailedItems, undoMoveItem, type MoveSelection, type PreflightItem } from '../sandbox/move';
+import { finishMoveIfSettled, preflightMove, processMoveItem, queueMove, retryFailedItems, undoMoveItem, type MoveSelection, type PreflightItem } from '../sandbox/move';
 import type { ActionResult } from './users';
 
 function refresh(moveId?: string) {
@@ -29,7 +29,7 @@ export async function queueMoveAction(selection: MoveSelection[]): Promise<Actio
   if (r.queued <= 3) {
     const items = await prisma.sandboxMoveItem.findMany({ where: { moveId: r.moveId, state: 'QUEUED' }, select: { id: true } });
     for (const i of items) await processMoveItem(i.id);
-    if (!(await prisma.sandboxMoveItem.count({ where: { moveId: r.moveId, state: 'QUEUED' } }))) await prisma.sandboxMove.update({ where: { id: r.moveId }, data: { state: 'DONE', finishedAt: new Date() } });
+    await finishMoveIfSettled(r.moveId);
   }
   refresh(r.moveId);
   return { ok: true, message: `${r.queued} queued to move.${r.left.length ? ` Left out: ${r.left.map((l) => `${l.name} (${l.reason})`).join(', ')}.` : ''}`, redirectTo: `/sandbox/moves/${r.moveId}` };

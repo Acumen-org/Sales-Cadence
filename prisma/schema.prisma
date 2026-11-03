@@ -1333,8 +1333,11 @@ model SandboxMoveItem {
   moveId           String
   move             SandboxMove @relation(fields: [moveId], references: [id], onDelete: Cascade)
   sandboxContactId String
-  /// QUEUED | DONE | FAILED | DRY_RUN | UNDONE
+  /// QUEUED | RUNNING | DONE | FAILED | DRY_RUN | UNDONE
   state            String
+  /// When a process took the item (RUNNING). The web request and the worker both work the queue;
+  /// the claim keeps them off the same item, and a stale claim is taken back.
+  claimedAt        DateTime?
   /// create | attach
   mode             String
   /// The Twenty person to attach to (attach mode).

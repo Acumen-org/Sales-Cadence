@@ -13,7 +13,7 @@ import { Badge, Surface, ViewHeader } from '@/components/ui';
 import { retryMoveAction, undoMoveAction } from '@/lib/actions/sandbox-move';
 
 const STATE: Record<string, { label: string; tone: 'green' | 'amber' | 'red' | 'gray' | 'blue' }> = {
-  QUEUED: { label: 'Waiting', tone: 'gray' }, DONE: { label: 'In the CRM', tone: 'green' }, FAILED: { label: 'Failed', tone: 'red' }, DRY_RUN: { label: 'Dry run', tone: 'amber' }, UNDONE: { label: 'Undone', tone: 'blue' },
+  QUEUED: { label: 'Waiting', tone: 'gray' }, RUNNING: { label: 'Moving', tone: 'gray' }, DONE: { label: 'In the CRM', tone: 'green' }, FAILED: { label: 'Failed', tone: 'red' }, DRY_RUN: { label: 'Dry run', tone: 'amber' }, UNDONE: { label: 'Undone', tone: 'blue' },
 };
 
 /** One Move to CRM: each contact's progress, Twenty's answer when it failed, Retry and Undo. */
