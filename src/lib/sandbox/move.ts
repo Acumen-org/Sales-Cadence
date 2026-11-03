@@ -1,4 +1,4 @@
-import type { Prisma, SandboxContact, SandboxMoveItem } from '@prisma/client';
+import type { EnrollmentStatus, Prisma, SandboxContact, SandboxMoveItem } from '@prisma/client';
 import { prisma } from '../db';
 import { logAudit, SYSTEM_ACTOR, type AuditActor } from '../audit';
 import { addDays, formatLocalDate, toLocalDate } from '../dates';
@@ -7,6 +7,7 @@ import { getTwentyClient, type TwentyClient } from '../twenty';
 import type { CreatePersonInput, TwentyCompany, TwentyIntrospection } from '../twenty/types';
 import { markCompanyDeleted, markPersonDeleted, upsertCompanyCache, upsertPersonCache } from '../person-cache';
 import { exitEnrollment, OCCUPYING_STATUSES } from '../engine/enrollment';
+import { loadSyncTasks, syncTasksCreated } from '../engine/sync-out';
 import { workspaceTimezone } from '../workspace';
 import { canMoveToCrm, canUndoMove, type Actor } from '../auth/rbac';
 import { crmMatch, internalOrBlocked, suppressionKeysOf } from './dedupe';
@@ -225,19 +226,50 @@ async function fail(item: SandboxMoveItem, error: string) {
   await prisma.sandboxMoveItem.update({ where: { id: item.id }, data: { state: 'FAILED', error: error.slice(0, 1000), attempts: { increment: 1 } } });
 }
 
-/** Hand every row of the contact to the person: touches, calls, next actions and its ended sequences. */
-async function handOver(contactId: string, personId: string, actor: AuditActor, now: Date) {
-  const running = await prisma.enrollment.findMany({ where: { sandboxContactId: contactId, personId: null, status: { in: OCCUPYING_STATUSES } }, select: { id: true } });
-  for (const e of running) await exitEnrollment(e.id, { reason: 'moved_to_crm', actor, now });
+/**
+ * What a move did to the contact's campaigns, kept on the move item for Undo: the enrollments that
+ * carried over to the person (still running, now in Tasks), and the ones that had to end because the
+ * person was already in a sequence or does not want contact (with the status each had).
+ */
+export type CarryOver = { carried: string[]; ended: { id: string; status: EnrollmentStatus }[] };
+
+export function readCarryOver(v: unknown): CarryOver {
+  const o = (v && typeof v === 'object' ? v : {}) as Partial<CarryOver>;
+  return { carried: Array.isArray(o.carried) ? o.carried.map(String) : [], ended: Array.isArray(o.ended) ? o.ended.filter((e) => e && typeof e.id === 'string') : [] };
+}
+
+/**
+ * Hand every row of the contact to the person: touches, calls, next actions and enrollments. A
+ * running campaign carries over, so the same enrollment and its open steps go on in Tasks with the
+ * person as their subject (and are mirrored to Twenty like any CRM step). Twenty has one sequence per
+ * person: when the person is already in one, or is marked do-not-contact, the sandbox's ends instead.
+ */
+async function handOver(contactId: string, personId: string, companyId: string | null, actor: AuditActor, now: Date): Promise<CarryOver> {
+  const running = await prisma.enrollment.findMany({ where: { sandboxContactId: contactId, personId: null, status: { in: OCCUPYING_STATUSES } }, select: { id: true, status: true } });
+  const [busy, person] = await Promise.all([
+    prisma.enrollment.count({ where: { personId, status: { in: OCCUPYING_STATUSES } } }),
+    prisma.personCache.findUnique({ where: { id: personId }, select: { dnd: true, optedOut: true } }),
+  ]);
+  const carryOver: CarryOver = { carried: [], ended: [] };
+  for (const e of running) {
+    if (busy || person?.dnd || person?.optedOut) { await exitEnrollment(e.id, { reason: 'moved_to_crm', actor, now }); carryOver.ended.push({ id: e.id, status: e.status }); }
+    else carryOver.carried.push(e.id);
+  }
   const personOpen = await prisma.nextAction.count({ where: { personId, state: 'OPEN' } });
   await prisma.$transaction(async (tx) => {
     await tx.touch.updateMany({ where: { sandboxContactId: contactId, personId: null }, data: { personId } });
     await tx.callLog.updateMany({ where: { sandboxContactId: contactId, personId: null }, data: { personId } });
     await tx.enrollment.updateMany({ where: { sandboxContactId: contactId, personId: null }, data: { personId } });
+    if (companyId && carryOver.carried.length) await tx.enrollment.updateMany({ where: { id: { in: carryOver.carried }, companyId: null }, data: { companyId } });
     // One open next action per person, as Twenty has one: the contact's goes across unless the person has one.
     if (personOpen) await tx.nextAction.updateMany({ where: { sandboxContactId: contactId, personId: null, state: 'OPEN' }, data: { state: 'CANCELLED', closedAt: now } });
     await tx.nextAction.updateMany({ where: { sandboxContactId: contactId, personId: null }, data: { personId, crmPending: true } });
   });
+  if (carryOver.carried.length) {
+    const open = await prisma.task.findMany({ where: { enrollmentId: { in: carryOver.carried }, state: 'PENDING' }, select: { id: true } });
+    await syncTasksCreated(await loadSyncTasks(open.map((t) => t.id)));
+  }
+  return carryOver;
 }
 
 /** A claim older than this belongs to a process that died mid-item; the queue takes the item back. */
@@ -329,7 +361,8 @@ export async function processMoveItem(itemId: string, now = new Date()): Promise
       await prisma.sandboxMoveItem.update({ where: { id: item.id }, data: { state: 'DRY_RUN', twentyPersonId: null, twentyCompanyId: null, companyAction, error: 'Dry run: nothing was written to Twenty and the contact stays in the sandbox.', doneAt: now, attempts: { increment: 1 } } });
       return 'DRY_RUN';
     }
-    await handOver(contact.id, personId!, actor, now);
+    const carryOver = item.carryOver ? readCarryOver(item.carryOver) : await handOver(contact.id, personId!, companyId, actor, now);
+    if (!item.carryOver) await prisma.sandboxMoveItem.update({ where: { id: item.id }, data: { carryOver } });
     const notes: string[] = [...item.notesWritten];
     if (!notes.length) {
       for (const d of await historyDrafts(contact.id)) {
@@ -340,7 +373,7 @@ export async function processMoveItem(itemId: string, now = new Date()): Promise
     }
     await prisma.sandboxContact.update({ where: { id: contact.id }, data: { status: 'MOVED', movedAt: now, movedById: item.move.createdById, twentyPersonId: personId, twentyCompanyId: companyId, statusChangedAt: now } });
     await prisma.sandboxMoveItem.update({ where: { id: item.id }, data: { state: 'DONE', twentyPersonId: personId, twentyCompanyId: companyId, companyAction, notesWritten: notes, personUpdatedAt, error: null, doneAt: now, attempts: { increment: 1 } } });
-    await logAudit({ entityType: 'sandbox_contact', entityId: contact.id, action: 'sandbox_moved', actor, details: { moveId: item.moveId, personId, companyId, companyAction, mode, notes: notes.length } });
+    await logAudit({ entityType: 'sandbox_contact', entityId: contact.id, action: 'sandbox_moved', actor, details: { moveId: item.moveId, personId, companyId, companyAction, mode, notes: notes.length, carriedOver: carryOver.carried.length, ended: carryOver.ended.length } });
     return 'DONE';
   } catch (err) {
     await fail(item, err instanceof Error ? err.message : String(err));
@@ -408,6 +441,10 @@ export async function undoMoveItem(itemId: string, actor: Actor, audit: AuditAct
     if (newer) return { ok: false, error: `This person has activity in the CRM since the move (${newer.summary}), so the move is kept.` };
     if (await prisma.enrollment.count({ where: { personId, sandboxContactId: null } })) return { ok: false, error: 'This person has been put in a CRM campaign since the move, so the move is kept.' };
   }
+  const carryOver = readCarryOver(item.carryOver);
+  // The carried-over steps Cadence mirrored as Twenty Tasks while the person was in the CRM.
+  const mirrored = await prisma.task.findMany({ where: { enrollment: { sandboxContactId: contact.id, personId }, twentyTaskId: { not: null } }, select: { id: true, twentyTaskId: true } });
+  for (const t of mirrored) await client.deleteTask(t.twentyTaskId!).catch(() => undefined);
   const retried = await prisma.$queryRaw<{ twentyId: string }[]>`SELECT "twentyId" FROM "TwentyWrite" WHERE operation = 'createNote' AND "twentyId" IS NOT NULL AND payload->>'cadenceMoveItemId' = ${item.id}`;
   const noteIds = [...new Set([...item.notesWritten, ...retried.map((r) => r.twentyId)])];
   for (const id of noteIds) await client.deleteNote(id).catch(() => undefined);
@@ -425,6 +462,13 @@ export async function undoMoveItem(itemId: string, actor: Actor, audit: AuditAct
     await tx.touch.updateMany({ where: fromContact, data: { personId: null } });
     await tx.callLog.updateMany({ where: fromContact, data: { personId: null } });
     await tx.enrollment.updateMany({ where: fromContact, data: { personId: null } });
+    if (carryOver.carried.length) await tx.enrollment.updateMany({ where: { id: { in: carryOver.carried }, companyId: item.twentyCompanyId ?? undefined }, data: { companyId: null } });
+    if (mirrored.length) await tx.task.updateMany({ where: { id: { in: mirrored.map((t) => t.id) } }, data: { twentyTaskId: null } });
+    // A campaign the move had to end (the person was busy or do-not-contact) runs on in the sandbox.
+    for (const e of carryOver.ended) {
+      const ended = await tx.enrollment.updateMany({ where: { id: e.id, sandboxContactId: contact.id, status: 'EXITED', exitReason: 'moved_to_crm' }, data: { status: e.status, exitReason: null, exitedAt: null } });
+      if (ended.count) await tx.task.updateMany({ where: { enrollmentId: e.id, state: 'CANCELLED', cancelReason: 'exited:moved_to_crm' }, data: { state: 'PENDING', cancelReason: null } });
+    }
     await tx.nextAction.updateMany({ where: fromContact, data: { personId: null, crmPending: false } });
     // An opt-out made while the person was in the CRM holds in the sandbox too.
     await tx.sandboxContact.update({ where: { id: contact.id }, data: { status: contact.optedOutAt ? 'OPTED_OUT' : 'ACTIVE', movedAt: null, movedById: null, twentyPersonId: null, twentyCompanyId: null, statusChangedAt: now } });

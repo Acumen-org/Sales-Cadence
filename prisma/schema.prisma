@@ -1350,6 +1350,9 @@ model SandboxMoveItem {
   twentyCompanyId  String?
   /// Twenty note ids, for undo.
   notesWritten     String[]    @default([])
+  /// The contact's campaigns at the move: { carried: enrollment ids now worked as the person,
+  /// ended: [{ id, status }] that had to end }. Undo hands back the first and restarts the second.
+  carryOver        Json?
   /// Twenty's updatedAt after Cadence's last write, for undo.
   personUpdatedAt  String?
   /// The contact as it was moved.
