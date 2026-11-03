@@ -1,4 +1,4 @@
-import type { Prisma, SandboxContact, SandboxMoveItem } from '@prisma/client';
+import type { ActionType, Prisma, SandboxContact, SandboxMoveItem } from '@prisma/client';
 import { prisma } from '../db';
 import { logAudit, SYSTEM_ACTOR, type AuditActor } from '../audit';
 import { addDays, formatLocalDate, toLocalDate } from '../dates';
@@ -14,6 +14,7 @@ import { findSuppressed } from './suppression';
 import { linkedinHref, normalizeDomain, normalizeEmail, normalizeFirmName, readExtraPhones } from './normalize';
 import { checkReady, type ReadyItem } from './ready';
 import { historyDrafts, writeNote } from './history-notes';
+import { setSandboxNextAction } from './work';
 
 /**
  * Move to CRM (plan section 8): one contact or up to 50. Preflight says, per contact, whether it is
@@ -79,7 +80,12 @@ export type PreflightItem = {
   reason: string | null;
   firm: FirmPlan;
   crmPerson: { id: string; name: string } | null;
+  /** The contact's open next action, offered as the move's next step. */
+  nextStep: MoveNextStep | null;
 };
+
+/** What happens after the move. It becomes the person's next action: in Tasks, and in Twenty. */
+export type MoveNextStep = { label: string; action: ActionType; dueDate: string };
 
 const contactInclude = { owner: { select: { id: true, name: true, twentyMemberId: true } }, pod: { select: { id: true, name: true, podOwnerValue: true } } } satisfies Prisma.SandboxContactInclude;
 type MoveContact = Prisma.SandboxContactGetPayload<{ include: typeof contactInclude }>;
@@ -115,14 +121,14 @@ export async function preflightMove(contactIds: string[], actor: Actor): Promise
   const limit = Math.min(MOVE_LIMIT, settings.sandbox.moveBatchLimit);
   const ids = [...new Set(contactIds)];
   if (ids.length > limit) return { items: [], limit, refused: `You selected ${ids.length} contacts. Move at most ${limit} at a time.` };
-  const contacts = await prisma.sandboxContact.findMany({ where: { id: { in: ids } }, include: contactInclude });
+  const contacts = await prisma.sandboxContact.findMany({ where: { id: { in: ids } }, include: { ...contactInclude, nextActions: { where: { personId: null, state: 'OPEN' }, select: { label: true, action: true, dueDate: true }, take: 1 } } });
   let client: TwentyClient | null = null;
   try { client = await getTwentyClient(); } catch { client = null; }
   const items: PreflightItem[] = [];
   for (const c of contacts) {
     const name = `${c.firstName} ${c.lastName}`.trim();
     const ready = checkReady(c, { owner: c.owner, podName: c.pod?.name ?? null, settings: settings.sandbox });
-    const base = { contactId: c.id, name, missing: ready.missing, reason: null, firm: { action: 'none' } as FirmPlan, crmPerson: null };
+    const base = { contactId: c.id, name, missing: ready.missing, reason: null, firm: { action: 'none' } as FirmPlan, crmPerson: null, nextStep: c.nextActions[0] ?? null };
     if (!canMoveToCrm(actor, c)) { items.push({ ...base, state: 'refused', reason: 'Not yours to move' }); continue; }
     if (c.status !== 'ACTIVE') { items.push({ ...base, state: 'refused', reason: c.status === 'MOVED' ? 'Already in the CRM' : 'No longer in the sandbox' }); continue; }
     const dedupeInput = { bellwetherContactId: c.bellwetherContactId, firstName: c.firstName, lastName: c.lastName, email: c.email, additionalEmails: c.additionalEmails, phone: c.phone, phoneType: c.phoneType ?? 'unknown', additionalPhones: readExtraPhones(c.additionalPhones), linkedinUrl: c.linkedinUrl, individualCrd: c.individualCrd, companyName: c.companyName, companyDomain: c.companyDomain, companyCrd: c.companyCrd, companyPhone: c.companyPhone };
@@ -146,7 +152,12 @@ export async function preflightMove(contactIds: string[], actor: Actor): Promise
 
 export type MoveSelection = { contactId: string; mode: 'create' | 'attach'; attachPersonId?: string | null; companyId?: string | null };
 
-export async function queueMove(selection: MoveSelection[], actor: Actor, audit: AuditActor): Promise<{ ok: true; moveId: string; queued: number; left: { name: string; reason: string }[] } | { ok: false; error: string }> {
+/**
+ * The next step, when given, replaces each moved contact's open next action, for the contact's owner.
+ * The move hands that next action to the person, so it shows in Tasks and is written to Twenty. A
+ * person already in Twenty with an open next action keeps theirs (handOver).
+ */
+export async function queueMove(selection: MoveSelection[], actor: Actor, audit: AuditActor, nextStep?: MoveNextStep): Promise<{ ok: true; moveId: string; queued: number; left: { name: string; reason: string }[] } | { ok: false; error: string }> {
   const preflight = await preflightMove(selection.map((s) => s.contactId), actor);
   if (preflight.refused) return { ok: false, error: preflight.refused };
   const byId = new Map(preflight.items.map((i) => [i.contactId, i]));
@@ -168,6 +179,7 @@ export async function queueMove(selection: MoveSelection[], actor: Actor, audit:
   }
   if (!accepted.length) return { ok: false, error: left.length ? `Nothing to move. ${left.map((l) => `${l.name}: ${l.reason}`).join('; ')}.` : 'Select contacts to move.' };
   const contacts = await prisma.sandboxContact.findMany({ where: { id: { in: accepted.map((a) => a.sel.contactId) } } });
+  if (nextStep) for (const c of contacts) await setSandboxNextAction(c.id, { ...nextStep, foUserId: c.ownerId ?? actor.id }, { ...audit, id: actor.id });
   const snapshotOf = new Map(contacts.map((c) => [c.id, c]));
   const move = await prisma.sandboxMove.create({
     data: {

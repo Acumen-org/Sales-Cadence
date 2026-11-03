@@ -5,7 +5,9 @@ import { prisma } from '../db';
 import { requireUser, toActor } from '../auth/current-user';
 import { canUndoMove } from '../auth/rbac';
 import { userActor } from '../audit';
-import { finishMoveIfSettled, preflightMove, processMoveItem, queueMove, retryFailedItems, undoMoveItem, type MoveSelection, type PreflightItem } from '../sandbox/move';
+import { isLocalDate, todayIn } from '../dates';
+import { NEXT_ACTION_CHANNELS } from '../next-actions';
+import { finishMoveIfSettled, preflightMove, processMoveItem, queueMove, retryFailedItems, undoMoveItem, type MoveNextStep, type MoveSelection, type PreflightItem } from '../sandbox/move';
 import type { ActionResult } from './users';
 
 function refresh(moveId?: string) {
@@ -15,16 +17,20 @@ function refresh(moveId?: string) {
 }
 
 /** What Move to CRM would do with these contacts: ready, needs, already in Twenty, which firm. */
-export async function preflightMoveAction(ids: string[]): Promise<{ ok: true; items: PreflightItem[]; limit: number } | { ok: false; error: string }> {
+export async function preflightMoveAction(ids: string[]): Promise<{ ok: true; items: PreflightItem[]; limit: number; today: string } | { ok: false; error: string }> {
   const user = await requireUser();
   const r = await preflightMove(ids, toActor(user));
-  return r.refused ? { ok: false, error: r.refused } : { ok: true, items: r.items, limit: r.limit };
+  return r.refused ? { ok: false, error: r.refused } : { ok: true, items: r.items, limit: r.limit, today: todayIn(user.timezone) };
 }
 
 /** Queue the move; the first items start at once so a single contact moves while the dialog closes. */
-export async function queueMoveAction(selection: MoveSelection[]): Promise<ActionResult> {
+export async function queueMoveAction(selection: MoveSelection[], nextStep: MoveNextStep): Promise<ActionResult> {
   const user = await requireUser();
-  const r = await queueMove(selection, toActor(user), userActor(user));
+  const label = String(nextStep?.label ?? '').trim();
+  if (!label) return { ok: false, error: 'Say what the next step is.' };
+  if (!NEXT_ACTION_CHANNELS.includes(nextStep.action)) return { ok: false, error: 'Choose how the next step is done.' };
+  if (!isLocalDate(nextStep.dueDate) || nextStep.dueDate < todayIn(user.timezone)) return { ok: false, error: 'Pick today or a later day for the next step.' };
+  const r = await queueMove(selection, toActor(user), userActor(user), { label, action: nextStep.action, dueDate: nextStep.dueDate });
   if (!r.ok) return r;
   if (r.queued <= 3) {
     const items = await prisma.sandboxMoveItem.findMany({ where: { moveId: r.moveId, state: 'QUEUED' }, select: { id: true } });

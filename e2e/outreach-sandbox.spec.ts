@@ -88,6 +88,12 @@ test('push, call, form, move to CRM and undo', async ({ page, request }) => {
   await page.getByRole('button', { name: 'Move to CRM' }).click();
   const dialog = page.getByRole('dialog', { name: 'Move to CRM' });
   await expect(dialog.getByText('Creates Harbor Light Advisors')).toBeVisible();
+  // The next step is asked for: Move waits until it is given.
+  const what = dialog.getByLabel('What');
+  if (!(await what.inputValue())) {
+    await expect(dialog.getByRole('button', { name: 'Move 1' })).toBeDisabled();
+    await what.fill('Follow up on the intro call');
+  }
   await dialog.getByRole('button', { name: 'Move 1' }).click();
   await page.waitForURL(/\/sandbox\/moves\//);
   await expect(page.getByText('In the CRM')).toBeVisible();
