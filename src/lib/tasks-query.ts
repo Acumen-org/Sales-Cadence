@@ -1,3 +1,4 @@
+import { CRM_TASK } from './subject';
 import { needsPod, ROLES_NEEDING_POD } from '@/lib/auth/rbac';
 import type { Prisma } from '@prisma/client';
 import { prisma } from './db';
@@ -39,6 +40,9 @@ export const taskRowInclude = {
 } satisfies Prisma.TaskInclude;
 
 export type TaskRow = Prisma.TaskGetPayload<{ include: typeof taskRowInclude }>;
+/** A task in a CRM view: its person is there (taskScopeWhere keeps sandbox steps out). */
+export type CrmTaskRow = TaskRow & { enrollment: TaskRow['enrollment'] & { person: NonNullable<TaskRow['enrollment']['person']> } };
+export const hasPerson = <T extends { enrollment: { person: unknown } }>(t: T): t is T & { enrollment: T['enrollment'] & { person: NonNullable<T['enrollment']['person']> } } => Boolean(t.enrollment.person);
 
 /** The day a task is worked: its snoozed day if snoozed, else its due day. */
 export function effectiveDate(t: { dueDate: string; snoozedTo: string | null }): LocalDate {
@@ -55,12 +59,16 @@ export function effectiveDate(t: { dueDate: string; snoozedTo: string | null }):
  */
 export const WORKABLE: Prisma.TaskWhereInput = { enrollment: { status: { not: 'PAUSED' } } };
 
+/**
+ * Tasks a CRM view may show this user. Sandbox steps are never among them: they are worked in
+ * Sandbox > Work, and there is no Sandbox or All filter here (decision 2 of the sandbox plan).
+ */
 export function taskScopeWhere(user: SessionUser): Prisma.TaskWhereInput {
-  if (canSeeAllPods(user)) return {};
+  if (canSeeAllPods(user)) return CRM_TASK;
   if (isPodLeader(user)) {
-    return { OR: [{ foUserId: user.id }, { enrollment: { podId: { in: user.podIds } } }] };
+    return { AND: [CRM_TASK, { OR: [{ foUserId: user.id }, { enrollment: { podId: { in: user.podIds } } }] }] };
   }
-  return { foUserId: user.id };
+  return { AND: [CRM_TASK, { foUserId: user.id }] };
 }
 
 function effectiveDateWhere(op: 'eq' | 'lt' | 'gt', date: LocalDate): Prisma.TaskWhereInput {
@@ -91,7 +99,7 @@ function filtersWhere(f: TaskFilters): Prisma.TaskWhereInput {
 }
 
 export type TaskListResult = {
-  rows: TaskRow[];
+  rows: CrmTaskRow[];
   counts: Record<TaskTab, number>;
   /** Pending tasks in the current tab per channel (before the channel filter). */
   channelCounts: Record<TaskChannel, number>;
@@ -151,6 +159,6 @@ export async function listTaskGroups(user: SessionUser, filters: TaskFilters, no
   selected.sort((a, b) => filters.tab === 'done' ? b.at - a.at : a.date.localeCompare(b.date));
   const page = selected.slice(0, limit);
   const rows = await prisma.task.findMany({ where: { id: { in: page.map(g => g.id) } }, include: taskRowInclude });
-  const byId = new Map(rows.map(t => [t.id, t]));
+  const byId = new Map(rows.filter(hasPerson).map(t => [t.id, t]));
   return { rows: page.flatMap(g => { const row = byId.get(g.id); return row ? [{ ...row, childIds: g.ids, childActions: records.filter(t => g.ids.includes(t.id)).map(t => ({ id: t.id, action: t.action, state: t.state })) }] : []; }), counts, channelCounts, today, total: selected.length, held };
 }

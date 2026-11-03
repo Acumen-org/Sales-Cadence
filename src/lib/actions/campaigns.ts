@@ -250,7 +250,7 @@ export async function reenrollNonRepliersAction(data: FormData): Promise<ActionR
   const sequence = await prisma.sequence.findFirst({ where: { id: d.sequenceId, archived: false } });
   if (!sequence) return { ok: false, error: 'Choose an available sequence.' };
   const candidates = await nonReplierCandidates(campaign.id, d.days);
-  const preview: FollowupPreview = { candidates: candidates.map(c => ({ id: c.personId, name: [c.person.firstName,c.person.lastName].filter(Boolean).join(' '), company: c.person.companyName, fo: c.fo.name, completedAt: c.completedAt?.toISOString() ?? null })) };
+  const preview: FollowupPreview = { candidates: candidates.map(c => ({ id: c.personId!, name: [c.person!.firstName,c.person!.lastName].filter(Boolean).join(' '), company: c.person!.companyName, fo: c.fo.name, completedAt: c.completedAt?.toISOString() ?? null })) };
   if (d.confirm !== 'yes') return { ok: true, data: preview };
   if (!candidates.length) return { ok: false, error: 'No contacts qualify yet.' };
   const next = await prisma.$transaction(async tx => {
@@ -258,7 +258,7 @@ export async function reenrollNonRepliersAction(data: FormData): Promise<ActionR
     const draft: CampaignDraft & { sequenceIds: Record<string, string> } = {
       name: d.name, podId: campaign.podId, startDate: d.startDate, endDate: addDays(d.startDate, 42),
       defaultBatchSize: 20, fos: [], productInterest: campaign.productInterest,
-      personIds: candidates.map(c => c.personId), assignments: {}, flows: [{ id: 'default', name: 'Default', steps: CAMPAIGN_DEFAULT_STEPS }], sequenceIds: { default: sequence.id },
+      personIds: candidates.map(c => c.personId!), assignments: {}, flows: [{ id: 'default', name: 'Default', steps: CAMPAIGN_DEFAULT_STEPS }], sequenceIds: { default: sequence.id },
     };
     return tx.campaign.create({ data: { name: d.name, sequenceId: sequence.id, podId: campaign.podId, sourceType: 'IDS', sourceRef: campaign.id, personIds: draft.personIds, startDate: draft.startDate, endDate: draft.endDate, productInterest: draft.productInterest, plannerDraft: draft, status: 'PENDING_APPROVAL', followupSourceId: campaign.id, followupSourceRun: campaign.runNumber, followupWaitDays: d.days, createdById: user.id } });
   });

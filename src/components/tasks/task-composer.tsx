@@ -1,13 +1,13 @@
 'use client';
-import { callHref, opensDialpad } from '@/lib/calls';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { saveTaskDraftAction } from '@/lib/actions/tasks';
 import { RichTextEditor } from '@/components/rich-text-editor';
-import { ActionIcon, IconCheck, IconCopy, IconPhone } from '@/components/icons';
+import { ActionIcon, IconCheck, IconCopy } from '@/components/icons';
 import { registerDraftWriter } from './draft-registry';
+import { CallButton } from '@/components/calls/call-button';
 
-type Props = { taskId: string; subject: string | null; body: string; html?: string; label: string; channel: 'EMAIL' | 'CALL' | 'LINKEDIN'; revision?: number; readOnly?: boolean; phone?: string | null; /** The dialpad address with {phone}; blank means tel:. */ callTemplate?: string | null };
-export function TaskComposer({ taskId, subject, body, html, label, channel, revision = 0, readOnly = false, phone, callTemplate = null }: Props) {
+type Props = { taskId: string; subject: string | null; body: string; html?: string; label: string; channel: 'EMAIL' | 'CALL' | 'LINKEDIN'; revision?: number; readOnly?: boolean; phone?: string | null; /** The dialpad address with {phone}; blank means tel:. */ callTemplate?: string | null; personId?: string | null; sandboxContactId?: string | null; /** Why Call is off now (a form waiting, an opt-out, calling hours), or a calling-hours warning. */ callBlocked?: string | null; callWarning?: string | null };
+export function TaskComposer({ taskId, subject, body, html, label, channel, revision = 0, readOnly = false, phone, callTemplate = null, personId = null, sandboxContactId = null, callBlocked = null, callWarning = null }: Props) {
   const initialHtml = html ?? '<p>' + body.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') + '</p>';
   const [draft, setDraft] = useState({ subject: subject ?? '', html: initialHtml, text: body });
   const [state, setState] = useState('Saved');
@@ -74,7 +74,7 @@ export function TaskComposer({ taskId, subject, body, html, label, channel, revi
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><div className="text-xs text-ink-500">Phone</div><strong className="mt-1 block text-lg text-ink-900">{phone || 'No phone number'}</strong></div>
         {phone ? <div className="flex flex-wrap items-center gap-2">
-          <a href={callHref(phone, callTemplate)} target={opensDialpad(callTemplate) ? '_blank' : undefined} rel={opensDialpad(callTemplate) ? 'noreferrer' : undefined} className="btn-primary"><IconPhone size={15} />Call</a>
+          <CallButton phone={phone} template={callTemplate} taskId={taskId} personId={personId} sandboxContactId={sandboxContactId} blocked={callBlocked} warning={callWarning} />
           <button type="button" className="btn-secondary" onClick={async () => { try { await navigator.clipboard.writeText(phone); setPhoneCopied(true); setTimeout(() => setPhoneCopied(false), 1800); } catch { setError('Clipboard unavailable. Select the phone number to copy.'); } }}>{phoneCopied ? 'Copied' : 'Copy number'}</button>
         </div> : null}
       </div>

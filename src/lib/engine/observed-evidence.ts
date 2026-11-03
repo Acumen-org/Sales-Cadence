@@ -21,7 +21,7 @@ import { completeTask, type EngineContext } from './tasks';
  * a call logged twice), or it is the one behind a step someone marked done by hand - the step it
  * counted for is stored on it, so it is judged once and never offered to another step.
  */
-const OBSERVED = [{ externalId: { startsWith: 'message:' } }, { externalId: { startsWith: 'note:' } }];
+const OBSERVED = [{ externalId: { startsWith: 'message:' } }, { externalId: { startsWith: 'note:' } }, { externalId: { startsWith: 'graph:' } }];
 const DAY = 86_400_000;
 /** How far apart a synced email and the note a tool logs for it can be, and how long before a Done its email can go. */
 export const SAME_TOUCH_HOURS = 6;
@@ -45,7 +45,8 @@ export function subjectKey(summary: string): string {
 }
 
 const near = (a: Date, b: Date, ms: number) => Math.abs(a.getTime() - b.getTime()) <= ms;
-const isMessage = (t: Pick<TouchLike, 'externalId'>) => t.externalId.startsWith('message:');
+/** An email message: one synced by Twenty, or one Graph saw in a sales mailbox (a sandbox contact's). */
+const isMessage = (t: Pick<TouchLike, 'externalId'>) => t.externalId.startsWith('message:') || t.externalId.startsWith('graph:');
 /** "Call Notes [date]" is a call written up, often the next morning. */
 const writtenUp = (t: Pick<TouchLike, 'summary' | 'externalId'>, matching: MatchingSettings) => !isMessage(t) && classifyNoteTitle(t.summary, matching).kind === 'call_notes';
 
@@ -75,12 +76,24 @@ async function claim(externalId: string, taskId: string) {
 
 export type Verdict = { kind: 'free' } | { kind: 'counted'; taskId: string };
 
+/** Who the evidence is about: a Twenty person (a bare id), or a sandbox contact that has not moved. */
+export type EvidenceSubject = string | { personId: string } | { sandboxContactId: string };
+function subjectWhere(s: EvidenceSubject): { personId: string } | { sandboxContactId: string; personId: null } {
+  if (typeof s === 'string') return { personId: s };
+  return 'personId' in s ? { personId: s.personId } : { sandboxContactId: s.sandboxContactId, personId: null };
+}
+/** The subject of an enrollment: its person once there is one, else its sandbox contact. */
+export function enrollmentSubject(e: { personId: string | null; sandboxContactId: string | null }): EvidenceSubject | null {
+  return e.personId ?? (e.sandboxContactId ? { sandboxContactId: e.sandboxContactId } : null);
+}
+
 /**
  * Whether an email or call is still free to close a step, or already counted: it closed one, it is
  * a second record of one that did, or it is the one behind a step marked done by hand (the nearest
  * to that Done, sent up to six hours before it or half an hour after). A counted verdict is stored.
  */
-export async function judgeTouch(personId: string, touch: TouchLike, matching: MatchingSettings): Promise<Verdict> {
+export async function judgeTouch(subject: EvidenceSubject, touch: TouchLike, matching: MatchingSettings): Promise<Verdict> {
+  const who = subjectWhere(subject);
   const stored = await prisma.touch.findUnique({ where: { externalId: touch.externalId }, select: { countedForTaskId: true } });
   if (stored?.countedForTaskId) return { kind: 'counted', taskId: stored.countedForTaskId };
   const closed = await prisma.task.findFirst({ where: { evidenceId: touch.externalId }, select: { id: true } });
@@ -89,7 +102,7 @@ export async function judgeTouch(personId: string, touch: TouchLike, matching: M
 
   const at = touch.occurredAt.getTime();
   const nearby = await prisma.touch.findMany({
-    where: { personId, channel: touch.channel as 'EMAIL' | 'CALL', direction: 'OUTBOUND', externalId: { not: touch.externalId }, countedForTaskId: { not: null }, occurredAt: { gte: new Date(at - DAY), lte: new Date(at + DAY) } },
+    where: { ...who, channel: touch.channel as 'EMAIL' | 'CALL', direction: 'OUTBOUND', externalId: { not: touch.externalId }, countedForTaskId: { not: null }, occurredAt: { gte: new Date(at - DAY), lte: new Date(at + DAY) } },
     select: { externalId: true, channel: true, occurredAt: true, summary: true, countedForTaskId: true },
   });
   const twin = nearby.find((u) => sameTouch(touch, u, matching));
@@ -99,7 +112,7 @@ export async function judgeTouch(personId: string, touch: TouchLike, matching: M
   const lateBy = writtenUp(touch, matching) ? DAY : AFTER_DONE_MS;
   const byHand = await prisma.task.findMany({
     where: {
-      enrollment: { personId }, state: 'DONE', action: touch.channel as 'EMAIL' | 'CALL',
+      enrollment: who, state: 'DONE', action: touch.channel as 'EMAIL' | 'CALL',
       completedAt: { gte: new Date(at - lateBy), lte: new Date(at + SAME_TOUCH_MS) },
       OR: [{ evidenceId: null }, { evidenceId: { startsWith: 'twentyTask:' } }],
       countedTouches: { none: {} },
@@ -114,8 +127,8 @@ export async function judgeTouch(personId: string, touch: TouchLike, matching: M
 }
 
 /** Whether this touch is one already counted for this person, under another record or a Done. */
-export async function alreadyCounted(personId: string, touch: TouchLike, matching: MatchingSettings): Promise<boolean> {
-  return (await judgeTouch(personId, touch, matching)).kind === 'counted';
+export async function alreadyCounted(subject: EvidenceSubject, touch: TouchLike, matching: MatchingSettings): Promise<boolean> {
+  return (await judgeTouch(subject, touch, matching)).kind === 'counted';
 }
 
 /**
@@ -144,13 +157,14 @@ const countsFor = (t: TouchLike, action: Task['action'], matching: MatchingSetti
  * Close the earliest open email or call step of this person's running campaign that a touch just
  * seen can count for. Returns a result code for the Activity log.
  */
-export async function closeFromTouch(params: { personId: string; types: Array<'EMAIL' | 'CALL'>; touch: TouchLike; source: 'OBSERVED_NOTE' | 'OBSERVED_MESSAGE'; matching: MatchingSettings; ctx: EngineContext }): Promise<{ code: string; taskId?: string }> {
-  const { personId, types, touch, matching } = params;
-  const enrollment = await prisma.enrollment.findFirst({ where: { personId, status: 'ACTIVE' } });
+export async function closeFromTouch(params: ({ personId: string } | { sandboxContactId: string }) & { types: Array<'EMAIL' | 'CALL'>; touch: TouchLike; source: 'OBSERVED_NOTE' | 'OBSERVED_MESSAGE'; matching: MatchingSettings; ctx: EngineContext }): Promise<{ code: string; taskId?: string }> {
+  const { types, touch, matching } = params;
+  const subject: EvidenceSubject = 'personId' in params ? params.personId : { sandboxContactId: params.sandboxContactId };
+  const enrollment = await prisma.enrollment.findFirst({ where: { ...subjectWhere(subject), status: 'ACTIVE' } });
   if (!enrollment) return { code: 'no_active_enrollment' };
   if (touch.occurredAt.getTime() < enrollment.createdAt.getTime() - matching.evidenceGraceDays * DAY) return { code: 'stale_evidence' };
   const tasks = await prisma.task.findMany({ where: { enrollmentId: enrollment.id, state: 'PENDING', action: { in: types } }, orderBy: [{ stepIndex: 'asc' }, { actionIndex: 'asc' }] });
-  const verdict = await judgeTouch(personId, touch, matching);
+  const verdict = await judgeTouch(subject, touch, matching);
   if (verdict.kind === 'counted') return { code: 'same_touch', taskId: verdict.taskId };
   if (!tasks.length) return { code: 'no_pending_task' };
   for (const task of tasks) {
@@ -172,7 +186,7 @@ export async function completeFromEarlierEvidence(taskIds: string[], ctx: Engine
   if (!taskIds.length) return [];
   const tasks = await prisma.task.findMany({
     where: { id: { in: taskIds }, state: 'PENDING', action: { in: ['EMAIL', 'CALL'] }, enrollment: { status: 'ACTIVE' } },
-    include: { enrollment: { select: { personId: true } } },
+    include: { enrollment: { select: { personId: true, sandboxContactId: true } } },
     orderBy: [{ stepIndex: 'asc' }, { actionIndex: 'asc' }],
   });
   if (!tasks.length) return [];
@@ -181,16 +195,17 @@ export async function completeFromEarlierEvidence(taskIds: string[], ctx: Engine
   const observed: EngineContext = { ...ctx, actor: SYSTEM_ACTOR, forceGenerate: false, deferAdvance: false };
   const closed: string[] = [];
   for (const task of tasks) {
-    const personId = task.enrollment.personId;
+    const subject = enrollmentSubject(task.enrollment);
+    if (!subject) continue;
     const since = await windowStart(task, matching, { grace: false });
     const touches = await prisma.touch.findMany({
-      where: { personId, direction: 'OUTBOUND', channel: task.action === 'CALL' ? 'CALL' : 'EMAIL', countedForTaskId: null, occurredAt: { gte: since, lte: now }, OR: OBSERVED },
+      where: { ...subjectWhere(subject), direction: 'OUTBOUND', channel: task.action === 'CALL' ? 'CALL' : 'EMAIL', countedForTaskId: null, occurredAt: { gte: since, lte: now }, OR: OBSERVED },
       orderBy: { occurredAt: 'asc' },
       select: { externalId: true, channel: true, occurredAt: true, summary: true },
     });
     for (const touch of touches) {
       if (!countsFor(touch, task.action, matching)) continue;
-      if ((await judgeTouch(personId, touch, matching)).kind === 'counted') continue;
+      if ((await judgeTouch(subject, touch, matching)).kind === 'counted') continue;
       const r = await completeTask({ taskId: task.id, source: isMessage(touch) ? 'OBSERVED_MESSAGE' : 'OBSERVED_NOTE', evidenceId: touch.externalId, chosenAction: task.action, occurredAt: touch.occurredAt }, observed);
       if (r.ok) { await claim(touch.externalId, task.id); closed.push(task.id); }
       break;
@@ -215,8 +230,9 @@ export async function catchUpObservedEvidence(ctx: EngineContext): Promise<numbe
     WHERE t.state = 'PENDING' AND t.action::text IN ('EMAIL', 'CALL') AND e.status = 'ACTIVE'
       AND EXISTS (
         SELECT 1 FROM "Touch" x
-        WHERE x."personId" = e."personId" AND x.direction = 'OUTBOUND' AND x.channel::text = t.action::text
-          AND (x."externalId" LIKE 'message:%' OR x."externalId" LIKE 'note:%')
+        WHERE (x."personId" = e."personId" OR (e."personId" IS NULL AND x."personId" IS NULL AND x."sandboxContactId" = e."sandboxContactId"))
+          AND x.direction = 'OUTBOUND' AND x.channel::text = t.action::text
+          AND (x."externalId" LIKE 'message:%' OR x."externalId" LIKE 'note:%' OR x."externalId" LIKE 'graph:%')
           AND x."countedForTaskId" IS NULL
           AND x."occurredAt" >= ${since}
           AND x."occurredAt" >= e."createdAt"

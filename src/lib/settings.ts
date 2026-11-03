@@ -163,12 +163,55 @@ export const SignInSettingsSchema = z.object({
   passwordRetiredAt: z.string().nullable().default(null),
 });
 
+/** The outreach sandbox: contacts that are not in Twenty yet (docs/outreach-sandbox-plan.md). */
+export const SandboxSettingsSchema = z.object({
+  /** Off: Bellwether's pushes are refused (503 integration_disabled) and nothing new enters the sandbox. */
+  enabled: z.boolean().default(true),
+  /** Contacts per Move to CRM. Rahul's limit is 50 (decision 10); it can be lowered, never raised. */
+  moveBatchLimit: z.number().int().min(1).max(50).default(50),
+  /** A move can be undone for this many days (decision 10: one year). */
+  undoDays: z.number().int().min(1).max(366).default(365),
+  /** Retention for contacts who never convert (decision 13). */
+  retentionInactiveDays: z.number().int().min(30).max(3650).default(180),
+  retentionUnworkedDays: z.number().int().min(30).max(3650).default(90),
+  /** What Move to CRM writes on the person it creates (decision 8): the usual CRM values. */
+  leadSource: z.string().trim().default('BELLWETHER'),
+  leadSourceFallback: z.string().trim().default('LEADGEN'),
+  contactType: z.array(z.string().trim()).default(['PROSPECT']),
+  listCategory: z.string().trim().default('COLD_BD'),
+  pipelineStage: z.string().trim().default('PROSPECT'),
+  /** CRM-ready rules an admin may switch off. Names, a status that is ACTIVE and no CRM match always apply. */
+  requireFirm: z.boolean().default(true),
+  requireEmailOrPhone: z.boolean().default(true),
+  requireOwnerLogin: z.boolean().default(true),
+  requirePod: z.boolean().default(true),
+  /**
+   * Remove (soft-delete, restorable from Twenty's trash) the people Twenty's mail or calendar sync
+   * creates for sandbox contacts, when nobody has worked them (src/lib/sandbox/crm-cleanup.ts).
+   */
+  cleanupAutoCreated: z.boolean().default(true),
+});
+
+/** Calls read from Twilio and the post-call form. Cadence changes nothing in Twilio. */
+export const CallingSettingsSchema = z.object({
+  /** Cadence's own Call button outside 8:00-21:00 in the contact's local time (decision 14). */
+  callingHours: z.enum(['block', 'warn', 'off']).default('block'),
+  startHour: z.number().int().min(0).max(23).default(8),
+  endHour: z.number().int().min(1).max(24).default(21),
+  /** A call counts as a connect before its form is in when the talk lasted this long. */
+  connectSeconds: z.number().int().min(1).max(600).default(30),
+  /** A connect with at least this much talk is a conversation. */
+  conversationSeconds: z.number().int().min(1).max(3600).default(120),
+});
+
 export const SettingsSchema = z.object({
   twenty: TwentySettingsSchema.default({}),
   matching: MatchingSettingsSchema.default({}),
   rules: RulesSettingsSchema.default({}),
   sync: SyncSettingsSchema.default({}),
   signIn: SignInSettingsSchema.default({}),
+  sandbox: SandboxSettingsSchema.default({}),
+  calling: CallingSettingsSchema.default({}),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;
@@ -176,6 +219,8 @@ export type SettingsSection = keyof Settings;
 export type MatchingSettings = Settings['matching'];
 export type RulesSettings = Settings['rules'];
 export type SyncSettings = Settings['sync'];
+export type SandboxSettings = Settings['sandbox'];
+export type CallingSettings = Settings['calling'];
 
 export const DEFAULT_SETTINGS: Settings = SettingsSchema.parse({});
 

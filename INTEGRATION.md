@@ -252,6 +252,16 @@ Turn dry run off (`CADENCE_DRY_RUN=false`), remove `demo` from `SEED_PROFILE`, r
 
 When the pilot pod is happy, add the other pods.
 
+## Calls read from Twilio
+
+Calls keep going through the hosted dialpad. Cadence reads them back from Twilio's REST API with a
+Restricted, read-only API key (`TWILIO_ACCOUNT_SID`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET`):
+every 2 minutes the worker reads Calls.json from the last run minus 10 minutes, then each ended
+call's recordings. Nothing is written to Twilio and no webhook points at Cadence. An admin confirms
+which rep owns each Twilio number in Settings > Calling; the dialpad's `tw_` handles keep matching
+too. Recordings play in Cadence through `/api/calls/<id>/recording`, streamed from Twilio and never
+stored. Details: section 9 of [docs/outreach-sandbox-plan.md](docs/outreach-sandbox-plan.md).
+
 ## Click to call
 
 Calls are placed by a person, not by Cadence. A call task shows the number from Twenty and a
@@ -281,6 +291,14 @@ Writes, and only these:
 | A Cadence task is generated (setting *Mirror open tasks*, on by default) | One **Task**: `Cadence: Email 1 - Dummy One`, assigned to the FO, due on the task day, linked to the person. |
 | That Cadence task is done / skipped / cancelled | The mirrored Task is marked done, or deleted (setting *Delete mirrored task on skip*). |
 | An admin or pod leader applies an Enrichment import | The fields in that import, on the records it matched: `email`, `phone`, `jobTitle`, `linkedinUrl`, `city` on a **Person**; `name`, `domain`, `industry`, `employees`, `aum`, `city`, `linkedinUrl` on a **Company**. Each row is matched by Twenty id, email or domain; a row whose CRM value changed since the preview is refused as a conflict; the write is verified against what Twenty returns before the row is marked applied. |
+
+| A rep moves a sandbox contact to the CRM (Sandbox > Move to CRM, one or up to 50) | One **Person**, and one **Company** when no firm matches by CRD, domain or exact name, with the fields set once at creation: name, emails, phones, LinkedIn, job title, city, company, `assignedTo` (the owner's Twenty login), `podOwner`, `leadSource` (BELLWETHER, else LEADGEN), `leadSourceNotes`, `productInterest`, `tags` (existing options only), `contactType`, `listCategory`, `pipelineStageField`, and the optional `cadenceSandboxId`. Then `[Cadence]` **Notes** for the contact's calls, notes and a sandbox history summary. Undo (within a year, while nobody changed the person) deletes those notes and the person, and the company when Cadence created it and nobody else is linked to it. `CADENCE_DRY_RUN=true` writes none of it. |
+| A rep fills in the post-call form for a CRM person | One **Note**: `[Cadence] Call 14 Oct 2026 by Alyssa - Connected (4/5)`, in place of the step's completion note; the next step and its date become the person's Next Action and Next Action Due Date as any next action does. |
+
+Two optional fields make Move to CRM exact; Cadence writes them only when the workspace has them: a
+Text field `cadenceSandboxId` on Person (a retried move finds the person it created) and a Text field
+`crd` on Company (the firm is matched by CRD first). The API key's role must allow creating People,
+Companies and Notes, and deleting People and Companies.
 
 Never on its own initiative: person, company or opportunity fields - not `dnd`, `podOwner`,
 `assignedTo`, `tier`, `listCategory`, `nextAction`, `nextActionDueDate`, `tags`, emails or stages -

@@ -329,6 +329,38 @@ export type UpdateTaskInput = {
 
 /** A person's Next Action and its due date (YYYY-MM-DD); null clears the field in Twenty. */
 export type PersonNextActionInput = { nextAction: string | null; nextActionDueDate: string | null };
+/**
+ * A person Move to CRM creates (docs/outreach-sandbox-plan.md 8.2): the fields set once, when
+ * Cadence creates the record. Cadence never edits a person it did not create.
+ */
+export type CreatePersonInput = {
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  additionalEmails: string[];
+  /** E.164. */
+  phone: string | null;
+  additionalPhone: string | null;
+  linkedinUrl: string | null;
+  jobTitle: string | null;
+  city: string | null;
+  companyId: string | null;
+  assignedToMemberId: string | null;
+  podOwner: string | null;
+  leadSource: string[];
+  leadSourceNotes: string | null;
+  productInterest: string[];
+  tags: string[];
+  contactType: string[];
+  listCategory: string | null;
+  pipelineStage: string | null;
+  /** Written only when the workspace has the optional cadenceSandboxId field: makes a retry exact. */
+  cadenceSandboxId: string | null;
+};
+export type CreateCompanyInput = { name: string; domain: string | null; city: string | null; state: string | null; employees: number | null; aum: string | null; linkedinUrl: string | null; crd: string | null };
+/** A live lookup before Move to CRM creates anyone: any one of these matching is a match. */
+export type FindPeopleQuery = { emails?: string[]; phones?: string[]; linkedinUrls?: string[]; cadenceSandboxId?: string | null };
+
 export type EnrichPersonInput = Partial<Pick<TwentyPerson, 'firstName' | 'lastName' | 'email' | 'phone' | 'linkedinUrl' | 'jobTitle' | 'city'>>;
 export type EnrichCompanyInput = Partial<Pick<TwentyCompany, 'name' | 'domain' | 'industry' | 'employees' | 'city' | 'linkedinUrl' | 'aum'>>;
 

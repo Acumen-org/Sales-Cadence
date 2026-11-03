@@ -5,7 +5,8 @@ import { getTwentyConnection, getTwentySchema } from '../settings';
 import type { TwentyClient } from './client';
 import { TwentyGraphqlClient } from './graphql-client';
 import { getMockTwentyClient } from './mock-client';
-import type { CreateNoteInput, UpdateNoteInput, TwentyMeetingSchema, TwentyMeetingRecordInput, TwentyTagField, CreateTaskInput, UpdateTaskInput, EnrichPersonInput, PersonNextActionInput, EnrichCompanyInput, TwentyPerson, TwentyCompany } from './types';
+import type { CreateNoteInput, UpdateNoteInput, TwentyMeetingSchema, TwentyMeetingRecordInput, TwentyTagField, CreateTaskInput, UpdateTaskInput, EnrichPersonInput, PersonNextActionInput, EnrichCompanyInput, TwentyPerson, TwentyCompany, CreatePersonInput, CreateCompanyInput } from './types';
+import { blankPerson } from './mock-client';
 
 /**
  * CADENCE_DRY_RUN=true: reads pass through, writes are logged (console + TwentyWrite
@@ -94,6 +95,26 @@ export class DryRunTwentyClient implements TwentyClient {
   }
   async setPersonNextAction(id: string, patch: PersonNextActionInput) {
     await this.record('setPersonNextAction', 'person', { id, ...patch }, id);
+  }
+  findPeople: TwentyClient['findPeople'] = (q) => this.inner.findPeople(q);
+  findCompanies: TwentyClient['findCompanies'] = (q) => this.inner.findCompanies(q);
+  /** Nothing is created: the answer is shaped like a person so the move can say what it would have done. */
+  async createPerson(input: CreatePersonInput): Promise<TwentyPerson> {
+    const id = `dry-person-${randomUUID()}`;
+    await this.record('createPerson', 'person', input, id);
+    const now = new Date().toISOString();
+    return { ...blankPerson(id, now), firstName: input.firstName, lastName: input.lastName, email: input.email, phone: input.phone, companyId: input.companyId, ownerMemberId: input.assignedToMemberId, podOwner: input.podOwner };
+  }
+  async createCompany(input: CreateCompanyInput): Promise<TwentyCompany> {
+    const id = `dry-company-${randomUUID()}`;
+    await this.record('createCompany', 'company', input, id);
+    return { id, name: input.name, domain: input.domain, ownerMemberId: null, industry: null, employees: input.employees, aum: input.aum, city: input.city, linkedinUrl: input.linkedinUrl, updatedAt: new Date().toISOString(), deletedAt: null };
+  }
+  async deletePerson(id: string) {
+    await this.record('deletePerson', 'person', { id }, id);
+  }
+  async deleteCompany(id: string) {
+    await this.record('deleteCompany', 'company', { id }, id);
   }
   async enrichCompany(id: string, patch: EnrichCompanyInput, current?: TwentyCompany) {
     const record = current ?? (await this.inner.listCompanies({ ids: [id], limit: 1 })).items[0];

@@ -1290,3 +1290,51 @@ admin only (`adminLoginAction`). Anyone else, and a wrong password, get the same
 is incorrect." After five wrong passwords for an address in 15 minutes it refuses that address for
 15 minutes (audit rows `signin` / `admin_login_failed`). Nothing links to the page. Password hashes
 were never cleared when passwords retired, so an admin's existing password works.
+
+## Outreach sandbox, Bellwether push and Twilio calls (2026-11-03)
+
+Built on the local branch `outreach-sandbox` from Rahul's brief of 2 November and his answers of
+3 November; the full plan, with the shared contract, is [docs/outreach-sandbox-plan.md](docs/outreach-sandbox-plan.md).
+
+- **One section holds contacts that are not in Twenty: Sandbox.** It is the one exception to
+  "Cadence keeps no contact data": a contact leaves when it is moved to the CRM, and after the
+  one-year undo window only ids and dates stay. What is in the sandbox stays there: Tasks, Home,
+  People, Activity's touches, Ctrl+K and the CRM report numbers read rows with a person only
+  (`src/lib/subject.ts`, `taskScopeWhere`). Reports show sandbox numbers on their own and in a
+  Platform total.
+- **Sandbox campaigns run on the existing engine.** `Enrollment`, `NextAction` and `Touch` carry
+  `sandboxContactId`; `personId` became optional with CHECK constraints and a second one-active
+  index. A sandbox campaign is a `Campaign` with `audience SANDBOX`, created from the Contacts tab
+  (sequence, pod, start, pace) rather than the studio, owner-first. Moving a contact ends its
+  sandbox sequence as `moved_to_crm` and hands its rows and open next action to the person.
+- **Move to CRM: up to 50 at a time, undone for one year.** A live lookup before every create,
+  the new person id stored at once, firm by CRD, domain, then exact name (or created), the usual
+  CRM values (lead source BELLWETHER, else LEADGEN; Prospect; Cold BD), history as `[Cadence]`
+  notes through the outbox. `CADENCE_DRY_RUN=true` writes nothing and leaves the contact in the
+  sandbox. Undo is refused after a year, or when the person changed in Twenty.
+- **Twilio is read only.** Calls go through the existing hosted dialpad; Cadence creates no Twilio
+  app, number, webhook, recording or transcript. The worker reads Calls.json every 2 minutes from
+  the watermark minus 10 minutes, then each ended call's recordings, with a Restricted API key.
+  Reps are matched by the caller number an admin confirms in Settings > Calling, then by the
+  `tw_` handle, then by the Call button's intent. Recordings play through a signed-in proxy and are
+  never copied. Calls made before the first import ask for no form.
+- **Every call needs its form; the next step carries its date.** One field: the step and its day,
+  required except for No further action, defaulting to 2 working days on. While a call waits,
+  Cadence's Call buttons are off and a bar names the call. Calling hours (8:00-21:00 local) are a
+  check on Cadence's own button only; no recording announcement, no counsel step.
+- **Bellwether contract v1, with two additive changes.** The CRM phone rule now also matches office
+  and unknown numbers unless they are the firm's main line, and `POST .../contacts/check` answers
+  what a push would without writing anything. Every opt-out path sets the pushed contact's status
+  to `opted_out` with `statusChangedAt`.
+- **Graph mail is off unless `GRAPH_MAIL_ENABLED=true`.** Application `Mail.Read`, limited by an
+  Exchange application access policy to the sales mailboxes; only metadata is requested and only
+  mail matching a sandbox contact is stored.
+- **No new packages.** Phones are normalised by a small built-in parser (North American numbers and
+  `+` international numbers); Twilio and Graph are plain `fetch`.
+- **Twenty's contact auto-creation stays on; Cadence cleans up (3 Nov, changes decision 11).**
+  Every 5 minutes the worker soft-deletes Twenty people created from EMAIL or CALENDAR for a sandbox
+  contact that is not MOVED, created after that contact, when nobody worked them (updatedAt within
+  10 minutes of createdAt, no notes, tasks or opportunities, no Cadence campaign, enrollment, work
+  or move). The rest are flagged on the sandbox contact. MANUAL, IMPORT, API and Cadence's own
+  people are never touched. Audit row per removal, cache updated, dry run respected, switch in
+  Settings > Sandbox (on).

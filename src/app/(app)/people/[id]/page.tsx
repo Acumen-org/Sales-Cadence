@@ -17,7 +17,8 @@ import { AddToCampaign, RemoveFromCampaign } from '@/components/campaigns/add-to
 import { prisma } from '@/lib/db';
 import { addDays, formatInstant, formatLocalDate, todayIn } from '@/lib/dates';
 import { accentFor } from '@/lib/accent';
-import { callHref, opensDialpad } from '@/lib/calls';
+import { CallButton } from '@/components/calls/call-button';
+import { callGate } from '@/lib/calls/gate';
 import { cachedPersonName } from '@/lib/person-cache';
 import { auditDetailText, describeAudit } from '@/lib/audit-format';
 import { describeStep, parseSteps } from '@/lib/sequences/steps';
@@ -65,6 +66,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
     prisma.nextAction.findFirst({ where: { personId: id, state: 'OPEN' }, include: { fo: { select: { id: true, name: true } } } }),
     nextActionAccess(user),
   ]);
+  const callGateNow = person.phone ? await callGate(user, { phone: person.phone, state: person.city?.split(',').pop()?.trim() ?? null, optedOut: person.optedOut, dnd: person.dnd, email: person.email, linkedinUrl: person.linkedinUrl }) : null;
   const mayWorkNext = openNext ? openNext.foUserId === user.id || user.role === 'ADMIN' || (nextAccess.canAssign && nextAccess.fos.some((f) => f.id === openNext.foUserId)) : false;
 
   let notes: TwentyNote[] = [];
@@ -153,9 +155,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                 </a>
               ) : null}
               {person.phone ? (
-                <a href={callHref(person.phone, settings.rules.clickToCallUrl)} target={opensDialpad(settings.rules.clickToCallUrl) ? '_blank' : undefined} rel="noreferrer" className="btn-secondary btn-sm">
-                  <ActionIcon action="CALL" size={13} /> Call
-                </a>
+                <CallButton phone={person.phone} template={settings.rules.clickToCallUrl} personId={person.id} nextActionId={openNext?.id ?? null} blocked={callGateNow?.blocked} warning={callGateNow?.warning} className="btn-secondary btn-sm" />
               ) : null}
               {person.linkedinUrl ? (
                 <a href={person.linkedinUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm">

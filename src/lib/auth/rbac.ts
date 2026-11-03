@@ -211,6 +211,69 @@ export function whyNotManageMeeting(a: Actor, what: string): string {
   return `Only the person who recorded this meeting, admins, and the Senior FOs, Sales Leaders and Pod Managers of a pod whose contact attended can ${what}.`;
 }
 
+/*
+ * The outreach sandbox (docs/outreach-sandbox-plan.md, section 6). Everyone reads every sandbox
+ * contact; writes follow the contact's owner and pod, as everywhere else. A contact with no owner
+ * is unclaimed, and any sales role may work or claim it. Biz Ops reads.
+ */
+export type SandboxContactRef = { ownerId: string | null; podId: string | null };
+
+/** Add, edit, note, call, set a next action, opt out. */
+export function canWorkSandboxContact(a: Actor, c: SandboxContactRef): boolean {
+  if (isAdmin(a)) return true;
+  if (!needsPod(a.role)) return false;
+  if (!c.ownerId || c.ownerId === a.id) return true;
+  return isPodLeader(a) && !!c.podId && a.podIds.includes(c.podId);
+}
+export const canClaimSandbox = (a: Actor, c: SandboxContactRef) => !c.ownerId && (isAdmin(a) || needsPod(a.role));
+/** Give a contact to someone else. A Junior FO may only let go of their own. */
+export function canAssignSandbox(a: Actor, c: SandboxContactRef, toUserId: string | null): boolean {
+  if (isAdmin(a)) return true;
+  if (!needsPod(a.role)) return false;
+  if (isPodLeader(a)) return (!!c.podId && a.podIds.includes(c.podId)) || c.ownerId === a.id || !c.ownerId;
+  return c.ownerId === a.id && (toUserId === null || toUserId === a.id);
+}
+export function canMoveToCrm(a: Actor, c: SandboxContactRef): boolean {
+  if (isAdmin(a)) return true;
+  if (!needsPod(a.role)) return false;
+  if (c.ownerId === a.id) return true;
+  return isPodLeader(a) && !!c.podId && a.podIds.includes(c.podId);
+}
+export const canRemoveSandboxContact = canMoveToCrm;
+/** Undo a move: the mover, a pod leader of the contact's pod, or an admin. */
+export function canUndoMove(a: Actor, m: { movedById: string | null; podId: string | null }): boolean {
+  if (isAdmin(a)) return true;
+  if (!needsPod(a.role)) return false;
+  if (m.movedById === a.id) return true;
+  return isPodLeader(a) && !!m.podId && a.podIds.includes(m.podId);
+}
+export const canEraseContact = (a: Actor) => isAdmin(a);
+export const canViewCalls = (a: Actor) => canViewReports(a);
+/** A call's form belongs to the rep who made it; pod leaders and admins may attach unmatched calls. */
+export const canAttachCalls = (a: Actor) => isAdmin(a) || isPodLeader(a);
+
+export function whyNotWorkSandboxContact(a: Actor, ownerName: string | null, podName: string | null): string | null {
+  if (isBizOps(a)) return 'Biz Ops can view sandbox contacts but cannot change them.';
+  if (!needsPod(a.role) && !isAdmin(a)) return 'Only sales roles and admins can work sandbox contacts.';
+  if (isJuniorFo(a)) return `This is ${ownerName ?? 'someone else'}'s contact. Junior FOs can work only their own contacts and unclaimed ones.`;
+  return `This is ${ownerName ?? 'someone else'}'s contact${podName ? ` in ${podName}, which is not one of your pods` : ''}. Only ${podName ? leadersOf(podName) : 'its owner'}, and admins, can change it.`;
+}
+export function whyNotMoveToCrm(a: Actor, ownerName: string | null, podName: string | null): string | null {
+  if (isBizOps(a)) return 'Biz Ops can view sandbox contacts but cannot move them to the CRM.';
+  if (isJuniorFo(a)) return `Only ${ownerName ?? 'the owner'}, ${podName ? leadersOf(podName) : 'the leaders of its pod'}, and admins can move this contact. Junior FOs move their own.`;
+  return `Only ${ownerName ?? 'the owner'}, ${podName ? leadersOf(podName) : 'the leaders of its pod'}, and admins can move this contact.`;
+}
+export function whyNotAssignSandbox(a: Actor, podName: string | null): string | null {
+  if (isBizOps(a)) return 'Biz Ops can view sandbox contacts but cannot assign them.';
+  if (isJuniorFo(a)) return 'Junior FOs can let go of their own contacts but cannot give contacts to someone else.';
+  return `Only ${podName ? leadersOf(podName) : 'the leaders of its pod'}, and admins, can give this contact to someone else.`;
+}
+export function whyNotUndoMove(a: Actor, moverName: string | null, podName: string | null): string | null {
+  if (isBizOps(a)) return 'Biz Ops cannot undo a move to the CRM.';
+  return `Only ${moverName ?? 'the person who moved it'}, ${podName ? leadersOf(podName) : 'the leaders of its pod'}, and admins can undo this move.`;
+}
+export const whyNotEraseContact = (a: Actor) => (canEraseContact(a) ? null : 'Only admins can erase a contact.');
+
 /** Enrichment belongs to the roles that lead pods. */
 export const ENRICHMENT_ROLES = 'Senior FOs, Sales Leaders, Pod Managers and admins';
 

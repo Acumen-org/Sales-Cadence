@@ -35,6 +35,8 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
   const { id } = await params;
   const sp = await searchParams;
   const today = todayIn(user.timezone);
+  // A sandbox campaign has its own page in the Sandbox section.
+  if ((await prisma.campaign.findUnique({ where: { id }, select: { audience: true } }))?.audience === 'SANDBOX') redirect(`/sandbox/campaigns/${id}`);
   const detail = await campaignDetail(id, today);
   if (!detail) notFound();
   const { campaign, history, summary, byStep, byFo, podFos, enrollments } = detail;
@@ -70,8 +72,8 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
     // The same preview the launch will run, so an approver sees who would be left out and why.
     proposed ? previewEnrollment({ personIds: campaign.personIds, sequenceId: campaign.sequenceId, podId: campaign.podId, campaignId: id, startDate: campaign.startDate, assignment: { mode: 'OWNER' }, dailyRampByFo: capacity ? Object.fromEntries(capacity.perFo.map((f) => [f.id, f.rate])) : null, lastStartDate: capacity?.lastStart ?? null, actor: userActor(user) }).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })) : Promise.resolve(null),
     // Replies and meetings that happened inside the window, for the people in the campaign.
-    enrollments.length ? prisma.touch.count({ where: { direction: 'INBOUND', personId: { in: enrollments.map((e) => e.personId) }, occurredAt: { gte: new Date(`${campaign.startDate}T00:00:00Z`), ...(campaign.endDate ? { lte: new Date(`${addDays(campaign.endDate, 1)}T00:00:00Z`) } : {}) } } }) : Promise.resolve(0),
-    enrollments.length ? prisma.meeting.count({ where: { review: 'APPROVED', attendees: { some: { personId: { in: enrollments.map((e) => e.personId) } } }, occurredAt: { gte: new Date(`${campaign.startDate}T00:00:00Z`), ...(campaign.endDate ? { lte: new Date(`${addDays(campaign.endDate, 1)}T00:00:00Z`) } : {}) } } }) : Promise.resolve(0),
+    enrollments.length ? prisma.touch.count({ where: { direction: 'INBOUND', personId: { in: enrollments.map((e) => e.personId!) }, occurredAt: { gte: new Date(`${campaign.startDate}T00:00:00Z`), ...(campaign.endDate ? { lte: new Date(`${addDays(campaign.endDate, 1)}T00:00:00Z`) } : {}) } } }) : Promise.resolve(0),
+    enrollments.length ? prisma.meeting.count({ where: { review: 'APPROVED', attendees: { some: { personId: { in: enrollments.map((e) => e.personId!) } } }, occurredAt: { gte: new Date(`${campaign.startDate}T00:00:00Z`), ...(campaign.endDate ? { lte: new Date(`${addDays(campaign.endDate, 1)}T00:00:00Z`) } : {}) } } }) : Promise.resolve(0),
   ]);
   const previewError = preview && 'error' in preview ? preview.error : campaign.sequence.archived ? 'The sequence is archived; restore it or pick another before launch.' : null;
   const ready = preview && !('error' in preview) ? preview : null;
@@ -82,7 +84,7 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
   const audienceFiltered = audienceAll.filter((p) => !q || `${cachedPersonName(p)} ${p.companyName ?? ''} ${p.email ?? ''}`.toLowerCase().includes(q));
   const audiencePages = Math.max(1, Math.ceil(audienceFiltered.length / AUDIENCE_PAGE));
   const audience = audienceFiltered.slice((page - 1) * AUDIENCE_PAGE, page * AUDIENCE_PAGE);
-  const historyFiltered = history.filter((e) => !q || `${cachedPersonName(e.person)} ${e.person.companyName ?? ''}`.toLowerCase().includes(q));
+  const historyFiltered = history.filter((e) => !q || `${cachedPersonName(e.person!)} ${e.person!.companyName ?? ''}`.toLowerCase().includes(q));
   const historyPages = Math.max(1, Math.ceil(historyFiltered.length / AUDIENCE_PAGE));
   const historyPage = historyFiltered.slice((page - 1) * AUDIENCE_PAGE, page * AUDIENCE_PAGE);
   const pageHref = (n: number) => `/campaigns/${id}?${new URLSearchParams({ ...(q ? { q } : {}), page: String(n) }).toString()}`;
@@ -169,7 +171,7 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
         </div>
         <Card title={`People in the campaign · ${history.length.toLocaleString('en-US')}`}>
           <form className="border-b border-line px-5 py-3"><input name="q" defaultValue={sp.q ?? ''} placeholder="Search people" aria-label="Search people in the campaign" className="!w-72" /></form>
-          <div className="overflow-x-auto"><table className="table table-dense"><thead><tr><th>Person</th><th>FO</th><th>Run</th><th>Status</th><th>Started</th><th>Step</th>{manager && <th>Manage</th>}</tr></thead><tbody>{historyPage.map((e) => <tr key={e.id}><td><Link href={'/people/' + e.personId} className="text-[13px] font-medium text-ink-900 hover:text-brand-700">{cachedPersonName(e.person)}</Link></td><td className="text-[12.5px]">{e.fo.name}</td><td className="tabular-nums">{e.campaignRun}</td><td><Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'}>{enrollmentStatusLabel(e)}</Badge></td><td className="whitespace-nowrap text-[12.5px]">{formatLocalDate(e.startDate)}</td><td className="text-[12.5px]">{e.currentStep < 0 ? 'Not started' : `${e.currentStep + 1} of ${detail.steps.length}`}</td>{manager && <td><EnrollmentActions enrollmentId={e.id} status={e.status} foUserId={e.foUserId} fos={podFos} compact /></td>}</tr>)}</tbody></table></div>
+          <div className="overflow-x-auto"><table className="table table-dense"><thead><tr><th>Person</th><th>FO</th><th>Run</th><th>Status</th><th>Started</th><th>Step</th>{manager && <th>Manage</th>}</tr></thead><tbody>{historyPage.map((e) => <tr key={e.id}><td><Link href={'/people/' + e.personId} className="text-[13px] font-medium text-ink-900 hover:text-brand-700">{cachedPersonName(e.person!)}</Link></td><td className="text-[12.5px]">{e.fo.name}</td><td className="tabular-nums">{e.campaignRun}</td><td><Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'}>{enrollmentStatusLabel(e)}</Badge></td><td className="whitespace-nowrap text-[12.5px]">{formatLocalDate(e.startDate)}</td><td className="text-[12.5px]">{e.currentStep < 0 ? 'Not started' : `${e.currentStep + 1} of ${detail.steps.length}`}</td>{manager && <td><EnrollmentActions enrollmentId={e.id} status={e.status} foUserId={e.foUserId} fos={podFos} compact /></td>}</tr>)}</tbody></table></div>
           {historyPages > 1 ? <div className="flex items-center justify-between border-t border-line px-5 py-3 text-[12.5px] text-ink-500"><span>Page {page} of {historyPages}</span><span className="flex gap-2">{page > 1 ? <Link href={pageHref(page - 1)} className="btn-secondary btn-sm">Previous</Link> : null}{page < historyPages ? <Link href={pageHref(page + 1)} className="btn-secondary btn-sm">Next</Link> : null}</span></div> : null}
         </Card>
       </>}

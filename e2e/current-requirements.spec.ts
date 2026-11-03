@@ -63,22 +63,25 @@ test('Pod Manager and Biz Ops seats work with their distinct write permissions',
     await form.getByRole('button', { name: 'Add team member', exact: true }).click();
     await expect(page.getByRole('cell', { name: new RegExp(name) })).toBeVisible();
   }
+  // On a retry the first attempt may already have saved its meeting, so each attempt gets its own title.
+  const title = `Audit shared meeting${test.info().retry ? ` ${test.info().retry}` : ''}`;
   await page.goto('/meetings/new');
-  await page.getByLabel('Title', { exact: true }).fill('Audit shared meeting');
+  await page.getByLabel('Title', { exact: true }).fill(title);
   await page.getByLabel('Recording or meeting link').fill('https://example.com/audit.mp4');
   await page.getByLabel('Booked by').selectOption({ index: 1 });
   await page.getByRole('combobox', { name: 'Find a prospect in Twenty' }).fill('Dummy One');
   await page.getByRole('listbox', { name: 'Find a prospect in Twenty results' }).getByRole('option', { name: /Dummy One/ }).click({ timeout: 20_000 });
   await page.getByRole('group', { name: 'Products' }).getByText('PHH', { exact: true }).click();
   await page.getByRole('button', { name: 'Add meeting', exact: true }).click();
-  await expect(page).toHaveURL(/\/meetings\/[0-9a-f-]+$/);
+  // Saving looks the prospect up in Twenty first; on a busy CI runner that can pass 15 seconds.
+  await expect(page).toHaveURL(/\/meetings\/[0-9a-f-]+$/, { timeout: 30_000 });
   const meetingUrl = page.url();
   for (const role of ['ops', 'manager']) {
     const context = await browser.newContext(); const seat = await context.newPage();
     await login(seat, `audit-${role}@cadence.local`);
     await seat.goto('/meetings');
     // A fresh context on a busy runner: give the first list render room.
-    await expect(seat.getByRole('link', { name: 'Audit shared meeting', exact: true })).toBeVisible({ timeout: 20_000 });
+    await expect(seat.getByRole('link', { name: title, exact: true })).toBeVisible({ timeout: 20_000 });
     if (role === 'ops') {
       await expect(seat.getByRole('link', { name: 'Add meeting', exact: true })).toHaveCount(0);
       await seat.goto('/meetings/new'); await expect(seat).toHaveURL(/\/meetings$/);
@@ -86,7 +89,7 @@ test('Pod Manager and Biz Ops seats work with their distinct write permissions',
       await seat.getByRole('button', { name: 'Add to favourites', exact: true }).click();
       await expect(seat.getByRole('button', { name: 'Favourite', exact: true })).toBeVisible();
       await seat.goto('/meetings?fav=1');
-      await expect(seat.getByRole('link', { name: 'Audit shared meeting', exact: true })).toBeVisible();
+      await expect(seat.getByRole('link', { name: title, exact: true })).toBeVisible();
       await seat.goto('/reports'); await expect(seat).toHaveURL(/\/reports$/);
     } else {
       await expect(seat.getByRole('link', { name: 'Add meeting', exact: true })).toBeVisible();

@@ -43,7 +43,7 @@ export async function activateCalendarCampaign(id: string, ctx: EngineContext) {
       const unreachable = await campaignAudienceIssues(ids.filter(id => !eligible.has(id)), undefined, tx);
       const goneFos = await tx.user.findMany({ where: { id: { in: plan.fos.filter(f => !fos.some(x => x.id === f.id)).map(f => f.id) } }, select: { name: true, active: true, role: true } });
       throw notStarted([
-        whoAndWhy([...unreachable, ...busy.map(e => ({ name: nameOf.get(e.personId) ?? 'Someone', reason: `Already in ${e.campaign?.name ?? `the ${e.sequence.name} sequence`}` }))]),
+        whoAndWhy([...unreachable, ...busy.map(e => ({ name: (e.personId && nameOf.get(e.personId)) || 'Someone', reason: `Already in ${e.campaign?.name ?? `the ${e.sequence.name} sequence`}` }))]),
         ...goneFos.map(f => !f.active ? `${f.name} no longer has access to Cadence` : !ROLES_NEEDING_POD.includes(f.role) ? `${f.name} is now ${ROLE_LABELS[f.role]} and does not run outreach` : `${f.name} is no longer in ${c.pod.name}`),
       ].filter(Boolean).join('; '));
     }

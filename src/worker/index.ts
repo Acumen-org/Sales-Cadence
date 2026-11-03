@@ -18,6 +18,12 @@ import { getTwentyClient } from '../lib/twenty';
 import { todayIn } from '../lib/dates';
 import { workspaceTimezone } from '../lib/workspace';
 import { syncNextActions } from '../lib/next-actions';
+import { runMoveQueue } from '../lib/sandbox/move';
+import { CLEANUP_EVERY_MS, cleanupSandboxCrmPeople } from '../lib/sandbox/crm-cleanup';
+import { backfillPhoneE164, runSandboxRetention } from '../lib/sandbox/retention';
+import { purgeOldPushes } from '../lib/sandbox/bellwether-api';
+import { importTwilioCalls } from '../lib/calls/import';
+import { runGraphMail } from '../lib/mail/graph-mail';
 
 const config=env();
 const log=(message:string,extra?:unknown)=>console.log('[worker '+new Date().toISOString()+'] '+message,extra??'');
@@ -45,6 +51,30 @@ async function nightly(now:Date){
  try{const stats=await reconcile({actor:SYSTEM_ACTOR,now});log('nightly reconcile',stats);}catch(error){log('nightly reconcile failed',error);}
  try{const stats=await refreshPersonCache(await getTwentyClient());log('cache refresh',stats);}catch(error){log('cache refresh failed',error);}
  try{const stats=await snapshotScorecard(now);log('enrichment scorecard snapshot',stats);}catch(error){log('enrichment scorecard snapshot failed',error);}
+ // The outreach sandbox: contacts nobody works, moved contacts past the one-year undo window, old push keys.
+ try{const stats=await runSandboxRetention(now);if(stats.removed||stats.movedCleared||stats.optedOutCleared)log('sandbox retention',stats);}catch(error){log('sandbox retention failed',error);}
+ try{const purged=await purgeOldPushes(now);if(purged)log('bellwether push keys forgotten',purged);}catch(error){log('push retention failed',error);}
+}
+/**
+ * Every 2 minutes: calls read from Twilio (read only), and the sales mailboxes read through Graph
+ * when GRAPH_MAIL_ENABLED is set. Moves to the CRM go at every tick, paced under Twenty's limit.
+ * Every 5 minutes: the sandbox CRM cleanup (src/lib/sandbox/crm-cleanup.ts).
+ */
+let callsAt=0;let mailAt=0;let crmCleanupAt=0;
+async function sandboxJobs(now:number){
+ try{const moved=await runMoveQueue({pauseMs:1500});if(moved.done||moved.failed||moved.dryRun)log('moves to CRM',moved);}catch(error){log('moves to CRM failed',error);}
+ if(now>=callsAt){callsAt=now+120_000;try{const stats=await importTwilioCalls();if(stats.ran&&(stats.created||stats.forms||stats.recordings||stats.error))log('twilio import',stats);}catch(error){log('twilio import failed',error);}}
+ // Every 5 minutes: people Twenty's mail or calendar sync created for sandbox contacts, removed when nobody worked them.
+ if(now>=crmCleanupAt){crmCleanupAt=now+CLEANUP_EVERY_MS;try{const stats=await cleanupSandboxCrmPeople();if(stats.removed||stats.kept||stats.dryRun||stats.errors)log('sandbox CRM cleanup',stats);}catch(error){log('sandbox CRM cleanup failed',error);}}
+ if(now>=mailAt){mailAt=now+120_000;try{const stats=await runGraphMail();if(stats.ran&&(stats.sent||stats.replies||stats.bounces||stats.errors.length))log('graph mail',stats);}catch(error){log('graph mail failed',error);}}
+}
+/** Once: E.164 copies of the phones already cached, so calls and pushes match CRM people by number. */
+let phoneBackfillChecked=false;
+async function phoneE164Backfill(){
+ if(phoneBackfillChecked)return;phoneBackfillChecked=true;
+ const key='phoneE164Backfill20261103';
+ if(await prisma.setting.findUnique({where:{key}}))return;
+ try{const updated=await backfillPhoneE164();log('phone numbers in E.164',updated);await prisma.setting.upsert({where:{key},create:{key,value:{at:new Date().toISOString(),updated}},update:{value:{at:new Date().toISOString(),updated}}});}catch(error){log('phone backfill failed',error);}
 }
 /**
  * Once: the last two weeks of notes and emails are read again. Logged calls and emails whose person
@@ -132,6 +162,8 @@ async function tick(){
    await meetingTagsRetry(now);
    await sharePointPlayers(now);
    await teamsTranscripts(now);
+   await phoneE164Backfill();
+   await sandboxJobs(now);
    try{await launchScheduledCampaigns({actor:SYSTEM_ACTOR});}catch(error){log('campaign launch failed',error);}
    const stats=await runSchedulerTick({actor:SYSTEM_ACTOR});
    if(stats.generated||stats.completed)log('scheduler',stats);
@@ -144,7 +176,7 @@ async function tick(){
 }
 async function main(){
  log('Continuous sync every '+config.CRM_SYNC_SECONDS+' seconds; nightly reconcile after '+config.RECONCILE_HOUR+':00 '+workspaceTimezone());
- await tick();const timer=setInterval(tick,Math.min(config.WORKER_TICK_SECONDS,config.CRM_SYNC_SECONDS)*1000);
+ await tick();const timer=setInterval(tick,Math.min(config.WORKER_TICK_SECONDS,config.CRM_SYNC_SECONDS,120)*1000);
  const stop=async()=>{stopping=true;clearInterval(timer);while(running)await new Promise(resolve=>setTimeout(resolve,100));await prisma.$disconnect();process.exit(0);};
  process.on('SIGTERM',stop);process.on('SIGINT',stop);
 }

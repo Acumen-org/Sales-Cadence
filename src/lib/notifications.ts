@@ -14,7 +14,8 @@ import { prisma } from './db';
 export function notificationScope(user: SessionUser): Prisma.TouchWhereInput {
   const owned: Prisma.PersonCacheWhereInput[] = [{ enrollments: { some: { foUserId: user.id } } }];
   if (user.twentyMemberId) owned.push({ ownerMemberId: user.twentyMemberId });
-  return { channel: 'EMAIL', direction: 'INBOUND', person: { deletedAt: null, OR: owned } };
+  // A sandbox contact's reply reaches the rep who owns it (Graph sees it in their mailbox).
+  return { channel: 'EMAIL', direction: 'INBOUND', OR: [{ person: { deletedAt: null, OR: owned } }, { personId: null, sandboxContact: { ownerId: user.id } }] };
 }
 
 export async function unreadNotifications(user: SessionUser) {

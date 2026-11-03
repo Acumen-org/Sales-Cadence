@@ -47,7 +47,7 @@ export async function campaignAudienceIssues(ids: string[], context?: AudienceCo
   const blockedIds = new Set(blocked.map(b => b.companyId));
   const occupied = new Map<string, string>();
   for (const c of campaigns) for (const id of c.personIds) occupied.set(id, c.name);
-  for (const e of enrollments) occupied.set(e.personId, e.campaign?.name ?? `the ${e.sequence.name} sequence`);
+  for (const e of enrollments) if (e.personId) occupied.set(e.personId, e.campaign?.name ?? `the ${e.sequence.name} sequence`);
   return ids.flatMap((id): AudienceIssue[] => {
     const p = byId.get(id);
     const issue = (kind: AudienceIssueKind, reason: string, ownerId?: string): AudienceIssue[] => [{ id, name: p ? cachedPersonName(p) : 'Unknown contact', company: p?.companyName ?? null, kind, reason, ...(ownerId ? { ownerId } : {}) }];

@@ -44,7 +44,7 @@ export function completionNoteTitle(task: Pick<SyncTask, 'label' | 'chosenAction
 }
 
 export function mirroredTaskTitle(task: SyncTask): string {
-  return `Cadence: ${task.label} - ${cachedPersonName(task.enrollment.person)}`;
+  return `Cadence: ${task.label} - ${task.enrollment.person ? cachedPersonName(task.enrollment.person) : 'sandbox contact'}`;
 }
 
 async function recordWrite(client: TwentyClient, operation: string, objectType: string, payload: unknown, twentyId: string | null, taskId: string | null) {
@@ -103,7 +103,8 @@ export async function syncTasksCreated(tasks: SyncTask[]): Promise<void> {
     clientError = err;
   }
   for (const task of tasks) {
-    if (task.twentyTaskId || task.state !== 'PENDING') continue;
+    // A sandbox contact has no Twenty record to hang a task on: its steps stay in Cadence.
+    if (task.twentyTaskId || task.state !== 'PENDING' || !task.enrollment.personId) continue;
     const input = {
       title: mirroredTaskTitle(task),
       bodyMarkdown: `Sequence "${task.enrollment.sequence.name}", step ${task.stepIndex + 1} (day ${task.stepDay}).\nDue ${task.dueDate}. Managed by Cadence.`,
@@ -128,6 +129,8 @@ export async function syncTasksCreated(tasks: SyncTask[]): Promise<void> {
 
 /** Completion note + close the mirrored task. */
 export async function syncTaskCompleted(task: SyncTask): Promise<void> {
+  // Sandbox steps write nothing to Twenty; their history goes across as notes when the contact moves.
+  if (!task.enrollment.personId) return;
   const settings = await getSettings();
   if (!settings.sync.writeCompletionNotes && !task.twentyTaskId) return;
   let client: TwentyClient | null = null;

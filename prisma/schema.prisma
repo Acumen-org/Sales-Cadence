@@ -57,6 +57,11 @@ enum CampaignStatus {
   COMPLETED
 }
 
+enum CampaignAudience {
+  CRM
+  SANDBOX
+}
+
 enum CampaignSource {
   IDS
   CSV
@@ -145,6 +150,9 @@ model User {
   roleAssigned   Boolean   @default(true)
   /// The Microsoft account (its object id) this user signs in with.
   microsoftId    String?   @unique
+  /// The rep's Twilio number (E.164), confirmed by an admin in Settings > Calling from Twilio's
+  /// IncomingPhoneNumbers. Imported calls from or to it belong to this rep.
+  callerNumber   String?   @unique
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
@@ -162,6 +170,8 @@ model User {
   bookedMeetings  Meeting[]        @relation("MeetingBookedBy")
   numberTicketsRaised   MeetingNumberTicket[] @relation("NumberTicketRaisedBy")
   numberTicketsResolved MeetingNumberTicket[] @relation("NumberTicketResolvedBy")
+  sandboxContacts SandboxContact[] @relation("SandboxOwner")
+  calls           CallLog[]        @relation("CallUser")
 }
 
 model Session {
@@ -190,6 +200,7 @@ model Pod {
   users       UserPod[]
   campaigns   Campaign[]
   enrollments Enrollment[]
+  sandboxContacts SandboxContact[]
 }
 
 model UserPod {
@@ -267,17 +278,24 @@ model Campaign {
   approvedAt DateTime?
   approvedById String?
   runNumber Int @default(1)
+  /// Which table personIds refers to: Twenty people (CRM) or sandbox contacts. Never mixed.
+  audience       CampaignAudience @default(CRM)
   createdById    String?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
   enrollments Enrollment[]
+
+  @@index([audience, status])
 }
 
 model Enrollment {
   id                String           @id @default(uuid())
-  personId          String
-  person            PersonCache      @relation(fields: [personId], references: [id])
+  /// Null while the subject is a sandbox contact; set when that contact moves to the CRM.
+  personId          String?
+  person            PersonCache?     @relation(fields: [personId], references: [id], onDelete: Restrict)
+  sandboxContactId  String?
+  sandboxContact    SandboxContact?  @relation(fields: [sandboxContactId], references: [id], onDelete: Restrict)
   companyId         String?
   foUserId          String
   fo                User             @relation("EnrollmentFo", fields: [foUserId], references: [id])
@@ -316,6 +334,7 @@ model Enrollment {
   tasks Task[]
 
   @@index([personId, status])
+  @@index([sandboxContactId, status])
   @@index([foUserId, status])
   @@index([campaignId])
   @@index([companyId])
@@ -401,6 +420,9 @@ model PersonCache {
   sortName        String?
   email           String?
   phone           String?
+  /// `phone` and `additionalPhone` in E.164, for matching calls and pushes (src/lib/sandbox/normalize.ts).
+  phoneE164       String?
+  additionalPhoneE164 String?
   linkedinUrl     String?
   jobTitle        String?
   companyId       String?
@@ -474,10 +496,14 @@ model PersonCache {
   touches          Touch[]
   meetingAttendees MeetingAttendee[]
   numberTickets    MeetingNumberTicket[]
+  calls            CallLog[]
 
   @@index([companyId])
   @@index([podOwner])
   @@index([email])
+  @@index([phoneE164])
+  @@index([additionalPhoneE164])
+  @@index([linkedinUrl])
   @@index([lastName, firstName])
   @@index([ownerMemberId])
   @@index([companyId, lastName])
@@ -680,8 +706,11 @@ model MeetingAttendee {
 /// Every observed or performed touch on a person, across channels.
 model Touch {
   id          String         @id @default(uuid())
-  personId    String
-  person      PersonCache    @relation(fields: [personId], references: [id], onDelete: Cascade)
+  /// Null for a touch on a sandbox contact; set when that contact moves to the CRM.
+  personId    String?
+  person      PersonCache?   @relation(fields: [personId], references: [id], onDelete: Cascade)
+  sandboxContactId String?
+  sandboxContact   SandboxContact? @relation(fields: [sandboxContactId], references: [id], onDelete: Cascade)
   channel     Channel
   direction   TouchDirection
   occurredAt  DateTime
@@ -696,6 +725,7 @@ model Touch {
   createdAt   DateTime       @default(now())
 
   @@index([personId, occurredAt])
+  @@index([sandboxContactId, occurredAt])
   @@index([countedForTaskId])
   @@index([occurredAt])
   @@index([createdAt])
@@ -868,8 +898,11 @@ enum NextActionState {
 /// Next Action Due Date in Twenty, both ways. One open next action per person, as Twenty has one.
 model NextAction {
   id            String           @id @default(uuid())
-  personId      String
-  person        PersonCache      @relation(fields: [personId], references: [id], onDelete: Cascade)
+  /// Null for a sandbox contact's next action, which never reaches Twenty until the contact moves.
+  personId      String?
+  person        PersonCache?     @relation(fields: [personId], references: [id], onDelete: Cascade)
+  sandboxContactId String?
+  sandboxContact   SandboxContact? @relation(fields: [sandboxContactId], references: [id], onDelete: Cascade)
   foUserId      String
   fo            User             @relation("NextActionFo", fields: [foUserId], references: [id])
   /// What to do, as it is written to Twenty's Next Action.
@@ -895,5 +928,436 @@ model NextAction {
 
   @@index([foUserId, state, dueDate])
   @@index([personId, state])
+  @@index([sandboxContactId, state])
   @@index([state, crmPending])
+}
+
+// ---------------------------------------------------------------------------
+// Outreach sandbox: contacts that are not in Twenty yet (docs/outreach-sandbox-plan.md)
+// ---------------------------------------------------------------------------
+
+enum SandboxStatus {
+  /// Workable in the sandbox.
+  ACTIVE
+  /// In Twenty now; the row is a tombstone (its data is kept for the one-year undo window).
+  MOVED
+  /// Asked not to be contacted.
+  OPTED_OUT
+  /// Removed by a user or by retention; personal data cleared.
+  REMOVED
+}
+
+enum ContactSource {
+  BELLWETHER
+  MANUAL
+  CSV
+  CALL
+}
+
+/// A contact that is not in Twenty. The firm is flat on the row: the sandbox works people, and the
+/// firm only matters again when the contact moves to Twenty.
+model SandboxContact {
+  id                  String        @id @default(uuid())
+  status              SandboxStatus @default(ACTIVE)
+  source              ContactSource
+  firstName           String
+  lastName            String
+  sortName            String?
+  jobTitle            String?
+  /// Lower-cased.
+  email               String?
+  /// valid | risky | unknown
+  emailVerification   String?
+  additionalEmails    String[]      @default([])
+  /// E.164.
+  phone               String?
+  /// direct | mobile | office | main | toll_free | unknown
+  phoneType           String?
+  phoneExtension      String?
+  /// [{ number: E.164, type }]
+  additionalPhones    Json          @default("[]")
+  /// linkedin.com/in/<slug>
+  linkedinUrl         String?
+  city                String?
+  state               String?
+  /// ISO 3166-1 alpha-2.
+  country             String?
+  individualCrd       String?
+  designations        String[]      @default([])
+  /// Twenty productInterest values.
+  productInterest     String[]      @default([])
+  tags                String[]      @default([])
+  companyName         String?
+  companyDomain       String?
+  companyWebsite      String?
+  companyCrd          String?
+  companyCity         String?
+  companyState        String?
+  companyCountry      String?
+  companyPhone        String?
+  companyAumUsd       Decimal?      @db.Decimal(24, 2)
+  companyEmployees    Int?
+  ownerId             String?
+  owner               User?         @relation("SandboxOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  podId               String?
+  pod                 Pod?          @relation(fields: [podId], references: [id], onDelete: SetNull)
+  claimedAt           DateTime?
+  /// The Bellwether record this contact came from; null for contacts added in Cadence.
+  bellwetherContactId String?       @unique
+  /// More Bellwether records that were pushed for the same person and matched this contact.
+  bellwetherAliases   String[]      @default([])
+  bellwetherUrl       String?
+  sourceNote          String?
+  /// LocalDate the source collected it.
+  collectedAt         String?
+  pushedByEmail       String?
+  createdById         String?
+  badEmail            Boolean       @default(false)
+  badPhone            Boolean       @default(false)
+  optedOutAt          DateTime?
+  optOutReason        String?
+  /// legitimate_interest | consent; set for EEA/UK contacts.
+  lawfulBasis         String?
+  /// Last call, email, note or task: drives retention.
+  lastActivityAt      DateTime?
+  /// When the status Bellwether reads last changed: every opt-out, move, undo and removal sets it
+  /// in the same write that changes the status.
+  statusChangedAt     DateTime      @default(now())
+  movedAt             DateTime?
+  movedById           String?
+  twentyPersonId      String?       @unique
+  twentyCompanyId     String?
+  /// A Twenty person that Twenty's own mail or calendar sync created for this contact, which
+  /// someone has since worked in the CRM, so the cleanup left it (src/lib/sandbox/crm-cleanup.ts).
+  crmAutoPersonId     String?
+  /// EMAIL | CALENDAR: what created that person.
+  crmAutoSource       String?
+  crmAutoFlaggedAt    DateTime?
+  piiClearedAt        DateTime?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  enrollments Enrollment[]
+  nextActions NextAction[]
+  touches     Touch[]
+  calls       CallLog[]
+  notes       SandboxNote[]
+  emails      SandboxEmail[]
+
+  @@index([status, ownerId])
+  @@index([status, podId])
+  @@index([status, lastActivityAt])
+  @@index([statusChangedAt])
+  @@index([email])
+  @@index([phone])
+  @@index([linkedinUrl])
+  @@index([individualCrd])
+  @@index([companyDomain])
+  @@index([sortName])
+}
+
+model SandboxNote {
+  id               String         @id @default(uuid())
+  sandboxContactId String
+  contact          SandboxContact @relation(fields: [sandboxContactId], references: [id], onDelete: Cascade)
+  authorId         String?
+  authorName       String?
+  body             String
+  /// Set when the contact moves.
+  twentyNoteId     String?
+  createdAt        DateTime       @default(now())
+
+  @@index([sandboxContactId, createdAt])
+}
+
+/// Never contact again. Values are SHA-256 of the normalised value, so an erased contact leaves no
+/// readable personal data behind and a later push of the same person is still refused.
+model Suppression {
+  id               String   @id @default(uuid())
+  /// email | phone | linkedin | bellwether_id
+  kind             String
+  valueHash        String
+  /// What an admin typed, masked (j***@acme.com), so the list is legible without keeping the value.
+  label            String?
+  /// opted_out | erased | do_not_contact
+  reason           String
+  sandboxContactId String?
+  personId         String?
+  createdById      String?
+  createdAt        DateTime @default(now())
+
+  @@unique([kind, valueHash])
+  @@index([createdAt])
+}
+
+enum CallDirection {
+  OUTBOUND
+  INBOUND
+}
+
+enum CallStatus {
+  QUEUED
+  INITIATED
+  RINGING
+  IN_PROGRESS
+  COMPLETED
+  BUSY
+  NO_ANSWER
+  FAILED
+  CANCELED
+}
+
+enum CallSource {
+  TWILIO_IMPORT
+  MANUAL
+}
+
+/// Every call, sandbox or CRM: read from Twilio's REST API (calls placed through the hosted dialpad
+/// or any other app on the account), or logged by hand. Cadence places no calls itself. One row per
+/// conversation: the Twilio leg that reaches the phone network.
+model CallLog {
+  id               String          @id @default(uuid())
+  source           CallSource
+  direction        CallDirection
+  /// The leg to or from the phone network.
+  twilioCallSid    String?         @unique
+  /// The dialpad's browser leg, when there is one.
+  parentCallSid    String?
+  fromNumber       String?
+  toNumber         String?
+  /// client:<identity> seen on the call or its parent, e.g. tw_alyssa.
+  repIdentity      String?
+  status           CallStatus      @default(QUEUED)
+  /// Imports overlap; the status never moves back.
+  statusRank       Int             @default(0)
+  twilioStatus     String?
+  startedAt        DateTime?
+  endedAt          DateTime?
+  /// Twilio's duration; 0 when nobody answered.
+  talkSec          Int?
+  priceUsd         Decimal?        @db.Decimal(10, 4)
+  userId           String?
+  user             User?           @relation("CallUser", fields: [userId], references: [id], onDelete: SetNull)
+  /// caller_number | alias | intent | chosen | manual | none
+  repMatchedBy     String?
+  personId         String?
+  person           PersonCache?    @relation(fields: [personId], references: [id], onDelete: SetNull)
+  sandboxContactId String?
+  sandboxContact   SandboxContact? @relation(fields: [sandboxContactId], references: [id], onDelete: SetNull)
+  /// dialed | number | chosen | ambiguous | none
+  matchedBy        String?
+  /// The possible contacts of an ambiguous call: [{ kind, id, name }].
+  candidates       Json?
+  taskId           String?
+  nextActionId     String?
+  enrollmentId     String?
+  campaignId       String?
+  touchId          String?         @unique
+  /// Twilio's recording; played through the proxy route, never copied.
+  recordingSid     String?
+  recordingSec     Int?
+  recordingCount   Int             @default(0)
+  /// Set when a matched rep's call has ended: the post-call form is due from then.
+  formDueAt        DateTime?
+  formDoneAt       DateTime?
+  importedAt       DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  form CallForm?
+
+  @@index([userId, startedAt])
+  @@index([userId, formDoneAt])
+  @@index([personId, startedAt])
+  @@index([sandboxContactId, startedAt])
+  @@index([campaignId, startedAt])
+  @@index([startedAt])
+  @@index([toNumber])
+  @@index([fromNumber])
+  @@index([parentCallSid])
+  @@index([status, startedAt])
+}
+
+/// A press of Cadence's Call button: who, which number, for which task or contact. The dialpad
+/// knows none of this, so the import links the Twilio call to the newest intent by the same rep to
+/// the same number within 30 minutes before the call started.
+model CallIntent {
+  id               String   @id @default(uuid())
+  userId           String
+  /// E.164.
+  toNumber         String
+  personId         String?
+  sandboxContactId String?
+  taskId           String?
+  nextActionId     String?
+  /// Set once a call has claimed it.
+  callId           String?  @unique
+  createdAt        DateTime @default(now())
+
+  @@index([userId, toNumber, createdAt])
+  @@index([toNumber, createdAt])
+}
+
+model CallForm {
+  id                String   @id @default(uuid())
+  callId            String   @unique
+  call              CallLog  @relation(fields: [callId], references: [id], onDelete: Cascade)
+  userId            String
+  /// Key in settings.rules.callDispositions.
+  outcome           String
+  /// 1-5, required when the outcome is answered.
+  rating            Int?
+  /// Required when the outcome is answered.
+  notes             String?
+  /// The next step together with its date: one field in the form, two columns here.
+  /// call_again | email | linkedin | meeting | none
+  nextStep          String
+  /// LocalDate; required for every next step except none.
+  nextStepDate      String?
+  /// hot | warm | cold
+  interest          String?
+  productsDiscussed String[] @default([])
+  /// yes | no | unknown
+  decisionMaker     String?
+  nextActionId      String?
+  /// CRM contact: at once. Sandbox contact: when moved.
+  twentyNoteId      String?
+  submittedAt       DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+enum SandboxEmailKind {
+  SENT
+  REPLY
+  AUTO_REPLY
+  BOUNCE
+}
+
+/// Mail seen in a sales mailbox to or from a sandbox contact. Nothing else is stored.
+model SandboxEmail {
+  id                String           @id @default(uuid())
+  sandboxContactId  String
+  contact           SandboxContact   @relation(fields: [sandboxContactId], references: [id], onDelete: Cascade)
+  /// Whose mailbox.
+  userId            String?
+  kind              SandboxEmailKind
+  internetMessageId String
+  conversationId    String?
+  subject           String?
+  at                DateTime
+  /// The step it closed.
+  taskId            String?
+  touchId           String?
+  createdAt         DateTime         @default(now())
+
+  @@unique([internetMessageId, sandboxContactId])
+  @@index([sandboxContactId, at])
+  @@index([conversationId])
+}
+
+model MailboxCursor {
+  userId    String
+  /// sentitems | inbox
+  folder    String
+  deltaLink String?
+  lastRunAt DateTime?
+  error     String?
+
+  @@id([userId, folder])
+}
+
+/// One push request from Bellwether, kept 7 days for idempotent replay. Check requests write
+/// nothing and have no row.
+model BellwetherPush {
+  id             String   @id @default(uuid())
+  idempotencyKey String   @unique
+  bodyHash       String
+  /// PROCESSING | DONE
+  state          String
+  pushedByEmail  String
+  ownerId        String?
+  contactCount   Int
+  response       Json?
+  createdAt      DateTime @default(now())
+
+  items BellwetherPushItem[]
+
+  @@index([createdAt])
+}
+
+/// Per-contact result of a push, kept as long as the contact's status may be asked for.
+model BellwetherPushItem {
+  id                  String         @id @default(uuid())
+  pushId              String
+  push                BellwetherPush @relation(fields: [pushId], references: [id], onDelete: Cascade)
+  bellwetherContactId String
+  result              String
+  reason              String?
+  sandboxContactId    String?
+  crmPersonId         String?
+  createdAt           DateTime       @default(now())
+
+  @@index([bellwetherContactId, createdAt])
+}
+
+/// A pushed Bellwether contact that did not become a sandbox contact but still has a status
+/// Bellwether reads: already in the CRM, or refused as suppressed (opted out).
+model BellwetherRefusal {
+  bellwetherContactId String   @id
+  /// already_in_crm | opted_out
+  status              String
+  crmPersonId         String?
+  statusChangedAt     DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([statusChangedAt])
+}
+
+/// One Move to CRM: up to 50 contacts. Each item can be undone for one year.
+model SandboxMove {
+  id          String    @id @default(uuid())
+  createdById String
+  count       Int
+  /// QUEUED | RUNNING | DONE
+  state       String
+  createdAt   DateTime  @default(now())
+  finishedAt  DateTime?
+
+  items SandboxMoveItem[]
+
+  @@index([createdAt])
+}
+
+model SandboxMoveItem {
+  id               String      @id @default(uuid())
+  moveId           String
+  move             SandboxMove @relation(fields: [moveId], references: [id], onDelete: Cascade)
+  sandboxContactId String
+  /// QUEUED | DONE | FAILED | DRY_RUN | UNDONE
+  state            String
+  /// create | attach
+  mode             String
+  /// The Twenty person to attach to (attach mode).
+  attachPersonId   String?
+  /// The Twenty company chosen in the dialog, when the firm matched several.
+  chosenCompanyId  String?
+  /// linked | created | none
+  companyAction    String?
+  twentyPersonId   String?
+  twentyCompanyId  String?
+  /// Twenty note ids, for undo.
+  notesWritten     String[]    @default([])
+  /// Twenty's updatedAt after Cadence's last write, for undo.
+  personUpdatedAt  String?
+  /// The contact as it was moved.
+  snapshot         Json
+  error            String?
+  attempts         Int         @default(0)
+  doneAt           DateTime?
+  undoneAt         DateTime?
+  undoneById       String?
+
+  @@index([moveId])
+  @@index([sandboxContactId])
+  @@index([state])
 }

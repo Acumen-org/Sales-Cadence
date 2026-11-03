@@ -1,6 +1,7 @@
 import { lockAccounts } from '../account-lock';
 import { Prisma, type CompletionSource, type Task, type TaskState } from '@prisma/client';
 import { personalizeAction } from '../sequences/personalize';
+import { subjectOf } from '../subject';
 import { prisma, type Tx } from '../db';
 import { logAudit, type AuditActor } from '../audit';
 import { addDays, formatLocalDate, isLocalDate, localDateToInstant, todayIn, toLocalDate, type LocalDate } from '../dates';
@@ -75,16 +76,17 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
     result = await prisma.$transaction(async (tx) => {
       const identity = await tx.enrollment.findUnique({ where: { id: enrollmentId }, select: { sequenceId: true, campaignId: true, companyId: true, person: { select: { companyId: true } } } });
       if (!identity) return { outcome: 'inactive' as const };
-      const accountIds = [identity.companyId, identity.person.companyId].filter((id): id is string => Boolean(id));
+      const accountIds = [identity.companyId, identity.person?.companyId].filter((id): id is string => Boolean(id));
       await lockAccounts(tx, accountIds);
       if (await tx.blockedAccount.count({ where: { companyId: { in: accountIds } } })) return { outcome: 'inactive' as const, reason: 'Account is blocked' };
       if (identity.campaignId) await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`campaign:${identity.campaignId}`}))`;
       await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${identity.sequenceId}))`;
       const e = await tx.enrollment.findUnique({
         where: { id: enrollmentId },
-        include: { fo: true, campaign: true, sequence: true, tasks: true, person: true },
+        include: { fo: true, campaign: true, sequence: true, tasks: true, person: true, sandboxContact: true },
       });
       if (!e || e.status !== 'ACTIVE') return { outcome: 'inactive' as const };
+      const subject = subjectOf(e);
       if (e.campaign && e.campaign.status !== 'ACTIVE') return { outcome: 'inactive' as const, reason: 'Campaign is not running' };
       const today = todayIn(workspaceTimezone(), now);
       const steps = parseSteps(e.sequence.steps);
@@ -102,14 +104,14 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
         await tx.enrollment.update({ where: { id: e.id }, data: { status: 'COMPLETED', completedAt: now, shiftDays } });
         await logAudit({ entityType: 'enrollment', entityId: e.id, action: 'completed', actor: ctx.actor, details: { steps: steps.length, cycle: e.cycle } }, tx);
         const repeat = e.sequence.repeatEveryDays;
-        if (repeat && repeat > 0 && !e.person.dnd && !e.person.optedOut && !e.person.deletedAt) {
+        if (repeat && repeat > 0 && !subject.blocked && !subject.deleted) {
           // Nurture: the same sequence starts again after the gap, as the next cycle of a new
           // enrollment - the old one is finished and keeps its history. A reply, a meeting, an
           // opt-out or a removal ends the loop like any other enrollment.
           const restart = plannedDateForStep(today, repeat + 1, 0, rules.workingDays);
           const next = await tx.enrollment.create({
             data: {
-              personId: e.personId, companyId: e.companyId, foUserId: e.foUserId, podId: e.podId, campaignId: e.campaignId, campaignRun: e.campaignRun,
+              personId: e.personId, sandboxContactId: e.sandboxContactId, companyId: e.companyId, foUserId: e.foUserId, podId: e.podId, campaignId: e.campaignId, campaignRun: e.campaignRun,
               sequenceId: e.sequenceId, startDate: restart, currentStep: -1, shiftDays: 0, status: 'ACTIVE', createdById: e.createdById, cycle: e.cycle + 1,
             },
           });
@@ -157,7 +159,7 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
             stepDay: step.day,
             actionIndex: i,
             actionId: a.id,
-            actionSnapshot: personalizeAction(a, { person: e.person, fo: e.fo }),
+            actionSnapshot: personalizeAction(a, { person: subject, fo: e.fo }),
             action: a.type,
             label: a.label,
             dueDate,
@@ -267,6 +269,7 @@ export async function completeTask(input: CompleteTaskInput, ctx: EngineContext)
         where: { externalId: `task:${task.id}` },
         create: {
           personId: task.enrollment.personId,
+          sandboxContactId: task.enrollment.sandboxContactId,
           channel: channelOf(chosen),
           direction: 'OUTBOUND',
           occurredAt: completedAt,

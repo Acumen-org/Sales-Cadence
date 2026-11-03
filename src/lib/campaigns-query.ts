@@ -48,7 +48,7 @@ export function campaignScope(user: SessionUser): Prisma.CampaignWhereInput {
   return pods === null ? {} : { podId: { in: pods } };
 }
 
-export type CampaignListFilters = { q?: string; podId?: string | null; sequenceId?: string | null; product?: string | null; foUserId?: string | null; from?: string | null; to?: string | null; statuses?: CampaignStatus[] };
+export type CampaignListFilters = { audience?: 'CRM' | 'SANDBOX'; q?: string; podId?: string | null; sequenceId?: string | null; product?: string | null; foUserId?: string | null; from?: string | null; to?: string | null; statuses?: CampaignStatus[] };
 
 /**
  * Touches done, still open, and "planned" per campaign. Tasks are generated step by step, so a
@@ -79,7 +79,8 @@ export function touchesPerPerson(steps: unknown): number {
 }
 
 export async function listCampaigns(user: SessionUser, filters: CampaignListFilters = {}): Promise<CampaignSummary[]> {
-  const where: Prisma.CampaignWhereInput = { AND: [campaignScope(user)] };
+  // The Campaigns section lists CRM campaigns; Sandbox > Campaigns asks for its own.
+  const where: Prisma.CampaignWhereInput = { AND: [campaignScope(user), { audience: filters.audience ?? 'CRM' }] };
   const and = where.AND as Prisma.CampaignWhereInput[];
   if (filters.q?.trim()) and.push({ OR: filters.q.trim().split(/\s+/).slice(0, 6).map((term) => ({ name: { contains: term, mode: 'insensitive' as const } })) });
   if (filters.podId) and.push({ podId: filters.podId });
@@ -209,10 +210,10 @@ export async function nonReplierCandidates(campaignId: string, days: number, now
     include: { person: true, fo: { select: { id: true, name: true } } },
   });
   // Exclude anyone re-enrolled elsewhere, removed, or marked do-not-contact in either system.
-  const ids = finished.map((f) => f.personId);
+  const ids = finished.map((f) => f.personId!);
   const busy = await prisma.enrollment.findMany({ where: { personId: { in: ids }, status: { in: ['ACTIVE', 'PAUSED'] } }, select: { personId: true } });
   const busySet = new Set(busy.map((b) => b.personId));
   const inbound = await prisma.touch.findMany({ where: { personId: { in: ids }, direction: 'INBOUND', occurredAt: { gte: campaign.createdAt } }, select: { personId: true } });
   for (const reply of inbound) busySet.add(reply.personId);
-  return finished.filter((f) => !busySet.has(f.personId) && !f.person.dnd && !f.person.optedOut && !f.person.deletedAt);
+  return finished.filter((f) => !busySet.has(f.personId) && !f.person!.dnd && !f.person!.optedOut && !f.person!.deletedAt);
 }

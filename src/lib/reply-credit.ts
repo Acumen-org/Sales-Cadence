@@ -13,6 +13,8 @@ export const ANSWERED_CALL_PREFIX = 'Answered call:';
  * Reports and the Accounts directory alike; the Accounts list repeats it in SQL.
  */
 export const REPLY_TOUCH_WHERE: Prisma.TouchWhereInput = {
+  // A sandbox contact's replies stay in the Sandbox section and its own report numbers.
+  personId: { not: null },
   OR: [
     { direction: 'INBOUND', channel: { in: ['EMAIL', 'CALL', 'LINKEDIN'] }, NOT: { summary: { startsWith: 'Auto-reply:' } } },
     { channel: 'CALL', summary: { startsWith: ANSWERED_CALL_PREFIX } },
@@ -24,7 +26,8 @@ export type CreditedEnrollment = { id: string; foUserId: string; podId: string |
 
 /** Credit each reply to the latest sequence that had started when it arrived.
  * Later campaigns must never take credit for historical responses. */
-export async function enrollmentByReply(replies: Array<{ id: string; personId: string; occurredAt: Date }>): Promise<Map<string, CreditedEnrollment>> {
+export async function enrollmentByReply(allReplies: Array<{ id: string; personId: string | null; occurredAt: Date }>): Promise<Map<string, CreditedEnrollment>> {
+  const replies = allReplies.filter((reply): reply is { id: string; personId: string; occurredAt: Date } => Boolean(reply.personId));
   if (!replies.length) return new Map();
   const rows = await prisma.enrollment.findMany({
     where: { personId: { in: [...new Set(replies.map(reply => reply.personId))] } },
@@ -32,7 +35,7 @@ export async function enrollmentByReply(replies: Array<{ id: string; personId: s
     orderBy: [{ startDate: 'desc' }, { createdAt: 'desc' }, { id: 'asc' }],
   });
   const byPerson = new Map<string, typeof rows>();
-  for (const row of rows) { const list = byPerson.get(row.personId) ?? []; list.push(row); byPerson.set(row.personId, list); }
+  for (const row of rows) { if (!row.personId) continue; const list = byPerson.get(row.personId) ?? []; list.push(row); byPerson.set(row.personId, list); }
   const by = new Map<string, CreditedEnrollment>();
   for (const reply of replies) {
     const day = toLocalDate(reply.occurredAt, workspaceTimezone());

@@ -453,7 +453,7 @@ async function handleOpportunity(o: TwentyOpportunity, ctx: EngineContext, setti
   const enrollment = await prisma.enrollment.findFirst({ where: { personId: { in: candidates }, status: { in: [...OCCUPYING_STATUSES, 'REPLIED'] } } });
   if (!enrollment) return { result: 'opportunity_no_active_enrollment' };
   await recordTouch({
-    personId: enrollment.personId,
+    personId: enrollment.personId!,
     channel: 'MEETING',
     direction: 'INBOUND',
     occurredAt: new Date(o.createdAt),

@@ -4,6 +4,7 @@ import { auditDetailText, describeAudit, type AuditField } from './audit-format'
 import { cachedPersonName } from './person-cache';
 import type { SessionUser } from './auth/current-user';
 import { isJuniorFo, visiblePodIds } from './auth/rbac';
+import { CRM_SUBJECT, CRM_TASK } from './subject';
 
 /**
  * The Activity feed: what everyone did, newest first.
@@ -169,7 +170,7 @@ async function activityPage(f: ActivityFilters, scope: FeedScope): Promise<Activ
     ...(f.actorId ? { actorId: f.actorId } : {}),
   };
   const touchWhere: Prisma.TouchWhereInput = {
-    AND: [scope.touch, beforeWhere('occurredAt', 't', before, afterId)],
+    AND: [scope.touch, beforeWhere('occurredAt', 't', before, afterId), CRM_SUBJECT],
     occurredAt: { ...(f.from ? { gte: f.from } : {}), ...(f.to ? { lt: f.to } : {}) },
     ...(f.channel ? { channel: f.channel } : {}),
     ...(f.actorId ? { actorUserId: f.actorId } : {}),
@@ -202,10 +203,10 @@ async function activityPage(f: ActivityFilters, scope: FeedScope): Promise<Activ
 
   const [tasks, enrollments, meetings, persons, campaigns, sequences] = await Promise.all([
     taskIds.length
-      ? prisma.task.findMany({ where: { id: { in: taskIds } }, select: { id: true, label: true, action: true, enrollment: { select: { personId: true, person: { select: { firstName: true, lastName: true, companyName: true } } } } } })
+      ? prisma.task.findMany({ where: { id: { in: taskIds } }, select: { id: true, label: true, action: true, enrollment: { select: { personId: true, sandboxContactId: true, person: { select: { firstName: true, lastName: true, companyName: true } }, sandboxContact: { select: { firstName: true, lastName: true, companyName: true } } } } } })
       : Promise.resolve([]),
     enrollmentIds.length
-      ? prisma.enrollment.findMany({ where: { id: { in: enrollmentIds } }, select: { id: true, personId: true, person: { select: { firstName: true, lastName: true, companyName: true } } } })
+      ? prisma.enrollment.findMany({ where: { id: { in: enrollmentIds } }, select: { id: true, personId: true, sandboxContactId: true, person: { select: { firstName: true, lastName: true, companyName: true } }, sandboxContact: { select: { firstName: true, lastName: true, companyName: true } } } })
       : Promise.resolve([]),
     meetingIds.length ? prisma.meeting.findMany({ where: { id: { in: meetingIds } }, select: { id: true, title: true, companyName: true } }) : Promise.resolve([]),
     personIds.length ? prisma.personCache.findMany({ where: { id: { in: personIds } }, select: { id: true, firstName: true, lastName: true, companyName: true } }) : Promise.resolve([]),
@@ -233,17 +234,19 @@ async function activityPage(f: ActivityFilters, scope: FeedScope): Promise<Activ
     if (kind === 'task') {
       const t = taskById.get(a.entityId);
       if (t) {
-        subjectName = cachedPersonName(t.enrollment.person);
-        subjectHref = `/people/${t.enrollment.personId}`;
-        companyName = t.enrollment.person.companyName;
+        const who = t.enrollment.person ?? t.enrollment.sandboxContact;
+        subjectName = who ? cachedPersonName(who) : null;
+        subjectHref = t.enrollment.personId ? `/people/${t.enrollment.personId}` : `/sandbox/${t.enrollment.sandboxContactId}`;
+        companyName = who?.companyName ?? null;
         icon = t.action;
       }
     } else if (kind === 'enrollment') {
       const e = enrollmentById.get(a.entityId);
       if (e) {
-        subjectName = cachedPersonName(e.person);
-        subjectHref = `/people/${e.personId}`;
-        companyName = e.person.companyName;
+        const who = e.person ?? e.sandboxContact;
+        subjectName = who ? cachedPersonName(who) : null;
+        subjectHref = e.personId ? `/people/${e.personId}` : `/sandbox/${e.sandboxContactId}`;
+        companyName = who?.companyName ?? null;
       }
     } else if (kind === 'meeting') {
       const m = meetingById.get(a.entityId);
@@ -300,9 +303,9 @@ async function activityPage(f: ActivityFilters, scope: FeedScope): Promise<Activ
     fields: [{ label: 'Direction', value: t.direction === 'INBOUND' ? 'Inbound' : 'Outbound' }],
     actorName: t.actorUserId ? userName.get(t.actorUserId) ?? t.actorLabel : t.actorLabel,
     actorId: t.actorUserId ?? null,
-    subjectName: cachedPersonName(t.person),
-    subjectHref: `/people/${t.person.id}`,
-    companyName: t.person.companyName,
+    subjectName: cachedPersonName(t.person!),
+    subjectHref: `/people/${t.person!.id}`,
+    companyName: t.person!.companyName,
     icon: t.channel,
     tone: t.direction === 'INBOUND' ? 'in' : 'out',
   }));
@@ -320,8 +323,8 @@ async function activityPage(f: ActivityFilters, scope: FeedScope): Promise<Activ
 export async function activityByUser(since: Date): Promise<Array<{ id: string; name: string; touches: number; tasks: number }>> {
   const [users, touchRows, taskRows] = await Promise.all([
     prisma.user.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
-    prisma.touch.groupBy({ by: ['actorUserId'], where: { occurredAt: { gte: since }, actorUserId: { not: null } }, _count: { _all: true } }),
-    prisma.task.groupBy({ by: ['foUserId'], where: { state: 'DONE', completedAt: { gte: since } }, _count: { _all: true } }),
+    prisma.touch.groupBy({ by: ['actorUserId'], where: { occurredAt: { gte: since }, actorUserId: { not: null }, ...CRM_SUBJECT }, _count: { _all: true } }),
+    prisma.task.groupBy({ by: ['foUserId'], where: { state: 'DONE', completedAt: { gte: since }, ...CRM_TASK }, _count: { _all: true } }),
   ]);
   const touchBy = new Map(touchRows.map((r) => [r.actorUserId!, r._count._all]));
   const taskBy = new Map(taskRows.map((r) => [r.foUserId, r._count._all]));

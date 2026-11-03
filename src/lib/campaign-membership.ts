@@ -1,6 +1,7 @@
 import type { CampaignDraft } from './campaign-planner';
 import type { CampaignStatus, EnrollmentStatus } from '@prisma/client';
 import { prisma } from './db';
+import { CRM_SUBJECT } from './subject';
 import { addDays, todayIn, type LocalDate } from './dates';
 import { workspaceTimezone } from './workspace';
 import { safeParseSteps } from './sequences/steps';
@@ -72,6 +73,7 @@ export async function membershipFor(personIds: string[]): Promise<Map<string, Me
     push(id, { campaignId: c.id, campaignName: c.name, campaignStatus: c.status, kind: 'upcoming', startDate: c.startDate, endDate: c.endDate, podId: c.podId, foIds: teamOf(c), podWide: !c.plannerDraft && !teamOf(c).length, enrollmentId: null, enrollmentStatus: null, sequenceId: c.sequenceId, sequenceName: flow?.name ?? c.sequence.name, step: null, steps: flow?.steps.length ?? stepCount(c.sequence.steps) });
   }
   for (const e of enrollments) {
+    if (!e.personId) continue;
     const c = e.campaign!;
     const running = e.status === 'ACTIVE' || e.status === 'PAUSED';
     push(e.personId, { campaignId: c.id, campaignName: c.name, campaignStatus: c.status, kind: running ? 'running' : 'finished', startDate: c.startDate, endDate: c.endDate, podId: c.podId, foIds: [...new Set([...teamOf(c), e.foUserId])], podWide: false, enrollmentId: e.id, enrollmentStatus: e.status, sequenceId: e.sequenceId, sequenceName: e.sequence.name, step: e.currentStep >= 0 ? e.currentStep : null, steps: stepCount(e.sequence.steps) });
@@ -84,10 +86,10 @@ export async function membershipFor(personIds: string[]): Promise<Map<string, Me
 /** Everyone in a campaign right now: scheduled in one that has not started, or in a live enrollment of one that has. */
 export async function liveCampaignMemberIds(): Promise<Set<string>> {
   const [scheduled, enrolled] = await Promise.all([
-    prisma.campaign.findMany({ where: { status: { in: UPCOMING } }, select: { personIds: true } }),
-    prisma.enrollment.findMany({ where: { campaignId: { not: null }, status: { in: ['ACTIVE', 'PAUSED'] } }, select: { personId: true }, distinct: ['personId'] }),
+    prisma.campaign.findMany({ where: { status: { in: UPCOMING }, audience: 'CRM' }, select: { personIds: true } }),
+    prisma.enrollment.findMany({ where: { campaignId: { not: null }, status: { in: ['ACTIVE', 'PAUSED'] }, ...CRM_SUBJECT }, select: { personId: true }, distinct: ['personId'] }),
   ]);
-  return new Set([...scheduled.flatMap((c) => c.personIds), ...enrolled.map((e) => e.personId)]);
+  return new Set([...scheduled.flatMap((c) => c.personIds), ...enrolled.flatMap((e) => (e.personId ? [e.personId] : []))]);
 }
 
 /** The one membership a directory row shows: running first, then upcoming, then the latest finished. */

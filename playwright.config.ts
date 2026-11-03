@@ -51,6 +51,10 @@ export default defineConfig({
       CADENCE_ALLOW_MOCK: '1',
       TWENTY_API_URL: 'http://twenty.local:3000',
       APP_URL: `http://localhost:${PORT}`,
+      // The outreach sandbox spec plays Bellwether (this key is a test value, not a secret) and
+      // reads calls from the in-memory Twilio stand-in.
+      BELLWETHER_API_KEY: 'e2e-bellwether-key-not-a-secret-000000000000',
+      CADENCE_FAKE_TWILIO: '1',
       ...(process.env.E2E_MICROSOFT_LOGIN_URL ? {
         MICROSOFT_CLIENT_ID: '0f0f0f0f-0000-4000-8000-00000000c1d0',
         MICROSOFT_TENANT_ID: '0e0e0e0e-0000-4000-8000-0000000071d0',

@@ -120,6 +120,8 @@ export const defaultTwentySchema = {
     meetingLink: 'meetingLink',
     /** Custom text: the booking reference from the scheduler. */
     bookingId: 'bookingId',
+    /** Optional custom text: the sandbox contact a person was moved from, which makes a retried move exact. */
+    cadenceSandboxId: 'cadenceSandboxId',
 
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
@@ -140,6 +142,8 @@ export const defaultTwentySchema = {
     industry: 'industry',
     /** Optional custom Number or USD Currency field: assets under management. */
     aum: 'aum',
+    /** Optional custom text: the firm's SEC/FINRA CRD, matched first when a sandbox contact moves. */
+    crd: 'crd',
     updatedAt: 'updatedAt',
     deletedAt: 'deletedAt',
   },

@@ -28,7 +28,7 @@ export async function startCallAction(payload: { taskId: string }): Promise<Call
   });
   if (!task) return { ok: false, error: 'Task not found.' };
   if (!canActOnTask(toActor(user), { foUserId: task.foUserId, podId: task.enrollment.podId })) return { ok: false, error: 'This is not your task.' };
-  const to = task.enrollment.person.phone;
+  const to = task.enrollment.person!.phone;
   if (!to) return { ok: false, error: 'This person has no phone number in Twenty.' };
 
   const controller = new AbortController();
@@ -37,7 +37,7 @@ export async function startCallAction(payload: { taskId: string }): Promise<Call
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ to, personId: task.enrollment.person.id, taskId: task.id, userId: user.id, userEmail: user.email }),
+      body: JSON.stringify({ to, personId: task.enrollment.person!.id, taskId: task.id, userId: user.id, userEmail: user.email }),
       signal: controller.signal,
     });
     const body = (await response.text()).slice(0, 300);
