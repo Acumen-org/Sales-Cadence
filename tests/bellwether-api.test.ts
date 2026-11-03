@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { prisma } from '@/lib/db';
 import { MOCK_PEOPLE } from '@/lib/twenty/fixtures';
+import { getMockTwentyClient } from '@/lib/twenty/mock-client';
 import { addSuppressions } from '@/lib/sandbox/suppression';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 import { bwContact, check, disableBellwether, enableBellwether, envelope, KEY, ping, push, status } from './helpers/sandbox';
@@ -120,6 +121,25 @@ describe('Bellwether push API (contract section 14)', () => {
       const row = await prisma.sandboxContact.findUniqueOrThrow({ where: { id: created.body.results[0].cadenceContactId } });
       expect(row).toEqual(expect.objectContaining({ firstName: 'Jane', jobTitle: 'Managing Partner', linkedinUrl: 'linkedin.com/in/jane-later', ownerId: b.users.alisa.id, bellwetherAliases: [again.bellwetherContactId] }));
       expect((await status({ bellwetherContactIds: [again.bellwetherContactId] })).body.results[0]).toEqual(expect.objectContaining({ status: 'in_sandbox', cadenceContactId: row.id }));
+    });
+
+    it('rule 4 asks Twenty itself: a person missing from Cadence\'s copy is found, one Twenty deleted is not', async () => {
+      // Added in Twenty, not yet in the copy (the webhook has not landed).
+      await prisma.personCache.delete({ where: { id: person(0).id } });
+      const found = await push(envelope([bwContact({ email: person(0).email })]));
+      expect(found.body.results[0]).toEqual(expect.objectContaining({ result: 'already_in_crm', matchedOn: 'email', crmPersonId: person(0).id }));
+      expect(await prisma.personCache.findUnique({ where: { id: person(0).id } })).not.toBeNull();
+      // Deleted in Twenty, still in the copy.
+      await getMockTwentyClient().deletePerson(person(1).id);
+      const gone = await push(envelope([bwContact({ email: null, linkedinUrl: person(1).linkedinUrl })]));
+      expect(gone.body.results[0].result).toBe('created');
+      expect((await prisma.personCache.findUniqueOrThrow({ where: { id: person(1).id } })).deletedAt).not.toBeNull();
+    });
+
+    it('rule 4 falls back to Cadence\'s copy when Twenty cannot be reached', async () => {
+      getMockTwentyClient().failNext = new Error('Twenty is down');
+      const r = await push(envelope([bwContact({ email: person(0).email })]));
+      expect(r.body.results[0]).toEqual(expect.objectContaining({ result: 'already_in_crm', crmPersonId: person(0).id }));
     });
 
     it('warns of a possible CRM match by name at the same firm', async () => {

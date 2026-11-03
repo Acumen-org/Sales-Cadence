@@ -5,7 +5,8 @@ import { env } from '../env';
 import { logAudit } from '../audit';
 import { getSettings, getTwentyConnection } from '../settings';
 import { twentyPersonUrl } from '../twenty/urls';
-import { dedupeContact, possibleCrmMatch, type DedupeInput, type MatchedOn } from './dedupe';
+import { getTwentyClient, type TwentyClient } from '../twenty';
+import { dedupeContact, possibleCrmMatch, refreshCrmCopyFor, type DedupeInput, type MatchedOn } from './dedupe';
 import { normalizeCrd, normalizeDomain, normalizeEmail, normalizeLinkedin, parsePhone, PHONE_TYPES, sandboxSortName, toE164, type ExtraPhone } from './normalize';
 import { recordRefusal } from './status';
 
@@ -335,8 +336,15 @@ export async function runContacts(envelope: Envelope, opts: { write: boolean; pu
   const results: ContactResult[] = [];
   const seenIds = new Set<string>();
   const seenEmails = new Set<string>();
-  for (const raw of envelope.contacts) {
-    const parsed = normalizeContact(raw);
+  const parsedAll = envelope.contacts.map(normalizeContact);
+  // Twenty is asked once per push, before any contact is judged (dedupe.ts).
+  const valid = parsedAll.flatMap((p) => (p.ok && !p.contact.doNotContact ? [p.contact] : []));
+  if (valid.length) {
+    let client: TwentyClient | null = null;
+    try { client = await getTwentyClient(); } catch { client = null; }
+    if (client) await refreshCrmCopyFor(valid, client);
+  }
+  for (const parsed of parsedAll) {
     if (!parsed.ok) { results.push(reject(parsed.id, 'invalid_field', parsed.detail)); continue; }
     const c = parsed.contact;
     const warnings = [...c.warnings];

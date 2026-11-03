@@ -5,6 +5,8 @@ import { isInternalCompany } from '../internal-organizations';
 import { isNeverProspect } from '../non-prospects';
 import { normalizeDomain, normalizeFirmName, normalizeLinkedin, readExtraPhones, toE164, type ExtraPhone } from './normalize';
 import { findSuppressed, type SuppressionKey } from './suppression';
+import { markPersonDeleted, upsertPersonCache } from '../person-cache';
+import type { TwentyClient } from '../twenty/client';
 
 /**
  * The dedupe rules of the Bellwether contract (plan 14.6), in order; the first hit decides. Also
@@ -181,6 +183,46 @@ export async function dedupeContact(c: DedupeInput, tx: Tx = prisma): Promise<De
     if (tomb) return { kind: 'moved_tombstone', contact: tomb };
   }
   return { kind: 'new' };
+}
+
+/** Contacts per findPeople call: three keys each stay well inside Twenty's 60-row page. */
+const LIVE_CHUNK = 20;
+
+/**
+ * Ask Twenty itself before a push is judged. Cadence's copy follows Twenty by webhook and a nightly
+ * refresh, so a person added seconds ago, or whose webhook was lost, can be missing from it, and a
+ * person deleted there can linger. The people Twenty has for these emails, phones and LinkedIn
+ * profiles go into the copy, and a copy hit Twenty no longer has is marked deleted; crmMatch then
+ * decides as before. When Twenty cannot be reached the copy decides on its own.
+ */
+export async function refreshCrmCopyFor(contacts: DedupeInput[], client: TwentyClient): Promise<{ found: number; gone: number } | null> {
+  const stats = { found: 0, gone: 0 };
+  try {
+    for (let i = 0; i < contacts.length; i += LIVE_CHUNK) {
+      const chunk = contacts.slice(i, i + LIVE_CHUNK);
+      const found = await client.findPeople({ emails: chunk.flatMap(emailsOf), phones: chunk.flatMap((c) => pushedPhones(c).map((p) => p.number)), linkedinUrls: chunk.flatMap((c) => (c.linkedinUrl ? [c.linkedinUrl] : [])) });
+      for (const p of found) await upsertPersonCache(p);
+      stats.found += found.length;
+      // A copy hit Twenty did not return may be gone there, or matched on a field findPeople does not search.
+      const live = new Set(found.map((p) => p.id));
+      for (let round = 0; round < 3; round++) {
+        const hits = (await Promise.all(chunk.map((c) => crmMatch(c)))).flatMap((m) => (m && !live.has(m.person.id) ? [m.person.id] : []));
+        if (!hits.length) break;
+        const kept = new Map((await client.getPeopleByIds([...new Set(hits)])).map((p) => [p.id, p]));
+        for (const id of new Set(hits)) {
+          live.add(id);
+          const p = kept.get(id);
+          if (p && !p.deletedAt) continue;
+          await markPersonDeleted(id, p?.deletedAt ? new Date(p.deletedAt) : new Date());
+          stats.gone++;
+        }
+      }
+    }
+    return stats;
+  } catch (err) {
+    console.warn('[bellwether] Twenty could not be asked; Cadence\'s copy decides', err);
+    return null;
+  }
 }
 
 /** A Twenty person with the same first and last name at a company with the same domain or CRD. */

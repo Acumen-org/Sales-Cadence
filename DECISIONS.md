@@ -1306,7 +1306,8 @@ Built on the local branch `outreach-sandbox` from Rahul's brief of 2 November an
   `sandboxContactId`; `personId` became optional with CHECK constraints and a second one-active
   index. A sandbox campaign is a `Campaign` with `audience SANDBOX`, created from the Contacts tab
   (sequence, pod, start, pace) rather than the studio, owner-first. Moving a contact ends its
-  sandbox sequence as `moved_to_crm` and hands its rows and open next action to the person.
+  sandbox sequence as `moved_to_crm` and hands its rows and open next action to the person. The
+  move dialog asks for that next step, so it shows in Tasks and in Twenty (3 Nov).
 - **Move to CRM: up to 50 at a time, undone for one year.** A live lookup before every create,
   the new person id stored at once, firm by CRD, domain, then exact name (or created), the usual
   CRM values (lead source BELLWETHER, else LEADGEN; Prospect; Cold BD), history as `[Cadence]`
@@ -1325,7 +1326,8 @@ Built on the local branch `outreach-sandbox` from Rahul's brief of 2 November an
 - **Bellwether contract v1, with two additive changes.** The CRM phone rule now also matches office
   and unknown numbers unless they are the firm's main line, and `POST .../contacts/check` answers
   what a push would without writing anything. Every opt-out path sets the pushed contact's status
-  to `opted_out` with `statusChangedAt`.
+  to `opted_out` with `statusChangedAt`. The CRM rule asks Twenty itself once per push, and falls
+  back to Cadence's copy when Twenty cannot be reached (3 Nov).
 - **Graph mail is off unless `GRAPH_MAIL_ENABLED=true`.** Application `Mail.Read`, limited by an
   Exchange application access policy to the sales mailboxes; only metadata is requested and only
   mail matching a sandbox contact is stored.

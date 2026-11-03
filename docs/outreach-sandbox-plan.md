@@ -619,6 +619,11 @@ person's Twenty Next Action and Next Action Due Date through the existing sync. 
 the person to a CRM campaign the same day. The enrollment keeps its `sandboxContactId` and gains
 the `personId`, so the person's Campaigns tab shows the sandbox campaign and why it ended.
 
+Because the campaign ends, the Move to CRM dialog asks for the next step (what, how, when; 3 Nov).
+Move waits until it is given. It replaces each moved contact's open next action, for the contact's
+owner, and goes across as above: in Tasks, and in Twenty as the Next Action. A person already in
+Twenty with an open next action keeps theirs.
+
 The alternative was to keep the person in the sandbox campaign after the move and write later
 steps to Twenty. That puts a CRM person in a sandbox campaign, which blurs the one-section split,
 and it was not chosen.
@@ -1266,6 +1271,10 @@ Contact:
 | domain | Lower-case. Remove the scheme, `www.` and any path. |
 
 ### 14.6 Dedupe rules (in this order; the first hit decides)
+
+Before rule 4 is judged, Twenty itself is asked once per push (3 Nov): the people it has for the
+pushed emails, phones and LinkedIn URLs go into Cadence's copy, and a copy hit Twenty no longer
+has is marked deleted. When Twenty cannot be reached, the copy decides on its own.
 
 1. **Within the request.** A second contact with the same `bellwetherContactId` or the same
    normalised email is `rejected` / `duplicate_in_request`.
