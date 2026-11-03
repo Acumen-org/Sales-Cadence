@@ -91,3 +91,37 @@ docker compose up -d --build                # deploy an update
 - A Teams recording's transcript arrives on its own once the same app registration also holds the Microsoft Graph **application** permission `OnlineMeetingTranscript.Read.All` (with admin consent), a Teams application access policy grants the app (`New-CsApplicationAccessPolicy`, then `Grant-CsApplicationAccessPolicy -Global`), and Teams admin center > Meetings > Meeting settings > Transcript API access has Microsoft Graph access on (and speaker attribution, for names). Settings > Sign-in > Teams transcripts says whether it works and, when it does not, Microsoft's reason. The worker asks again each hour for recent meetings without one.
 - Meeting recordings are **not** stored by Cadence: it keeps the link, the transcript text and any analysis. Playback streams from wherever the recording lives (SharePoint, Drive, your own file host), so viewers must be able to reach it and be signed in to Microsoft 365 or Google where that applies. Disk use stays tiny.
 - Postgres is deliberately tuned small in `docker-compose.yml` (`shared_buffers=192MB`, `work_mem=8MB`, `jit=off`) and Prisma's pool is capped (`connection_limit=6` web, `4` worker). If you move to a bigger box, raise those rather than leaving the defaults: Prisma's default pool is `cores * 2 + 1`, which opens far more Postgres backends than this workload needs.
+
+## Outreach sandbox, Bellwether and Twilio (November 2026)
+
+New environment variables. Secrets go in the Nomad variable `nomad/jobs/cadence` (the templates in
+`nomad/cadence.hcl` read them into both the web and the worker containers); locally they go in
+`.env`. Names only here: never put a value in the repository, a doc or a chat.
+
+| Variable | Secret | Set in | Needed by | What it does |
+|---|---|---|---|---|
+| `BELLWETHER_API_KEY` | yes | Nomad variable `nomad/jobs/cadence` | web | The key Bellwether sends as `X-Cadence-Api-Key`. At least 32 random bytes, base64url. The same value goes into Bellwether's `CADENCE_API_KEY`. Unset: every Bellwether call gets 503 `integration_disabled`. |
+| `BELLWETHER_API_KEY_PREVIOUS` | yes | Nomad variable, during a rotation only | web | The old key, still accepted while Bellwether moves to the new one. Remove it afterwards. |
+| `TWILIO_ACCOUNT_SID` | no (an id) | Nomad variable | web, worker | The Twilio account behind the hosted dialpad. |
+| `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET` | the secret is | Nomad variable | web, worker | A **Restricted** API key made for Cadence in the Twilio console, with read permission only on Calls, Recordings (including media) and IncomingPhoneNumbers. With any of the three Twilio variables unset the import is off and Settings > Calling says which is missing. |
+| `GRAPH_MAIL_ENABLED` | no | the template (`GRAPH_MAIL_ENABLED=false` until the admin steps below are done) | web, worker | `true` turns on reading the sales mailboxes through Microsoft Graph. |
+| `TWILIO_API_URL` | no | tests only | - | Points the Twilio client at a stand-in. Leave unset in production. |
+| `CADENCE_FAKE_TWILIO` | no | tests only | - | `1` uses the in-memory Twilio. Refused in production unless mock mode is allowed. |
+
+Existing variables the feature relies on: `TWENTY_API_KEY` (its role must allow creating People,
+Companies and Notes, and deleting People and Companies for undo), `CADENCE_DRY_RUN` (still stops
+every write to Twenty, Move to CRM included), `MICROSOFT_CLIENT_ID` / `MICROSOFT_TENANT_ID` /
+`MICROSOFT_CLIENT_SECRET` or the app saved in Settings > Sign-in (Graph mail uses the same app).
+
+One-off steps before the pilot:
+
+1. Apply the migration `20261103000000_outreach_sandbox` (the entrypoint runs `prisma migrate deploy`;
+   every object is new or optional, so it is safe with the app running).
+2. Create the Bellwether key and set it in both apps.
+3. Create the Restricted Twilio API key, set the three Twilio variables, then in Settings > Calling
+   confirm which rep owns each number.
+4. For Graph mail, follow the admin steps in section 12 of `docs/outreach-sandbox-plan.md`
+   (mail-enabled security group, `Mail.Read` application permission, `New-ApplicationAccessPolicy`,
+   `Test-ApplicationAccessPolicy`), then set `GRAPH_MAIL_ENABLED=true`.
+5. In Twenty, switch off contact auto-creation from mail and calendars for the sales mailboxes.
+

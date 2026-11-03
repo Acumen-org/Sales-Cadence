@@ -94,6 +94,11 @@ New code:
 | `src/components/sandbox/*` | Contacts table, toolbar, contact form, move dialog, assign and claim. |
 | `src/components/calls/{post-call-form,pending-forms,call-row,recording-player}.tsx` | Calling UI. |
 | `src/lib/actions/sandbox.ts`, `sandbox-move.ts`, `call-forms.ts` | Server actions. |
+| `src/lib/sandbox/status.ts`, `bellwether-http.ts` | The status endpoint's answers and `changedSince` paging; the HTTP layer of the four endpoints. |
+| `src/lib/sandbox/campaigns.ts`, `work.ts`, `query.ts` | Sandbox campaigns on the engine, Sandbox > Work and the Contacts list. |
+| `src/lib/subject.ts` | Which rows a CRM view reads (a person) and which the Sandbox reads. |
+| `src/lib/calls/gate.ts` | Whether Cadence's Call button may open the dialpad now: a form waiting, an opt-out, calling hours. |
+| `src/app/api/test/fake-twilio/route.ts` | Seeds the Twilio stand-in for the browser test; answers 404 unless `CADENCE_FAKE_TWILIO=1` and mock mode. |
 
 Changed code:
 
@@ -109,7 +114,7 @@ Changed code:
 | `src/lib/twenty/twenty-schema.ts`, `scripts/verify-schema.ts` | Two optional fields, `person.cadenceSandboxId` (text) and `company.crd` (text). Neither is required. |
 | `src/lib/person-cache.ts` | `personToCacheData` fills a new `phoneE164`. |
 | `src/lib/engine/enrollment.ts`, `tasks.ts`, `campaigns.ts`, `outcomes.ts`, `sync-out.ts`, `observed-evidence.ts`, `delegate.ts` | Work with a subject that is either a person or a sandbox contact (section 7). `sync-out.ts` writes nothing to Twenty for a sandbox subject. `completeCall` takes a call form. |
-| `src/lib/campaign-audience.ts`, `campaign-planning-service.ts`, `campaign-fit.ts`, `campaign-starter.ts`, `campaign-membership.ts`, `campaign-people*.ts`, `campaigns-query.ts`, `src/lib/actions/people-picker.ts`, `src/components/campaigns/people-picker.tsx` | An audience switch: a sandbox campaign picks from `SandboxContact`. |
+| `src/lib/campaign-membership.ts`, `campaigns-query.ts`, `src/lib/actions/search.ts`, `src/lib/engine/campaigns.ts` | CRM campaign lists, audiences and Ctrl+K read `audience = CRM`; launching a campaign with `audience = SANDBOX` goes to `src/lib/sandbox/campaigns.ts`. The studio is unchanged. |
 | `src/lib/next-actions.ts` | Sandbox next actions never reach Twenty until the contact moves (`syncNextActions` skips rows without a `personId`). |
 | `src/lib/tasks-query.ts`, `home-query.ts` | CRM only, always. There is no Sandbox or All filter in Tasks, Today (Home) or any CRM view (decision 2); sandbox work is worked in Sandbox > Work. |
 | `src/lib/reports-query.ts`, `reports-bundle.ts` | The existing numbers stay CRM. Reports gains a Sandbox section with the sandbox numbers on their own, and a Platform total that combines CRM and sandbox (decision 2). |
@@ -491,20 +496,22 @@ sandbox tasks and next actions due today or overdue.
    - Columns: Name (title under it), Firm, Owner, Ready for CRM ("Ready", or the first missing
      item and "+N"), Campaign, Next action (what and when), Last touch, Calls, Source ("Bellwether
      · 2 Nov").
-   - Toolbar: search, Owner (opens on "Mine"), Pod, Campaign, Ready for CRM, Source, Status
-     (Active, Unclaimed, Moved to CRM, Opted out). Behind Filters: state, has email, has direct
-     phone, firm.
-   - Bulk bar: Add to campaign, Set next action, Assign to, Claim, Move to CRM, Remove.
-   - Header: Add contact, and Import CSV (the column mapping reuses `src/lib/csv.ts` and the
-     enrichment mapping memory).
+   - Toolbar, one row: search, Owner (opens on "Mine"), Status (Active, Unclaimed, Moved to CRM,
+     Opted out, Removed), Ready for CRM, Pod, Source.
+   - Bulk bar: Claim, Assign to, Start campaign, Add to campaign, Move to CRM, Remove. A next
+     action is set per contact, on its page.
+   - Header: Add contact. CSV import is not in this build: Bellwether is the source, and a file can
+     come later through the enrichment mapping without a schema change.
    - The Moved to CRM status lists tombstones with a link to the person in People, and Undo while
      the one-year window is open.
-2. **Work**. The `TaskList` and Task flow components from `/tasks`, limited to sandbox steps and
-   sandbox next actions. Same controls. Call opens the dialpad URL with the number, as everywhere
+2. **Work**. The sandbox's own steps and next actions, overdue first, with Call (calls), Done
+   (email and LinkedIn steps, next actions) and Skip with a reason. Call opens the dialpad URL with the number, as everywhere
    else, and every call ends in the post-call form once the import has read it from Twilio.
-3. **Campaigns**. The Campaigns list (Upcoming, Active, Finished) for `audience = SANDBOX`. New
-   campaign opens the studio with the sandbox people picker, and the campaign page is the same
-   page. The main Campaigns page lists CRM campaigns only.
+3. **Campaigns**. The campaigns with `audience = SANDBOX`. A campaign is started from the Contacts
+   tab: select contacts, Start campaign (name, sequence, pod, start day, new people a day per FO).
+   It runs on the existing engine (decision 1); the studio's calendar planner stays CRM only in this
+   build. A sandbox campaign has its own page (`/sandbox/campaigns/[id]`) with Approve, Pause,
+   Resume and Stop. The main Campaigns page lists CRM campaigns only.
 
 **Contact page `/sandbox/[id]`.**
 - Header band: name, title, firm, owner, pod, the Ready for CRM chip, Call, and Move to CRM (the
@@ -1548,7 +1555,8 @@ no credentials at all.
   matched by caller number and by `tw_` alias, the browser leg folded into the network leg, the
   contact matched (sandbox and CRM), the recording read, the pending form for the matched rep, an
   unmatched call left without a form, a second run not duplicating, the intent linking the task.
-- `calls-hours.test.ts`: the local-time window by state and area code.
+- `sandbox-normalize.test.ts` also covers calling hours: the local-time window by state and area
+  code, blocked and warned.
 - The existing suite passes unchanged.
 
 **Browser** (Playwright, the built-in fake CRM, `CADENCE_FAKE_TWILIO=1`):
@@ -1655,3 +1663,9 @@ that change Cadence are noted.
 - Twenty message participants are not used as a second source of sandbox email evidence in v1.
 - Erase cannot delete recordings in Twilio (the key is read only); it lists their SIDs for an
   admin.
+- Sandbox campaigns are started from the Contacts tab with a short form; the studio's calendar
+  planner stays CRM only. No CSV import and no bulk "set next action" in this build.
+- The Activity log shows sandbox steps with links to the Sandbox; its touch feed and counts stay CRM.
+- A sandbox contact's reply rings its owner's bell, like a CRM reply.
+- Calls made before the first Twilio import run are logged without a form, so the first day does
+  not open a form for every call of the previous 24 hours.
