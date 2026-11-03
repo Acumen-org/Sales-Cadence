@@ -66,6 +66,7 @@ export default async function SandboxContactPage({ params }: { params: Promise<{
             {live ? <Badge tone={ready.ready ? 'green' : 'amber'}>{ready.ready ? 'Ready for CRM' : `Needs ${ready.missing.map((m) => m.text.toLowerCase()).join(', ')}`}</Badge> : null}
             <span className="text-ink-600">{contact.owner ? contact.owner.name : 'Unclaimed'}{contact.pod ? ` · ${contact.pod.name}` : ''}</span>
             {contact.status === 'MOVED' && contact.twentyPersonId ? <Link href={`/people/${contact.twentyPersonId}`} className="text-brand-700 hover:underline">Open in People</Link> : null}
+            {contact.status !== 'MOVED' && contact.crmAutoPersonId ? <Link href={`/people/${contact.crmAutoPersonId}`} className="hover:underline"><Badge tone="amber">{`Also in CRM, created from ${contact.crmAutoSource === 'CALENDAR' ? 'calendar' : 'email'}`}</Badge></Link> : null}
           </div>
         </div>
         <div className="flex flex-col items-end gap-2">

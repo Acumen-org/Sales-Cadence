@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { requireAdmin } from '../auth/current-user';
 import { logAudit, userActor } from '../audit';
+import { cleanupSandboxCrmPeople } from '../sandbox/crm-cleanup';
 import { CallingSettingsSchema, getSettings, MatchingSettingsSchema, RulesSettingsSchema, SandboxSettingsSchema, saveSettingsSection, SyncSettingsSchema, TwentySettingsSchema } from '../settings';
 import { applyNeverProspectRule } from '../non-prospects';
 import type { ActionResult } from './users';
@@ -170,6 +171,7 @@ export async function saveSandboxSettingsAction(formData: FormData): Promise<Act
     requireEmailOrPhone: bool(formData.get('requireEmailOrPhone')),
     requireOwnerLogin: bool(formData.get('requireOwnerLogin')),
     requirePod: bool(formData.get('requirePod')),
+    cleanupAutoCreated: bool(formData.get('cleanupAutoCreated')),
   });
   if (!parsed.success) return { ok: false, error: issues(parsed.error) };
   await saveSettingsSection('sandbox', parsed.data);
@@ -189,4 +191,16 @@ export async function saveCallingSettingsAction(formData: FormData): Promise<Act
   await logAudit({ entityType: 'settings', entityId: 'calling', action: 'updated', actor: userActor(admin), details: parsed.data });
   revalidatePath('/settings');
   return { ok: true, message: 'Calling settings saved.' };
+}
+
+/** Settings > Sandbox: run the sandbox CRM cleanup now instead of waiting for the worker's next five minutes. */
+export async function cleanupSandboxCrmNowAction(): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  const stats = await cleanupSandboxCrmPeople({ actor: userActor(admin) });
+  revalidatePath('/settings');
+  if (!stats.ran) return { ok: false, error: stats.reason ?? 'The cleanup did not run.' };
+  const parts = [`${stats.removed} removed`, `${stats.kept} kept and flagged`];
+  if (stats.dryRun) parts.push(`${stats.dryRun} would be removed (dry run)`);
+  if (stats.errors) parts.push(`${stats.errors} failed`);
+  return { ok: true, message: `Cleanup: ${parts.join(', ')}.` };
 }

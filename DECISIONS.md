@@ -1331,3 +1331,10 @@ Built on the local branch `outreach-sandbox` from Rahul's brief of 2 November an
   mail matching a sandbox contact is stored.
 - **No new packages.** Phones are normalised by a small built-in parser (North American numbers and
   `+` international numbers); Twilio and Graph are plain `fetch`.
+- **Twenty's contact auto-creation stays on; Cadence cleans up (3 Nov, changes decision 11).**
+  Every 5 minutes the worker soft-deletes Twenty people created from EMAIL or CALENDAR for a sandbox
+  contact that is not MOVED, created after that contact, when nobody worked them (updatedAt within
+  10 minutes of createdAt, no notes, tasks or opportunities, no Cadence campaign, enrollment, work
+  or move). The rest are flagged on the sandbox contact. MANUAL, IMPORT, API and Cadence's own
+  people are never touched. Audit row per removal, cache updated, dry run respected, switch in
+  Settings > Sandbox (on).

@@ -19,6 +19,7 @@ import { todayIn } from '../lib/dates';
 import { workspaceTimezone } from '../lib/workspace';
 import { syncNextActions } from '../lib/next-actions';
 import { runMoveQueue } from '../lib/sandbox/move';
+import { CLEANUP_EVERY_MS, cleanupSandboxCrmPeople } from '../lib/sandbox/crm-cleanup';
 import { backfillPhoneE164, runSandboxRetention } from '../lib/sandbox/retention';
 import { purgeOldPushes } from '../lib/sandbox/bellwether-api';
 import { importTwilioCalls } from '../lib/calls/import';
@@ -57,11 +58,14 @@ async function nightly(now:Date){
 /**
  * Every 2 minutes: calls read from Twilio (read only), and the sales mailboxes read through Graph
  * when GRAPH_MAIL_ENABLED is set. Moves to the CRM go at every tick, paced under Twenty's limit.
+ * Every 5 minutes: the sandbox CRM cleanup (src/lib/sandbox/crm-cleanup.ts).
  */
-let callsAt=0;let mailAt=0;
+let callsAt=0;let mailAt=0;let crmCleanupAt=0;
 async function sandboxJobs(now:number){
  try{const moved=await runMoveQueue({pauseMs:1500});if(moved.done||moved.failed||moved.dryRun)log('moves to CRM',moved);}catch(error){log('moves to CRM failed',error);}
  if(now>=callsAt){callsAt=now+120_000;try{const stats=await importTwilioCalls();if(stats.ran&&(stats.created||stats.forms||stats.recordings||stats.error))log('twilio import',stats);}catch(error){log('twilio import failed',error);}}
+ // Every 5 minutes: people Twenty's mail or calendar sync created for sandbox contacts, removed when nobody worked them.
+ if(now>=crmCleanupAt){crmCleanupAt=now+CLEANUP_EVERY_MS;try{const stats=await cleanupSandboxCrmPeople();if(stats.removed||stats.kept||stats.dryRun||stats.errors)log('sandbox CRM cleanup',stats);}catch(error){log('sandbox CRM cleanup failed',error);}}
  if(now>=mailAt){mailAt=now+120_000;try{const stats=await runGraphMail();if(stats.ran&&(stats.sent||stats.replies||stats.bounces||stats.errors.length))log('graph mail',stats);}catch(error){log('graph mail failed',error);}}
 }
 /** Once: E.164 copies of the phones already cached, so calls and pushes match CRM people by number. */

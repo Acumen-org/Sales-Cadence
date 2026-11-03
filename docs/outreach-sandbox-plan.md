@@ -763,6 +763,37 @@ its data for the one-year undo window; once the window has passed, the nightly
 their data. The tombstone
 remains so the dedupe and the Bellwether status still work.
 
+### 8.9 Cleaning up people Twenty creates from mail and calendars
+
+Twenty's contact auto-creation stays on (decision 11). When a rep emails or meets a sandbox
+contact, Twenty may create a person for them. The worker's `sandboxCrmCleanup` job
+(`src/lib/sandbox/crm-cleanup.ts`) runs every 5 minutes and looks at Twenty people where all of
+these hold:
+
+- `createdBy.source` is `EMAIL` or `CALENDAR`, read live from Twenty before anything happens;
+- the email or an additional email matches a sandbox contact that is not MOVED, and no MOVED one;
+- the person was created after that sandbox contact.
+
+Candidates are found in the person cache, so a new person is seen within one CRM sync. Each one is
+read live from Twenty. It is soft-deleted (restorable from Twenty's trash) only when nobody
+touched it:
+
+- `updatedAt` is within 10 minutes of `createdAt` (`SYNC_MARGIN_MS`, for the sync's own writes);
+- it has no notes, tasks or opportunities in Twenty;
+- it is in no Cadence campaign or enrollment, has no Cadence next action, call or meeting;
+- no Move to CRM item and no sandbox contact points at it.
+
+Otherwise it is left alone and the sandbox contact is flagged ("Also in CRM, created from email",
+`crmAutoPersonId`, `crmAutoSource`, `crmAutoFlaggedAt`), with an audit row giving the reasons. A
+flagged person is not read again. People created MANUAL, IMPORT or API, or by Cadence, are never
+touched.
+
+Each removal writes an audit row (`crm_auto_person_removed`) with the person id, name, email,
+source and sandbox contact, and marks the person deleted in the cache, so dedupe and Move to CRM no
+longer see it. In dry run nothing is deleted; one `crm_auto_person_would_remove` row is written per
+person. Settings > Sandbox has the switch (on by default), the counts and a Clean up now button.
+At most 50 people are read per run, to stay under Twenty's rate limit.
+
 ## 9. Twilio
 
 Decisions 4, 5 and 14 set this section: no new Twilio app, no TwiML App, no Voice SDK, no new
@@ -1065,10 +1096,10 @@ from these mailboxes with participants it could not link to a person, and `inges
 those to sandbox emails. It is left out of v1 so that there is one source of sandbox email
 evidence; it can be added later behind the same matching code.
 
-**Twenty must not create contacts from mail.** If a connected mailbox in Twenty has "contact
-auto-creation" on, emailing a sandbox contact creates a Twenty person by itself. That breaks
-"contacts reach the CRM only through Move to CRM". Rahul switches it off for the sales mailboxes
-and calendars (decision 11).
+**Twenty's contact auto-creation stays on; Cadence cleans up after it.** With "contact
+auto-creation" on, emailing or meeting a sandbox contact creates a Twenty person by itself. Rahul
+keeps it on (decision 11, changed 3 Nov). Cadence removes those people again when nobody has
+worked them, so what is in the sandbox stays in the sandbox: section 8.9.
 
 ## 13. Compliance
 
@@ -1519,6 +1550,10 @@ no credentials at all.
 ## 17. Test plan
 
 **Unit and integration** (Vitest on the embedded Postgres, mock Twenty, fake Twilio, no network):
+- `sandbox-crm-cleanup.test.ts`: each rule of 8.9 on its own: removed when untouched (email,
+  calendar, additional emails on either side), kept and flagged when edited, with a note, task or
+  opportunity, in a campaign, an enrollment or a move; never MANUAL, IMPORT, API or Cadence; not
+  when created before the contact or matching a MOVED one; the switch; dry run; dedupe afterwards.
 - `sandbox-normalize.test.ts`: emails, phones in every format with extensions, LinkedIn variants,
   CRDs, domains.
 - `bellwether-api.test.ts`:
@@ -1571,7 +1606,7 @@ no credentials at all.
 | Risk | Mitigation |
 |---|---|
 | Move to CRM creates duplicate people. The 22 Oct flood of copies came from another API key, but Cadence has never created a person before. | A live lookup before every create, `cadenceSandboxId` when the field exists, the twentyPersonId stored immediately, at most 50 per move, dry run honoured, an audit row per item, and undo for a year. |
-| Twenty creates contacts from synced mail or calendars and bypasses Move to CRM. | Rahul switches off contact auto-creation for the sales mailboxes (decision 11). |
+| Twenty creates contacts from synced mail or calendars and bypasses Move to CRM. | Auto-creation stays on; the sandbox CRM cleanup (8.9) soft-deletes those people every 5 minutes when nobody worked them, and flags the rest on the sandbox contact (decision 11). |
 | Optional `personId` touches the campaign engine everywhere. | The compiler lists every site. The existing unit and browser tests must pass unchanged. |
 | The existing dialpad and its Twilio numbers break. | Cadence changes nothing in Twilio and nothing in the dialpad. Its key is read only. |
 | The import misses a call or links it to the wrong rep. | A 10-minute overlap on every run, a re-read of unfinished calls, unique call SIDs, rep matching by the admin-confirmed caller number before the alias, and an Unmatched list for a person to decide. |
@@ -1620,8 +1655,9 @@ that change Cadence are noted.
 9. **Firm not in Twenty: default.** Cadence creates the Company and leaves Account Owner empty.
 10. **Moves: changed.** Up to 50 contacts per move, and a move can be undone for one year. The
     sandbox row keeps its data for that year so undo can restore it, then it is cleared.
-11. **Twenty's contact auto-creation from mail: default.** Rahul switches it off for the sales
-    mailboxes; Meow reminds him. Nothing to build in Cadence.
+11. **Twenty's contact auto-creation from mail: changed 3 Nov.** It stays on. Cadence removes the
+    people it creates for sandbox contacts when nobody has worked them, and flags the others on
+    the sandbox contact (section 8.9).
 12. **Graph mail: read only, sales mailboxes only.** Application `Mail.Read`, limited by an
     Exchange Online application access policy (or RBAC for Applications) to a mail-enabled security
     group of the sales mailboxes. The exact admin steps are in section 12. Cadence never sends.

@@ -1,7 +1,7 @@
 'use client';
 
 import { ActionForm, ActionButton } from '@/components/action-form';
-import { saveCallingSettingsAction, saveSandboxSettingsAction } from '@/lib/actions/settings';
+import { cleanupSandboxCrmNowAction, saveCallingSettingsAction, saveSandboxSettingsAction } from '@/lib/actions/settings';
 import { addSuppressionAction } from '@/lib/actions/sandbox';
 import { importCallsNowAction, setCallerNumberAction } from '@/lib/actions/call-forms';
 import type { CallingSettings, SandboxSettings } from '@/lib/settings';
@@ -12,7 +12,7 @@ const text = (name: string, label: string, value: string) => <label className="b
 
 export function SandboxSettingsForm({ s }: { s: SandboxSettings }) {
   return <ActionForm action={saveSandboxSettingsAction} className="space-y-4 p-4">
-    <div className="flex flex-wrap gap-5">{check('enabled', 'Bellwether may push into the sandbox', s.enabled)}</div>
+    <div className="flex flex-wrap gap-5">{check('enabled', 'Bellwether may push into the sandbox', s.enabled)}{check('cleanupAutoCreated', 'Remove people Twenty creates from email or calendar for sandbox contacts', s.cleanupAutoCreated)}</div>
     <fieldset><legend className="mb-2 text-xs text-ink-500">Ready for CRM needs</legend><div className="flex flex-wrap gap-5">{check('requireFirm', 'A firm', s.requireFirm)}{check('requireEmailOrPhone', 'An email or a direct or mobile phone', s.requireEmailOrPhone)}{check('requireOwnerLogin', 'An owner with a Twenty login', s.requireOwnerLogin)}{check('requirePod', 'A pod', s.requirePod)}</div></fieldset>
     <fieldset><legend className="mb-2 text-xs text-ink-500">Move to CRM writes</legend><div className="flex flex-wrap gap-4">{text('leadSource', 'Lead source', s.leadSource)}{text('leadSourceFallback', 'Lead source if that option is missing', s.leadSourceFallback)}{text('contactType', 'Contact type', s.contactType.join(', '))}{text('listCategory', 'List category', s.listCategory)}{text('pipelineStage', 'Pipeline stage', s.pipelineStage)}</div></fieldset>
     <div className="flex flex-wrap gap-4">{num('moveBatchLimit', 'Contacts per move (at most 50)', s.moveBatchLimit, 1, 50)}{num('undoDays', 'Undo window, days', s.undoDays, 1, 366)}{num('retentionInactiveDays', 'Remove after days without activity', s.retentionInactiveDays, 30, 3650)}{num('retentionUnworkedDays', 'Remove never-worked after days', s.retentionUnworkedDays, 30, 3650)}</div>
@@ -48,4 +48,8 @@ export function CallerNumberRow({ number, friendlyName, userId, suggestion, user
     <select name="userId" aria-label={`Rep for ${number}`} defaultValue={userId ?? suggestion ?? ''} className="!py-1 text-[13px]"><option value="">Nobody</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
     <button type="submit" className="btn-secondary btn-sm">{userId ? 'Save' : 'Confirm'}</button>
   </ActionForm>;
+}
+
+export function CleanupNowButton() {
+  return <ActionButton action={async () => cleanupSandboxCrmNowAction()} payload={{}} refresh>Clean up now</ActionButton>;
 }

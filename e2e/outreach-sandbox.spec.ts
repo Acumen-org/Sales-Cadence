@@ -106,3 +106,41 @@ test('push, call, form, move to CRM and undo', async ({ page, request }) => {
   await page.goto(`/people?q=${encodeURIComponent(NAME.last)}`);
   await expect(page.getByRole('link', { name: new RegExp(NAME.last) })).toHaveCount(0);
 });
+
+test('people Twenty creates from email for sandbox contacts are cleaned up unless someone worked them', async ({ page, request }) => {
+  const push = async (first: string, last: string, email: string) => {
+    const res = await request.post('/api/integrations/bellwether/v1/contacts', {
+      headers: { 'x-cadence-api-key': KEY, 'idempotency-key': randomUUID(), 'content-type': 'application/json' },
+      data: { pushedBy: { email: 'alisa@cadence.local', name: 'Alisa' }, contacts: [{ bellwetherContactId: `e2e-clean:${email}`, firstName: first, lastName: last, email, emailVerification: 'valid', state: 'IL', country: 'US', firm: { name: 'Quiet Lake Advisors', website: 'https://quiet-lake.com' } }] },
+    });
+    expect(res.status()).toBe(200);
+    return (await res.json()).results[0].cadenceContactId as string;
+  };
+  const untouched = { first: 'Nora', last: `Quiet${stamp % 100000}`, email: `nora.${stamp}@quiet-lake.com` };
+  const worked = { first: 'Owen', last: `Quiet${stamp % 100000}`, email: `owen.${stamp}@quiet-lake.com` };
+  await push(untouched.first, untouched.last, untouched.email);
+  const workedId = await push(worked.first, worked.last, worked.email);
+
+  await signIn(page, 'admin@cadence.local', 'admin12345');
+  // Twenty's mail sync creates both; someone then edits Owen in the CRM.
+  const a = await page.request.post('/api/test/fake-twenty', { data: { action: 'autoPerson', firstName: untouched.first, lastName: untouched.last, email: untouched.email, source: 'EMAIL' } });
+  expect(a.ok()).toBe(true);
+  const b = await page.request.post('/api/test/fake-twenty', { data: { action: 'autoPerson', firstName: worked.first, lastName: worked.last, email: worked.email, source: 'EMAIL' } });
+  const owen = (await b.json()).person.id as string;
+  await page.request.post('/api/test/fake-twenty', { data: { action: 'editPerson', id: owen, jobTitle: 'Partner' } });
+  await page.goto(`/people?q=${encodeURIComponent(untouched.first)}`);
+  await expect(page.getByRole('link', { name: new RegExp(untouched.last) }).first()).toBeVisible();
+
+  await page.goto('/settings?tab=sandbox');
+  await expect(page.getByText('On, every 5 minutes')).toBeVisible();
+  await page.getByRole('button', { name: 'Clean up now' }).click();
+  await expect(page.getByText('Cleanup: 1 removed, 1 kept and flagged.')).toBeVisible();
+  await page.reload();
+  await expect(page.getByText(/^1 people · 1 in the last 7 days$/)).toBeVisible();
+
+  // Nora is gone from People; Owen stays, and his sandbox contact says so.
+  await page.goto(`/people?q=${encodeURIComponent(untouched.first)}`);
+  await expect(page.getByRole('link', { name: new RegExp(untouched.last) })).toHaveCount(0);
+  await page.goto(`/sandbox/${workedId}`);
+  await expect(page.getByText('Also in CRM, created from email')).toBeVisible();
+});

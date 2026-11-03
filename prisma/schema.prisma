@@ -1027,6 +1027,12 @@ model SandboxContact {
   movedById           String?
   twentyPersonId      String?       @unique
   twentyCompanyId     String?
+  /// A Twenty person that Twenty's own mail or calendar sync created for this contact, which
+  /// someone has since worked in the CRM, so the cleanup left it (src/lib/sandbox/crm-cleanup.ts).
+  crmAutoPersonId     String?
+  /// EMAIL | CALENDAR: what created that person.
+  crmAutoSource       String?
+  crmAutoFlaggedAt    DateTime?
   piiClearedAt        DateTime?
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt

@@ -185,6 +185,11 @@ export const SandboxSettingsSchema = z.object({
   requireEmailOrPhone: z.boolean().default(true),
   requireOwnerLogin: z.boolean().default(true),
   requirePod: z.boolean().default(true),
+  /**
+   * Remove (soft-delete, restorable from Twenty's trash) the people Twenty's mail or calendar sync
+   * creates for sandbox contacts, when nobody has worked them (src/lib/sandbox/crm-cleanup.ts).
+   */
+  cleanupAutoCreated: z.boolean().default(true),
 });
 
 /** Calls read from Twilio and the post-call form. Cadence changes nothing in Twilio. */

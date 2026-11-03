@@ -123,5 +123,11 @@ One-off steps before the pilot:
 4. For Graph mail, follow the admin steps in section 12 of `docs/outreach-sandbox-plan.md`
    (mail-enabled security group, `Mail.Read` application permission, `New-ApplicationAccessPolicy`,
    `Test-ApplicationAccessPolicy`), then set `GRAPH_MAIL_ENABLED=true`.
-5. In Twenty, switch off contact auto-creation from mail and calendars for the sales mailboxes.
+5. Leave Twenty's contact auto-creation from mail and calendars on. Apply the migration
+   `20261103120000_sandbox_crm_cleanup` (three nullable columns, safe with the app running). The
+   worker then removes, every 5 minutes, the people Twenty creates for sandbox contacts when nobody
+   has worked them (plan section 8.9). It soft-deletes, so a removed person can be restored from
+   Twenty's trash; `TWENTY_API_KEY` already may delete People for undo. Settings > Sandbox shows
+   the count and has the switch. To watch it first, run with `CADENCE_DRY_RUN=true` and read the
+   `crm_auto_person_would_remove` audit rows.
 

@@ -37,7 +37,8 @@ import { graphMailState } from '@/lib/mail/graph-mail';
 import { getTwilioReader, twilioStatus } from '@/lib/calls/twilio';
 import { importStatus } from '@/lib/calls/import';
 import { toE164 } from '@/lib/sandbox/normalize';
-import { CallerNumberRow, CallingSettingsForm, ImportNowButton, SandboxSettingsForm, SuppressionForm } from '@/components/settings/sandbox-settings';
+import { CallerNumberRow, CallingSettingsForm, CleanupNowButton, ImportNowButton, SandboxSettingsForm, SuppressionForm } from '@/components/settings/sandbox-settings';
+import { cleanupCounts } from '@/lib/sandbox/crm-cleanup';
 
 const TABS = [
   { key: 'twenty', label: 'Twenty' },
@@ -449,12 +450,13 @@ async function SandboxTab({ timezone }: { timezone: string }) {
   const e = env();
   const settings = await getSettings();
   const week = new Date(Date.now() - 7 * 86_400_000);
-  const [lastPush, pushes, created, suppressions, suppressionCount] = await Promise.all([
+  const [lastPush, pushes, created, suppressions, suppressionCount, cleanup] = await Promise.all([
     prisma.bellwetherPush.findFirst({ orderBy: { createdAt: 'desc' }, select: { createdAt: true, pushedByEmail: true } }),
     prisma.bellwetherPush.count({ where: { createdAt: { gte: week } } }),
     prisma.sandboxContact.count({ where: { createdAt: { gte: week }, source: 'BELLWETHER' } }),
     prisma.suppression.findMany({ orderBy: { createdAt: 'desc' }, take: 50 }),
     prisma.suppression.count(),
+    cleanupCounts(),
   ]);
   return <div className="space-y-3">
     <Card title="Bellwether">
@@ -466,6 +468,14 @@ async function SandboxTab({ timezone }: { timezone: string }) {
       ]} /></div>
     </Card>
     <Card title="Sandbox rules"><SandboxSettingsForm s={settings.sandbox} /></Card>
+    <Card title="CRM cleanup" actions={<CleanupNowButton />}>
+      <div className="p-4"><KeyValue items={[
+        { k: 'Status', v: settings.sandbox.cleanupAutoCreated ? <Badge tone="green">On, every 5 minutes</Badge> : <Badge>Off</Badge> },
+        { k: 'Removed', v: <span className="tabular-nums">{cleanup.total} people · {cleanup.week} in the last 7 days</span> },
+        { k: 'Kept and flagged', v: <span className="tabular-nums">{cleanup.kept} contacts</span> },
+      ]} /></div>
+      <p className="px-4 pb-4 text-[12px] text-ink-500">People Twenty created from email or calendar for a sandbox contact, that nobody has edited, noted, tasked or put in a campaign. They go to Twenty&apos;s trash and can be restored there.</p>
+    </Card>
     <Card title="Suppression list" actions={<Count value={suppressionCount} />}>
       <SuppressionForm />
       <table className="w-full text-[13px]"><tbody className="divide-y divide-line">{suppressions.map((s) => <tr key={s.id}><td className="px-4 py-2 tabular-nums">{s.label ?? s.kind}</td><td className="px-4 py-2 text-ink-600">{s.kind.replace('_', ' ')}</td><td className="px-4 py-2 text-ink-600">{s.reason.replace('_', ' ')}</td><td className="px-4 py-2 tabular-nums text-ink-500">{formatInstant(s.createdAt, timezone)}</td></tr>)}</tbody></table>
