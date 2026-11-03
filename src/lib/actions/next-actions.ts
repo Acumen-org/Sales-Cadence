@@ -11,7 +11,8 @@ import { personSearchWhere } from '../search-terms';
 import { cachedPersonName } from '../person-cache';
 import type { ActionResult } from './users';
 
-function revalidate(personIds: string[] = []) {
+function revalidate(personIds: string[] = [], sandbox = false) {
+  if (sandbox) revalidatePath('/sandbox', 'layout');
   revalidatePath('/tasks');
   revalidatePath('/people');
   revalidatePath('/home');
@@ -51,7 +52,7 @@ export async function saveNextActionAction(formData: FormData): Promise<ActionRe
   // FO's tasks are for their own people.
   const refused: { personId: string; reason: string }[] = [];
   const open = await prisma.nextAction.findMany({ where: { personId: { in: personIds }, state: 'OPEN' }, select: { personId: true, foUserId: true, fo: { select: { name: true } } } });
-  for (const o of open) if (!(await mayWork(user, o.foUserId))) refused.push({ personId: o.personId, reason: `already has a task with ${o.fo.name}` });
+  for (const o of open) if (!(await mayWork(user, o.foUserId))) refused.push({ personId: o.personId!, reason: `already has a task with ${o.fo.name}` });
   if (isJuniorFo(actor)) {
     const podOwners = (await prisma.pod.findMany({ where: { id: { in: user.podIds } }, select: { podOwnerValue: true } })).map((p) => p.podOwnerValue);
     const mine = new Set((await prisma.personCache.findMany({
@@ -85,7 +86,7 @@ export async function completeNextActionAction(formData: FormData): Promise<Acti
   const { user, na, error } = await loadOwn(String(formData.get('id') ?? ''));
   if (!na) return { ok: false, error: error! };
   const r = await completeNextAction(na.id, userActor(user), new Date(), String(formData.get('dueDate') ?? '') || null);
-  revalidate([na.personId]);
+  revalidate(na.personId ? [na.personId] : [], !na.personId);
   if (!r.ok) return r;
   return { ok: true, message: r.next ? `Done. Next one on ${formatLocalDate(r.next, 'long')}.` : 'Done.' };
 }
@@ -95,7 +96,7 @@ export async function moveNextActionAction(formData: FormData): Promise<ActionRe
   if (!na) return { ok: false, error: error! };
   const to = String(formData.get('dueDate') ?? '');
   const r = await moveNextAction(na.id, to, userActor(user), todayIn(user.timezone));
-  revalidate([na.personId]);
+  revalidate(na.personId ? [na.personId] : [], !na.personId);
   if (!r.ok) return r;
   return { ok: true, message: `Moved to ${formatLocalDate(to, 'long')}.` };
 }
@@ -104,7 +105,7 @@ export async function stopNextActionAction(formData: FormData): Promise<ActionRe
   const { user, na, error } = await loadOwn(String(formData.get('id') ?? ''));
   if (!na) return { ok: false, error: error! };
   const r = await stopNextAction(na.id, userActor(user));
-  revalidate([na.personId]);
+  revalidate(na.personId ? [na.personId] : [], !na.personId);
   if (!r.ok) return r;
   return { ok: true, message: 'Task stopped.' };
 }

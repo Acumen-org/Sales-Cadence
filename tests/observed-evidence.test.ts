@@ -44,8 +44,8 @@ describe('emails and calls close the step they belong to', () => {
   });
 
   const enrollment = (personId: string) => prisma.enrollment.findFirstOrThrow({ where: { campaignId, personId }, include: { tasks: { orderBy: { stepIndex: 'asc' } } } });
-  const firstDay = async () => (await prisma.enrollment.findFirstOrThrow({ where: { campaignId, startDate: '2027-01-04' } })).personId;
-  const laterDay = async () => (await prisma.enrollment.findFirstOrThrow({ where: { campaignId, startDate: { gt: '2027-01-05' } } }));
+  const firstDay = async () => (await prisma.enrollment.findFirstOrThrow({ where: { campaignId, startDate: '2027-01-04' } })).personId!;
+  const laterDay = async () => { const e = await prisma.enrollment.findFirstOrThrow({ where: { campaignId, startDate: { gt: '2027-01-05' } } }); return { ...e, personId: e.personId! }; };
   const email = (personId: string, from: { handle: string; workspaceMemberId?: string | null }, subject: string, receivedAt: Date, cc: { handle: string; workspaceMemberId?: string | null }[] = []) => {
     const m = mock.addMessage({ subject, receivedAt: receivedAt.toISOString(), from: { ...from, personId: null }, to: [{ handle: `${personId}@prospect.example`, personId }, ...cc.map((c) => ({ ...c, role: 'cc' as const }))] });
     return ingestEvent({ source: 'WEBHOOK', objectType: 'message', eventName: 'message.created', record: rawFromMessage(m), now: receivedAt, skipSync: true });

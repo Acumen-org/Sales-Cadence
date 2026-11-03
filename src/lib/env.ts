@@ -33,6 +33,20 @@ const EnvSchema = z.object({
   MICROSOFT_GRAPH_URL: z.string().default('https://graph.microsoft.com'),
   /** true brings password sign-in back after Microsoft took over, if Microsoft sign-in ever fails. */
   PASSWORD_SIGN_IN: BoolString,
+  /** The key Bellwether sends in X-Cadence-Api-Key. Unset: every Bellwether call gets 503 integration_disabled. */
+  BELLWETHER_API_KEY: z.string().optional(),
+  /** The previous key, accepted too while a rotation is under way. */
+  BELLWETHER_API_KEY_PREVIOUS: z.string().optional(),
+  /** Twilio, read only: the account behind the hosted dialpad and a Restricted API key made for Cadence. */
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_API_KEY_SID: z.string().optional(),
+  TWILIO_API_KEY_SECRET: z.string().optional(),
+  /** Where Twilio's REST API lives. Only a test points it elsewhere. */
+  TWILIO_API_URL: z.string().default('https://api.twilio.com'),
+  /** 1 uses the in-memory Twilio stand-in (tests and the local launcher); refused in production unless mock mode is allowed. */
+  CADENCE_FAKE_TWILIO: z.string().optional(),
+  /** true turns on reading the sales mailboxes through Microsoft Graph (application Mail.Read). Off when unset. */
+  GRAPH_MAIL_ENABLED: BoolString,
   WORKER_TICK_SECONDS: z.coerce.number().int().positive().default(300),
   CRM_SYNC_SECONDS: z.coerce.number().int().min(15).max(300).default(60),
   RECONCILE_HOUR: z.coerce.number().int().min(0).max(23).default(2),

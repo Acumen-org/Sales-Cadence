@@ -20,7 +20,7 @@ import type {
   TwentyMeetingRecord,
   TwentyTagField,
   EnrichPersonInput,
-  EnrichCompanyInput,TwentyWebhook, CreateWebhookInput } from './types';
+  EnrichCompanyInput,TwentyWebhook, CreateWebhookInput, CreatePersonInput, CreateCompanyInput, FindPeopleQuery } from './types';
 
 export type ListOptions = {
   /** ISO timestamp; only records updated at or after this instant. */
@@ -103,6 +103,17 @@ export interface TwentyClient {
   enrichCompany(id: string, patch: EnrichCompanyInput, current?: TwentyCompany): Promise<TwentyCompany>;
   /** A person's Next Action and Next Action Due Date, kept in step with Cadence's next action. */
   setPersonNextAction(id: string, patch: PersonNextActionInput): Promise<void>;
+
+  // ---- Move to CRM: the only records Cadence creates, and the only ones undo may delete ----
+  /** Live people matching any email, phone (E.164), LinkedIn profile or sandbox id given. */
+  findPeople(q: FindPeopleQuery): Promise<TwentyPerson[]>;
+  /** Live companies with this domain or this exact name. */
+  findCompanies(q: { domain?: string | null; name?: string | null }): Promise<TwentyCompany[]>;
+  createPerson(input: CreatePersonInput): Promise<TwentyPerson>;
+  createCompany(input: CreateCompanyInput): Promise<TwentyCompany>;
+  /** Soft delete, as Twenty's own delete does. Only ever a record Cadence created (undo). */
+  deletePerson(id: string): Promise<void>;
+  deleteCompany(id: string): Promise<void>;
 
   // ---- schema ----
   introspect(): Promise<TwentyIntrospection>;

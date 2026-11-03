@@ -3,6 +3,7 @@ import type { ListOptions, ListPeopleOptions, TwentyClient } from './client';
 import { normalizeCalendarEvent, normalizeCompany, normalizeMessage, normalizeNote, normalizeOpportunity, normalizePerson, normalizeTask, normalizeWorkspaceMember, connectionToArray } from './normalize';
 import type { TwentySchema } from './twenty-schema';
 import { likeSafe, searchTerms } from '../search-terms';
+import { normalizeDomain, normalizeEmail, normalizeLinkedin, splitE164, toE164 } from '../sandbox/normalize';
 import type {
   PersonNextActionInput,
   CreateNoteInput,
@@ -26,7 +27,7 @@ import type {
   TwentyMeetingRecord,
   TwentyTagField,
   EnrichPersonInput,
-  EnrichCompanyInput,TwentyWebhook, CreateWebhookInput, TwentyCalendarEvent } from './types';
+  EnrichCompanyInput,TwentyWebhook, CreateWebhookInput, TwentyCalendarEvent, CreatePersonInput, CreateCompanyInput, FindPeopleQuery } from './types';
 
 export type TwentyGraphqlClientOptions = {
   /** Twenty server base URL, no trailing slash. The API lives at /graphql and /metadata. */
@@ -856,6 +857,119 @@ export class TwentyGraphqlClient implements TwentyClient {
     const result = await this.request<Record<string, Raw>>(`mutation EnrichCompany($id: UUID!, $data: ${type}UpdateInput!) { update${type}(id: $id, data: $data) { ${selection} } }`, { id, data });
     if (!result[`update${type}`]) throw new TwentyApiError('Twenty did not return the updated account.');
     return normalizeCompany(result[`update${type}`], this.s);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Move to CRM: the only records Cadence creates, and the only ones undo deletes
+  // ---------------------------------------------------------------------------
+
+  async findPeople(q: FindPeopleQuery): Promise<TwentyPerson[]> {
+    const p = this.s.person;
+    const type = this.s.objects.person.typeName;
+    const available = await this.availableFields(type);
+    const emails = [...new Set((q.emails ?? []).map((e) => normalizeEmail(e)).filter((e): e is string => Boolean(e)))];
+    const phones = [...new Set((q.phones ?? []).map((n) => toE164(n)).filter((n): n is string => Boolean(n)))];
+    const links = [...new Set((q.linkedinUrls ?? []).map((l) => normalizeLinkedin(l)).filter((l): l is string => Boolean(l)))];
+    const or: Raw[] = [
+      ...emails.map((email) => ({ [p.emails]: { primaryEmail: { ilike: likeSafe(email) } } })),
+      // Numbers are stored as typed; the last seven digits find them, and the comparison below decides.
+      ...phones.map((n) => ({ [p.phones]: { primaryPhoneNumber: { ilike: `%${n.slice(-7)}%` } } })),
+      ...links.map((l) => ({ [p.linkedinLink]: { primaryLinkUrl: { ilike: `%${likeSafe(l)}%` } } })),
+      ...(q.cadenceSandboxId && (!available || available.has(p.cadenceSandboxId)) ? [{ [p.cadenceSandboxId]: { eq: q.cadenceSandboxId } }] : []),
+    ];
+    if (!or.length) return [];
+    const sel = await this.personSelection();
+    const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.person.plural, type, sel), { filter: { or }, first: PAGE_SIZE, after: null });
+    const found = this.page(data[this.s.objects.person.plural], (n) => normalizePerson(n, this.s)).items;
+    const emailSet = new Set(emails), phoneSet = new Set(phones), linkSet = new Set(links);
+    return found.filter((person) => !person.deletedAt && (
+      [person.email, ...person.additionalEmails].some((e) => emailSet.has(normalizeEmail(e) ?? ''))
+      || [person.phone, person.additionalPhone].some((n) => phoneSet.has(toE164(n) ?? ''))
+      || linkSet.has(normalizeLinkedin(person.linkedinUrl) ?? '')
+      || (q.cadenceSandboxId != null && (person.raw as Raw | undefined)?.[p.cadenceSandboxId] === q.cadenceSandboxId)
+    ));
+  }
+
+  async findCompanies(q: { domain?: string | null; name?: string | null }): Promise<TwentyCompany[]> {
+    const c = this.s.company;
+    const domain = normalizeDomain(q.domain);
+    const or: Raw[] = [
+      ...(domain ? [{ [c.domainName]: { primaryLinkUrl: { ilike: `%${likeSafe(domain)}%` } } }] : []),
+      ...(q.name?.trim() ? [{ [c.name]: { ilike: likeSafe(q.name.trim()) } }] : []),
+    ];
+    if (!or.length) return [];
+    const sel = await this.companySelection();
+    const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.company.plural, this.s.objects.company.typeName, sel), { filter: { or }, first: PAGE_SIZE, after: null });
+    return this.page(data[this.s.objects.company.plural], (n) => normalizeCompany(n, this.s)).items
+      .filter((company) => !company.deletedAt && ((domain && normalizeDomain(company.domain) === domain) || (q.name && company.name.trim().toLowerCase() === q.name.trim().toLowerCase())));
+  }
+
+  /** Optional fields the workspace does not have are left out; the name and emails always go. */
+  private async onlyAvailable(type: string, data: Raw, required: string[]): Promise<Raw> {
+    const available = await this.availableFields(type);
+    if (!available) return data;
+    return Object.fromEntries(Object.entries(data).filter(([key]) => required.includes(key) || available.has(key)));
+  }
+
+  async createPerson(input: CreatePersonInput): Promise<TwentyPerson> {
+    const p = this.s.person;
+    const type = this.s.objects.person.typeName;
+    const phone = splitE164(input.phone);
+    const extra = splitE164(input.additionalPhone);
+    const data = await this.onlyAvailable(type, {
+      [p.name]: { firstName: input.firstName, lastName: input.lastName },
+      [p.emails]: { primaryEmail: input.email ?? '', additionalEmails: input.additionalEmails.length ? input.additionalEmails : null },
+      ...(phone ? { [p.phones]: { primaryPhoneNumber: phone.number, primaryPhoneCallingCode: phone.callingCode, primaryPhoneCountryCode: phone.country } } : {}),
+      ...(extra ? { [p.additionalNumber]: { primaryPhoneNumber: extra.number, primaryPhoneCallingCode: extra.callingCode, primaryPhoneCountryCode: extra.country } } : {}),
+      ...(input.linkedinUrl ? { [p.linkedinLink]: { primaryLinkUrl: input.linkedinUrl } } : {}),
+      ...(input.jobTitle ? { [p.jobTitle]: input.jobTitle } : {}),
+      ...(input.city ? { [p.city]: input.city } : {}),
+      ...(input.companyId ? { [p.companyId]: input.companyId } : {}),
+      ...(input.assignedToMemberId ? { [p.assignedToId]: input.assignedToMemberId } : {}),
+      ...(input.podOwner ? { [p.podOwner]: input.podOwner } : {}),
+      ...(input.leadSource.length ? { [p.leadSource]: input.leadSource } : {}),
+      ...(input.leadSourceNotes ? { [p.leadSourceNotes]: input.leadSourceNotes } : {}),
+      ...(input.productInterest.length ? { [p.productInterest]: input.productInterest } : {}),
+      ...(input.tags.length ? { [p.tags]: input.tags } : {}),
+      ...(input.contactType.length ? { [p.contactType]: input.contactType } : {}),
+      ...(input.listCategory ? { [p.listCategory]: input.listCategory } : {}),
+      ...(input.pipelineStage ? { [p.pipelineStageField]: input.pipelineStage } : {}),
+      ...(input.cadenceSandboxId ? { [p.cadenceSandboxId]: input.cadenceSandboxId } : {}),
+    }, [p.name, p.emails]);
+    const selection = await this.personSelection();
+    const result = await this.request<Record<string, Raw>>(`mutation CreatePerson($data: ${type}CreateInput!) { create${type}(data: $data) { ${selection} } }`, { data });
+    if (!result[`create${type}`]) throw new TwentyApiError('Twenty did not return the new contact.');
+    return normalizePerson(result[`create${type}`], this.s);
+  }
+
+  async createCompany(input: CreateCompanyInput): Promise<TwentyCompany> {
+    const c = this.s.company;
+    const type = this.s.objects.company.typeName;
+    const aumType = input.aum ? await this.companyAumType() : null;
+    const data = await this.onlyAvailable(type, {
+      [c.name]: input.name,
+      ...(input.domain ? { [c.domainName]: { primaryLinkUrl: input.domain } } : {}),
+      ...(input.city || input.state ? { [c.address]: { addressCity: input.city ?? '', addressState: input.state ?? '' } } : {}),
+      ...(input.employees != null ? { [c.employees]: input.employees } : {}),
+      ...(input.linkedinUrl ? { [c.linkedinLink]: { primaryLinkUrl: input.linkedinUrl } } : {}),
+      ...(input.crd ? { [c.crd]: input.crd } : {}),
+      ...(input.aum && aumType === 'currency' ? { [c.aum]: { amountMicros: (BigInt(input.aum.split('.')[0]) * BigInt(1_000_000)).toString(), currencyCode: 'USD' } } : {}),
+      ...(input.aum && aumType === 'number' ? { [c.aum]: Number(input.aum) } : {}),
+    }, [c.name]);
+    const selection = await this.companySelection();
+    const result = await this.request<Record<string, Raw>>(`mutation CreateCompany($data: ${type}CreateInput!) { create${type}(data: $data) { ${selection} } }`, { data });
+    if (!result[`create${type}`]) throw new TwentyApiError('Twenty did not return the new account.');
+    return normalizeCompany(result[`create${type}`], this.s);
+  }
+
+  async deletePerson(id: string): Promise<void> {
+    const type = this.s.objects.person.typeName;
+    await this.request(`mutation DeletePerson($id: UUID!) { delete${type}(id: $id) { id } }`, { id });
+  }
+
+  async deleteCompany(id: string): Promise<void> {
+    const type = this.s.objects.company.typeName;
+    await this.request(`mutation DeleteCompany($id: UUID!) { delete${type}(id: $id) { id } }`, { id });
   }
 
   // ---------------------------------------------------------------------------

@@ -155,7 +155,7 @@ export async function removeFromSequenceAction(formData: FormData): Promise<Acti
   const reason = String(formData.get('reason') ?? 'removed').trim() || 'removed';
   await exitEnrollment(enrollment.id, { reason, actor: userActor(user) });
   // "Asked not to be contacted" has to hold for every future campaign, not just this one.
-  await applyExitConsequence(enrollment.personId, reason, userActor(user));
+  await applyExitConsequence(enrollment, reason, userActor(user));
   revalidate();
   return { ok: true, message: reason === 'opted_out' ? 'Sequence ended and this person is opted out of all outreach.' : 'Sequence ended. No more tasks for this person.' };
 }

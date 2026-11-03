@@ -352,7 +352,7 @@ export async function resumeEnrollment(enrollmentId: string, opts: { actor: Audi
   const now = opts.now ?? new Date();
   const { updated, movedIds, refused } = await prisma.$transaction(async (tx) => {
     const identity = await tx.enrollment.findUnique({ where: { id: enrollmentId }, select: { campaignId: true, companyId: true, person: { select: { companyId: true } } } });
-    await lockAccounts(tx, [identity?.companyId, identity?.person.companyId]);
+    await lockAccounts(tx, [identity?.companyId, identity?.person?.companyId]);
     if (identity?.campaignId) await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`campaign:${identity.campaignId}`}))`;
     const e = await tx.enrollment.findUnique({ where: { id: enrollmentId }, include: { fo: true } });
     if (!e) throw new Error('Enrollment not found');

@@ -61,7 +61,8 @@ import type {
   TwentyMeetingRecord,
   TwentyTagField,
   EnrichPersonInput,
-  EnrichCompanyInput,TwentyWebhook, CreateWebhookInput } from './types';
+  EnrichCompanyInput,TwentyWebhook, CreateWebhookInput, CreatePersonInput, CreateCompanyInput, FindPeopleQuery } from './types';
+import { normalizeDomain, normalizeEmail, normalizeLinkedin, toE164 } from '../sandbox/normalize';
 
 export type MockWrite =
   | { op: 'createNote'; id: string; input: CreateNoteInput }
@@ -75,7 +76,11 @@ export type MockWrite =
   | { op: 'enrichPerson'; id: string; patch: EnrichPersonInput }
   | { op: 'enrichCompany'; id: string; patch: EnrichCompanyInput }
   | { op: 'setPersonNextAction'; id: string; patch: PersonNextActionInput }
-  | { op: 'deleteTask'; id: string };
+  | { op: 'deleteTask'; id: string }
+  | { op: 'createPerson'; id: string; input: CreatePersonInput }
+  | { op: 'createCompany'; id: string; input: CreateCompanyInput }
+  | { op: 'deletePerson'; id: string }
+  | { op: 'deleteCompany'; id: string };
 
 /** The Meetings object as the team set it up in Twenty (October 2026), for the demo workspace and the tests. */
 export const MOCK_MEETING_SCHEMA = (): TwentyMeetingSchema => ({
@@ -99,6 +104,19 @@ export const MOCK_MEETING_SCHEMA = (): TwentyMeetingSchema => ({
 });
 
 type MockMeetingRecord = { data: Record<string, unknown>; contacts: TwentyMeetingRecordInput['contacts']; cadenceId: string | null; createdAt: string; updatedAt: string; addedByMemberId: string | null };
+
+/** A person with every field empty, for records Cadence creates. */
+export function blankPerson(id: string, now: string): TwentyPerson {
+  return {
+    id, firstName: '', lastName: '', email: null, additionalEmails: [], phone: null, additionalPhone: null, linkedinUrl: null, xUrl: null,
+    jobTitle: null, city: null, companyId: null, companyName: null, ownerMemberId: null, podOwner: null, rotatedTo: null, rotationChangedAt: null,
+    dnd: false, dndReason: null, emailMissing: false, phoneMissing: false, tags: [], leadSource: [], leadSourceNotes: null, tier: null,
+    contactType: [], listCategory: null, previousCadence: null, pipelineStage: null, productInterest: [], primaryProduct: null, campaigns: [],
+    onCallingList: false, dealSignalStrength: null, nextAction: null, nextActionDueDate: null, nextStep: null, nextActionDueDatePoc: null,
+    lastNote: null, lastCallAt: null, lastEmailAt: null, recordingUrl: null, meetingUrl: null, bookingId: null, createdBySource: null,
+    createdByName: null, createdByMemberId: null, createdAt: now, updatedAt: now, deletedAt: null,
+  };
+}
 
 function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T;
@@ -551,6 +569,72 @@ export class MockTwentyClient implements TwentyClient {
     Object.assign(company, patch, { updatedAt: new Date().toISOString() });
     this.writes.push({ op: 'enrichCompany', id, patch: clone(patch) });
     return clone(company);
+  }
+
+  // ---- Move to CRM ---------------------------------------------------------
+
+  async findPeople(q: FindPeopleQuery): Promise<TwentyPerson[]> {
+    this.maybeFail();
+    const emails = new Set((q.emails ?? []).map((e) => normalizeEmail(e)).filter(Boolean));
+    const phones = new Set((q.phones ?? []).map((p) => toE164(p)).filter(Boolean));
+    const links = new Set((q.linkedinUrls ?? []).map((l) => normalizeLinkedin(l)).filter(Boolean));
+    return clone(this.people.filter((p) => !p.deletedAt && (
+      [p.email, ...p.additionalEmails].some((e) => emails.has(normalizeEmail(e)))
+      || [p.phone, p.additionalPhone].some((n) => phones.has(toE164(n)))
+      || links.has(normalizeLinkedin(p.linkedinUrl))
+      || (q.cadenceSandboxId != null && (p.raw as { cadenceSandboxId?: string } | undefined)?.cadenceSandboxId === q.cadenceSandboxId)
+    )));
+  }
+
+  async findCompanies(q: { domain?: string | null; name?: string | null }): Promise<TwentyCompany[]> {
+    this.maybeFail();
+    const domain = normalizeDomain(q.domain);
+    const name = q.name?.trim().toLowerCase();
+    return clone(this.companies.filter((c) => !c.deletedAt && ((domain && normalizeDomain(c.domain) === domain) || (name && c.name.trim().toLowerCase() === name))));
+  }
+
+  async createPerson(input: CreatePersonInput): Promise<TwentyPerson> {
+    this.maybeFail();
+    const now = new Date().toISOString();
+    const id = this.nextId('person-new');
+    const company = input.companyId ? this.companies.find((c) => c.id === input.companyId) : undefined;
+    const person: TwentyPerson = {
+      ...blankPerson(id, now), firstName: input.firstName, lastName: input.lastName, email: input.email, additionalEmails: input.additionalEmails,
+      phone: input.phone, additionalPhone: input.additionalPhone, linkedinUrl: input.linkedinUrl, jobTitle: input.jobTitle,
+      city: input.city, companyId: input.companyId, companyName: company?.name ?? null,
+      ownerMemberId: input.assignedToMemberId, podOwner: input.podOwner,
+      tags: input.tags, leadSource: input.leadSource, leadSourceNotes: input.leadSourceNotes, contactType: input.contactType,
+      listCategory: input.listCategory, pipelineStage: input.pipelineStage, productInterest: input.productInterest,
+      createdBySource: 'API', createdByName: 'Cadence',
+      raw: { cadenceSandboxId: input.cadenceSandboxId },
+    };
+    this.people.push(person);
+    this.writes.push({ op: 'createPerson', id, input: clone(input) });
+    return clone(person);
+  }
+
+  async createCompany(input: CreateCompanyInput): Promise<TwentyCompany> {
+    this.maybeFail();
+    const now = new Date().toISOString();
+    const id = this.nextId('company-new');
+    const company: TwentyCompany = { id, name: input.name, domain: input.domain, ownerMemberId: null, industry: null, employees: input.employees, aum: input.aum, city: input.city, linkedinUrl: input.linkedinUrl, updatedAt: now, deletedAt: null, raw: { crd: input.crd } };
+    this.companies.push(company);
+    this.writes.push({ op: 'createCompany', id, input: clone(input) });
+    return clone(company);
+  }
+
+  async deletePerson(id: string) {
+    this.maybeFail();
+    const person = this.people.find((p) => p.id === id);
+    if (person) { person.deletedAt = new Date().toISOString(); person.updatedAt = person.deletedAt; }
+    this.writes.push({ op: 'deletePerson', id });
+  }
+
+  async deleteCompany(id: string) {
+    this.maybeFail();
+    const company = this.companies.find((c) => c.id === id);
+    if (company) { company.deletedAt = new Date().toISOString(); company.updatedAt = company.deletedAt; }
+    this.writes.push({ op: 'deleteCompany', id });
   }
 
   // ---- schema -------------------------------------------------------------

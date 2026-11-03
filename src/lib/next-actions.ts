@@ -6,6 +6,10 @@ import { nextWorkingDay } from './engine/clock';
 import { getSettings } from './settings';
 import { getTwentyClient } from './twenty';
 import { afterResponse } from './engine/sync-out';
+import { CRM_SUBJECT } from './subject';
+
+/** The audit row for a next action: on its person, or on its sandbox contact while it has none. */
+const auditSubject = (na: { personId: string | null; sandboxContactId: string | null }) => (na.personId ? { entityType: 'person' as const, entityId: na.personId } : { entityType: 'sandbox_contact' as const, entityId: na.sandboxContactId ?? '' });
 
 /**
  * A person's next action outside any campaign (owner, 25 September 2026): "add people who may or
@@ -126,8 +130,8 @@ export async function completeNextAction(id: string, actor: AuditActor & { id?: 
       : { state: 'DONE', doneCount: { increment: 1 }, lastDoneAt: now, closedAt: now, completedById: actor.id ?? null, crmPending: true },
   });
   if (!claimed.count) return { ok: false, error: 'Someone else just changed this task.' };
-  await mirrorToPerson(na.personId, next ? { label: na.label, dueDate: next } : null);
-  await logAudit({ entityType: 'person', entityId: na.personId, action: 'next_action_done', actor, details: { label: na.label, dueDate: na.dueDate, next } });
+  if (na.personId) await mirrorToPerson(na.personId, next ? { label: na.label, dueDate: next } : null);
+  await logAudit({ ...auditSubject(na), action: 'next_action_done', actor, details: { label: na.label, dueDate: na.dueDate, next } });
   await afterResponse(async () => { await pushNextAction(id); });
   return { ok: true, next };
 }
@@ -137,8 +141,8 @@ export async function moveNextAction(id: string, dueDate: LocalDate, actor: Audi
   if (!isLocalDate(dueDate) || dueDate <= today) return { ok: false, error: 'Pick a later day.' };
   const na = await prisma.nextAction.findUnique({ where: { id } });
   if (!na || na.state !== 'OPEN') return { ok: false, error: 'This task is already closed.' };
-  await prisma.nextAction.update({ where: { id }, data: { dueDate, crmPending: true } });
-  await logAudit({ entityType: 'person', entityId: na.personId, action: 'next_action_moved', actor, details: { label: na.label, from: na.dueDate, to: dueDate } });
+  await prisma.nextAction.update({ where: { id }, data: { dueDate, crmPending: Boolean(na.personId) } });
+  await logAudit({ ...auditSubject(na), action: 'next_action_moved', actor, details: { label: na.label, from: na.dueDate, to: dueDate } });
   await afterResponse(async () => { await pushNextAction(id); });
   return { ok: true };
 }
@@ -147,9 +151,9 @@ export async function moveNextAction(id: string, dueDate: LocalDate, actor: Audi
 export async function stopNextAction(id: string, actor: AuditActor, now = new Date()): Promise<{ ok: true } | { ok: false; error: string }> {
   const na = await prisma.nextAction.findUnique({ where: { id } });
   if (!na || na.state !== 'OPEN') return { ok: false, error: 'This task is already closed.' };
-  await prisma.nextAction.update({ where: { id }, data: { state: 'CANCELLED', closedAt: now, crmPending: true } });
-  await mirrorToPerson(na.personId, null);
-  await logAudit({ entityType: 'person', entityId: na.personId, action: 'next_action_stopped', actor, details: { label: na.label, dueDate: na.dueDate } });
+  await prisma.nextAction.update({ where: { id }, data: { state: 'CANCELLED', closedAt: now, crmPending: Boolean(na.personId) } });
+  if (na.personId) await mirrorToPerson(na.personId, null);
+  await logAudit({ ...auditSubject(na), action: 'next_action_stopped', actor, details: { label: na.label, dueDate: na.dueDate } });
   await afterResponse(async () => { await pushNextAction(id); });
   return { ok: true };
 }
@@ -170,22 +174,28 @@ async function mirrorToPerson(personId: string, open: { label: string; dueDate: 
 export async function pushNextAction(id: string): Promise<boolean> {
   const na = await prisma.nextAction.findUnique({ where: { id } });
   if (!na || !na.crmPending) return true;
+  // A sandbox contact's next action stays in Cadence until the contact moves to the CRM.
+  if (!na.personId) {
+    await prisma.nextAction.update({ where: { id }, data: { crmPending: false, crmError: null } });
+    return true;
+  }
+  const personId = na.personId;
   // A newer open next action for the same person owns the fields; a closed one must not clear them.
-  if (na.state !== 'OPEN' && (await prisma.nextAction.count({ where: { personId: na.personId, state: 'OPEN' } }))) {
+  if (na.state !== 'OPEN' && (await prisma.nextAction.count({ where: { personId, state: 'OPEN' } }))) {
     await prisma.nextAction.update({ where: { id }, data: { crmPending: false, crmSyncedAt: new Date(), crmError: null } });
     return true;
   }
   const patch = na.state === 'OPEN' ? { nextAction: na.label, nextActionDueDate: na.dueDate } : { nextAction: null, nextActionDueDate: null };
   try {
     const client = await getTwentyClient();
-    await client.setPersonNextAction(na.personId, patch);
+    await client.setPersonNextAction(personId, patch);
     // Only if nothing changed meanwhile: a newer change is still pending and goes on the next pass.
     await prisma.nextAction.updateMany({ where: { id, updatedAt: na.updatedAt }, data: { crmPending: false, crmSyncedAt: new Date(), crmError: null } });
-    await prisma.personCache.updateMany({ where: { id: na.personId }, data: patch });
+    await prisma.personCache.updateMany({ where: { id: personId }, data: patch });
     return true;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[next-action] could not update Twenty for ${na.personId}: ${message}`);
+    console.warn(`[next-action] could not update Twenty for ${personId}: ${message}`);
     await prisma.nextAction.updateMany({ where: { id, updatedAt: na.updatedAt }, data: { crmError: message.slice(0, 500) } });
     return false;
   }
@@ -201,11 +211,12 @@ export async function syncNextActions(now = new Date()): Promise<{ pushed: numbe
   for (const p of pending) { if (await pushNextAction(p.id)) stats.pushed++; else stats.failed++; }
 
   const open = await prisma.nextAction.findMany({
-    where: { state: 'OPEN', crmPending: false },
+    where: { state: 'OPEN', crmPending: false, ...CRM_SUBJECT },
     select: { id: true, label: true, dueDate: true, crmSyncedAt: true, personId: true, person: { select: { nextAction: true, nextActionDueDate: true, twentyUpdatedAt: true } } },
   });
   for (const na of open) {
     const crm = na.person;
+    if (!crm || !na.personId) continue;
     // Only a change made in Twenty after Cadence last matched it.
     if (!crm.twentyUpdatedAt || (na.crmSyncedAt && crm.twentyUpdatedAt <= na.crmSyncedAt)) continue;
     const date = crm.nextActionDueDate && isLocalDate(crm.nextActionDueDate.slice(0, 10)) ? crm.nextActionDueDate.slice(0, 10) : null;
@@ -230,6 +241,7 @@ export type NextActionRow = NextAction & { person: { id: string; firstName: stri
 export function nextActionWhere(filters: { podId: string | null; foUserId: string | null; channel: 'CALL' | 'EMAIL' | 'LINKEDIN' | null }): Prisma.NextActionWhereInput {
   return {
     state: 'OPEN',
+    ...CRM_SUBJECT,
     ...(filters.foUserId ? { foUserId: filters.foUserId } : {}),
     ...(filters.podId ? { fo: { pods: { some: { podId: filters.podId } } } } : {}),
     ...(filters.channel === 'LINKEDIN' ? { action: { in: ['LINKEDIN_CONNECT', 'LINKEDIN_MESSAGE'] } } : filters.channel ? { action: filters.channel } : {}),

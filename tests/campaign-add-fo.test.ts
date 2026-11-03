@@ -80,7 +80,7 @@ describe('adding an FO to a running campaign', () => {
     const enrollments = await prisma.enrollment.findMany({ where: { campaignId, foUserId: b.users.karson.id }, include: { tasks: true } });
     expect(enrollments).toHaveLength(4);
     for (const e of enrollments) {
-      const batch = theirs.find((x) => x.personIds.includes(e.personId))!;
+      const batch = theirs.find((x) => x.personIds.includes(e.personId!))!;
       expect(e.scheduleDates).toEqual(batch.dates);
       expect(e.startDate).toBe(batch.dates[0]);
       expect(e.campaignRun).toBe(c.runNumber);

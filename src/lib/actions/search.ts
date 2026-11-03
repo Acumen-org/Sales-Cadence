@@ -28,7 +28,7 @@ export async function globalSearchAction(query: string): Promise<SearchHit[]> {
       orderBy: [{ lastName: 'asc' }],
       take: 6,
     }),
-    prisma.campaign.findMany({ where: { AND: [campaignScope(user), { name: like }] }, select: { id: true, name: true, status: true }, orderBy: { name: 'asc' }, take: 3 }),
+    prisma.campaign.findMany({ where: { AND: [campaignScope(user), { name: like, audience: 'CRM' }] }, select: { id: true, name: true, status: true }, orderBy: { name: 'asc' }, take: 3 }),
   ]);
   return [
     ...people.map<SearchHit>((p) => ({ kind: 'person', id: p.id, title: cachedPersonName(p), sub: [p.jobTitle, p.companyName].filter(Boolean).join(' · ') || null, href: `/people/${p.id}` })),

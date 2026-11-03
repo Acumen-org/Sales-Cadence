@@ -2,6 +2,7 @@ import { prisma } from '../db';
 import { logAudit, type AuditActor } from '../audit';
 import { getSettings, type RulesSettings } from '../settings';
 import { exitEnrollment, finishEnrollment, markReplied, setPersonFlags } from './enrollment';
+import { optOutPerson, optOutSandboxContact, type SubjectRef } from '../sandbox/opt-out';
 import { advanceEnrollment, cancelOpenTasks, completeTask, skipTask, syncCancelled, type EngineContext, type ResolveResult } from './tasks';
 import { parseSteps } from '../sequences/steps';
 import { ANSWERED_CALL_PREFIX } from '../reply-credit';
@@ -14,8 +15,23 @@ import { ANSWERED_CALL_PREFIX } from '../reply-credit';
  *  - move a person ahead to a later step, finish (replied / no reply)
  */
 
+/**
+ * Outcomes the post-call form always offers beside the ones in Settings > Rules (plan section 10):
+ * each means the person picked up, so each ends the sequence as a reply.
+ */
+export const EXTRA_CALL_OUTCOMES: RulesSettings['callDispositions'] = [
+  { key: 'not_interested', label: 'Not interested', answered: true, badPhone: false },
+  { key: 'meeting_booked', label: 'Meeting booked', answered: true, badPhone: false },
+  { key: 'do_not_contact', label: 'Asked not to be contacted', answered: true, badPhone: false },
+];
+
+/** Settings > Rules' call outcomes, then the extras it does not already have. */
+export function callOutcomes(rules: RulesSettings): RulesSettings['callDispositions'] {
+  return [...rules.callDispositions, ...EXTRA_CALL_OUTCOMES.filter((x) => !rules.callDispositions.some((d) => d.key === x.key))];
+}
+
 export function dispositionFor(rules: RulesSettings, key: string | null | undefined) {
-  return key ? rules.callDispositions.find((d) => d.key === key) ?? null : null;
+  return key ? callOutcomes(rules).find((d) => d.key === key) ?? null : null;
 }
 
 export function skipReasonFor(rules: RulesSettings, key: string | null | undefined) {
@@ -29,13 +45,13 @@ export async function completeCall(input: CallOutcomeInput, ctx: EngineContext):
   const settings = await getSettings();
   const disposition = dispositionFor(settings.rules, input.disposition);
   if (!disposition) return { ok: false, reason: 'invalid', detail: 'Pick a call outcome.' };
-  const task = await prisma.task.findUnique({ where: { id: input.taskId }, include: { enrollment: { select: { personId: true } } } });
+  const task = await prisma.task.findUnique({ where: { id: input.taskId }, include: { enrollment: { select: { personId: true, sandboxContactId: true } } } });
   if (!task) return { ok: false, reason: 'not_found' };
 
   const shouldReply = disposition.answered && settings.rules.answeredCallIsReply;
   const r = await completeTask({ taskId: input.taskId, source: 'MANUAL', disposition: disposition.key, note: input.note ?? null, chosenAction: input.chosenAction ?? 'CALL' }, { ...ctx, deferAdvance: shouldReply });
   if (!r.ok) return r;
-  if (disposition.badPhone) await setPersonFlags(task.enrollment.personId, { badPhone: true }, ctx.actor);
+  if (disposition.badPhone) await setSubjectFlags(task.enrollment, { badPhone: true }, ctx.actor);
   let replied = false;
   if (shouldReply) {
     // The call's touch says the person answered, so every Replies figure counts it as one.
@@ -47,6 +63,27 @@ export async function completeCall(input: CallOutcomeInput, ctx: EngineContext):
 }
 
 /**
+ * Flags on whoever a task is about. A person keeps Cadence's own flags (Twenty is never written);
+ * a sandbox contact keeps them on its row. Opting out goes through the one opt-out path, so a
+ * contact pushed from Bellwether reads as opted out there too.
+ */
+export async function setSubjectFlags(subject: SubjectRef, flags: { optedOut?: boolean; badEmail?: boolean; badPhone?: boolean }, actor: AuditActor): Promise<void> {
+  const { optedOut, ...rest } = flags;
+  if (subject.personId) {
+    if (optedOut) await optOutPerson(subject.personId, { source: 'skip_reason', actor, endSequences: false });
+    await setPersonFlags(subject.personId, rest, actor);
+    return;
+  }
+  if (!subject.sandboxContactId) return;
+  if (optedOut) await optOutSandboxContact(subject.sandboxContactId, { source: 'skip_reason', actor });
+  const data: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(rest)) if (typeof v === 'boolean') data[k] = v;
+  if (!Object.keys(data).length) return;
+  await prisma.sandboxContact.update({ where: { id: subject.sandboxContactId }, data });
+  await logAudit({ entityType: 'sandbox_contact', entityId: subject.sandboxContactId, action: 'flags_updated', actor, details: data });
+}
+
+/**
  * The person-level consequence of ending a sequence.
  *
  * The reason belongs on the enrollment, but "asked not to be contacted" has to outlive it: without
@@ -54,8 +91,8 @@ export async function completeCall(input: CallOutcomeInput, ctx: EngineContext):
  * somebody who told us to stop. The skip path already does this; ending a sequence from the task
  * or the person has to do the same.
  */
-export async function applyExitConsequence(personId: string, reason: string, actor: AuditActor): Promise<void> {
-  if (reason === 'opted_out') await setPersonFlags(personId, { optedOut: true }, actor);
+export async function applyExitConsequence(subject: string | SubjectRef, reason: string, actor: AuditActor): Promise<void> {
+  if (reason === 'opted_out') await setSubjectFlags(typeof subject === 'string' ? { personId: subject } : subject, { optedOut: true }, actor);
 }
 
 export type SkipOutcomeInput = { taskId: string; reasonKey: string; note?: string | null };
@@ -68,15 +105,15 @@ export async function skipWithReason(input: SkipOutcomeInput, ctx: EngineContext
   const shouldExit = Boolean(reason && reason.exit !== 'none' && (reason.exit !== 'bounced' || settings.rules.exitOnBounce));
   const r = await skipTask({ taskId: input.taskId, reason: label, note: input.note ?? null }, { ...ctx, deferAdvance: shouldExit });
   if (!r.ok) return r;
-  const task = await prisma.task.findUnique({ where: { id: input.taskId }, include: { enrollment: { select: { id: true, personId: true, status: true } } } });
+  const task = await prisma.task.findUnique({ where: { id: input.taskId }, include: { enrollment: { select: { id: true, personId: true, sandboxContactId: true, status: true } } } });
   if (!task || !reason) return r;
 
   if (reason.badEmail || reason.badPhone) {
-    await setPersonFlags(task.enrollment.personId, { badEmail: reason.badEmail || undefined, badPhone: reason.badPhone || undefined }, ctx.actor);
+    await setSubjectFlags(task.enrollment, { badEmail: reason.badEmail || undefined, badPhone: reason.badPhone || undefined }, ctx.actor);
   }
   let exited: string | null = null;
   if (reason.exit !== 'none' && (reason.exit !== 'bounced' || settings.rules.exitOnBounce)) {
-    if (reason.exit === 'opted_out') await setPersonFlags(task.enrollment.personId, { optedOut: true }, ctx.actor);
+    if (reason.exit === 'opted_out') await setSubjectFlags(task.enrollment, { optedOut: true }, ctx.actor);
     if (task.enrollment.status === 'ACTIVE' || task.enrollment.status === 'PAUSED') {
       await exitEnrollment(task.enrollment.id, { reason: reason.exit, actor: ctx.actor, now: ctx.now, skipSync: ctx.skipSync });
       exited = reason.exit;

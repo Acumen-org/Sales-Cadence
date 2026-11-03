@@ -1,3 +1,4 @@
+import { toE164 } from './sandbox/normalize';
 import type { Prisma } from '@prisma/client';
 import { prisma, type Tx } from './db';
 import type { TwentyClient } from './twenty/client';
@@ -26,6 +27,8 @@ export function personToCacheData(p: TwentyPerson): Prisma.PersonCacheUncheckedC
     sortName: sortKey(`${p.firstName ?? ''} ${p.lastName ?? ''}`),
     email: p.email,
     phone: p.phone,
+    phoneE164: toE164(p.phone),
+    additionalPhoneE164: toE164(p.additionalPhone),
     linkedinUrl: p.linkedinUrl,
     jobTitle: p.jobTitle,
     city: p.city,

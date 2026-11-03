@@ -56,7 +56,7 @@ export async function campaignPeoplePage(campaign: { id: string; personIds: stri
     const enrollments = await prisma.enrollment.findMany({ where, include: { person: true, fo: { select: { name: true } } }, orderBy: [{ startDate: 'asc' }, { id: 'asc' }], skip: (page - 1) * CAMPAIGN_PEOPLE_PAGE, take: CAMPAIGN_PEOPLE_PAGE });
     return {
       launched, total, page, pages, stats: { completedSteps, late: late.length, replies, meetings, finished },
-      rows: enrollments.map((e) => ({ id: e.id, personId: e.personId, name: cachedPersonName(e.person), company: e.person.companyName, fo: e.fo.name, flowId: flowOf(e.personId), step: Math.max(0, e.currentStep + 1), status: e.status, exitReason: e.exitReason })),
+      rows: enrollments.map((e) => ({ id: e.id, personId: e.personId!, name: cachedPersonName(e.person!), company: e.person!.companyName, fo: e.fo.name, flowId: flowOf(e.personId!), step: Math.max(0, e.currentStep + 1), status: e.status, exitReason: e.exitReason })),
     };
   }
 

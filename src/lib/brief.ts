@@ -47,7 +47,7 @@ export type ColleagueRow = {
 export type TaskBrief = {
   task: TaskRow;
   modules: Array<{ task: TaskRow; action: RenderedAction }>;
-  person: TaskRow['enrollment']['person'];
+  person: NonNullable<TaskRow['enrollment']['person']>;
   personName: string;
   /** Today in the reader's timezone, so "due" dates from Twenty can be coloured. */
   today: LocalDate;
@@ -108,6 +108,8 @@ export async function getTaskBrief(taskId: string, user: SessionUser): Promise<T
     }),
   ]);
   const person = task.enrollment.person;
+  // A sandbox step has no CRM brief; Sandbox > Work shows its own.
+  if (!person) return null;
 
   // One plan per sequence. What this task says is frozen on the task itself, so an edit to the
   // plan since it was generated cannot rewrite the message an FO is looking at.

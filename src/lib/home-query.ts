@@ -6,6 +6,7 @@ import { isAdmin, isPodLeader, visiblePodIds, canSeeAllPods, ROLES_NEEDING_POD }
 import { addDays, startOfLocalDay, todayIn, workWeekRange, type LocalDate } from './dates';
 import { taskScopeWhere, WORKABLE, type TaskChannel } from './tasks-query';
 import { myOwnershipCounts } from './accounts-query';
+import { CRM_SUBJECT } from './subject';
 
 export type HomeData = Awaited<ReturnType<typeof buildHome>>;
 
@@ -85,7 +86,7 @@ function channelOfAction(action: string): TaskChannel {
 /** A touchpoint for "Up next": one person's step, with every action it holds. */
 export type NextTouchpoint = { id: string; kind: 'step' | 'task'; name: string; company: string | null; campaign: string | null; fo: string | null; due: LocalDate; actions: string[] };
 
-type OpenRow = { id: string; action: string; dueDate: string; snoozedTo: string | null; enrollmentId: string; stepId: string; fo: { name: string }; enrollment: { personId: string; person: { firstName: string | null; lastName: string | null; companyName: string | null }; campaign: { name: string } | null } };
+type OpenRow = { id: string; action: string; dueDate: string; snoozedTo: string | null; enrollmentId: string; stepId: string; fo: { name: string }; enrollment: { personId: string | null; person: null | { firstName: string | null; lastName: string | null; companyName: string | null }; campaign: { name: string } | null } };
 
 /**
  * The next touchpoints, in the order the Tasks flow gives them: what is overdue (oldest first),
@@ -96,16 +97,16 @@ function nextTouchpoints(rows: OpenRow[], created: CreatedRow[], today: LocalDat
   for (const r of rows) { const key = `${r.enrollmentId}:${r.stepId}`; groups.set(key, [...(groups.get(key) ?? []), r]); }
   const order = (d: string) => (d < today ? 0 : d === today ? 1 : 2);
   const rank = (a: string) => ['EMAIL', 'CALL', 'LINKEDIN_CONNECT', 'LINKEDIN_MESSAGE'].indexOf(a) + 1 || 9;
-  const personName = (p: { firstName: string | null; lastName: string | null }) => [p.firstName, p.lastName].filter(Boolean).join(' ') || 'Unnamed person';
+  const personName = (p: { firstName: string | null; lastName: string | null } | null) => [p?.firstName, p?.lastName].filter(Boolean).join(' ') || 'Unnamed person';
   const steps: NextTouchpoint[] = [...groups.values()]
-    .map((g) => { const due = g.map((t) => t.snoozedTo ?? t.dueDate).sort()[0]; const r = g[0]; return { id: r.id, kind: 'step' as const, name: personName(r.enrollment.person), company: r.enrollment.person.companyName, campaign: r.enrollment.campaign?.name ?? null, fo: r.fo.name, due, actions: [...new Set(g.map((t) => t.action))].sort((x, y) => rank(x) - rank(y)) }; });
-  const tasks: NextTouchpoint[] = created.map((n) => ({ id: n.id, kind: 'task' as const, name: personName(n.person), company: n.person.companyName, campaign: n.label, fo: n.fo.name, due: n.dueDate, actions: [n.action] }));
+    .map((g) => { const due = g.map((t) => t.snoozedTo ?? t.dueDate).sort()[0]; const r = g[0]; return { id: r.id, kind: 'step' as const, name: personName(r.enrollment.person), company: r.enrollment.person?.companyName ?? null, campaign: r.enrollment.campaign?.name ?? null, fo: r.fo.name, due, actions: [...new Set(g.map((t) => t.action))].sort((x, y) => rank(x) - rank(y)) }; });
+  const tasks: NextTouchpoint[] = created.map((n) => ({ id: n.id, kind: 'task' as const, name: personName(n.person), company: n.person?.companyName ?? null, campaign: n.label, fo: n.fo.name, due: n.dueDate, actions: [n.action] }));
   return [...steps, ...tasks]
     .sort((a, b) => order(a.due) - order(b.due) || a.due.localeCompare(b.due) || a.name.localeCompare(b.name))
     .slice(0, limit);
 }
 
-type CreatedRow = { id: string; label: string; action: string; dueDate: string; person: { id: string; firstName: string | null; lastName: string | null; companyName: string | null }; fo: { name: string } };
+type CreatedRow = { id: string; label: string; action: string; dueDate: string; person: null | { id: string; firstName: string | null; lastName: string | null; companyName: string | null }; fo: { name: string } };
 const createdSelect = { id: true, label: true, action: true, dueDate: true, person: { select: { id: true, firstName: true, lastName: true, companyName: true } }, fo: { select: { name: true } } } satisfies Prisma.NextActionSelect;
 
 const openRowSelect = { id: true, action: true, label: true, dueDate: true, snoozedTo: true, enrollmentId: true, stepId: true, fo: { select: { name: true } }, enrollment: { select: { personId: true, person: { select: { firstName: true, lastName: true, companyName: true } }, campaign: { select: { name: true } } } } } satisfies Prisma.TaskSelect;
@@ -118,7 +119,7 @@ async function myOpenTasks(base: Prisma.TaskWhereInput, today: LocalDate, user: 
   const [rows, createdRows] = await Promise.all([
     prisma.task.findMany({ where: { AND: [base, WORKABLE, { state: 'PENDING' }] }, select: openRowSelect }),
     // Tasks someone created for a person count like any step, as in the sidebar badge and Tasks.
-    prisma.nextAction.findMany({ where: { foUserId: user.id, OR: [{ state: 'OPEN' }, { lastDoneAt: day }] }, select: { ...createdSelect, state: true, lastDoneAt: true } }),
+    prisma.nextAction.findMany({ where: { foUserId: user.id, ...CRM_SUBJECT, OR: [{ state: 'OPEN' }, { lastDoneAt: day }] }, select: { ...createdSelect, state: true, lastDoneAt: true } }),
   ]);
   const created = createdRows.filter((n) => n.state === 'OPEN');
   const createdDoneToday = createdRows.filter((n) => n.lastDoneAt && n.lastDoneAt >= day.gte && n.lastDoneAt < day.lt).length;
@@ -138,7 +139,7 @@ async function myOpenTasks(base: Prisma.TaskWhereInput, today: LocalDate, user: 
     if (due === today) {
       todayC[ch] += 1;
       todayGroups.add(group);
-      peopleToday.add(r.enrollment.personId);
+      if (r.enrollment.personId) peopleToday.add(r.enrollment.personId);
     } else if (due < today) {
       overdueC[ch] += 1;
       overdueGroups.add(group);
@@ -148,7 +149,7 @@ async function myOpenTasks(base: Prisma.TaskWhereInput, today: LocalDate, user: 
   for (const g of overdueGroups) todayGroups.delete(g);
   for (const n of created) {
     const ch = channelOfAction(n.action);
-    if (n.dueDate === today) { todayC[ch] += 1; todayGroups.add(`task:${n.id}`); peopleToday.add(n.person.id); }
+    if (n.dueDate === today) { todayC[ch] += 1; todayGroups.add(`task:${n.id}`); if (n.person) peopleToday.add(n.person.id); }
     else if (n.dueDate < today) { overdueC[ch] += 1; overdueGroups.add(`task:${n.id}`); }
     else upcomingC[ch] += 1;
   }
@@ -201,7 +202,7 @@ async function teamThisWeek(user: SessionUser, today: LocalDate, week: { from: L
   if (!users.length) return [];
   const ids = users.map((u) => u.id);
   const taskScope = taskScopeWhere(user);
-  const enrollmentScope: Prisma.EnrollmentWhereInput = pods === null ? {} : { OR: [{ podId: { in: pods } }, { foUserId: user.id }] };
+  const enrollmentScope: Prisma.EnrollmentWhereInput = pods === null ? CRM_SUBJECT : { ...CRM_SUBJECT, OR: [{ podId: { in: pods } }, { foUserId: user.id }] };
   const inWeek = { gte: week.fromInstant, lt: week.toInstant };
 
   const [pending, doneRows, replyRows, meetingRows, planned, created] = await Promise.all([
@@ -212,7 +213,7 @@ async function teamThisWeek(user: SessionUser, today: LocalDate, week: { from: L
     prisma.meeting.findMany({ where: { review: 'APPROVED', occurredAt: { gte: week.fromInstant, lt: new Date(Math.min(week.toInstant.getTime(), startOfLocalDay(addDays(today, 1), user.timezone).getTime())) }, OR: [{ bookedById: { in: ids } }, { bookedById: null, createdById: { in: ids } }] }, select: { bookedById: true, createdById: true } }),
     // Campaign calendars: every step dated this week, open yet or not.
     prisma.enrollment.findMany({ where: { AND: [enrollmentScope, { foUserId: { in: ids }, status: 'ACTIVE', scheduleDates: { isEmpty: false } }] }, select: { id: true, foUserId: true, currentStep: true, scheduleDates: true } }),
-    prisma.nextAction.findMany({ where: { foUserId: { in: ids }, OR: [{ state: 'OPEN', dueDate: { lte: week.to } }, { lastDoneAt: inWeek }] }, select: { id: true, foUserId: true, dueDate: true, state: true, lastDoneAt: true } }),
+    prisma.nextAction.findMany({ where: { foUserId: { in: ids }, ...CRM_SUBJECT, OR: [{ state: 'OPEN', dueDate: { lte: week.to } }, { lastDoneAt: inWeek }] }, select: { id: true, foUserId: true, dueDate: true, state: true, lastDoneAt: true } }),
   ]);
   const createdOpen = created.filter((n) => n.state === 'OPEN' && n.dueDate <= week.to);
   const createdDone = created.filter((n) => n.lastDoneAt && n.lastDoneAt >= week.fromInstant && n.lastDoneAt < week.toInstant);
@@ -246,7 +247,7 @@ async function teamThisWeek(user: SessionUser, today: LocalDate, week: { from: L
   const userByMember = new Map(users.flatMap((u) => (u.twentyMemberId ? [[u.twentyMemberId, u.id] as const] : [])));
   const replyBy = new Map<string, number>();
   const creditedFo = await enrollmentByReply(replyRows);
-  for (const r of replyRows) { const id = creditedFo.get(r.id)?.foUserId ?? (r.person.ownerMemberId ? userByMember.get(r.person.ownerMemberId) : null); if (id && ids.includes(id)) replyBy.set(id, (replyBy.get(id) ?? 0) + 1); }
+  for (const r of replyRows) { const id = creditedFo.get(r.id)?.foUserId ?? (r.person!.ownerMemberId ? userByMember.get(r.person!.ownerMemberId) : null); if (id && ids.includes(id)) replyBy.set(id, (replyBy.get(id) ?? 0) + 1); }
   const meetingBy = new Map<string, number>();
   for (const m of meetingRows) { const id = m.bookedById ?? m.createdById; if (id) meetingBy.set(id, (meetingBy.get(id) ?? 0) + 1); }
 

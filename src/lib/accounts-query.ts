@@ -429,7 +429,7 @@ export async function accountDetail(companyId: string, user: SessionUser) {
 
   const nameById = new Map(accountPeople.map((p) => [p.id, p.name]));
   const enrollmentPerson = new Map<string, { id: string; name: string }>();
-  for (const t of tasks) enrollmentPerson.set(t.enrollmentId, { id: t.enrollment.personId, name: `${t.enrollment.person.firstName} ${t.enrollment.person.lastName}`.trim() });
+  for (const t of tasks) enrollmentPerson.set(t.enrollmentId, { id: t.enrollment.personId!, name: `${t.enrollment.person!.firstName} ${t.enrollment.person!.lastName}`.trim() });
 
   const campaigns = [...new Map(campaignRows.filter((r) => r.campaign).map((r) => [r.campaign!.id, r.campaign!])).values()].map((c) => ({
     id: c.id,
@@ -448,7 +448,7 @@ export async function accountDetail(companyId: string, user: SessionUser) {
       detail: t.actorLabel,
       fields: t.actorLabel ? [{ label: 'By', value: t.actorLabel }] : [],
       personId: t.personId,
-      personName: nameById.get(t.personId) ?? null,
+      personName: nameById.get(t.personId!) ?? null,
       href: `/people/${t.personId}`,
       tone: t.direction === 'INBOUND' ? 'in' : 'out',
       icon: t.channel,
@@ -477,7 +477,7 @@ export async function accountDetail(companyId: string, user: SessionUser) {
         detail: t.note ?? t.skipReason ?? t.fo.name,
         fields: [t.skipReason ? { label: 'Reason', value: t.skipReason } : null, t.note ? { label: 'Note', value: t.note } : null, { label: 'By', value: t.fo.name }].filter((f): f is { label: string; value: string } => Boolean(f)),
         personId: t.enrollment.personId,
-        personName: nameById.get(t.enrollment.personId) ?? null,
+        personName: nameById.get(t.enrollment.personId!) ?? null,
         href: `/people/${t.enrollment.personId}`,
         tone: 'out',
         icon: t.action,
@@ -524,8 +524,8 @@ export async function accountDetail(companyId: string, user: SessionUser) {
       action: t.action,
       due: t.snoozedTo ?? t.dueDate,
       foName: t.fo.name,
-      personId: t.enrollment.personId,
-      personName: nameById.get(t.enrollment.personId) ?? '',
+      personId: t.enrollment.personId!,
+      personName: nameById.get(t.enrollment.personId!) ?? '',
     })),
     stats: {
       people: accountPeople.length,

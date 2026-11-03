@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { workspaceTimezone } from './workspace';
 import { prisma } from './db';
+import { CRM_SUBJECT } from './subject';
 import { enrollmentByReply, REPLY_TOUCH_WHERE, type CreditedEnrollment } from './reply-credit';
 import type { SessionUser } from './auth/current-user';
 import { isJuniorFo, visiblePodIds } from './auth/rbac';
@@ -76,11 +77,12 @@ export type Slice = { key: string; label: string; value: number };
 
 export type ChannelRow = { action: ActionType; label: string; done: number; observed: number; manual: number; skipped: number; open: number; overdue: number };
 
+/** CRM outreach this reader's report covers. Sandbox numbers have their own section (sandbox-report.ts). */
 function enrollmentScope(user: SessionUser): Prisma.EnrollmentWhereInput {
-  if (isJuniorFo(user)) return { foUserId: user.id };
+  if (isJuniorFo(user)) return { ...CRM_SUBJECT, foUserId: user.id };
   const pods = visiblePodIds(user);
-  if (pods === null) return {};
-  return { OR: [{ podId: { in: pods } }, { foUserId: user.id }] };
+  if (pods === null) return CRM_SUBJECT;
+  return { ...CRM_SUBJECT, OR: [{ podId: { in: pods } }, { foUserId: user.id }] };
 }
 
 type Acc = GroupRow & { people: Set<string> };
@@ -213,6 +215,7 @@ export async function buildReports(user: SessionUser, today: LocalDate, filters?
     const channel = channelOf(action);
     const isAnswered = channel === 'CALL' && !!t.disposition && answeredKeys.has(t.disposition);
     const personId = t.enrollment.personId;
+    if (!personId) continue;
     people.add(personId);
     sentBy[channel] += 1;
     if (isAnswered) answered += 1;
@@ -235,7 +238,7 @@ export async function buildReports(user: SessionUser, today: LocalDate, filters?
     // Only replies to outreach: a message from someone nobody reached out to answers nothing here.
     if (!e || !inScope(e)) continue;
     replies += 1;
-    repliedPeople.add(r.personId);
+    if (r.personId) repliedPeople.add(r.personId);
     byFo.reply(e.foUserId);
     byPod.reply(e.podId ?? 'none');
     byCampaign.reply(e.campaignId ?? 'none');

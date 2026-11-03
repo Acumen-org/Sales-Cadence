@@ -9,6 +9,8 @@ import { nextWorkingDaySnooze, snoozeDefault } from '@/lib/engine/tasks';
 import { cachedPersonName } from '@/lib/person-cache';
 import { getSettings } from '@/lib/settings';
 import { ACTION_LABELS, channelOf } from '@/lib/sequences/steps';
+import { CRM_SUBJECT } from '@/lib/subject';
+import { callGate } from '@/lib/calls/gate';
 import { filterOptions, listTaskGroups, parseChannel, parseTab, TASK_CHANNELS, type TaskChannel, type TaskTab } from '@/lib/tasks-query';
 import { ActionIcon, IconCampaigns, IconChevronLeft, IconChevronRight, IconRefresh } from '@/components/icons';
 import { prisma } from '@/lib/db';
@@ -61,7 +63,9 @@ function CampaignBand({ brief }: { brief: NonNullable<Awaited<ReturnType<typeof 
   </div>;
 }
 
-type NextItem = Awaited<ReturnType<typeof prisma.nextAction.findMany<{ include: typeof nextActionInclude }>>>[number];
+type AnyNextItem = Awaited<ReturnType<typeof prisma.nextAction.findMany<{ include: typeof nextActionInclude }>>>[number];
+type NextItem = AnyNextItem & { person: NonNullable<AnyNextItem['person']> };
+const crmNext = (n: AnyNextItem): n is NextItem => Boolean(n.person);
 const personName = (p: { firstName: string; lastName: string; email: string | null }) => `${p.firstName} ${p.lastName}`.trim() || p.email || 'Unnamed';
 const dueLabel = (due: string, today: string) => (due === today ? 'Today' : formatLocalDate(due));
 
@@ -124,10 +128,12 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   }
   // Next actions (outside any campaign) are work in these same tabs, counted with the tasks.
   const recentDone = startOfLocalDay(addDays(today, -30), user.timezone);
-  const [openNext, doneNext] = await Promise.all([
+  const [openNextAll, doneNextAll] = await Promise.all([
     prisma.nextAction.findMany({ where: nextActionWhere({ podId, foUserId, channel: null }), include: nextActionInclude, orderBy: [{ dueDate: 'asc' }, { createdAt: 'asc' }], take: 500 }),
-    prisma.nextAction.findMany({ where: { ...(foUserId ? { foUserId } : {}), ...(podId ? { fo: { pods: { some: { podId } } } } : {}), lastDoneAt: { gte: recentDone } }, include: nextActionInclude, orderBy: { lastDoneAt: 'desc' }, take: 100 }),
+    prisma.nextAction.findMany({ where: { ...CRM_SUBJECT, ...(foUserId ? { foUserId } : {}), ...(podId ? { fo: { pods: { some: { podId } } } } : {}), lastDoneAt: { gte: recentDone } }, include: nextActionInclude, orderBy: { lastDoneAt: 'desc' }, take: 100 }),
   ]);
+  const openNext = openNextAll.filter(crmNext);
+  const doneNext = doneNextAll.filter(crmNext);
   const nextTab = (n: { dueDate: string }): TaskTab => (n.dueDate < today ? 'overdue' : n.dueDate === today ? 'today' : 'upcoming');
   for (const n of openNext) {
     if (nextTab(n) === tab) channelCounts[channelOf(n.action)]++;
@@ -146,7 +152,8 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const inView = rows.find(r => r.id === requested || r.childIds.includes(requested ?? '')) ?? null;
   const selected = requestedNext ? null : inView ?? (requested ? null : rows[0] ?? null);
   // A next action opens when asked for, or first when the tab has no task to open.
-  const selectedNext = requestedNext ? nextInTab.find((n) => n.id === requestedNext) ?? await prisma.nextAction.findUnique({ where: { id: requestedNext }, include: nextActionInclude }) : !selected && !requested ? nextInTab[0] ?? null : null;
+  const requestedRow = requestedNext && !nextInTab.some((n) => n.id === requestedNext) ? await prisma.nextAction.findUnique({ where: { id: requestedNext }, include: nextActionInclude }) : null;
+  const selectedNext = requestedNext ? nextInTab.find((n) => n.id === requestedNext) ?? (requestedRow && crmNext(requestedRow) ? requestedRow : null) : !selected && !requested ? nextInTab[0] ?? null : null;
   const nextIndex = selectedNext ? nextInTab.findIndex((n) => n.id === selectedNext.id) : -1;
   const afterNext = nextIndex >= 0 && nextInTab[nextIndex + 1] ? href({ next: nextInTab[nextIndex + 1].id, task: null }) : rows[0] ? href({ task: rows[0].id, next: null }) : href({ task: null, next: null });
   const index = selected ? rows.findIndex(r => r.id === selected.id) : -1;
@@ -154,6 +161,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const nextUrl = following ? href({ task: following.id }) : href({ task: null });
   const prevUrl = index > 0 ? href({ task: rows[index - 1].id }) : null;
   const brief = selected ? await getTaskBrief(selected.id, user) : requested ? await getTaskBrief(requested, user) : null;
+  const gate = brief ? await callGate(user, { phone: brief.person.phone, state: brief.person.city?.split(',').pop()?.trim() ?? null, optedOut: brief.person.optedOut, dnd: brief.person.dnd, email: brief.person.email, linkedinUrl: brief.person.linkedinUrl }) : null;
   const missing = Boolean(requested && !inView && !brief);
   const nextWorkingDay = nextWorkingDaySnooze(today, settings.rules.workingDays);
   const dispositions = settings.rules.callDispositions.map(d => ({ key: d.key, label: d.label, answered: d.answered }));
@@ -199,12 +207,12 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
           {brief.task.enrollment.status === 'PAUSED' ? <div className="border-b border-line px-5 py-4"><Notice tone="warn">This campaign is paused, so these touches are held. {brief.task.enrollment.campaign ? <Link href={'/campaigns/' + brief.task.enrollment.campaign.id} className="font-medium underline">Open the campaign</Link> : null}</Notice></div> : null}
           <div className="divide-y divide-line">{modules.map(({task,action}) => <div key={task.id} className="space-y-4 p-5">
             {task.action === 'EMAIL' && (!brief.person.email || brief.person.badEmail) && <Notice tone="warn">Email needs verification. <Link href={'/enrichment?q=' + encodeURIComponent(brief.personName)} className="font-medium underline">Review contact data</Link></Notice>}
-            <TaskComposer key={task.id} taskId={task.id} label={ACTION_LABELS[task.action]} subject={action.subject} body={action.body} html={action.html} channel={channelOf(task.action)} revision={task.draftRevision} readOnly={task.state !== 'PENDING' || !canActOnTask(user, { foUserId: task.foUserId, podId: task.enrollment.podId })} phone={brief.person.phone} callTemplate={settings.rules.clickToCallUrl} />
+            <TaskComposer key={task.id} taskId={task.id} label={ACTION_LABELS[task.action]} subject={action.subject} body={action.body} html={action.html} channel={channelOf(task.action)} revision={task.draftRevision} readOnly={task.state !== 'PENDING' || !canActOnTask(user, { foUserId: task.foUserId, podId: task.enrollment.podId })} phone={brief.person.phone} callTemplate={settings.rules.clickToCallUrl} personId={brief.person.id} callBlocked={gate?.blocked ?? null} callWarning={gate?.warning ?? null} />
             {task.state === 'PENDING' && canActOnTask(user, { foUserId: task.foUserId, podId: task.enrollment.podId }) ? <TaskActions fixedCalendar={brief.task.enrollment.scheduleDates.length > 0} taskId={task.id} action={task.action} nextUrl={nextUrl} variant={openModules.length > 1 ? 'module' : 'full'} prevUrl={prevUrl} twentyUrl={brief.twentyUrl} nextWorkingDay={snoozeDefault(today, dueOn ?? today, settings.rules.workingDays)} canPickSnoozeDate={canSnoozeFreely(user)} dispositions={dispositions} skipReasons={skipReasons} steps={brief.steps} currentStep={brief.currentStep} canManageEnrollment={canManageEnrollment(user, { foUserId: task.foUserId, podId: task.enrollment.podId })} delegates={delegatesFor(task.enrollment.podId)} currentFoId={task.foUserId} keyboardEnabled={openModules.length === 1} /> : <RecordFields items={[{label:'Result',value:task.state === 'DONE' ? (task.completionSource?.startsWith('OBSERVED') ? 'Done: seen in Twenty' : 'Done') : task.state === 'SKIPPED' ? 'Skipped' : task.state === 'CANCELLED' ? 'Cancelled' : 'Open'},{label:'Outcome',value:task.disposition ? dispositions.find(d => d.key === task.disposition)?.label ?? task.disposition : task.skipReason ?? task.cancelReason},{label:'Logged note',value:task.note}]} />}
           </div>)}</div>
           {openModules.length > 1 && canActOnTask(user, { foUserId: openModules[0].task.foUserId, podId: openModules[0].task.enrollment.podId }) ? <div className="border-t border-line p-5"><TaskActions fixedCalendar={brief.task.enrollment.scheduleDates.length > 0} variant="step" taskId={openModules[0].task.id} snoozeTaskIds={openModules.map(m => m.task.id)} action={openModules[0].task.action} nextUrl={nextUrl} prevUrl={prevUrl} twentyUrl={brief.twentyUrl} nextWorkingDay={snoozeDefault(today, dueOn ?? today, settings.rules.workingDays)} canPickSnoozeDate={canSnoozeFreely(user)} dispositions={dispositions} skipReasons={skipReasons} steps={brief.steps} currentStep={brief.currentStep} canManageEnrollment={canManageEnrollment(user, { foUserId: openModules[0].task.foUserId, podId: openModules[0].task.enrollment.podId })} delegates={delegatesFor(openModules[0].task.enrollment.podId)} currentFoId={openModules[0].task.foUserId} keyboardEnabled /></div> : null}
         </Surface>}</div>
-        {brief && <aside className="min-w-0 space-y-4 xl:col-start-2 2xl:col-auto"><TaskBriefPanel brief={brief} timezone={user.timezone} callTemplate={settings.rules.clickToCallUrl} /><SuggestedApproach canConfigure={isAdmin(user)} /><Suspense key={brief.person.id} fallback={<div className="surface h-40" />}><CrmHistory personId={brief.person.id} timezone={user.timezone} baseHref={href({ task: brief.task.id })} notesAfter={sp.crmNotes} emailsAfter={sp.crmEmails} /></Suspense></aside>}
+        {brief && <aside className="min-w-0 space-y-4 xl:col-start-2 2xl:col-auto"><TaskBriefPanel brief={brief} timezone={user.timezone} gate={gate} callTemplate={settings.rules.clickToCallUrl} /><SuggestedApproach canConfigure={isAdmin(user)} /><Suspense key={brief.person.id} fallback={<div className="surface h-40" />}><CrmHistory personId={brief.person.id} timezone={user.timezone} baseHref={href({ task: brief.task.id })} notesAfter={sp.crmNotes} emailsAfter={sp.crmEmails} /></Suspense></aside>}
       </div>
     </>}
   </PageFrame>;
