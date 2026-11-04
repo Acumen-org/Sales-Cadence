@@ -31,6 +31,8 @@ export type ContactRow = {
   id: string; name: string; title: string | null; firm: string | null; owner: string | null; ownerId: string | null; podId: string | null;
   ready: boolean; readyText: string; campaign: { id: string; name: string } | null; nextAction: string | null; lastTouch: string | null;
   calls: number; source: string; status: SandboxStatus; twentyPersonId: string | null; movedAt: Date | null;
+  /** Twenty gained the person after the push: outreach stopped (crm-check.ts). */
+  crmMatchPersonId: string | null;
 };
 
 export async function listContacts(f: ContactFilters, userId: string, page: number): Promise<{ rows: ContactRow[]; total: number; pages: number }> {
@@ -56,7 +58,7 @@ export async function listContacts(f: ContactFilters, userId: string, page: numb
       nextAction: na ? `${na.label} · ${formatLocalDate(na.dueDate)}` : null,
       lastTouch: c.touches[0] ? formatLocalDate(toLocalDate(c.touches[0].occurredAt, workspaceTimezone())) : null,
       calls: c._count.calls, source: `${c.source === 'BELLWETHER' ? 'Bellwether' : c.source === 'MANUAL' ? 'Added' : c.source === 'CSV' ? 'CSV' : 'Call'} · ${formatLocalDate(toLocalDate(c.createdAt, workspaceTimezone()))}`,
-      status: c.status, twentyPersonId: c.twentyPersonId, movedAt: c.movedAt,
+      status: c.status, twentyPersonId: c.twentyPersonId, movedAt: c.movedAt, crmMatchPersonId: c.crmMatchPersonId,
     };
   });
   const filtered = f.ready === 'ready' ? rows.filter((r) => r.ready) : f.ready === 'not_ready' ? rows.filter((r) => !r.ready) : rows;

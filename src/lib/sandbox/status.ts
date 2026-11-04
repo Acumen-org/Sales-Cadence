@@ -38,8 +38,9 @@ export async function recordRefusal(bellwetherContactId: string, status: 'alread
   await prisma.bellwetherRefusal.update({ where: { bellwetherContactId }, data: existing.status === status ? { crmPersonId: crmPersonId ?? existing.crmPersonId } : { status, crmPersonId, statusChangedAt: now } });
 }
 
-export function statusOfContact(c: Pick<SandboxContact, 'status' | 'optedOutAt'>): BellwetherStatus {
-  if (c.status === 'ACTIVE') return 'in_sandbox';
+export function statusOfContact(c: Pick<SandboxContact, 'status' | 'optedOutAt' | 'crmMatchPersonId'>): BellwetherStatus {
+  // Twenty gained the person after the push (the daily check, crm-check.ts).
+  if (c.status === 'ACTIVE') return c.crmMatchPersonId ? 'already_in_crm' : 'in_sandbox';
   if (c.status === 'MOVED') return c.optedOutAt ? 'opted_out' : 'moved_to_crm';
   if (c.status === 'OPTED_OUT') return 'opted_out';
   return 'removed';
@@ -68,7 +69,7 @@ export async function statusByIds(ids: string[]): Promise<StatusRow[]> {
   const callsBy = new Map(calls.map((c) => [c.sandboxContactId, c._count._all]));
   const campaignBy = new Map(enrollments.map((e) => [e.sandboxContactId, e.campaign?.name ?? null]));
   const refusalBy = new Map(refusals.map((r) => [r.bellwetherContactId, r]));
-  const personIds = [...new Set([...contacts.map((c) => c.twentyPersonId), ...refusals.map((r) => r.crmPersonId)].filter((id): id is string => Boolean(id)))];
+  const personIds = [...new Set([...contacts.flatMap((c) => [c.twentyPersonId, c.crmMatchPersonId]), ...refusals.map((r) => r.crmPersonId)].filter((id): id is string => Boolean(id)))];
   const people = personIds.length ? await prisma.personCache.findMany({ where: { id: { in: personIds } }, select: { id: true, ownerMemberId: true } }) : [];
   const memberBy = new Map(people.map((p) => [p.id, p.ownerMemberId]));
   const out: StatusRow[] = [];
@@ -79,13 +80,14 @@ export async function statusByIds(ids: string[]): Promise<StatusRow[]> {
     const refusal = refusalBy.get(id);
     if (answering && (!refusal || answering.statusChangedAt >= refusal.statusChangedAt)) {
       const status = statusOfContact(answering);
-      const inCrm = status === 'moved_to_crm' || (answering.status === 'MOVED');
-      const owner = inCrm ? await ownerFromMember(answering.twentyPersonId ? memberBy.get(answering.twentyPersonId) : null) : answering.owner;
+      const inCrm = status === 'moved_to_crm' || status === 'already_in_crm' || (answering.status === 'MOVED');
+      const crmPerson = answering.status === 'MOVED' ? answering.twentyPersonId : answering.crmMatchPersonId;
+      const owner = inCrm ? await ownerFromMember(crmPerson ? memberBy.get(crmPerson) : null) : answering.owner;
       out.push({
         bellwetherContactId: id, status, cadenceContactId: answering.id, ownerEmail: owner?.email ?? null, ownerName: owner?.name ?? null,
         campaignName: campaignBy.get(answering.id) ?? null, callCount: callsBy.get(answering.id) ?? 0, lastActivityAt: iso(answering.lastActivityAt),
         movedToCrmAt: answering.status === 'MOVED' ? iso(answering.movedAt) : null,
-        crmPersonId: inCrm ? answering.twentyPersonId : null, crmUrl: inCrm && answering.twentyPersonId ? twentyPersonUrl(conn.baseUrl, answering.twentyPersonId) : null,
+        crmPersonId: inCrm ? crmPerson : null, crmUrl: inCrm && crmPerson ? twentyPersonUrl(conn.baseUrl, crmPerson) : null,
         statusChangedAt: iso(answering.statusChangedAt)!,
       });
       continue;

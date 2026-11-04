@@ -799,6 +799,24 @@ longer see it. In dry run nothing is deleted; one `crm_auto_person_would_remove`
 person. Settings > Sandbox has the switch (on by default), the counts and a Clean up now button.
 At most 50 people are read per run, to stay under Twenty's rate limit.
 
+### 8.10 The daily check against Twenty (4 Nov)
+
+A push is refused when Twenty has the person (14.6 rule 4), but someone can add them to Twenty
+afterwards, by hand or by import. Each night the worker matches every ACTIVE sandbox contact
+against Twenty again, by rule 4, asking Twenty itself first (up to 15 minutes; past that, or when
+Twenty cannot be reached, Cadence's copy decides). A contact Twenty now has:
+
+- is flagged on `crmMatchPersonId`, `crmMatchedOn` and `crmMatchedAt`, shown as "Also in CRM" on
+  the contact and in the Contacts list, linking to the person;
+- has its outreach stopped: a running sandbox campaign ends with exit reason `in_crm`, its open
+  next action closes, no sandbox campaign takes it again and no next action can be set;
+- reads as `already_in_crm` in the Bellwether status, with the person's id and owner.
+
+The owner then uses Move to CRM, which attaches the history to that person. A person Twenty's mail
+or calendar sync created is the cleanup's (8.9), unless the cleanup kept it because someone worked
+it. When the person leaves Twenty, the next night clears the flag; stopped outreach is not
+restarted. Audit rows `sandbox_in_crm` and `sandbox_in_crm_cleared`.
+
 ## 9. Twilio
 
 Decisions 4, 5 and 14 set this section: no new Twilio app, no TwiML App, no Voice SDK, no new

@@ -1033,6 +1033,12 @@ model SandboxContact {
   /// EMAIL | CALENDAR: what created that person.
   crmAutoSource       String?
   crmAutoFlaggedAt    DateTime?
+  /// The Twenty person the daily check found for this contact after the push: its outreach was
+  /// stopped and Bellwether reads it as already_in_crm (src/lib/sandbox/crm-check.ts).
+  crmMatchPersonId    String?
+  /// email | linkedin_url | phone
+  crmMatchedOn        String?
+  crmMatchedAt        DateTime?
   piiClearedAt        DateTime?
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt

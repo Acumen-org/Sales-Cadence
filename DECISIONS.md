@@ -1340,3 +1340,8 @@ Built on the local branch `outreach-sandbox` from Rahul's brief of 2 November an
   or move). The rest are flagged on the sandbox contact. MANUAL, IMPORT, API and Cadence's own
   people are never touched. Audit row per removal, cache updated, dry run respected, switch in
   Settings > Sandbox (on).
+- **Sandbox contacts are checked against Twenty every night (4 Nov).** Someone can add a person to
+  Twenty after the push. A sandbox contact Twenty now has is flagged "Also in CRM", its sandbox
+  campaign ends, its next action closes and Bellwether reads it as already_in_crm; the owner moves
+  it to the CRM. Chosen over moving it automatically, which would skip the next step the move asks
+  for, and over a flag alone, which would let both sides contact the person.

@@ -22,7 +22,7 @@ function refresh(id?: string) {
 
 const field = (fd: FormData, k: string) => (fd.has(k) ? String(fd.get(k) ?? '') : undefined);
 
-async function loadForWork(id: string): Promise<{ user: SessionUser; error: string | null; contact: { id: string; ownerId: string | null; podId: string | null } | null }> {
+async function loadForWork(id: string): Promise<{ user: SessionUser; error: string | null; contact: { id: string; ownerId: string | null; podId: string | null; crmMatchPersonId: string | null } | null }> {
   const user = await requireUser();
   const contact = await prisma.sandboxContact.findUnique({ where: { id }, include: { owner: { select: { name: true } }, pod: { select: { name: true } } } });
   if (!contact) return { user, contact: null, error: 'Contact not found.' };
@@ -115,6 +115,7 @@ export async function setNextActionAction(fd: FormData): Promise<ActionResult> {
   const id = String(fd.get('id') ?? '');
   const { user, contact, error } = await loadForWork(id);
   if (!contact) return { ok: false, error: error! };
+  if (contact.crmMatchPersonId) return { ok: false, error: 'This person is in the CRM now, so their outreach has stopped. Move to CRM to work them there.' };
   const label = String(fd.get('label') ?? '').trim();
   const action = String(fd.get('action') ?? 'EMAIL') as ActionType;
   const dueDate = String(fd.get('dueDate') ?? '');

@@ -67,6 +67,7 @@ export default async function SandboxContactPage({ params }: { params: Promise<{
             <span className="text-ink-600">{contact.owner ? contact.owner.name : 'Unclaimed'}{contact.pod ? ` · ${contact.pod.name}` : ''}</span>
             {contact.status === 'MOVED' && contact.twentyPersonId ? <Link href={`/people/${contact.twentyPersonId}`} className="text-brand-700 hover:underline">Open in People</Link> : null}
             {contact.status !== 'MOVED' && contact.crmAutoPersonId ? <Link href={`/people/${contact.crmAutoPersonId}`} className="hover:underline"><Badge tone="amber">{`Also in CRM, created from ${contact.crmAutoSource === 'CALENDAR' ? 'calendar' : 'email'}`}</Badge></Link> : null}
+            {live && contact.crmMatchPersonId && contact.crmMatchPersonId !== contact.crmAutoPersonId ? <Link href={`/people/${contact.crmMatchPersonId}`} className="hover:underline"><Badge tone="amber">Also in CRM</Badge></Link> : null}
           </div>
         </div>
         <div className="flex flex-col items-end gap-2">
@@ -91,7 +92,8 @@ export default async function SandboxContactPage({ params }: { params: Promise<{
           <ViewHeader title="Next action" />
           <div className="space-y-3 p-4 text-[13px]">
             {open ? <div className="text-ink-900">{open.label} · {ACTION_LABELS[open.action]} · {formatLocalDate(open.dueDate, 'long')} <span className="text-ink-500">· {open.fo.name}</span></div> : <div className="text-ink-500">None set</div>}
-            {mayWork ? <ActionForm action={setNextActionAction} className="flex flex-wrap items-end gap-2">
+            {live && contact.crmMatchPersonId ? <p className="text-ink-600">Outreach stopped: this person was added to the CRM after the push. Move to CRM attaches this history to them.</p> : null}
+            {mayWork && !contact.crmMatchPersonId ? <ActionForm action={setNextActionAction} className="flex flex-wrap items-end gap-2">
               <input type="hidden" name="id" value={contact.id} />
               <label className="block text-xs text-ink-500">What<input name="label" required defaultValue={open?.label ?? ''} className="mt-1 w-40" /></label>
               <label className="block text-xs text-ink-500">How<select name="action" defaultValue={open?.action ?? 'CALL'} className="mt-1"><option value="CALL">Call</option><option value="EMAIL">Email</option><option value="LINKEDIN_MESSAGE">LinkedIn message</option><option value="LINKEDIN_CONNECT">LinkedIn connect</option></select></label>

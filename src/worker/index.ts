@@ -20,6 +20,7 @@ import { workspaceTimezone } from '../lib/workspace';
 import { syncNextActions } from '../lib/next-actions';
 import { runMoveQueue } from '../lib/sandbox/move';
 import { CLEANUP_EVERY_MS, cleanupSandboxCrmPeople } from '../lib/sandbox/crm-cleanup';
+import { checkSandboxAgainstCrm } from '../lib/sandbox/crm-check';
 import { backfillPhoneE164, runSandboxRetention } from '../lib/sandbox/retention';
 import { purgeOldPushes } from '../lib/sandbox/bellwether-api';
 import { importTwilioCalls } from '../lib/calls/import';
@@ -51,6 +52,8 @@ async function nightly(now:Date){
  try{const stats=await reconcile({actor:SYSTEM_ACTOR,now});log('nightly reconcile',stats);}catch(error){log('nightly reconcile failed',error);}
  try{const stats=await refreshPersonCache(await getTwentyClient());log('cache refresh',stats);}catch(error){log('cache refresh failed',error);}
  try{const stats=await snapshotScorecard(now);log('enrichment scorecard snapshot',stats);}catch(error){log('enrichment scorecard snapshot failed',error);}
+ // Sandbox contacts Twenty gained after the push: flagged, outreach stopped (crm-check.ts).
+ try{const stats=await checkSandboxAgainstCrm({now});log('sandbox crm check',stats);}catch(error){log('sandbox crm check failed',error);}
  // The outreach sandbox: contacts nobody works, moved contacts past the one-year undo window, old push keys.
  try{const stats=await runSandboxRetention(now);if(stats.removed||stats.movedCleared||stats.optedOutCleared)log('sandbox retention',stats);}catch(error){log('sandbox retention failed',error);}
  try{const purged=await purgeOldPushes(now);if(purged)log('bellwether push keys forgotten',purged);}catch(error){log('push retention failed',error);}
