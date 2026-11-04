@@ -130,4 +130,7 @@ One-off steps before the pilot:
    Twenty's trash; `TWENTY_API_KEY` already may delete People for undo. Settings > Sandbox shows
    the count and has the switch. To watch it first, run with `CADENCE_DRY_RUN=true` and read the
    `crm_auto_person_would_remove` audit rows.
+6. Apply the migration `20261104090000_sandbox_crm_check` (three nullable columns, safe with the app
+   running). The worker's nightly run then checks every sandbox contact against Twenty (plan
+   section 8.10) and logs `sandbox crm check` with the counts.
 

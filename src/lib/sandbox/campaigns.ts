@@ -35,6 +35,7 @@ export async function sandboxAudienceIssues(contactIds: string[], podId: string,
     const name = `${c.firstName} ${c.lastName}`.trim() || 'Someone';
     if (c.status === 'MOVED') { issues.push({ id, name, reason: 'Moved to the CRM' }); continue; }
     if (c.status !== 'ACTIVE') { issues.push({ id, name, reason: c.status === 'OPTED_OUT' ? 'Opted out' : 'Removed' }); continue; }
+    if (c.crmMatchPersonId) { issues.push({ id, name, reason: 'Also in the CRM' }); continue; }
     if (contactKeys(c).some((k) => hashes.has(suppressionHash(k.kind, k.value)))) { issues.push({ id, name, reason: 'On the suppression list' }); continue; }
     if (busy.has(id)) { issues.push({ id, name, reason: 'Already in a sandbox campaign' }); continue; }
     if (promised.has(id)) { issues.push({ id, name, reason: `Already in ${promised.get(id)}` }); continue; }
