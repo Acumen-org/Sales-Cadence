@@ -4,9 +4,14 @@ import { PageFrame } from '@/components/page-frame';
 import { requireUser, toActor } from '@/lib/auth/current-user';
 import { canAssignSandbox, canEraseContact, canMoveToCrm, canWorkSandboxContact, isAdmin } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
-import { formatInstant, formatLocalDate, todayIn } from '@/lib/dates';
+import { formatInstant, formatLocalDate, toLocalDate, todayIn } from '@/lib/dates';
+import { workspaceTimezone } from '@/lib/workspace';
+import { assignableOwners } from '@/lib/outreach/ownership';
+import { workWords } from '@/lib/outreach/transfer';
+import { latestMoves } from '@/lib/sandbox/moves-query';
+import { UndoMoveButton } from '@/components/sandbox/move-undo';
 import { getSettings } from '@/lib/settings';
-import { checkReady } from '@/lib/sandbox/ready';
+import { checkReady, moveSignals } from '@/lib/sandbox/ready';
 import { callGate } from '@/lib/calls/gate';
 import { canAct, loadColdSubject } from '@/lib/outreach/guard';
 import { callOutcomes } from '@/lib/engine/outcomes';
@@ -14,13 +19,35 @@ import { NEXT_STEP_LABELS } from '@/lib/sandbox/history-notes';
 import { PRODUCT_VALUES } from '@/lib/sandbox/bellwether-api';
 import { readExtraPhones } from '@/lib/sandbox/normalize';
 import { ActionForm } from '@/components/action-form';
-import { Badge, EmptyState, Surface, ViewHeader } from '@/components/ui';
+import { Badge, EmptyState, Notice, Surface, ViewHeader, enrollmentStatusLabel } from '@/components/ui';
 import { CallButton } from '@/components/calls/call-button';
 import { ContactActions } from '@/components/sandbox/contact-actions';
-import { addNoteAction, setNextActionAction, updateContactAction } from '@/lib/actions/sandbox';
+import { addNoteAction, setNextActionAction, setPodAction, updateContactAction } from '@/lib/actions/sandbox';
 import { ACTION_LABELS } from '@/lib/sequences/steps';
 
-const STATUS_LABEL = { ACTIVE: 'In the sandbox', MOVED: 'Moved to the CRM', OPTED_OUT: 'Opted out', REMOVED: 'Removed' } as const;
+const STATUS_LABEL = { ACTIVE: 'In Cold outreach', MOVED: 'In CRM', OPTED_OUT: 'Do not contact', REMOVED: 'Removed' } as const;
+
+/** Audit actions the contact's history shows (B108). */
+const HISTORY_ACTIONS = ['claimed', 'assigned', 'released', 'reassigned', 'pod_set', 'move_queued', 'sandbox_moved', 'move_failed', 'move_undone', 'opted_out', 'opt_out_lifted', 'removed'] as const;
+
+function historyWords(action: string, d: Record<string, unknown> | null, names: Map<string, string>): string {
+  const to = typeof d?.to === 'string' ? names.get(d.to) ?? 'someone' : null;
+  switch (action) {
+    case 'claimed': return 'Claimed';
+    case 'assigned': return `Given to ${to ?? 'someone'}`;
+    case 'reassigned': return `Handed to ${to ?? 'someone'}${d?.reason === 'team_access_removed' ? ' when its owner left' : d?.reason === 'pod_change' ? ' with a pod change' : ''}`;
+    case 'released': return 'Let go';
+    case 'pod_set': return 'Pod changed';
+    case 'move_queued': return 'Queued to move to the CRM';
+    case 'sandbox_moved': return 'Moved to the CRM';
+    case 'move_failed': return `Move failed${typeof d?.reason === 'string' ? `: ${d.reason}` : ''}`;
+    case 'move_undone': return 'Move to the CRM undone';
+    case 'opted_out': return 'Opted out';
+    case 'opt_out_lifted': return 'Opt-out lifted';
+    case 'removed': return 'Removed';
+    default: return action.replace(/_/g, ' ');
+  }
+}
 
 /** One sandbox contact: what we know, what happened, and what happens next. Sandbox data is edited in place. */
 export default async function SandboxContactPage({ params }: { params: Promise<{ id: string }> }) {
@@ -29,7 +56,7 @@ export default async function SandboxContactPage({ params }: { params: Promise<{
   const contact = await prisma.sandboxContact.findUnique({
     where: { id },
     include: {
-      owner: { select: { id: true, name: true, twentyMemberId: true } }, pod: { select: { id: true, name: true } },
+      owner: { select: { id: true, name: true, twentyMemberId: true, active: true } }, pod: { select: { id: true, name: true } },
       notes: { orderBy: { createdAt: 'desc' } }, emails: { orderBy: { at: 'desc' } },
       calls: { orderBy: { startedAt: 'desc' }, include: { form: true, user: { select: { name: true } } } },
       nextActions: { where: { state: 'OPEN' }, include: { fo: { select: { name: true } } }, take: 1 },
@@ -38,10 +65,25 @@ export default async function SandboxContactPage({ params }: { params: Promise<{
   });
   if (!contact) notFound();
   const actor = toActor(user);
-  const [settings, users] = await Promise.all([getSettings(), prisma.user.findMany({ where: { active: true, role: { in: ['JUNIOR_FO', 'SENIOR_FO', 'SALES_LEADER', 'POD_MANAGER', 'ADMIN'] } }, select: { id: true, name: true }, orderBy: { name: 'asc' } })]);
+  // B119, B208: Assign offers only the reps this reader may give the contact to.
+  const [settings, users, moves, signals, history, pods] = await Promise.all([
+    getSettings(), assignableOwners(user), latestMoves([contact.id], actor), moveSignals([contact.id]),
+    prisma.auditLog.findMany({ where: { entityType: 'sandbox_contact', entityId: contact.id, action: { in: [...HISTORY_ACTIONS] } }, orderBy: { createdAt: 'desc' }, take: 50 }),
+    prisma.pod.findMany({ where: { archived: false, ...(isAdmin(user) ? {} : { id: { in: user.podIds } }) }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+  ]);
+  const move = moves.get(contact.id) ?? null;
+  // B050: the pod picker, for a contact with no pod or an owner in several pods: their pods, else the reader's.
+  const ownerPodIds = contact.ownerId && contact.owner?.active ? (await prisma.userPod.findMany({ where: { userId: contact.ownerId, pod: { archived: false } }, select: { podId: true } })).map((p) => p.podId) : null;
+  const podChoices = contact.status === 'ACTIVE' && canWorkSandboxContact(actor, contact) ? pods.filter((p) => !ownerPodIds || ownerPodIds.includes(p.id)) : [];
+  const signal = signals.get(contact.id) ?? null;
   const live = contact.status === 'ACTIVE';
   const mayWork = live && canWorkSandboxContact(actor, contact);
   const ready = checkReady(contact, { owner: contact.owner, podName: contact.pod?.name ?? null, settings: settings.sandbox });
+  // D3: complete details are the hard rule; green "Ready to move" also needs a positive outcome (B155).
+  const readyToMove = ready.ready && Boolean(signal?.positive);
+  const runningCampaigns = contact.enrollments.filter((e) => e.status === 'ACTIVE' || e.status === 'PAUSED');
+  const work = workWords({ nextSteps: contact.nextActions.filter((n) => !n.personId).length, enrollments: runningCampaigns.length, tasks: runningCampaigns.reduce((k, e) => k + e.tasks.filter((t) => t.state === 'PENDING').length, 0) });
+  const actorNames = new Map((await prisma.user.findMany({ where: { id: { in: [...new Set(history.flatMap((h) => [h.actorId, (h.details as { to?: string } | null)?.to].filter((x): x is string => Boolean(x))))] } }, select: { id: true, name: true } })).map((u) => [u.id, u.name]));
   const gate = contact.phone && live ? await callGate(user, contact) : null;
   // B120: the Call button says why when this viewer may not work the contact. N027: a removed
   // contact can still be opted out (any sales user) and erased (admins).
@@ -58,6 +100,8 @@ export default async function SandboxContactPage({ params }: { params: Promise<{
     ...contact.emails.map((m) => ({ at: m.at, key: `m${m.id}`, node: <div><span className="text-ink-900">{m.kind === 'SENT' ? 'Email sent' : m.kind === 'REPLY' ? 'Reply' : m.kind === 'BOUNCE' ? 'Bounced' : 'Auto-reply'}</span><span className="text-ink-500"> · {m.subject ?? '(no subject)'}</span></div> })),
     ...contact.notes.map((n) => ({ at: n.createdAt, key: `n${n.id}`, node: <div><span className="text-ink-900">Note</span><span className="text-ink-500"> · {n.authorName ?? 'Cadence'}</span><p className="mt-1 whitespace-pre-wrap text-ink-700">{n.body}</p></div> })),
     ...contact.enrollments.flatMap((e) => e.tasks.filter((t) => t.state === 'DONE' && t.completedAt).map((t) => ({ at: t.completedAt!, key: `t${t.id}`, node: <div><span className="text-ink-900">{t.label} done</span><span className="text-ink-500"> · {e.campaign?.name ?? e.sequence.name}</span></div> }))),
+    // B108: claims, hand-overs, moves and undos are in the history too.
+    ...history.map((h) => ({ at: h.createdAt, key: `a${h.id}`, node: <div><span className="text-ink-900">{historyWords(h.action, h.details as Record<string, unknown> | null, actorNames)}</span><span className="text-ink-500"> · {h.actorLabel ?? 'Cadence'}</span></div> })),
   ].sort((a, b) => b.at.getTime() - a.at.getTime());
   const input = (label: string, field: string, value: string | null | undefined, type = 'text') => <label className="block text-xs text-ink-500">{label}<input name={field} type={type} defaultValue={value ?? ''} disabled={!mayWork} className="mt-1 w-full" /></label>;
 
@@ -65,24 +109,35 @@ export default async function SandboxContactPage({ params }: { params: Promise<{
     <Surface>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <div className="text-[12px] text-ink-500"><Link href="/sandbox" className="hover:text-ink-700">Sandbox</Link></div>
+          <div className="text-[12px] text-ink-500"><Link href="/sandbox" className="hover:text-ink-700">Cold outreach</Link></div>
           <h1 className="text-xl font-semibold tracking-tight text-ink-900">{name}</h1>
           <div className="mt-1 text-sm text-ink-600">{[contact.jobTitle, contact.companyName].filter(Boolean).join(' · ') || 'No title or firm yet'}</div>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-[13px]">
             <Badge tone={live ? 'green' : 'gray'}>{STATUS_LABEL[contact.status]}</Badge>
-            {live ? <Badge tone={ready.ready ? 'green' : 'amber'}>{ready.ready ? 'Ready for CRM' : `Needs ${ready.missing.map((m) => m.text.toLowerCase()).join(', ')}`}</Badge> : null}
-            <span className="text-ink-600">{contact.owner ? contact.owner.name : 'Unclaimed'}{contact.pod ? ` · ${contact.pod.name}` : ''}</span>
+            {live && move && (move.state === 'QUEUED' || move.state === 'RUNNING') ? <Badge tone="blue">Moving to CRM…</Badge> : null}
+            {live && !contact.crmMatchPersonId && !contact.crmAutoPersonId ? (signal?.closed ? <Badge tone="gray">{`Closed · ${signal.closed.outcome}${signal.closed.at ? ` · ${formatLocalDate(toLocalDate(signal.closed.at, workspaceTimezone()), 'year')}` : ''}`}</Badge> : <Badge tone={readyToMove ? 'green' : ready.ready ? 'blue' : 'amber'}>{readyToMove ? 'Ready to move' : ready.ready ? 'CRM details complete' : `Needs ${ready.missing.map((m) => m.text.toLowerCase()).join(', ')}`}</Badge>) : null}
+            <span className="text-ink-600">{contact.owner ? `${contact.owner.name}${contact.owner.active ? '' : ' (removed)'}` : 'Unclaimed'}{contact.pod ? ` · ${contact.pod.name}` : ''}</span>
+            {podChoices.length > 1 || (mayWork && !contact.podId && podChoices.length) ? <ActionForm action={setPodAction} className="flex items-center gap-1.5"><input type="hidden" name="id" value={contact.id} /><select name="podId" aria-label="Pod" defaultValue={contact.podId ?? ''} className="!py-0.5 text-[12px]"><option value="" disabled>Choose its pod</option>{podChoices.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select><button type="submit" className="btn-ghost btn-sm">Set pod</button></ActionForm> : null}
             {contact.status === 'MOVED' && contact.twentyPersonId ? <Link href={`/people/${contact.twentyPersonId}`} className="text-brand-700 hover:underline">Open in People</Link> : null}
             {contact.status !== 'MOVED' && contact.crmAutoPersonId ? <Link href={`/people/${contact.crmAutoPersonId}`} className="hover:underline"><Badge tone="amber">{`Also in CRM, created from ${contact.crmAutoSource === 'CALENDAR' ? 'calendar' : 'email'}`}</Badge></Link> : null}
             {live && contact.crmMatchPersonId && contact.crmMatchPersonId !== contact.crmAutoPersonId ? <Link href={`/people/${contact.crmMatchPersonId}`} className="hover:underline"><Badge tone="amber">Also in CRM</Badge></Link> : null}
           </div>
+          {live && ready.ready && (ready.warnings.length || signal?.positive) ? <div className="mt-2 text-[12px] text-ink-600">{[signal?.positive ? `Positive outcome: ${signal.positive}` : 'No conversation yet', ...ready.warnings.map((w) => w.text)].join(' · ')}</div> : null}
         </div>
         <div className="flex flex-col items-end gap-2">
           {contact.phone && live ? <CallButton phone={contact.phone} template={settings.rules.clickToCallUrl} sandboxContactId={contact.id} nextActionId={open?.id ?? null} blocked={callBlocked} warning={gate?.warning} /> : null}
-          {live ? <ContactActions id={contact.id} ready={ready.ready} unclaimed={!contact.ownerId} mayWork={mayWork} mayOptOut={mayOptOut} mayMove={canMoveToCrm(actor, contact)} mayAssign={canAssignSandbox(actor, contact, null) && (isAdmin(user) || actor.role !== 'JUNIOR_FO')} mayErase={canEraseContact(actor)} users={users} /> : contact.status === 'REMOVED' || (contact.status === 'OPTED_OUT' && !contact.piiClearedAt) ? <ContactActions id={contact.id} ready={false} unclaimed={false} mayWork={false} mayOptOut={contact.status === 'REMOVED' && mayOptOut} mayMove={false} mayAssign={false} mayErase={canEraseContact(actor)} users={[]} /> : null}
+          {live ? <ContactActions id={contact.id} name={name} ready={readyToMove} unclaimed={!contact.ownerId || !contact.owner?.active} mayWork={mayWork} mayOptOut={mayOptOut} mayMove={canMoveToCrm(actor, contact)} mayAssign={users.length > 0 && canAssignSandbox(actor, contact, null) && (isAdmin(user) || actor.role !== 'JUNIOR_FO')} mayErase={canEraseContact(actor)} users={users} ownerId={contact.ownerId} work={work} pods={pods} /> : contact.status === 'REMOVED' || (contact.status === 'OPTED_OUT' && !contact.piiClearedAt) ? <ContactActions id={contact.id} ready={false} unclaimed={false} mayWork={false} mayOptOut={contact.status === 'REMOVED' && mayOptOut} mayMove={false} mayAssign={false} mayErase={canEraseContact(actor)} users={[]} /> : null}
         </div>
       </div>
     </Surface>
+    {contact.status === 'MOVED' ? <Notice tone="success"><span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <span>Moved to the CRM{move?.moverName ? ` by ${move.moverName}` : ''}{contact.movedAt ? ` on ${formatLocalDate(toLocalDate(contact.movedAt, workspaceTimezone()), 'year')}` : ''}{move?.mode === 'attach' && move.personName ? `, as history on ${move.personName}` : ''}.</span>
+      {contact.twentyPersonId ? <Link href={`/people/${contact.twentyPersonId}`} className="underline">Open in People</Link> : null}
+      {move?.undoUntil ? <span>Undo until {move.undoUntil}</span> : null}
+      {move?.canUndo ? <UndoMoveButton itemIds={[move.itemId]} confirm={move.undoConfirm} campaigns={move.campaigns} /> : null}
+    </span></Notice> : null}
+    {live && move?.state === 'FAILED' ? <Notice tone="error">Move failed: {move.error ?? 'see the move'} <Link href={`/sandbox/moves/${move.moveId}`} className="underline">{move.failure === 'permanent' ? 'See the move' : 'Retry'}</Link></Notice> : null}
+    {live && contact.owner && !contact.owner.active ? <Notice tone="warn">{contact.owner.name} has left: this contact needs a new owner before it can move or be worked by its pod&apos;s reps.</Notice> : null}
     <div className="grid grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-4">
       <div className="space-y-4">
         <Surface flush>
@@ -91,7 +146,7 @@ export default async function SandboxContactPage({ params }: { params: Promise<{
         </Surface>
         <Surface flush>
           <ViewHeader title="Campaigns" />
-          {contact.enrollments.length ? <ul className="divide-y divide-line text-[13px]">{contact.enrollments.map((e) => <li key={e.id} className="px-4 py-2.5"><Link href={e.campaign ? `/sandbox/campaigns/${e.campaign.id}` : '#'} className="text-ink-900 hover:text-brand-700">{e.campaign?.name ?? e.sequence.name}</Link><span className="text-ink-500"> · {e.status === 'EXITED' ? `ended (${(e.exitReason ?? '').replace(/_/g, ' ')})` : e.status.toLowerCase()}</span><div className="mt-1 flex flex-wrap gap-1.5">{e.tasks.map((t) => <span key={t.id} className={t.state === 'DONE' ? 'text-brand-700' : t.state === 'PENDING' ? 'text-ink-900' : 'text-ink-400'}>{t.label}{t.state === 'PENDING' ? ` (${formatLocalDate(t.dueDate)})` : ''}</span>)}</div></li>)}</ul> : <EmptyState title="Not in a campaign" />}
+          {contact.enrollments.length ? <ul className="divide-y divide-line text-[13px]">{contact.enrollments.map((e) => <li key={e.id} className="px-4 py-2.5"><Link href={e.campaign ? `/sandbox/campaigns/${e.campaign.id}` : '#'} className="text-ink-900 hover:text-brand-700">{e.campaign?.name ?? e.sequence.name}</Link><span className="text-ink-500"> · {enrollmentStatusLabel(e)}</span><div className="mt-1 flex flex-wrap gap-1.5">{e.tasks.map((t) => <span key={t.id} className={t.state === 'DONE' ? 'text-brand-700' : t.state === 'PENDING' ? 'text-ink-900' : 'text-ink-400'}>{t.label}{t.state === 'PENDING' ? ` (${formatLocalDate(t.dueDate)})` : ''}</span>)}</div></li>)}</ul> : <EmptyState title="Not in a campaign" />}
         </Surface>
       </div>
       <div className="space-y-4">
