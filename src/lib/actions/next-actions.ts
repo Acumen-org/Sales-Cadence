@@ -93,6 +93,8 @@ export async function completeNextActionAction(formData: FormData): Promise<Acti
   const r = await completeNextAction(na.id, userActor(user), new Date(), String(formData.get('dueDate') ?? '') || null);
   revalidate(na.personId ? [na.personId] : [], !na.personId);
   if (!r.ok) return r;
+  // A meeting next step done is a meeting held (B183): Meetings held counts a cold one from here.
+  if (na.kind === 'MEETING') return { ok: true, message: 'Meeting recorded as held.' };
   return { ok: true, message: r.next ? `Done. Next one on ${formatLocalDate(r.next, 'long')}.` : 'Done.' };
 }
 

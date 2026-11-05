@@ -2,7 +2,7 @@ import type { ActionType, NextActionKind, NextActionRepeat, Prisma } from '@pris
 import { prisma } from '../db';
 import { logAudit, type AuditActor } from '../audit';
 import { coldRef, SANDBOX_TASK, workWhere } from '../subject';
-import { WORKABLE } from '../tasks-query';
+import { dueCounts, WORKABLE } from '../tasks-query';
 import { isUniqueViolation } from '../engine/tasks';
 import { refuse, RefusedError, withSubjectLock, type GuardActor, type Refusal } from '../outreach/guard';
 import { channelOfAction, contactability } from '../outreach/contactability';
@@ -84,12 +84,8 @@ export async function sandboxWork(filters: { foUserId: string | null; podId: str
   return { tasks, next, counts };
 }
 
-/** The Sandbox entry's badge: the signed-in user's cold steps and next actions due today or earlier, on active contacts only. */
+/** The Cold outreach entry's badge: the user's cold steps and next actions due today or earlier, on active contacts only, counted as its Tasks view counts them (B117). */
 export async function sandboxDueCount(userId: string, today: string): Promise<number> {
-  const [tasks, next] = await Promise.all([
-    prisma.task.findMany({ where: { AND: [SANDBOX_TASK, { enrollment: { sandboxContact: liveContact } }, WORKABLE, { foUserId: userId, state: 'PENDING' }] }, select: { enrollmentId: true, stepId: true, dueDate: true, snoozedTo: true } }),
-    prisma.nextAction.count({ where: { AND: [workWhere('cold'), { foUserId: userId, state: 'OPEN', dueDate: { lte: today } }] } }),
-  ]);
-  const steps = new Set(tasks.filter((t) => (t.snoozedTo ?? t.dueDate) <= today).map((t) => `${t.enrollmentId}:${t.stepId}`));
-  return steps.size + next;
+  const due = await dueCounts(userId, 'cold', today);
+  return due.today + due.overdue;
 }

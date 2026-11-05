@@ -1,3 +1,4 @@
+import { DateWithWorkingDayHint } from '@/components/tasks/working-day-hint';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { PageFrame } from '@/components/page-frame';
@@ -197,7 +198,7 @@ export default async function SandboxContactPage({ params, searchParams }: { par
               <input type="hidden" name="id" value={contact.id} />
               <label className="block text-xs text-ink-500">What<input name="label" required defaultValue={open?.label ?? ''} className="mt-1 w-40" /></label>
               <label className="block text-xs text-ink-500">How<select name="action" defaultValue={open?.action ?? 'CALL'} className="mt-1"><option value="CALL">Call</option><option value="EMAIL">Email</option><option value="LINKEDIN_MESSAGE">LinkedIn message</option><option value="LINKEDIN_CONNECT">LinkedIn connect</option></select></label>
-              <label className="block text-xs text-ink-500">When<input type="date" name="dueDate" required min={today} defaultValue={open?.dueDate ?? today} className="mt-1" /></label>
+              <label className="block text-xs text-ink-500">When<DateWithWorkingDayHint name="dueDate" required min={today} defaultValue={open?.dueDate ?? today} workingDays={settings.rules.workingDays} className="mt-1" /></label>
               <button type="submit" className="btn-secondary btn-sm">Set</button>
             </ActionForm> : null}
           </div>

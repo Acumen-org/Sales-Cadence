@@ -106,12 +106,12 @@ test('task flow: complete an email, log a call with an outcome, skip with a boun
   await expect(page.getByText(/^\d+ \/ \d+$/).first()).toBeVisible();
   const firstPerson = (await page.locator('#main-content a[href^="/people/"]').first().textContent())!.trim();
   await expect(page.getByLabel('Email subject').first()).toBeVisible(); // template rendered
-  await page.getByRole('button', { name: 'Done', exact: true }).first().click();
+  await page.getByRole('button', { name: /^Done(: .+)?$/ }).first().click();
   await expect(page.getByRole('status').or(page.getByText(/Step \d+ of \d+/))).toBeVisible();
   // A step is one unit of work: while its LinkedIn module is open the row stays where it is.
   await page.goto(`/tasks?tab=${tab}&type=LINKEDIN`);
   await page.getByRole('link', { name: new RegExp(firstPerson) }).first().click();
-  await page.getByRole('button', { name: 'Done', exact: true }).first().click();
+  await page.getByRole('button', { name: /^Done(: .+)?$/ }).first().click();
   await expect(page.getByRole('status')).toContainText(/Done\./);
 
   // Now that both modules are resolved the step has moved to Done, and step 2 is generated.
@@ -137,7 +137,7 @@ test('task flow: complete an email, log a call with an outcome, skip with a boun
   const secondLink = page.locator('a[href*="task="]').filter({ hasNot: page.getByText(firstPerson, { exact: true }) }).first();
   const secondPerson = (await secondLink.getByTestId('task-person').textContent())!.trim();
   await secondLink.click();
-  await page.getByRole('button', { name: 'Skip', exact: true }).first().click();
+  await page.getByRole('button', { name: /^Skip(: .+)?$/ }).first().click();
   await page.getByLabel('Why?', { exact: true }).selectOption('bounced');
   await page.getByRole('button', { name: 'Skip step' }).first().click();
   await expect(page.getByText(/Skipped and removed from the sequence \(bounced\)/)).toBeVisible();
@@ -163,11 +163,11 @@ test('answered call finishes the sequence as replied and shows on Home', async (
   const link = page.locator('a[href*="task="]').first();
   const person = (await link.getByTestId('task-person').textContent())!.trim();
   await link.click();
-  await page.getByRole('button', { name: 'Done', exact: true }).first().click();
+  await page.getByRole('button', { name: /^Done(: .+)?$/ }).first().click();
   await expect(page.getByText(/Done\./).first()).toBeVisible();
   await page.goto(`/tasks?tab=${tab}&type=LINKEDIN`);
   await page.getByRole('link', { name: new RegExp(person) }).first().click();
-  await page.getByRole('button', { name: 'Done', exact: true }).first().click();
+  await page.getByRole('button', { name: /^Done(: .+)?$/ }).first().click();
   await expect(page.getByText(/Done\./).first()).toBeVisible();
   await page.goto('/tasks?tab=upcoming&type=CALL');
   await page.getByRole('link', { name: new RegExp(person) }).first().click();

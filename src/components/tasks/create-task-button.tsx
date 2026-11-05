@@ -7,7 +7,7 @@ import { NextActionButton } from '@/components/people/next-action-form';
  * Create a task from Tasks: find the person, say what to do and when. Once saved, the list opens
  * on the tab its date falls in, with the new task open.
  */
-export function CreateTaskButton({ today, fos, canAssign, query, selfId }: { today: string; fos: { id: string; name: string }[]; canAssign: boolean; query: string; selfId: string }) {
+export function CreateTaskButton({ today, fos, canAssign, query, selfId, workingDays }: { today: string; fos: { id: string; name: string }[]; canAssign: boolean; query: string; selfId: string; workingDays?: number[] }) {
   const router = useRouter();
   // From Tasks it is the reader's own task unless they give it to someone else.
   const mine = canAssign && fos.some((f) => f.id === selfId) ? selfId : '';
@@ -18,6 +18,7 @@ export function CreateTaskButton({ today, fos, canAssign, query, selfId }: { tod
       fos={fos}
       canAssign={canAssign}
       icon="plus"
+      workingDays={workingDays}
       className="btn-primary"
       onDone={(_message, created) => {
         const params = new URLSearchParams(query);

@@ -8,7 +8,7 @@ import { ActionIcon, IconExternal, IconNote } from '@/components/icons';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
 import { Avatar, Badge, contactWarnings, crmStanding, enrollmentTone, enrollmentStatusLabel, KeyValue, Notice, RecordFields, Surface, TierBadge, type BadgeTone } from '@/components/ui';
 
-function Section({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
+export function Section({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
   return <section className="border-b border-line px-4 py-4 last:border-b-0"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold text-ink-900">{title}</h3>{right}</div>{children}</section>;
 }
 /** Standing, tier and data-quality flags for the person a task is about: shown once, beside the name. */
@@ -26,7 +26,7 @@ const filled = (items: { k: string; v: React.ReactNode }[]) => items.filter((i) 
 function dueTone(due: LocalDate, today: LocalDate): BadgeTone { const comparison = compareLocalDates(due, today); return comparison < 0 ? 'red' : comparison === 0 ? 'amber' : 'gray'; }
 const KIND_ICON: Record<BriefTimelineItem['kind'], string> = { email: 'EMAIL', call: 'CALL', linkedin: 'LINKEDIN_MESSAGE', note: 'NOTE', meeting: 'MEETING', state: 'STATE' };
 
-function TimelineRow({ item, timezone }: { item: BriefTimelineItem; timezone: string }) {
+export function TimelineRow({ item, timezone }: { item: BriefTimelineItem; timezone: string }) {
   const icon = KIND_ICON[item.kind];
   return <li className="relative pl-7"><span aria-hidden className="absolute left-[7px] top-2 h-full w-px bg-line" /><span aria-hidden className="absolute left-0 top-1 rounded-full bg-white text-brand-700">{icon === 'NOTE' ? <IconNote size={15} /> : <ActionIcon action={icon} size={15} />}</span>
     <div className="space-y-2 pb-5"><div className="text-sm font-medium leading-relaxed text-ink-900">{item.title}</div>{item.detail ? <details><summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden text-xs font-medium text-brand-700">Details</summary><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed text-ink-800">{item.detail}</p></details> : null}<div className="flex flex-wrap gap-2"><time dateTime={item.at.toISOString()} className="text-xs text-ink-500">{formatInstant(item.at, timezone)}</time>{item.direction === 'in' ? <Badge tone="green">Inbound</Badge> : null}</div>{item.actor ? <div className="text-xs"><span className="text-ink-500">By</span><strong className="ml-2 text-ink-900">{item.actor}</strong></div> : null}</div>

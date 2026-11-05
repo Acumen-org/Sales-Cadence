@@ -50,6 +50,8 @@ export type CallFormContext = {
   prefill: string | null;
   defaultDate: string;
   today: string;
+  /** Settings > Rules' working days, for the weekend cue under the next step's day (N103). */
+  workingDays?: number[];
   /** Why the call cannot be discarded now, or null when it can (B024). */
   discard: string | null;
 };
@@ -134,6 +136,7 @@ export async function callFormContext(callId: string, user: Viewer, now = new Da
       prefill,
       defaultDate: defaultNextStepDate(today, settings.rules.workingDays),
       today,
+      workingDays: settings.rules.workingDays,
       discard: discardRefusal(call, user, now),
     },
   };

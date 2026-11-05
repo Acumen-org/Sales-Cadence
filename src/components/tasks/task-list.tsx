@@ -31,6 +31,8 @@ export type TaskListRow = {
   state: string;
   foName: string;
   campaignName: string | null;
+  /** "Email bounced" or "Possible bounce" on a cold contact (N097), beside the firm. */
+  warning?: string | null;
 };
 
 type Props = {
@@ -174,6 +176,7 @@ export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispos
                   <span className="mt-0.5 flex items-center gap-2 text-[11.5px] text-ink-500">
                     <span className="min-w-0 flex-1 truncate">{t.companyName ?? 'No company'}</span>
                     <span className="shrink-0">Day <span className="font-medium text-ink-700">{t.stepDay}</span></span>
+                    {t.warning ? <Badge tone="amber">{t.warning}</Badge> : null}
                     {t.snoozed ? <Badge tone="sky">snoozed</Badge> : null}
                   </span>
                   {showFo ? <span className="mt-1 block truncate text-[11px] text-ink-500">FO <span className="font-medium text-ink-700">{t.foName}</span></span> : null}

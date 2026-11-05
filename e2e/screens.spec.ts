@@ -59,7 +59,7 @@ test('capture screens', async ({ page }) => {
 
   for (const type of ['EMAIL', 'LINKEDIN']) {
     await page.goto(`/tasks?tab=today&type=${type}`);
-    const done = page.getByRole('button', { name: 'Done', exact: true }).first();
+    const done = page.getByRole('button', { name: /^Done(: .+)?$/ }).first();
     if (await done.isVisible().catch(() => false)) {
       await done.click();
       await page.waitForLoadState('networkidle').catch(() => {});

@@ -1,5 +1,6 @@
 'use client';
 
+import { WorkingDayHint } from '@/components/tasks/working-day-hint';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { findPeopleForTaskAction, saveNextActionAction, type TaskPersonOption } from '@/lib/actions/next-actions';
@@ -91,7 +92,10 @@ function PersonPicker({ chosen, onChoose }: { chosen: TaskPersonOption | null; o
  * Action Due Date in Twenty, and shows up in Tasks on its day. A person has one open task at a
  * time (Twenty's fields hold one), so a new one replaces theirs.
  */
-export function NextActionButton({ personIds, today, fos, canAssign, initial, label = 'Create task', className = 'btn-secondary btn-sm', onDone, existing, icon = 'plus' }: {
+/** Mon to Fri, Settings > Rules' default, when the caller does not pass the workspace's own. */
+const DEFAULT_WORKING_DAYS = [1, 2, 3, 4, 5];
+
+export function NextActionButton({ personIds, today, fos, canAssign, initial, label = 'Create task', className = 'btn-secondary btn-sm', onDone, existing, icon = 'plus', workingDays = DEFAULT_WORKING_DAYS }: {
   /** Who it is for; leave out to choose the person in the dialog. */
   personIds?: string[];
   today: string;
@@ -105,6 +109,8 @@ export function NextActionButton({ personIds, today, fos, canAssign, initial, la
   /** The open task this one would replace, for one person. */
   existing?: { label: string; dueDate: string } | null;
   icon?: 'refresh' | 'plus';
+  /** Settings > Rules' working days, for the weekend cue under the date (N103). */
+  workingDays?: number[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -156,6 +162,7 @@ export function NextActionButton({ personIds, today, fos, canAssign, initial, la
               </label>
               <label className="block space-y-1.5"><span className="text-[12px] font-medium text-ink-600">Due</span>
                 <input type="date" required min={today} value={draft.dueDate} onChange={(e) => { setDraft({ ...draft, dueDate: e.target.value }); setError(null); }} />
+                <WorkingDayHint date={draft.dueDate} workingDays={workingDays} onMove={(d) => setDraft({ ...draft, dueDate: d })} />
               </label>
               <label className="block space-y-1.5"><span className="text-[12px] font-medium text-ink-600">Repeats</span>
                 <select value={draft.repeat} onChange={(e) => setDraft({ ...draft, repeat: e.target.value })}>{REPEATS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}</select>

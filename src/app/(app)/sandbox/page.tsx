@@ -1,35 +1,33 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { PageFrame } from '@/components/page-frame';
 import { requireUser, toActor } from '@/lib/auth/current-user';
-import { isAdmin, isBizOps, isJuniorFo, isPodLeader, needsPod } from '@/lib/auth/rbac';
+import { isAdmin, isBizOps, isPodLeader, needsPod } from '@/lib/auth/rbac';
 import { assignableOwners, needsNewOwner } from '@/lib/outreach/ownership';
 import { latestMoves, listMoves } from '@/lib/sandbox/moves-query';
 import { NeedsNewOwner } from '@/components/sandbox/needs-new-owner';
 import { prisma } from '@/lib/db';
 import { formatInstant, formatLocalDate, todayIn } from '@/lib/dates';
-import { getSettings } from '@/lib/settings';
 import { listCampaigns } from '@/lib/campaigns-query';
 import { listContacts, type ContactFilters } from '@/lib/sandbox/query';
-import { sandboxWork } from '@/lib/sandbox/work';
-import { callGate } from '@/lib/calls/gate';
-import { emailCloseWords, mailTrackedFor } from '@/lib/mail/graph-mail';
-import { bounceWords } from '@/lib/mail/cold-email';
+import { COLD_TASKS_HREF } from '@/lib/tasks-query';
 import { EmptyState, Surface, Tabs, Toolbar, ViewHeader, Badge, CAMPAIGN_TONE } from '@/components/ui';
 import { ContactsTable } from '@/components/sandbox/contacts-table';
 import { AddContactButton } from '@/components/sandbox/add-contact';
-import { WorkRow } from '@/components/sandbox/work-row';
-import { ACTION_LABELS } from '@/lib/sequences/steps';
 
 type Search = { tab?: string; q?: string; owner?: string; status?: string; ready?: string; pod?: string; source?: string; page?: string; state?: string; mover?: string };
 
 /**
  * The outreach sandbox (docs/outreach-sandbox-plan.md, section 5): contacts that are not in
- * Twenty, worked here and moved to the CRM when ready. Nothing here shows in Tasks, Home or People.
+ * the CRM, worked here and moved to the CRM when ready. Their work is in Tasks and on Home with
+ * everyone's (D2); People stays CRM-only.
  */
 export default async function SandboxPage({ searchParams }: { searchParams: Promise<Search> }) {
   const user = await requireUser();
   const sp = await searchParams;
-  const tab = sp.tab === 'work' || sp.tab === 'campaigns' || sp.tab === 'moves' ? sp.tab : 'contacts';
+  // The section's work is the Tasks screen, filtered to cold work (D2, B157): an old Work link lands there.
+  if (sp.tab === 'work') redirect(COLD_TASKS_HREF);
+  const tab = sp.tab === 'campaigns' || sp.tab === 'moves' ? sp.tab : 'contacts';
   const today = todayIn(user.timezone);
   const mayWork = !isBizOps(user) && (isAdmin(user) || needsPod(user.role));
   const href = (patch: Record<string, string | null>) => {
@@ -50,10 +48,10 @@ export default async function SandboxPage({ searchParams }: { searchParams: Prom
   return <PageFrame className="space-y-4 px-6 pb-8 pt-2">
     <Surface flush>
       <ViewHeader title="Sandbox" meta={<span className="tabular-nums text-ink-500">{active} in the sandbox</span>} actions={mayWork ? <AddContactButton pods={pods.filter((p) => isAdmin(user) || user.podIds.includes(p.id))} /> : null} />
-      <Tabs inset={false} current={tab} tabs={[{ key: 'contacts', label: 'Contacts', href: href({ tab: 'contacts', page: null }) }, { key: 'work', label: 'Work', href: href({ tab: 'work' }) }, { key: 'campaigns', label: 'Campaigns', href: href({ tab: 'campaigns' }) }, { key: 'moves', label: 'Moves to CRM', href: '/sandbox?tab=moves' }]} />
+      <Tabs inset={false} current={tab} tabs={[{ key: 'contacts', label: 'Contacts', href: href({ tab: 'contacts', page: null }) }, { key: 'work', label: 'Tasks', href: COLD_TASKS_HREF }, { key: 'campaigns', label: 'Campaigns', href: href({ tab: 'campaigns' }) }, { key: 'moves', label: 'Moves to CRM', href: '/sandbox?tab=moves' }]} />
     </Surface>
     {stranded.length ? <NeedsNewOwner stranded={stranded} owners={owners} /> : null}
-    {tab === 'contacts' ? await ContactsTab() : tab === 'work' ? await WorkTab() : tab === 'moves' ? await MovesTab() : await CampaignsTab()}
+    {tab === 'contacts' ? await ContactsTab() : tab === 'moves' ? await MovesTab() : await CampaignsTab()}
   </PageFrame>;
 
   async function ContactsTab() {
@@ -84,38 +82,6 @@ export default async function SandboxPage({ searchParams }: { searchParams: Prom
       </Toolbar>
       {rows.length ? <ContactsTable rows={rows} owners={owners} sequences={sequences} pods={pods.filter((p) => isAdmin(user) || user.podIds.includes(p.id))} campaigns={campaigns} today={today} mayWork={mayWork} moves={moves} /> : <EmptyState title={filters.status === 'active' && !sp.q ? 'No contacts in the sandbox yet' : 'No contacts match'} />}
       {pages > 1 ? <div className="flex items-center justify-end gap-2 border-t border-line px-4 py-2 text-[13px]">{page > 1 ? <Link href={href({ page: String(page - 1) })} className="btn-ghost btn-sm">Previous</Link> : null}<span className="tabular-nums text-ink-500">{page} of {pages}</span>{page < pages ? <Link href={href({ page: String(page + 1) })} className="btn-ghost btn-sm">Next</Link> : null}</div> : null}
-    </Surface>;
-  }
-
-  async function WorkTab() {
-    const mine = sp.owner !== 'all' && (isJuniorFo(user) || needsPod(user.role));
-    const { tasks, next, counts: c } = await sandboxWork({ foUserId: mine ? user.id : null, podId: sp.pod ?? null }, today);
-    const settings = await getSettings();
-    const due = (d: string) => (d < today ? 'overdue' : d === today ? 'today' : 'upcoming');
-    const items = [
-      ...tasks.map((t) => ({ kind: 'step' as const, id: t.id, due: t.snoozedTo ?? t.dueDate, t })),
-      ...next.map((n) => ({ kind: 'next' as const, id: n.id, due: n.dueDate, n })),
-    ].sort((a, b) => a.due.localeCompare(b.due));
-    const gates = new Map<string, { blocked: string | null; warning: string | null }>();
-    for (const item of items) {
-      const contact = item.kind === 'step' ? item.t.enrollment.sandboxContact : item.n.sandboxContact;
-      if (contact?.phone && !gates.has(contact.id)) gates.set(contact.id, await callGate(user, contact));
-    }
-    // N088: an email item says whether it closes itself, by whether Cadence reads its rep's sent mail.
-    const tracked = await mailTrackedFor(items.map((item) => (item.kind === 'step' ? item.t.foUserId : item.n.foUserId)));
-    return <Surface flush>
-      <Toolbar className="flex items-center gap-3 border-b border-line px-4 py-3 text-[13px]">
-        <Link href={href({ owner: mine ? 'all' : null })} className="btn-secondary btn-sm">{mine ? 'Show everyone' : 'Show mine'}</Link>
-        <span className="text-ink-600">Overdue <span className="tabular-nums">{c.overdue}</span> · Today <span className="tabular-nums">{c.today}</span> · Upcoming <span className="tabular-nums">{c.upcoming}</span></span>
-      </Toolbar>
-      {items.length ? <ul className="divide-y divide-line">{items.map((item) => {
-        const contact = item.kind === 'step' ? item.t.enrollment.sandboxContact! : item.n.sandboxContact!;
-        return <WorkRow key={item.id} kind={item.kind} id={item.id} contact={{ id: contact.id, name: `${contact.firstName} ${contact.lastName}`.trim(), firm: contact.companyName, phone: contact.phone }}
-          label={item.kind === 'step' ? `${item.t.label}` : item.n.label} action={item.kind === 'step' ? item.t.action : item.n.kind === 'MEETING' ? 'MEETING' : item.n.action} channelLabel={item.kind === 'next' && item.n.kind === 'MEETING' ? 'Meeting' : ACTION_LABELS[item.kind === 'step' ? item.t.action : item.n.action]}
-          due={formatLocalDate(item.due)} dueState={due(item.due)} campaign={item.kind === 'step' ? item.t.enrollment.campaign?.name ?? item.t.enrollment.sequence.name : null} fo={item.kind === 'step' ? item.t.fo.name : item.n.fo.name}
-          callTemplate={settings.rules.clickToCallUrl} gate={gates.get(contact.id) ?? null} skipReasons={settings.rules.skipReasons.map((r) => ({ key: r.key, label: r.label }))} mayWork={mayWork && (isAdmin(user) || (item.kind === 'step' ? item.t.foUserId : item.n.foUserId) === user.id || !isJuniorFo(user))}
-          warning={bounceWords(contact)} closeWords={emailCloseWords(tracked.has(item.kind === 'step' ? item.t.foUserId : item.n.foUserId))} />;
-      })}</ul> : <EmptyState title="Nothing to work in the sandbox" />}
     </Surface>;
   }
 

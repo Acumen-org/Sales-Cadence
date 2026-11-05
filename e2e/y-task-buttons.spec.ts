@@ -78,7 +78,7 @@ test('a task created for two people in People is worked in Tasks and moves on wh
   await expect(page.getByText('Created tasks', { exact: false }).first()).toBeVisible();
   await page.locator('a[href*="next="]').filter({ hasText: 'E2E send the one-pager' }).first().click();
   await expect(page.getByText('Task', { exact: true }).first()).toBeVisible();
-  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await page.getByRole('button', { name: /^Done(: .+)?$/ }).click();
   await expect(page.getByText(/Done\. Next one on \w{3}, \d{1,2} \w{3,4} \d{4}\./)).toBeVisible();
   // The other one: snoozed, then stopped.
   await page.locator('a[href*="next="]').filter({ hasText: 'E2E send the one-pager' }).first().click();

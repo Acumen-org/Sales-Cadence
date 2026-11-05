@@ -22,6 +22,8 @@ type Props = {
   warning?: string | null;
   className?: string;
   label?: string;
+  /** The accessible name, when the visible label does not say who is called (N105): "Call Jane Doe". */
+  ariaLabel?: string;
 };
 
 /**
@@ -31,7 +33,7 @@ type Props = {
  * opted out, calling hours ended), so the server checks again first (N008). The dialpad's tab opens
  * at the click, to keep the browser's permission, and closes again when the server says no.
  */
-export function CallButton({ phone, template, taskId, nextActionId, personId, sandboxContactId, blocked, warning, className = 'btn-primary', label = 'Call' }: Props) {
+export function CallButton({ phone, template, taskId, nextActionId, personId, sandboxContactId, blocked, warning, className = 'btn-primary', label = 'Call', ariaLabel }: Props) {
   const [refused, setRefused] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [ask, dialog] = useConfirm();
@@ -53,6 +55,7 @@ export function CallButton({ phone, template, taskId, nextActionId, personId, sa
       rel={dialpad ? 'noreferrer' : undefined}
       className={clsx(className, busy && 'pointer-events-none opacity-70')}
       aria-busy={busy}
+      aria-label={ariaLabel}
       onClick={async (event) => {
         event.preventDefault();
         if (warning && !(await ask({ title: 'Call anyway?', body: warning, confirmLabel: 'Call' }))) return;

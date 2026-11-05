@@ -1,5 +1,6 @@
 'use client';
 
+import { WorkingDayHint } from '@/components/tasks/working-day-hint';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
@@ -224,6 +225,7 @@ export function PostCallForm({ callId, onClose, initial }: { callId: string; onC
       <div className="flex flex-wrap items-end gap-2">
         <label className="block text-xs text-ink-500">Next step<select name="nextStep" value={steps.includes(step) ? step : ''} onChange={(e) => { setStep(e.target.value); setStepTouched(true); }} className="mt-1 max-w-full">{!steps.includes(step) ? <option value="" disabled>Pick one</option> : null}{steps.map((s) => <option key={s} value={s}>{stepWords(s)}</option>)}</select></label>
         {DATED.has(step) ? <label className="block text-xs text-ink-500">Day<input type="date" name="nextStepDate" value={date} min={ctx.today} onChange={(e) => setDate(e.target.value)} className="mt-1" /></label> : null}
+        {DATED.has(step) ? <WorkingDayHint date={date} workingDays={ctx.workingDays ?? []} onMove={setDate} /> : null}
         {step === 'meeting' ? <label className="block text-xs text-ink-500">Time (optional)<input type="time" name="meetingTime" value={time} onChange={(e) => setTime(e.target.value)} className="mt-1" /></label> : null}
       </div>
       {DATED.has(step) ? <label className="block text-xs text-ink-500">What<input value={whatShown} maxLength={200} placeholder={STEP_LABELS[step]} onChange={(e) => { setWhat(e.target.value); setWhatTouched(true); }} className="mt-1 w-full" /></label> : null}
