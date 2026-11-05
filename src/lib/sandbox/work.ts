@@ -3,6 +3,7 @@ import { prisma } from '../db';
 import { logAudit, type AuditActor } from '../audit';
 import { SANDBOX_SUBJECT, SANDBOX_TASK } from '../subject';
 import { WORKABLE } from '../tasks-query';
+import { isUniqueViolation } from '../engine/tasks';
 
 /**
  * Sandbox > Work: the sandbox's own steps and next actions. They never reach Tasks, Home or Twenty
@@ -11,10 +12,13 @@ import { WORKABLE } from '../tasks-query';
 
 export async function setSandboxNextAction(contactId: string, input: { label: string; action: ActionType; dueDate: string; repeat?: NextActionRepeat; foUserId: string }, actor: AuditActor & { id?: string | null }): Promise<string> {
   const data = { label: input.label, action: input.action, dueDate: input.dueDate, repeat: input.repeat ?? 'NONE', foUserId: input.foUserId, crmPending: false, crmError: null };
-  const row = await prisma.$transaction(async (tx) => {
+  const write = () => prisma.$transaction(async (tx) => {
     const open = await tx.nextAction.findFirst({ where: { sandboxContactId: contactId, personId: null, state: 'OPEN' }, select: { id: true } });
     return open ? tx.nextAction.update({ where: { id: open.id }, data }) : tx.nextAction.create({ data: { ...data, sandboxContactId: contactId, createdById: actor.id ?? null } });
   });
+  // One open next step per contact is a database rule (NextAction_one_open_per_sandbox_contact): when
+  // another request created it first, this one updates that row instead of making a second (B005).
+  const row = await write().catch((err) => { if (isUniqueViolation(err)) return write(); throw err; });
   await logAudit({ entityType: 'sandbox_contact', entityId: contactId, action: 'next_action_set', actor, details: { label: row.label, dueDate: row.dueDate } });
   return row.id;
 }

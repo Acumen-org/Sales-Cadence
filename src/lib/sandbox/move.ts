@@ -15,6 +15,7 @@ import { linkedinHref, normalizeDomain, normalizeEmail, normalizeFirmName, readE
 import { checkReady, type ReadyItem } from './ready';
 import { historyDrafts, writeNote } from './history-notes';
 import { setSandboxNextAction } from './work';
+import { isUniqueViolation } from '../engine/tasks';
 
 /**
  * Move to CRM (plan section 8): one contact or up to 50. Preflight says, per contact, whether it is
@@ -24,6 +25,9 @@ import { setSandboxNextAction } from './work';
  */
 
 export const MOVE_LIMIT = 50;
+
+/** Item states of a move still to happen. At most one per contact (SandboxMoveItem_one_in_flight_per_contact, B005). */
+export const IN_FLIGHT = ['QUEUED', 'RUNNING'] as const;
 
 // ---------------------------------------------------------------------------
 // Firm resolution (8.4)
@@ -122,6 +126,7 @@ export async function preflightMove(contactIds: string[], actor: Actor): Promise
   const ids = [...new Set(contactIds)];
   if (ids.length > limit) return { items: [], limit, refused: `You selected ${ids.length} contacts. Move at most ${limit} at a time.` };
   const contacts = await prisma.sandboxContact.findMany({ where: { id: { in: ids } }, include: { ...contactInclude, nextActions: { where: { personId: null, state: 'OPEN' }, select: { label: true, action: true, dueDate: true }, take: 1 } } });
+  const inFlight = new Set((await prisma.sandboxMoveItem.findMany({ where: { sandboxContactId: { in: ids }, state: { in: [...IN_FLIGHT] } }, select: { sandboxContactId: true } })).map((i) => i.sandboxContactId));
   let client: TwentyClient | null = null;
   try { client = await getTwentyClient(); } catch { client = null; }
   const items: PreflightItem[] = [];
@@ -131,6 +136,7 @@ export async function preflightMove(contactIds: string[], actor: Actor): Promise
     const base = { contactId: c.id, name, missing: ready.missing, reason: null, firm: { action: 'none' } as FirmPlan, crmPerson: null, nextStep: c.nextActions[0] ?? null };
     if (!canMoveToCrm(actor, c)) { items.push({ ...base, state: 'refused', reason: 'Not yours to move' }); continue; }
     if (c.status !== 'ACTIVE') { items.push({ ...base, state: 'refused', reason: c.status === 'MOVED' ? 'Already in the CRM' : 'No longer in the sandbox' }); continue; }
+    if (inFlight.has(c.id)) { items.push({ ...base, state: 'refused', reason: 'Being moved already' }); continue; }
     const dedupeInput = { bellwetherContactId: c.bellwetherContactId, firstName: c.firstName, lastName: c.lastName, email: c.email, additionalEmails: c.additionalEmails, phone: c.phone, phoneType: c.phoneType ?? 'unknown', additionalPhones: readExtraPhones(c.additionalPhones), linkedinUrl: c.linkedinUrl, individualCrd: c.individualCrd, companyName: c.companyName, companyDomain: c.companyDomain, companyCrd: c.companyCrd, companyPhone: c.companyPhone };
     if (await findSuppressed(suppressionKeysOf(dedupeInput))) { items.push({ ...base, state: 'refused', reason: 'On the suppression list' }); continue; }
     const blocked = await internalOrBlocked(dedupeInput, settings.rules);
@@ -181,12 +187,20 @@ export async function queueMove(selection: MoveSelection[], actor: Actor, audit:
   const contacts = await prisma.sandboxContact.findMany({ where: { id: { in: accepted.map((a) => a.sel.contactId) } } });
   if (nextStep) for (const c of contacts) await setSandboxNextAction(c.id, { ...nextStep, foUserId: c.ownerId ?? actor.id }, { ...audit, id: actor.id });
   const snapshotOf = new Map(contacts.map((c) => [c.id, c]));
-  const move = await prisma.sandboxMove.create({
-    data: {
-      createdById: actor.id, count: accepted.length, state: 'QUEUED',
-      items: { create: accepted.map(({ sel }) => ({ sandboxContactId: sel.contactId, state: 'QUEUED', mode: sel.mode, attachPersonId: sel.mode === 'attach' ? sel.attachPersonId ?? null : null, chosenCompanyId: sel.companyId ?? null, snapshot: JSON.parse(JSON.stringify(snapshotOf.get(sel.contactId) ?? {})) })) },
-    },
-  });
+  let move: { id: string };
+  try {
+    move = await prisma.sandboxMove.create({
+      data: {
+        createdById: actor.id, count: accepted.length, state: 'QUEUED',
+        items: { create: accepted.map(({ sel }) => ({ sandboxContactId: sel.contactId, state: 'QUEUED', mode: sel.mode, attachPersonId: sel.mode === 'attach' ? sel.attachPersonId ?? null : null, chosenCompanyId: sel.companyId ?? null, snapshot: JSON.parse(JSON.stringify(snapshotOf.get(sel.contactId) ?? {})) })) },
+      },
+    });
+  } catch (err) {
+    // Another tab queued one of these contacts a moment ago: the database keeps one move in flight
+    // per contact, so this whole request is refused and the other move runs alone (B005).
+    if (isUniqueViolation(err)) return { ok: false, error: 'One of these contacts is already being moved, so nothing was queued. Check Moves to CRM, then try again.' };
+    throw err;
+  }
   await logAudit({ entityType: 'sandbox_move', entityId: move.id, action: 'move_queued', actor: audit, details: { count: accepted.length, left: left.length } });
   return { ok: true, moveId: move.id, queued: accepted.length, left };
 }
@@ -391,10 +405,22 @@ export async function finishMoveIfSettled(moveId: string, now = new Date()): Pro
   await prisma.sandboxMove.updateMany({ where: { id: moveId, state: { not: 'DONE' } }, data: { state: 'DONE', finishedAt: now } });
 }
 
+/**
+ * Queue a move's failed items again. A permanent failure would only fail again, and a contact that
+ * is being moved by a later move keeps that one move (B005), so neither is queued.
+ */
 export async function retryFailedItems(moveId: string): Promise<number> {
-  const r = await prisma.sandboxMoveItem.updateMany({ where: { moveId, state: 'FAILED' }, data: { state: 'QUEUED' } });
-  if (r.count) await prisma.sandboxMove.update({ where: { id: moveId }, data: { state: 'QUEUED', finishedAt: null } });
-  return r.count;
+  const failed = await prisma.sandboxMoveItem.findMany({ where: { moveId, state: 'FAILED', OR: [{ failure: null }, { failure: { not: 'permanent' } }] }, select: { id: true } });
+  let queued = 0;
+  for (const item of failed) {
+    const r = await prisma.sandboxMoveItem.updateMany({ where: { id: item.id, state: 'FAILED' }, data: { state: 'QUEUED' } }).catch((err) => {
+      if (isUniqueViolation(err)) return { count: 0 };
+      throw err;
+    });
+    queued += r.count;
+  }
+  if (queued) await prisma.sandboxMove.update({ where: { id: moveId }, data: { state: 'QUEUED', finishedAt: null } });
+  return queued;
 }
 
 // ---------------------------------------------------------------------------

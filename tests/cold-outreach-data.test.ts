@@ -8,7 +8,8 @@ import { getMockTwentyClient } from '@/lib/twenty/mock-client';
 import { isRoleEmail } from '@/lib/sandbox/normalize';
 import { optOutSandboxContact, suppressValue } from '@/lib/sandbox/opt-out';
 import { addSuppressions, findSuppressed, widenedKeys } from '@/lib/sandbox/suppression';
-import { queueMove, runMoveQueue } from '@/lib/sandbox/move';
+import { setSandboxNextAction } from '@/lib/sandbox/work';
+import { preflightMove, queueMove, retryFailedItems, runMoveQueue } from '@/lib/sandbox/move';
 import { rerunSuppressionAgainstCrm, widenOptOutSuppressions } from '@/lib/outreach/backfills';
 import { runTool } from '../scripts/local-runtime';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
@@ -102,6 +103,82 @@ describe('cold outreach data model (S1)', () => {
     expect(await prisma.touch.findUniqueOrThrow({ where: { id: coldTouch.id } })).toEqual(expect.objectContaining({ personId, audience: 'SANDBOX' }));
     expect(await prisma.callLog.findUniqueOrThrow({ where: { id: coldCall.id } })).toEqual(expect.objectContaining({ personId, audience: 'SANDBOX' }));
     expect(await prisma.enrollment.findUniqueOrThrow({ where: { id: coldEnrollment.id } })).toEqual(expect.objectContaining({ personId, audience: 'SANDBOX' }));
+  });
+
+  it('B005: one open next step per cold contact is a database rule, and two requests at once leave one', async () => {
+    const alisa = b.users.alisa.id;
+    const c = await readyContact(alisa, b.pods.Alisa.id);
+    const row = { sandboxContactId: c.id, foUserId: alisa, label: 'Call', action: 'CALL' as const, dueDate: '2026-11-09' };
+    await prisma.nextAction.create({ data: row });
+    await expect(prisma.nextAction.create({ data: row })).rejects.toThrow();
+    // A done one does not hold the place.
+    await prisma.nextAction.create({ data: { ...row, state: 'DONE' } });
+
+    const d = await readyContact(alisa, b.pods.Alisa.id);
+    const actor = userActor(b.users.alisa);
+    await Promise.all([
+      setSandboxNextAction(d.id, { label: 'Email', action: 'EMAIL', dueDate: '2026-11-10', foUserId: alisa }, actor),
+      setSandboxNextAction(d.id, { label: 'Call', action: 'CALL', dueDate: '2026-11-11', foUserId: alisa }, actor),
+    ]);
+    expect(await prisma.nextAction.count({ where: { sandboxContactId: d.id, state: 'OPEN' } })).toBe(1);
+  });
+
+  it('B005: duplicate open next steps from before the release are closed, never deleted, and the newest stays', async () => {
+    const alisa = b.users.alisa.id;
+    const c = await readyContact(alisa, b.pods.Alisa.id);
+    await prisma.$executeRawUnsafe('DROP INDEX "NextAction_one_open_per_sandbox_contact"');
+    const row = { sandboxContactId: c.id, foUserId: alisa, action: 'CALL' as const, dueDate: '2026-11-09' };
+    const older = await prisma.nextAction.create({ data: { ...row, label: 'Older', createdAt: new Date('2026-11-03T09:00:00Z') } });
+    const newer = await prisma.nextAction.create({ data: { ...row, label: 'Newer', createdAt: new Date('2026-11-04T09:00:00Z') } });
+
+    rerun('20261105000200_one_open_cold_next_action');
+
+    expect((await prisma.nextAction.findUniqueOrThrow({ where: { id: older.id } })).state).toBe('CANCELLED');
+    expect((await prisma.nextAction.findUniqueOrThrow({ where: { id: newer.id } })).state).toBe('OPEN');
+    const logged = (await auditRows('deduped_by_migration')).filter((a) => a.entityType === 'sandbox_contact');
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toEqual(expect.objectContaining({ entityId: c.id, details: expect.objectContaining({ nextActionId: older.id, kept: newer.id, label: 'Older', was: 'OPEN' }) }));
+    // The index is back, and a second run finds nothing to close.
+    await expect(prisma.nextAction.create({ data: { ...row, label: 'Third' } })).rejects.toThrow();
+    rerun('20261105000200_one_open_cold_next_action');
+    expect((await auditRows('deduped_by_migration')).filter((a) => a.entityType === 'sandbox_contact')).toHaveLength(1);
+  });
+
+  it('B005: a contact already being moved cannot be queued again, from the dialog, a second tab or the database', async () => {
+    const { actor, audit } = await actorOf(b.users.alisa.id);
+    const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+    const first = await queueMove([{ contactId: c.id, mode: 'create' }], actor, audit);
+    expect(first.ok).toBe(true);
+    expect((await preflightMove([c.id], actor)).items[0]).toEqual(expect.objectContaining({ state: 'refused', reason: 'Being moved already' }));
+    expect(await queueMove([{ contactId: c.id, mode: 'create' }], actor, audit)).toEqual(expect.objectContaining({ ok: false }));
+    await expect(prisma.sandboxMove.create({ data: { createdById: b.users.alisa.id, count: 1, state: 'QUEUED', items: { create: [{ sandboxContactId: c.id, state: 'QUEUED', mode: 'create', snapshot: {} }] } } })).rejects.toThrow();
+
+    // Two tabs at the same moment: one move is queued, the other is refused, one CRM person is made.
+    const d = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+    const both = await Promise.all([queueMove([{ contactId: d.id, mode: 'create' }], actor, audit), queueMove([{ contactId: d.id, mode: 'create' }], actor, audit)]);
+    expect(both.filter((r) => r.ok)).toHaveLength(1);
+    expect(both.find((r) => !r.ok)).toEqual({ ok: false, error: expect.stringContaining('already being moved') });
+    expect(await prisma.sandboxMoveItem.count({ where: { sandboxContactId: d.id } })).toBe(1);
+    expect(await runMoveQueue()).toEqual({ done: 2, failed: 0, dryRun: 0 });
+    expect(getMockTwentyClient().writes.filter((w) => w.op === 'createPerson')).toHaveLength(2);
+  });
+
+  it('B005: moves of one contact queued twice before the release: the newest runs, the older fails for good and Retry leaves it', async () => {
+    const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+    await prisma.$executeRawUnsafe('DROP INDEX "SandboxMoveItem_one_in_flight_per_contact"');
+    const item = { sandboxContactId: c.id, state: 'QUEUED', mode: 'create', snapshot: {} };
+    const older = await prisma.sandboxMove.create({ data: { createdById: b.users.alisa.id, count: 1, state: 'QUEUED', createdAt: new Date('2026-11-03T09:00:00Z'), items: { create: [item] } }, include: { items: true } });
+    const newer = await prisma.sandboxMove.create({ data: { createdById: b.users.alisa.id, count: 1, state: 'QUEUED', createdAt: new Date('2026-11-03T09:01:00Z'), items: { create: [item] } }, include: { items: true } });
+
+    rerun('20261105000300_one_move_in_flight');
+
+    expect(await prisma.sandboxMoveItem.findUniqueOrThrow({ where: { id: older.items[0].id } })).toEqual(expect.objectContaining({ state: 'FAILED', failure: 'permanent', error: expect.stringContaining('queued again') }));
+    expect((await prisma.sandboxMoveItem.findUniqueOrThrow({ where: { id: newer.items[0].id } })).state).toBe('QUEUED');
+    expect((await prisma.sandboxMove.findUniqueOrThrow({ where: { id: older.id } })).state).toBe('DONE');
+    expect((await auditRows('deduped_by_migration')).filter((a) => a.entityType === 'sandbox_move')[0]).toEqual(expect.objectContaining({ entityId: older.id, details: expect.objectContaining({ itemId: older.items[0].id, kept: newer.items[0].id, was: 'QUEUED' }) }));
+    expect(await retryFailedItems(older.id)).toBe(0);
+    rerun('20261105000300_one_move_in_flight');
+    expect((await auditRows('deduped_by_migration')).filter((a) => a.entityType === 'sandbox_move')).toHaveLength(1);
   });
 
   it('B011: an entry on the suppression list opts out a CRM person whose cached email has capitals', async () => {
