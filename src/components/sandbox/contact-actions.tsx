@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { ActionButton } from '@/components/action-form';
-import { Modal } from '@/components/modal';
+import { ConfirmDialog, type ConfirmOptions } from '@/components/confirm-dialog';
 import { assignContactsAction, claimContactsAction, eraseContactAction, optOutContactAction, removeContactsAction } from '@/lib/actions/sandbox';
 import { logManualCallAction } from '@/lib/actions/call-forms';
 import { MoveDialog } from './move-dialog';
@@ -29,10 +29,12 @@ type Props = {
   work?: string;
   /** Pods the reader may put the contact in, for the Move dialog's fixes (B050). */
   pods?: Option[];
+  /** The confirms for Opt out, Remove and Erase, naming the person and every effect (confirm-words.ts). */
+  confirms: { optOut: ConfirmOptions; remove: ConfirmOptions; erase: ConfirmOptions };
 };
 
 /** The contact page's controls: Move to CRM first once the contact is ready, then the rest. */
-export function ContactActions({ id, name = 'this contact', ready, unclaimed, mayWork, mayOptOut, mayMove, mayAssign, mayErase, users, ownerId = null, work, pods = [] }: Props) {
+export function ContactActions({ id, name = 'this contact', ready, unclaimed, mayWork, mayOptOut, mayMove, mayAssign, mayErase, users, ownerId = null, work, pods = [], confirms }: Props) {
   const [moving, setMoving] = useState(false);
   const [assigning, setAssigning] = useState(false);
   const [to, setTo] = useState('');
@@ -55,19 +57,22 @@ export function ContactActions({ id, name = 'this contact', ready, unclaimed, ma
     {unclaimed && mayWork ? <ActionButton action={claimContactsAction} payload={payload} refresh>Claim</ActionButton> : null}
     {mayAssign ? <button type="button" className="btn-secondary btn-sm" disabled={pending} onClick={() => { setTo(''); setAssigning(true); }}>Assign</button> : null}
     {mayWork ? <button type="button" className="btn-secondary btn-sm" disabled={pending} onClick={() => { const fd = new FormData(); fd.set('sandboxContactId', id); start(async () => { const r = await logManualCallAction(fd); if (!r.ok) setError(r.error); else router.refresh(); }); }}>Log a call</button> : null}
-    {mayOptOut ? <ActionButton action={optOutContactAction} payload={{ id }} confirm="Opt this person out? Cadence will not contact them again, and Bellwether shows them as opted out." refresh className="btn-ghost btn-sm">Opt out</ActionButton> : null}
-    {mayMove ? <ActionButton action={removeContactsAction} payload={payload} confirm="Remove this contact from Cold outreach? Their details are cleared." className="btn-ghost btn-sm">Remove</ActionButton> : null}
-    {mayErase ? <ActionButton action={eraseContactAction} payload={{ id }} confirm="Erase every piece of this person's data in Cadence? It cannot be undone." className="btn-ghost btn-sm">Erase</ActionButton> : null}
+    {mayOptOut ? <ActionButton action={optOutContactAction} payload={{ id }} confirm={confirms.optOut} refresh className="btn-ghost btn-sm">Opt out</ActionButton> : null}
+    {mayMove ? <ActionButton action={removeContactsAction} payload={payload} confirm={confirms.remove} className="btn-ghost btn-sm">Remove</ActionButton> : null}
+    {mayErase ? <ActionButton action={eraseContactAction} payload={{ id }} confirm={confirms.erase} className="btn-ghost btn-sm">Erase</ActionButton> : null}
     {error ? <span role="alert" className="text-[12px] text-red-700">{error}</span> : null}
     {message ? <span role="status" className="text-[12px] text-emerald-700">{message}</span> : null}
     {moving ? <MoveDialog ids={[id]} owners={users.map((u) => ({ ...u, podIds: u.podIds ?? [] }))} pods={pods} onClose={() => setMoving(false)} /> : null}
-    {assigning ? <Modal label="Assign the contact" onClose={() => setAssigning(false)} className="max-w-md">
-      <div className="space-y-4 p-5">
-        <h2 className="text-base font-semibold text-ink-900">Assign {name}</h2>
-        <label className="block text-xs text-ink-500">To<select className="mt-1 w-full" value={to} onChange={(e) => setTo(e.target.value)}><option value="">Choose a rep</option><option value="release">Nobody: let it go</option>{users.filter((u) => u.id !== ownerId).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
-        <p className="text-[13px] text-ink-700">{to === 'release' ? (work ? `It has ${work}, so it cannot be let go: give it to someone instead.` : 'It goes back to its pod\'s Unclaimed view.') : `${target?.name ?? 'The new owner'} owns it from now${work ? `, with its ${work}` : ''}.`}</p>
-        <div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={() => setAssigning(false)}>Cancel</button><button type="button" className="btn-primary" disabled={!to || pending || (to === 'release' && Boolean(work))} onClick={assign}>{to === 'release' ? 'Let go' : 'Assign'}</button></div>
-      </div>
-    </Modal> : null}
+    {assigning ? <ConfirmDialog
+      title={`Assign ${name}`}
+      effects={[to === 'release' ? (work ? `It has ${work}, so it cannot be let go: give it to someone instead.` : "It goes back to its pod's Unclaimed view.") : `${target?.name ?? 'The new owner'} owns it from now${work ? `, with its ${work}` : ''}.`]}
+      confirmLabel={to === 'release' ? 'Let go' : 'Assign'}
+      confirmDisabled={!to || (to === 'release' && Boolean(work))}
+      pending={pending}
+      onCancel={() => setAssigning(false)}
+      onConfirm={assign}
+    >
+      <label className="block text-xs text-ink-500">To<select className="mt-1 w-full" value={to} onChange={(e) => setTo(e.target.value)}><option value="">Choose a rep</option><option value="release">Nobody: let it go</option>{users.filter((u) => u.id !== ownerId).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
+    </ConfirmDialog> : null}
   </div>;
 }

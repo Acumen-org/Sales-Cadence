@@ -13,6 +13,7 @@ import { Field } from '@/components/ui';
 import { IconAlert, IconBolt, IconCheck, IconChevronRight, IconPlus, IconTrash } from '@/components/icons';
 import { readCampaignSelection } from '@/lib/campaign-selection';
 import { Modal } from '@/components/modal';
+import { useConfirm } from '@/components/confirm-dialog';
 
 type Review = Extract<Awaited<ReturnType<typeof previewCalendarAction>>, { ok: true }>['data'];
 export type WorkspacePod = { id: string; name: string; podOwnerValue: string; fos: { id: string; name: string }[] };
@@ -26,6 +27,7 @@ type SaveState = 'idle' | 'saving' | 'saved' | 'failed';
  */
 export function CampaignWorkspace({ initial, pods, products, campaignId, revision: initialRevision, canPublish = true, status, today }: { initial: CampaignDraft; pods: WorkspacePod[]; products: string[]; campaignId?: string; revision?: string; canPublish?: boolean; status?: string; today: string }) {
   const router = useRouter();
+  const [askConfirm, confirmDialog] = useConfirm();
   const [draft, setDraft] = useState(initial);
   const [id, setId] = useState(campaignId);
   const [tab, setTab] = useState(0);
@@ -193,8 +195,8 @@ export function CampaignWorkspace({ initial, pods, products, campaignId, revisio
     editOutreach({ flows: groupEditor === 'new' ? [...draft.flows, { ...structuredClone(draft.flows[0]), id: newId, name: `Custom outreach ${draft.flows.length}` }] : draft.flows, assignments });
     setActiveFlow(newId); setSubset([]); setGroupEditor(null);
   };
-  const removeGroup = (flowId: string) => {
-    if (!window.confirm('Delete this outreach group and return its people to Default?')) return;
+  const removeGroup = async (flowId: string) => {
+    if (!(await askConfirm({ title: 'Delete this outreach group?', effects: ['Its people go back to Default.'], confirmLabel: 'Delete group', tone: 'danger' }))) return;
     editOutreach({ flows: draft.flows.filter(f => f.id !== flowId), assignments: Object.fromEntries(Object.entries(draft.assignments).filter(([, f]) => f !== flowId)) });
     setActiveFlow('default');
   };
@@ -228,6 +230,7 @@ export function CampaignWorkspace({ initial, pods, products, campaignId, revisio
   const savable = useMemo(() => CampaignDraftSaveSchema.safeParse(draft).success, [draft]);
   const saveLabel = saveState === 'saving' || (canAutosave && dirty.current && savable && saveState !== 'failed') ? 'Saving draft…' : saveState === 'failed' ? 'Not saved' : canAutosave && dirty.current && !savable ? `Not saved: ${CampaignDraftSaveSchema.safeParse(draft).error?.issues[0]?.message ?? 'something is missing'}` : saveState === 'saved' || (canAutosave && id && !dirty.current) ? 'Draft saved' : null;
   return <div className="space-y-5 pb-4">
+    {confirmDialog}
     <header className="surface p-5 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-4"><div><h1 className="text-2xl font-semibold tracking-tight text-ink-900">{draft.name || 'New campaign'}</h1></div><div className="flex items-center gap-3">{saveLabel && <span role="status" className={`text-sm ${saveState === 'failed' ? 'text-red-700' : 'text-ink-500'}`}>{saveLabel}</span>}{(!canAutosave || saveState === 'failed') && <button type="button" className="btn-secondary" disabled={pending} onClick={saveDraft}>{canAutosave ? 'Retry save' : 'Save draft'}</button>}</div></div>
       <nav aria-label="Campaign setup" className="mt-6 grid grid-cols-3 gap-1 sm:flex sm:gap-2">{steps.map((name, i) => <button type="button" key={name} disabled={pending || planning || (i === 2 && tab !== 2 && (tab !== 1 || !review?.calendar.valid || checking))} aria-current={tab === i ? 'step' : undefined} onClick={() => go(i)} className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-2.5 text-xs sm:gap-2 sm:px-4 sm:text-sm ${tab === i ? 'bg-brand-600 font-semibold text-white shadow-sm' : 'bg-white/70 font-medium text-ink-500 hover:bg-white'}`}><span className="opacity-60">0{i + 1}</span>{name}</button>)}</nav>

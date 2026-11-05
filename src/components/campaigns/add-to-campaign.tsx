@@ -9,6 +9,7 @@ import { IconCampaigns, IconClose, IconPlus } from '@/components/icons';
 import { Badge, Count, EmptyState } from '@/components/ui';
 import { campaignSelectionUrl } from '@/lib/campaign-selection';
 import { formatLocalDate } from '@/lib/dates';
+import { useConfirm } from '@/components/confirm-dialog';
 
 type Choice = CampaignChoice & { placesLeft: number | null };
 
@@ -96,14 +97,16 @@ export function RemoveFromCampaign({ campaignId, campaignName, personIds, classN
   const router = useRouter();
   const [pending, start] = useTransition();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [ask, dialog] = useConfirm();
   return (
     <span className="inline-flex flex-col items-start">
+      {dialog}
       <button
         type="button"
         className={className}
         disabled={pending || !personIds.length}
-        onClick={() => {
-          if (!window.confirm(`Remove ${personIds.length} ${personIds.length === 1 ? 'person' : 'people'} from ${campaignName}? Their outreach stops.`)) return;
+        onClick={async () => {
+          if (!(await ask({ title: `Remove ${personIds.length} ${personIds.length === 1 ? 'person' : 'people'} from ${campaignName}?`, effects: ['Their outreach in this campaign stops.'], confirmLabel: 'Remove', tone: 'danger' }))) return;
           start(async () => {
             const fd = new FormData();
             fd.set('campaignId', campaignId);
@@ -129,14 +132,16 @@ export function RemoveFromCampaigns({ people, className = 'btn-danger btn-sm', o
   const byCampaign = new Map<string, { name: string; ids: string[] }>();
   for (const p of people) { const g = byCampaign.get(p.campaignId) ?? { name: p.campaignName, ids: [] }; g.ids.push(p.id); byCampaign.set(p.campaignId, g); }
   const names = [...byCampaign.values()].map((g) => g.name);
+  const [ask, dialog] = useConfirm();
   return (
     <span className="inline-flex flex-col items-start">
+      {dialog}
       <button
         type="button"
         className={className}
         disabled={pending || !people.length}
-        onClick={() => {
-          if (!window.confirm(`Remove ${people.length} ${people.length === 1 ? 'person' : 'people'} from ${names.length === 1 ? names[0] : `${names.length} campaigns`}? Their outreach stops.`)) return;
+        onClick={async () => {
+          if (!(await ask({ title: `Remove ${people.length} ${people.length === 1 ? 'person' : 'people'} from ${names.length === 1 ? names[0] : `${names.length} campaigns`}?`, effects: ['Their outreach in these campaigns stops.'], confirmLabel: 'Remove', tone: 'danger' }))) return;
           start(async () => {
             const results: string[] = [];
             let failed = false;

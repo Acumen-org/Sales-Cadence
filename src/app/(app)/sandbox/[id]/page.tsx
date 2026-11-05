@@ -24,6 +24,7 @@ import { CallButton } from '@/components/calls/call-button';
 import { ContactActions } from '@/components/sandbox/contact-actions';
 import { addNoteAction, setNextActionAction, setPodAction, updateContactAction } from '@/lib/actions/sandbox';
 import { ACTION_LABELS } from '@/lib/sequences/steps';
+import { eraseConfirm, optOutConfirm, removeConfirm } from '@/lib/outreach/confirm-words';
 
 const STATUS_LABEL = { ACTIVE: 'In Cold outreach', MOVED: 'In CRM', OPTED_OUT: 'Do not contact', REMOVED: 'Removed' } as const;
 
@@ -95,6 +96,9 @@ export default async function SandboxContactPage({ params }: { params: Promise<{
   const today = todayIn(user.timezone);
   const name = `${contact.firstName} ${contact.lastName}`.trim() || 'Removed contact';
   const open = contact.nextActions[0];
+  // Opt out, Remove and Erase name the person and every effect (PLAN 4.0), and ask why.
+  const effects = { name, campaigns: runningCampaigns.map((e) => e.campaign?.name ?? e.sequence.name), nextStep: open && !open.personId ? `${ACTION_LABELS[open.action]} on ${formatLocalDate(open.dueDate)}` : null, fromBellwether: contact.source === 'BELLWETHER', inCrm: contact.status === 'MOVED' };
+  const confirms = { optOut: optOutConfirm(effects), remove: removeConfirm(effects), erase: eraseConfirm(effects) };
   const timeline = [
     ...contact.calls.map((c) => ({ at: c.startedAt ?? c.createdAt, key: `c${c.id}`, node: <div><Link href={`/calls/${c.id}`} className="text-ink-900 hover:text-brand-700">{c.direction === 'OUTBOUND' ? 'Call' : 'Call received'}{c.talkSec ? ` · ${Math.floor(c.talkSec / 60)}m ${c.talkSec % 60}s` : ''}</Link><span className="text-ink-500"> · {c.user?.name ?? 'Unknown rep'}{c.form ? ` · ${outcomes.find((o) => o.key === c.form!.outcome)?.label ?? c.form.outcome}${c.form.rating ? ` (${c.form.rating}/5)` : ''}` : c.formDueAt ? ' · form due' : ''}</span>{c.form?.notes ? <p className="mt-1 whitespace-pre-wrap text-ink-700">{c.form.notes}</p> : null}{c.form ? <p className="text-ink-500">Next: {NEXT_STEP_LABELS[c.form.nextStep] ?? c.form.nextStep}{c.form.nextStepDate ? `, ${formatLocalDate(c.form.nextStepDate)}` : ''}</p> : null}{c.recordingSid ? <audio controls preload="none" className="mt-1 h-8" src={`/api/calls/${c.id}/recording`} /> : null}</div> })),
     ...contact.emails.map((m) => ({ at: m.at, key: `m${m.id}`, node: <div><span className="text-ink-900">{m.kind === 'SENT' ? 'Email sent' : m.kind === 'REPLY' ? 'Reply' : m.kind === 'BOUNCE' ? 'Bounced' : 'Auto-reply'}</span><span className="text-ink-500"> · {m.subject ?? '(no subject)'}</span></div> })),
@@ -126,7 +130,7 @@ export default async function SandboxContactPage({ params }: { params: Promise<{
         </div>
         <div className="flex flex-col items-end gap-2">
           {contact.phone && live ? <CallButton phone={contact.phone} template={settings.rules.clickToCallUrl} sandboxContactId={contact.id} nextActionId={open?.id ?? null} blocked={callBlocked} warning={gate?.warning} /> : null}
-          {live ? <ContactActions id={contact.id} name={name} ready={readyToMove} unclaimed={!contact.ownerId || !contact.owner?.active} mayWork={mayWork} mayOptOut={mayOptOut} mayMove={canMoveToCrm(actor, contact)} mayAssign={users.length > 0 && canAssignSandbox(actor, contact, null) && (isAdmin(user) || actor.role !== 'JUNIOR_FO')} mayErase={canEraseContact(actor)} users={users} ownerId={contact.ownerId} work={work} pods={pods} /> : contact.status === 'REMOVED' || (contact.status === 'OPTED_OUT' && !contact.piiClearedAt) ? <ContactActions id={contact.id} ready={false} unclaimed={false} mayWork={false} mayOptOut={contact.status === 'REMOVED' && mayOptOut} mayMove={false} mayAssign={false} mayErase={canEraseContact(actor)} users={[]} /> : null}
+          {live ? <ContactActions id={contact.id} name={name} ready={readyToMove} unclaimed={!contact.ownerId || !contact.owner?.active} mayWork={mayWork} mayOptOut={mayOptOut} mayMove={canMoveToCrm(actor, contact)} mayAssign={users.length > 0 && canAssignSandbox(actor, contact, null) && (isAdmin(user) || actor.role !== 'JUNIOR_FO')} mayErase={canEraseContact(actor)} users={users} ownerId={contact.ownerId} work={work} pods={pods} confirms={confirms} /> : contact.status === 'REMOVED' || (contact.status === 'OPTED_OUT' && !contact.piiClearedAt) ? <ContactActions id={contact.id} ready={false} unclaimed={false} mayWork={false} mayOptOut={contact.status === 'REMOVED' && mayOptOut} mayMove={false} mayAssign={false} mayErase={canEraseContact(actor)} users={[]} confirms={confirms} /> : null}
         </div>
       </div>
     </Surface>

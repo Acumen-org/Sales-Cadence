@@ -12,6 +12,8 @@ import type { ContactMove } from '@/lib/sandbox/moves-query';
 import type { ActionResult } from '@/lib/actions/users';
 import { MoveDialog } from './move-dialog';
 import { UndoMoveButton } from './move-undo';
+import { ConfirmDialog, useConfirm, type ConfirmOptions } from '@/components/confirm-dialog';
+import { removeConfirm } from '@/lib/outreach/confirm-words';
 
 type Option = { id: string; name: string };
 type Props = {
@@ -36,11 +38,14 @@ export function ContactsTable({ rows, owners, sequences, pods, campaigns, today,
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
+  const [ask, confirmDialog] = useConfirm();
   const ids = [...selected];
   const all = rows.length > 0 && rows.every((r) => selected.has(r.id));
-  const run = (action: (fd: FormData) => Promise<ActionResult>, extra: Record<string, string> = {}, confirm?: string) => {
-    if (confirm && !window.confirm(confirm)) return;
+  const run = async (action: (fd: FormData) => Promise<ActionResult>, extra: Record<string, string> = {}, confirm?: ConfirmOptions) => {
+    const answer = confirm ? await ask(confirm) : null;
+    if (confirm && !answer) return;
     const fd = new FormData();
+    if (answer?.reason) fd.set('reason', answer.reason);
     for (const id of ids) fd.append('ids', id);
     for (const [k, v] of Object.entries(extra)) fd.set(k, v);
     start(async () => {
@@ -53,6 +58,7 @@ export function ContactsTable({ rows, owners, sequences, pods, campaigns, today,
   const seenOwners = Object.fromEntries(ids.map((id) => [`owner:${id}`, rows.find((r) => r.id === id)?.ownerId ?? '']));
   const target = owners.find((o) => o.id === assignTo);
   return <div>
+    {confirmDialog}
     {mayWork && selected.size ? <div className="flex flex-wrap items-center gap-2 border-b border-line bg-brand-50/50 px-4 py-2 text-[13px]" role="toolbar" aria-label="Selected contacts">
       <span className="tabular-nums text-ink-700">{selected.size} selected</span>
       <button type="button" className="btn-secondary btn-sm" disabled={pending} onClick={() => run(claimContactsAction)}>Claim</button>
@@ -60,7 +66,7 @@ export function ContactsTable({ rows, owners, sequences, pods, campaigns, today,
       <button type="button" className="btn-secondary btn-sm" disabled={pending} onClick={() => setDialog('campaign')}>Start campaign</button>
       {campaigns.length ? <select aria-label="Add to campaign" className="!py-1 text-[13px]" defaultValue="" disabled={pending} onChange={(e) => { const v = e.target.value; e.target.value = ''; if (v) run(addToSandboxCampaignAction, { campaignId: v }); }}><option value="" disabled>Add to campaign</option>{campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select> : null}
       <button type="button" className="btn-primary btn-sm" disabled={pending} onClick={() => setDialog('move')}>Move to CRM</button>
-      <button type="button" className="btn-ghost btn-sm" disabled={pending} onClick={() => run(removeContactsAction, {}, `Remove ${selected.size} from Cold outreach? Their details are cleared.`)}>Remove</button>
+      <button type="button" className="btn-ghost btn-sm" disabled={pending} onClick={() => run(removeContactsAction, {}, removeConfirm(selected.size))}>Remove</button>
     </div> : null}
     {message ? <p role="status" className={clsx('px-4 py-2 text-[13px]', message.ok ? 'text-emerald-700' : 'text-red-700')}>{message.text}</p> : null}
     <table className="w-full table-fixed text-[13px]">
@@ -85,14 +91,17 @@ export function ContactsTable({ rows, owners, sequences, pods, campaigns, today,
       })}</tbody>
     </table>
     {dialog === 'move' ? <MoveDialog ids={ids} owners={owners} pods={pods} onClose={() => setDialog(null)} /> : null}
-    {dialog === 'assign' ? <Modal label="Assign contacts" onClose={() => setDialog(null)} className="max-w-md">
-      <div className="space-y-4 p-5">
-        <h2 className="text-base font-semibold text-ink-900">Assign {selected.size === 1 ? rows.find((r) => r.id === ids[0])?.name ?? 'this contact' : `${selected.size} contacts`}</h2>
-        <label className="block text-xs text-ink-500">To<select className="mt-1 w-full" value={assignTo} onChange={(e) => setAssignTo(e.target.value)}><option value="">Choose a rep</option><option value="release">Nobody: let {selected.size === 1 ? 'it' : 'them'} go</option>{owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
-        <p className="text-[13px] text-ink-700">{assignTo === 'release' ? 'A contact with an open next step or a running campaign is not let go: give it to someone instead.' : `Their open next steps and running campaigns go to ${target?.name ?? 'the new owner'} too.`}</p>
-        <div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={() => setDialog(null)}>Cancel</button><button type="button" className="btn-primary" disabled={!assignTo || pending} onClick={() => { setDialog(null); run(assignContactsAction, { userId: assignTo === 'release' ? '' : assignTo, ...seenOwners }); }}>{assignTo === 'release' ? 'Let go' : 'Assign'}</button></div>
-      </div>
-    </Modal> : null}
+    {dialog === 'assign' ? <ConfirmDialog
+      title={`Assign ${selected.size === 1 ? rows.find((r) => r.id === ids[0])?.name ?? 'this contact' : `${selected.size} contacts`}`}
+      effects={[assignTo === 'release' ? 'A contact with an open next step or a running campaign is not let go: give it to someone instead.' : `Their open next steps and running campaigns go to ${target?.name ?? 'the new owner'} too.`]}
+      confirmLabel={assignTo === 'release' ? 'Let go' : 'Assign'}
+      confirmDisabled={!assignTo}
+      pending={pending}
+      onCancel={() => setDialog(null)}
+      onConfirm={() => { setDialog(null); void run(assignContactsAction, { userId: assignTo === 'release' ? '' : assignTo, ...seenOwners }); }}
+    >
+      <label className="block text-xs text-ink-500">To<select className="mt-1 w-full" value={assignTo} onChange={(e) => setAssignTo(e.target.value)}><option value="">Choose a rep</option><option value="release">Nobody: let {selected.size === 1 ? 'it' : 'them'} go</option>{owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
+    </ConfirmDialog> : null}
     {dialog === 'campaign' ? <Modal label="Start a cold campaign" onClose={() => setDialog(null)} className="max-w-lg">
       <form className="space-y-3 p-5" onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); setDialog(null); run(startSandboxCampaignAction, Object.fromEntries([...fd.entries()].map(([k, v]) => [k, String(v)]))); }}>
         <h2 className="text-base font-semibold text-ink-900">Start a campaign with {selected.size}</h2>

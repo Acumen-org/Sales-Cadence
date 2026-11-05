@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { blockAccountAction, searchAccountsToBlock, unblockAccountAction } from '@/lib/actions/blocked-accounts';
 import { IconLock, IconSearch } from '@/components/icons';
 import { Card, Empty, EmptyState } from '@/components/ui';
+import { useConfirm } from '@/components/confirm-dialog';
 
 export type BlockedRow = { companyId: string; name: string; domain: string | null; reason: string | null; byName: string | null; at: string };
 
@@ -17,6 +18,7 @@ export function BlockedAccountsPanel({ rows }: { rows: BlockedRow[] }) {
   const [matches, setMatches] = useState<{ id: string; name: string; domain: string | null }[]>([]);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
+  const [ask, dialog] = useConfirm();
 
   useEffect(() => {
     let live = true;
@@ -57,6 +59,7 @@ export function BlockedAccountsPanel({ rows }: { rows: BlockedRow[] }) {
 
   return (
     <div className="space-y-3">
+      {dialog}
       <Card title="Block an account">
         <div className="space-y-3 p-4">
           <div className="flex flex-wrap items-center gap-2">
@@ -78,8 +81,8 @@ export function BlockedAccountsPanel({ rows }: { rows: BlockedRow[] }) {
                     type="button"
                     disabled={pending}
                     className="btn-secondary btn-sm !border-red-200 !text-red-700 hover:!bg-red-50"
-                    onClick={() => {
-                      if (!window.confirm(`Block ${match.name}? It leaves Accounts, People, search and enrichment for everyone, and any sequence its people are in ends.`)) return;
+                    onClick={async () => {
+                      if (!(await ask({ title: `Block ${match.name}?`, effects: ['It leaves Accounts, People, search and enrichment for everyone.', 'Any sequence its people are in ends.'], confirmLabel: 'Block', tone: 'danger' }))) return;
                       run(blockAccountAction, { companyId: match.id, reason });
                     }}
                   >
@@ -125,8 +128,8 @@ export function BlockedAccountsPanel({ rows }: { rows: BlockedRow[] }) {
                         type="button"
                         disabled={pending}
                         className="btn-secondary btn-sm"
-                        onClick={() => {
-                          if (!window.confirm(`Put ${row.name} back in Cadence?`)) return;
+                        onClick={async () => {
+                          if (!(await ask({ title: `Put ${row.name} back in Cadence?`, effects: ['It shows again in Accounts, People, search and enrichment.'], confirmLabel: 'Unblock' }))) return;
                           run(unblockAccountAction, { companyId: row.companyId });
                         }}
                       >

@@ -5,6 +5,7 @@ import clsx from 'clsx';
 import { callHref, opensDialpad } from '@/lib/calls';
 import { recordCallIntentAction } from '@/lib/actions/call-forms';
 import { IconPhone } from '@/components/icons';
+import { useConfirm } from '@/components/confirm-dialog';
 
 type Props = {
   phone: string;
@@ -32,6 +33,7 @@ type Props = {
 export function CallButton({ phone, template, taskId, nextActionId, personId, sandboxContactId, blocked, warning, className = 'btn-primary', label = 'Call' }: Props) {
   const [refused, setRefused] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [ask, dialog] = useConfirm();
   if (blocked) return <button type="button" className={clsx(className, 'cursor-not-allowed opacity-60')} disabled title={blocked} aria-label={`${label}: ${blocked}`}><IconPhone size={15} />{label}</button>;
   const dialpad = opensDialpad(template);
   const href = callHref(phone, template);
@@ -43,9 +45,9 @@ export function CallButton({ phone, template, taskId, nextActionId, personId, sa
       rel={dialpad ? 'noreferrer' : undefined}
       className={clsx(className, busy && 'pointer-events-none opacity-70')}
       aria-busy={busy}
-      onClick={(event) => {
+      onClick={async (event) => {
         event.preventDefault();
-        if (warning && !window.confirm(`${warning} Call anyway?`)) return;
+        if (warning && !(await ask({ title: 'Call anyway?', body: warning, confirmLabel: 'Call' }))) return;
         const tab = dialpad ? window.open('about:blank', '_blank') : null;
         setBusy(true);
         setRefused(null);
@@ -56,7 +58,7 @@ export function CallButton({ phone, template, taskId, nextActionId, personId, sa
             let r = await recordCallIntentAction({ ...input, confirmed: Boolean(warning) });
             // A question asked once (a number marked wrong, calling hours set to warn).
             if (r.ok && (r.data as { confirm?: boolean } | undefined)?.confirm) {
-              if (!window.confirm(r.message ?? 'Call anyway?')) { tab?.close(); return; }
+              if (!(await ask({ title: 'Call anyway?', body: r.message ?? '', confirmLabel: 'Call' }))) { tab?.close(); return; }
               r = await recordCallIntentAction({ ...input, confirmed: true });
             }
             if (!r.ok) { tab?.close(); setRefused(r.error); return; }
@@ -71,5 +73,6 @@ export function CallButton({ phone, template, taskId, nextActionId, personId, sa
       }}
     ><IconPhone size={15} />{label}</a>
     {refused ? <span role="alert" className="max-w-xs text-[12px] text-red-700">{refused}</span> : null}
+    {dialog}
   </span>;
 }

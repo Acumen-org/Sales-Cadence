@@ -41,7 +41,7 @@ export async function recordCallIntentAction(input: { phone: string; taskId?: st
     const check = await contactability(ref, { act: 'call', channel: 'CALL', number: toNumber, user });
     if (!check.ok) return { ok: false, error: check.reason };
     const ask = [check.confirm, check.warning].filter(Boolean).join(' ');
-    if (ask && !input.confirmed) return { ok: true, message: `${ask} Call anyway?`, data: { confirm: true } };
+    if (ask && !input.confirmed) return { ok: true, message: ask, data: { confirm: true } };
   } else if (isBizOps(user)) {
     return { ok: false, error: 'Biz Ops can view calls but cannot make them from Cadence.' };
   }

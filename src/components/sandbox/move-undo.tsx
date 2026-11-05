@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import clsx from 'clsx';
-import { Modal } from '@/components/modal';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Notice } from '@/components/ui';
 import { undoMoveAction } from '@/lib/actions/sandbox-move';
 
@@ -42,20 +42,19 @@ export function UndoMoveButton({ itemIds, label = 'Undo', confirm, campaigns = [
   return <span className="inline-flex flex-wrap items-center gap-2">
     <button type="button" className="btn-secondary btn-sm" disabled={pending || !itemIds.length} onClick={() => { setResult(null); setOpen(true); }}>{finishing ? 'Finish undo' : label}</button>
     {result ? <span role="status" className={clsx('text-[12px]', result.ok ? 'text-emerald-700' : 'text-amber-800')}>{result.text}</span> : null}
-    {open ? <Modal label={finishing ? 'Finish the undo' : 'Undo the move'} onClose={() => setOpen(false)} className="max-w-md">
-      <div className="space-y-4 p-5">
-        <h2 className="text-base font-semibold text-ink-900">{finishing ? 'Finish the undo?' : itemIds.length > 1 ? `Undo ${itemIds.length} moves?` : 'Undo this move?'}</h2>
-        <p className="text-[13px] text-ink-700">{finishing ? 'Cadence tries again to take off what is still in the CRM.' : confirm}</p>
-        {!finishing && campaigns.length ? <fieldset className="space-y-1.5">
-          <legend className="text-[12px] text-ink-500">The move ended {campaigns.length === 1 ? 'this campaign' : 'these campaigns'}:</legend>
-          {campaigns.map((c) => <label key={c.enrollmentId} className="flex items-center gap-2 text-[13px] text-ink-800"><input type="checkbox" checked={restore.has(c.enrollmentId)} onChange={() => { const next = new Set(restore); if (next.has(c.enrollmentId)) next.delete(c.enrollmentId); else next.add(c.enrollmentId); setRestore(next); }} />Put back in {c.name}</label>)}
-        </fieldset> : null}
-        {!finishing ? <Notice tone="info">The contact&apos;s own next step comes back. Nothing restarts unless you tick it.</Notice> : null}
-        <div className="flex justify-end gap-2">
-          <button type="button" className="btn-secondary" onClick={() => setOpen(false)}>Cancel</button>
-          <button type="button" className="btn-primary" disabled={pending} onClick={run}>{pending ? 'Undoing' : finishing ? 'Finish undo' : itemIds.length > 1 ? `Undo ${itemIds.length}` : 'Undo'}</button>
-        </div>
-      </div>
-    </Modal> : null}
+    {open ? <ConfirmDialog
+      title={finishing ? 'Finish the undo?' : itemIds.length > 1 ? `Undo ${itemIds.length} moves?` : 'Undo this move?'}
+      body={finishing ? 'Cadence tries again to take off what is still in the CRM.' : confirm}
+      confirmLabel={finishing ? 'Finish undo' : itemIds.length > 1 ? `Undo ${itemIds.length}` : 'Undo'}
+      pending={pending}
+      onCancel={() => setOpen(false)}
+      onConfirm={run}
+    >
+      {!finishing && campaigns.length ? <fieldset className="space-y-1.5">
+        <legend className="text-[12px] text-ink-500">The move ended {campaigns.length === 1 ? 'this campaign' : 'these campaigns'}:</legend>
+        {campaigns.map((c) => <label key={c.enrollmentId} className="flex items-center gap-2 text-[13px] text-ink-800"><input type="checkbox" checked={restore.has(c.enrollmentId)} onChange={() => { const next = new Set(restore); if (next.has(c.enrollmentId)) next.delete(c.enrollmentId); else next.add(c.enrollmentId); setRestore(next); }} />Put back in {c.name}</label>)}
+      </fieldset> : null}
+      {!finishing ? <Notice tone="info">The contact&apos;s own next step comes back. Nothing restarts unless you tick it.</Notice> : null}
+    </ConfirmDialog> : null}
   </span>;
 }

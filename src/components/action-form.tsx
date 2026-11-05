@@ -4,6 +4,7 @@ import { useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import clsx from 'clsx';
 import type { ActionResult } from '@/lib/actions/users';
+import { useConfirm, type ConfirmOptions } from '@/components/confirm-dialog';
 
 type Props = {
   action: (formData: FormData) => Promise<ActionResult>;
@@ -11,7 +12,8 @@ type Props = {
   className?: string;
   /** Reset the form fields after a successful submit. */
   resetOnSuccess?: boolean;
-  confirm?: string;
+  /** Asked first, in the one ConfirmDialog; a reason it asks for is sent as `reason`. */
+  confirm?: string | ConfirmOptions;
   onSuccess?: (r: Extract<ActionResult, { ok: true }>) => void;
 };
 
@@ -22,14 +24,19 @@ type Props = {
 export function ActionForm({ action, children, className, resetOnSuccess, confirm, onSuccess }: Props) {
   const [pending, start] = useTransition();
   const [result, setResult] = useState<ActionResult | null>(null);
+  const [ask, dialog] = useConfirm();
   return (
     <form
       className={clsx(pending && 'opacity-70')}
-      onSubmit={(e) => {
+      onSubmit={async (e) => {
         e.preventDefault();
-        if (confirm && !window.confirm(confirm)) return;
         const form = e.currentTarget;
         const fd = new FormData(form);
+        if (confirm) {
+          const answer = await ask(confirm);
+          if (!answer) return;
+          if (answer.reason) fd.set('reason', answer.reason);
+        }
         start(async () => {
           try {
             const r = await action(fd);
@@ -59,6 +66,7 @@ export function ActionForm({ action, children, className, resetOnSuccess, confir
           ) : null}
         </div>
       </fieldset>
+      {dialog}
     </form>
   );
 }
@@ -77,7 +85,8 @@ export function ActionButton({
   payload: Record<string, string>;
   children: ReactNode;
   className?: string;
-  confirm?: string;
+  /** Asked first, in the one ConfirmDialog; a reason it asks for is sent as `reason`. */
+  confirm?: string | ConfirmOptions;
   title?: string;
   /** Re-read the page after it worked, for a page whose answer to the action can arrive late. */
   refresh?: boolean;
@@ -85,6 +94,7 @@ export function ActionButton({
   const [pending, start] = useTransition();
   const [result, setResult] = useState<ActionResult | null>(null);
   const router = useRouter();
+  const [ask, dialog] = useConfirm();
   return (
     <span className="inline-flex flex-col items-start">
       <button
@@ -92,10 +102,14 @@ export function ActionButton({
         title={title}
         className={className}
         disabled={pending}
-        onClick={() => {
-          if (confirm && !window.confirm(confirm)) return;
+        onClick={async () => {
           const fd = new FormData();
           for (const [k, v] of Object.entries(payload)) fd.set(k, v);
+          if (confirm) {
+            const answer = await ask(confirm);
+            if (!answer) return;
+            if (answer.reason) fd.set('reason', answer.reason);
+          }
           start(async () => {
             try {
               const r = await action(fd);
@@ -113,6 +127,7 @@ export function ActionButton({
         {children}
       </button>
       {result ? <span role="status" className={clsx('mt-1 text-xs', result.ok ? 'text-brand-700' : 'text-red-700')}>{result.ok ? result.message ?? 'Done.' : result.error}</span> : null}
+      {dialog}
     </span>
   );
 }

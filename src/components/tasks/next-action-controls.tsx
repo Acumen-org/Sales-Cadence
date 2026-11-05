@@ -6,6 +6,7 @@ import clsx from 'clsx';
 import { completeNextActionAction, moveNextActionAction, stopNextActionAction } from '@/lib/actions/next-actions';
 import type { ActionResult } from '@/lib/actions/users';
 import { IconCheck, IconClock, IconClose } from '@/components/icons';
+import { useConfirm } from '@/components/confirm-dialog';
 
 /** Done, Snooze and Stop for a next action in Tasks; each goes on to the next item with its result. */
 export function NextActionControls({ id, nextUrl, nextWorkingDay, repeats, dueDate }: { id: string; nextUrl: string; nextWorkingDay: string; repeats: boolean; /** The occurrence on screen: Done in a stale tab must not use up the next one. */ dueDate?: string }) {
@@ -14,6 +15,7 @@ export function NextActionControls({ id, nextUrl, nextWorkingDay, repeats, dueDa
   const [panel, setPanel] = useState<'none' | 'snooze'>('none');
   const [date, setDate] = useState(nextWorkingDay);
   const [error, setError] = useState<string | null>(null);
+  const [ask, dialog] = useConfirm();
 
   const run = (fn: (fd: FormData) => Promise<ActionResult>, extra: Record<string, string> = {}) =>
     start(async () => {
@@ -40,8 +42,9 @@ export function NextActionControls({ id, nextUrl, nextWorkingDay, repeats, dueDa
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" disabled={pending} className={primary} onClick={() => run(completeNextActionAction, dueDate ? { dueDate } : {})}><IconCheck size={16} /> Done</button>
         <button type="button" disabled={pending} className={clsx(secondary, panel === 'snooze' && 'border-ink-300 bg-canvas')} onClick={() => setPanel((p) => (p === 'snooze' ? 'none' : 'snooze'))}><IconClock size={16} /> Snooze</button>
-        <button type="button" disabled={pending} className="btn-ghost" onClick={() => { if (window.confirm(repeats ? 'Stop this task? It stops repeating and is cleared in Twenty.' : 'Stop this task? It is cleared in Twenty.')) run(stopNextActionAction); }}><IconClose size={15} /> Stop</button>
+        <button type="button" disabled={pending} className="btn-ghost" onClick={async () => { if (await ask({ title: 'Stop this task?', effects: [repeats ? 'It stops repeating.' : 'It closes without being done.', 'It is cleared in the CRM too.'], confirmLabel: 'Stop' })) run(stopNextActionAction); }}><IconClose size={15} /> Stop</button>
       </div>
+      {dialog}
       {panel === 'snooze' ? (
         <form className="mt-3 flex flex-wrap items-end gap-2 rounded-xl border border-line bg-canvas/60 p-3" onSubmit={(e) => { e.preventDefault(); run(moveNextActionAction, { dueDate: date }); }}>
           <label className="space-y-1"><span className="block text-[12px] font-medium text-ink-600">Snooze until</span><input type="date" min={nextWorkingDay} value={date} onChange={(e) => setDate(e.target.value)} className="!w-auto" /></label>
