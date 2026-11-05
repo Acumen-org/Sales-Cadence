@@ -20,3 +20,17 @@ export const OPT_OUT_OUTCOME = 'do_not_contact';
 export function callOutcomes(rules: Pick<RulesSettings, 'callDispositions'>): RulesSettings['callDispositions'] {
   return [...rules.callDispositions, ...EXTRA_CALL_OUTCOMES.filter((x) => !rules.callDispositions.some((d) => d.key === x.key))];
 }
+
+/**
+ * What the CRM's quick Log call in Tasks offers (Done, its keys, bulk): Settings > Rules' outcomes only,
+ * exactly as before (owner, 5 November 2026: "CRM Log call stays as it is"). The form's extras are the
+ * post-call form's; a quick Log call never opts anyone out by one more chip.
+ */
+export function logCallOutcomes(rules: Pick<RulesSettings, 'callDispositions'>): RulesSettings['callDispositions'] {
+  return rules.callDispositions;
+}
+
+/** How an outcome reads wherever one is shown (N055): from the one list, so a form outcome is never a raw key. */
+export function outcomeLabel(rules: Pick<RulesSettings, 'callDispositions'>, key: string): string {
+  return callOutcomes(rules).find((d) => d.key === key)?.label ?? key;
+}

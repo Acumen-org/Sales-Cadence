@@ -25,7 +25,7 @@ import { addCallContactAction, assignCallRepAction, chooseCallContactAction, imp
 import { completeNextActionAction } from '@/lib/actions/next-actions';
 import { formsWaiting } from '@/lib/calls/analytics';
 import { mayHearCall } from '@/lib/calls/access';
-import { callOutcomes } from '@/lib/call-outcomes';
+import { callOutcomes, logCallOutcomes, outcomeLabel } from '@/lib/call-outcomes';
 import { dispositionFor } from '@/lib/engine/outcomes';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 import { readyContact } from './helpers/sandbox';
@@ -547,6 +547,18 @@ describe('W4: calls and the post-call form', () => {
     const answered = callOutcomes(rules).filter((o) => o.answered).map((o) => o.key);
     expect(answered).toEqual(expect.arrayContaining(['connected', 'not_interested', 'meeting_booked', 'do_not_contact']));
     expect(dispositionFor(rules, 'not_interested')?.label).toBe('Not interested');
+  });
+
+  it('N055: CRM Log call offers only Settings > Rules outcomes; finished tasks still label form outcomes', () => {
+    // The owner's decision: CRM "Log call" stays as it is. Its picker is Settings > Rules', no more.
+    expect(logCallOutcomes(rules).map((o) => o.key)).toEqual(rules.callDispositions.map((d) => d.key));
+    expect(logCallOutcomes(rules).map((o) => o.key)).not.toEqual(expect.arrayContaining(['do_not_contact']));
+    expect(logCallOutcomes(rules).some((o) => ['not_interested', 'meeting_booked', 'do_not_contact', 'no_conversation'].includes(o.key))).toBe(false);
+    // A task the post-call form finished still reads in words, never as its key.
+    expect(outcomeLabel(rules, 'not_interested')).toBe('Not interested');
+    expect(outcomeLabel(rules, 'do_not_contact')).toBe('Asked not to be contacted');
+    expect(outcomeLabel(rules, 'connected')).toBe('Connected');
+    expect(outcomeLabel(rules, 'made_up')).toBe('made_up');
   });
 
   it('N051: a call\'s notes, numbers and recording are for the rep, the owner and those who see Reports', () => {

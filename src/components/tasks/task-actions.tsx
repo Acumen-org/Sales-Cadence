@@ -111,6 +111,7 @@ export function TaskActions(p: Props) {
   const submitComplete = useCallback(
     async (chosen: ActionType, dispositionKey?: string) => {
       // N042: "Asked not to be contacted" opts the person out for good, so it asks first, naming what it does.
+      // The quick Log call offers only Settings > Rules' outcomes; this guards a rule set that ever holds that key.
       if (dispositionKey === 'do_not_contact' && !(await ask({ title: 'Asked not to be contacted?', effects: ['This person is opted out for good: Cadence never calls, emails or messages them again.', 'This sequence ends as Opted out.', 'The CRM marks them Do not contact and clears their Next Action.'], confirmLabel: 'Opt out', tone: 'danger' }))) return;
       const fd = new FormData();
       fd.set('taskId', p.taskId);
