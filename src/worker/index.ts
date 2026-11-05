@@ -38,10 +38,15 @@ let running=false;let lastSync=0;let lastPurge=0;let stopping=false;
  * does not repeat it and a missed day is picked up at the next tick after the hour.
  */
 let lastNightly:string|null=null;
-/** The day the last reconcile actually ran, from its own audit row, so a restart does not repeat it. */
+/**
+ * The day the nightly last finished, from its own marker (B214), so a restart does not repeat it.
+ * It used to read the reconcile's audit row, which the continuous sync also writes every minute, so
+ * the nightly never ran at all: no CRM check, no retention.
+ */
+const NIGHTLY_MARKER='nightlyRanOn';
 async function nightlyAlreadyRan(now:Date):Promise<boolean>{
- const row=await prisma.auditLog.findFirst({where:{entityType:'settings',entityId:'reconcile',action:'reconcile_ran'},orderBy:{createdAt:'desc'},select:{createdAt:true}});
- return Boolean(row&&todayIn(workspaceTimezone(),row.createdAt)===todayIn(workspaceTimezone(),now));
+ const row=await prisma.setting.findUnique({where:{key:NIGHTLY_MARKER}});
+ return (row?.value as {day?:string}|null)?.day===todayIn(workspaceTimezone(),now);
 }
 async function nightly(now:Date){
  const today=todayIn(workspaceTimezone(),now);
@@ -55,9 +60,12 @@ async function nightly(now:Date){
  try{const stats=await snapshotScorecard(now);log('enrichment scorecard snapshot',stats);}catch(error){log('enrichment scorecard snapshot failed',error);}
  // Sandbox contacts Twenty gained after the push: flagged, outreach stopped (crm-check.ts).
  try{const stats=await checkSandboxAgainstCrm({now});log('sandbox crm check',stats);}catch(error){log('sandbox crm check failed',error);}
- // The outreach sandbox: contacts nobody works, moved contacts past the one-year undo window, old push keys.
- try{const stats=await runSandboxRetention(now);if(stats.removed||stats.movedCleared||stats.optedOutCleared)log('sandbox retention',stats);}catch(error){log('sandbox retention failed',error);}
+ // Cold outreach retention, always on: contacts nobody works, moved contacts past the undo window, and
+ // the record of what it would remove in the next 30 days (Settings > Cold outreach).
+ try{const stats=await runSandboxRetention(now);log('sandbox retention',stats);}catch(error){log('sandbox retention failed',error);}
  try{const purged=await purgeOldPushes(now);if(purged)log('bellwether push keys forgotten',purged);}catch(error){log('push retention failed',error);}
+ const value={day:today,at:new Date().toISOString()};
+ await prisma.setting.upsert({where:{key:NIGHTLY_MARKER},create:{key:NIGHTLY_MARKER,value},update:{value}}).catch((error)=>log('nightly marker failed',error));
 }
 /**
  * Every 2 minutes: calls read from Twilio (read only), and the sales mailboxes read through Graph
