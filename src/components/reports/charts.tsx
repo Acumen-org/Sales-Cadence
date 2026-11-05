@@ -161,7 +161,7 @@ export function Donut({ slices, colour, total, centre }: { slices: Slice[]; colo
       <div className="rp-slices">
         {slices.map((s) => (
           <div key={s.key} className="rp-slice">
-            <span className="rp-key"><span className="rp-swatch" style={{ background: colour(s.key) }} />{s.label}</span>
+            <span className="rp-key" title={s.label}><span className="rp-swatch" style={{ background: colour(s.key) }} /><span className="rp-label">{s.label}</span></span>
             <span className="rp-num">{fmt(s.value)}</span>
             <span className="rp-num rp-muted">{pct(sum ? s.value / sum : 0)}</span>
           </div>

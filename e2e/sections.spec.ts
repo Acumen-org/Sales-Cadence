@@ -63,13 +63,16 @@ test('the team board reports this week, with a total row', async ({ page }) => {
   await expect(headers.nth(5)).toHaveText('Later this week');
   await expect(headers.nth(6)).toHaveText('Replies');
   await expect(headers.nth(7)).toHaveText('Meetings');
+  // Calls made and post-call forms still waiting (N046).
+  await expect(headers.nth(8)).toHaveText('Calls');
+  await expect(headers.nth(9)).toHaveText('Forms waiting');
   // Each FO's own week: done out of what the week holds, never a bar scaled to somebody else.
   await expect(page.locator('table tbody').getByText(/\d+ of \d+ done|Nothing planned/).first()).toBeVisible();
   await expect(page.getByText('In sequence')).toHaveCount(0);
   await expect(page.getByText(/\(7d\)/)).toHaveCount(0);
   // Everyone's totals, and a link into each person's tasks.
-  // Totals when more than one FO has work; everyone with nothing this week on one line.
-  await expect(page.locator('table tfoot')).toContainText(/Everyone|Nothing this week:/);
+  // Totals when more than one FO has work. Nobody is named for having nothing this week (B032).
+  await expect(page.getByText('Nothing this week:')).toHaveCount(0);
   await expect(page.getByRole('link', { name: /'s tasks$/ }).first()).toBeVisible();
   await logout(page);
 });

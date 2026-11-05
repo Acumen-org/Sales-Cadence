@@ -22,6 +22,9 @@ export const REPORT_DOCUMENT_STYLES = `
   .rp-aside { font-size: 12px; color: #6b7a74; }
   .rp-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 8px; font-size: 12px; color: #3c4a44; }
   .rp-key { display: inline-flex; align-items: center; gap: 7px; min-width: 0; white-space: nowrap; }
+  /* B185: in a narrow donut card a long label stops before its figures instead of running over them. */
+  .rp-slice .rp-key { overflow: hidden; }
+  .rp-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .rp-swatch { display: inline-block; flex-shrink: 0; width: 10px; height: 10px; border-radius: 3px; }
   .rp-svg { display: block; width: 100%; height: auto; overflow: visible; }
   .rp-col:hover rect, .rp-col:hover path { opacity: 0.86; }
