@@ -6,6 +6,7 @@ import { likeSafe, searchTerms } from '../search-terms';
 import { normalizeDomain, normalizeEmail, normalizeLinkedin, splitE164, toE164 } from '../sandbox/normalize';
 import type {
   PersonNextActionInput,
+  PersonDndInput,
   CreateNoteInput,
   CreateTaskInput,
   Page,
@@ -60,6 +61,8 @@ type Sel = string | { field: string; sub: string };
  * for 60 whatever the caller wanted; the pagination helper walks the rest.
  */
 const PAGE_SIZE = 60;
+/** Pages findPeople reads at most: a push asks for at most 20 contacts' keys at a time. */
+const FIND_PAGES = 5;
 /** Twenty allows 100 API requests a minute. A 429 is waited out, not treated as a failure. */
 const MAX_RATE_LIMIT_WAIT_MS = 30_000;
 
@@ -829,6 +832,20 @@ export class TwentyGraphqlClient implements TwentyClient {
     if (!result[`update${type}`]) throw new TwentyApiError('Twenty did not update the contact.');
   }
 
+  /**
+   * The person's Do not contact field. In this workspace dnd is a select, so setting it writes the
+   * first value the schema lists (DO_NOT_DISTURB) and clearing it writes null.
+   */
+  async setPersonDnd(id: string, patch: PersonDndInput): Promise<void> {
+    const fields = this.s.person;
+    const value = patch.dnd ? patch.reason ?? this.s.personValues.dnd[0] ?? 'DO_NOT_DISTURB' : null;
+    const data: Raw = { [fields.dnd]: value };
+    const type = this.s.objects.person.typeName;
+    await this.assertWritableFields(type, data);
+    const result = await this.request<Record<string, Raw>>(`mutation SetDnd($id: UUID!, $data: ${type}UpdateInput!) { update${type}(id: $id, data: $data) { id } }`, { id, data });
+    if (!result[`update${type}`]) throw new TwentyApiError('Twenty did not update the contact.');
+  }
+
   async enrichCompany(id: string, patch: EnrichCompanyInput, current?: TwentyCompany): Promise<TwentyCompany> {
     const company = current ?? (await this.listCompanies({ ids: [id], limit: 1 })).items[0];
     if (!company || company.deletedAt) throw new TwentyApiError('This account no longer exists in Twenty.');
@@ -879,8 +896,33 @@ export class TwentyGraphqlClient implements TwentyClient {
     ];
     if (!or.length) return [];
     const sel = await this.personSelection();
-    const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.person.plural, type, sel), { filter: { or }, first: PAGE_SIZE, after: null });
-    const found = this.page(data[this.s.objects.person.plural], (n) => normalizePerson(n, this.s)).items;
+    // B073: past the first page, and a second look at additional emails and the additional number.
+    // That look is its own request, so a workspace that refuses the filter still answers the first.
+    const all = async (filter: Raw[]) => {
+      const out: TwentyPerson[] = [];
+      let after: string | null = null;
+      for (let i = 0; i < FIND_PAGES; i++) {
+        const data: Record<string, Connection> = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.person.plural, type, sel), { filter: { or: filter }, first: PAGE_SIZE, after });
+        const page = this.page(data[this.s.objects.person.plural], (n) => normalizePerson(n, this.s));
+        out.push(...page.items);
+        if (!page.hasNextPage || !page.endCursor) break;
+        after = page.endCursor;
+      }
+      return out;
+    };
+    const found = await all(or);
+    const extra: Raw[] = [
+      ...emails.map((email) => ({ [p.emails]: { additionalEmails: { like: `%${likeSafe(email)}%` } } })),
+      ...(!available || available.has(p.additionalNumber) ? phones.map((n) => ({ [p.additionalNumber]: { primaryPhoneNumber: { ilike: `%${n.slice(-7)}%` } } })) : []),
+    ];
+    if (extra.length) {
+      try {
+        const seen = new Set(found.map((x) => x.id));
+        for (const x of await all(extra)) if (!seen.has(x.id)) found.push(x);
+      } catch (err) {
+        console.warn('[twenty] additional emails and numbers could not be searched; primary ones were', err instanceof Error ? err.message : err);
+      }
+    }
     const emailSet = new Set(emails), phoneSet = new Set(phones), linkSet = new Set(links);
     return found.filter((person) => !person.deletedAt && (
       [person.email, ...person.additionalEmails].some((e) => emailSet.has(normalizeEmail(e) ?? ''))

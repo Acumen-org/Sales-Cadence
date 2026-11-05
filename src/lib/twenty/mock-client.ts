@@ -39,7 +39,7 @@ function datasetFor(kind: MockDataset) {
     podOptions: DEMO_POD_OPTIONS,
   };
 }
-import type { PersonNextActionInput, TwentyCalendarEvent, TwentyCalendarParticipant } from './types';
+import type { PersonDndInput, PersonNextActionInput, TwentyCalendarEvent, TwentyCalendarParticipant } from './types';
 import type {
   CreateNoteInput,
   CreateTaskInput,
@@ -76,6 +76,7 @@ export type MockWrite =
   | { op: 'enrichPerson'; id: string; patch: EnrichPersonInput }
   | { op: 'enrichCompany'; id: string; patch: EnrichCompanyInput }
   | { op: 'setPersonNextAction'; id: string; patch: PersonNextActionInput }
+  | { op: 'setPersonDnd'; id: string; patch: PersonDndInput }
   | { op: 'deleteTask'; id: string }
   | { op: 'createPerson'; id: string; input: CreatePersonInput }
   | { op: 'createCompany'; id: string; input: CreateCompanyInput }
@@ -614,6 +615,14 @@ export class MockTwentyClient implements TwentyClient {
     if (!person) throw new Error('This contact no longer exists in Twenty.');
     Object.assign(person, patch, { updatedAt: new Date().toISOString() });
     this.writes.push({ op: 'setPersonNextAction', id, patch: clone(patch) });
+  }
+
+  async setPersonDnd(id: string, patch: PersonDndInput) {
+    this.maybeFail();
+    const person = this.people.find((item) => item.id === id && !item.deletedAt);
+    if (!person) throw new Error('This contact no longer exists in Twenty.');
+    Object.assign(person, { dnd: patch.dnd, dndReason: patch.dnd ? patch.reason ?? 'DO_NOT_DISTURB' : null, updatedAt: new Date().toISOString() });
+    this.writes.push({ op: 'setPersonDnd', id, patch: clone(patch) });
   }
 
   async enrichCompany(id: string, patch: EnrichCompanyInput) {

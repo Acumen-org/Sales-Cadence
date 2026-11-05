@@ -6,7 +6,7 @@ import type { TwentyClient } from './client';
 import { TwentyGraphqlClient } from './graphql-client';
 import { getMockTwentyClient } from './mock-client';
 import { mockStoreEnabled, sharedMock } from './mock-store';
-import type { CreateNoteInput, UpdateNoteInput, TwentyMeetingSchema, TwentyMeetingRecordInput, TwentyTagField, CreateTaskInput, UpdateTaskInput, EnrichPersonInput, PersonNextActionInput, EnrichCompanyInput, TwentyPerson, TwentyCompany, CreatePersonInput, CreateCompanyInput } from './types';
+import type { CreateNoteInput, UpdateNoteInput, TwentyMeetingSchema, TwentyMeetingRecordInput, TwentyTagField, CreateTaskInput, UpdateTaskInput, EnrichPersonInput, PersonNextActionInput, PersonDndInput, EnrichCompanyInput, TwentyPerson, TwentyCompany, CreatePersonInput, CreateCompanyInput } from './types';
 import { blankPerson } from './mock-client';
 
 /**
@@ -96,6 +96,9 @@ export class DryRunTwentyClient implements TwentyClient {
   }
   async setPersonNextAction(id: string, patch: PersonNextActionInput) {
     await this.record('setPersonNextAction', 'person', { id, ...patch }, id);
+  }
+  async setPersonDnd(id: string, patch: PersonDndInput) {
+    await this.record('setPersonDnd', 'person', { id, ...patch }, id);
   }
   findPeople: TwentyClient['findPeople'] = (q) => this.inner.findPeople(q);
   findCompanies: TwentyClient['findCompanies'] = (q) => this.inner.findCompanies(q);

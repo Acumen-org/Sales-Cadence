@@ -330,6 +330,11 @@ export type UpdateTaskInput = {
 /** A person's Next Action and its due date (YYYY-MM-DD); null clears the field in Twenty. */
 export type PersonNextActionInput = { nextAction: string | null; nextActionDueDate: string | null };
 /**
+ * The person's own Do not contact field (dnd): set when Cadence opts a CRM person out, cleared only
+ * when Cadence lifts an opt-out it set itself (D6, D4). `reason` is the select value to write.
+ */
+export type PersonDndInput = { dnd: boolean; reason?: string | null };
+/**
  * A person Move to CRM creates (docs/outreach-sandbox-plan.md 8.2): the fields set once, when
  * Cadence creates the record. Cadence never edits a person it did not create.
  */

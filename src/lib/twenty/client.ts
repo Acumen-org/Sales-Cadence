@@ -1,5 +1,6 @@
 import type {
   PersonNextActionInput,
+  PersonDndInput,
   CreateNoteInput,
   CreateTaskInput,
   Page,
@@ -103,6 +104,8 @@ export interface TwentyClient {
   enrichCompany(id: string, patch: EnrichCompanyInput, current?: TwentyCompany): Promise<TwentyCompany>;
   /** A person's Next Action and Next Action Due Date, kept in step with Cadence's next action. */
   setPersonNextAction(id: string, patch: PersonNextActionInput): Promise<void>;
+  /** The person's Do not contact field (D6): every opt-out of a CRM person sets it. */
+  setPersonDnd(id: string, patch: PersonDndInput): Promise<void>;
 
   // ---- Move to CRM: the only records Cadence creates, and the only ones undo may delete ----
   /** Live people matching any email, phone (E.164), LinkedIn profile or sandbox id given. */

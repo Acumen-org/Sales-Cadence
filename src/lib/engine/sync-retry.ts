@@ -105,6 +105,17 @@ async function replay(client: TwentyClient, row: TwentyWrite): Promise<string | 
       await client.deleteNote(id);
       return id;
     }
+    case 'setPersonDnd': {
+      // An opt-out's Do not contact (D6), written again until Twenty takes it.
+      const { id, dnd, reason } = payload as { id: string; dnd: boolean; reason?: string | null };
+      await client.setPersonDnd(id, { dnd, reason: reason ?? null });
+      return id;
+    }
+    case 'setPersonNextAction': {
+      const { id, nextAction, nextActionDueDate } = payload as { id: string; nextAction: string | null; nextActionDueDate: string | null };
+      await client.setPersonNextAction(id, { nextAction, nextActionDueDate });
+      return id;
+    }
     case 'deleteTask': {
       const id = String(payload.id);
       await client.deleteTask(id);

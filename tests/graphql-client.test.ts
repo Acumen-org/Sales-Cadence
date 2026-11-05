@@ -285,6 +285,38 @@ describe('TwentyGraphqlClient', () => {
     expect(call.variables.orderBy).toEqual([{ startsAt: 'AscNullsLast' }]);
   });
 
+  it('B073: findPeople reads past the first page and also asks for additional emails and the additional number', async () => {
+    const second = { ...rawPerson, id: 'p-2', emails: { primaryEmail: 'other@acme.example', additionalEmails: ['Jane.Extra@Acme.example'] } };
+    const { client, calls } = fakeClient((call) => {
+      if (!call.query.includes('people(')) throw new Error(`unexpected ${call.query}`);
+      const filter = JSON.stringify(call.variables.filter);
+      if (filter.includes('additionalEmails')) return { data: { people: { edges: [{ node: second }], pageInfo: { hasNextPage: false, endCursor: null } } } };
+      return call.variables.after
+        ? { data: { people: { edges: [{ node: { ...rawPerson, id: 'p-3', emails: { primaryEmail: 'jane.extra@acme.example' } } }], pageInfo: { hasNextPage: false, endCursor: null } } } }
+        : { data: { people: { edges: [{ node: rawPerson }], pageInfo: { hasNextPage: true, endCursor: 'c1' } } } };
+    }, { fieldsWith: ['additionalNumber'] });
+    const found = await client.findPeople({ emails: ['jane.extra@acme.example'], phones: ['+447946100100'] });
+    expect(found.map((p) => p.id).sort()).toEqual(['p-2', 'p-3']);
+    const extra = calls.find((c) => JSON.stringify(c.variables.filter ?? {}).includes('additionalEmails'))!;
+    expect(JSON.stringify(extra.variables.filter)).toContain('additionalNumber');
+  });
+
+  it('B073: a workspace that refuses the additional-emails filter still answers on the primary ones', async () => {
+    const { client } = fakeClient((call) => {
+      if (JSON.stringify(call.variables.filter).includes('additionalEmails')) return { errors: [{ message: 'Unknown filter' }] };
+      return { data: { people: { edges: [{ node: rawPerson }], pageInfo: { hasNextPage: false, endCursor: null } } } };
+    });
+    expect((await client.findPeople({ emails: ['nina@acme.example'] })).map((p) => p.id)).toEqual(['p-1']);
+  });
+
+  it('D6: setPersonDnd writes the dnd select (and clears it) on the person', async () => {
+    const { client, calls } = fakeClient(() => ({ data: { updatePerson: { id: 'p-1' } } }));
+    await client.setPersonDnd('p-1', { dnd: true });
+    await client.setPersonDnd('p-1', { dnd: false });
+    const writes = calls.filter((c) => c.query.includes('updatePerson('));
+    expect(writes.map((c) => c.variables)).toEqual([{ id: 'p-1', data: { dnd: 'DO_NOT_DISTURB' } }, { id: 'p-1', data: { dnd: null } }]);
+  });
+
   it('uses the default schema object names', () => {
     expect(defaultTwentySchema.objects.person.plural).toBe('people');
     expect(defaultTwentySchema.objects.noteTarget.typeName).toBe('NoteTarget');
