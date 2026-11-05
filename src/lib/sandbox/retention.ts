@@ -143,8 +143,12 @@ async function warnOwners(items: RetentionItem[], now: Date) {
   for (const i of items) if (i.ownerId && i.dueOn <= soon) byOwner.set(i.ownerId, [...(byOwner.get(i.ownerId) ?? []), i]);
   await prisma.notification.deleteMany({ where: { kind: 'retention_warning', readAt: null, ...(byOwner.size ? { userId: { notIn: [...byOwner.keys()] } } : {}) } });
   for (const [userId, list] of byOwner) {
+    const payload = { count: list.length, firstDueOn: list[0].dueOn, contactIds: list.slice(0, 50).map((i) => i.id) };
+    // The same warning the owner has already had (read or not) rings the bell once, not every night.
+    const last = (await prisma.notification.findFirst({ where: { userId, kind: 'retention_warning' }, orderBy: { createdAt: 'desc' }, select: { payload: true } }))?.payload as typeof payload | undefined;
+    if (last && last.count === payload.count && last.firstDueOn === payload.firstDueOn && JSON.stringify(last.contactIds) === JSON.stringify(payload.contactIds)) continue;
     await prisma.notification.deleteMany({ where: { userId, kind: 'retention_warning', readAt: null } });
-    await prisma.notification.create({ data: { userId, kind: 'retention_warning', payload: { count: list.length, firstDueOn: list[0].dueOn, contactIds: list.slice(0, 50).map((i) => i.id) } } });
+    await prisma.notification.create({ data: { userId, kind: 'retention_warning', payload } });
   }
 }
 
