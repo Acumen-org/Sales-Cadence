@@ -172,22 +172,61 @@ async function SignInTab() {
   const passwords = !methods.password ? `Off since ${formatInstant(new Date(signIn.passwordRetiredAt!), workspaceTimezone())}` : methods.microsoft && !signIn.passwordRetiredAt ? 'On until the first Microsoft sign-in' : 'On';
   const [recordings, transcripts] = methods.microsoft ? await Promise.all([sharePointPlayerStatus(), teamsTranscriptStatus()]) : [null, null];
   const mail = await graphMailState();
+  const tz = workspaceTimezone();
+  const read = mail.mailboxes.filter((m) => m.folders.some((f) => f.state !== 'not_started')).length;
   return (
-    <Card title="Microsoft sign-in">
-      <div className="p-4">
-        <KeyValue items={[
-          { k: 'Microsoft', v: methods.microsoft ? <Badge tone="green">On</Badge> : <Badge>Off</Badge> },
-          { k: 'Passwords', v: passwords },
-          { k: 'Redirect URI', v: <code className="text-[12px]">{microsoftRedirectUri()}</code> },
-          ...(recordings ? [{ k: 'SharePoint recordings', v: recordings.plays ? <Badge tone="green">Play in Cadence</Badge> : <span className="flex flex-wrap items-center gap-2"><Badge>Open in SharePoint</Badge><span className="text-[12.5px] text-ink-600">{recordings.why}</span></span> }] : []),
-          ...(transcripts ? [{ k: 'Teams transcripts', v: transcripts.fetches ? <Badge tone="green">Fetched automatically</Badge> : <span className="flex flex-wrap items-center gap-2"><Badge>Pasted by hand</Badge><span className="text-[12.5px] text-ink-600">{transcripts.why}</span></span> }] : []),
-          { k: 'Sales mailboxes (Mail.Read)', v: !mail.enabled ? <Badge>Off</Badge> : mail.refusal ? <span className="flex flex-wrap items-center gap-2"><Badge tone="amber">Refused</Badge><span className="text-[12.5px] text-ink-600">{mail.refusal}</span></span> : mail.lastRunAt ? <span className="flex items-center gap-2"><Badge tone="green">Read</Badge><span className="text-[12.5px] text-ink-600">{mail.mailboxes} mailboxes · {formatInstant(mail.lastRunAt, workspaceTimezone())}</span></span> : <Badge>Waiting for the first run</Badge> },
-          ...(fromServer ? [{ k: 'Set by', v: 'The server' }] : []),
-        ]} />
-      </div>
-      {fromServer ? null : <SignInForm clientId={signIn.microsoftClientId} tenantId={signIn.microsoftTenantId} hasSecret={Boolean(signIn.microsoftClientSecret)} />}
-    </Card>
+    <div className="space-y-3">
+      <Card title="Microsoft sign-in">
+        <div className="p-4">
+          <KeyValue items={[
+            { k: 'Microsoft', v: methods.microsoft ? <Badge tone="green">On</Badge> : <Badge>Off</Badge> },
+            { k: 'Passwords', v: passwords },
+            { k: 'Redirect URI', v: <code className="text-[12px]">{microsoftRedirectUri()}</code> },
+            ...(recordings ? [{ k: 'SharePoint recordings', v: recordings.plays ? <Badge tone="green">Play in Cadence</Badge> : <span className="flex flex-wrap items-center gap-2"><Badge>Open in SharePoint</Badge><span className="text-[12.5px] text-ink-600">{recordings.why}</span></span> }] : []),
+            ...(transcripts ? [{ k: 'Teams transcripts', v: transcripts.fetches ? <Badge tone="green">Fetched automatically</Badge> : <span className="flex flex-wrap items-center gap-2"><Badge>Pasted by hand</Badge><span className="text-[12.5px] text-ink-600">{transcripts.why}</span></span> }] : []),
+            // N088: why tracking is off; N015: amber when any mailbox fails, never a green "Read" over errors.
+            { k: 'Sales mailboxes (Mail.Read)', v: mail.why ? <span className="flex flex-wrap items-center gap-2"><Badge>Off</Badge><span className="text-[12.5px] text-ink-600">{mail.why} Email steps close only when a rep clicks Done.</span></span>
+              : mail.refusal ? <span className="flex flex-wrap items-center gap-2"><Badge tone="amber">Refused</Badge><span className="text-[12.5px] text-ink-600">{mail.refusal}</span></span>
+              : mail.failing ? <span className="flex flex-wrap items-center gap-2"><Badge tone="amber">{`${mail.failing} failing`}</Badge><span className="text-[12.5px] text-ink-600">{read} of {mail.mailboxes.length} mailboxes read{mail.lastRunAt ? ` · last run ${formatInstant(mail.lastRunAt, tz)}` : ''}. See Mail tracking below.</span></span>
+              : mail.lastRunAt ? <span className="flex flex-wrap items-center gap-2"><Badge tone="green">Read</Badge><span className="text-[12.5px] text-ink-600">{read} of {mail.mailboxes.length} mailboxes · {formatInstant(mail.lastRunAt, tz)}</span></span>
+              : <Badge>Waiting for the first run</Badge> },
+            ...(fromServer ? [{ k: 'Set by', v: 'The server' }] : []),
+          ]} />
+        </div>
+        {fromServer ? null : <SignInForm clientId={signIn.microsoftClientId} tenantId={signIn.microsoftTenantId} hasSecret={Boolean(signIn.microsoftClientSecret)} />}
+      </Card>
+      {mail.enabled ? <MailTrackingCard mail={mail} tz={tz} /> : null}
+    </div>
   );
+}
+
+const FOLDER_WORDS = { sentitems: 'Sent items', inbox: 'Inbox' } as const;
+
+/**
+ * Outlook tracking, mailbox by mailbox (N015, N088): each folder's state, its last good read and
+ * its last error, amber when one fails; and how many emails went to people who must not be
+ * contacted (N016).
+ */
+function MailTrackingCard({ mail, tz }: { mail: Awaited<ReturnType<typeof graphMailState>>; tz: string }) {
+  const folderWords = (f: Awaited<ReturnType<typeof graphMailState>>['mailboxes'][number]['folders'][number], signedIn: boolean) => {
+    if (f.state === 'not_started') return <span className="text-ink-500">{signedIn ? 'Not read yet' : 'Not signed in with Microsoft yet: not read'}</span>;
+    const good = f.lastSuccessAt ? `last read ${formatInstant(f.lastSuccessAt, tz)}` : 'never read';
+    if (f.state === 'failing') return <span className="flex flex-wrap items-center gap-1.5"><Badge tone="amber">Failing</Badge><span className="text-ink-600">since {formatInstant(f.errorAt, tz)} · {good}</span><span className="block w-full break-words text-[12px] text-amber-800">{f.error}</span></span>;
+    return <span className="flex flex-wrap items-center gap-1.5">{f.state === 'in_step' ? <Badge tone="green">Up to date</Badge> : <Badge tone="blue">Catching up</Badge>}<span className="text-ink-600">{good}</span>{f.resetAt ? <span className="block w-full text-[12px] text-ink-500">The sync link expired on {formatInstant(f.resetAt, tz)}; it was read again from the last good read.</span> : null}</span>;
+  };
+  return <Card title="Mail tracking" flush>
+    <p className="border-b border-line px-4 py-3 text-[13px] text-ink-600">
+      Cadence reads each sales mailbox&apos;s sent items and inbox from the day tracking started: who an email went to, its subject and time, never the message. An email to a cold contact closes its step; a reply stops the campaign.
+      {' '}{mail.emailsToDoNotContact ? <span className="font-medium text-red-700">{mail.emailsToDoNotContact === 1 ? '1 email' : `${mail.emailsToDoNotContact} emails`} went to people who must not be contacted in the last 30 days; the rep and their pod leaders were told.</span> : 'No email went to anyone who must not be contacted in the last 30 days.'}
+    </p>
+    {mail.mailboxes.length ? <table className="w-full text-[13px]">
+      <thead><tr className="border-b border-line text-left text-ink-500"><th className="px-4 py-2 font-normal">Mailbox</th><th className="px-4 py-2 font-normal">{FOLDER_WORDS.sentitems}</th><th className="px-4 py-2 font-normal">{FOLDER_WORDS.inbox}</th></tr></thead>
+      <tbody className="divide-y divide-line">{mail.mailboxes.map((m) => <tr key={m.userId} className={m.failing ? 'bg-amber-50/50' : undefined}>
+        <td className="px-4 py-2 align-top"><span className="text-ink-900">{m.name}</span><span className="block text-[12px] text-ink-500">{m.email}</span></td>
+        {m.folders.map((f) => <td key={f.folder} className="px-4 py-2 align-top">{folderWords(f, m.signedIn)}</td>)}
+      </tr>)}</tbody>
+    </table> : <p className="px-4 py-3 text-[13px] text-ink-500">No sales reps yet.</p>}
+  </Card>;
 }
 
 async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: boolean; hasEnvKey: boolean }) {

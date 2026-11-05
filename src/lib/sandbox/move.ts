@@ -422,7 +422,7 @@ export function personInput(c: MoveContact, companyId: string | null, settings: 
     additionalPhone: extra[0]?.number ?? null, linkedinUrl: linkedinHref(c.linkedinUrl), jobTitle: c.jobTitle, city: cityLine(c.city, c.state),
     companyId, assignedToMemberId: c.owner?.twentyMemberId ?? null, podOwner: c.pod?.podOwnerValue ?? null,
     leadSource: lead.length ? lead : allowed(fields.leadSource, [settings.leadSourceFallback]), leadSourceNotes: notes.join('\n'),
-    productInterest: allowed(fields.productInterest, c.productInterest), tags: allowed(fields.tags, c.tags).filter((t) => t !== '' && !t.startsWith('list:')),
+    productInterest: allowed(fields.productInterest, c.productInterest), tags: allowed(fields.tags, c.tags).filter((t) => t !== '' && !t.startsWith('list:') && t !== 'bounce:check'),
     contactType: allowed(fields.contactType, settings.contactType), listCategory: allowed(fields.listCategory, [settings.listCategory])[0] ?? null,
     pipelineStage: allowed(fields.pipelineStageField, [settings.pipelineStage])[0] ?? null, cadenceSandboxId: c.id,
   };

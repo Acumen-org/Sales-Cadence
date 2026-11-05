@@ -107,29 +107,61 @@ export async function applyExitConsequence(subject: string | SubjectRef, reason:
 
 export type SkipOutcomeInput = { taskId: string; reasonKey: string; note?: string | null };
 
+type SkipReason = NonNullable<ReturnType<typeof skipReasonFor>>;
+/** Whether a reason ends the enrollment: "Email bounced" only while "exit on bounce" is on. */
+const endsEnrollment = (reason: SkipReason, rules: RulesSettings) => reason.exit !== 'none' && (reason.exit !== 'bounced' || rules.exitOnBounce);
+
+/** What a reason does beyond the skipped step: flags on the subject, and the end of the enrollment when it ends it. */
+async function applySkipReason(enrollment: { id: string; personId: string | null; sandboxContactId: string | null; status: string }, reason: SkipReason, rules: RulesSettings, ctx: EngineContext): Promise<string | null> {
+  if (reason.badEmail || reason.badPhone) {
+    await setSubjectFlags(enrollment, { badEmail: reason.badEmail || undefined, badPhone: reason.badPhone || undefined }, ctx.actor);
+  }
+  if (!endsEnrollment(reason, rules)) return null;
+  if (reason.exit === 'opted_out') await setSubjectFlags(enrollment, { optedOut: true }, ctx.actor);
+  if (enrollment.status !== 'ACTIVE' && enrollment.status !== 'PAUSED') return null;
+  await exitEnrollment(enrollment.id, { reason: reason.exit, actor: ctx.actor, now: ctx.now, skipSync: ctx.skipSync });
+  return reason.exit;
+}
+
 /** Skip with a configured reason; some reasons end the enrollment and flag the person. */
 export async function skipWithReason(input: SkipOutcomeInput, ctx: EngineContext): Promise<ResolveResult & { exited?: string | null }> {
   const settings = await getSettings();
   const reason = skipReasonFor(settings.rules, input.reasonKey);
   const label = reason?.label ?? input.reasonKey;
-  const shouldExit = Boolean(reason && reason.exit !== 'none' && (reason.exit !== 'bounced' || settings.rules.exitOnBounce));
+  const shouldExit = Boolean(reason && endsEnrollment(reason, settings.rules));
   const r = await skipTask({ taskId: input.taskId, reason: label, note: input.note ?? null }, { ...ctx, deferAdvance: shouldExit });
   if (!r.ok) return r;
   const task = await prisma.task.findUnique({ where: { id: input.taskId }, include: { enrollment: { select: { id: true, personId: true, sandboxContactId: true, status: true } } } });
   if (!task || !reason) return r;
+  const exited = await applySkipReason(task.enrollment, reason, settings.rules, ctx);
+  return { ...r, exited };
+}
 
-  if (reason.badEmail || reason.badPhone) {
-    await setSubjectFlags(task.enrollment, { badEmail: reason.badEmail || undefined, badPhone: reason.badPhone || undefined }, ctx.actor);
+/**
+ * A bounce Cadence saw in a mailbox, or one a rep confirmed by hand, follows the same rule as the
+ * "Email bounced" skip (N060): every email step still open is skipped with that reason, the address
+ * is flagged, and the running campaign ends when "exit on bounce" is on. With no campaign running,
+ * the address is flagged all the same.
+ */
+export async function bounceDetected(subject: { personId?: string | null; sandboxContactId?: string | null }, ctx: EngineContext): Promise<{ skipped: number; exited: string | null }> {
+  const settings = await getSettings();
+  const reason: SkipReason = skipReasonFor(settings.rules, 'bounced') ?? { key: 'bounced', label: 'Email bounced', exit: 'bounced', badEmail: true, badPhone: false };
+  const who = subject.personId ? { personId: subject.personId } : subject.sandboxContactId ? { sandboxContactId: subject.sandboxContactId, personId: null } : null;
+  if (!who) return { skipped: 0, exited: null };
+  const ends = endsEnrollment(reason, settings.rules);
+  const running = await prisma.enrollment.findMany({ where: { ...who, status: { in: ['ACTIVE', 'PAUSED'] } }, select: { id: true, personId: true, sandboxContactId: true, status: true } });
+  let skipped = 0;
+  for (const e of running) {
+    const open = await prisma.task.findMany({ where: { enrollmentId: e.id, state: 'PENDING', action: 'EMAIL' }, orderBy: [{ stepIndex: 'asc' }, { actionIndex: 'asc' }], select: { id: true } });
+    for (const t of open) if ((await skipTask({ taskId: t.id, reason: reason.label }, { ...ctx, deferAdvance: ends })).ok) skipped++;
+  }
+  if (!running.length) {
+    if (reason.badEmail) await setSubjectFlags(who, { badEmail: true }, ctx.actor);
+    return { skipped, exited: null };
   }
   let exited: string | null = null;
-  if (reason.exit !== 'none' && (reason.exit !== 'bounced' || settings.rules.exitOnBounce)) {
-    if (reason.exit === 'opted_out') await setSubjectFlags(task.enrollment, { optedOut: true }, ctx.actor);
-    if (task.enrollment.status === 'ACTIVE' || task.enrollment.status === 'PAUSED') {
-      await exitEnrollment(task.enrollment.id, { reason: reason.exit, actor: ctx.actor, now: ctx.now, skipSync: ctx.skipSync });
-      exited = reason.exit;
-    }
-  }
-  return { ...r, exited };
+  for (const e of running) exited = (await applySkipReason(e, reason, settings.rules, ctx)) ?? exited;
+  return { skipped, exited };
 }
 
 /**

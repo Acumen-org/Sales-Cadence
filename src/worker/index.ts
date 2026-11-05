@@ -78,7 +78,7 @@ async function sandboxJobs(now:number){
  if(now>=callsAt){callsAt=now+120_000;try{const stats=await importTwilioCalls();if(stats.ran&&(stats.created||stats.forms||stats.recordings||stats.error))log('twilio import',stats);}catch(error){log('twilio import failed',error);}}
  // Every 5 minutes: people Twenty's mail or calendar sync created for sandbox contacts, removed when nobody worked them.
  if(now>=crmCleanupAt){crmCleanupAt=now+CLEANUP_EVERY_MS;try{const stats=await cleanupSandboxCrmPeople();if(stats.removed||stats.kept||stats.dryRun||stats.errors)log('sandbox CRM cleanup',stats);}catch(error){log('sandbox CRM cleanup failed',error);}}
- if(now>=mailAt){mailAt=now+120_000;try{const stats=await runGraphMail();if(stats.ran&&(stats.sent||stats.replies||stats.bounces||stats.errors.length))log('graph mail',stats);}catch(error){log('graph mail failed',error);}}
+ if(now>=mailAt){mailAt=now+120_000;try{const stats=await runGraphMail();if(stats.ran&&(stats.sent||stats.replies||stats.bounces||stats.possibleBounces||stats.alerts||stats.resets||stats.errors.length))log('graph mail',stats);}catch(error){log('graph mail failed',error);}}
 }
 /** Once: E.164 copies of the phones already cached, so calls and pushes match CRM people by number. */
 let phoneBackfillChecked=false;

@@ -20,6 +20,8 @@ import { OCCUPYING_STATUSES, applyPersonFlags, markMeeting, markReplied } from '
 import { actionTypesFor, classifyMessage, classifyNoteTitle, isInternalAddress, resolveNoteActor, type UserLike } from './matching';
 import { completeTask, type EngineContext } from './tasks';
 import { closeFromTouch } from './observed-evidence';
+import { closeEmailNextAction } from '../next-actions';
+import { coldOnlyAddresses, recordColdReply, recordColdSent } from '../mail/cold-email';
 
 export type IngestInput = {
   source: EventSource;
@@ -308,6 +310,8 @@ async function handleNote(note: TwentyNote, ctx: EngineContext, settings: Settin
       actorUserId: actor?.id ?? null,
       actorLabel: actor?.name ?? note.createdByName ?? cls.actorHandle ?? null,
     });
+    // N098: an email logged by a tool closes the Email next step due that day, as a synced one does.
+    if (cls.kind === 'outbound_email') await closeEmailNextAction({ personId }, occurredAt, `note:${note.id}:person:${personId}`);
     if (!types.length) {
       outcomes[personId] = 'touch_only';
       continue;
@@ -331,10 +335,10 @@ async function handleNote(note: TwentyNote, ctx: EngineContext, settings: Settin
  * address): the person whose address it is, when exactly one person has it. Our own addresses
  * never count.
  */
-async function recipientsByAddress(message: TwentyMessage, users: UserLike[], internalDomains: readonly string[]): Promise<{ ids: string[]; unresolved: number }> {
+async function recipientsByAddress(message: TwentyMessage, users: UserLike[], internalDomains: readonly string[], skip: ReadonlySet<string> = new Set()): Promise<{ ids: string[]; unresolved: number }> {
   const ours = new Set(users.flatMap((u) => [u.email, ...u.aliases]).map((a) => a.trim().toLowerCase()));
   const handles = [...new Set(message.participants.filter((p) => p.role !== 'from' && !p.personId && !p.workspaceMemberId).map((p) => (p.handle ?? '').trim().toLowerCase()))].filter(
-    (h) => h.includes('@') && !ours.has(h) && !isInternalAddress(h, internalDomains),
+    (h) => h.includes('@') && !ours.has(h) && !isInternalAddress(h, internalDomains) && !skip.has(h),
   );
   if (!handles.length) return { ids: [], unresolved: 0 };
   // Second addresses are stored as typed, so they are compared lower-cased on both sides.
@@ -356,9 +360,15 @@ async function handleMessage(message: TwentyMessage, ctx: EngineContext, setting
   const subject = message.subject ?? '(no subject)';
 
   if (cls.direction === 'outbound') {
-    const byAddress = await recipientsByAddress(message, users, settings.rules.internalDomains);
-    const recipientPersonIds = [...new Set([...cls.recipientPersonIds, ...byAddress.ids])];
-    if (!recipientPersonIds.length) return { result: 'ignored_outbound_no_person' };
+    // N028: an address of a live cold contact with no real CRM person behind it (none, or only the
+    // one Twenty's mail sync made for it, which the cleanup deletes) is the cold contact's email.
+    const cold = await coldOnlyAddresses(message.participants.filter((p) => p.role !== 'from').map((p) => ({ handle: p.handle, personId: p.personId })));
+    const coldPeople = new Set([...cold.values()].flat());
+    const coldSent = cold.size ? await recordColdSent([...cold.keys()], { key: `message:${message.id}`, conversationId: message.threadId, subject: message.subject, at: occurredAt, mailboxUserId: cls.actor?.id ?? null, via: 'crm' }) : null;
+    const coldDetails = coldSent ? { coldContacts: coldSent.recorded.length, coldAlerts: coldSent.alerts } : {};
+    const byAddress = await recipientsByAddress(message, users, settings.rules.internalDomains, new Set(cold.keys()));
+    const recipientPersonIds = [...new Set([...cls.recipientPersonIds, ...byAddress.ids])].filter((id) => !coldPeople.has(id));
+    if (!recipientPersonIds.length) return coldSent ? { result: 'message_outbound_cold', details: coldDetails } : { result: 'ignored_outbound_no_person' };
     const outcomes: Record<string, string> = {};
     let anyCompleted = false;
     for (const personId of recipientPersonIds) {
@@ -385,14 +395,25 @@ async function handleMessage(message: TwentyMessage, ctx: EngineContext, setting
       });
       outcomes[personId] = r.code;
       if (r.code === 'completed') anyCompleted = true;
+      // N098: the Email next step due that day closes too, by the rep's own date, as a cold one does.
+      await closeEmailNextAction({ personId }, occurredAt, `message:${message.id}:person:${personId}`);
     }
-    if (anyCompleted) return { result: 'message_outbound_completed', details: outcomes };
+    if (anyCompleted) return { result: 'message_outbound_completed', details: { ...outcomes, ...coldDetails } };
     // Someone it went to is not a contact yet (Twenty links them a moment later): read it again then.
-    if (byAddress.unresolved) return { result: 'message_outbound_partial', details: { ...outcomes, unmatchedRecipients: byAddress.unresolved } };
-    return { result: 'message_outbound_touch', details: outcomes };
+    if (byAddress.unresolved) return { result: 'message_outbound_partial', details: { ...outcomes, ...coldDetails, unmatchedRecipients: byAddress.unresolved } };
+    return { result: 'message_outbound_touch', details: { ...outcomes, ...coldDetails } };
   }
 
   if (cls.direction === 'inbound') {
+    // N028: a cold contact's reply in the CRM's mail is theirs: it stops their campaign and rings
+    // their rep, instead of landing on a person the cleanup then deletes with it.
+    const from = (cls.fromHandle ?? '').trim().toLowerCase();
+    const cold = from ? await coldOnlyAddresses([{ handle: from, personId: cls.fromPersonId }]) : new Map<string, string[]>();
+    if (cold.size) {
+      const automatic = isAutomaticReply(subject);
+      const r = await recordColdReply(from, { key: `message:${message.id}`, conversationId: message.threadId, subject: message.subject, at: occurredAt, mailboxUserId: cls.recipientUsers[0]?.id ?? null, via: 'crm' }, automatic);
+      return { result: automatic ? 'inbound_cold_automatic_reply' : 'inbound_cold_reply', details: { coldContacts: r.contacts.length } };
+    }
     let personId = cls.fromPersonId;
     if (!personId && cls.fromHandle) {
       const p = await prisma.personCache.findFirst({ where: { email: { equals: cls.fromHandle, mode: 'insensitive' } }, select: { id: true } });

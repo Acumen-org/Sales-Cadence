@@ -1,7 +1,8 @@
 import type { ActionType, NextAction, NextActionKind, NextActionRepeat, Prisma } from '@prisma/client';
 import { prisma } from './db';
 import { logAudit, SYSTEM_ACTOR, type AuditActor } from './audit';
-import { addDays, formatLocalDate, isLocalDate, todayIn, type LocalDate } from './dates';
+import { addDays, formatLocalDate, isLocalDate, safeTimezone, toLocalDate, todayIn, type LocalDate } from './dates';
+import { workspaceTimezone } from './workspace';
 import { nextWorkingDay } from './engine/clock';
 import { getSettings } from './settings';
 import { getTwentyClient } from './twenty';
@@ -139,6 +140,28 @@ export async function completeNextAction(id: string, actor: AuditActor & { id?: 
   await logAudit({ ...auditSubject(na), action: 'next_action_done', actor, details: { label: na.label, dueDate: na.dueDate, next } });
   await afterResponse(async () => { await pushNextAction(id); });
   return { ok: true, next };
+}
+
+/**
+ * An email Cadence saw go to the person closes their open Email next step when it is due that day
+ * or earlier: the day of the step's rep, never UTC's, so an email sent at 7 pm in Chicago does not
+ * close tomorrow's step (N098). CRM people and cold contacts follow this one rule, whether Outlook
+ * tracking or the CRM's mail sync saw the email, and each close is logged with the email behind it.
+ * A repeating one moves on, as Done would. Returns the next action closed, if any.
+ */
+export async function closeEmailNextAction(subject: { personId: string } | { sandboxContactId: string }, at: Date, evidence: string): Promise<string | null> {
+  const where = 'personId' in subject ? { personId: subject.personId } : { sandboxContactId: subject.sandboxContactId, personId: null };
+  const open = await prisma.nextAction.findMany({ where: { ...where, state: 'OPEN', action: 'EMAIL', kind: 'ACTION' }, include: { fo: { select: { timezone: true } } }, orderBy: { dueDate: 'asc' } });
+  for (const na of open) {
+    const day = toLocalDate(at, safeTimezone(na.fo?.timezone ?? workspaceTimezone()));
+    // An email sent before the step was set is not the one it asks for (a few minutes' grace).
+    if (na.dueDate > day || at.getTime() < na.createdAt.getTime() - 30 * 60_000) continue;
+    const r = await completeNextAction(na.id, SYSTEM_ACTOR, at, na.dueDate);
+    if (!r.ok) continue;
+    await logAudit({ ...auditSubject(na), action: 'next_action_auto_closed', actor: SYSTEM_ACTOR, details: { nextActionId: na.id, label: na.label, dueDate: na.dueDate, emailDay: day, evidence, next: r.next } });
+    return na.id;
+  }
+  return null;
 }
 
 /** Move it to another day. A repeating one keeps its rhythm from the new day. */

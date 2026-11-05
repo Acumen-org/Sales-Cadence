@@ -1148,6 +1148,8 @@ model SandboxContact {
   @@index([individualCrd])
   @@index([companyDomain])
   @@index([sortName])
+  /// An email to a removed contact is recognised by the hashes it keeps (N016, N027).
+  @@index([keptKeys(ops: JsonbPathOps)], type: Gin)
 }
 
 model SandboxNote {
@@ -1393,13 +1395,27 @@ model SandboxEmail {
   @@index([conversationId])
 }
 
+/// Where Outlook tracking is in one folder of one sales mailbox (src/lib/mail/graph-mail.ts).
 model MailboxCursor {
-  userId    String
+  userId        String
   /// sentitems | inbox
-  folder    String
-  deltaLink String?
-  lastRunAt DateTime?
-  error     String?
+  folder        String
+  /// Microsoft's delta link: the folder is in step and the next run reads only what changed.
+  deltaLink     String?
+  /// The page a first sync (or a restart) has reached, kept between runs so a big mailbox gets
+  /// there in the end instead of starting again every run (N015).
+  nextLink      String?
+  /// Mail from this moment on is read: when tracking first ran for this folder.
+  startedAt     DateTime?
+  /// Last tried, whatever happened.
+  lastRunAt     DateTime?
+  /// Last run that read the folder without an error.
+  lastSuccessAt DateTime?
+  /// The last run's error, cleared by the next good run, and since when it has failed.
+  error         String?
+  errorAt       DateTime?
+  /// When Microsoft last said the sync link had expired and the folder was read again from a date.
+  resetAt       DateTime?
 
   @@id([userId, folder])
 }

@@ -36,7 +36,19 @@ export type CleanupStats = { ran: boolean; reason?: string; checked: number; rem
 type Match = { personId: string; contactId: string; status: string; contactCreatedAt: Date };
 
 const isAutoSource = (s: string | null | undefined) => AUTO_SOURCES.includes(String(s ?? '').toUpperCase() as (typeof AUTO_SOURCES)[number]);
-const madeByCadence = (p: TwentyPerson) => (p.createdByName ?? '').trim().toLowerCase() === 'cadence' || Boolean((p.raw as { cadenceSandboxId?: unknown } | undefined)?.cadenceSandboxId);
+const madeByCadence = (p: Pick<TwentyPerson, 'createdByName' | 'raw'>) => (p.createdByName ?? '').trim().toLowerCase() === 'cadence' || Boolean((p.raw as { cadenceSandboxId?: unknown } | undefined)?.cadenceSandboxId);
+
+/**
+ * Whether a person in Cadence's copy of the CRM is one Twenty's mail or calendar sync made for this
+ * cold contact: auto-created (not by Cadence), after the contact, and not one the cleanup kept
+ * because someone worked it. Mail with such a person belongs to the cold contact (N028).
+ */
+export function autoCreatedFor(p: { id: string; createdBySource: string | null; createdByName: string | null; raw: unknown }, contact: { createdAt: Date; crmAutoPersonId: string | null; crmMatchPersonId: string | null }): boolean {
+  if (!isAutoSource(p.createdBySource) || madeByCadence({ createdByName: p.createdByName, raw: p.raw as TwentyPerson['raw'] })) return false;
+  if (p.id === contact.crmAutoPersonId || p.id === contact.crmMatchPersonId) return false;
+  const created = Date.parse(String((p.raw as { createdAt?: unknown } | null)?.createdAt ?? ''));
+  return !Number.isFinite(created) || created > contact.createdAt.getTime();
+}
 
 /**
  * Cadence's copy of Twenty, joined to the sandbox on every address either side holds. The cache
