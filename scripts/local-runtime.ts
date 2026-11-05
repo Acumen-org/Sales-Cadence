@@ -1,5 +1,54 @@
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+
+/**
+ * Flags for every embedded Postgres cluster Cadence creates: the local launcher, `pnpm dev:db` and
+ * the test runner. Without them initdb takes the machine's locale, which on Windows is
+ * English_United States.1252, so the cluster is WIN1252 and a name outside Latin-1 (Chinese, Greek)
+ * fails every write it reaches (B013). Production's postgres image is UTF8 already.
+ */
+export const UTF8_INITDB_FLAGS = ['--encoding=UTF8', '--locale=C'];
+
+/** Why a database of this encoding cannot be used, or null when it is UTF8. */
+export function encodingProblem(encoding: string | null | undefined, databaseDir: string): string | null {
+  if ((encoding ?? '').toUpperCase() === 'UTF8') return null;
+  return [
+    `The local database in ${databaseDir} was created as ${encoding || 'an unknown encoding'}, not UTF8, so names outside Latin-1 would fail to save.`,
+    'Stop Cadence and delete that folder (this deletes the local data), or set DEV_DB_DIR to a new folder, then start again: Cadence creates it as UTF8.',
+  ].join(' ');
+}
+
+type PgClient = { connect(): Promise<unknown>; query(sql: string, values?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>; end(): Promise<unknown> };
+
+/** Refuse to go on with a cluster created before the UTF8 flags, rather than fail later on a name. */
+export async function assertUtf8Database(pg: { getPgClient(database?: string): PgClient }, database: string, databaseDir: string): Promise<void> {
+  const client = pg.getPgClient('postgres');
+  await client.connect();
+  try {
+    const { rows } = await client.query('SELECT pg_encoding_to_char(encoding) AS encoding FROM pg_database WHERE datname = $1', [database]);
+    const problem = encodingProblem(rows.length ? String(rows[0].encoding) : 'UTF8', databaseDir);
+    if (problem) throw new Error(problem);
+  } finally {
+    await client.end();
+  }
+}
+
+/** The JavaScript entry of each command-line tool the launcher runs. */
+export const LOCAL_TOOLS = {
+  prisma: path.join('node_modules', 'prisma', 'build', 'index.js'),
+  tsx: path.join('node_modules', 'tsx', 'dist', 'cli.mjs'),
+  next: path.join('node_modules', 'next', 'dist', 'bin', 'next'),
+} as const;
+
+/**
+ * Run a tool with this Node and no shell, as the web and worker processes already are. Through a
+ * shell (`node_modules/.bin/prisma.cmd` on Windows) an unquoted path is split at its first space, so
+ * the launcher failed in any folder such as "Tech Projects" (L001).
+ */
+export function runTool(root: string, tool: keyof typeof LOCAL_TOOLS, args: string[], env: NodeJS.ProcessEnv, stdio: 'inherit' | 'pipe' = 'inherit') {
+  return spawnSync(process.execPath, [path.join(root, LOCAL_TOOLS[tool]), ...args], { stdio, env, shell: false, encoding: 'utf8' });
+}
 
 /** Never remove an arbitrary directory or the lock of a database that is still running. */
 export function prepareDatabaseDirectory(root: string, configured: string) {

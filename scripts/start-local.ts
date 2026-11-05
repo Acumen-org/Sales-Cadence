@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { parse } from 'dotenv';
-import { prepareDatabaseDirectory } from './local-runtime';
+import { assertUtf8Database, LOCAL_TOOLS, prepareDatabaseDirectory, runTool, UTF8_INITDB_FLAGS } from './local-runtime';
 
 /**
  * One-click local run, no Docker:
@@ -22,7 +22,6 @@ const dbPort = Number.parseInt(process.env.DEV_DB_PORT ?? '5434', 10);
 const databaseUrl = `postgresql://postgres:postgres@localhost:${dbPort}/cadence?connection_limit=6&pool_timeout=20`;
 const workerDatabaseUrl = `postgresql://postgres:postgres@localhost:${dbPort}/cadence?connection_limit=3&pool_timeout=20`;
 const isWin = process.platform === 'win32';
-const bin = (name: string) => path.join(root, 'node_modules', '.bin', isWin ? `${name}.cmd` : name);
 const log = (msg: string) => console.log(`[cadence] ${msg}`);
 
 /**
@@ -65,9 +64,11 @@ function readEnvFile(): Record<string, string> {
   return parse(fs.readFileSync(path.join(root, '.env'), 'utf8'));
 }
 
-function run(cmd: string, args: string[], env: NodeJS.ProcessEnv, label: string) {
+/** Each tool runs with this Node and no shell, so a space in the folder's path cannot break it (L001). */
+function run(tool: keyof typeof LOCAL_TOOLS, args: string[], env: NodeJS.ProcessEnv, label: string) {
   log(label);
-  const r = spawnSync(cmd, args, { stdio: 'inherit', env, shell: isWin });
+  const r = runTool(root, tool, args, env);
+  if (r.error) throw new Error(`${label} failed: ${r.error.message}`);
   if (r.status !== 0) throw new Error(`${label} failed (exit ${r.status})`);
 }
 
@@ -144,8 +145,9 @@ async function main() {
   // 1. database
   const { databaseDir, fresh } = prepareDatabaseDirectory(root, process.env.DEV_DB_DIR ?? '.pgdata-dev');
   const mod = await import('embedded-postgres');
-  const EmbeddedPostgres = (mod.default ?? mod) as unknown as new (opts: Record<string, unknown>) => { initialise(): Promise<void>; start(): Promise<void>; stop(): Promise<void>; createDatabase(n: string): Promise<void> };
-  const instance = new EmbeddedPostgres({ databaseDir, user: 'postgres', password: 'postgres', port: dbPort, persistent: true, onLog: () => {} });
+  const EmbeddedPostgres = (mod.default ?? mod) as unknown as new (opts: Record<string, unknown>) => Parameters<typeof assertUtf8Database>[0] & { initialise(): Promise<void>; start(): Promise<void>; stop(): Promise<void>; createDatabase(n: string): Promise<void> };
+  // UTF8 whatever the machine's locale (B013); a cluster made before that is refused below.
+  const instance = new EmbeddedPostgres({ databaseDir, user: 'postgres', password: 'postgres', port: dbPort, persistent: true, initdbFlags: UTF8_INITDB_FLAGS, onLog: () => {} });
   log(fresh ? 'creating the local database...' : 'starting the local database...');
   if (fresh) {
     await instance.initialise();
@@ -153,20 +155,21 @@ async function main() {
   await instance.start();
   pg = instance;
   if (fresh) await instance.createDatabase('cadence');
+  await assertUtf8Database(instance, 'cadence', databaseDir);
 
   // 2. schema + seed
-  run(bin('prisma'), ['migrate', 'deploy'], env, 'applying migrations');
-  run(bin('tsx'), ['prisma/seed.ts'], env, 'seeding (default sequence, admin, demo pods, users, people)');
+  run('prisma', ['migrate', 'deploy'], env, 'applying migrations');
+  run('tsx', ['prisma/seed.ts'], env, 'seeding (default sequence, admin, demo pods, users, people)');
 
   // Local launches pick up source changes. Test runs can explicitly reuse a build they just made.
-  if (env.CADENCE_SKIP_BUILD !== '1' || !fs.existsSync(path.join(root, env.NEXT_DIST_DIR || '.next', 'BUILD_ID'))) run(bin('next'), ['build'], env, 'building the current app');
+  if (env.CADENCE_SKIP_BUILD !== '1' || !fs.existsSync(path.join(root, env.NEXT_DIST_DIR || '.next', 'BUILD_ID'))) run('next', ['build'], env, 'building the current app');
 
   // 4. web + worker
   // Spawn node directly (no shell wrapper) so the pids we track are the real processes and
   // taskkill /T reliably takes the whole tree down on shutdown.
   log(`starting web on http://localhost:${port}`);
-  const nextBin = path.join(root, 'node_modules', 'next', 'dist', 'bin', 'next');
-  const tsxBin = path.join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+  const nextBin = path.join(root, LOCAL_TOOLS.next);
+  const tsxBin = path.join(root, LOCAL_TOOLS.tsx);
   const web = spawn(process.execPath, [nextBin, 'start', '-p', String(port)], { stdio: 'inherit', env });
   children.push(web);
   web.on('exit', (code) => {
