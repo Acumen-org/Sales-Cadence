@@ -266,9 +266,16 @@ async function claimItem(itemId: string): Promise<boolean> {
   return r.count === 1;
 }
 
+/**
+ * What one call of processMoveItem did. CLAIMED_ELSEWHERE: another process held the item or had
+ * already finished it, so this call did nothing and counts nothing (B190). Reading the item's state
+ * instead said RUNNING or DONE depending on how far the other process had got.
+ */
+export type MoveItemOutcome = 'DONE' | 'FAILED' | 'DRY_RUN' | 'CLAIMED_ELSEWHERE';
+
 /** One item: idempotent, so a retry after a crash finds what the first attempt created. */
-export async function processMoveItem(itemId: string, now = new Date()): Promise<SandboxMoveItem['state']> {
-  if (!(await claimItem(itemId))) return (await prisma.sandboxMoveItem.findUniqueOrThrow({ where: { id: itemId }, select: { state: true } })).state;
+export async function processMoveItem(itemId: string, now = new Date()): Promise<MoveItemOutcome> {
+  if (!(await claimItem(itemId))) return 'CLAIMED_ELSEWHERE';
   const item = await prisma.sandboxMoveItem.findUniqueOrThrow({ where: { id: itemId }, include: { move: true } });
   const contact = await prisma.sandboxContact.findUnique({ where: { id: item.sandboxContactId }, include: contactInclude });
   if (!contact || contact.status !== 'ACTIVE') { await fail(item, 'This contact is no longer in the sandbox.'); return 'FAILED'; }
@@ -369,8 +376,8 @@ export async function runMoveQueue(opts: { now?: Date; maxItems?: number; pauseM
   if (moves.size) await prisma.sandboxMove.updateMany({ where: { id: { in: [...moves] }, state: 'QUEUED' }, data: { state: 'RUNNING' } });
   for (const i of items) {
     const state = await processMoveItem(i.id, opts.now);
-    // RUNNING: another process holds it (the dialog's own request) and counts it there.
-    if (state === 'RUNNING') continue;
+    // Another process holds it (the dialog's own request) and counts it there.
+    if (state === 'CLAIMED_ELSEWHERE') continue;
     if (state === 'DONE') stats.done++; else if (state === 'DRY_RUN') stats.dryRun++; else stats.failed++;
     if (opts.pauseMs) await new Promise((r) => setTimeout(r, opts.pauseMs));
   }

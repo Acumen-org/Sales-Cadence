@@ -102,10 +102,30 @@ describe('Move to CRM: attach to a person already in Twenty', () => {
     if (!q.ok) throw new Error(q.error);
     const item = await prisma.sandboxMoveItem.findFirstOrThrow({ where: { moveId: q.moveId } });
 
+    // B190: exactly one call wins the claim, however the two interleave; the other did nothing.
     const states = await Promise.all([processMoveItem(item.id), processMoveItem(item.id)]);
-    expect(states.sort()).toEqual(['DONE', 'RUNNING']);
+    expect(states.sort()).toEqual(['CLAIMED_ELSEWHERE', 'DONE']);
     expect(getMockTwentyClient().writes.filter((w) => w.op === 'createPerson')).toHaveLength(1);
     expect(await prisma.sandboxMoveItem.findUniqueOrThrow({ where: { id: item.id } })).toEqual(expect.objectContaining({ state: 'DONE', attempts: 1 }));
+  });
+
+  it('B190: a call that finds the item held or finished elsewhere says so, whatever the timing', async () => {
+    const { actor, audit } = await actorOf(b.users.alisa.id);
+    const contact = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+    const q = await queueMove([{ contactId: contact.id, mode: 'create' }], actor, audit);
+    if (!q.ok) throw new Error(q.error);
+    const item = await prisma.sandboxMoveItem.findFirstOrThrow({ where: { moveId: q.moveId } });
+
+    // Held by another process (the dialog's request) that has not finished yet.
+    await prisma.sandboxMoveItem.update({ where: { id: item.id }, data: { state: 'RUNNING', claimedAt: new Date() } });
+    expect(await processMoveItem(item.id)).toBe('CLAIMED_ELSEWHERE');
+    expect(await runMoveQueue()).toEqual({ done: 0, failed: 0, dryRun: 0 });
+
+    // Already finished by the other process before this one asked.
+    await prisma.sandboxMoveItem.update({ where: { id: item.id }, data: { state: 'QUEUED', claimedAt: null } });
+    expect(await processMoveItem(item.id)).toBe('DONE');
+    expect(await processMoveItem(item.id)).toBe('CLAIMED_ELSEWHERE');
+    expect(getMockTwentyClient().writes.filter((w) => w.op === 'createPerson')).toHaveLength(1);
   });
 
   it('the built-in fake Twenty is one workspace for the web server and the worker', async () => {
