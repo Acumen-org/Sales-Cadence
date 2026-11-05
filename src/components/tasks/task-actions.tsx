@@ -9,6 +9,7 @@ import type { ActionResult } from '@/lib/actions/users';
 import { type ActionType } from '@/lib/sequences/steps';
 import { formatLocalDate } from '@/lib/dates';
 import { IconCheck, IconChevronLeft, IconChevronRight, IconClock, IconExternal, IconPhone, IconSkip } from '@/components/icons';
+import { useConfirm } from '@/components/confirm-dialog';
 
 export type DispositionOption = { key: string; label: string; answered: boolean };
 export type SkipReasonOption = { key: string; label: string; exit: string };
@@ -106,8 +107,11 @@ export function TaskActions(p: Props) {
     [p.nextUrl, router],
   );
 
+  const [ask, confirmDialog] = useConfirm();
   const submitComplete = useCallback(
-    (chosen: ActionType, dispositionKey?: string) => {
+    async (chosen: ActionType, dispositionKey?: string) => {
+      // N042: "Asked not to be contacted" opts the person out for good, so it asks first, naming what it does.
+      if (dispositionKey === 'do_not_contact' && !(await ask({ title: 'Asked not to be contacted?', effects: ['This person is opted out for good: Cadence never calls, emails or messages them again.', 'This sequence ends as Opted out.', 'The CRM marks them Do not contact and clears their Next Action.'], confirmLabel: 'Opt out', tone: 'danger' }))) return;
       const fd = new FormData();
       fd.set('taskId', p.taskId);
       fd.set('chosenAction', chosen);
@@ -115,7 +119,7 @@ export function TaskActions(p: Props) {
       if (note.trim()) fd.set('note', note.trim());
       run(() => completeTaskAction(fd));
     },
-    [note, p.taskId, run],
+    [ask, note, p.taskId, run],
   );
 
   const startDone = useCallback(
@@ -259,6 +263,7 @@ export function TaskActions(p: Props) {
 
   return (
     <div>
+      {confirmDialog}
       {/* One row of controls, in one place. Its height never changes and nothing above it grows,
           so the buttons are always where the FO last saw them. */}
       <div className="flex flex-wrap items-center gap-2">

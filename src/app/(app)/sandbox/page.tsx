@@ -107,7 +107,7 @@ export default async function SandboxPage({ searchParams }: { searchParams: Prom
       {items.length ? <ul className="divide-y divide-line">{items.map((item) => {
         const contact = item.kind === 'step' ? item.t.enrollment.sandboxContact! : item.n.sandboxContact!;
         return <WorkRow key={item.id} kind={item.kind} id={item.id} contact={{ id: contact.id, name: `${contact.firstName} ${contact.lastName}`.trim(), firm: contact.companyName, phone: contact.phone }}
-          label={item.kind === 'step' ? `${item.t.label}` : item.n.label} action={item.kind === 'step' ? item.t.action : item.n.action} channelLabel={ACTION_LABELS[item.kind === 'step' ? item.t.action : item.n.action]}
+          label={item.kind === 'step' ? `${item.t.label}` : item.n.label} action={item.kind === 'step' ? item.t.action : item.n.kind === 'MEETING' ? 'MEETING' : item.n.action} channelLabel={item.kind === 'next' && item.n.kind === 'MEETING' ? 'Meeting' : ACTION_LABELS[item.kind === 'step' ? item.t.action : item.n.action]}
           due={formatLocalDate(item.due)} dueState={due(item.due)} campaign={item.kind === 'step' ? item.t.enrollment.campaign?.name ?? item.t.enrollment.sequence.name : null} fo={item.kind === 'step' ? item.t.fo.name : item.n.fo.name}
           callTemplate={settings.rules.clickToCallUrl} gate={gates.get(contact.id) ?? null} skipReasons={settings.rules.skipReasons.map((r) => ({ key: r.key, label: r.label }))} mayWork={mayWork && (isAdmin(user) || (item.kind === 'step' ? item.t.foUserId : item.n.foUserId) === user.id || !isJuniorFo(user))} />;
       })}</ul> : <EmptyState title="Nothing to work in the sandbox" />}

@@ -8,6 +8,7 @@ import { getTaskBrief } from '@/lib/brief';
 import { nextWorkingDaySnooze, snoozeDefault } from '@/lib/engine/tasks';
 import { cachedPersonName } from '@/lib/person-cache';
 import { getSettings } from '@/lib/settings';
+import { callOutcomes } from '@/lib/call-outcomes';
 import { ACTION_LABELS, channelOf } from '@/lib/sequences/steps';
 import { CRM_SUBJECT } from '@/lib/subject';
 import { callGate } from '@/lib/calls/gate';
@@ -164,7 +165,8 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const gate = brief ? await callGate(user, { phone: brief.person.phone, state: brief.person.city?.split(',').pop()?.trim() ?? null, optedOut: brief.person.optedOut, dnd: brief.person.dnd, email: brief.person.email, linkedinUrl: brief.person.linkedinUrl }) : null;
   const missing = Boolean(requested && !inView && !brief);
   const nextWorkingDay = nextWorkingDaySnooze(today, settings.rules.workingDays);
-  const dispositions = settings.rules.callDispositions.map(d => ({ key: d.key, label: d.label, answered: d.answered }));
+  // N055: the one outcome list, for the Done labels and Log call; the form's own extras included.
+  const dispositions = callOutcomes(settings.rules).map(d => ({ key: d.key, label: d.label, answered: d.answered }));
   // Skipping one step must not end the sequence by default: reasons that end it come last.
   const skipReasons = settings.rules.skipReasons.map(r => ({ key: r.key, label: r.label, exit: r.exit })).sort((a, b) => Number(a.exit !== 'none') - Number(b.exit !== 'none'));
   // A step holds several modules. With a channel filter on, the module for that channel is the

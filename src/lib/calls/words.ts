@@ -6,6 +6,11 @@ import { addDays, formatLocalDate, todayIn } from '../dates';
  * carries its day and its zone: "today 14:05 CT", "yesterday 20:20 CT", "3 Nov 09:12 GMT".
  */
 
+/** How a Call blocked by a waiting form begins, so the button can offer to open it (B089). */
+export const FORM_FIRST = 'Fill in the form for your';
+/** Opens the first waiting form from anywhere on the page: the Call button's "Fill it in" (B089). */
+export const OPEN_FORM_EVENT = 'cadence:open-call-form';
+
 /** US zones by their everyday letters; anything else as Intl names it (GMT, BST, CET). */
 const PLAIN_ZONE: Record<string, string> = { EST: 'ET', EDT: 'ET', CST: 'CT', CDT: 'CT', MST: 'MT', MDT: 'MT', PST: 'PT', PDT: 'PT' };
 

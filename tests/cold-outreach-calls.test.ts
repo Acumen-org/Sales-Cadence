@@ -21,8 +21,12 @@ import { resetEnvCache } from '@/lib/env';
 import { MOCK_PEOPLE } from '@/lib/twenty/fixtures';
 import { toE164 } from '@/lib/sandbox/normalize';
 import { getMockTwentyClient } from '@/lib/twenty/mock-client';
-import { addCallContactAction, chooseCallContactAction, importCallsNowAction, logManualCallAction, setCallerNumberAction } from '@/lib/actions/call-forms';
+import { addCallContactAction, assignCallRepAction, chooseCallContactAction, importCallsNowAction, logManualCallAction, setCallerNumberAction } from '@/lib/actions/call-forms';
 import { completeNextActionAction } from '@/lib/actions/next-actions';
+import { formsWaiting } from '@/lib/calls/analytics';
+import { mayHearCall } from '@/lib/calls/access';
+import { callOutcomes } from '@/lib/call-outcomes';
+import { dispositionFor } from '@/lib/engine/outcomes';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 import { readyContact } from './helpers/sandbox';
 
@@ -526,6 +530,39 @@ describe('W4: calls and the post-call form', () => {
       expect(zoneFor({ state: 'N.Y.' })).toEqual(expect.objectContaining({ zone: 'America/New_York', from: 'state' }));
       expect(zoneFor({})).toEqual(expect.objectContaining({ from: 'workspace', guessed: true }));
     });
+  });
+
+  it('N046: forms waiting are counted now, whatever the report period, by whoever holds them, with the oldest', async () => {
+    const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+    const old = await logManualCall({ userId: b.users.karson.id, sandboxContactId: c.id }, new Date('2026-10-01T10:00:00Z'));
+    await logManualCall({ userId: b.users.karson.id, sandboxContactId: c.id }, new Date('2026-11-04T10:00:00Z'));
+    const handed = await logManualCall({ userId: b.users.karson.id, sandboxContactId: c.id }, new Date('2026-11-04T11:00:00Z'));
+    await prisma.callLog.update({ where: { id: handed.id }, data: { formUserId: b.users.alisa.id } });
+    const waiting = await formsWaiting({ podId: b.pods.Alisa.id });
+    expect(waiting.get(b.users.karson.id)).toEqual({ count: 2, oldest: old.formDueAt });
+    expect(waiting.get(b.users.alisa.id)?.count).toBe(1);
+  });
+
+  it('N055: one outcome list: the form\'s own outcomes are answered calls in Reports and read in words everywhere', () => {
+    const answered = callOutcomes(rules).filter((o) => o.answered).map((o) => o.key);
+    expect(answered).toEqual(expect.arrayContaining(['connected', 'not_interested', 'meeting_booked', 'do_not_contact']));
+    expect(dispositionFor(rules, 'not_interested')?.label).toBe('Not interested');
+  });
+
+  it('N051: a call\'s notes, numbers and recording are for the rep, the owner and those who see Reports', () => {
+    const call = { userId: b.users.alisa.id, formUserId: null, ownerId: b.users.leigh.id };
+    expect(mayHearCall({ id: b.users.alisa.id, role: 'SENIOR_FO', podIds: [] }, call)).toBe(true);
+    expect(mayHearCall({ id: b.users.leigh.id, role: 'SENIOR_FO', podIds: [] }, call)).toBe(true);
+    expect(mayHearCall({ id: b.users.karson.id, role: 'JUNIOR_FO', podIds: [] }, call)).toBe(false);
+    expect(mayHearCall({ id: 'x', role: 'BIZ_OPS', podIds: [] }, call)).toBe(true);
+  });
+
+  it('B127: a call can be given only to a sales rep', async () => {
+    const bea = await bizOps();
+    auth.requireUser.mockResolvedValue(session(b.users.ria));
+    const call = await prisma.callLog.create({ data: { source: 'TWILIO_IMPORT', direction: 'OUTBOUND', status: 'COMPLETED', statusRank: 4, toNumber: '+16175550000', matchedBy: 'none', startedAt: new Date() } });
+    expect(await assignCallRepAction(form({ callId: call.id, userId: bea.id }))).toEqual({ ok: false, error: 'Choose an active sales rep: only reps make calls.' });
+    expect(await assignCallRepAction(form({ callId: call.id, userId: b.users.karson.id }))).toEqual(expect.objectContaining({ ok: true }));
   });
 
   it('B120: Biz Ops are refused the Call at the click, with the reason', async () => {

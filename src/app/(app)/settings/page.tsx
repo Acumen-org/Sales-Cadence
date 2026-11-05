@@ -457,8 +457,18 @@ async function CallingTab({ timezone }: { timezone: string }) {
     <Card title="Numbers and reps">
       <div className="space-y-2 p-4 text-[13px]">
         {numbersError ? <p className="text-red-700">{numbersError}</p> : null}
-        {numbers.map((n) => { const e164 = toE164(n.phoneNumber) ?? n.phoneNumber; return <CallerNumberRow key={e164} number={e164} friendlyName={n.friendlyName} userId={users.find((u) => u.callerNumber === e164)?.id ?? null} suggestion={suggest(n.friendlyName)} users={users.map((u) => ({ id: u.id, name: u.name }))} former={users.some((u) => u.callerNumber === e164) ? null : formerOf(e164)} />; })}
+        {numbers.map((n) => {
+          const e164 = toE164(n.phoneNumber) ?? n.phoneNumber;
+          const holder = users.find((u) => u.callerNumber === e164) ?? null;
+          const suggested = holder ? null : users.find((u) => u.id === suggest(n.friendlyName)) ?? null;
+          return <CallerNumberRow key={e164} number={e164} friendlyName={n.friendlyName} holder={holder ? { id: holder.id, name: holder.name } : null} suggestion={suggested ? { id: suggested.id, name: suggested.name } : null} users={users.map((u) => ({ id: u.id, name: u.name, number: u.callerNumber }))} former={holder ? null : formerOf(e164)} />;
+        })}
         {!numbers.length && !numbersError ? <p className="text-ink-500">{status.configured ? 'No numbers on the account' : 'Connect Twilio to see its numbers'}</p> : null}
+        {numbers.length ? (() => {
+          // B167: the reps who still have no calling line, so none is missed.
+          const without = users.filter((u) => u.role !== 'ADMIN' && !u.callerNumber);
+          return without.length ? <p className="border-t border-line pt-2 text-[12.5px] text-ink-600">Reps without a calling line: {without.map((u) => u.name).join(', ')}.</p> : null;
+        })() : null}
       </div>
     </Card>
     <Card title="Calling hours and connects"><CallingSettingsForm c={settings.calling} /></Card>

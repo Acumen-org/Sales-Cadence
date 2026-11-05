@@ -21,6 +21,12 @@ import { readExtraPhones } from '@/lib/sandbox/normalize';
 import { ActionForm } from '@/components/action-form';
 import { Badge, EmptyState, Notice, Surface, ViewHeader, enrollmentStatusLabel } from '@/components/ui';
 import { CallButton } from '@/components/calls/call-button';
+import { LogCallButton } from '@/components/calls/log-call';
+import { SuggestionList } from '@/components/calls/suggestions';
+import { openSuggestions } from '@/lib/outreach/suggestions';
+import { openCallItems } from '@/lib/calls/link';
+import { pendingFormBlock } from '@/lib/calls/gate';
+import { mayHearCall } from '@/lib/calls/access';
 import { ContactActions } from '@/components/sandbox/contact-actions';
 import { addNoteAction, setNextActionAction, setPodAction, updateContactAction } from '@/lib/actions/sandbox';
 import { ACTION_LABELS } from '@/lib/sequences/steps';
@@ -51,9 +57,10 @@ function historyWords(action: string, d: Record<string, unknown> | null, names: 
 }
 
 /** One sandbox contact: what we know, what happened, and what happens next. Sandbox data is edited in place. */
-export default async function SandboxContactPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function SandboxContactPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ move?: string }> }) {
   const user = await requireUser();
   const { id } = await params;
+  const openMove = (await searchParams).move === '1';
   const contact = await prisma.sandboxContact.findUnique({
     where: { id },
     include: {
@@ -96,11 +103,20 @@ export default async function SandboxContactPage({ params }: { params: Promise<{
   const today = todayIn(user.timezone);
   const name = `${contact.firstName} ${contact.lastName}`.trim() || 'Removed contact';
   const open = contact.nextActions[0];
+  // B024, B027: Log a call with the steps it could close; colleagues' suggested steps for this owner.
+  const [callSteps, logBlocked, suggestions] = await Promise.all([
+    mayWork ? openCallItems({ personId: null, sandboxContactId: contact.id }, null) : Promise.resolve([]),
+    mayWork ? pendingFormBlock(user.id, user.timezone) : Promise.resolve(null),
+    openSuggestions(user.id, { sandboxContactId: contact.id }),
+  ]);
+  const nowLocal = new Intl.DateTimeFormat('sv-SE', { timeZone: user.timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()).replace(' ', 'T');
   // Opt out, Remove and Erase name the person and every effect (PLAN 4.0), and ask why.
   const effects = { name, campaigns: runningCampaigns.map((e) => e.campaign?.name ?? e.sequence.name), nextStep: open && !open.personId ? `${ACTION_LABELS[open.action]} on ${formatLocalDate(open.dueDate)}` : null, fromBellwether: contact.source === 'BELLWETHER', inCrm: contact.status === 'MOVED' };
   const confirms = { optOut: optOutConfirm(effects), remove: removeConfirm(effects), erase: eraseConfirm(effects) };
+  // N051: a call's notes and recording show only to its rep, the owner and those who see Reports.
+  const hears = (c: (typeof contact.calls)[number]) => mayHearCall(actor, { userId: c.userId, formUserId: c.formUserId, ownerId: contact.ownerId });
   const timeline = [
-    ...contact.calls.map((c) => ({ at: c.startedAt ?? c.createdAt, key: `c${c.id}`, node: <div><Link href={`/calls/${c.id}`} className="text-ink-900 hover:text-brand-700">{c.direction === 'OUTBOUND' ? 'Call' : 'Call received'}{c.talkSec ? ` · ${Math.floor(c.talkSec / 60)}m ${c.talkSec % 60}s` : ''}</Link><span className="text-ink-500"> · {c.user?.name ?? 'Unknown rep'}{c.form ? ` · ${outcomes.find((o) => o.key === c.form!.outcome)?.label ?? c.form.outcome}${c.form.rating ? ` (${c.form.rating}/5)` : ''}` : c.formDueAt ? ' · form due' : ''}</span>{c.form?.notes ? <p className="mt-1 whitespace-pre-wrap text-ink-700">{c.form.notes}</p> : null}{c.form ? <p className="text-ink-500">Next: {NEXT_STEP_LABELS[c.form.nextStep] ?? c.form.nextStep}{c.form.nextStepDate ? `, ${formatLocalDate(c.form.nextStepDate)}` : ''}</p> : null}{c.recordingSid ? <audio controls preload="none" className="mt-1 h-8" src={`/api/calls/${c.id}/recording`} /> : null}</div> })),
+    ...contact.calls.filter((c) => !c.discardedAt).map((c) => ({ at: c.startedAt ?? c.createdAt, key: `c${c.id}`, node: <div><Link href={`/calls/${c.id}`} className="text-ink-900 hover:text-brand-700">{c.direction === 'OUTBOUND' ? 'Call' : 'Call received'}{c.talkSec ? ` · ${Math.floor(c.talkSec / 60)}m ${c.talkSec % 60}s` : ''}</Link><span className="text-ink-500"> · {c.user?.name ?? 'Unknown rep'}{c.form ? ` · ${outcomes.find((o) => o.key === c.form!.outcome)?.label ?? c.form.outcome}${c.form.rating ? ` (${c.form.rating}/5)` : ''}` : c.formDueAt ? ' · form due' : ''}</span>{c.form?.notes && hears(c) ? <p className="mt-1 whitespace-pre-wrap text-ink-700">{c.form.notes}</p> : null}{c.form ? <p className="text-ink-500">Next: {c.form.nextStepLabel ?? NEXT_STEP_LABELS[c.form.nextStep] ?? c.form.nextStep}{c.form.nextStepDate ? `, ${formatLocalDate(c.form.nextStepDate)}` : ''}</p> : null}{c.recordingSid && hears(c) ? <audio controls preload="none" className="mt-1 h-8" src={`/api/calls/${c.id}/recording`} /> : null}</div> })),
     ...contact.emails.map((m) => ({ at: m.at, key: `m${m.id}`, node: <div><span className="text-ink-900">{m.kind === 'SENT' ? 'Email sent' : m.kind === 'REPLY' ? 'Reply' : m.kind === 'BOUNCE' ? 'Bounced' : 'Auto-reply'}</span><span className="text-ink-500"> · {m.subject ?? '(no subject)'}</span></div> })),
     ...contact.notes.map((n) => ({ at: n.createdAt, key: `n${n.id}`, node: <div><span className="text-ink-900">Note</span><span className="text-ink-500"> · {n.authorName ?? 'Cadence'}</span><p className="mt-1 whitespace-pre-wrap text-ink-700">{n.body}</p></div> })),
     ...contact.enrollments.flatMap((e) => e.tasks.filter((t) => t.state === 'DONE' && t.completedAt).map((t) => ({ at: t.completedAt!, key: `t${t.id}`, node: <div><span className="text-ink-900">{t.label} done</span><span className="text-ink-500"> · {e.campaign?.name ?? e.sequence.name}</span></div> }))),
@@ -130,7 +146,8 @@ export default async function SandboxContactPage({ params }: { params: Promise<{
         </div>
         <div className="flex flex-col items-end gap-2">
           {contact.phone && live ? <CallButton phone={contact.phone} template={settings.rules.clickToCallUrl} sandboxContactId={contact.id} nextActionId={open?.id ?? null} blocked={callBlocked} warning={gate?.warning} /> : null}
-          {live ? <ContactActions id={contact.id} name={name} ready={readyToMove} unclaimed={!contact.ownerId || !contact.owner?.active} mayWork={mayWork} mayOptOut={mayOptOut} mayMove={canMoveToCrm(actor, contact)} mayAssign={users.length > 0 && canAssignSandbox(actor, contact, null) && (isAdmin(user) || actor.role !== 'JUNIOR_FO')} mayErase={canEraseContact(actor)} users={users} ownerId={contact.ownerId} work={work} pods={pods} confirms={confirms} /> : contact.status === 'REMOVED' || (contact.status === 'OPTED_OUT' && !contact.piiClearedAt) ? <ContactActions id={contact.id} ready={false} unclaimed={false} mayWork={false} mayOptOut={contact.status === 'REMOVED' && mayOptOut} mayMove={false} mayAssign={false} mayErase={canEraseContact(actor)} users={[]} confirms={confirms} /> : null}
+          {mayWork ? <LogCallButton sandboxContactId={contact.id} name={name} steps={callSteps.map((s) => ({ key: `${s.kind}:${s.id}`, words: s.words }))} now={nowLocal} blocked={logBlocked} /> : null}
+          {live ? <ContactActions id={contact.id} name={name} ready={readyToMove} unclaimed={!contact.ownerId || !contact.owner?.active} mayWork={mayWork} mayOptOut={mayOptOut} mayMove={canMoveToCrm(actor, contact)} mayAssign={users.length > 0 && canAssignSandbox(actor, contact, null) && (isAdmin(user) || actor.role !== 'JUNIOR_FO')} mayErase={canEraseContact(actor)} users={users} ownerId={contact.ownerId} work={work} pods={pods} confirms={confirms} openMove={openMove} /> : contact.status === 'REMOVED' || (contact.status === 'OPTED_OUT' && !contact.piiClearedAt) ? <ContactActions id={contact.id} ready={false} unclaimed={false} mayWork={false} mayOptOut={contact.status === 'REMOVED' && mayOptOut} mayMove={false} mayAssign={false} mayErase={canEraseContact(actor)} users={[]} confirms={confirms} /> : null}
         </div>
       </div>
     </Surface>
@@ -157,7 +174,8 @@ export default async function SandboxContactPage({ params }: { params: Promise<{
         <Surface flush>
           <ViewHeader title="Next action" />
           <div className="space-y-3 p-4 text-[13px]">
-            {open ? <div className="text-ink-900">{open.label} · {ACTION_LABELS[open.action]} · {formatLocalDate(open.dueDate, 'long')} <span className="text-ink-500">· {open.fo.name}</span></div> : <div className="text-ink-500">None set</div>}
+            {open ? <div className="text-ink-900">{open.label} · {open.kind === 'MEETING' ? 'Meeting' : ACTION_LABELS[open.action]} · {formatLocalDate(open.dueDate, 'long')}{open.meetingAt ? ` at ${new Intl.DateTimeFormat('en-GB', { timeZone: user.timezone, hour: '2-digit', minute: '2-digit' }).format(open.meetingAt)}` : ''} <span className="text-ink-500">· {open.fo.name}</span></div> : <div className="text-ink-500">None set</div>}
+            <SuggestionList items={live ? suggestions.map((s) => ({ id: s.id, from: s.from, words: s.words })) : []} />
             {live && contact.crmMatchPersonId ? <p className="text-ink-600">Outreach stopped: this person was added to the CRM after the push. Move to CRM attaches this history to them.</p> : null}
             {mayWork && !contact.crmMatchPersonId ? <ActionForm action={setNextActionAction} className="flex flex-wrap items-end gap-2">
               <input type="hidden" name="id" value={contact.id} />

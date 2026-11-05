@@ -41,7 +41,9 @@ export function WorkRow({ kind, id, contact, label, action, channelLabel, due, d
     {mayWork ? <span className="flex shrink-0 items-center gap-1.5">
       {action === 'CALL' && contact.phone ? <CallButton phone={contact.phone} template={callTemplate} taskId={kind === 'step' ? id : null} nextActionId={kind === 'next' ? id : null} sandboxContactId={contact.id} blocked={gate?.blocked} warning={gate?.warning} className="btn-secondary btn-sm" /> : null}
       {kind === 'step' && action !== 'CALL' ? <ActionButton action={completeTaskAction} payload={{ taskId: id }} refresh>Done</ActionButton> : null}
-      {kind === 'next' ? <ActionButton action={completeNextActionAction} payload={{ id }} refresh>Done</ActionButton> : null}
+      {/* B161: a call closes with its call and its form, never with Done. */}
+      {/* B183: a booked meeting is no call to make: it is marked held. */}
+      {kind === 'next' && action !== 'CALL' ? <ActionButton action={completeNextActionAction} payload={{ id }} refresh>{action === 'MEETING' ? 'Meeting held' : 'Done'}</ActionButton> : null}
       {kind === 'step' ? <select aria-label={`Skip ${channelLabel}`} className="!py-1 text-[12px]" defaultValue="" onChange={async (e) => { const reason = e.target.value; e.target.value = ''; if (!reason) return; const fd = new FormData(); fd.set('taskId', id); fd.set('reasonKey', reason); await skipTaskAction(fd); window.location.reload(); }}><option value="" disabled>Skip</option>{skipReasons.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}</select> : null}
     </span> : null}
   </li>;

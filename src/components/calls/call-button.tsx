@@ -6,6 +6,7 @@ import { callHref, opensDialpad } from '@/lib/calls';
 import { recordCallIntentAction } from '@/lib/actions/call-forms';
 import { IconPhone } from '@/components/icons';
 import { useConfirm } from '@/components/confirm-dialog';
+import { FORM_FIRST, OPEN_FORM_EVENT } from '@/lib/calls/words';
 
 type Props = {
   phone: string;
@@ -34,7 +35,14 @@ export function CallButton({ phone, template, taskId, nextActionId, personId, sa
   const [refused, setRefused] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [ask, dialog] = useConfirm();
-  if (blocked) return <button type="button" className={clsx(className, 'cursor-not-allowed opacity-60')} disabled title={blocked} aria-label={`${label}: ${blocked}`}><IconPhone size={15} />{label}</button>;
+  // B089: why Call is off shows as text under it, with the fix when there is one; a waiting form reads "Form first".
+  if (blocked) {
+    const formFirst = blocked.startsWith(FORM_FIRST);
+    return <span className="inline-flex flex-col items-start gap-1">
+      <button type="button" className={clsx(className, 'cursor-not-allowed opacity-60')} disabled aria-label={`${label}: ${blocked}`}><IconPhone size={15} />{formFirst ? 'Form first' : label}</button>
+      <span className="max-w-xs text-[12px] text-ink-600">{blocked}{formFirst ? <> <button type="button" className="text-brand-700 underline" onClick={() => window.dispatchEvent(new Event(OPEN_FORM_EVENT))}>Fill it in</button></> : null}</span>
+    </span>;
+  }
   const dialpad = opensDialpad(template);
   const href = callHref(phone, template);
   const open = (tab: Window | null) => { if (tab) tab.location.href = href; else window.location.href = href; };

@@ -7,6 +7,7 @@ import type { SessionUser } from './auth/current-user';
 import { isJuniorFo, visiblePodIds } from './auth/rbac';
 import { addDays, dayOfWeek, diffDays, formatLocalDate, isLocalDate, startOfLocalDay, toLocalDate, type LocalDate } from './dates';
 import { ACTION_LABELS, type ActionType } from './sequences/steps';
+import { callOutcomes } from './call-outcomes';
 import { channelOf, CHANNELS, NO_PRODUCT, productLabel, productRank, SEVERAL_PRODUCTS, type Channel } from './report-keys';
 
 export const reportingTimezone = () => workspaceTimezone();
@@ -198,7 +199,8 @@ export async function buildReports(user: SessionUser, today: LocalDate, filters?
     const list = campaignId ? campaignById.get(campaignId)?.productInterest ?? [] : [];
     return list.length ? list : [NO_PRODUCT];
   };
-  const answeredKeys = new Set(settings.rules.callDispositions.filter((d) => d.answered).map((d) => d.key));
+  // N055: Not interested, Meeting booked and the rest of the form's outcomes are answered calls too.
+  const answeredKeys = new Set(callOutcomes(settings.rules).filter((d) => d.answered).map((d) => d.key));
 
   const byFo = new Rollup((k) => userName.get(k) ?? 'Unknown');
   const byPod = new Rollup((k) => (k === 'none' ? 'No pod' : podName.get(k) ?? 'Archived pod'));

@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { ActionButton } from '@/components/action-form';
 import { ConfirmDialog, type ConfirmOptions } from '@/components/confirm-dialog';
 import { assignContactsAction, claimContactsAction, eraseContactAction, optOutContactAction, removeContactsAction } from '@/lib/actions/sandbox';
-import { logManualCallAction } from '@/lib/actions/call-forms';
 import { MoveDialog } from './move-dialog';
 
 type Option = { id: string; name: string };
@@ -31,11 +30,13 @@ type Props = {
   pods?: Option[];
   /** The confirms for Opt out, Remove and Erase, naming the person and every effect (confirm-words.ts). */
   confirms: { optOut: ConfirmOptions; remove: ConfirmOptions; erase: ConfirmOptions };
+  /** Open the Move dialog at once: "Move to CRM" offered after a booked meeting (N061). */
+  openMove?: boolean;
 };
 
 /** The contact page's controls: Move to CRM first once the contact is ready, then the rest. */
-export function ContactActions({ id, name = 'this contact', ready, unclaimed, mayWork, mayOptOut, mayMove, mayAssign, mayErase, users, ownerId = null, work, pods = [], confirms }: Props) {
-  const [moving, setMoving] = useState(false);
+export function ContactActions({ id, name = 'this contact', ready, unclaimed, mayWork, mayOptOut, mayMove, mayAssign, mayErase, users, ownerId = null, work, pods = [], confirms, openMove = false }: Props) {
+  const [moving, setMoving] = useState(openMove && mayMove);
   const [assigning, setAssigning] = useState(false);
   const [to, setTo] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +57,6 @@ export function ContactActions({ id, name = 'this contact', ready, unclaimed, ma
     {mayMove ? <button type="button" className={ready ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'} onClick={() => setMoving(true)}>Move to CRM</button> : null}
     {unclaimed && mayWork ? <ActionButton action={claimContactsAction} payload={payload} refresh>Claim</ActionButton> : null}
     {mayAssign ? <button type="button" className="btn-secondary btn-sm" disabled={pending} onClick={() => { setTo(''); setAssigning(true); }}>Assign</button> : null}
-    {mayWork ? <button type="button" className="btn-secondary btn-sm" disabled={pending} onClick={() => { const fd = new FormData(); fd.set('sandboxContactId', id); start(async () => { const r = await logManualCallAction(fd); if (!r.ok) setError(r.error); else router.refresh(); }); }}>Log a call</button> : null}
     {mayOptOut ? <ActionButton action={optOutContactAction} payload={{ id }} confirm={confirms.optOut} refresh className="btn-ghost btn-sm">Opt out</ActionButton> : null}
     {mayMove ? <ActionButton action={removeContactsAction} payload={payload} confirm={confirms.remove} className="btn-ghost btn-sm">Remove</ActionButton> : null}
     {mayErase ? <ActionButton action={eraseContactAction} payload={{ id }} confirm={confirms.erase} className="btn-ghost btn-sm">Erase</ActionButton> : null}

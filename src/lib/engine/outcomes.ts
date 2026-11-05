@@ -6,6 +6,7 @@ import { optOutPerson, optOutSandboxContact, type RowSubject as SubjectRef } fro
 import { advanceEnrollment, cancelOpenTasks, completeTask, skipTask, syncCancelled, type EngineContext, type ResolveResult } from './tasks';
 import { parseSteps } from '../sequences/steps';
 import { ANSWERED_CALL_PREFIX } from '../reply-credit';
+import { callOutcomes, OPT_OUT_OUTCOME } from '../call-outcomes';
 
 /**
  * Outreach-style outcomes layered on the primitive task operations:
@@ -15,25 +16,9 @@ import { ANSWERED_CALL_PREFIX } from '../reply-credit';
  *  - move a person ahead to a later step, finish (replied / no reply)
  */
 
-/**
- * Outcomes the post-call form always offers beside the ones in Settings > Rules (plan section 10):
- * each means the person picked up, so each ends the sequence as a reply.
- */
-export const EXTRA_CALL_OUTCOMES: RulesSettings['callDispositions'] = [
-  { key: 'not_interested', label: 'Not interested', answered: true, badPhone: false },
-  { key: 'meeting_booked', label: 'Meeting booked', answered: true, badPhone: false },
-  { key: 'do_not_contact', label: 'Asked not to be contacted', answered: true, badPhone: false },
-  // B025: the line was picked up but nobody spoke (a machine, a hang-up): allowed with a reason.
-  { key: 'no_conversation', label: 'Line connected, no conversation', answered: false, badPhone: false },
-];
-
-/** "Asked not to be contacted": the person picked up, but it is never a reply (B091). */
-export const OPT_OUT_OUTCOME = 'do_not_contact';
-
-/** Settings > Rules' call outcomes, then the extras it does not already have. */
-export function callOutcomes(rules: RulesSettings): RulesSettings['callDispositions'] {
-  return [...rules.callDispositions, ...EXTRA_CALL_OUTCOMES.filter((x) => !rules.callDispositions.some((d) => d.key === x.key))];
-}
+// The one outcome list lives in call-outcomes.ts (N055), apart from the engine, so the sync and the
+// reports can read it too.
+export { callOutcomes, EXTRA_CALL_OUTCOMES, OPT_OUT_OUTCOME } from '../call-outcomes';
 
 export function dispositionFor(rules: RulesSettings, key: string | null | undefined) {
   return key ? callOutcomes(rules).find((d) => d.key === key) ?? null : null;

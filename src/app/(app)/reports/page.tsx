@@ -38,7 +38,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const [calls, sandbox, reps] = await Promise.all([
     view === 'calls' ? callReport(period) : Promise.resolve(null),
     view === 'outreach' ? sandboxReport(period) : Promise.resolve(null),
-    view === 'calls' ? prisma.user.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } }) : Promise.resolve([]),
+    view === 'calls' ? prisma.user.findMany({ where: { active: true }, select: { id: true, name: true, role: true }, orderBy: { name: 'asc' } }).then((us) => us.map((u) => ({ id: u.id, name: u.name, sales: ['JUNIOR_FO', 'SENIOR_FO', 'SALES_LEADER', 'POD_MANAGER'].includes(u.role) }))) : Promise.resolve([]),
   ]);
   const query = (patch: Record<string, string | null | undefined>) => {
     const params = new URLSearchParams({ tab, from: range.from, to: range.to, ...(view === 'calls' ? { view } : {}) });

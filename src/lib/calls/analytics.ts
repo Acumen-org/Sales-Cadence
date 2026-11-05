@@ -16,6 +16,24 @@ export type Audience = 'crm' | 'sandbox' | 'platform';
 
 export type CallTotals = { dials: number; inbound: number; connects: number; connectRate: number; conversations: number; talkSec: number; avgTalkPerConnect: number; meetings: number; avgRating: number | null; formsOutstanding: number; medianMinutesToForm: number | null; costUsd: number };
 
+/**
+ * N046: forms waiting now, whatever the period, by whoever holds them (the rep, or whom it was handed
+ * to), with the oldest one's due time: the backlog leaders chase. Scoped by pod or rep only.
+ */
+export async function formsWaiting(f: { podId?: string | null; foUserId?: string | null } = {}): Promise<Map<string, { count: number; oldest: Date }>> {
+  const podUsers = f.podId ? (await prisma.userPod.findMany({ where: { podId: f.podId }, select: { userId: true } })).map((u) => u.userId) : null;
+  const rows = await prisma.callLog.findMany({ where: { formDueAt: { not: null }, formDoneAt: null, discardedAt: null }, select: { userId: true, formUserId: true, formDueAt: true } });
+  const by = new Map<string, { count: number; oldest: Date }>();
+  for (const r of rows) {
+    const holder = r.formUserId ?? r.userId;
+    if (!holder || (f.foUserId && holder !== f.foUserId) || (podUsers && !podUsers.includes(holder))) continue;
+    const cur = by.get(holder);
+    if (!cur) by.set(holder, { count: 1, oldest: r.formDueAt! });
+    else { cur.count++; if (r.formDueAt! < cur.oldest) cur.oldest = r.formDueAt!; }
+  }
+  return by;
+}
+
 type CallRow = Prisma.CallLogGetPayload<{ include: { form: true; user: { select: { id: true; name: true } } } }>;
 
 async function callsIn(f: CallFilters): Promise<CallRow[]> {
@@ -23,6 +41,8 @@ async function callsIn(f: CallFilters): Promise<CallRow[]> {
   return prisma.callLog.findMany({
     where: {
       startedAt: { gte: f.from, lt: f.to },
+      // A call discarded as a mistake counts nowhere (B024).
+      discardedAt: null,
       ...(f.foUserId ? { userId: f.foUserId } : podUsers ? { userId: { in: podUsers } } : {}),
       ...(f.campaignId ? { campaignId: f.campaignId } : {}),
       ...(f.direction ? { direction: f.direction } : {}),
@@ -64,10 +84,13 @@ export async function callReport(f: CallFilters) {
   const outcomes = callOutcomes(settings.rules);
   const answered = new Set(outcomes.filter((o) => o.answered).map((o) => o.key));
   const span = f.to.getTime() - f.from.getTime();
-  const [calls, previousCalls, users] = await Promise.all([callsIn(f), callsIn({ ...f, from: new Date(f.from.getTime() - span), to: f.from }), prisma.user.findMany({ select: { id: true, name: true } })]);
+  const [calls, previousCalls, users, waiting] = await Promise.all([callsIn(f), callsIn({ ...f, from: new Date(f.from.getTime() - span), to: f.from }), prisma.user.findMany({ select: { id: true, name: true } }), formsWaiting(f)]);
   const t = (list: CallRow[]) => totals(list, answered, settings.calling.connectSeconds, settings.calling.conversationSeconds);
   const split: Record<Audience, CallTotals> = { crm: t(calls.filter((c) => audienceOf(c) === 'crm')), sandbox: t(calls.filter((c) => audienceOf(c) === 'sandbox')), platform: t(calls) };
-  const byRep = [...new Set(calls.map((c) => c.userId).filter((id): id is string => Boolean(id)))].map((id) => ({ userId: id, name: users.find((u) => u.id === id)?.name ?? 'Unknown', ...t(calls.filter((c) => c.userId === id)) })).sort((a, b) => b.dials - a.dials);
+  // N046: forms outstanding are the backlog now, never only the period's.
+  split.platform.formsOutstanding = [...waiting.values()].reduce((n, w) => n + w.count, 0);
+  const repIds = new Set([...calls.map((c) => c.userId).filter((id): id is string => Boolean(id)), ...waiting.keys()]);
+  const byRep = [...repIds].map((id) => ({ userId: id, name: users.find((u) => u.id === id)?.name ?? 'Unknown', ...t(calls.filter((c) => c.userId === id)), formsOutstanding: waiting.get(id)?.count ?? 0, oldestFormDue: waiting.get(id)?.oldest ?? null })).sort((a, b) => b.dials - a.dials || b.formsOutstanding - a.formsOutstanding);
   const byOutcome = outcomes.map((o) => ({ key: o.key, label: o.label, count: calls.filter((c) => c.form?.outcome === o.key).length })).filter((o) => o.count);
   const hourFmt = new Intl.DateTimeFormat('en-US', { timeZone: workspaceTimezone(), hour: 'numeric', weekday: 'short', hour12: false });
   const hours = new Map<string, { dials: number; connects: number }>();

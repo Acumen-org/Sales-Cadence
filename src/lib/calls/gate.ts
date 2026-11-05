@@ -3,7 +3,7 @@ import { getSettings } from '../settings';
 import { suppressionReason } from '../sandbox/opt-out';
 import { callingHours } from './hours';
 import { formsHeldBy } from './form-holder';
-import { callTimeWords } from './words';
+import { callTimeWords, FORM_FIRST } from './words';
 
 /**
  * Whether Cadence's Call button may open the dialpad for this contact now, as the button is drawn: a
@@ -21,7 +21,7 @@ export async function pendingFormBlock(userId: string, timezone: string, now = n
   const who = pending.person ?? pending.sandboxContact;
   // A removed contact's name was cleared: it reads as one (B008).
   const name = who ? `${who.firstName} ${who.lastName}`.trim() || 'a removed contact' : (pending.direction === 'INBOUND' ? pending.fromNumber : pending.toNumber) ?? 'an unknown number';
-  return `Fill in the form for your ${pending.direction === 'INBOUND' ? 'call from' : 'call with'} ${name} (${callTimeWords(pending.startedAt ?? pending.createdAt, timezone, now)}) first.`;
+  return `${FORM_FIRST} ${pending.direction === 'INBOUND' ? 'call from' : 'call with'} ${name} (${callTimeWords(pending.startedAt ?? pending.createdAt, timezone, now)}) first.`;
 }
 
 export async function callGate(user: { id: string; timezone: string }, contact: { state?: string | null; companyState?: string | null; phone?: string | null; country?: string | null; status?: string; optedOut?: boolean; dnd?: boolean; email?: string | null; additionalEmails?: string[]; phoneType?: string | null; additionalPhones?: unknown; linkedinUrl?: string | null; bellwetherContactId?: string | null; individualCrd?: string | null; crmMatchPersonId?: string | null; crmAutoPersonId?: string | null }, now = new Date()): Promise<CallGate> {

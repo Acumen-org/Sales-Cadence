@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser, toActor } from '@/lib/auth/current-user';
-import { canViewCalls } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
+import { callOwnerId, HIDDEN_CALL, mayHearCall } from '@/lib/calls/access';
 import { getTwilioReader } from '@/lib/calls/twilio';
 
 export const dynamic = 'force-dynamic';
@@ -14,10 +14,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'Sign in first.' }, { status: 401 });
   const { id } = await params;
-  const call = await prisma.callLog.findUnique({ where: { id }, select: { recordingSid: true, userId: true, sandboxContact: { select: { ownerId: true } } } });
+  const call = await prisma.callLog.findUnique({ where: { id }, select: { recordingSid: true, userId: true, formUserId: true, personId: true, sandboxContactId: true } });
   if (!call?.recordingSid) return NextResponse.json({ error: 'This call has no recording.' }, { status: 404 });
-  const mayHear = canViewCalls(toActor(user)) || call.userId === user.id || call.sandboxContact?.ownerId === user.id;
-  if (!mayHear) return NextResponse.json({ error: 'Only the rep, the contact owner and those who see Reports can play this recording.' }, { status: 403 });
+  // N051: one rule for the recording, the call page and the timelines.
+  if (!mayHearCall(toActor(user), { userId: call.userId, formUserId: call.formUserId, ownerId: await callOwnerId(call) })) return NextResponse.json({ error: HIDDEN_CALL }, { status: 403 });
   const reader = getTwilioReader();
   if (!reader) return NextResponse.json({ error: 'Twilio is not connected.' }, { status: 503 });
   const upstream = await reader.recordingMedia(call.recordingSid, req.headers.get('range'));

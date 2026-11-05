@@ -3,6 +3,7 @@ import { prisma } from '../db';
 import { logAudit, SYSTEM_ACTOR } from '../audit';
 import { cachedPersonName } from '../person-cache';
 import { getSettings } from '../settings';
+import { callOutcomes } from '../call-outcomes';
 import { firstNameOf } from '../names';
 import { getTwentyClient, type TwentyClient } from '../twenty';
 import { channelOf, type ActionType } from '../sequences/steps';
@@ -142,7 +143,8 @@ export async function syncTaskCompleted(task: SyncTask): Promise<void> {
   }
   if (settings.sync.writeCompletionNotes && !task.twentyNoteId) {
     const action = (task.chosenAction ?? task.action) as ActionType;
-    const dispositionLabel = settings.rules.callDispositions.find((d) => d.key === task.disposition)?.label ?? task.disposition ?? null;
+    // N055: the one outcome list, so "Not interested" never reaches the CRM as not_interested.
+    const dispositionLabel = callOutcomes(settings.rules).find((d) => d.key === task.disposition)?.label ?? task.disposition ?? null;
     const input = {
       title: completionNoteTitle(task, settings.matching.cadencePrefix, dispositionLabel),
       bodyMarkdown: [
