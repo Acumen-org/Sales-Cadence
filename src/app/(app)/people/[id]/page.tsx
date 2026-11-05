@@ -29,7 +29,7 @@ import { twentyPersonUrl } from '@/lib/twenty/urls';
 import { CrmHistory } from '@/components/people/crm-history';
 import { ActionIcon, IconExternal } from '@/components/icons';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
-import { Avatar, Badge, Card, contactWarnings, crmStanding, ENROLLMENT_TONE, enrollmentStatusLabel, KeyValue, RecordFields, RecordHeader, Surface, Tabs, TierBadge } from '@/components/ui';
+import { Avatar, Badge, Card, contactWarnings, crmStanding, enrollmentTone, enrollmentStatusLabel, KeyValue, RecordFields, RecordHeader, Surface, Tabs, TierBadge } from '@/components/ui';
 import { campaignStatusLabel } from '@/lib/campaign-status';
 
 type TimelineItem = { at: Date; kind: 'touch' | 'note' | 'task' | 'state'; icon: string; title: string; detail?: string | null; tone?: 'in' | 'out' | 'neutral' };
@@ -243,7 +243,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                     <Card
                       key={e.id}
                       title={<span className="flex items-center gap-2"><Link href={`/sequences/${e.sequenceId}`} className="font-medium hover:underline">{e.sequence.name}</Link>{e.cycle > 1 ? <Badge tone="blue">Round {e.cycle}</Badge> : null}</span>}
-                      actions={<Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'}>{enrollmentStatusLabel(e)}</Badge>}
+                      actions={<Badge tone={enrollmentTone(e)}>{enrollmentStatusLabel(e)}</Badge>}
                     >
                       <div className="border-b border-line bg-canvas/50 p-4"><RecordFields className="lg:grid-cols-4" items={[
                         { label: 'Campaign', value: e.campaign ? <Link href={`/campaigns/${e.campaign.id}`} className="text-brand-700 hover:underline">{e.campaign.name}</Link> : 'Direct enrollment' },
@@ -366,7 +366,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                             : null,
                         },
                         { k: 'Lead source', v: optionLabels(person.leadSource) || null },
-                        { k: 'Lead source notes', v: person.leadSourceNotes },
+                        { k: 'Lead source notes', v: person.leadSourceNotes ? <span className="whitespace-pre-line">{person.leadSourceNotes}</span> : null },
                         { k: 'Product interest', v: optionLabels(person.productInterest) || null },
                         { k: 'Primary product', v: person.primaryProduct ? optionLabel(person.primaryProduct) : null },
                         { k: 'Campaigns in Twenty', v: optionLabels(person.campaigns) || null },

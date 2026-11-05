@@ -4,6 +4,7 @@ import clsx from 'clsx';
 import { cloneElement, isValidElement, useId, type CSSProperties, type ReactElement, type ReactNode } from 'react';
 import { artFor, type Accent, type RecordArt } from '@/lib/accent';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
+import { ENROLLMENT_TONES, enrollmentStatusLabel, enrollmentTone } from '@/lib/enrollment-labels';
 
 /* -------------------------------------------------------------------------- */
 /* Page chrome                                                                */
@@ -210,14 +211,7 @@ export function DotTimeline({ points, now, width = 210, days = 30 }: { points: T
 /* Status tones shared across pages                                           */
 /* -------------------------------------------------------------------------- */
 
-export const ENROLLMENT_TONE: Record<string, BadgeTone> = {
-  ACTIVE: 'blue',
-  PAUSED: 'amber',
-  REPLIED: 'green',
-  MEETING: 'purple',
-  COMPLETED: 'gray',
-  EXITED: 'red',
-};
+export const ENROLLMENT_TONE: Record<string, BadgeTone> = ENROLLMENT_TONES;
 
 export const TASK_TONE: Record<string, BadgeTone> = {
   PENDING: 'blue',
@@ -234,35 +228,8 @@ export const CAMPAIGN_TONE: Record<string, BadgeTone> = {
   COMPLETED: 'green',
 };
 
-/** Outreach-style wording for an enrollment's state. */
-export function enrollmentStatusLabel(e: { status: string; exitReason?: string | null }): string {
-  switch (e.status) {
-    case 'ACTIVE':
-      return 'Active';
-    case 'PAUSED':
-      return 'Paused';
-    case 'REPLIED':
-      return 'Finished (Replied)';
-    case 'MEETING':
-      return 'Meeting booked';
-    case 'COMPLETED':
-      return 'Finished (No reply)';
-    case 'EXITED': {
-      const r = e.exitReason ?? '';
-      if (r === 'bounced') return 'Bounced';
-      if (r === 'opted_out') return 'Opted out';
-      if (r === 'dnd') return 'Do not contact';
-      if (r === 'not_interested') return 'Not interested';
-      if (r === 'not_a_prospect') return 'Not a prospect';
-      if (r === 'bad_data') return 'Bad data';
-      if (r === 'person_deleted') return 'Deleted in Twenty';
-      if (r.startsWith('campaign_')) return 'Campaign stopped';
-      return 'Removed';
-    }
-    default:
-      return e.status.charAt(0) + e.status.slice(1).toLowerCase();
-  }
-}
+/** Outreach-style wording for an enrollment's state, and its tone (B102): see lib/enrollment-labels.ts. */
+export { enrollmentStatusLabel, enrollmentTone };
 
 /** How Twenty classifies the person: its own funnel stage, then contact type, then the list. */
 const STAGE_TONE: Record<string, BadgeTone> = { PROSPECT: 'blue', QUALIFY: 'sky', RETAIN: 'green' };

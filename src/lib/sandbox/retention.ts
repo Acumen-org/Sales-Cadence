@@ -116,8 +116,14 @@ export async function runSandboxRetention(now = new Date(), opts: { remove?: boo
   if (remove) {
     const day = DAY;
     const inactiveBefore = new Date(now.getTime() - sandbox.retentionInactiveDays * day);
-    const movedBefore = new Date(now.getTime() - sandbox.undoDays * day);
-    movedCleared = (await prisma.sandboxContact.updateMany({ where: { status: 'MOVED', movedAt: { lt: movedBefore }, piiClearedAt: null }, data: { ...(PII_CLEARED as object), piiClearedAt: now } })).count;
+    // N062: a moved contact keeps its data until its own move's undo deadline, fixed when it moved;
+    // lowering the setting later never takes undo away from moves already made.
+    const expired = await prisma.$queryRaw<{ id: string }[]>`
+      SELECT c.id FROM "SandboxContact" c WHERE c.status = 'MOVED' AND c."piiClearedAt" IS NULL AND COALESCE(
+        (SELECT max(i."undoUntil") FROM "SandboxMoveItem" i WHERE i."sandboxContactId" = c.id AND i.state = 'DONE'),
+        c."movedAt" + make_interval(days => ${sandbox.undoDays}::int)
+      ) < ${now}`;
+    movedCleared = expired.length ? (await prisma.sandboxContact.updateMany({ where: { id: { in: expired.map((e) => e.id) }, status: 'MOVED', piiClearedAt: null }, data: { ...(PII_CLEARED as object), piiClearedAt: now } })).count : 0;
     optedOutCleared = (await prisma.sandboxContact.updateMany({ where: { status: 'OPTED_OUT', optedOutAt: { lt: inactiveBefore }, piiClearedAt: null }, data: { ...(PII_CLEARED as object), piiClearedAt: now } })).count;
     if (movedCleared || optedOutCleared) await prisma.sandboxNote.deleteMany({ where: { contact: { piiClearedAt: { not: null } } } });
   }

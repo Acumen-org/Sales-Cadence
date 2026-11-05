@@ -5,6 +5,7 @@ import { exitEnrollment, OCCUPYING_STATUSES } from '../engine/enrollment';
 import { afterResponse, retryDelayMs } from '../engine/sync-out';
 import { pushNextAction } from '../next-actions';
 import { getTwentyClient } from '../twenty';
+import { ownWriteStamp } from '../twenty/own-writes';
 import { isRoleEmail, normalizeLinkedin, personalPhone, readExtraPhones, toE164 } from '../sandbox/normalize';
 import { addKeptSuppressions, addSuppressions, keepKeys, personKeys, readKeptKeys, widenedKeys } from '../sandbox/suppression';
 import { OWN_DETAIL_MATCHES } from '../sandbox/status';
@@ -206,7 +207,7 @@ export async function writeCrmDoNotContact(personId: string, what: { dnd: boolea
       if (!client) throw new Error('Twenty is not configured.');
       if (w.operation === 'setPersonDnd') await client.setPersonDnd(personId, { dnd: Boolean(w.payload.dnd) });
       else await client.setPersonNextAction(personId, { nextAction: null, nextActionDueDate: null });
-      if (client.kind !== 'dry-run') await prisma.twentyWrite.create({ data: { operation: w.operation, objectType: 'person', twentyId: personId, payload: w.payload as Prisma.InputJsonValue, dryRun: false } });
+      if (client.kind !== 'dry-run') await prisma.twentyWrite.create({ data: { operation: w.operation, objectType: 'person', twentyId: personId, payload: w.payload as Prisma.InputJsonValue, dryRun: false, resultUpdatedAt: await ownWriteStamp(client, personId) } });
       if (w.operation === 'setPersonDnd') await prisma.personCache.updateMany({ where: { id: personId }, data: w.payload.dnd ? { dnd: true, dndReason: 'DO_NOT_DISTURB' } : { dnd: false, dndReason: null } });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

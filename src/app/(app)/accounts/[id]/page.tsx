@@ -12,7 +12,7 @@ import { accentFor } from '@/lib/accent';
 import { membershipFor, membershipLabel, primaryMembership } from '@/lib/campaign-membership';
 import { OrgTree, type TreePerson } from '@/components/accounts/org-tree';
 import { ActionIcon, IconExternal, IconLock, IconPlus } from '@/components/icons';
-import { Avatar, Badge, CAMPAIGN_TONE, Card, Count, ENROLLMENT_TONE, Empty, EmptyState, EventDetail, IdentityCell, KeyValue, RecordHeader, Stat, Surface, Tabs, TierBadge, enrollmentStatusLabel, type BadgeTone } from '@/components/ui';
+import { Avatar, Badge, CAMPAIGN_TONE, Card, Count, enrollmentTone, Empty, EmptyState, EventDetail, IdentityCell, KeyValue, RecordHeader, Stat, Surface, Tabs, TierBadge, enrollmentStatusLabel } from '@/components/ui';
 import { campaignStatusLabel } from '@/lib/campaign-status';
 import { optionLabels } from '@/lib/twenty/labels';
 
@@ -46,7 +46,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
       ? {
           status: p.enrollment.status,
           label: enrollmentStatusLabel(p.enrollment),
-          tone: (ENROLLMENT_TONE[p.enrollment.status] ?? 'gray') as BadgeTone,
+          tone: enrollmentTone(p.enrollment),
           foName: p.enrollment.foName,
           stepIndex: p.enrollment.stepIndex,
           steps: p.enrollment.steps,

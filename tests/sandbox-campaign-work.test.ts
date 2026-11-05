@@ -66,9 +66,9 @@ describe('Sandbox contacts in campaigns, on the same engine as CRM people', () =
   it('ends the running campaign on Move, and the next step becomes the person\'s next action', async () => {
     const { contact, enrollment, actor, audit } = await enrolled(b);
     await prisma.nextAction.create({ data: { sandboxContactId: contact.id, foUserId: b.users.alisa.id, label: 'Old sandbox step', action: 'EMAIL', dueDate: todayIn(workspaceTimezone()), crmPending: false } });
-    expect((await preflightMove([contact.id], actor)).items[0].nextStep).toEqual(expect.objectContaining({ label: 'Old sandbox step', action: 'EMAIL' }));
+    expect((await preflightMove([contact.id], actor)).items[0].ownStep).toEqual(expect.objectContaining({ label: 'Old sandbox step', action: 'EMAIL' }));
     const due = addDays(todayIn(workspaceTimezone()), 2);
-    const q = await queueMove([{ contactId: contact.id, mode: 'create' }], actor, audit, { label: 'Follow up on the intro call', action: 'CALL', dueDate: due });
+    const q = await queueMove([{ contactId: contact.id, mode: 'create', noConversation: true }], actor, audit, { label: 'Follow up on the intro call', action: 'CALL', dueDate: due });
     if (!q.ok) throw new Error(q.error);
     const item = await prisma.sandboxMoveItem.findFirstOrThrow({ where: { moveId: q.moveId } });
     expect(await processMoveItem(item.id)).toBe('DONE');
@@ -79,10 +79,12 @@ describe('Sandbox contacts in campaigns, on the same engine as CRM people', () =
     expect(ended.tasks.every((t) => t.state === 'CANCELLED')).toBe(true);
     expect(getMockTwentyClient().writes.filter((w) => w.op === 'createTask')).toEqual([]);
 
-    // The step replaced the contact's own and went across: open on the person, for the owner, waiting for Twenty.
+    // B034: the contact keeps its own step: the cold one closes, a CRM one opens on the person, for
+    // the owner, waiting for Twenty. The dialog's step was only for contacts without one.
     const open = await prisma.nextAction.findMany({ where: { personId, state: 'OPEN' } });
-    expect(open).toEqual([expect.objectContaining({ label: 'Follow up on the intro call', action: 'CALL', dueDate: due, foUserId: b.users.alisa.id, crmPending: true })]);
-    expect(await prisma.nextAction.count({ where: { sandboxContactId: contact.id } })).toBe(1);
+    expect(open).toEqual([expect.objectContaining({ label: 'Old sandbox step', action: 'EMAIL', foUserId: b.users.alisa.id, audience: 'CRM' })]);
+    expect(getMockTwentyClient().writes).toEqual(expect.arrayContaining([expect.objectContaining({ op: 'setPersonNextAction', id: personId, patch: expect.objectContaining({ nextAction: 'Old sandbox step' }) })]));
+    expect(await prisma.nextAction.findMany({ where: { sandboxContactId: contact.id, personId: null } })).toEqual([expect.objectContaining({ label: 'Old sandbox step', state: 'CANCELLED' })]);
   });
 
   it('leaves the next action of a person already in Twenty in place', async () => {
@@ -93,6 +95,7 @@ describe('Sandbox contacts in campaigns, on the same engine as CRM people', () =
     if (!q.ok) throw new Error(q.error);
     expect(await processMoveItem((await prisma.sandboxMoveItem.findFirstOrThrow({ where: { moveId: q.moveId } })).id)).toBe('DONE');
     expect(await prisma.nextAction.findMany({ where: { personId: person.id, state: 'OPEN' } })).toEqual([expect.objectContaining({ id: theirs.id, label: 'Their own step' })]);
-    expect(await prisma.nextAction.findFirst({ where: { sandboxContactId: contact.id } })).toEqual(expect.objectContaining({ label: 'Follow up on the intro call', state: 'CANCELLED' }));
+    // B034: nothing was written on the contact at queue time, and the move left the person's own step alone (B097).
+    expect(await prisma.nextAction.findFirst({ where: { sandboxContactId: contact.id } })).toBeNull();
   });
 });

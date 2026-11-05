@@ -5,6 +5,7 @@ import { addDays, formatLocalDate, isLocalDate, todayIn, type LocalDate } from '
 import { nextWorkingDay } from './engine/clock';
 import { getSettings } from './settings';
 import { getTwentyClient } from './twenty';
+import { logOwnPersonWrite } from './twenty/own-writes';
 import { afterResponse } from './engine/sync-out';
 import { CRM_SUBJECT } from './subject';
 
@@ -193,6 +194,8 @@ export async function pushNextAction(id: string): Promise<boolean> {
   try {
     const client = await getTwentyClient();
     await client.setPersonNextAction(personId, patch);
+    // B033: a moved person's updatedAt after Cadence's own write, so Undo does not mistake it for an edit.
+    await logOwnPersonWrite(client, personId, 'setPersonNextAction', { id: personId, ...patch });
     // Only if nothing changed meanwhile: a newer change is still pending and goes on the next pass.
     await prisma.nextAction.updateMany({ where: { id, updatedAt: na.updatedAt }, data: { crmPending: false, crmSyncedAt: new Date(), crmError: null } });
     await prisma.personCache.updateMany({ where: { id: personId }, data: patch });

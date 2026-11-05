@@ -6,7 +6,7 @@ import { canApproveCampaign, canManageCampaigns } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
 import { formatLocalDate } from '@/lib/dates';
 import { ActionButton } from '@/components/action-form';
-import { Badge, CAMPAIGN_TONE, EmptyState, Surface, ViewHeader, enrollmentStatusLabel, ENROLLMENT_TONE } from '@/components/ui';
+import { Badge, CAMPAIGN_TONE, EmptyState, Surface, ViewHeader, enrollmentStatusLabel, enrollmentTone } from '@/components/ui';
 import { approveCampaignAction, pauseCampaignAction, resumeCampaignAction, stopCampaignAction } from '@/lib/actions/campaigns';
 
 /** A sandbox campaign: the engine's campaign, its sandbox contacts, who works each and where they are. */
@@ -43,7 +43,7 @@ export default async function SandboxCampaignPage({ params }: { params: Promise<
           <td className="px-4 py-2">{e.sandboxContact ? <Link href={e.personId ? `/people/${e.personId}` : `/sandbox/${e.sandboxContact.id}`} className="text-ink-900 hover:text-brand-700">{`${e.sandboxContact.firstName} ${e.sandboxContact.lastName}`.trim() || 'Contact'}</Link> : '-'}<span className="text-ink-500">{e.sandboxContact?.companyName ? ` · ${e.sandboxContact.companyName}` : ''}</span></td>
           <td className="px-4 py-2">{e.fo.name}</td>
           <td className="px-4 py-2 tabular-nums">{formatLocalDate(e.startDate)}</td>
-          <td className="px-4 py-2"><Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'}>{enrollmentStatusLabel(e)}</Badge></td>
+          <td className="px-4 py-2"><Badge tone={enrollmentTone(e)}>{enrollmentStatusLabel(e)}</Badge></td>
           <td className="px-4 py-2 text-ink-600">{e.tasks[0] ? `${e.tasks[0].label} · ${formatLocalDate(e.tasks[0].dueDate)}` : '-'}</td>
         </tr>)}</tbody></table>
         : contacts.length ? <table className="w-full text-[13px]"><thead><tr className="border-b border-line text-left text-ink-500"><th className="px-4 py-2 font-normal">Contact</th><th className="px-4 py-2 font-normal">Firm</th><th className="px-4 py-2 font-normal">Owner</th></tr></thead>

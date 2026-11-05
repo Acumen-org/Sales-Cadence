@@ -96,7 +96,7 @@ describe('cold outreach data model (S1)', () => {
     // A move hands the cold rows to the CRM person, but their audience stays where the work happened.
     const { actor, audit } = await actorOf(alisa);
     await prisma.enrollment.update({ where: { id: coldEnrollment.id }, data: { status: 'EXITED' } });
-    const q = await queueMove([{ contactId: cold.id, mode: 'create' }], actor, audit);
+    const q = await queueMove([{ contactId: cold.id, mode: 'create', noConversation: true }], actor, audit);
     if (!q.ok) throw new Error(q.error);
     expect(await runMoveQueue()).toEqual({ done: 1, failed: 0, dryRun: 0 });
     const personId = (await prisma.sandboxContact.findUniqueOrThrow({ where: { id: cold.id } })).twentyPersonId;
@@ -147,15 +147,15 @@ describe('cold outreach data model (S1)', () => {
   it('B005: a contact already being moved cannot be queued again, from the dialog, a second tab or the database', async () => {
     const { actor, audit } = await actorOf(b.users.alisa.id);
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
-    const first = await queueMove([{ contactId: c.id, mode: 'create' }], actor, audit);
+    const first = await queueMove([{ contactId: c.id, mode: 'create', noConversation: true }], actor, audit);
     expect(first.ok).toBe(true);
-    expect((await preflightMove([c.id], actor)).items[0]).toEqual(expect.objectContaining({ state: 'refused', reason: 'Being moved already' }));
-    expect(await queueMove([{ contactId: c.id, mode: 'create' }], actor, audit)).toEqual(expect.objectContaining({ ok: false }));
+    expect((await preflightMove([c.id], actor)).items[0]).toEqual(expect.objectContaining({ group: 'left_out', reason: 'Being moved already' }));
+    expect(await queueMove([{ contactId: c.id, mode: 'create', noConversation: true }], actor, audit)).toEqual(expect.objectContaining({ ok: false }));
     await expect(prisma.sandboxMove.create({ data: { createdById: b.users.alisa.id, count: 1, state: 'QUEUED', items: { create: [{ sandboxContactId: c.id, state: 'QUEUED', mode: 'create', snapshot: {} }] } } })).rejects.toThrow();
 
     // Two tabs at the same moment: one move is queued, the other is refused, one CRM person is made.
     const d = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
-    const both = await Promise.all([queueMove([{ contactId: d.id, mode: 'create' }], actor, audit), queueMove([{ contactId: d.id, mode: 'create' }], actor, audit)]);
+    const both = await Promise.all([queueMove([{ contactId: d.id, mode: 'create', noConversation: true }], actor, audit), queueMove([{ contactId: d.id, mode: 'create', noConversation: true }], actor, audit)]);
     expect(both.filter((r) => r.ok)).toHaveLength(1);
     expect(both.find((r) => !r.ok)).toEqual({ ok: false, error: expect.stringContaining('already being moved') });
     expect(await prisma.sandboxMoveItem.count({ where: { sandboxContactId: d.id } })).toBe(1);
@@ -176,7 +176,7 @@ describe('cold outreach data model (S1)', () => {
     expect((await prisma.sandboxMoveItem.findUniqueOrThrow({ where: { id: newer.items[0].id } })).state).toBe('QUEUED');
     expect((await prisma.sandboxMove.findUniqueOrThrow({ where: { id: older.id } })).state).toBe('DONE');
     expect((await auditRows('deduped_by_migration')).filter((a) => a.entityType === 'sandbox_move')[0]).toEqual(expect.objectContaining({ entityId: older.id, details: expect.objectContaining({ itemId: older.items[0].id, kept: newer.items[0].id, was: 'QUEUED' }) }));
-    expect(await retryFailedItems(older.id)).toBe(0);
+    expect((await retryFailedItems(older.id)).queued).toBe(0);
     rerun('20261105000300_one_move_in_flight');
     expect((await auditRows('deduped_by_migration')).filter((a) => a.entityType === 'sandbox_move')).toHaveLength(1);
   });
@@ -259,6 +259,8 @@ describe('cold outreach data model (S1)', () => {
     await prisma.callForm.create({ data: { callId: byContact.id, userId: alisa, outcome: 'meeting_booked', nextStep: 'meeting', nextStepDate: '2026-11-12', nextActionId: meeting.id, submittedAt: new Date('2026-11-04T12:00:00Z') } });
     const move = await prisma.sandboxMove.create({ data: { createdById: alisa, count: 1, state: 'DONE', items: { create: [{ sandboxContactId: optedOut.id, state: 'DONE', mode: 'create', snapshot: {}, doneAt: new Date('2026-11-04T12:00:00Z') }] } }, include: { items: true } });
     await prisma.personCache.update({ where: { id: person.id }, data: { email: ' Mixed@Case.COM ', emailNorm: null, additionalEmails: ['Two@Case.com', 'not an address'], additionalEmailsNorm: [] } });
+    // Owned contacts without a pod, as they were before the release: the pod CHECK (S3, M2) is not there yet.
+    await prisma.$executeRawUnsafe('ALTER TABLE "SandboxContact" DROP CONSTRAINT "SandboxContact_owner_has_pod"');
     const podless = await readyContact(b.users.karson.id, b.pods.Alisa.id, { podId: null });
     const adminOwned = await readyContact(b.users.ria.id, b.pods.Alisa.id, { podId: null });
     // The write paths fill these from now on; as they were before the release, they are empty.
@@ -287,6 +289,12 @@ describe('cold outreach data model (S1)', () => {
 
     rerun('20261105000001_cold_outreach_backfill');
     expect(await auditRows('cold_outreach_backfill')).toHaveLength(1);
+
+    // B050 (S3, M2): the release then lets go of the admin-owned contact, audited with who held it, and the CHECK holds.
+    rerun('20261105200000_owned_contact_has_pod');
+    expect(await prisma.sandboxContact.findUniqueOrThrow({ where: { id: adminOwned.id } })).toEqual(expect.objectContaining({ ownerId: null, podId: null }));
+    expect((await auditRows('released_by_migration'))[0].details).toEqual(expect.objectContaining({ from: b.users.ria.id }));
+    await expect(prisma.sandboxContact.update({ where: { id: podless.id }, data: { podId: null } })).rejects.toThrow();
   });
 
   it('shared inboxes are told apart from personal addresses the same way here, in SQL and in Bellwether', () => {

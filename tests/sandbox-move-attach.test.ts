@@ -37,11 +37,11 @@ describe('Move to CRM: attach to a person already in Twenty', () => {
     goneFromTwenty(stale.id);
 
     const pre = await preflightMove([contact.id], actor);
-    expect(pre.items[0].state).toBe('ready');
+    expect(pre.items[0].group).toBe('no_conversation');
     expect((await prisma.personCache.findUniqueOrThrow({ where: { id: stale.id } })).deletedAt).not.toBeNull();
 
     // The dialog that was opened before Twenty lost the person still asks to attach.
-    const q = await queueMove([{ contactId: contact.id, mode: 'attach', attachPersonId: stale.id }], actor, audit);
+    const q = await queueMove([{ contactId: contact.id, mode: 'attach', attachPersonId: stale.id, noConversation: true }], actor, audit);
     if (!q.ok) throw new Error(q.error);
     expect(await runMoveQueue()).toEqual({ done: 1, failed: 0, dryRun: 0 });
     const item = await prisma.sandboxMoveItem.findFirstOrThrow({ where: { moveId: q.moveId } });
@@ -55,13 +55,13 @@ describe('Move to CRM: attach to a person already in Twenty', () => {
     const person = await prisma.personCache.findFirstOrThrow({ where: { email: { not: null }, deletedAt: null } });
     const contact = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { email: person.email });
     const pre = await preflightMove([contact.id], actor);
-    expect(pre.items[0]).toEqual(expect.objectContaining({ state: 'attach', crmPerson: expect.objectContaining({ id: person.id }) }));
+    expect(pre.items[0]).toEqual(expect.objectContaining({ group: 'in_crm', crmPerson: expect.objectContaining({ id: person.id }) }));
 
     // The sandbox CRM cleanup removes the person, in Twenty and in the copy.
     goneFromTwenty(person.id);
     await markPersonDeleted(person.id);
 
-    const q = await queueMove([{ contactId: contact.id, mode: 'attach', attachPersonId: person.id }], actor, audit);
+    const q = await queueMove([{ contactId: contact.id, mode: 'attach', attachPersonId: person.id, noConversation: true }], actor, audit);
     if (!q.ok) throw new Error(q.error);
     const item = await prisma.sandboxMoveItem.findFirstOrThrow({ where: { moveId: q.moveId } });
     expect(item).toEqual(expect.objectContaining({ mode: 'create', attachPersonId: null }));
@@ -72,7 +72,7 @@ describe('Move to CRM: attach to a person already in Twenty', () => {
     const { actor, audit } = await actorOf(b.users.alisa.id);
     const person = await prisma.personCache.findFirstOrThrow({ where: { email: { not: null }, deletedAt: null } });
     const contact = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { email: person.email });
-    const q = await queueMove([{ contactId: contact.id, mode: 'attach' }], actor, audit);
+    const q = await queueMove([{ contactId: contact.id, mode: 'attach', noConversation: true }], actor, audit);
     if (!q.ok) throw new Error(q.error);
     goneFromTwenty(person.id);
 
@@ -86,19 +86,19 @@ describe('Move to CRM: attach to a person already in Twenty', () => {
     const { actor, audit } = await actorOf(b.users.alisa.id);
     const person = await prisma.personCache.findFirstOrThrow({ where: { email: { not: null }, deletedAt: null } });
     const contact = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { email: person.email, companyName: null, companyDomain: null, companyWebsite: null });
-    const q = await queueMove([{ contactId: contact.id, mode: 'attach' }], actor, audit);
+    const q = await queueMove([{ contactId: contact.id, mode: 'attach', noConversation: true }], actor, audit);
     if (!q.ok) throw new Error(q.error);
     goneFromTwenty(person.id);
 
     expect(await runMoveQueue()).toEqual({ done: 0, failed: 1, dryRun: 0 });
     const item = await prisma.sandboxMoveItem.findFirstOrThrow({ where: { moveId: q.moveId } });
-    expect(item.error).toMatch(/^The CRM person to attach to is no longer in Twenty, and Cadence cannot create them until the contact has /);
+    expect(item.error).toMatch(/^The CRM person to attach to is no longer in the CRM, and Cadence cannot create them until the contact has /);
   });
 
   it('the web request and the worker never work the same item', async () => {
     const { actor, audit } = await actorOf(b.users.alisa.id);
     const contact = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
-    const q = await queueMove([{ contactId: contact.id, mode: 'create' }], actor, audit);
+    const q = await queueMove([{ contactId: contact.id, mode: 'create', noConversation: true }], actor, audit);
     if (!q.ok) throw new Error(q.error);
     const item = await prisma.sandboxMoveItem.findFirstOrThrow({ where: { moveId: q.moveId } });
 
@@ -112,7 +112,7 @@ describe('Move to CRM: attach to a person already in Twenty', () => {
   it('B190: a call that finds the item held or finished elsewhere says so, whatever the timing', async () => {
     const { actor, audit } = await actorOf(b.users.alisa.id);
     const contact = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
-    const q = await queueMove([{ contactId: contact.id, mode: 'create' }], actor, audit);
+    const q = await queueMove([{ contactId: contact.id, mode: 'create', noConversation: true }], actor, audit);
     if (!q.ok) throw new Error(q.error);
     const item = await prisma.sandboxMoveItem.findFirstOrThrow({ where: { moveId: q.moveId } });
 

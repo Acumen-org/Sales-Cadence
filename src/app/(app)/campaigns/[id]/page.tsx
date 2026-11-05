@@ -22,7 +22,7 @@ import { campaignStatusLabel, enrollConflictLabel } from '@/lib/campaign-status'
 import { CampaignControls, CampaignLifecycle, HardStopToggle } from '@/components/campaigns/campaign-controls';
 import { EnrollmentActions } from '@/components/campaigns/enrollment-actions';
 import { IconCampaigns } from '@/components/icons';
-import { Badge, CAMPAIGN_TONE, Card, Count, ENROLLMENT_TONE, Empty, RecordHeader, Stat, enrollmentStatusLabel } from '@/components/ui';
+import { Badge, CAMPAIGN_TONE, Card, Count, enrollmentTone, Empty, RecordHeader, Stat, enrollmentStatusLabel } from '@/components/ui';
 
 const AUDIENCE_PAGE = 50;
 
@@ -171,7 +171,7 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
         </div>
         <Card title={`People in the campaign · ${history.length.toLocaleString('en-US')}`}>
           <form className="border-b border-line px-5 py-3"><input name="q" defaultValue={sp.q ?? ''} placeholder="Search people" aria-label="Search people in the campaign" className="!w-72" /></form>
-          <div className="overflow-x-auto"><table className="table table-dense"><thead><tr><th>Person</th><th>FO</th><th>Run</th><th>Status</th><th>Started</th><th>Step</th>{manager && <th>Manage</th>}</tr></thead><tbody>{historyPage.map((e) => <tr key={e.id}><td><Link href={'/people/' + e.personId} className="text-[13px] font-medium text-ink-900 hover:text-brand-700">{cachedPersonName(e.person!)}</Link></td><td className="text-[12.5px]">{e.fo.name}</td><td className="tabular-nums">{e.campaignRun}</td><td><Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'}>{enrollmentStatusLabel(e)}</Badge></td><td className="whitespace-nowrap text-[12.5px]">{formatLocalDate(e.startDate)}</td><td className="text-[12.5px]">{e.currentStep < 0 ? 'Not started' : `${e.currentStep + 1} of ${detail.steps.length}`}</td>{manager && <td><EnrollmentActions enrollmentId={e.id} status={e.status} foUserId={e.foUserId} fos={podFos} compact /></td>}</tr>)}</tbody></table></div>
+          <div className="overflow-x-auto"><table className="table table-dense"><thead><tr><th>Person</th><th>FO</th><th>Run</th><th>Status</th><th>Started</th><th>Step</th>{manager && <th>Manage</th>}</tr></thead><tbody>{historyPage.map((e) => <tr key={e.id}><td><Link href={'/people/' + e.personId} className="text-[13px] font-medium text-ink-900 hover:text-brand-700">{cachedPersonName(e.person!)}</Link></td><td className="text-[12.5px]">{e.fo.name}</td><td className="tabular-nums">{e.campaignRun}</td><td><Badge tone={enrollmentTone(e)}>{enrollmentStatusLabel(e)}</Badge></td><td className="whitespace-nowrap text-[12.5px]">{formatLocalDate(e.startDate)}</td><td className="text-[12.5px]">{e.currentStep < 0 ? 'Not started' : `${e.currentStep + 1} of ${detail.steps.length}`}</td>{manager && <td><EnrollmentActions enrollmentId={e.id} status={e.status} foUserId={e.foUserId} fos={podFos} compact /></td>}</tr>)}</tbody></table></div>
           {historyPages > 1 ? <div className="flex items-center justify-between border-t border-line px-5 py-3 text-[12.5px] text-ink-500"><span>Page {page} of {historyPages}</span><span className="flex gap-2">{page > 1 ? <Link href={pageHref(page - 1)} className="btn-secondary btn-sm">Previous</Link> : null}{page < historyPages ? <Link href={pageHref(page + 1)} className="btn-secondary btn-sm">Next</Link> : null}</span></div> : null}
         </Card>
       </>}

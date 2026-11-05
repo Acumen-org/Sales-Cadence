@@ -6,7 +6,7 @@ import { compareLocalDates, formatInstant, formatLocalDate, type LocalDate } fro
 import { ACTION_LABELS } from '@/lib/sequences/steps';
 import { ActionIcon, IconExternal, IconNote } from '@/components/icons';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
-import { Avatar, Badge, contactWarnings, crmStanding, ENROLLMENT_TONE, enrollmentStatusLabel, KeyValue, Notice, RecordFields, Surface, TierBadge, type BadgeTone } from '@/components/ui';
+import { Avatar, Badge, contactWarnings, crmStanding, enrollmentTone, enrollmentStatusLabel, KeyValue, Notice, RecordFields, Surface, TierBadge, type BadgeTone } from '@/components/ui';
 
 function Section({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
   return <section className="border-b border-line px-4 py-4 last:border-b-0"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold text-ink-900">{title}</h3>{right}</div>{children}</section>;
@@ -81,7 +81,7 @@ export function TaskBriefPanel({ brief, timezone, callTemplate, gate }: { brief:
 
     {person.recordingUrl || person.meetingUrl ? <Section title="Meetings"><div className="flex flex-wrap gap-2">{person.meetingUrl ? <a href={person.meetingUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm">Meeting link<IconExternal size={12} /></a> : null}{person.recordingUrl ? <Link href={`/meetings/new?personId=${person.id}&url=${encodeURIComponent(person.recordingUrl)}`} className="btn-secondary btn-sm">Add recording</Link> : null}</div>{person.bookingId ? <div className="mt-3"><RecordFields items={[{ label: 'Booking ID', value: person.bookingId }]} /></div> : null}</Section> : null}
 
-    <Section title="Outreach progress" right={<Badge tone={ENROLLMENT_TONE[brief.enrollment.status] ?? 'gray'}>{enrollmentStatusLabel(brief.enrollment)}</Badge>}>
+    <Section title="Outreach progress" right={<Badge tone={enrollmentTone(brief.enrollment)}>{enrollmentStatusLabel(brief.enrollment)}</Badge>}>
       <KeyValue items={[
         // The campaign and the step lead the task in its band; this is the rest of the story.
         { k: 'Outreach', v: <Link href={`/sequences/${brief.task.enrollment.sequence.id}`} className="text-brand-700 hover:underline">{brief.enrollment.sequenceName}</Link> },
@@ -98,7 +98,7 @@ export function TaskBriefPanel({ brief, timezone, callTemplate, gate }: { brief:
     </Section>
 
     <Section title="Colleagues" right={person.companyId ? <Link href={`/accounts/${person.companyId}?tab=people`} className="text-xs font-medium text-brand-700 hover:underline">All company people</Link> : null}>
-      {brief.colleagues.length ? <ul className="space-y-4">{brief.colleagues.map((colleague) => <li key={colleague.personId} className="flex items-start gap-2.5"><Avatar name={colleague.name} shape="circle" size={28} /><div className="min-w-0 flex-1"><Link href={`/people/${colleague.personId}`} className="text-sm font-medium text-ink-900 hover:text-brand-700">{colleague.name}</Link>{colleague.jobTitle ? <div className="mt-1 text-xs text-ink-500">{colleague.jobTitle}</div> : null}{colleague.status ? <div className="mt-2"><Badge tone={colleague.status === 'DND' ? 'red' : ENROLLMENT_TONE[colleague.status] ?? 'gray'}>{enrollmentStatusLabel({ status: colleague.status, exitReason: colleague.exitReason })}</Badge></div> : null}</div></li>)}</ul> : <span className="text-sm text-ink-500">No other people linked</span>}
+      {brief.colleagues.length ? <ul className="space-y-4">{brief.colleagues.map((colleague) => <li key={colleague.personId} className="flex items-start gap-2.5"><Avatar name={colleague.name} shape="circle" size={28} /><div className="min-w-0 flex-1"><Link href={`/people/${colleague.personId}`} className="text-sm font-medium text-ink-900 hover:text-brand-700">{colleague.name}</Link>{colleague.jobTitle ? <div className="mt-1 text-xs text-ink-500">{colleague.jobTitle}</div> : null}{colleague.status ? <div className="mt-2"><Badge tone={colleague.status === 'DND' ? 'red' : enrollmentTone({ status: colleague.status ?? '' })}>{enrollmentStatusLabel({ status: colleague.status, exitReason: colleague.exitReason })}</Badge></div> : null}</div></li>)}</ul> : <span className="text-sm text-ink-500">No other people linked</span>}
     </Section>
     {/* Last, so nothing above moves when Twenty answers; one boundary per person, so moving to the next task never waits on the last one's. */}
     <Suspense key={person.id} fallback={null}><OpenOpportunities personId={person.id} /></Suspense>
