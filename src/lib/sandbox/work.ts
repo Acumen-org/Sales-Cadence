@@ -1,27 +1,59 @@
 import type { ActionType, NextActionRepeat, Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { logAudit, type AuditActor } from '../audit';
-import { SANDBOX_SUBJECT, SANDBOX_TASK } from '../subject';
+import { coldRef, SANDBOX_TASK, workWhere } from '../subject';
 import { WORKABLE } from '../tasks-query';
 import { isUniqueViolation } from '../engine/tasks';
+import { refuse, RefusedError, withSubjectLock, type GuardActor, type Refusal } from '../outreach/guard';
+import { channelOfAction, contactability } from '../outreach/contactability';
 
 /**
- * Sandbox > Work: the sandbox's own steps and next actions. They never reach Tasks, Home or Twenty
- * (decision 2): a sandbox contact's next action stays in Cadence until the contact moves.
+ * Sandbox > Work: the cold section's own steps and next actions. A cold contact's next action stays
+ * in Cadence until the contact moves. Work lists only active contacts (B009).
  */
 
-export async function setSandboxNextAction(contactId: string, input: { label: string; action: ActionType; dueDate: string; repeat?: NextActionRepeat; foUserId: string }, actor: AuditActor & { id?: string | null }): Promise<string> {
+export type ColdNextStepInput = { label: string; action: ActionType; dueDate: string; repeat?: NextActionRepeat; foUserId: string };
+export type ColdNextStepOptions = {
+  /** The signed-in user the guard judges; null is Cadence itself. */
+  guard?: GuardActor | null;
+  /** By hand, or the post-call form's next step (whose own pending form never blocks it). */
+  act?: 'next_step' | 'form_next_step';
+  /** The rep, for the pending-form block. */
+  user?: { id: string; timezone: string } | null;
+};
+
+/**
+ * Set a cold contact's one open next step, under its lock, only if the contact may be reached that
+ * way (PLAN 8.2): active and not being moved (B009), not suppressed or Do not contact, not "Also in
+ * CRM" (B053), with an email for an Email step and a LinkedIn profile for a LinkedIn one (N077).
+ */
+export async function setColdNextStep(contactId: string, input: ColdNextStepInput, actor: AuditActor & { id?: string | null }, opts: ColdNextStepOptions = {}): Promise<{ ok: true; id: string } | Refusal> {
+  const act = opts.act ?? 'next_step';
   const data = { label: input.label, action: input.action, dueDate: input.dueDate, repeat: input.repeat ?? 'NONE', foUserId: input.foUserId, crmPending: false, crmError: null };
-  const write = () => prisma.$transaction(async (tx) => {
+  const attempt = () => withSubjectLock(coldRef(contactId), opts.guard ?? null, act === 'form_next_step' ? 'form_next_step' : 'next_action', async (tx) => {
+    const row = (await tx.sandboxContact.findUnique({ where: { id: contactId } }))!;
+    const check = await contactability({ kind: 'cold', row }, { act, channel: channelOfAction(input.action), user: opts.user ?? null, tx });
+    if (!check.ok && check.effect === 'block') throw new RefusedError(refuse(check.code, check.reason, check.fix));
     const open = await tx.nextAction.findFirst({ where: { sandboxContactId: contactId, personId: null, state: 'OPEN' }, select: { id: true } });
-    return open ? tx.nextAction.update({ where: { id: open.id }, data }) : tx.nextAction.create({ data: { ...data, sandboxContactId: contactId, createdById: actor.id ?? null } });
-  });
-  // One open next step per contact is a database rule (NextAction_one_open_per_sandbox_contact): when
-  // another request created it first, this one updates that row instead of making a second (B005).
-  const row = await write().catch((err) => { if (isUniqueViolation(err)) return write(); throw err; });
-  await logAudit({ entityType: 'sandbox_contact', entityId: contactId, action: 'next_action_set', actor, details: { label: row.label, dueDate: row.dueDate } });
-  return row.id;
+    // One open next step per contact is a database rule (NextAction_one_open_per_sandbox_contact, B005).
+    const saved = open ? await tx.nextAction.update({ where: { id: open.id }, data }) : await tx.nextAction.create({ data: { ...data, sandboxContactId: contactId, createdById: actor.id ?? null, audience: 'SANDBOX' } });
+    // Setting a next step is activity (N032).
+    await tx.sandboxContact.update({ where: { id: contactId }, data: { lastActivityAt: new Date() } });
+    await logAudit({ entityType: 'sandbox_contact', entityId: contactId, action: 'next_action_set', actor, details: { label: saved.label, dueDate: saved.dueDate } }, tx);
+    return saved.id;
+  }, { audit: actor });
+  const r = await attempt().catch((err) => { if (isUniqueViolation(err)) return attempt(); throw err; });
+  return r.ok ? { ok: true, id: r.value } : r;
 }
+
+/** The same, for callers that only expect it to succeed: a refusal is thrown with its reason. */
+export async function setSandboxNextAction(contactId: string, input: ColdNextStepInput, actor: AuditActor & { id?: string | null }, opts: ColdNextStepOptions = {}): Promise<string> {
+  const r = await setColdNextStep(contactId, input, actor, opts);
+  if (!r.ok) throw new Error(r.reason);
+  return r.id;
+}
+
+const liveContact = { status: 'ACTIVE' } satisfies Prisma.SandboxContactWhereInput;
 
 export const sandboxTaskInclude = {
   enrollment: { include: { sandboxContact: { select: { id: true, firstName: true, lastName: true, companyName: true, jobTitle: true, email: true, phone: true, linkedinUrl: true, status: true, state: true, companyState: true, country: true, ownerId: true, podId: true } }, campaign: { select: { id: true, name: true, status: true } }, sequence: { select: { name: true } } } },
@@ -37,12 +69,12 @@ export type SandboxNextRow = Prisma.NextActionGetPayload<{ include: typeof sandb
 
 export type WorkTab = 'today' | 'overdue' | 'upcoming';
 
-/** Open sandbox steps and next actions for whoever the filter names (one FO, or everyone). */
+/** Open cold steps and next actions of active contacts for whoever the filter names (one FO, or everyone). */
 export async function sandboxWork(filters: { foUserId: string | null; podId: string | null }, today: string): Promise<{ tasks: SandboxTaskRow[]; next: SandboxNextRow[]; counts: Record<WorkTab, number> }> {
-  const who: Prisma.TaskWhereInput = { ...(filters.foUserId ? { foUserId: filters.foUserId } : {}), ...(filters.podId ? { enrollment: { ...SANDBOX_SUBJECT, podId: filters.podId } } : {}) };
+  const who: Prisma.TaskWhereInput = { ...(filters.foUserId ? { foUserId: filters.foUserId } : {}), ...(filters.podId ? { enrollment: { podId: filters.podId } } : {}) };
   const [tasks, next] = await Promise.all([
-    prisma.task.findMany({ where: { AND: [SANDBOX_TASK, WORKABLE, who, { state: 'PENDING' }] }, include: sandboxTaskInclude, orderBy: [{ dueDate: 'asc' }, { stepIndex: 'asc' }, { actionIndex: 'asc' }], take: 500 }),
-    prisma.nextAction.findMany({ where: { ...SANDBOX_SUBJECT, state: 'OPEN', ...(filters.foUserId ? { foUserId: filters.foUserId } : {}), ...(filters.podId ? { sandboxContact: { podId: filters.podId } } : {}) }, include: sandboxNextInclude, orderBy: [{ dueDate: 'asc' }], take: 500 }),
+    prisma.task.findMany({ where: { AND: [SANDBOX_TASK, { enrollment: { sandboxContact: liveContact } }, WORKABLE, who, { state: 'PENDING' }] }, include: sandboxTaskInclude, orderBy: [{ dueDate: 'asc' }, { stepIndex: 'asc' }, { actionIndex: 'asc' }], take: 500 }),
+    prisma.nextAction.findMany({ where: { AND: [workWhere('cold'), { state: 'OPEN' }, filters.foUserId ? { foUserId: filters.foUserId } : {}, filters.podId ? { sandboxContact: { podId: filters.podId } } : {}] }, include: sandboxNextInclude, orderBy: [{ dueDate: 'asc' }], take: 500 }),
   ]);
   const counts: Record<WorkTab, number> = { today: 0, overdue: 0, upcoming: 0 };
   const tab = (due: string): WorkTab => (due < today ? 'overdue' : due === today ? 'today' : 'upcoming');
@@ -51,11 +83,11 @@ export async function sandboxWork(filters: { foUserId: string | null; podId: str
   return { tasks, next, counts };
 }
 
-/** The Sandbox entry's badge: the signed-in user's sandbox steps and next actions due today or earlier. */
+/** The Sandbox entry's badge: the signed-in user's cold steps and next actions due today or earlier, on active contacts only. */
 export async function sandboxDueCount(userId: string, today: string): Promise<number> {
   const [tasks, next] = await Promise.all([
-    prisma.task.findMany({ where: { AND: [SANDBOX_TASK, WORKABLE, { foUserId: userId, state: 'PENDING' }] }, select: { enrollmentId: true, stepId: true, dueDate: true, snoozedTo: true } }),
-    prisma.nextAction.count({ where: { ...SANDBOX_SUBJECT, foUserId: userId, state: 'OPEN', dueDate: { lte: today } } }),
+    prisma.task.findMany({ where: { AND: [SANDBOX_TASK, { enrollment: { sandboxContact: liveContact } }, WORKABLE, { foUserId: userId, state: 'PENDING' }] }, select: { enrollmentId: true, stepId: true, dueDate: true, snoozedTo: true } }),
+    prisma.nextAction.count({ where: { AND: [workWhere('cold'), { foUserId: userId, state: 'OPEN', dueDate: { lte: today } }] } }),
   ]);
   const steps = new Set(tasks.filter((t) => (t.snoozedTo ?? t.dueDate) <= today).map((t) => `${t.enrollmentId}:${t.stepId}`));
   return steps.size + next;

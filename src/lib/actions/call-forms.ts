@@ -3,8 +3,12 @@
 import { revalidatePath } from 'next/cache';
 import { prisma } from '../db';
 import { requireUser, toActor } from '../auth/current-user';
-import { canAttachCalls, canManageSettings, isAdmin } from '../auth/rbac';
+import { canAttachCalls, canManageSettings, isAdmin, isBizOps } from '../auth/rbac';
 import { logAudit, userActor } from '../audit';
+import { coldRef, personRef } from '../subject';
+import { canAct, loadSubject, refuse, RefusedError, withSubjectLock } from '../outreach/guard';
+import { contactability } from '../outreach/contactability';
+import { audienceFor, callPodFor } from '../outreach/audience';
 import { toE164 } from '../sandbox/normalize';
 import { logManualCall, submitCallForm, type CallFormInput } from '../calls/form';
 import { importTwilioCalls } from '../calls/import';
@@ -16,11 +20,30 @@ function refresh() {
   revalidatePath('/', 'layout');
 }
 
-/** Cadence's Call button was pressed: who, which number, for which task or contact. The dialpad opens either way. */
-export async function recordCallIntentAction(input: { phone: string; taskId?: string | null; nextActionId?: string | null; personId?: string | null; sandboxContactId?: string | null }): Promise<ActionResult> {
+/**
+ * Cadence's Call button was pressed (N008). The check runs again here, at the click, on the server:
+ * a form waiting, the contact's status and owner, an opt-out or the suppression list on any key or
+ * on this exact number, "Also in CRM", calling hours. Only then is the intent recorded and the
+ * dialpad opened; otherwise the reason comes back for the button to show. `confirmed` answers a
+ * question asked once (a number marked wrong, calling hours set to warn).
+ */
+export async function recordCallIntentAction(input: { phone: string; taskId?: string | null; nextActionId?: string | null; personId?: string | null; sandboxContactId?: string | null; confirmed?: boolean }): Promise<ActionResult> {
   const user = await requireUser();
   const toNumber = toE164(input.phone);
   if (!toNumber) return { ok: false, error: 'That number could not be read.' };
+  const ref = input.personId ? personRef(input.personId) : input.sandboxContactId ? coldRef(input.sandboxContactId) : null;
+  if (ref) {
+    const subject = await loadSubject(ref);
+    if (!subject) return { ok: false, error: ref.kind === 'cold' ? 'This contact is no longer in Cold outreach.' : 'This person is no longer in the CRM.' };
+    const verdict = canAct(toActor(user), subject, 'call');
+    if (!verdict.ok) return { ok: false, error: verdict.reason };
+    const check = await contactability(ref, { act: 'call', channel: 'CALL', number: toNumber, user });
+    if (!check.ok) return { ok: false, error: check.reason };
+    const ask = [check.confirm, check.warning].filter(Boolean).join(' ');
+    if (ask && !input.confirmed) return { ok: true, message: `${ask} Call anyway?`, data: { confirm: true } };
+  } else if (isBizOps(user)) {
+    return { ok: false, error: 'Biz Ops can view calls but cannot make them from Cadence.' };
+  }
   await prisma.callIntent.create({ data: { userId: user.id, toNumber, taskId: input.taskId ?? null, nextActionId: input.nextActionId ?? null, personId: input.personId ?? null, sandboxContactId: input.personId ? null : input.sandboxContactId ?? null } });
   return { ok: true };
 }
@@ -38,7 +61,7 @@ export async function submitCallFormAction(formData: FormData): Promise<ActionRe
     productsDiscussed: formData.getAll('productsDiscussed').map(String).filter(Boolean),
     decisionMaker: String(formData.get('decisionMaker') ?? '') || null,
   };
-  const r = await submitCallForm(callId, input, user);
+  const r = await submitCallForm(callId, input, { id: user.id, name: user.name, timezone: user.timezone, role: user.role, podIds: user.podIds });
   refresh();
   return r.ok ? { ok: true, message: r.reminder ? `${r.message} ${r.reminder}` : r.message } : { ok: false, error: r.error };
 }
@@ -50,6 +73,20 @@ export async function logManualCallAction(formData: FormData): Promise<ActionRes
   const sandboxContactId = String(formData.get('sandboxContactId') ?? '') || null;
   const taskId = String(formData.get('taskId') ?? '') || null;
   if (!personId && !sandboxContactId) return { ok: false, error: 'Choose who the call was with.' };
+  // B008, B053: only someone who may work the contact logs a call on it, and only while it is active
+  // and not "Also in CRM". An unclaimed contact is claimed by it (PLAN 8.1).
+  if (sandboxContactId && !personId) {
+    const r = await withSubjectLock(coldRef(sandboxContactId), toActor(user), 'log_call', async (tx) => {
+      const row = (await tx.sandboxContact.findUnique({ where: { id: sandboxContactId } }))!;
+      if (row.crmMatchPersonId || row.crmAutoPersonId) throw new RefusedError(refuse('in_crm', 'This person is in the CRM now, so their outreach has stopped. Move to CRM to work them there.', { label: 'Move to CRM' }));
+    }, { audit: userActor(user) });
+    if (!r.ok) return { ok: false, error: r.reason };
+  } else if (personId) {
+    const subject = await loadSubject(personRef(personId));
+    if (!subject) return { ok: false, error: 'This person is no longer in the CRM.' };
+    const verdict = canAct(toActor(user), subject, 'log_call');
+    if (!verdict.ok) return { ok: false, error: verdict.reason };
+  }
   const minutes = Number(formData.get('minutes') ?? 0);
   const call = await logManualCall({ userId: user.id, personId, sandboxContactId, taskId, talkSec: Number.isFinite(minutes) && minutes > 0 ? Math.round(minutes * 60) : null });
   await recordCallTouch(call);
@@ -83,7 +120,18 @@ export async function attachCallContactAction(formData: FormData): Promise<Actio
   const callId = String(formData.get('callId') ?? '');
   const [kind, id] = String(formData.get('contact') ?? '').split(':');
   if (!id || (kind !== 'person' && kind !== 'sandbox')) return { ok: false, error: 'Choose who the call was with.' };
-  const call = await prisma.callLog.update({ where: { id: callId }, data: { personId: kind === 'person' ? id : null, sandboxContactId: kind === 'sandbox' ? id : null, matchedBy: 'chosen' } });
+  const before = await prisma.callLog.findUnique({ where: { id: callId }, select: { audience: true, podId: true, enrollmentId: true, userId: true } });
+  if (!before) return { ok: false, error: 'Call not found.' };
+  if (kind === 'sandbox' && !isAdmin(user)) {
+    // B008: a pod leader attaches calls to contacts of their own pods (an unclaimed one, or one with no pod, too).
+    const c = await prisma.sandboxContact.findUnique({ where: { id }, select: { podId: true, pod: { select: { name: true } } } });
+    if (!c) return { ok: false, error: 'That contact is no longer in Cold outreach.' };
+    if (c.podId && !user.podIds.includes(c.podId)) return { ok: false, error: `That contact is in ${c.pod?.name ?? 'another pod'}, which is not one of your pods.` };
+  }
+  const subject = { personId: kind === 'person' ? id : null, sandboxContactId: kind === 'sandbox' ? id : null };
+  // Stamped once, when the call is matched (PLAN 8.4): an unmatched call had no audience until now.
+  const stamp = { ...(before.audience ? {} : { audience: await audienceFor(subject) }), ...(before.podId ? {} : { podId: await callPodFor({ enrollmentId: before.enrollmentId, sandboxContactId: subject.sandboxContactId, userId: before.userId }) }) };
+  const call = await prisma.callLog.update({ where: { id: callId }, data: { ...subject, matchedBy: 'chosen', ...stamp } });
   if (call.statusRank >= 4) await recordCallTouch(call);
   await logAudit({ entityType: 'call', entityId: callId, action: 'contact_chosen', actor: userActor(user), details: { kind, id } });
   refresh();

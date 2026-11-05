@@ -2,7 +2,7 @@ import { prisma } from '../db';
 import { logAudit, type AuditActor } from '../audit';
 import { getSettings, type RulesSettings } from '../settings';
 import { exitEnrollment, finishEnrollment, markReplied, setPersonFlags } from './enrollment';
-import { optOutPerson, optOutSandboxContact, type SubjectRef } from '../sandbox/opt-out';
+import { optOutPerson, optOutSandboxContact, type RowSubject as SubjectRef } from '../sandbox/opt-out';
 import { advanceEnrollment, cancelOpenTasks, completeTask, skipTask, syncCancelled, type EngineContext, type ResolveResult } from './tasks';
 import { parseSteps } from '../sequences/steps';
 import { ANSWERED_CALL_PREFIX } from '../reply-credit';

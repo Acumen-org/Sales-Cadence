@@ -87,7 +87,7 @@ export function validateNextAction(raw: { label?: unknown; action?: unknown; due
  * Twenty's two fields can only hold one. Returns how many were set and who was left out.
  */
 export async function setNextActions(personIds: string[], input: NextActionInput, actor: AuditActor & { id?: string | null }, fallbackFoUserId: string): Promise<{ set: string[]; skipped: { personId: string; reason: string }[] }> {
-  const people = await prisma.personCache.findMany({ where: { id: { in: [...new Set(personIds)] } }, select: { id: true, deletedAt: true, dnd: true, ownerMemberId: true } });
+  const people = await prisma.personCache.findMany({ where: { id: { in: [...new Set(personIds)] } }, select: { id: true, deletedAt: true, dnd: true, optedOut: true, ownerMemberId: true } });
   const owners = await prisma.user.findMany({ where: { active: true, twentyMemberId: { in: people.flatMap((p) => (p.ownerMemberId ? [p.ownerMemberId] : [])) } }, select: { id: true, twentyMemberId: true } });
   const ownerOf = new Map(owners.map((u) => [u.twentyMemberId, u.id]));
   const set: string[] = [];
@@ -96,13 +96,15 @@ export async function setNextActions(personIds: string[], input: NextActionInput
     const p = people.find((x) => x.id === id);
     if (!p || p.deletedAt) { skipped.push({ personId: id, reason: 'Not in the CRM any more' }); continue; }
     if (p.dnd) { skipped.push({ personId: id, reason: 'Marked do not contact' }); continue; }
+    // B007: an opted-out person gets no new next action either.
+    if (p.optedOut) { skipped.push({ personId: id, reason: 'Asked not to be contacted' }); continue; }
     const foUserId = input.foUserId ?? (p.ownerMemberId ? ownerOf.get(p.ownerMemberId) : undefined) ?? fallbackFoUserId;
     const data = { label: input.label, action: input.action, dueDate: input.dueDate, repeat: input.repeat, foUserId, crmPending: true, crmError: null };
     const row = await prisma.$transaction(async (tx) => {
       const open = await tx.nextAction.findFirst({ where: { personId: id, state: 'OPEN' }, select: { id: true } });
       const saved = open
         ? await tx.nextAction.update({ where: { id: open.id }, data })
-        : await tx.nextAction.create({ data: { ...data, personId: id, createdById: actor.id ?? null } });
+        : await tx.nextAction.create({ data: { ...data, personId: id, createdById: actor.id ?? null, audience: 'CRM' } });
       // What Twenty will hold once the write lands, shown at once rather than after it.
       await tx.personCache.update({ where: { id }, data: { nextAction: saved.label, nextActionDueDate: saved.dueDate } });
       return saved;
@@ -131,6 +133,8 @@ export async function completeNextAction(id: string, actor: AuditActor & { id?: 
   });
   if (!claimed.count) return { ok: false, error: 'Someone else just changed this task.' };
   if (na.personId) await mirrorToPerson(na.personId, next ? { label: na.label, dueDate: next } : null);
+  // A cold contact's next step done is activity, which keeps retention away (N032).
+  else if (na.sandboxContactId) await prisma.sandboxContact.updateMany({ where: { id: na.sandboxContactId }, data: { lastActivityAt: now } });
   await logAudit({ ...auditSubject(na), action: 'next_action_done', actor, details: { label: na.label, dueDate: na.dueDate, next } });
   await afterResponse(async () => { await pushNextAction(id); });
   return { ok: true, next };

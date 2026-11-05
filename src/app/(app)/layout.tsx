@@ -41,7 +41,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   ]);
   const pendingCalls = pending.map((c) => {
     const who = c.person ?? c.sandboxContact;
-    return { id: c.id, name: who ? `${who.firstName} ${who.lastName}`.trim() : (c.direction === 'OUTBOUND' ? c.toNumber : c.fromNumber) ?? 'Unknown number', at: formatInstant(c.startedAt ?? c.createdAt, user.timezone).split(', ').pop() ?? '', number: c.direction === 'OUTBOUND' ? c.toNumber : c.fromNumber, twilioStatus: c.twilioStatus, talk: c.talkSec ? `${Math.floor(c.talkSec / 60)}m ${c.talkSec % 60}s` : null };
+    return { id: c.id, name: who ? `${who.firstName} ${who.lastName}`.trim() || 'Removed contact' : (c.direction === 'OUTBOUND' ? c.toNumber : c.fromNumber) ?? 'Unknown number', at: formatInstant(c.startedAt ?? c.createdAt, user.timezone).split(', ').pop() ?? '', number: c.direction === 'OUTBOUND' ? c.toNumber : c.fromNumber, twilioStatus: c.twilioStatus, talk: c.talkSec ? `${Math.floor(c.talkSec / 60)}m ${c.talkSec % 60}s` : null };
   });
   const todayGroups = new Set<string>();
   const overdueGroups = new Set<string>();

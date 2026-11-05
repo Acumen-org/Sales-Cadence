@@ -2,18 +2,25 @@
 
 import { revalidatePath } from 'next/cache';
 import { prisma } from '../db';
-import { requireUser, toActor, type SessionUser } from '../auth/current-user';
-import { canAssignSandbox, canClaimSandbox, canEraseContact, canManageSettings, canRemoveSandboxContact, canWorkSandboxContact, needsPod, isAdmin, whyNotAssignSandbox, whyNotWorkSandboxContact } from '../auth/rbac';
+import { requireUser, toActor } from '../auth/current-user';
+import { canManageSettings, needsPod, isAdmin } from '../auth/rbac';
 import { userActor } from '../audit';
 import { isLocalDate, todayIn } from '../dates';
 import { addNote, assignContact, claimContact, createContact, eraseContact, removeContact, setContactPod, updateContact, type ContactInput } from '../sandbox/contacts';
-import { optOutSandboxContact, suppressValue } from '../sandbox/opt-out';
+import { suppressValue } from '../sandbox/opt-out';
 import { normalizedFor, type SuppressionKind } from '../sandbox/suppression';
-import { setSandboxNextAction } from '../sandbox/work';
+import { setColdNextStep } from '../sandbox/work';
 import { addToSandboxCampaign, createSandboxCampaign } from '../sandbox/campaigns';
+import { optOutContact } from '../outreach/transitions';
 import { NEXT_ACTION_CHANNELS } from '../next-actions';
 import type { ActionType } from '@prisma/client';
 import type { ActionResult } from './users';
+
+/**
+ * Cold outreach's server actions. Every one goes through the guard (src/lib/outreach/guard.ts) with
+ * the signed-in user, so a stale tab, another pod or Biz Ops is refused with the reason in words, and
+ * nothing is changed (B008, B009, B048, B053).
+ */
 
 function refresh(id?: string) {
   revalidatePath('/sandbox');
@@ -21,14 +28,6 @@ function refresh(id?: string) {
 }
 
 const field = (fd: FormData, k: string) => (fd.has(k) ? String(fd.get(k) ?? '') : undefined);
-
-async function loadForWork(id: string): Promise<{ user: SessionUser; error: string | null; contact: { id: string; ownerId: string | null; podId: string | null; crmMatchPersonId: string | null } | null }> {
-  const user = await requireUser();
-  const contact = await prisma.sandboxContact.findUnique({ where: { id }, include: { owner: { select: { name: true } }, pod: { select: { name: true } } } });
-  if (!contact) return { user, contact: null, error: 'Contact not found.' };
-  if (!canWorkSandboxContact(toActor(user), contact)) return { user, contact: null, error: whyNotWorkSandboxContact(toActor(user), contact.owner?.name ?? null, contact.pod?.name ?? null) };
-  return { user, contact, error: null };
-}
 
 function contactInput(fd: FormData): Partial<ContactInput> {
   const input: Partial<ContactInput> = {};
@@ -42,19 +41,25 @@ function contactInput(fd: FormData): Partial<ContactInput> {
 
 export async function createContactAction(fd: FormData): Promise<ActionResult> {
   const user = await requireUser();
-  if (!isAdmin(user) && !needsPod(user.role)) return { ok: false, error: 'Biz Ops can view sandbox contacts but cannot add them.' };
-  const r = await createContact(contactInput(fd) as ContactInput, { id: user.id, podIds: user.podIds, ownsContacts: needsPod(user.role) || isAdmin(user) }, userActor(user), field(fd, 'podId') || null);
+  if (!isAdmin(user) && !needsPod(user.role)) return { ok: false, error: 'Biz Ops can view cold contacts but cannot add them.' };
+  const r = await createContact(contactInput(fd) as ContactInput, { id: user.id, podIds: user.podIds, ownsContacts: needsPod(user.role) || isAdmin(user) }, userActor(user), field(fd, 'podId') || null, { addAnyway: field(fd, 'addAnyway') === '1' });
   refresh();
   return r.ok ? { ok: true, message: 'Added to the sandbox.', redirectTo: `/sandbox/${r.id}` } : r;
 }
 
 export async function updateContactAction(fd: FormData): Promise<ActionResult> {
+  const user = await requireUser();
   const id = String(fd.get('id') ?? '');
-  const { user, contact, error } = await loadForWork(id);
-  if (!contact) return { ok: false, error: error! };
-  const r = await updateContact(id, contactInput(fd), userActor(user));
+  const r = await updateContact(id, contactInput(fd), userActor(user), toActor(user));
   refresh(id);
   return r.ok ? { ok: true, message: 'Saved.' } : r;
+}
+
+/** Many contacts, each through the guard on its own; the refusals are named, not swallowed. */
+function summary(done: number, refused: string[], verb: string): ActionResult {
+  const reasons = [...new Set(refused)];
+  if (!done) return { ok: false, error: reasons[0] ?? 'Nothing was changed.' };
+  return { ok: true, message: `${verb} ${done}.${refused.length ? ` ${refused.length} not changed: ${reasons.slice(0, 2).join(' ')}` : ''}` };
 }
 
 export async function claimContactsAction(fd: FormData): Promise<ActionResult> {
@@ -63,14 +68,11 @@ export async function claimContactsAction(fd: FormData): Promise<ActionResult> {
   let claimed = 0;
   const refused: string[] = [];
   for (const id of ids) {
-    const c = await prisma.sandboxContact.findUnique({ where: { id }, select: { ownerId: true, podId: true } });
-    if (!c || !canClaimSandbox(toActor(user), c)) { refused.push(id); continue; }
-    const r = await claimContact(id, user, userActor(user));
-    if (r.ok) claimed++; else refused.push(id);
+    const r = await claimContact(id, { id: user.id, podIds: user.podIds, role: user.role }, userActor(user));
+    if (r.ok) claimed++; else refused.push(r.error);
   }
   refresh(ids.length === 1 ? ids[0] : undefined);
-  if (!claimed) return { ok: false, error: ids.length === 1 ? 'This contact already has an owner.' : 'None of these could be claimed: they already have owners.' };
-  return { ok: true, message: `Claimed ${claimed}${refused.length ? `; ${refused.length} already had an owner` : ''}.` };
+  return summary(claimed, refused, 'Claimed');
 }
 
 export async function assignContactsAction(fd: FormData): Promise<ActionResult> {
@@ -78,94 +80,91 @@ export async function assignContactsAction(fd: FormData): Promise<ActionResult> 
   const ids = fd.getAll('ids').map(String).filter(Boolean);
   const to = String(fd.get('userId') ?? '') || null;
   let done = 0;
-  let refusal: string | null = null;
+  const refused: string[] = [];
   for (const id of ids) {
-    const c = await prisma.sandboxContact.findUnique({ where: { id }, include: { pod: { select: { name: true } } } });
-    if (!c) continue;
-    if (!canAssignSandbox(toActor(user), c, to)) { refusal = whyNotAssignSandbox(toActor(user), c.pod?.name ?? null); continue; }
-    const r = await assignContact(id, to, userActor(user), field(fd, 'podId') || null);
-    if (r.ok) done++; else refusal = r.error;
+    const r = await assignContact(id, to, userActor(user), field(fd, 'podId') || null, toActor(user));
+    if (r.ok) done++; else refused.push(r.error);
   }
   refresh(ids.length === 1 ? ids[0] : undefined);
-  if (!done) return { ok: false, error: refusal ?? 'Nothing was changed.' };
-  return { ok: true, message: to ? `Assigned ${done}.` : `Released ${done}.` };
+  return summary(done, refused, to ? 'Assigned' : 'Released');
 }
 
 export async function setPodAction(fd: FormData): Promise<ActionResult> {
+  const user = await requireUser();
   const id = String(fd.get('id') ?? '');
-  const { user, contact, error } = await loadForWork(id);
-  if (!contact) return { ok: false, error: error! };
   const podId = String(fd.get('podId') ?? '') || null;
   if (podId && !isAdmin(user) && !user.podIds.includes(podId)) return { ok: false, error: 'Choose one of your pods.' };
-  await setContactPod(id, podId, userActor(user));
+  const r = await setContactPod(id, podId, userActor(user), toActor(user));
   refresh(id);
-  return { ok: true, message: 'Pod set.' };
+  return r.ok ? { ok: true, message: 'Pod set.' } : r;
 }
 
 export async function addNoteAction(fd: FormData): Promise<ActionResult> {
+  const user = await requireUser();
   const id = String(fd.get('id') ?? '');
-  const { user, contact, error } = await loadForWork(id);
-  if (!contact) return { ok: false, error: error! };
-  const r = await addNote(id, String(fd.get('body') ?? ''), user, userActor(user));
+  const r = await addNote(id, String(fd.get('body') ?? ''), user, userActor(user), toActor(user));
   refresh(id);
   return r.ok ? { ok: true, message: 'Note added.' } : r;
 }
 
 export async function setNextActionAction(fd: FormData): Promise<ActionResult> {
+  const user = await requireUser();
   const id = String(fd.get('id') ?? '');
-  const { user, contact, error } = await loadForWork(id);
-  if (!contact) return { ok: false, error: error! };
-  if (contact.crmMatchPersonId) return { ok: false, error: 'This person is in the CRM now, so their outreach has stopped. Move to CRM to work them there.' };
   const label = String(fd.get('label') ?? '').trim();
   const action = String(fd.get('action') ?? 'EMAIL') as ActionType;
   const dueDate = String(fd.get('dueDate') ?? '');
   if (!label) return { ok: false, error: 'Say what to do.' };
   if (!NEXT_ACTION_CHANNELS.includes(action)) return { ok: false, error: 'Choose how.' };
   if (!isLocalDate(dueDate) || dueDate < todayIn(user.timezone)) return { ok: false, error: 'Pick today or a later day.' };
-  await setSandboxNextAction(id, { label, action, dueDate, foUserId: contact.ownerId ?? user.id }, userActor(user));
+  const contact = await prisma.sandboxContact.findUnique({ where: { id }, select: { ownerId: true, owner: { select: { active: true } } } });
+  // The owner works it; an unclaimed contact (or one whose owner left) is claimed by this write (PLAN 8.1).
+  const fo = contact?.ownerId && contact.owner?.active ? contact.ownerId : user.id;
+  const r = await setColdNextStep(id, { label, action, dueDate, foUserId: fo }, userActor(user), { guard: toActor(user), act: 'next_step', user });
   refresh(id);
-  return { ok: true, message: 'Next action set.' };
+  return r.ok ? { ok: true, message: 'Next action set.' } : { ok: false, error: r.reason };
 }
 
+/** Opt out: any sales user, any contact, no claim needed (PLAN 8.1); a removed one too (N027). */
 export async function optOutContactAction(fd: FormData): Promise<ActionResult> {
+  const user = await requireUser();
   const id = String(fd.get('id') ?? '');
-  const { user, contact, error } = await loadForWork(id);
-  if (!contact) return { ok: false, error: error! };
-  await optOutSandboxContact(id, { source: 'contact_page', actor: userActor(user), reason: String(fd.get('reason') ?? '') || null, createdById: user.id });
+  const r = await optOutContact(id, { source: 'contact_page', actor: userActor(user), guard: toActor(user), reason: String(fd.get('reason') ?? '') || null, createdById: user.id });
   refresh(id);
-  return { ok: true, message: 'Opted out. Cadence will not contact this person again, and Bellwether shows them as opted out.' };
+  if (!r.ok) return { ok: false, error: r.reason };
+  return { ok: true, message: r.changed ? 'Opted out. Cadence will not contact this person again, and Bellwether shows them as opted out.' : 'This contact is already opted out.' };
 }
 
 export async function removeContactsAction(fd: FormData): Promise<ActionResult> {
   const user = await requireUser();
   const ids = fd.getAll('ids').map(String).filter(Boolean);
+  const reason = String(fd.get('reason') ?? '') || null;
   let done = 0;
+  const refused: string[] = [];
   for (const id of ids) {
-    const c = await prisma.sandboxContact.findUnique({ where: { id }, select: { ownerId: true, podId: true } });
-    if (!c || !canRemoveSandboxContact(toActor(user), c)) continue;
-    if ((await removeContact(id, userActor(user))).ok) done++;
+    const r = await removeContact(id, userActor(user), new Date(), { guard: toActor(user), reason });
+    if (r.ok) done++; else refused.push(r.error);
   }
   refresh();
-  return done ? { ok: true, message: `Removed ${done}.`, ...(ids.length === 1 ? { redirectTo: '/sandbox' } : {}) } : { ok: false, error: 'Only the owner, the leaders of its pod and admins can remove these contacts.' };
+  const r = summary(done, refused, 'Removed');
+  return r.ok && ids.length === 1 ? { ...r, redirectTo: '/sandbox' } : r;
 }
 
 export async function eraseContactAction(fd: FormData): Promise<ActionResult> {
   const user = await requireUser();
-  if (!canEraseContact(toActor(user))) return { ok: false, error: 'Only admins can erase a contact.' };
-  const r = await eraseContact(String(fd.get('id') ?? ''), userActor(user));
+  const r = await eraseContact(String(fd.get('id') ?? ''), userActor(user), new Date(), toActor(user));
   refresh();
   if (!r.ok) return r;
   return { ok: true, message: r.recordings.length ? `Erased. Delete these recordings in the Twilio console too: ${r.recordings.join(', ')}.` : 'Erased.' };
 }
 
-/** Settings > Sandbox: add an email, phone or LinkedIn URL to the suppression list. */
+/** Settings > Sandbox: add an email, phone, LinkedIn URL or individual CRD to the suppression list. */
 export async function addSuppressionAction(fd: FormData): Promise<ActionResult> {
   const user = await requireUser();
   if (!canManageSettings(toActor(user))) return { ok: false, error: 'Only admins can change the suppression list.' };
   const kind = String(fd.get('kind') ?? '') as SuppressionKind;
-  if (!['email', 'phone', 'linkedin'].includes(kind)) return { ok: false, error: 'Choose email, phone or LinkedIn.' };
+  if (!['email', 'phone', 'linkedin', 'individual_crd'].includes(kind)) return { ok: false, error: 'Choose email, phone, LinkedIn or CRD.' };
   const value = normalizedFor(kind, String(fd.get('value') ?? ''));
-  if (!value) return { ok: false, error: kind === 'email' ? 'That email address is not valid.' : kind === 'phone' ? 'That phone number could not be read.' : 'Enter a LinkedIn profile address.' };
+  if (!value) return { ok: false, error: kind === 'email' ? 'That email address is not valid.' : kind === 'phone' ? 'That phone number could not be read.' : kind === 'individual_crd' ? 'A CRD is digits only.' : 'Enter a LinkedIn profile address.' };
   const r = await suppressValue({ kind, value }, { actor: userActor(user), createdById: user.id });
   revalidatePath('/settings');
   refresh();
@@ -189,7 +188,7 @@ export async function addToSandboxCampaignAction(fd: FormData): Promise<ActionRe
   const campaign = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { podId: true, createdById: true } });
   if (!campaign) return { ok: false, error: 'Campaign not found.' };
   if (!isAdmin(user) && !user.podIds.includes(campaign.podId)) return { ok: false, error: 'You can add contacts only to campaigns of your pods.' };
-  const r = await addToSandboxCampaign(campaignId, fd.getAll('ids').map(String).filter(Boolean), userActor(user));
+  const r = await addToSandboxCampaign(campaignId, fd.getAll('ids').map(String).filter(Boolean), userActor(user), toActor(user));
   refresh();
   if (!r.ok) return r;
   return { ok: true, message: `Added ${r.added}.${r.left ? ` Left out: ${r.left}.` : ''}` };

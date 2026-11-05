@@ -159,12 +159,13 @@ export async function previewEnrollment(req: EnrollRequest, client?: TwentyClien
       conflicts.push({ personId: id, name, reason: 'internal', detail: 'Internal team or organisation; excluded from outreach' });
       continue;
     }
-    if (p.dnd) {
-      conflicts.push({ personId: id, name, reason: 'dnd', detail: 'Do not contact is set in Twenty' });
-      continue;
-    }
+    // Cadence's own opt-out first: since D6 it also sets the CRM's Do not contact, and it says more.
     if (p.optedOut) {
       conflicts.push({ personId: id, name, reason: 'opted_out', detail: 'Asked not to be contacted (recorded in Cadence)' });
+      continue;
+    }
+    if (p.dnd) {
+      conflicts.push({ personId: id, name, reason: 'dnd', detail: 'Do not contact is set in Twenty' });
       continue;
     }
     if (p.podOwner && p.podOwner !== pod.podOwnerValue) {
@@ -273,6 +274,7 @@ export async function enrollPeople(req: EnrollRequest, ctx: Omit<EngineContext, 
             sequenceId: sequence.id,
             startDate: c.startDate,
             status: 'ACTIVE',
+            audience: 'CRM',
             createdById: req.actor.type === 'USER' ? req.actor.id ?? null : null,
             // The engine's clock, not the database's. In production they are the same instant;
             // in a replay or a test they must agree, because the evidence window is measured

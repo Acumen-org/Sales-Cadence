@@ -8,6 +8,7 @@ import { formatInstant, formatLocalDate, todayIn } from '@/lib/dates';
 import { getSettings } from '@/lib/settings';
 import { checkReady } from '@/lib/sandbox/ready';
 import { callGate } from '@/lib/calls/gate';
+import { canAct, loadColdSubject } from '@/lib/outreach/guard';
 import { callOutcomes } from '@/lib/engine/outcomes';
 import { NEXT_STEP_LABELS } from '@/lib/sandbox/history-notes';
 import { PRODUCT_VALUES } from '@/lib/sandbox/bellwether-api';
@@ -42,6 +43,12 @@ export default async function SandboxContactPage({ params }: { params: Promise<{
   const mayWork = live && canWorkSandboxContact(actor, contact);
   const ready = checkReady(contact, { owner: contact.owner, podName: contact.pod?.name ?? null, settings: settings.sandbox });
   const gate = contact.phone && live ? await callGate(user, contact) : null;
+  // B120: the Call button says why when this viewer may not work the contact. N027: a removed
+  // contact can still be opted out (any sales user) and erased (admins).
+  const subject = await loadColdSubject(contact.id);
+  const callVerdict = subject ? canAct(actor, subject, 'call') : null;
+  const callBlocked = callVerdict && !callVerdict.ok ? callVerdict.reason : gate?.blocked ?? null;
+  const mayOptOut = Boolean(subject && canAct(actor, subject, 'opt_out').ok);
   const outcomes = callOutcomes(settings.rules);
   const today = todayIn(user.timezone);
   const name = `${contact.firstName} ${contact.lastName}`.trim() || 'Removed contact';
@@ -71,8 +78,8 @@ export default async function SandboxContactPage({ params }: { params: Promise<{
           </div>
         </div>
         <div className="flex flex-col items-end gap-2">
-          {contact.phone && live ? <CallButton phone={contact.phone} template={settings.rules.clickToCallUrl} sandboxContactId={contact.id} nextActionId={open?.id ?? null} blocked={gate?.blocked} warning={gate?.warning} /> : null}
-          {live ? <ContactActions id={contact.id} ready={ready.ready} unclaimed={!contact.ownerId} mayWork={mayWork} mayMove={canMoveToCrm(actor, contact)} mayAssign={canAssignSandbox(actor, contact, null) && (isAdmin(user) || actor.role !== 'JUNIOR_FO')} mayErase={canEraseContact(actor)} users={users} /> : canEraseContact(actor) && contact.status !== 'MOVED' && !contact.piiClearedAt ? <ContactActions id={contact.id} ready={false} unclaimed={false} mayWork={false} mayMove={false} mayAssign={false} mayErase users={[]} /> : null}
+          {contact.phone && live ? <CallButton phone={contact.phone} template={settings.rules.clickToCallUrl} sandboxContactId={contact.id} nextActionId={open?.id ?? null} blocked={callBlocked} warning={gate?.warning} /> : null}
+          {live ? <ContactActions id={contact.id} ready={ready.ready} unclaimed={!contact.ownerId} mayWork={mayWork} mayOptOut={mayOptOut} mayMove={canMoveToCrm(actor, contact)} mayAssign={canAssignSandbox(actor, contact, null) && (isAdmin(user) || actor.role !== 'JUNIOR_FO')} mayErase={canEraseContact(actor)} users={users} /> : contact.status === 'REMOVED' || (contact.status === 'OPTED_OUT' && !contact.piiClearedAt) ? <ContactActions id={contact.id} ready={false} unclaimed={false} mayWork={false} mayOptOut={contact.status === 'REMOVED' && mayOptOut} mayMove={false} mayAssign={false} mayErase={canEraseContact(actor)} users={[]} /> : null}
         </div>
       </div>
     </Surface>

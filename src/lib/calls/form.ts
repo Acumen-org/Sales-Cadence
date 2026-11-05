@@ -1,4 +1,4 @@
-import type { ActionType } from '@prisma/client';
+import type { ActionType, Role } from '@prisma/client';
 import { prisma } from '../db';
 import { logAudit, type AuditActor } from '../audit';
 import { addDays, isLocalDate, todayIn, type LocalDate } from '../dates';
@@ -10,8 +10,12 @@ import { ANSWERED_CALL_PREFIX } from '../reply-credit';
 import { getTwentyClient } from '../twenty';
 import { workspaceTimezone } from '../workspace';
 import { optOutSubject } from '../sandbox/opt-out';
-import { setSandboxNextAction } from '../sandbox/work';
+import { setColdNextStep } from '../sandbox/work';
 import { callNoteDraft, writeNote } from '../sandbox/history-notes';
+import { coldRef, personRef } from '../subject';
+import { audienceFor, callPodFor } from '../outreach/audience';
+import { channelOfAction, contactability } from '../outreach/contactability';
+import type { GuardActor } from '../outreach/guard';
 
 /**
  * The post-call form (plan section 10): after every call, and a call is complete only once it is in.
@@ -83,7 +87,7 @@ export async function pendingForms(userId: string) {
 
 export type SubmitResult = { ok: true; message: string; reminder: string | null } | { ok: false; error: string; field?: string };
 
-export async function submitCallForm(callId: string, input: CallFormInput, user: { id: string; name: string; timezone: string }, now = new Date()): Promise<SubmitResult> {
+export async function submitCallForm(callId: string, input: CallFormInput, user: { id: string; name: string; timezone: string; role?: Role; podIds?: string[] }, now = new Date()): Promise<SubmitResult> {
   const settings = await getSettings();
   const call = await prisma.callLog.findUnique({ where: { id: callId }, include: { form: true } });
   if (!call) return { ok: false, error: 'Call not found.' };
@@ -94,11 +98,20 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
   if (!valid.ok) return valid;
   const v = valid.value;
   const actor: AuditActor & { id: string } = { type: 'USER', id: user.id, label: user.name };
+  const guard: GuardActor | null = user.role ? { id: user.id, role: user.role, podIds: user.podIds ?? [] } : null;
   const subject = { personId: call.personId, sandboxContactId: call.personId ? null : call.sandboxContactId };
   const outcome = callOutcomes(settings.rules).find((o) => o.key === v.outcome)!;
+  const step = NEXT_STEPS.find((s) => s.key === v.nextStep)!;
+
+  // N077: a next step the contact cannot be reached by is refused before anything is saved, so the rep picks another.
+  if (step.action && v.outcome !== 'do_not_contact' && (subject.personId || subject.sandboxContactId)) {
+    const check = await contactability(subject.personId ? personRef(subject.personId) : coldRef(subject.sandboxContactId!), { act: 'form_next_step', channel: channelOfAction(step.action), now });
+    if (!check.ok && check.block === 'no_channel') return { ok: false, error: check.reason, field: 'nextStep' };
+  }
 
   const form = await prisma.$transaction(async (tx) => {
-    const created = await tx.callForm.create({ data: { callId, userId: user.id, outcome: v.outcome, rating: v.rating, notes: v.notes, nextStep: v.nextStep, nextStepDate: v.nextStepDate, interest: v.interest, productsDiscussed: v.productsDiscussed, decisionMaker: v.decisionMaker, submittedAt: now } });
+    const audience = call.audience ?? await audienceFor(subject, tx);
+    const created = await tx.callForm.create({ data: { callId, userId: user.id, outcome: v.outcome, rating: v.rating, notes: v.notes, nextStep: v.nextStep, nextStepDate: v.nextStepDate, interest: v.interest, productsDiscussed: v.productsDiscussed, decisionMaker: v.decisionMaker, submittedAt: now, audience } });
     await tx.callLog.update({ where: { id: callId }, data: { formDoneAt: now, formDueAt: call.formDueAt ?? now } });
     return created;
   });
@@ -128,20 +141,36 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
   if (outcome.answered && call.touchId) await prisma.touch.update({ where: { id: call.touchId }, data: { summary: `${ANSWERED_CALL_PREFIX} ${outcome.label}` } });
 
   let reminder: string | null = null;
+  const openWhere = subject.personId ? { personId: subject.personId } : { sandboxContactId: subject.sandboxContactId, personId: null };
   if (v.outcome === 'do_not_contact' && (subject.personId || subject.sandboxContactId)) {
-    await optOutSubject(subject, { source: 'call_form', actor, now, createdById: user.id });
-    if (subject.personId) reminder = 'Set Do not disturb on this person in Twenty too: Cadence does not change that field.';
+    // Every opt-out of a CRM person sets the CRM's Do not contact and clears its Next Action (D6).
+    await optOutSubject(subject, { source: 'call_form', actor, now, createdById: user.id, guard });
+    if (subject.personId) reminder = 'Do not contact is set on this person in the CRM too.';
   } else if (subject.personId || subject.sandboxContactId) {
-    const step = NEXT_STEPS.find((s) => s.key === v.nextStep)!;
-    if (step.key === 'none') {
-      const open = await prisma.nextAction.findFirst({ where: { state: 'OPEN', ...(subject.personId ? { personId: subject.personId } : { sandboxContactId: subject.sandboxContactId, personId: null }) }, select: { id: true } });
+    const open = await prisma.nextAction.findFirst({ where: { state: 'OPEN', ...openWhere }, select: { id: true, foUserId: true, label: true, dueDate: true } });
+    const owner = subject.personId ? await crmOwnerOf(subject.personId) : (await prisma.sandboxContact.findUnique({ where: { id: subject.sandboxContactId! }, select: { ownerId: true } }))?.ownerId ?? null;
+    // B027: a colleague's form never replaces the owner's next step; it goes to them as a suggestion.
+    const colleague = Boolean(open && open.foUserId !== user.id && owner !== user.id);
+    if (colleague && open) {
+      await suggestNextStep({ to: open.foUserId, from: user, subject, callId, what: step.label, how: step.action, when: v.nextStepDate });
+      reminder = `${await nameOf(open.foUserId)} owns the next step (${open.label}, ${open.dueDate}), so it was not changed. They were sent your suggestion.`;
+    } else if (step.key === 'none') {
       if (open) await stopNextAction(open.id, actor, now);
     } else if (subject.personId) {
-      await setNextActions([subject.personId], { label: step.label, action: step.action!, dueDate: v.nextStepDate!, repeat: 'NONE', foUserId: user.id }, actor, user.id);
+      // B004: an opted-out or Do not contact person gets no next step; the call and form are saved.
+      const check = await contactability(personRef(subject.personId), { act: 'form_next_step', channel: channelOfAction(step.action), now });
+      if (!check.ok && check.effect === 'block') reminder = `No next step was set: ${check.reason}`;
+      else await setNextActions([subject.personId], { label: step.label, action: step.action!, dueDate: v.nextStepDate!, repeat: 'NONE', foUserId: owner && owner !== user.id ? owner : user.id }, actor, user.id);
     } else {
-      await setSandboxNextAction(subject.sandboxContactId!, { label: step.label, action: step.action!, dueDate: v.nextStepDate!, foUserId: user.id }, actor);
+      // B004, B008, B053: a contact opted out, removed, moved or in the CRM since the call gets no
+      // next step, and neither does one this rep may not work. The call and its form are saved.
+      const r = await setColdNextStep(subject.sandboxContactId!, { label: step.label, action: step.action!, dueDate: v.nextStepDate!, foUserId: owner && owner !== user.id ? owner : user.id }, actor, { guard, act: 'form_next_step', user });
+      if (!r.ok && r.code === 'not_yours' && owner) {
+        await suggestNextStep({ to: owner, from: user, subject, callId, what: step.label, how: step.action, when: v.nextStepDate });
+        reminder = `No next step was set: ${r.reason} They were sent your suggestion.`;
+      } else if (!r.ok) reminder = `No next step was set: ${r.reason}`;
     }
-    const nextActionId = (await prisma.nextAction.findFirst({ where: { state: 'OPEN', ...(subject.personId ? { personId: subject.personId } : { sandboxContactId: subject.sandboxContactId, personId: null }) }, select: { id: true } }))?.id ?? null;
+    const nextActionId = (await prisma.nextAction.findFirst({ where: { state: 'OPEN', ...openWhere }, select: { id: true } }))?.id ?? null;
     if (nextActionId) await prisma.callForm.update({ where: { id: form.id }, data: { nextActionId } });
   }
   if (subject.sandboxContactId) await prisma.sandboxContact.updateMany({ where: { id: subject.sandboxContactId }, data: { lastActivityAt: now, lastOutcome: v.outcome, lastOutcomeAt: now } });
@@ -149,15 +178,32 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
   return { ok: true, message: 'Saved. The call is complete.', reminder };
 }
 
+/** The Cadence user who owns a CRM person (Twenty's Assigned To), when there is one. */
+async function crmOwnerOf(personId: string): Promise<string | null> {
+  const p = await prisma.personCache.findUnique({ where: { id: personId }, select: { ownerMemberId: true } });
+  if (!p?.ownerMemberId) return null;
+  return (await prisma.user.findFirst({ where: { twentyMemberId: p.ownerMemberId, active: true }, select: { id: true } }))?.id ?? null;
+}
+
+const nameOf = async (userId: string) => (await prisma.user.findUnique({ where: { id: userId }, select: { name: true } }))?.name ?? 'Someone else';
+
+/** B027: a colleague's next step, offered to the owner instead of replacing theirs (accepted through the same checks later, W4). */
+async function suggestNextStep(s: { to: string; from: { id: string; name: string }; subject: { personId: string | null; sandboxContactId: string | null }; callId: string; what: string; how: ActionType | null; when: string | null }) {
+  await prisma.notification.create({ data: { userId: s.to, kind: 'next_step_suggestion', personId: s.subject.personId, sandboxContactId: s.subject.sandboxContactId, fromUserId: s.from.id, payload: { what: s.what, how: s.how, when: s.when, callId: s.callId, from: s.from.name } } });
+}
+
 /** A call made off Twilio (a mobile, say): logged by hand, with the same form. */
 export async function logManualCall(input: { userId: string; personId?: string | null; sandboxContactId?: string | null; taskId?: string | null; startedAt?: Date; talkSec?: number | null; direction?: 'OUTBOUND' | 'INBOUND' }, now = new Date()) {
   const task = input.taskId ? await prisma.task.findUnique({ where: { id: input.taskId }, select: { enrollmentId: true, enrollment: { select: { campaignId: true } } } }) : null;
+  const subject = { personId: input.personId ?? null, sandboxContactId: input.personId ? null : input.sandboxContactId ?? null };
   return prisma.callLog.create({
     data: {
       source: 'MANUAL', direction: input.direction ?? 'OUTBOUND', status: 'COMPLETED', statusRank: 4, userId: input.userId, repMatchedBy: 'manual',
-      personId: input.personId ?? null, sandboxContactId: input.personId ? null : input.sandboxContactId ?? null, matchedBy: 'chosen',
+      ...subject, matchedBy: 'chosen',
       taskId: input.taskId ?? null, enrollmentId: task?.enrollmentId ?? null, campaignId: task?.enrollment.campaignId ?? null,
       startedAt: input.startedAt ?? now, endedAt: now, talkSec: input.talkSec ?? null, formDueAt: now,
+      // Stamped once, when the call is written (PLAN 8.4): who it was with, and the pod it counts for (B040).
+      audience: await audienceFor(subject), podId: await callPodFor({ enrollmentId: task?.enrollmentId ?? null, sandboxContactId: subject.sandboxContactId, userId: input.userId }),
     },
   });
 }

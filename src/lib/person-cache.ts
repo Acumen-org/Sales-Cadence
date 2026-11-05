@@ -1,4 +1,6 @@
-import { normalizeEmail, toE164 } from './sandbox/normalize';
+import { isRoleEmail, normalizeEmail, normalizeLinkedin, toE164 } from './sandbox/normalize';
+import { findSuppressed, type SuppressionKey } from './sandbox/suppression';
+import { SYSTEM_ACTOR } from './audit';
 import type { Prisma } from '@prisma/client';
 import { prisma, type Tx } from './db';
 import type { TwentyClient } from './twenty/client';
@@ -96,7 +98,30 @@ export async function upsertPersonCache(p: TwentyPerson, tx: Tx | typeof prisma 
   await tx.personCache.updateMany({ where: { id, ...snapshotOrder(p.updatedAt, p.deletedAt) }, data: rest });
   const row = await tx.personCache.findUniqueOrThrow({ where: { id } });
   if (row.podOwner) await ensurePod(row.podOwner, null, tx);
+  if (tx === prisma) await optOutIfSuppressed(row);
   return row;
+}
+
+/**
+ * B010: a person who enters or changes in Cadence's copy of the CRM is checked against the
+ * suppression list, and opted out on a hit (in the CRM too, D6). Their own email or LinkedIn, or a
+ * number someone asked us never to call, counts; a shared inbox (info@) never does, and neither does
+ * an opted-out cold contact's office line, which protects only that contact. Also a cold contact who
+ * opted out with the same personal email.
+ */
+export async function optOutIfSuppressed(row: Pick<Prisma.PersonCacheGetPayload<object>, 'id' | 'optedOut' | 'deletedAt' | 'emailNorm' | 'additionalEmailsNorm' | 'phoneE164' | 'additionalPhoneE164' | 'linkedinUrl'>): Promise<boolean> {
+  if (row.optedOut || row.deletedAt) return false;
+  const emails = [...new Set([row.emailNorm, ...row.additionalEmailsNorm].filter((e): e is string => Boolean(e) && !isRoleEmail(e)))];
+  const keys: SuppressionKey[] = [
+    ...emails.map((value) => ({ kind: 'email' as const, value })),
+    ...[row.phoneE164, row.additionalPhoneE164].filter((n): n is string => Boolean(n)).map((value) => ({ kind: 'phone' as const, value })),
+    ...(normalizeLinkedin(row.linkedinUrl) ? [{ kind: 'linkedin' as const, value: normalizeLinkedin(row.linkedinUrl)! }] : []),
+  ];
+  const hit = (await findSuppressed(keys)) ?? (emails.length && (await prisma.sandboxContact.findFirst({ where: { optedOutAt: { not: null }, OR: [{ email: { in: emails } }, { additionalEmails: { hasSome: emails } }] }, select: { id: true } })));
+  if (!hit) return false;
+  const { optOutPerson } = await import('./outreach/transitions');
+  await optOutPerson(row.id, { source: 'suppression_list', actor: SYSTEM_ACTOR, reason: 'Their details are on the suppression list.' });
+  return true;
 }
 
 /** Deletions have their own clock in Twenty. Compare both clocks in the atomic write. */

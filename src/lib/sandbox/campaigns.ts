@@ -7,7 +7,9 @@ import { nextWorkingDay } from '../engine/clock';
 import { OCCUPYING_STATUSES } from '../engine/enrollment';
 import { advanceEnrollment, type EngineContext } from '../engine/tasks';
 import { workspaceTimezone } from '../workspace';
-import { contactKeys, suppressedHashes, suppressionHash } from './suppression';
+import { checkKeysOf, suppressedHashes, suppressionHash } from './suppression';
+import { crmDoNotContactTwin } from './dedupe';
+import { canAct, type GuardActor } from '../outreach/guard';
 
 /**
  * Sandbox campaigns on the existing engine (decision 1): a Campaign with audience SANDBOX whose
@@ -18,15 +20,20 @@ import { contactKeys, suppressedHashes, suppressionHash } from './suppression';
 
 export type SandboxAudienceIssue = { id: string; name: string; reason: string };
 
-/** Who cannot be in this campaign, and why, in one phrase each (the studio's whoAndWhy rule). */
-export async function sandboxAudienceIssues(contactIds: string[], podId: string, excludeCampaignId?: string): Promise<{ eligible: string[]; issues: SandboxAudienceIssue[] }> {
-  const contacts = await prisma.sandboxContact.findMany({ where: { id: { in: contactIds } } });
+/**
+ * Who cannot be in this campaign, and why, in one phrase each (the studio's whoAndWhy rule). With
+ * `actor`, the guard's ownership rule applies to each contact (B132): a Junior FO adds only their own.
+ * Every key counts for suppression, every phone of every type included (B001), and a contact whose
+ * name and firm are Do not contact in the CRM is left out (N003).
+ */
+export async function sandboxAudienceIssues(contactIds: string[], podId: string, excludeCampaignId?: string, actor?: GuardActor | null): Promise<{ eligible: string[]; issues: SandboxAudienceIssue[] }> {
+  const contacts = await prisma.sandboxContact.findMany({ where: { id: { in: contactIds } }, include: { owner: { select: { name: true, active: true } }, pod: { select: { name: true } } } });
   const busy = new Set((await prisma.enrollment.findMany({ where: { sandboxContactId: { in: contactIds }, personId: null, status: { in: OCCUPYING_STATUSES } }, select: { sandboxContactId: true } })).map((e) => e.sandboxContactId));
   const promised = new Map<string, string>();
   for (const c of await prisma.campaign.findMany({ where: { audience: 'SANDBOX', status: { in: ['DRAFT', 'PENDING_APPROVAL', 'SCHEDULED'] }, personIds: { hasSome: contactIds }, ...(excludeCampaignId ? { id: { not: excludeCampaignId } } : {}) }, select: { name: true, personIds: true } })) for (const id of c.personIds) promised.set(id, c.name);
   const podFos = new Set((await prisma.userPod.findMany({ where: { podId, user: { active: true } }, select: { userId: true } })).map((u) => u.userId));
-  const keys = contacts.flatMap((c) => contactKeys(c));
-  const hashes = await suppressedHashes(keys);
+  const keysOf = new Map(contacts.map((c) => [c.id, checkKeysOf(c, c.id)]));
+  const hashes = await suppressedHashes([...keysOf.values()].flat());
   const eligible: string[] = [];
   const issues: SandboxAudienceIssue[] = [];
   for (const id of contactIds) {
@@ -36,7 +43,12 @@ export async function sandboxAudienceIssues(contactIds: string[], podId: string,
     if (c.status === 'MOVED') { issues.push({ id, name, reason: 'Moved to the CRM' }); continue; }
     if (c.status !== 'ACTIVE') { issues.push({ id, name, reason: c.status === 'OPTED_OUT' ? 'Opted out' : 'Removed' }); continue; }
     if (c.crmMatchPersonId) { issues.push({ id, name, reason: 'Also in the CRM' }); continue; }
-    if (contactKeys(c).some((k) => hashes.has(suppressionHash(k.kind, k.value)))) { issues.push({ id, name, reason: 'On the suppression list' }); continue; }
+    if ((keysOf.get(c.id) ?? []).some((k) => hashes.has(suppressionHash(k.kind, k.value)))) { issues.push({ id, name, reason: 'On the suppression list' }); continue; }
+    if (await crmDoNotContactTwin(c)) { issues.push({ id, name, reason: 'Do not contact in the CRM' }); continue; }
+    if (actor) {
+      const verdict = canAct(actor, { kind: 'cold', id: c.id, status: c.status, name, ownerId: c.ownerId, ownerName: c.owner?.name ?? null, ownerActive: c.owner?.active ?? false, podId: c.podId, podName: c.pod?.name ?? null, twentyPersonId: c.twentyPersonId, movedById: c.movedById, optedOutAt: c.optedOutAt, optOutSource: c.optOutSource, crmMatchPersonId: c.crmMatchPersonId, crmAutoPersonId: c.crmAutoPersonId, moving: false }, 'enroll');
+      if (!verdict.ok) { issues.push({ id, name, reason: verdict.reason.replace(/\.$/, '') }); continue; }
+    }
     if (busy.has(id)) { issues.push({ id, name, reason: 'Already in a sandbox campaign' }); continue; }
     if (promised.has(id)) { issues.push({ id, name, reason: `Already in ${promised.get(id)}` }); continue; }
     if (c.ownerId && !podFos.has(c.ownerId)) { issues.push({ id, name, reason: 'Owned by someone outside this pod' }); continue; }
@@ -63,7 +75,7 @@ export async function createSandboxCampaign(input: CreateSandboxCampaignInput, a
   if (!canCreateCampaign(actor, input.podId)) return { ok: false, error: 'You can start campaigns only for the pods you are in.' };
   const sequence = await prisma.sequence.findFirst({ where: { id: input.sequenceId, archived: false } });
   if (!sequence) return { ok: false, error: 'Choose a sequence.' };
-  const { eligible, issues } = await sandboxAudienceIssues([...new Set(input.contactIds)], input.podId);
+  const { eligible, issues } = await sandboxAudienceIssues([...new Set(input.contactIds)], input.podId, undefined, actor);
   if (!eligible.length) return { ok: false, error: issues.length ? `Nobody can be in it. ${whoAndWhySandbox(issues)}.` : 'Select contacts first.' };
   const approved = canApproveCampaign(actor, input.podId);
   const campaign = await prisma.campaign.create({
@@ -95,7 +107,7 @@ export async function activateSandboxCampaign(id: string, ctx: EngineContext): P
       let day = start;
       for (let i = 0; i < Math.floor(k / rate); i++) day = nextWorkingDay(addDays(day, 1), settings.rules.workingDays);
       if (!c.ownerId) await tx.sandboxContact.update({ where: { id: c.id }, data: { ownerId: owner, podId: campaign.podId, claimedAt: now, firstClaimedAt: c.firstClaimedAt ?? now } });
-      const e = await tx.enrollment.create({ data: { sandboxContactId: c.id, foUserId: owner, podId: campaign.podId, campaignId: id, campaignRun: campaign.runNumber, sequenceId: campaign.sequenceId, startDate: day, status: 'ACTIVE', createdById: ctx.actor.type === 'USER' ? ctx.actor.id ?? null : null, createdAt: now } });
+      const e = await tx.enrollment.create({ data: { sandboxContactId: c.id, foUserId: owner, podId: campaign.podId, campaignId: id, campaignRun: campaign.runNumber, sequenceId: campaign.sequenceId, startDate: day, status: 'ACTIVE', createdById: ctx.actor.type === 'USER' ? ctx.actor.id ?? null : null, createdAt: now, audience: 'SANDBOX' } });
       rows.push(e);
     }
     await tx.campaign.update({ where: { id }, data: { status: 'ACTIVE' } });
@@ -107,12 +119,12 @@ export async function activateSandboxCampaign(id: string, ctx: EngineContext): P
 }
 
 /** Add more contacts to a sandbox campaign that has not started. */
-export async function addToSandboxCampaign(campaignId: string, contactIds: string[], audit: AuditActor): Promise<{ ok: true; added: number; left: string | null } | { ok: false; error: string }> {
+export async function addToSandboxCampaign(campaignId: string, contactIds: string[], audit: AuditActor, actor: GuardActor | null = null): Promise<{ ok: true; added: number; left: string | null } | { ok: false; error: string }> {
   const campaign = await prisma.campaign.findUnique({ where: { id: campaignId } });
   if (!campaign || campaign.audience !== 'SANDBOX') return { ok: false, error: 'Campaign not found.' };
   if (!['DRAFT', 'PENDING_APPROVAL', 'SCHEDULED'].includes(campaign.status)) return { ok: false, error: 'This campaign has started; add these contacts to a new one.' };
   const fresh = contactIds.filter((id) => !campaign.personIds.includes(id));
-  const { eligible, issues } = await sandboxAudienceIssues(fresh, campaign.podId, campaignId);
+  const { eligible, issues } = await sandboxAudienceIssues(fresh, campaign.podId, campaignId, actor);
   if (eligible.length) await prisma.campaign.update({ where: { id: campaignId }, data: { personIds: [...campaign.personIds, ...eligible] } });
   await logAudit({ entityType: 'campaign', entityId: campaignId, action: 'people_added', actor: audit, details: { added: eligible.length } });
   return { ok: true, added: eligible.length, left: issues.length ? whoAndWhySandbox(issues) : null };

@@ -472,7 +472,7 @@ export async function undoMoveItem(itemId: string, actor: Actor, audit: AuditAct
     await tx.enrollment.updateMany({ where: fromContact, data: { personId: null } });
     await tx.nextAction.updateMany({ where: fromContact, data: { personId: null, crmPending: false } });
     // An opt-out made while the person was in the CRM holds in the sandbox too.
-    await tx.sandboxContact.update({ where: { id: contact.id }, data: { status: contact.optedOutAt ? 'OPTED_OUT' : 'ACTIVE', movedAt: null, movedById: null, twentyPersonId: null, twentyCompanyId: null, statusChangedAt: now } });
+    await tx.sandboxContact.update({ where: { id: contact.id }, data: { status: contact.optedOutAt ? 'OPTED_OUT' : 'ACTIVE', movedAt: null, movedById: null, twentyPersonId: null, twentyCompanyId: null, statusChangedAt: now, lastActivityAt: now } });
     await tx.sandboxNote.updateMany({ where: { sandboxContactId: contact.id }, data: { twentyNoteId: null } });
     await tx.sandboxMoveItem.update({ where: { id: item.id }, data: { state: 'UNDONE', undoneAt: now, undoneById: actor.id } });
   });

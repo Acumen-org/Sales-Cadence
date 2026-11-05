@@ -6,8 +6,8 @@ import { toActor } from '@/lib/auth/rbac';
 import { upsertPersonCache } from '@/lib/person-cache';
 import { getMockTwentyClient } from '@/lib/twenty/mock-client';
 import { isRoleEmail } from '@/lib/sandbox/normalize';
-import { optOutSandboxContact, suppressValue } from '@/lib/sandbox/opt-out';
-import { addSuppressions, findSuppressed, widenedKeys } from '@/lib/sandbox/suppression';
+import { suppressValue } from '@/lib/sandbox/opt-out';
+import { addSuppressions, contactKeys, findSuppressed, widenedKeys } from '@/lib/sandbox/suppression';
 import { setSandboxNextAction } from '@/lib/sandbox/work';
 import { preflightMove, queueMove, retryFailedItems, runMoveQueue } from '@/lib/sandbox/move';
 import { rerunSuppressionAgainstCrm, widenOptOutSuppressions } from '@/lib/outreach/backfills';
@@ -226,7 +226,9 @@ describe('cold outreach data model (S1)', () => {
 
   it('B001, B002: opt-outs from before the release are re-hashed under the wider keys, once, with their source', async () => {
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { phone: '+13125550111', phoneType: 'main', additionalPhones: [{ number: '+13125550112', type: 'mobile' }], individualCrd: '7654321' });
-    await optOutSandboxContact(c.id, { source: 'call_form', actor: userActor(b.users.alisa) });
+    // An opt-out as it was before the release: personal keys only. Today's opt-out writes the wider ones itself (S2).
+    await prisma.sandboxContact.update({ where: { id: c.id }, data: { status: 'OPTED_OUT', optedOutAt: new Date(), optOutSource: 'call_form' } });
+    await addSuppressions(contactKeys(c), { reason: 'opted_out', source: 'call_form', sandboxContactId: c.id });
     expect(await prisma.suppression.count({ where: { kind: { in: ['phone_subject', 'individual_crd'] } } })).toBe(0);
     const erased = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { status: 'OPTED_OUT', optedOutAt: new Date(), piiClearedAt: new Date() });
 

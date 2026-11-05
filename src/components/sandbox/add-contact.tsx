@@ -10,12 +10,14 @@ import { IconPlus } from '@/components/icons';
 export function AddContactButton({ pods }: { pods: { id: string; name: string }[] }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // B139: the same name at the same firm is refused once; the rep can say it is someone else.
+  const [twin, setTwin] = useState(false);
   const [pending, start] = useTransition();
   const router = useRouter();
   return <>
     <button type="button" className="btn-primary btn-sm" onClick={() => setOpen(true)}><IconPlus size={14} />Add contact</button>
     {open ? <Modal label="Add a sandbox contact" onClose={() => setOpen(false)} className="max-w-xl">
-      <form className="space-y-3 p-5" onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); start(async () => { const r = await createContactAction(fd); if (!r.ok) { setError(r.error); return; } setOpen(false); if (r.redirectTo) router.push(r.redirectTo); else router.refresh(); }); }}>
+      <form className="space-y-3 p-5" onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); start(async () => { const r = await createContactAction(fd); if (!r.ok) { setError(r.error); setTwin(r.error.includes('at the same firm is already in')); return; } setOpen(false); if (r.redirectTo) router.push(r.redirectTo); else router.refresh(); }); }}>
         <h2 className="text-base font-semibold text-ink-900">Add contact</h2>
         <div className="grid grid-cols-2 gap-3">
           <label className="block text-xs text-ink-500">First name<input name="firstName" required className="mt-1 w-full" data-autofocus /></label>
@@ -31,6 +33,7 @@ export function AddContactButton({ pods }: { pods: { id: string; name: string }[
           {pods.length > 1 ? <label className="block text-xs text-ink-500">Pod<select name="podId" className="mt-1 w-full" defaultValue={pods[0].id}>{pods.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label> : null}
         </div>
         {error ? <p role="alert" className="text-sm text-red-700">{error}</p> : null}
+        {twin ? <label className="flex items-center gap-2 text-[13px] text-ink-700"><input type="checkbox" name="addAnyway" value="1" />This is someone else: add anyway</label> : null}
         <div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={() => setOpen(false)}>Cancel</button><button type="submit" className="btn-primary" disabled={pending}>{pending ? 'Adding' : 'Add'}</button></div>
       </form>
     </Modal> : null}
