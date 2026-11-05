@@ -248,7 +248,7 @@ async function recordTouch(data: { personId: string; channel: 'EMAIL' | 'CALL' |
   if (!person) return false;
   await prisma.touch.upsert({
     where: { externalId: data.externalId },
-    create: { ...data, actorUserId: data.actorUserId ?? null, actorLabel: data.actorLabel ?? null },
+    create: { ...data, actorUserId: data.actorUserId ?? null, actorLabel: data.actorLabel ?? null, audience: 'CRM' },
     update: { summary: data.summary, occurredAt: data.occurredAt },
   });
   return true;

@@ -161,7 +161,7 @@ export async function applyAddFo(user: SessionUser, campaignId: string, input: A
     await tx.campaign.update({ where: { id: c.id }, data: { personIds: [...new Set([...c.personIds, ...newIds])], plannerDraft: json(draft), publishedPlan: json(published) } });
     const people = await tx.personCache.findMany({ where: { id: { in: newIds } }, select: { id: true, companyId: true } });
     const company = new Map(people.map((p) => [p.id, p.companyId]));
-    const rows = preview.batches.flatMap((b) => b.personIds.map((personId) => ({ personId, companyId: company.get(personId) ?? null, campaignId: c.id, campaignRun: c.runNumber, foUserId: fo.id, podId: c.podId, sequenceId: sequenceIds[b.flowId], startDate: b.dates[0], scheduleDates: b.dates, createdById: user.id, status: 'ACTIVE' as const })));
+    const rows = preview.batches.flatMap((b) => b.personIds.map((personId) => ({ personId, companyId: company.get(personId) ?? null, campaignId: c.id, campaignRun: c.runNumber, foUserId: fo.id, podId: c.podId, sequenceId: sequenceIds[b.flowId], startDate: b.dates[0], scheduleDates: b.dates, createdById: user.id, status: 'ACTIVE' as const, audience: 'CRM' as const })));
     await tx.enrollment.createMany({ data: rows });
     await logAudit({ entityType: 'campaign', entityId: c.id, action: 'fo_added', actor: userActor(user), details: { foUserId: fo.id, people: newIds.length, batches: preview.batches.length, pace: preview.pace, ownOutreach: preview.flow.created } }, tx);
     return tx.enrollment.findMany({ where: { campaignId: c.id, foUserId: fo.id, personId: { in: newIds } }, select: { id: true } });

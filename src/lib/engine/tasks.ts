@@ -13,6 +13,7 @@ import { afterResponse, loadSyncTask, loadSyncTasks, syncTaskCompleted, syncTask
 import { resolveNextStep } from './sequence-plan';
 import { workspaceTimezone } from '../workspace';
 import { workingDay } from '../campaign-planner';
+import { audienceOf } from '../outreach/audience';
 import { catchUpObservedEvidence } from './observed-evidence';
 
 /** Who is acting, what time it is (tests), and whether to skip Twenty writes. */
@@ -113,6 +114,8 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
             data: {
               personId: e.personId, sandboxContactId: e.sandboxContactId, companyId: e.companyId, foUserId: e.foUserId, podId: e.podId, campaignId: e.campaignId, campaignRun: e.campaignRun,
               sequenceId: e.sequenceId, startDate: restart, currentStep: -1, shiftDays: 0, status: 'ACTIVE', createdById: e.createdById, cycle: e.cycle + 1,
+              // The next pass keeps the first pass's audience (PLAN 8.4).
+              audience: e.audience ?? audienceOf(e),
             },
           });
           await logAudit({ entityType: 'enrollment', entityId: next.id, action: 'repeated', actor: ctx.actor, details: { from: e.id, cycle: e.cycle + 1, startDate: restart, everyDays: repeat } }, tx);
@@ -277,6 +280,7 @@ export async function completeTask(input: CompleteTaskInput, ctx: EngineContext)
           externalId: `task:${task.id}`,
           actorUserId: task.foUserId,
           actorLabel: ctx.actor.label ?? null,
+          audience: task.enrollment.audience ?? audienceOf(task.enrollment),
         },
         update: {},
       });

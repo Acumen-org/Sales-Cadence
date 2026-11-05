@@ -68,7 +68,7 @@ export async function processSent(m: GraphMessage, userId: string, stats: GraphM
     const existing = await prisma.sandboxEmail.findUnique({ where: { internetMessageId_sandboxContactId: { internetMessageId: id, sandboxContactId: c.id } } });
     if (existing) continue;
     const externalId = `graph:${id}:sbx:${c.id}`;
-    const touch = await prisma.touch.upsert({ where: { externalId }, create: { sandboxContactId: c.id, channel: 'EMAIL', direction: 'OUTBOUND', occurredAt: at, summary: `Email sent: ${m.subject ?? '(no subject)'}`, externalId, actorUserId: userId }, update: {} });
+    const touch = await prisma.touch.upsert({ where: { externalId }, create: { sandboxContactId: c.id, channel: 'EMAIL', direction: 'OUTBOUND', occurredAt: at, summary: `Email sent: ${m.subject ?? '(no subject)'}`, externalId, actorUserId: userId, audience: 'SANDBOX' }, update: {} });
     const closed = await closeFromTouch({ sandboxContactId: c.id, types: ['EMAIL'], touch: { externalId, channel: 'EMAIL', occurredAt: at, summary: touch.summary }, source: 'OBSERVED_MESSAGE', matching, ctx: { actor: SYSTEM_ACTOR } });
     await prisma.sandboxEmail.create({ data: { sandboxContactId: c.id, userId, kind: 'SENT', internetMessageId: id, conversationId: m.conversationId ?? null, subject: m.subject ?? null, at, touchId: touch.id, taskId: closed.code === 'completed' ? closed.taskId ?? null : null } });
     // An email next action due today or earlier is done by the email too.
@@ -98,7 +98,7 @@ export async function processInbox(m: GraphMessage, userId: string, stats: Graph
     if (existing) continue;
     const automatic = isAutomaticReply(subject);
     const externalId = `graph:${id}:sbx:${c.id}`;
-    const touch = await prisma.touch.upsert({ where: { externalId }, create: { sandboxContactId: c.id, channel: 'EMAIL', direction: 'INBOUND', occurredAt: at, summary: `${automatic ? 'Auto-reply' : 'Reply'}: ${subject || '(no subject)'}`, externalId }, update: {} });
+    const touch = await prisma.touch.upsert({ where: { externalId }, create: { sandboxContactId: c.id, channel: 'EMAIL', direction: 'INBOUND', occurredAt: at, summary: `${automatic ? 'Auto-reply' : 'Reply'}: ${subject || '(no subject)'}`, externalId, audience: 'SANDBOX' }, update: {} });
     await prisma.sandboxEmail.create({ data: { sandboxContactId: c.id, userId, kind: automatic ? 'AUTO_REPLY' : 'REPLY', internetMessageId: id, conversationId: m.conversationId ?? null, subject: subject || null, at, touchId: touch.id } });
     await prisma.sandboxContact.update({ where: { id: c.id }, data: { lastActivityAt: at } });
     if (automatic) { stats.autoReplies++; continue; }

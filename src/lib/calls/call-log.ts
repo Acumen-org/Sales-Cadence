@@ -3,6 +3,7 @@ import { prisma } from '../db';
 import { toE164 } from '../sandbox/normalize';
 import type { TwilioCall } from './twilio';
 import { identityOf, matchContact, matchRep } from './match';
+import { audienceFor, callPodFor } from '../outreach/audience';
 
 /**
  * One call read from Twilio, stored once and kept up to date: its status only moves forward, the
@@ -72,7 +73,12 @@ export async function upsertImportedCall(leg: TwilioCall, parent: TwilioCall | n
   const finalNow = isFinal((facts.status as CallStatus | undefined) ?? existing?.status ?? status);
   const started = startedAt ?? existing?.startedAt ?? null;
   const formOpened = Boolean(finalNow && userId && !existing?.formDueAt && !existing?.formDoneAt && started && started >= ctx.formsFrom);
-  const data = { ...facts, ...link, userId, repMatchedBy, ...(formOpened ? { formDueAt: endedAt ?? ctx.now } : {}) };
+  // Stamped once, when the call is first matched to someone (PLAN 8.4): its audience, and the pod it counts for (B040).
+  const subject = { personId: (link.personId as string | null | undefined) ?? existing?.personId ?? null, sandboxContactId: (link.sandboxContactId as string | null | undefined) ?? existing?.sandboxContactId ?? null };
+  const stamp: Prisma.CallLogUncheckedUpdateInput = {};
+  if (!existing?.audience) { const audience = await audienceFor(subject); if (audience) stamp.audience = audience; }
+  if (!existing?.podId) { const podId = await callPodFor({ enrollmentId: (link.enrollmentId as string | null | undefined) ?? existing?.enrollmentId ?? null, sandboxContactId: subject.sandboxContactId, userId }); if (podId) stamp.podId = podId; }
+  const data = { ...facts, ...link, userId, repMatchedBy, ...stamp, ...(formOpened ? { formDueAt: endedAt ?? ctx.now } : {}) };
 
   const call = existing
     ? await prisma.callLog.update({ where: { id: existing.id }, data })
@@ -90,9 +96,10 @@ export async function recordCallTouch(call: CallLog): Promise<void> {
   const at = call.startedAt ?? call.createdAt;
   const externalId = call.twilioCallSid ? `twilio:${call.twilioCallSid}` : `call:${call.id}`;
   const user = call.userId ? await prisma.user.findUnique({ where: { id: call.userId }, select: { name: true } }) : null;
+  const audience = call.audience ?? await audienceFor(call);
   const touch = await prisma.touch.upsert({
     where: { externalId },
-    create: { personId: call.personId, sandboxContactId: call.sandboxContactId, channel: 'CALL', direction: call.direction, occurredAt: at, summary: `${call.direction === 'OUTBOUND' ? 'Call made' : 'Call received'} (${talk(call.talkSec)})`, externalId, actorUserId: call.userId, actorLabel: user?.name ?? null },
+    create: { personId: call.personId, sandboxContactId: call.sandboxContactId, channel: 'CALL', direction: call.direction, occurredAt: at, summary: `${call.direction === 'OUTBOUND' ? 'Call made' : 'Call received'} (${talk(call.talkSec)})`, externalId, actorUserId: call.userId, actorLabel: user?.name ?? null, audience },
     update: {},
   });
   await prisma.callLog.update({ where: { id: call.id }, data: { touchId: touch.id } });

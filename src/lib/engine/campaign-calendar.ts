@@ -58,7 +58,7 @@ export async function activateCalendarCampaign(id: string, ctx: EngineContext) {
       for (const personId of b.personIds) rows.push({
         personId, companyId: eligible.get(personId)!.companyId, campaignId: id, campaignRun: c.runNumber,
         foUserId: b.foId, podId: c.podId, sequenceId: plan.sequenceIds[b.flowId], startDate: b.dates[0], scheduleDates: b.dates,
-        createdById: c.createdById, status: 'ACTIVE' as const,
+        createdById: c.createdById, status: 'ACTIVE' as const, audience: 'CRM' as const,
       });
     }
     await tx.enrollment.createMany({ data: rows });
