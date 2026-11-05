@@ -27,10 +27,13 @@ import { openSuggestions } from '@/lib/outreach/suggestions';
 import { openCallItems } from '@/lib/calls/link';
 import { pendingFormBlock } from '@/lib/calls/gate';
 import { mayHearCall } from '@/lib/calls/access';
+import { formOptOut } from '@/lib/tickets';
+import { FormOptOutControls } from '@/components/tickets/close-ticket-form';
 import { ContactActions } from '@/components/sandbox/contact-actions';
 import { addNoteAction, setNextActionAction, setPodAction, updateContactAction } from '@/lib/actions/sandbox';
 import { ACTION_LABELS } from '@/lib/sequences/steps';
 import { eraseConfirm, optOutConfirm, removeConfirm } from '@/lib/outreach/confirm-words';
+import { coldRef } from '@/lib/subject';
 
 const STATUS_LABEL = { ACTIVE: 'In Cold outreach', MOVED: 'In CRM', OPTED_OUT: 'Do not contact', REMOVED: 'Removed' } as const;
 
@@ -103,6 +106,8 @@ export default async function SandboxContactPage({ params, searchParams }: { par
   const today = todayIn(user.timezone);
   const name = `${contact.firstName} ${contact.lastName}`.trim() || 'Removed contact';
   const open = contact.nextActions[0];
+  // D4: an opt-out from the post-call form can be questioned by anyone and undone by an admin.
+  const formOpt = contact.status === 'OPTED_OUT' && !contact.piiClearedAt ? await formOptOut(coldRef(contact.id)) : null;
   // B024, B027: Log a call with the steps it could close; colleagues' suggested steps for this owner.
   const [callSteps, logBlocked, suggestions] = await Promise.all([
     mayWork ? openCallItems({ personId: null, sandboxContactId: contact.id }, null) : Promise.resolve([]),
@@ -156,6 +161,10 @@ export default async function SandboxContactPage({ params, searchParams }: { par
       {contact.twentyPersonId ? <Link href={`/people/${contact.twentyPersonId}`} className="underline">Open in People</Link> : null}
       {move?.undoUntil ? <span>Undo until {move.undoUntil}</span> : null}
       {move?.canUndo ? <UndoMoveButton itemIds={[move.itemId]} confirm={move.undoConfirm} campaigns={move.campaigns} /> : null}
+    </span></Notice> : null}
+    {formOpt ? <Notice tone="error"><span className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+      <span><span className="font-medium">Do not contact</span> since {formOpt.at ? formatInstant(formOpt.at, user.timezone) : 'the call'}: {formOpt.byName ?? 'a rep'} chose &quot;Asked not to be contacted&quot; on the post-call form{formOpt.callId ? <> (<Link href={`/calls/${formOpt.callId}`} className="underline">the call</Link>)</> : null}. Do not email, call or message this person.{formOpt.lastTicket?.outcome === 'kept' ? ` Biz Ops checked it: ${formOpt.lastTicket.resolution ?? 'it stays'}.` : ''}</span>
+      <FormOptOutControls subject={{ sandboxContactId: contact.id }} name={name} mayLift={isAdmin(user)} ticket={formOpt.ticket ? `Biz Ops are looking at it: raised by ${formOpt.ticket.raisedBy ?? 'someone'} ${formatInstant(formOpt.ticket.raisedAt, user.timezone)}.` : null} />
     </span></Notice> : null}
     {live && move?.state === 'FAILED' ? <Notice tone="error">Move failed: {move.error ?? 'see the move'} <Link href={`/sandbox/moves/${move.moveId}`} className="underline">{move.failure === 'permanent' ? 'See the move' : 'Retry'}</Link></Notice> : null}
     {live && contact.owner && !contact.owner.active ? <Notice tone="warn">{contact.owner.name} has left: this contact needs a new owner before it can move or be worked by its pod&apos;s reps.</Notice> : null}

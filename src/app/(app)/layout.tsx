@@ -1,6 +1,7 @@
 import { FilterNavigationProvider } from '@/components/filter-navigation';
 import { requireUser } from '@/lib/auth/current-user';
-import { canCheckMeetingNumbers, isAdmin } from '@/lib/auth/rbac';
+import { isAdmin } from '@/lib/auth/rbac';
+import { canWorkTickets, openTicketCount } from '@/lib/tickets';
 import { prisma } from '@/lib/db';
 import { env } from '@/lib/env';
 import { todayIn } from '@/lib/dates';
@@ -35,8 +36,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     isAdmin(user) ? prisma.activityEvent.count({ where: { needsReview: true } }) : Promise.resolve(0),
     // Next actions of mine due by today count like any step.
     prisma.nextAction.findMany({ where: { foUserId: user.id, state: 'OPEN', dueDate: { lte: today }, ...CRM_SUBJECT }, select: { dueDate: true } }),
-    // Meeting numbers someone doubted, waiting for Biz Ops.
-    canCheckMeetingNumbers(user) ? prisma.meetingNumberTicket.count({ where: { open: true } }) : Promise.resolve(0),
+    // Tickets waiting for Biz Ops: opt-outs someone doubted and meeting-number checks (D4).
+    canWorkTickets(user) ? openTicketCount() : Promise.resolve(0),
     // Calls of mine waiting for their form: the notice above every page, and Call buttons wait for it (B088).
     pendingForms(user.id),
     pendingFormCount(user.id),
@@ -58,7 +59,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <FilterNavigationProvider><div className="flex min-h-screen bg-canvas">
       <a href="#main-content" className="skip-link">Skip to content</a>
-      <Sidebar user={user} mode={e.TWENTY_MODE} dryRun={e.CADENCE_DRY_RUN} todayCount={todayCount} overdueCount={overdueCount} checksCount={checksCount} sandboxCount={sandboxDue} />
+      <Sidebar user={user} mode={e.TWENTY_MODE} dryRun={e.CADENCE_DRY_RUN} todayCount={todayCount} overdueCount={overdueCount} ticketsCount={checksCount} sandboxCount={sandboxDue} />
       <main id="main-content" tabIndex={-1} className="flex min-w-0 flex-1 flex-col outline-none">
         <LiveRefresh />
         <TopBar role={user.role} unread={unread} needsReview={needsReview} timezone={workspaceTimezone()} />

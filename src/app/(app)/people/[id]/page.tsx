@@ -9,6 +9,9 @@ import { requireUser, toActor } from '@/lib/auth/current-user';
 import { canAct, loadPersonSubject } from '@/lib/outreach/guard';
 import { openSuggestions } from '@/lib/outreach/suggestions';
 import { SuggestionList } from '@/components/calls/suggestions';
+import { formOptOut } from '@/lib/tickets';
+import { FormOptOutControls } from '@/components/tickets/close-ticket-form';
+import { personRef } from '@/lib/subject';
 import { nextActionAccess, REPEAT_LABELS } from '@/lib/next-actions';
 import { ACTION_LABELS } from '@/lib/sequences/steps';
 import { completeNextActionAction, stopNextActionAction } from '@/lib/actions/next-actions';
@@ -32,7 +35,7 @@ import { twentyPersonUrl } from '@/lib/twenty/urls';
 import { CrmHistory } from '@/components/people/crm-history';
 import { ActionIcon, IconExternal } from '@/components/icons';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
-import { Avatar, Badge, Card, contactWarnings, crmStanding, enrollmentTone, enrollmentStatusLabel, KeyValue, RecordFields, RecordHeader, Surface, Tabs, TierBadge } from '@/components/ui';
+import { Avatar, Badge, Card, contactWarnings, crmStanding, enrollmentTone, enrollmentStatusLabel, KeyValue, Notice, RecordFields, RecordHeader, Surface, Tabs, TierBadge } from '@/components/ui';
 import { campaignStatusLabel } from '@/lib/campaign-status';
 
 type TimelineItem = { at: Date; kind: 'touch' | 'note' | 'task' | 'state'; icon: string; title: string; detail?: string | null; tone?: 'in' | 'out' | 'neutral' };
@@ -76,6 +79,8 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
   const callVerdict = subject ? canAct(toActor(user), subject, 'call') : null;
   const gateNow = person.phone ? await callGate(user, { phone: person.phone, state: person.city?.split(',').pop()?.trim() ?? null, optedOut: person.optedOut, dnd: person.dnd, email: person.email, linkedinUrl: person.linkedinUrl }) : null;
   const callGateNow = gateNow && callVerdict && !callVerdict.ok ? { blocked: callVerdict.reason, warning: null } : gateNow;
+  // D4: an opt-out from the post-call form can be questioned by anyone and undone by an admin.
+  const formOpt = person.optedOut ? await formOptOut(personRef(id)) : null;
   const mayWorkNext = openNext ? openNext.foUserId === user.id || user.role === 'ADMIN' || (nextAccess.canAssign && nextAccess.fos.some((f) => f.id === openNext.foUserId)) : false;
 
   let notes: TwentyNote[] = [];
@@ -182,6 +187,10 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
             </>
           }
         />
+        {formOpt ? <div className="mt-2"><Notice tone="error"><span className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+          <span><span className="font-medium">Do not contact</span> since {formOpt.at ? formatInstant(formOpt.at, user.timezone) : 'the call'}: {formOpt.byName ?? 'a rep'} chose &quot;Asked not to be contacted&quot; on the post-call form.</span>
+          <FormOptOutControls subject={{ personId: id }} name={cachedPersonName(person)} mayLift={user.role === 'ADMIN'} ticket={formOpt.ticket ? `Biz Ops are looking at it: raised by ${formOpt.ticket.raisedBy ?? 'someone'}.` : null} />
+        </span></Notice></div> : null}
       </div>
       <div className="grid gap-3 px-6 pb-8 pt-3 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0">

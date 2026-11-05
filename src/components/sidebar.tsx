@@ -5,9 +5,9 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import clsx from 'clsx';
 import type { SessionUser } from '@/lib/auth/current-user';
-import { canViewReports, ROLE_LABELS } from '@/lib/auth/rbac';
+import { canCheckMeetingNumbers, canViewReports, ROLE_LABELS } from '@/lib/auth/rbac';
 import { logoutAction } from '@/lib/actions/auth';
-import { IconActivity, IconBolt, IconCalendar, IconCampaigns, IconClose, IconColumns, IconCompany, IconHome, IconLogout, IconMenu, IconPeople, IconReports, IconSettings, IconTasks } from './icons';
+import { IconActivity, IconBolt, IconCalendar, IconCampaigns, IconClose, IconColumns, IconCompany, IconHelp, IconHome, IconLogout, IconMenu, IconPeople, IconReports, IconSettings, IconTasks } from './icons';
 import { Avatar } from './ui';
 import { BrandMark } from './brand';
 
@@ -26,6 +26,8 @@ const GROUPS = [
     { href: '/people', label: 'People', icon: IconPeople },
     { href: '/enrichment', label: 'Enrichment', icon: IconColumns },
     { href: '/meetings', label: 'Meetings', icon: IconCalendar },
+    // D4: Biz Ops' and admins' questions to answer: opt-outs someone doubted, meeting numbers.
+    { href: '/tickets', label: 'Tickets', icon: IconHelp },
   ] },
   { label: 'Engagement', items: [
     { href: '/campaigns', label: 'Campaigns', icon: IconCampaigns },
@@ -37,7 +39,7 @@ const GROUPS = [
   ] },
 ];
 
-type Props = { user: SessionUser; mode: 'mock' | 'graphql'; dryRun: boolean; todayCount: number; overdueCount: number; /** Open meeting number checks, for Biz Ops and admins. */ checksCount?: number; /** The user's sandbox steps and next actions due today or earlier. */ sandboxCount?: number };
+type Props = { user: SessionUser; mode: 'mock' | 'graphql'; dryRun: boolean; todayCount: number; overdueCount: number; /** Open tickets of every kind, for Biz Ops and admins. */ ticketsCount?: number; /** The user's sandbox steps and next actions due today or earlier. */ sandboxCount?: number };
 
 export function Sidebar(props: Props) {
   const [open, setOpen] = useState(false);
@@ -48,7 +50,7 @@ export function Sidebar(props: Props) {
   </>;
 }
 
-function SidebarContent({ user, mode, dryRun, todayCount, overdueCount, checksCount = 0, sandboxCount = 0, close }: Props & { close?: () => void }) {
+function SidebarContent({ user, mode, dryRun, todayCount, overdueCount, ticketsCount = 0, sandboxCount = 0, close }: Props & { close?: () => void }) {
   const pathname = usePathname();
   return (
     <aside className="sidebar-shell">
@@ -60,7 +62,7 @@ function SidebarContent({ user, mode, dryRun, todayCount, overdueCount, checksCo
       <nav aria-label="Main navigation" className="flex-1 space-y-6 overflow-y-auto px-3 pb-5 scroll-thin">
         {GROUPS.map((group) => <div key={group.label}>
           <div className="mb-2 px-3 text-[9px] font-semibold uppercase tracking-[0.16em] text-[#91a79d]">{group.label}</div>
-          <div className="space-y-1">{group.items.filter((item) => item.href !== '/reports' || canViewReports(user)).map((item) => {
+          <div className="space-y-1">{group.items.filter((item) => (item.href !== '/reports' || canViewReports(user)) && (item.href !== '/tickets' || canCheckMeetingNumbers(user))).map((item) => {
             const active = pathname === item.href || pathname.startsWith(item.href + '/');
             const Icon = item.icon;
             return <Link key={item.href} href={item.href} onClick={close} aria-current={active ? 'page' : undefined} className={clsx('nav-item', active && 'nav-item-active')}>
@@ -68,7 +70,7 @@ function SidebarContent({ user, mode, dryRun, todayCount, overdueCount, checksCo
               <Icon size={18} /> <span>{item.label}</span>
               {item.href === '/tasks' && todayCount + overdueCount > 0 ? <span className={clsx('ml-auto rounded-md px-1.5 py-0.5 text-[10px] tabular-nums', overdueCount ? 'bg-red-400/20 text-red-200' : 'bg-white/10 text-[#dfefc1]')} title={overdueCount ? `${overdueCount} overdue` : undefined}>{todayCount + overdueCount}</span> : null}
               {item.href === '/sandbox' && sandboxCount > 0 ? <span className="ml-auto rounded-md bg-white/10 px-1.5 py-0.5 text-[10px] tabular-nums text-[#dfefc1]">{sandboxCount}</span> : null}
-              {item.href === '/meetings' && checksCount > 0 ? <span className="ml-auto rounded-md bg-amber-300/20 px-1.5 py-0.5 text-[10px] tabular-nums text-amber-100" title={`${checksCount} meeting number ${checksCount === 1 ? 'check' : 'checks'} open`}>{checksCount}</span> : null}
+              {item.href === '/tickets' && ticketsCount > 0 ? <span className="ml-auto rounded-md bg-amber-300/20 px-1.5 py-0.5 text-[10px] tabular-nums text-amber-100" title={`${ticketsCount} ${ticketsCount === 1 ? 'ticket' : 'tickets'} open`}>{ticketsCount}</span> : null}
             </Link>;
           })}</div>
         </div>)}

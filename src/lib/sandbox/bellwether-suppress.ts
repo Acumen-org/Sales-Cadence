@@ -80,6 +80,10 @@ export async function suppressContacts(req: SuppressRequest, now = new Date()): 
       const r = await optOutPerson(p.id, { source: 'bellwether', actor, reason: why, now });
       if (r.ok && r.changed) changed = true;
     }
+    // D4: Bellwether's Do not contact is marked on each record it reached, even one opted out already,
+    // so lifting a form opt-out later can never take it away (src/lib/tickets.ts).
+    for (const c of contacts) await logAudit({ entityType: 'sandbox_contact', entityId: c.id, action: 'bellwether_do_not_contact', actor, details: { reason: req.reason } });
+    for (const p of people) await logAudit({ entityType: 'person', entityId: p.id, action: 'bellwether_do_not_contact', actor, details: { reason: req.reason } });
     const answering = contacts.filter((c) => c.bellwetherContactId === id || c.bellwetherAliases.includes(id)).sort((a, b) => b.statusChangedAt.getTime() - a.statusChangedAt.getTime())[0] ?? contacts[0] ?? null;
     const personId = people[0]?.id ?? answering?.twentyPersonId ?? null;
     const found = contacts.length > 0 || people.length > 0 || Boolean(refusal);
