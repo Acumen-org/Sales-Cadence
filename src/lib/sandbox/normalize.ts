@@ -11,6 +11,19 @@ export function normalizeEmail(raw: string | null | undefined): string | null {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? value : null;
 }
 
+/**
+ * The local part of a shared inbox (info@, sales@, compliance@...), which nobody in particular reads
+ * and different people really do share. The same pattern as Bellwether's ROLE_RE (prospect/contacts.py)
+ * and the 20261105000001_cold_outreach_backfill migration, so all three agree on which address is one.
+ */
+export const ROLE_EMAIL = /^(info|contact|hello|hi|hey|enquir(y|ies)|inquir(y|ies)|sales|support|help|admin|office|team|mail|press|media|marketing|careers|jobs|hr|recruit(ing|ment)?|billing|accounts?|accounting|finance|invoices?|legal|privacy|security|partners|partnerships|business|bd|general|customerservice|customer[-_.]?care|service|services|booking|reservations|orders?|webmaster|hostmaster|it|desk|reception|newsletter|subscribe|feedback|questions|ask|talk|connect|compliance|operations|ops|clientservices?|client[-_.]?service|clients?|advisors?|planning|wealth|invest(ments?|ing)?|trading|trade|custody|transfers?|documents?|statements?|noreply|no[-_.]?reply|frontdesk|main|appointments?|scheduling|events?)s?([-_.].*)?$/i;
+
+/** Whether an address is a shared inbox rather than one person's (B177, N025). */
+export function isRoleEmail(email: string | null | undefined): boolean {
+  const at = (email ?? '').lastIndexOf('@');
+  return at > 0 && ROLE_EMAIL.test((email ?? '').slice(0, at));
+}
+
 /** Calling codes for the regions Bellwether sends today, keyed by ISO 3166-1 alpha-2. */
 const CALLING_CODES: Record<string, string> = {
   US: '1', CA: '1', PR: '1', GB: '44', IE: '353', AU: '61', NZ: '64', IN: '91', SG: '65', HK: '852', AE: '971',

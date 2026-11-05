@@ -25,6 +25,7 @@ import { backfillPhoneE164, runSandboxRetention } from '../lib/sandbox/retention
 import { purgeOldPushes } from '../lib/sandbox/bellwether-api';
 import { importTwilioCalls } from '../lib/calls/import';
 import { runGraphMail } from '../lib/mail/graph-mail';
+import { COLD_OUTREACH_BACKFILL, runColdOutreachBackfill } from '../lib/outreach/backfills';
 
 const config=env();
 const log=(message:string,extra?:unknown)=>console.log('[worker '+new Date().toISOString()+'] '+message,extra??'');
@@ -78,6 +79,17 @@ async function phoneE164Backfill(){
  const key='phoneE164Backfill20261103';
  if(await prisma.setting.findUnique({where:{key}}))return;
  try{const updated=await backfillPhoneE164();log('phone numbers in E.164',updated);await prisma.setting.upsert({where:{key},create:{key,value:{at:new Date().toISOString(),updated}},update:{value:{at:new Date().toISOString(),updated}}});}catch(error){log('phone backfill failed',error);}
+}
+/**
+ * Once, after the cold outreach release: old opt-outs re-hashed under the wider keys, and the
+ * suppression list run again against the CRM copy in lower case (src/lib/outreach/backfills.ts). Each
+ * step is idempotent, so a run that fails part way simply runs again at the next start.
+ */
+let coldOutreachBackfillChecked=false;
+async function coldOutreachBackfill(){
+ if(coldOutreachBackfillChecked)return;coldOutreachBackfillChecked=true;
+ if(await prisma.setting.findUnique({where:{key:COLD_OUTREACH_BACKFILL}}))return;
+ try{const stats=await runColdOutreachBackfill();log('cold outreach backfill',stats);const value={at:new Date().toISOString(),...stats};await prisma.setting.upsert({where:{key:COLD_OUTREACH_BACKFILL},create:{key:COLD_OUTREACH_BACKFILL,value},update:{value}});}catch(error){log('cold outreach backfill failed',error);}
 }
 /**
  * Once: the last two weeks of notes and emails are read again. Logged calls and emails whose person
@@ -166,6 +178,7 @@ async function tick(){
    await sharePointPlayers(now);
    await teamsTranscripts(now);
    await phoneE164Backfill();
+   await coldOutreachBackfill();
    await sandboxJobs(now);
    try{await launchScheduledCampaigns({actor:SYSTEM_ACTOR});}catch(error){log('campaign launch failed',error);}
    const stats=await runSchedulerTick({actor:SYSTEM_ACTOR});

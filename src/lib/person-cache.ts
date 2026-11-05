@@ -1,4 +1,4 @@
-import { toE164 } from './sandbox/normalize';
+import { normalizeEmail, toE164 } from './sandbox/normalize';
 import type { Prisma } from '@prisma/client';
 import { prisma, type Tx } from './db';
 import type { TwentyClient } from './twenty/client';
@@ -26,6 +26,9 @@ export function personToCacheData(p: TwentyPerson): Prisma.PersonCacheUncheckedC
     lastName: p.lastName ?? '',
     sortName: sortKey(`${p.firstName ?? ''} ${p.lastName ?? ''}`),
     email: p.email,
+    // Every comparison goes through these, never the address as Twenty holds it (B011).
+    emailNorm: normalizeEmail(p.email),
+    additionalEmailsNorm: (p.additionalEmails ?? []).map(normalizeEmail).filter((e): e is string => Boolean(e)),
     phone: p.phone,
     phoneE164: toE164(p.phone),
     additionalPhoneE164: toE164(p.additionalPhone),

@@ -144,7 +144,7 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
     const nextActionId = (await prisma.nextAction.findFirst({ where: { state: 'OPEN', ...(subject.personId ? { personId: subject.personId } : { sandboxContactId: subject.sandboxContactId, personId: null }) }, select: { id: true } }))?.id ?? null;
     if (nextActionId) await prisma.callForm.update({ where: { id: form.id }, data: { nextActionId } });
   }
-  if (subject.sandboxContactId) await prisma.sandboxContact.updateMany({ where: { id: subject.sandboxContactId }, data: { lastActivityAt: now } });
+  if (subject.sandboxContactId) await prisma.sandboxContact.updateMany({ where: { id: subject.sandboxContactId }, data: { lastActivityAt: now, lastOutcome: v.outcome, lastOutcomeAt: now } });
   await logAudit({ entityType: 'call', entityId: callId, action: 'call_form_submitted', actor, details: { outcome: v.outcome, nextStep: v.nextStep, nextStepDate: v.nextStepDate } });
   return { ok: true, message: 'Saved. The call is complete.', reminder };
 }

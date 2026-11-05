@@ -7,7 +7,7 @@ import { getSettings, getTwentyConnection } from '../settings';
 import { twentyPersonUrl } from '../twenty/urls';
 import { getTwentyClient, type TwentyClient } from '../twenty';
 import { dedupeContact, possibleCrmMatch, refreshCrmCopyFor, type DedupeInput, type MatchedOn } from './dedupe';
-import { normalizeCrd, normalizeDomain, normalizeEmail, normalizeLinkedin, parsePhone, PHONE_TYPES, sandboxSortName, toE164, type ExtraPhone } from './normalize';
+import { isRoleEmail, normalizeCrd, normalizeDomain, normalizeEmail, normalizeLinkedin, parsePhone, PHONE_TYPES, sandboxSortName, toE164, type ExtraPhone } from './normalize';
 import { recordRefusal } from './status';
 
 /**
@@ -306,7 +306,7 @@ export function fillPlan(existing: SandboxContact, c: PushContact): { fields: st
     fields.push(field);
     data[column] = column === 'companyAumUsd' ? new Prisma.Decimal(String(v)) : v;
     if (column === 'phone') { data.phoneType = c.phoneType; data.phoneExtension = c.phoneExtension; }
-    if (column === 'email') data.emailVerification = c.emailVerification;
+    if (column === 'email') { data.emailVerification = c.emailVerification; data.emailIsRole = isRoleEmail(c.email); }
   }
   const alias = existing.bellwetherContactId && existing.bellwetherContactId !== c.bellwetherContactId && !existing.bellwetherAliases.includes(c.bellwetherContactId) ? c.bellwetherContactId : null;
   if (alias) data.bellwetherAliases = { push: alias };
@@ -400,7 +400,7 @@ async function judgeOne(c: PushContact, warnings: Warning[], ctx: JudgeCtx): Pro
   if (!ctx.write) return { ...base, result: 'created', warnings: allWarnings, ownerEmail: owner?.email ?? null, ownerName: owner?.name ?? null };
   // A contact retention removed keeps its Bellwether id only until the person is pushed again.
   await tx.sandboxContact.updateMany({ where: { status: 'REMOVED', bellwetherContactId: c.bellwetherContactId }, data: { bellwetherContactId: null } });
-  const created = await tx.sandboxContact.create({ data: sandboxRowFromPush(c, owner, ctx) });
+  const created = await tx.sandboxContact.create({ data: { ...sandboxRowFromPush(c, owner, ctx), possibleCrmPersonId: possible ?? null } });
   if (c.notes) await tx.sandboxNote.create({ data: { sandboxContactId: created.id, body: c.notes, authorName: ctx.envelope.pushedBy.name ? `${ctx.envelope.pushedBy.name} (Bellwether)` : 'Bellwether' } });
   await logAudit({ entityType: 'sandbox_contact', entityId: created.id, action: 'pushed', actor: { type: 'WEBHOOK', label: `bellwether:${ctx.envelope.pushedBy.email}` }, details: { bellwetherContactId: c.bellwetherContactId, ownerId: owner?.id ?? null } }, tx);
   return { ...base, result: 'created', cadenceContactId: created.id, warnings: allWarnings, ownerEmail: owner?.email ?? null, ownerName: owner?.name ?? null };
@@ -409,7 +409,7 @@ async function judgeOne(c: PushContact, warnings: Warning[], ctx: JudgeCtx): Pro
 function sandboxRowFromPush(c: PushContact, owner: Owner, ctx: JudgeCtx): Prisma.SandboxContactUncheckedCreateInput {
   return {
     source: 'BELLWETHER', firstName: c.firstName, lastName: c.lastName, sortName: sandboxSortName(c.firstName, c.lastName), jobTitle: c.jobTitle,
-    email: c.email, emailVerification: c.emailVerification, additionalEmails: c.additionalEmails, phone: c.phone, phoneType: c.phoneType,
+    email: c.email, emailIsRole: isRoleEmail(c.email), emailVerification: c.emailVerification, additionalEmails: c.additionalEmails, phone: c.phone, phoneType: c.phoneType,
     phoneExtension: c.phoneExtension, additionalPhones: c.additionalPhones, linkedinUrl: c.linkedinUrl, city: c.city, state: c.state, country: c.country,
     individualCrd: c.individualCrd, designations: c.designations, productInterest: c.productInterest, tags: c.tags,
     companyName: c.companyName, companyDomain: c.companyDomain, companyWebsite: c.companyWebsite, companyCrd: c.companyCrd, companyCity: c.companyCity,
@@ -417,7 +417,7 @@ function sandboxRowFromPush(c: PushContact, owner: Owner, ctx: JudgeCtx): Prisma
     companyAumUsd: c.companyAumUsd ? new Prisma.Decimal(c.companyAumUsd) : null, companyEmployees: c.companyEmployees,
     ownerId: owner?.id ?? null, podId: owner?.podId ?? null, claimedAt: owner ? ctx.now : null,
     bellwetherContactId: c.bellwetherContactId, bellwetherUrl: c.bellwetherUrl, sourceNote: c.source, collectedAt: c.collectedAt,
-    pushedByEmail: ctx.envelope.pushedBy.email, lawfulBasis: EEA_UK.has(c.country) ? 'legitimate_interest' : null, statusChangedAt: ctx.now,
+    pushedByEmail: ctx.envelope.pushedBy.email, pushedByName: ctx.envelope.pushedBy.name ?? null, lawfulBasis: EEA_UK.has(c.country) ? 'legitimate_interest' : null, statusChangedAt: ctx.now,
   };
 }
 

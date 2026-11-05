@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../db';
-import { normalizeEmail, normalizeLinkedin, personalPhone, readExtraPhones, toE164 } from './normalize';
+import { normalizeCrd, normalizeEmail, normalizeLinkedin, personalPhone, readExtraPhones, toE164 } from './normalize';
 
 /**
  * The one suppression list (plan section 13). Values are SHA-256 of the normalised value, so an
@@ -10,7 +10,12 @@ import { normalizeEmail, normalizeLinkedin, personalPhone, readExtraPhones, toE1
  * Call button and before Graph closes steps.
  */
 
-export type SuppressionKind = 'email' | 'phone' | 'linkedin' | 'bellwether_id';
+/**
+ * email, phone (a direct or mobile number), linkedin, bellwether_id and individual_crd protect whoever
+ * holds the value. phone_subject is a firm main, office or unknown line: it protects only the one
+ * person in `subjectId`, so a shared line never blocks or opts out a colleague (PLAN 8.2).
+ */
+export type SuppressionKind = 'email' | 'phone' | 'linkedin' | 'bellwether_id' | 'individual_crd' | 'phone_subject';
 export type SuppressionReason = 'opted_out' | 'erased' | 'do_not_contact';
 type Tx = Prisma.TransactionClient | typeof prisma;
 
@@ -21,8 +26,9 @@ export function suppressionHash(kind: SuppressionKind, value: string): string {
 /** The normalised value of a raw one, or null when it does not parse. */
 export function normalizedFor(kind: SuppressionKind, raw: string): string | null {
   if (kind === 'email') return normalizeEmail(raw);
-  if (kind === 'phone') return toE164(raw);
+  if (kind === 'phone' || kind === 'phone_subject') return toE164(raw);
   if (kind === 'linkedin') return normalizeLinkedin(raw);
+  if (kind === 'individual_crd') return normalizeCrd(raw);
   return raw.trim() || null;
 }
 
@@ -32,12 +38,14 @@ export function maskValue(kind: SuppressionKind, value: string): string {
     const [local, domain] = value.split('@');
     return `${local.slice(0, 1)}***@${domain}`;
   }
-  if (kind === 'phone') return `${value.slice(0, 2)} *** *** ${value.slice(-4)}`;
+  if (kind === 'phone' || kind === 'phone_subject') return `${value.slice(0, 2)} *** *** ${value.slice(-4)}`;
+  if (kind === 'individual_crd') return `CRD ***${value.slice(-3)}`;
   if (kind === 'linkedin') return `linkedin.com/in/${value.split('/').pop()?.slice(0, 2) ?? ''}***`;
   return `${value.slice(0, 4)}***`;
 }
 
-export type SuppressionKey = { kind: SuppressionKind; value: string };
+/** A value to suppress or check. `subjectId` is set on a phone_subject key, and only there. */
+export type SuppressionKey = { kind: SuppressionKind; value: string; subjectId?: string | null };
 
 /** Every key that identifies a contact: its emails, personal phones, LinkedIn and Bellwether ids. */
 export function contactKeys(c: { email?: string | null; additionalEmails?: string[]; phone?: string | null; phoneType?: string | null; additionalPhones?: unknown; linkedinUrl?: string | null; bellwetherContactId?: string | null; bellwetherAliases?: string[] }, opts: { allPhones?: boolean } = {}): SuppressionKey[] {
@@ -55,14 +63,34 @@ export function contactKeys(c: { email?: string | null; additionalEmails?: strin
   return keys;
 }
 
-/** The first key that is suppressed, or null. */
+/**
+ * Every key of a contact, widened (PLAN 8.2, 9.7 step 6): a direct or mobile phone protects whoever
+ * holds it; any other line (office, main, toll-free, unknown) is kept for this one subject only; and
+ * the individual CRD follows the person to any firm (B001, B002).
+ */
+export function widenedKeys(c: Parameters<typeof contactKeys>[0] & { individualCrd?: string | null }, subjectId: string): SuppressionKey[] {
+  const keys = contactKeys(c);
+  const phones = [{ number: c.phone ?? '', type: c.phoneType ?? 'unknown' }, ...readExtraPhones(c.additionalPhones)];
+  for (const p of phones) {
+    if (personalPhone(p.type)) continue;
+    const v = toE164(p.number);
+    if (v && !keys.some((k) => k.kind === 'phone' && k.value === v)) keys.push({ kind: 'phone_subject', value: v, subjectId });
+  }
+  const crd = normalizeCrd(c.individualCrd);
+  if (crd) keys.push({ kind: 'individual_crd', value: crd });
+  return keys;
+}
+
+/** The first key that is suppressed, or null. A phone_subject row counts only for its own subject. */
 export async function findSuppressed(keys: SuppressionKey[], tx: Tx = prisma): Promise<SuppressionKey | null> {
   if (!keys.length) return null;
   const hashes = keys.map((k) => suppressionHash(k.kind, k.value));
-  const rows = await tx.suppression.findMany({ where: { valueHash: { in: hashes } }, select: { kind: true, valueHash: true } });
+  const rows = await tx.suppression.findMany({ where: { valueHash: { in: hashes } }, select: { kind: true, valueHash: true, subjectId: true } });
   if (!rows.length) return null;
-  const hit = new Set(rows.map((r) => `${r.kind}:${r.valueHash}`));
-  return keys.find((k) => hit.has(`${k.kind}:${suppressionHash(k.kind, k.value)}`)) ?? null;
+  return keys.find((k) => {
+    const hash = suppressionHash(k.kind, k.value);
+    return rows.some((r) => r.kind === k.kind && r.valueHash === hash && (r.subjectId === null || r.subjectId === (k.subjectId ?? null)));
+  }) ?? null;
 }
 
 /** Hashes already on the list, of every kind, for checking many contacts at once. */
@@ -72,17 +100,23 @@ export async function suppressedHashes(keys: SuppressionKey[], tx: Tx = prisma):
   return new Set(rows.map((r) => r.valueHash));
 }
 
-export async function addSuppressions(keys: SuppressionKey[], meta: { reason: SuppressionReason; sandboxContactId?: string | null; personId?: string | null; createdById?: string | null }, tx: Tx = prisma): Promise<number> {
-  let added = 0;
-  for (const k of keys) {
-    const valueHash = suppressionHash(k.kind, k.value);
-    const before = await tx.suppression.count({ where: { kind: k.kind, valueHash } });
-    await tx.suppression.upsert({
-      where: { kind_valueHash: { kind: k.kind, valueHash } },
-      create: { kind: k.kind, valueHash, label: maskValue(k.kind, k.value), reason: meta.reason, sandboxContactId: meta.sandboxContactId ?? null, personId: meta.personId ?? null, createdById: meta.createdById ?? null },
-      update: {},
-    });
-    if (!before) added += 1;
-  }
-  return added;
+/**
+ * Add keys to the list; a value already on it keeps its first row (and that row's source). `source`
+ * is the opt-out that wrote the rows, so lifting a form opt-out removes only its own (D4). Returns how
+ * many rows were new.
+ */
+export async function addSuppressions(keys: SuppressionKey[], meta: { reason: SuppressionReason; source?: string | null; sandboxContactId?: string | null; personId?: string | null; createdById?: string | null }, tx: Tx = prisma): Promise<number> {
+  // A shared-line key without its subject would block everyone on the line: never written.
+  keys = keys.filter((k) => k.kind !== 'phone_subject' || k.subjectId);
+  if (!keys.length) return 0;
+  // ON CONFLICT DO NOTHING honours both partial unique keys (Suppression_global_key, Suppression_subject_key).
+  const { count } = await tx.suppression.createMany({
+    data: keys.map((k) => ({
+      kind: k.kind, valueHash: suppressionHash(k.kind, k.value), label: maskValue(k.kind, k.value), reason: meta.reason, source: meta.source ?? null,
+      subjectId: k.kind === 'phone_subject' ? k.subjectId ?? null : null,
+      sandboxContactId: meta.sandboxContactId ?? null, personId: meta.personId ?? null, createdById: meta.createdById ?? null,
+    })),
+    skipDuplicates: true,
+  });
+  return count;
 }

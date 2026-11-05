@@ -94,7 +94,7 @@ export async function activateSandboxCampaign(id: string, ctx: EngineContext): P
       load.set(owner, k + 1);
       let day = start;
       for (let i = 0; i < Math.floor(k / rate); i++) day = nextWorkingDay(addDays(day, 1), settings.rules.workingDays);
-      if (!c.ownerId) await tx.sandboxContact.update({ where: { id: c.id }, data: { ownerId: owner, podId: campaign.podId, claimedAt: now } });
+      if (!c.ownerId) await tx.sandboxContact.update({ where: { id: c.id }, data: { ownerId: owner, podId: campaign.podId, claimedAt: now, firstClaimedAt: c.firstClaimedAt ?? now } });
       const e = await tx.enrollment.create({ data: { sandboxContactId: c.id, foUserId: owner, podId: campaign.podId, campaignId: id, campaignRun: campaign.runNumber, sequenceId: campaign.sequenceId, startDate: day, status: 'ACTIVE', createdById: ctx.actor.type === 'USER' ? ctx.actor.id ?? null : null, createdAt: now } });
       rows.push(e);
     }

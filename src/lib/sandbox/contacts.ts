@@ -4,7 +4,7 @@ import { logAudit, type AuditActor } from '../audit';
 import { getSettings } from '../settings';
 import { exitEnrollment, OCCUPYING_STATUSES } from '../engine/enrollment';
 import { crmMatch, internalOrBlocked, sandboxMatch } from './dedupe';
-import { normalizeCrd, normalizeDomain, normalizeEmail, normalizeLinkedin, parsePhone, PHONE_TYPES, sandboxSortName } from './normalize';
+import { isRoleEmail, normalizeCrd, normalizeDomain, normalizeEmail, normalizeLinkedin, parsePhone, PHONE_TYPES, sandboxSortName } from './normalize';
 import { findSuppressed, addSuppressions, contactKeys } from './suppression';
 import { optOutSandboxContact } from './opt-out';
 import { suppressionKeysOf } from './dedupe';
@@ -49,6 +49,7 @@ export function contactData(input: Partial<ContactInput>): { ok: true; data: Pri
     if (e && !normalizeEmail(e)) return { ok: false, error: 'That email address is not valid.' };
     data.email = e ? normalizeEmail(e) : null;
     data.emailVerification = e ? 'unknown' : null;
+    data.emailIsRole = isRoleEmail(data.email as string | null);
     data.badEmail = false;
   }
   if (input.phone !== undefined) {
@@ -147,6 +148,7 @@ export async function claimContact(id: string, user: { id: string; podIds: strin
     const c = await prisma.sandboxContact.findUnique({ where: { id }, include: { owner: { select: { name: true } } } });
     return { ok: false, error: c?.owner ? `${c.owner.name} claimed this contact first.` : 'This contact is no longer in the sandbox.' };
   }
+  await prisma.sandboxContact.updateMany({ where: { id, firstClaimedAt: null }, data: { firstClaimedAt: new Date() } });
   await logAudit({ entityType: 'sandbox_contact', entityId: id, action: 'claimed', actor });
   return { ok: true, id };
 }
@@ -165,6 +167,7 @@ export async function assignContact(id: string, toUserId: string | null, actor: 
   await prisma.sandboxContact.update({ where: { id }, data: { ownerId: toUserId, podId: pod, claimedAt: toUserId ? new Date() : null } });
   // Open sandbox work follows the contact to its new owner.
   if (toUserId) {
+    await prisma.sandboxContact.updateMany({ where: { id, firstClaimedAt: null }, data: { firstClaimedAt: new Date() } });
     await prisma.nextAction.updateMany({ where: { sandboxContactId: id, personId: null, state: 'OPEN' }, data: { foUserId: toUserId } });
   }
   await logAudit({ entityType: 'sandbox_contact', entityId: id, action: toUserId ? 'assigned' : 'released', actor, details: { from: contact.ownerId, to: toUserId, podId: pod } });
@@ -205,7 +208,7 @@ export async function removeContact(id: string, actor: AuditActor, now = new Dat
   const contact = await prisma.sandboxContact.findUnique({ where: { id } });
   if (!contact || contact.status !== 'ACTIVE') return { ok: false, error: 'This contact is no longer in the sandbox.' };
   await endSandboxWork(id, 'removed', actor, now);
-  await prisma.sandboxContact.update({ where: { id }, data: { ...PII_CLEARED, status: 'REMOVED', statusChangedAt: now, piiClearedAt: now } });
+  await prisma.sandboxContact.update({ where: { id }, data: { ...PII_CLEARED, status: 'REMOVED', statusChangedAt: now, piiClearedAt: now, removedById: actor.type === 'USER' ? actor.id ?? null : null } });
   await prisma.sandboxNote.deleteMany({ where: { sandboxContactId: id } });
   await logAudit({ entityType: 'sandbox_contact', entityId: id, action: 'removed', actor });
   return { ok: true, id };
@@ -221,7 +224,7 @@ export async function eraseContact(id: string, actor: AuditActor & { id?: string
   const contact = await prisma.sandboxContact.findUnique({ where: { id } });
   if (!contact) return { ok: false, error: 'Contact not found.' };
   if (contact.status === 'MOVED') return { ok: false, error: 'This contact is in the CRM now. Erase the person in Twenty.' };
-  await addSuppressions(contactKeys(contact, { allPhones: true }), { reason: 'erased', sandboxContactId: id, createdById: actor.id ?? null });
+  await addSuppressions(contactKeys(contact, { allPhones: true }), { reason: 'erased', source: 'erase', sandboxContactId: id, createdById: actor.id ?? null });
   if (contact.status === 'ACTIVE') await optOutSandboxContact(id, { source: 'erase', actor, now, createdById: actor.id ?? null });
   await endSandboxWork(id, 'opted_out', actor, now);
   const calls = await prisma.callLog.findMany({ where: { sandboxContactId: id }, select: { id: true, recordingSid: true, sandboxContactId: true, toNumber: true, fromNumber: true, direction: true } });

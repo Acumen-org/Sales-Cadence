@@ -358,7 +358,7 @@ export async function processMoveItem(itemId: string, now = new Date()): Promise
       await prisma.sandboxNote.updateMany({ where: { sandboxContactId: contact.id }, data: { twentyNoteId: 'moved' } });
     }
     await prisma.sandboxContact.update({ where: { id: contact.id }, data: { status: 'MOVED', movedAt: now, movedById: item.move.createdById, twentyPersonId: personId, twentyCompanyId: companyId, statusChangedAt: now } });
-    await prisma.sandboxMoveItem.update({ where: { id: item.id }, data: { state: 'DONE', twentyPersonId: personId, twentyCompanyId: companyId, companyAction, notesWritten: notes, personUpdatedAt, error: null, doneAt: now, attempts: { increment: 1 } } });
+    await prisma.sandboxMoveItem.update({ where: { id: item.id }, data: { state: 'DONE', twentyPersonId: personId, twentyCompanyId: companyId, companyAction, notesWritten: notes, personUpdatedAt, error: null, doneAt: now, undoUntil: new Date(now.getTime() + settings.sandbox.undoDays * 86_400_000), attempts: { increment: 1 } } });
     await logAudit({ entityType: 'sandbox_contact', entityId: contact.id, action: 'sandbox_moved', actor, details: { moveId: item.moveId, personId, companyId, companyAction, mode, notes: notes.length } });
     return 'DONE';
   } catch (err) {

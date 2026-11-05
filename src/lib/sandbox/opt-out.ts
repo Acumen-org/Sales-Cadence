@@ -22,9 +22,9 @@ export async function optOutSandboxContact(contactId: string, opts: { source: Op
   if (contact.status === 'MOVED' && contact.twentyPersonId) return optOutPerson(contact.twentyPersonId, opts);
   const keys = contactKeys(contact);
   const changed = await prisma.$transaction(async (tx) => {
-    await addSuppressions(keys, { reason: 'opted_out', sandboxContactId: contact.id, createdById: opts.createdById ?? null }, tx);
+    await addSuppressions(keys, { reason: 'opted_out', source: opts.source, sandboxContactId: contact.id, createdById: opts.createdById ?? null }, tx);
     if (contact.status === 'OPTED_OUT' || contact.status === 'REMOVED') return false;
-    await tx.sandboxContact.update({ where: { id: contact.id }, data: { status: 'OPTED_OUT', optedOutAt: now, optOutReason: opts.reason ?? opts.source, statusChangedAt: now } });
+    await tx.sandboxContact.update({ where: { id: contact.id }, data: { status: 'OPTED_OUT', optedOutAt: now, optOutReason: opts.reason ?? opts.source, optOutSource: opts.source, statusChangedAt: now } });
     await tx.nextAction.updateMany({ where: { sandboxContactId: contact.id, personId: null, state: 'OPEN' }, data: { state: 'CANCELLED', closedAt: now } });
     await logAudit({ entityType: 'sandbox_contact', entityId: contact.id, action: 'opted_out', actor: opts.actor, details: { source: opts.source, reason: opts.reason ?? null } }, tx);
     return true;
@@ -44,11 +44,15 @@ export async function optOutPerson(personId: string, opts: { source: OptOutSourc
   const person = await prisma.personCache.findUnique({ where: { id: personId } });
   if (!person) return { changed: false };
   const changed = !person.optedOut;
-  if (changed) await setPersonFlags(personId, { optedOut: true }, opts.actor);
+  if (changed) {
+    await setPersonFlags(personId, { optedOut: true }, opts.actor);
+    // Where it came from decides whether it may be lifted (D4).
+    await prisma.personCache.update({ where: { id: personId }, data: { optedOutAt: now, optOutSource: opts.source } });
+  }
   const keys = contactKeys({ email: person.email, additionalEmails: person.additionalEmails, phone: person.phoneE164, phoneType: 'direct', additionalPhones: person.additionalPhoneE164 ? [{ number: person.additionalPhoneE164, type: 'direct' }] : [], linkedinUrl: person.linkedinUrl });
   await prisma.$transaction(async (tx) => {
-    await addSuppressions(keys, { reason: 'opted_out', personId, createdById: opts.createdById ?? null }, tx);
-    await tx.sandboxContact.updateMany({ where: { twentyPersonId: personId, optedOutAt: null }, data: { optedOutAt: now, optOutReason: opts.reason ?? opts.source, statusChangedAt: now } });
+    await addSuppressions(keys, { reason: 'opted_out', source: opts.source, personId, createdById: opts.createdById ?? null }, tx);
+    await tx.sandboxContact.updateMany({ where: { twentyPersonId: personId, optedOutAt: null }, data: { optedOutAt: now, optOutReason: opts.reason ?? opts.source, optOutSource: opts.source, statusChangedAt: now } });
     await tx.bellwetherRefusal.updateMany({ where: { crmPersonId: personId, status: { not: 'opted_out' } }, data: { status: 'opted_out', statusChangedAt: now } });
   });
   if (opts.endSequences !== false) {
@@ -70,7 +74,7 @@ export async function optOutSubject(subject: SubjectRef, opts: Parameters<typeof
  * entry is kept as a hash, and every sandbox contact and CRM person it matches is opted out.
  */
 export async function suppressValue(key: SuppressionKey, opts: { actor: AuditActor; createdById?: string | null }): Promise<{ added: boolean; optedOut: number }> {
-  const added = (await addSuppressions([key], { reason: 'do_not_contact', createdById: opts.createdById ?? null })) > 0;
+  const added = (await addSuppressions([key], { reason: 'do_not_contact', source: 'suppression_list', createdById: opts.createdById ?? null })) > 0;
   const contacts = await matchingSandboxContacts(key);
   let optedOut = 0;
   for (const c of contacts) if ((await optOutSandboxContact(c.id, { source: 'suppression_list', actor: opts.actor, createdById: opts.createdById })).changed) optedOut += 1;
@@ -93,7 +97,8 @@ async function matchingSandboxContacts(key: SuppressionKey): Promise<{ id: strin
 
 async function matchingPeople(key: SuppressionKey): Promise<{ id: string }[]> {
   const live = { deletedAt: null };
-  if (key.kind === 'email') return prisma.personCache.findMany({ where: { ...live, OR: [{ email: key.value }, { additionalEmails: { has: key.value } }] }, select: { id: true } });
+  // Twenty keeps an address as typed: compare the normalised copies, so capitals never hide a person (B011).
+  if (key.kind === 'email') return prisma.personCache.findMany({ where: { ...live, OR: [{ emailNorm: key.value }, { additionalEmailsNorm: { has: key.value } }] }, select: { id: true } });
   if (key.kind === 'phone') return prisma.personCache.findMany({ where: { ...live, OR: [{ phoneE164: key.value }, { additionalPhoneE164: key.value }] }, select: { id: true } });
   if (key.kind === 'linkedin') {
     const people = await prisma.personCache.findMany({ where: { ...live, linkedinUrl: { contains: key.value.replace('linkedin.com/in/', ''), mode: 'insensitive' } }, select: { id: true, linkedinUrl: true } });

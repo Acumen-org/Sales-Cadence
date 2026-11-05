@@ -172,6 +172,9 @@ model User {
   numberTicketsResolved MeetingNumberTicket[] @relation("NumberTicketResolvedBy")
   sandboxContacts SandboxContact[] @relation("SandboxOwner")
   calls           CallLog[]        @relation("CallUser")
+  ticketsRaised         Ticket[]              @relation("TicketRaisedBy")
+  ticketsResolved       Ticket[]              @relation("TicketResolvedBy")
+  notifications         Notification[]        @relation("NotificationFor")
 }
 
 model Session {
@@ -201,6 +204,7 @@ model Pod {
   campaigns   Campaign[]
   enrollments Enrollment[]
   sandboxContacts SandboxContact[]
+  calls           CallLog[]
 }
 
 model UserPod {
@@ -327,12 +331,17 @@ model Enrollment {
   meetingAt         DateTime?
   completedAt       DateTime?
   exitedAt          DateTime?
+  /// CRM or cold outreach (SANDBOX), set once when the enrollment is made and never changed, Move
+  /// and Undo included: reports count by it, so a move never rewrites the past (PLAN 8.4, B037). Its
+  /// tasks take it from here. Null only on rows written before the stamping code; NOT NULL in W14.
+  audience         CampaignAudience?
   createdById       String?
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
 
   tasks Task[]
 
+  @@index([audience, createdAt])
   @@index([personId, status])
   @@index([sandboxContactId, status])
   @@index([foUserId, status])
@@ -419,6 +428,11 @@ model PersonCache {
   /// nameless sort last instead of filling the first pages of every list.
   sortName        String?
   email           String?
+  /// `email` and `additionalEmails` trimmed and lower-cased (normalizeEmail), for every comparison:
+  /// Twenty keeps an address as typed, so "Jane.Doe@Acme.com" never equalled a suppressed
+  /// "jane.doe@acme.com" (B011, B073).
+  emailNorm            String?
+  additionalEmailsNorm String[] @default([])
   phone           String?
   /// `phone` and `additionalPhone` in E.164, for matching calls and pushes (src/lib/sandbox/normalize.ts).
   phoneE164       String?
@@ -484,6 +498,11 @@ model PersonCache {
 
   /// Cadence-local flags (Twenty is never written): opted out of outreach, bad contact data.
   optedOut        Boolean   @default(false)
+  /// When and where the opt-out came from (src/lib/sandbox/opt-out.ts OptOutSource). Only one from
+  /// the post-call form (call_form) may be lifted, by an admin or by Biz Ops closing a ticket (D4).
+  optedOutAt      DateTime?
+  optOutSource    String?
+  optOutLiftedAt  DateTime?
   badEmail        Boolean   @default(false)
   badPhone        Boolean   @default(false)
   raw             Json?
@@ -497,10 +516,13 @@ model PersonCache {
   meetingAttendees MeetingAttendee[]
   numberTickets    MeetingNumberTicket[]
   calls            CallLog[]
+  tickets          Ticket[]
 
   @@index([companyId])
   @@index([podOwner])
   @@index([email])
+  @@index([emailNorm])
+  @@index([additionalEmailsNorm], type: Gin)
   @@index([phoneE164])
   @@index([additionalPhoneE164])
   @@index([linkedinUrl])
@@ -625,6 +647,7 @@ model Meeting {
 
   attendees MeetingAttendee[]
   numberTickets MeetingNumberTicket[]
+  tickets       Ticket[]
 
   @@index([occurredAt])
   @@index([companyId, occurredAt])
@@ -636,6 +659,9 @@ model Meeting {
 
 /// "Think this is wrong?": someone doubts which meeting with a prospect this is, and Biz Ops
 /// checks it, sets the number if it is wrong, and closes it. See src/lib/actions/number-checks.ts.
+/// It sits beside the general Ticket below, and Biz Ops' Tickets section lists both; its columns map
+/// onto a Ticket of kind MEETING_NUMBER (meetingDay, shownNumber, expectedNumber go in `details`),
+/// so it can be folded in later without losing anything.
 model MeetingNumberTicket {
   id             String       @id @default(uuid())
   personId       String
@@ -722,8 +748,12 @@ model Touch {
   /// The step this email or call counted for, once one has claimed it. A touch counts once.
   countedForTaskId String?
   countedForTask   Task?          @relation("TouchCountedFor", fields: [countedForTaskId], references: [id], onDelete: SetNull)
+  /// CRM or cold outreach (SANDBOX), set once when the touch is recorded and never changed (PLAN 8.4,
+  /// B037). Null only on rows written before the stamping code; NOT NULL in W14.
+  audience         CampaignAudience?
   createdAt   DateTime       @default(now())
 
+  @@index([audience, occurredAt])
   @@index([personId, occurredAt])
   @@index([sandboxContactId, occurredAt])
   @@index([countedForTaskId])
@@ -768,6 +798,9 @@ model TwentyWrite {
   error         String?
   attempts      Int       @default(0)
   nextAttemptAt DateTime?
+  /// Twenty's updatedAt on the record right after this write, as Twenty wrote it: Undo of a move
+  /// tells Cadence's own writes from someone's edit by it (B033).
+  resultUpdatedAt String?
   createdAt     DateTime  @default(now())
 
   @@index([taskId])
@@ -875,6 +908,7 @@ model EnrichmentRow {
   error String?
   appliedAt DateTime?
   updatedAt DateTime @updatedAt
+
   @@unique([batchId, rowNumber])
   @@index([batchId, status])
 }
@@ -893,6 +927,13 @@ enum NextActionState {
   CANCELLED
 }
 
+/// A next action is something to do (ACTION: email, call, LinkedIn), or a meeting already booked
+/// (MEETING), which is held or moved rather than called and stays out of calls-due counts (B183).
+enum NextActionKind {
+  ACTION
+  MEETING
+}
+
 /// A person's next action outside any campaign (owner, 25 September 2026): what to do, on which
 /// day, once or on repeat. It is worked in Tasks and kept in step with the person's Next Action and
 /// Next Action Due Date in Twenty, both ways. One open next action per person, as Twenty has one.
@@ -908,6 +949,9 @@ model NextAction {
   /// What to do, as it is written to Twenty's Next Action.
   label         String
   action        ActionType       @default(EMAIL)
+  kind             NextActionKind    @default(ACTION)
+  /// A MEETING's date and time, when known; `dueDate` holds its day either way.
+  meetingAt        DateTime?
   /// LocalDate (YYYY-MM-DD): the day it is due, written to Twenty's Next Action Due Date.
   dueDate       String
   repeat        NextActionRepeat @default(NONE)
@@ -923,9 +967,17 @@ model NextAction {
   /// When Twenty last matched this next action, by Cadence's write or by following Twenty.
   crmSyncedAt   DateTime?
   crmError      String?
+  /// CRM or cold outreach (SANDBOX), set once when the row is created and never changed (PLAN 8.4,
+  /// B037). A move closes the cold row and opens a CRM one; it never restamps. Null only on rows
+  /// written before the stamping code; NOT NULL in W14.
+  audience         CampaignAudience?
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
 
+  // Two partial unique indexes live in the migrations, as Prisma cannot declare them:
+  // NextAction_one_open_per_person (personId) WHERE state = 'OPEN', and
+  // NextAction_one_open_per_sandbox_contact (sandboxContactId) WHERE state = 'OPEN' AND personId IS NULL.
+  @@index([audience, dueDate])
   @@index([foUserId, state, dueDate])
   @@index([personId, state])
   @@index([sandboxContactId, state])
@@ -966,6 +1018,9 @@ model SandboxContact {
   jobTitle            String?
   /// Lower-cased.
   email               String?
+  /// The email is a shared inbox (info@, sales@, compliance@...; normalize.ts isRoleEmail), which
+  /// different people really do share: left out of the one-live-contact-per-email rule (B177, N025).
+  emailIsRole         Boolean       @default(false)
   /// valid | risky | unknown
   emailVerification   String?
   additionalEmails    String[]      @default([])
@@ -1002,6 +1057,9 @@ model SandboxContact {
   podId               String?
   pod                 Pod?          @relation(fields: [podId], references: [id], onDelete: SetNull)
   claimedAt           DateTime?
+  /// The first time someone took the contact on (a claim, or an assignment by a leader). Unlike
+  /// `claimedAt`, a push with an owner does not set it, so the funnel counts real claims (B194).
+  firstClaimedAt      DateTime?
   /// The Bellwether record this contact came from; null for contacts added in Cadence.
   bellwetherContactId String?       @unique
   /// More Bellwether records that were pushed for the same person and matched this contact.
@@ -1011,11 +1069,30 @@ model SandboxContact {
   /// LocalDate the source collected it.
   collectedAt         String?
   pushedByEmail       String?
+  /// The pusher's name as Cadence knows them, shown instead of the email (B205).
+  pushedByName        String?
   createdById         String?
   badEmail            Boolean       @default(false)
   badPhone            Boolean       @default(false)
+  /// Set when an email to the contact may have bounced but the notice did not say so for certain
+  /// (a subject-only match): a "Possible bounce" badge with Clear / Confirm, never sent to Twenty (N097).
+  possibleBounceAt    DateTime?
   optedOutAt          DateTime?
   optOutReason        String?
+  /// Where the opt-out came from (src/lib/sandbox/opt-out.ts OptOutSource). Only one from the
+  /// post-call form (call_form) may be lifted, by an admin or by Biz Ops closing a ticket (D4).
+  optOutSource        String?
+  /// When an opt-out was last lifted (D4); Bellwether reads it as `optOutLiftedAt` (contract 1.1).
+  optOutLiftedAt      DateTime?
+  /// Who removed the contact and why (asked in the Remove dialog; B086). Retention leaves both null.
+  removedById         String?
+  removedReason       String?
+  /// The latest post-call outcome and when it was filed: "Ready to move" and "Closed" read it (D3).
+  lastOutcome         String?
+  lastOutcomeAt       DateTime?
+  /// A CRM person Bellwether's push or the nightly check thought might be this contact, not
+  /// certain enough to stop outreach: "Possibly in the CRM: Jane Doe" (B143).
+  possibleCrmPersonId String?
   /// legitimate_interest | consent; set for EEA/UK contacts.
   lawfulBasis         String?
   /// Last call, email, note or task: drives retention.
@@ -1049,6 +1126,7 @@ model SandboxContact {
   calls       CallLog[]
   notes       SandboxNote[]
   emails      SandboxEmail[]
+  tickets     Ticket[]
 
   @@index([status, ownerId])
   @@index([status, podId])
@@ -1080,19 +1158,34 @@ model SandboxNote {
 /// readable personal data behind and a later push of the same person is still refused.
 model Suppression {
   id               String   @id @default(uuid())
-  /// email | phone | linkedin | bellwether_id
+  /// email | phone | linkedin | bellwether_id | individual_crd: the person, wherever they turn up.
+  /// phone_subject: a firm main, office or unknown line, which blocks only the one person in
+  /// `subjectId` and warns for colleagues on it, so a shared line never opts a colleague out (PLAN 8.2).
   kind             String
   valueHash        String
   /// What an admin typed, masked (j***@acme.com), so the list is legible without keeping the value.
   label            String?
   /// opted_out | erased | do_not_contact
   reason           String
+  /// The one person a phone_subject row protects: the cold contact's id or the CRM person's id.
+  /// Null for every other kind, which protects whoever holds the value.
+  subjectId        String?
+  /// The opt-out that wrote it (OptOutSource: call_form, contact_page, suppression_list, erase...).
+  /// Lifting a form opt-out (D4) removes only the rows its own opt-out wrote.
+  source           String?
   sandboxContactId String?
   personId         String?
   createdById      String?
   createdAt        DateTime @default(now())
 
-  @@unique([kind, valueHash])
+  // One row per value: two partial unique indexes live in the migrations, as Prisma cannot declare
+  // them: Suppression_global_key (kind, valueHash) WHERE subjectId IS NULL, and
+  // Suppression_subject_key (kind, valueHash, subjectId) WHERE subjectId IS NOT NULL. Insert with
+  // createMany({ skipDuplicates: true }), which respects both.
+  @@index([valueHash])
+  @@index([subjectId])
+  @@index([sandboxContactId])
+  @@index([personId])
   @@index([createdAt])
 }
 
@@ -1144,6 +1237,10 @@ model CallLog {
   priceUsd         Decimal?        @db.Decimal(10, 4)
   userId           String?
   user             User?           @relation("CallUser", fields: [userId], references: [id], onDelete: SetNull)
+  /// The pod the call counts for, at the time of the call: the enrollment's, else the contact's,
+  /// else the rep's only pod. Reports filter calls by it, never by today's pods (B040).
+  podId            String?
+  pod              Pod?              @relation(fields: [podId], references: [id], onDelete: SetNull)
   /// caller_number | alias | intent | chosen | manual | none
   repMatchedBy     String?
   personId         String?
@@ -1163,15 +1260,27 @@ model CallLog {
   recordingSid     String?
   recordingSec     Int?
   recordingCount   Int             @default(0)
+  /// Null while the import still looks for the recording (48 hours after the call), then found or
+  /// not_found, so the call page can say so (N050).
+  recordingStatus  String?
   /// Set when a matched rep's call has ended: the post-call form is due from then.
   formDueAt        DateTime?
   formDoneAt       DateTime?
+  /// A call logged by mistake, discarded by the rep soon after: kept for the audit, out of every
+  /// count and form queue (B024).
+  discardedAt      DateTime?
+  discardReason    String?
+  /// CRM or cold outreach (SANDBOX), stamped once when the call is matched to someone and never
+  /// changed (PLAN 8.4, B037). An unmatched call stays null, so All = CRM + Cold + Not matched yet.
+  audience         CampaignAudience?
   importedAt       DateTime?
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
   form CallForm?
 
+  @@index([audience, startedAt])
+  @@index([podId, startedAt])
   @@index([userId, startedAt])
   @@index([userId, formDoneAt])
   @@index([personId, startedAt])
@@ -1228,8 +1337,12 @@ model CallForm {
   nextActionId      String?
   /// CRM contact: at once. Sandbox contact: when moved.
   twentyNoteId      String?
+  /// The call's audience when the form was filed, never changed (PLAN 8.4, B037).
+  audience          CampaignAudience?
   submittedAt       DateTime @default(now())
   updatedAt         DateTime @updatedAt
+
+  @@index([audience, submittedAt])
 }
 
 enum SandboxEmailKind {
@@ -1313,6 +1426,11 @@ model BellwetherRefusal {
   /// already_in_crm | opted_out
   status              String
   crmPersonId         String?
+  /// The key the refusal matched on: email | linkedin | phone_personal (direct or mobile) |
+  /// phone_shared (office, main, unknown) | bellwether_id | individual_crd | name_firm. Opting a CRM
+  /// person out flips only refusals that matched on their own details, never a shared line (N011).
+  /// Null on refusals from before it was kept.
+  matchedOn           String?
   statusChangedAt     DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -1339,8 +1457,13 @@ model SandboxMoveItem {
   moveId           String
   move             SandboxMove @relation(fields: [moveId], references: [id], onDelete: Cascade)
   sandboxContactId String
-  /// QUEUED | RUNNING | DONE | FAILED | DRY_RUN | UNDONE
+  /// QUEUED | RUNNING | DONE | FAILED | DRY_RUN | UNDOING | UNDONE | UNDO_PARTIAL. At most one item
+  /// per contact is QUEUED or RUNNING: SandboxMoveItem_one_in_flight_per_contact, a partial unique
+  /// index in the migrations (B005).
   state            String
+  /// transient (Retry may work) | permanent (it will not: opted out, removed, already in the CRM).
+  /// Null on failures from before it was kept, which count as transient.
+  failure             String?
   /// When a process took the item (RUNNING). The web request and the worker both work the queue;
   /// the claim keeps them off the same item, and a stale claim is taken back.
   claimedAt        DateTime?
@@ -1360,6 +1483,20 @@ model SandboxMoveItem {
   personUpdatedAt  String?
   /// The contact as it was moved.
   snapshot         Json
+  /// The step chosen in the dialog ({ label, action, dueDate }): applied only when the item succeeds,
+  /// so nothing on the contact changes at queue time (B034).
+  nextStep            Json?
+  /// The contact's own open next step when the move was queued, restored by Undo or a failure.
+  priorNextAction     Json?
+  /// The CRM person's Next Action before an attach wrote one ({ nextAction, dueDate }), for Undo (B097).
+  personNextBefore    Json?
+  /// Enrollments the move ended, so Undo can offer "Put back in <campaign>" (B101).
+  exitedEnrollmentIds String[]    @default([])
+  /// What Undo did and did not manage: { personDeleted, notesDeleted, notesLeft, companyDeleted } (B113).
+  undoReport          Json?
+  /// The last moment this item can be undone, fixed when it is made: lowering the setting later does
+  /// not take undo away from moves already made (N062).
+  undoUntil           DateTime?
   error            String?
   attempts         Int         @default(0)
   doneAt           DateTime?
@@ -1369,4 +1506,79 @@ model SandboxMoveItem {
   @@index([moveId])
   @@index([sandboxContactId])
   @@index([state])
+}
+
+// ---------------------------------------------------------------------------
+// Tickets and notifications
+// ---------------------------------------------------------------------------
+
+/// What a ticket is about. MEETING_NUMBER is the meeting-number check, which today still lives in
+/// MeetingNumberTicket and can be folded in here.
+enum TicketKind {
+  /// "Think this is wrong?" on an opt-out from the post-call form (D4).
+  OPT_OUT
+  MEETING_NUMBER
+}
+
+/// A question someone raises for Biz Ops, who look into it and close it with a note (D4, owner, 5
+/// November 2026). Built like MeetingNumberTicket (src/lib/actions/number-checks.ts): Biz Ops' Tickets
+/// section lists every open ticket of either table. Closing an OPT_OUT ticket may lift the opt-out.
+model Ticket {
+  id               String          @id @default(uuid())
+  kind             TicketKind
+  /// Who it is about: a CRM person, a cold contact, or both once the contact has moved.
+  personId         String?
+  person           PersonCache?    @relation(fields: [personId], references: [id], onDelete: SetNull)
+  sandboxContactId String?
+  sandboxContact   SandboxContact? @relation(fields: [sandboxContactId], references: [id], onDelete: SetNull)
+  /// The meeting it was raised on (MEETING_NUMBER).
+  meetingId        String?
+  meeting          Meeting?        @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+  /// What the person raising it says.
+  note             String?
+  /// What Cadence showed when it was raised, by kind. OPT_OUT: { optedOutAt, source, reason, callId }.
+  /// MEETING_NUMBER: { meetingDay, shownNumber, expectedNumber }.
+  details          Json?
+  open             Boolean         @default(true)
+  raisedById       String?
+  raisedBy         User?           @relation("TicketRaisedBy", fields: [raisedById], references: [id], onDelete: SetNull)
+  resolvedById     String?
+  resolvedBy       User?           @relation("TicketResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+  resolvedAt       DateTime?
+  /// The note it was closed with, for whoever raised it.
+  resolution       String?
+  /// What closing it did. OPT_OUT: lifted | kept. MEETING_NUMBER: number_set | unchanged.
+  outcome          String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([open, createdAt])
+  @@index([kind, open])
+  @@index([personId])
+  @@index([sandboxContactId])
+}
+
+/// Something one user is told about that is not a reply (replies stay touches): a colleague's
+/// suggested next step after a call, accepted only through the same checks as any next step (B027);
+/// mail seen to an opted-out or removed contact (N016); a bounce (N064).
+model Notification {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation("NotificationFor", fields: [userId], references: [id], onDelete: Cascade)
+  /// next_step_suggestion | compliance_alert | bounce
+  kind             String
+  personId         String?
+  sandboxContactId String?
+  /// Who it came from, when a person: the colleague who filed the call.
+  fromUserId       String?
+  /// What it says and, for a suggestion, what accepting it would set: { what, how, when, callId }.
+  payload          Json
+  readAt           DateTime?
+  /// accepted | dismissed, and when.
+  resolution       String?
+  resolvedAt       DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
 }
