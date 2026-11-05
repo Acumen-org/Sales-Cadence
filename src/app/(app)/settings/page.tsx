@@ -13,6 +13,7 @@ import { getTwentyClient } from '@/lib/twenty';
 import { recentEvents } from '@/lib/engine/ingest';
 import { Badge, Card, KeyValue, Surface, Tabs, ViewHeader, Empty, Count } from '@/components/ui';
 import { UsersPanel } from '@/components/settings/users-panel';
+import { leaverHasWork, leaverWork, leaverWorkWords } from '@/lib/outreach/ownership';
 import { BlockedAccountsPanel } from '@/components/settings/blocked-accounts-panel';
 import { NonProspectRulesForm } from '@/components/settings/non-prospect-rules-form';
 import { listBlockedAccounts } from '@/lib/blocked-accounts';
@@ -131,6 +132,8 @@ async function UsersTab({ selfId }: { selfId: string }) {
   ]);
   const peopleCount = new Map(peopleByPod.map((r) => [r.podOwner, r._count._all]));
   const { microsoft } = await signInMethods();
+  // N089: what each active member holds, for the Remove access dialog.
+  const holds = await leaverWork(users.filter((u) => u.active).map((u) => u.id));
   return (
     <UsersPanel
       selfId={selfId}
@@ -145,6 +148,9 @@ async function UsersTab({ selfId }: { selfId: string }) {
         openWork: u._count.enrollments,
         openPodIds: [...new Set(u.enrollments.flatMap((e) => e.podId ? [e.podId] : []))],
         podIds: u.pods.map((p) => p.podId),
+        holds: holds.get(u.id) && leaverHasWork(holds.get(u.id)!) ? leaverWorkWords(holds.get(u.id)!) : null,
+        callerNumber: u.callerNumber,
+        coldContacts: holds.get(u.id)?.contacts ?? 0,
       }))}
       pods={pods.map((p) => ({
         id: p.id,
@@ -418,7 +424,20 @@ async function ActivityTab() {
 async function CallingTab({ timezone }: { timezone: string }) {
   const settings = await getSettings();
   const status = twilioStatus();
-  const [last, users] = await Promise.all([importStatus(), prisma.user.findMany({ where: { active: true }, select: { id: true, name: true, aliases: true, callerNumber: true }, orderBy: { name: 'asc' } })]);
+  const [last, everyone, released] = await Promise.all([
+    importStatus(),
+    prisma.user.findMany({ select: { id: true, name: true, aliases: true, callerNumber: true, active: true, role: true }, orderBy: { name: 'asc' } }),
+    prisma.auditLog.findMany({ where: { entityType: 'user', action: 'caller_number_released' }, orderBy: { createdAt: 'desc' }, take: 200, select: { entityId: true, details: true } }),
+  ]);
+  // B208: a calling number goes to someone who calls: not Biz Ops. N107: a removed rep's line says whose it was.
+  const users = everyone.filter((u) => u.active && u.role !== 'BIZ_OPS');
+  const formerOf = (number: string) => {
+    const held = everyone.find((u) => !u.active && u.callerNumber === number);
+    if (held) return `${held.name} (removed)`;
+    const r = released.find((a) => (a.details as { number?: string } | null)?.number === number);
+    const who = r ? everyone.find((u) => u.id === r.entityId) : null;
+    return who && !who.active ? `${who.name} (removed)` : null;
+  };
   let numbers: { phoneNumber: string; friendlyName: string }[] = [];
   let numbersError: string | null = null;
   try { numbers = status.configured ? (await getTwilioReader()?.listNumbers()) ?? [] : []; } catch (err) { numbersError = err instanceof Error ? err.message : String(err); }
@@ -438,7 +457,7 @@ async function CallingTab({ timezone }: { timezone: string }) {
     <Card title="Numbers and reps">
       <div className="space-y-2 p-4 text-[13px]">
         {numbersError ? <p className="text-red-700">{numbersError}</p> : null}
-        {numbers.map((n) => { const e164 = toE164(n.phoneNumber) ?? n.phoneNumber; return <CallerNumberRow key={e164} number={e164} friendlyName={n.friendlyName} userId={users.find((u) => u.callerNumber === e164)?.id ?? null} suggestion={suggest(n.friendlyName)} users={users.map((u) => ({ id: u.id, name: u.name }))} />; })}
+        {numbers.map((n) => { const e164 = toE164(n.phoneNumber) ?? n.phoneNumber; return <CallerNumberRow key={e164} number={e164} friendlyName={n.friendlyName} userId={users.find((u) => u.callerNumber === e164)?.id ?? null} suggestion={suggest(n.friendlyName)} users={users.map((u) => ({ id: u.id, name: u.name }))} former={users.some((u) => u.callerNumber === e164) ? null : formerOf(e164)} />; })}
         {!numbers.length && !numbersError ? <p className="text-ink-500">{status.configured ? 'No numbers on the account' : 'Connect Twilio to see its numbers'}</p> : null}
       </div>
     </Card>

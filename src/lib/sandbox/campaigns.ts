@@ -10,6 +10,7 @@ import { workspaceTimezone } from '../workspace';
 import { checkKeysOf, suppressedHashes, suppressionHash } from './suppression';
 import { crmDoNotContactTwin } from './dedupe';
 import { canAct, type GuardActor } from '../outreach/guard';
+import { applyTransfer } from '../outreach/transfer';
 
 /**
  * Sandbox campaigns on the existing engine (decision 1): a Campaign with audience SANDBOX whose
@@ -45,6 +46,8 @@ export async function sandboxAudienceIssues(contactIds: string[], podId: string,
     if (c.crmMatchPersonId) { issues.push({ id, name, reason: 'Also in the CRM' }); continue; }
     if ((keysOf.get(c.id) ?? []).some((k) => hashes.has(suppressionHash(k.kind, k.value)))) { issues.push({ id, name, reason: 'On the suppression list' }); continue; }
     if (await crmDoNotContactTwin(c)) { issues.push({ id, name, reason: 'Do not contact in the CRM' }); continue; }
+    // N069: a removed rep's contact says so, and what to do, rather than "outside this pod".
+    if (c.ownerId && c.owner && !c.owner.active) { issues.push({ id, name, reason: `${c.owner.name} no longer has access: assign these contacts first` }); continue; }
     if (actor) {
       const verdict = canAct(actor, { kind: 'cold', id: c.id, status: c.status, name, ownerId: c.ownerId, ownerName: c.owner?.name ?? null, ownerActive: c.owner?.active ?? false, podId: c.podId, podName: c.pod?.name ?? null, twentyPersonId: c.twentyPersonId, movedById: c.movedById, optedOutAt: c.optedOutAt, optOutSource: c.optOutSource, crmMatchPersonId: c.crmMatchPersonId, crmAutoPersonId: c.crmAutoPersonId, moving: false }, 'enroll');
       if (!verdict.ok) { issues.push({ id, name, reason: verdict.reason.replace(/\.$/, '') }); continue; }
@@ -106,7 +109,8 @@ export async function activateSandboxCampaign(id: string, ctx: EngineContext): P
       load.set(owner, k + 1);
       let day = start;
       for (let i = 0; i < Math.floor(k / rate); i++) day = nextWorkingDay(addDays(day, 1), settings.rules.workingDays);
-      if (!c.ownerId) await tx.sandboxContact.update({ where: { id: c.id }, data: { ownerId: owner, podId: campaign.podId, claimedAt: now, firstClaimedAt: c.firstClaimedAt ?? now } });
+      // The rep who runs it claims an unclaimed contact, in the campaign's pod (8.8).
+      if (!c.ownerId) await applyTransfer(tx, c, { id: owner }, campaign.podId, { actor: ctx.actor, now, action: 'claimed', reason: 'campaign_launch' });
       const e = await tx.enrollment.create({ data: { sandboxContactId: c.id, foUserId: owner, podId: campaign.podId, campaignId: id, campaignRun: campaign.runNumber, sequenceId: campaign.sequenceId, startDate: day, status: 'ACTIVE', createdById: ctx.actor.type === 'USER' ? ctx.actor.id ?? null : null, createdAt: now, audience: 'SANDBOX' } });
       rows.push(e);
     }

@@ -8,7 +8,15 @@ import { ActionButton, ActionForm } from '@/components/action-form';
 import { Avatar, Badge, Card, Count, Empty, Field, type BadgeTone } from '@/components/ui';
 
 /** roleAssigned is false for someone who joined through Microsoft and has no title yet. */
-export type UserRow = { id: string; email: string; name: string; role: Role; roleAssigned: boolean; active: boolean; podIds: string[]; openWork: number; openPodIds: string[] };
+export type UserRow = {
+  id: string; email: string; name: string; role: Role; roleAssigned: boolean; active: boolean; podIds: string[]; openWork: number; openPodIds: string[];
+  /** Everything they hold, in words (N089): "12 cold contacts, 3 next steps (1 meeting) and 1 call form waiting". Null when nothing. */
+  holds?: string | null;
+  /** Their calling number, which removal lets go or moves (N107). */
+  callerNumber?: string | null;
+  /** How many active cold contacts they own, for the pod change (N090). */
+  coldContacts?: number;
+};
 export type PodRow = { id: string; name: string; podOwnerValue: string; userCount: number; peopleCount: number; archived: boolean };
 const ROLES: Role[] = ['JUNIOR_FO', 'SENIOR_FO', 'POD_MANAGER', 'SALES_LEADER', 'BIZ_OPS', 'ADMIN'];
 const ROLE_TONE: Record<Role, BadgeTone> = { ADMIN: 'purple', SALES_LEADER: 'purple', POD_MANAGER: 'purple', SENIOR_FO: 'blue', JUNIOR_FO: 'gray', BIZ_OPS: 'sky' };
@@ -16,13 +24,39 @@ const ROLE_TONE: Record<Role, BadgeTone> = { ADMIN: 'purple', SALES_LEADER: 'pur
 /** With Microsoft sign-in there are no passwords to set: people sign in with their work account. */
 function UserFields({ user, pods, passwords }: { user?: UserRow; pods: PodRow[]; passwords: boolean }) {
   const untitled = user && !user.roleAssigned;
+  const live = pods.filter((pod) => !pod.archived);
   return <div className="grid gap-4 md:grid-cols-2">
     <Field label="Name"><input name="name" required maxLength={200} defaultValue={user?.name} /></Field>
     <Field label="Email"><input name="email" type="email" required maxLength={254} defaultValue={user?.email} /></Field>
     <Field label="Role"><select name="role" required defaultValue={untitled ? '' : user?.role ?? 'JUNIOR_FO'}>{untitled ? <option value="" disabled>Choose a role</option> : null}{ROLES.map((role) => <option key={role} value={role}>{ROLE_LABELS[role]}</option>)}</select></Field>
     {passwords ? <Field label={user ? 'New password (optional)' : 'Password'}><input name="password" type="password" minLength={8} required={!user} autoComplete="new-password" /></Field> : null}
-    <fieldset className="rounded-xl border border-line bg-white p-4 md:col-span-2"><legend className="px-1 text-sm font-medium text-ink-700">Pods</legend><div className="flex flex-wrap gap-3">{pods.filter((pod) => !pod.archived).map((pod) => <label key={pod.id} className="flex cursor-pointer items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm font-medium text-ink-900"><input type="checkbox" name="podIds" value={pod.id} defaultChecked={user?.podIds.includes(pod.id)} />{pod.name}</label>)}{!pods.some((pod) => !pod.archived) ? <span className="text-sm text-ink-500">No active pods</span> : null}</div></fieldset>
+    <fieldset className="rounded-xl border border-line bg-white p-4 md:col-span-2"><legend className="px-1 text-sm font-medium text-ink-700">Pods</legend><div className="flex flex-wrap gap-3">{live.map((pod) => <label key={pod.id} className="flex cursor-pointer items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm font-medium text-ink-900"><input type="checkbox" name="podIds" value={pod.id} defaultChecked={user?.podIds.includes(pod.id)} />{pod.name}</label>)}{!live.length ? <span className="text-sm text-ink-500">No active pods</span> : null}</div></fieldset>
+    {user?.coldContacts ? <Field label={`If ${user.name} leaves a pod, their ${user.coldContacts} cold contact${user.coldContacts === 1 ? '' : 's'} there move to`} hint="Needed only when they end up in more than one pod."><select name="contactsPodId" defaultValue=""><option value="">Their only pod</option>{live.map((pod) => <option key={pod.id} value={pod.id}>{pod.name}</option>)}</select></Field> : null}
   </div>;
+}
+
+const SALES: Role[] = ['JUNIOR_FO', 'SENIOR_FO', 'POD_MANAGER', 'SALES_LEADER'];
+
+/**
+ * Remove access (PLAN 8.8, N089): everything the leaver holds is listed, and whoever takes it over is
+ * required when anything is: their cold contacts with their work, open next steps (CRM and cold),
+ * live enrollments and call forms waiting; their calling number is let go or moved (N107). Only a
+ * sales rep in every pod of their live enrollments can take over.
+ */
+function RemoveAccess({ user: u, users, onDone }: { user: UserRow; users: UserRow[]; onDone: () => void }) {
+  const holds = u.holds ?? null;
+  const takers = users.filter((c) => c.active && c.id !== u.id && SALES.includes(c.role) && u.openPodIds.every((podId) => c.podIds.includes(podId)));
+  return <ActionForm action={setUserAccessAction} onSuccess={onDone} className="space-y-3 p-2">
+    <input type="hidden" name="userId" value={u.id} /><input type="hidden" name="active" value="false" />
+    <div className="font-medium text-ink-900">Remove access for {u.name}?</div>
+    {holds ? <p className="text-sm text-ink-700">{u.name} holds {holds}. All of it moves to the person you choose; a cold contact in a pod they are not in waits for that pod&apos;s leaders under &quot;Needs a new owner&quot;.</p> : <p className="text-sm text-ink-600">{u.name} holds no open work.</p>}
+    {holds ? <Field label="Who takes over"><select name="replacementId" required={Boolean(holds && (holds !== `the calling number ${u.callerNumber}`))} defaultValue=""><option value="">Select a sales rep</option>{takers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field> : null}
+    {u.callerNumber ? <fieldset className="space-y-1 text-sm text-ink-700"><legend className="text-xs text-ink-500">Their calling number {u.callerNumber}</legend>
+      <label className="flex items-center gap-2"><input type="radio" name="number" value="release" defaultChecked />Let it go: assign it later in Settings › Calling</label>
+      <label className="flex items-center gap-2"><input type="radio" name="number" value="move" />Move it to whoever takes over</label>
+    </fieldset> : null}
+    <div className="flex gap-2"><button type="submit" className="btn-danger">Remove access</button><button type="button" className="btn-secondary" onClick={onDone}>Cancel</button></div>
+  </ActionForm>;
 }
 
 export function UsersPanel({ users, pods, selfId, passwords = true }: { users: UserRow[]; pods: PodRow[]; selfId?: string; passwords?: boolean }) {
@@ -39,7 +73,7 @@ export function UsersPanel({ users, pods, selfId, passwords = true }: { users: U
       <div className="overflow-x-auto"><table className="table"><thead><tr><th>Team member</th><th>Role</th><th>Pods</th><th>Access</th><th aria-label="Actions" /></tr></thead><tbody>{visibleUsers.map((u) => <Fragment key={u.id}>
         <tr><td><div className="flex items-center gap-3"><Avatar name={u.name} shape="circle" size={32} /><div><div className="font-medium text-ink-900">{u.name}</div><div className="mt-1 text-xs text-ink-500">{u.email}</div></div></div></td><td>{u.roleAssigned ? <Badge tone={ROLE_TONE[u.role]}>{ROLE_LABELS[u.role]}</Badge> : <Badge tone="amber">No title</Badge>}</td><td>{(() => { const mine = u.podIds.map((id) => pods.find((pod) => pod.id === id)).filter((pod): pod is PodRow => Boolean(pod && !pod.archived)); return mine.length ? <div className="flex flex-wrap gap-1">{mine.map((pod) => <Badge key={pod.id} tone="gray">{pod.name}</Badge>)}</div> : <Empty />; })()}</td><td><Badge tone={u.active ? 'green' : 'gray'}>{u.active ? 'Enabled' : 'Removed'}</Badge></td><td><div className="flex justify-end gap-2"><button type="button" className="btn-ghost btn-sm" onClick={() => { setEditing(editing === u.id ? null : u.id); setRemoving(null); }}>{editing === u.id ? 'Close' : 'Edit'}</button>{u.id === selfId ? null : u.active ? <button type="button" className="btn-ghost btn-sm text-red-700" onClick={() => { setRemoving(removing === u.id ? null : u.id); setEditing(null); }}>Remove</button> : <ActionButton action={setUserAccessAction} payload={{ userId: u.id, active: 'true' }} className="btn-secondary btn-sm">Restore</ActionButton>}</div></td></tr>
         {editing === u.id ? <tr><td colSpan={5} className="bg-canvas"><ActionForm action={updateUserAction} onSuccess={() => setEditing(null)} className="space-y-4 p-2"><input type="hidden" name="userId" value={u.id} /><UserFields user={u} pods={pods} passwords={passwords} /><div className="flex gap-2"><button type="submit" className="btn-primary">Save changes</button><button type="button" className="btn-secondary" onClick={() => setEditing(null)}>Cancel</button></div></ActionForm></td></tr> : null}
-        {removing === u.id ? <tr><td colSpan={5} className="bg-canvas"><ActionForm action={setUserAccessAction} onSuccess={() => setRemoving(null)} className="space-y-3 p-2"><input type="hidden" name="userId" value={u.id} /><input type="hidden" name="active" value="false" /><div className="font-medium text-ink-900">Remove access for {u.name}?</div>{u.openWork ? <Field label={`Transfer ${u.openWork} live enrollment${u.openWork === 1 ? '' : 's'} to`}><select name="replacementId" required><option value="">Select team member</option>{users.filter((candidate) => candidate.active && candidate.id !== u.id && u.openPodIds.every((podId) => candidate.podIds.includes(podId))).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></Field> : null}<div className="flex gap-2"><button type="submit" className="btn-danger">Remove access</button><button type="button" className="btn-secondary" onClick={() => setRemoving(null)}>Cancel</button></div></ActionForm></td></tr> : null}
+        {removing === u.id ? <tr><td colSpan={5} className="bg-canvas"><RemoveAccess user={u} users={users} onDone={() => setRemoving(null)} /></td></tr> : null}
       </Fragment>)}</tbody></table></div>
     </Card>
     <Card title="Pods" actions={<button type="button" className="btn-secondary btn-sm" onClick={() => setAddingPod(!addingPod)}>{addingPod ? 'Close' : 'Add pod'}</button>}>

@@ -14,6 +14,7 @@ import { logManualCall, submitCallForm, type CallFormInput } from '../calls/form
 import { importTwilioCalls } from '../calls/import';
 import { getTwilioReader } from '../calls/twilio';
 import { recordCallTouch } from '../calls/call-log';
+import { closeFormWithoutForm, handFormTo } from '../calls/form-tools';
 import type { ActionResult } from './users';
 
 function refresh() {
@@ -165,4 +166,24 @@ export async function setCallerNumberAction(formData: FormData): Promise<ActionR
   await logAudit({ entityType: 'settings', entityId: 'calling', action: 'caller_number_set', actor: userActor(user), details: { number, userId } });
   refresh();
   return { ok: true, message: userId ? 'Number assigned.' : 'Number cleared.' };
+}
+
+/** N010: a leader hands a call's waiting form to another rep (logged); the call keeps its rep. */
+export async function handFormAction(formData: FormData): Promise<ActionResult> {
+  const user = await requireUser();
+  const callId = String(formData.get('callId') ?? '');
+  const r = await handFormTo(callId, String(formData.get('userId') ?? ''), toActor(user), userActor(user));
+  refresh();
+  revalidatePath(`/calls/${callId}`);
+  return r;
+}
+
+/** N010: a leader closes a call's form without one, with a reason (logged). */
+export async function closeFormAction(formData: FormData): Promise<ActionResult> {
+  const user = await requireUser();
+  const callId = String(formData.get('callId') ?? '');
+  const r = await closeFormWithoutForm(callId, String(formData.get('reason') ?? ''), toActor(user), userActor(user));
+  refresh();
+  revalidatePath(`/calls/${callId}`);
+  return r;
 }

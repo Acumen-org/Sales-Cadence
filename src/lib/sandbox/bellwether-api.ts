@@ -9,6 +9,7 @@ import { getTwentyClient, type TwentyClient } from '../twenty';
 import { dedupeContact, possibleCrmMatch, refreshCrmCopyFor, type DedupeInput, type MatchedOn } from './dedupe';
 import { isRoleEmail, normalizeCrd, normalizeDomain, normalizeEmail, normalizeLinkedin, parsePhone, PHONE_TYPES, sandboxSortName, toE164, type ExtraPhone } from './normalize';
 import { recordRefusal, type RefusalMatch } from './status';
+import { podForOwner } from '../outreach/transfer';
 
 /**
  * The Bellwether push API (contract: "Shared contract with Bellwether" in
@@ -228,7 +229,12 @@ export async function resolveOwner(env: Envelope): Promise<{ owner: Owner; podIg
   if (!user || !OWNER_ROLES.includes(user.role)) return { owner: null, podIgnored: Boolean(env.pod) };
   const pods = user.pods.map((p) => p.pod).filter((p) => !p.archived);
   const named = env.pod ? pods.find((p) => p.podOwnerValue === env.pod) : undefined;
-  const podId = named?.id ?? (pods.length === 1 ? pods[0].id : null);
+  // B050: an owner's contact always has a pod: the one Bellwether named, else the owner's only pod,
+  // else (an owner in several pods, the push naming none) the first of theirs by name. An owner in
+  // no pod (an admin) does not own it: the contact arrives unclaimed.
+  const choice = podForOwner({ name: user.name, podIds: pods.map((p) => p.id) }, null, named?.id);
+  const podId = choice.ok ? choice.podId : [...pods].sort((a, b) => a.name.localeCompare(b.name))[0]?.id ?? null;
+  if (!podId) return { owner: null, podIgnored: Boolean(env.pod) };
   return { owner: { id: user.id, email: user.email, name: user.name, podId }, podIgnored: Boolean(env.pod && !named) };
 }
 

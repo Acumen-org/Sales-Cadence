@@ -1,8 +1,9 @@
 import type { Prisma, Role, SandboxStatus } from '@prisma/client';
 import { prisma } from '../db';
 import { isAdmin, isBizOps, isJuniorFo, isPodLeader, isPodManager, needsPod } from '../auth/rbac';
-import { logAudit, type AuditActor } from '../audit';
+import type { AuditActor } from '../audit';
 import { coldRef, type SubjectRef } from '../subject';
+import { applyTransfer, podForOwner } from './transfer';
 
 /**
  * One guard for every write (cold outreach PLAN 8.1). `canAct(actor, subject, act)` says whether this
@@ -226,12 +227,11 @@ export async function withSubjectLock<T>(ref: SubjectRef, actor: GuardActor | nu
       if (!verdict.ok) return verdict;
       let claimed = false;
       if (actor && subject.kind === 'cold' && WORK_ACTS.has(act) && !effectiveOwner(subject) && needsPod(actor.role)) {
-        // The first write claims (8.1). Only one claim can win: the row is locked.
-        const pod = subject.podId && actor.podIds.includes(subject.podId) ? subject.podId : actor.podIds.length === 1 ? actor.podIds[0] : subject.podId;
-        await tx.sandboxContact.update({ where: { id: subject.id }, data: { ownerId: actor.id, podId: pod, claimedAt: now } });
-        await tx.sandboxContact.updateMany({ where: { id: subject.id, firstClaimedAt: null }, data: { firstClaimedAt: now } });
-        await logAudit({ entityType: 'sandbox_contact', entityId: subject.id, action: 'claimed', actor: opts.audit ?? { type: 'USER', id: actor.id }, details: { by: act, from: subject.ownerId } }, tx);
-        Object.assign(subject, { ownerId: actor.id, ownerActive: true, podId: pod });
+        // The first write claims (8.1), with the contact's work (8.8). Only one claim can win: the row is locked.
+        const pod = podForOwner({ name: 'You', podIds: actor.podIds }, subject.podId);
+        if (!pod.ok) return refuse('not_allowed', 'This contact has no pod yet, and you are in more than one. Claim it from the contacts list and choose its pod first.');
+        await applyTransfer(tx, subject, { id: actor.id }, pod.podId, { actor: opts.audit ?? { type: 'USER', id: actor.id }, now, action: 'claimed', reason: act });
+        Object.assign(subject, { ownerId: actor.id, ownerActive: true, podId: pod.podId });
         claimed = true;
       }
       if (actor && subject.kind === 'cold' && ACTIVITY_ACTS.has(act)) await tx.sandboxContact.update({ where: { id: subject.id }, data: { lastActivityAt: now } });

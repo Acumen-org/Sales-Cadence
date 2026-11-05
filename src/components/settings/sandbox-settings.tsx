@@ -15,7 +15,7 @@ export function SandboxSettingsForm({ s }: { s: SandboxSettings }) {
     <div className="flex flex-wrap gap-5">{check('enabled', 'Bellwether may push into the sandbox', s.enabled)}{check('cleanupAutoCreated', 'Remove people Twenty creates from email or calendar for sandbox contacts', s.cleanupAutoCreated)}</div>
     <fieldset><legend className="mb-2 text-xs text-ink-500">Ready for CRM needs</legend><div className="flex flex-wrap gap-5">{check('requireFirm', 'A firm', s.requireFirm)}{check('requireEmailOrPhone', 'An email or a direct or mobile phone', s.requireEmailOrPhone)}{check('requireOwnerLogin', 'An owner with a Twenty login', s.requireOwnerLogin)}{check('requirePod', 'A pod', s.requirePod)}</div></fieldset>
     <fieldset><legend className="mb-2 text-xs text-ink-500">Move to CRM writes</legend><div className="flex flex-wrap gap-4">{text('leadSource', 'Lead source', s.leadSource)}{text('leadSourceFallback', 'Lead source if that option is missing', s.leadSourceFallback)}{text('contactType', 'Contact type', s.contactType.join(', '))}{text('listCategory', 'List category', s.listCategory)}{text('pipelineStage', 'Pipeline stage', s.pipelineStage)}</div></fieldset>
-    <div className="flex flex-wrap gap-4">{num('moveBatchLimit', 'Contacts per move (at most 50)', s.moveBatchLimit, 1, 50)}{num('undoDays', 'Undo window, days', s.undoDays, 1, 366)}{num('retentionInactiveDays', 'Remove after days without activity', s.retentionInactiveDays, 30, 3650)}{num('retentionUnworkedDays', 'Remove never-worked after days', s.retentionUnworkedDays, 30, 3650)}</div>
+    <div className="flex flex-wrap gap-4">{num('moveBatchLimit', 'Contacts per move (at most 50)', s.moveBatchLimit, 1, 50)}{num('undoDays', 'Undo window, days (applies to new moves only; existing moves keep their deadline)', s.undoDays, 1, 366)}{num('retentionInactiveDays', 'Remove after days without activity', s.retentionInactiveDays, 30, 3650)}{num('retentionUnworkedDays', 'Remove never-worked after days', s.retentionUnworkedDays, 30, 3650)}</div>
     <div className="flex justify-end"><button type="submit" className="btn-primary btn-sm">Save</button></div>
   </ActionForm>;
 }
@@ -40,13 +40,15 @@ export function ImportNowButton() {
   return <ActionButton action={async () => importCallsNowAction()} payload={{}} refresh>Import calls now</ActionButton>;
 }
 
-export function CallerNumberRow({ number, friendlyName, userId, suggestion, users }: { number: string; friendlyName: string; userId: string | null; suggestion: string | null; users: { id: string; name: string }[] }) {
+/** One Twilio number and its rep. A number a removed rep held says so: "Was Karson (removed)" (N107). */
+export function CallerNumberRow({ number, friendlyName, userId, suggestion, users, former = null }: { number: string; friendlyName: string; userId: string | null; suggestion: string | null; users: { id: string; name: string }[]; former?: string | null }) {
   return <ActionForm action={setCallerNumberAction} className="flex flex-wrap items-center gap-2">
     <input type="hidden" name="number" value={number} />
     <span className="w-36 tabular-nums text-ink-900">{number}</span>
     <span className="w-56 truncate text-ink-500">{friendlyName}</span>
     <select name="userId" aria-label={`Rep for ${number}`} defaultValue={userId ?? suggestion ?? ''} className="!py-1 text-[13px]"><option value="">Nobody</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
     <button type="submit" className="btn-secondary btn-sm">{userId ? 'Save' : 'Confirm'}</button>
+    {former ? <span className="text-[12px] text-amber-800">Was {former}</span> : null}
   </ActionForm>;
 }
 

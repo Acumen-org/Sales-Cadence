@@ -8,6 +8,8 @@ import { findSuppressed } from './suppression';
 import { coldRef } from '../subject';
 import { refuse, withSubjectLock, RefusedError, type GuardActor } from '../outreach/guard';
 import { eraseContact as eraseTransition, PII_CLEARED, removeContact as removeTransition } from '../outreach/transitions';
+import { transferContact } from '../outreach/ownership';
+import { workWords } from '../outreach/transfer';
 
 export { PII_CLEARED };
 
@@ -88,8 +90,12 @@ const dedupeInputOf = (c: Pick<SandboxContact, 'bellwetherContactId' | 'firstNam
 
 type Tx = Prisma.TransactionClient | typeof prisma;
 
-/** Why this contact cannot be in Cold outreach, or null: suppressed, ours, blocked, Do not contact or already in the CRM, or here already. */
-async function refusalFor(row: Parameters<typeof dedupeInputOf>[0], excludeId?: string, tx: Tx = prisma): Promise<string | null> {
+/**
+ * Why this contact cannot be in Cold outreach, or null: suppressed, ours, blocked, Do not contact or
+ * already in the CRM, or here already. An edit of a contact that is here already skips the plain
+ * "already in the CRM" match (B051): the nightly check flags it "Also in CRM" and Move attaches.
+ */
+async function refusalFor(row: Parameters<typeof dedupeInputOf>[0], excludeId?: string, tx: Tx = prisma, opts: { crmMatch?: boolean } = {}): Promise<string | null> {
   const input = dedupeInputOf(row);
   if (await findSuppressed(suppressionKeysOf(input), tx)) return 'This person is on the suppression list and cannot be contacted.';
   // B002: another record of the same person asked not to be contacted.
@@ -100,7 +106,7 @@ async function refusalFor(row: Parameters<typeof dedupeInputOf>[0], excludeId?: 
   // N003: the same name at the same firm is Do not contact in the CRM.
   const dnc = await crmDoNotContactTwin(input, tx);
   if (dnc) return `${dnc.name} is marked Do not contact in the CRM.`;
-  const crm = await crmMatch(input, tx);
+  const crm = opts.crmMatch === false ? null : await crmMatch(input, tx);
   if (crm) return `${crm.person.firstName} ${crm.person.lastName} is already in the CRM (same ${crm.matchedOn === 'linkedin_url' ? 'LinkedIn' : crm.matchedOn}).`.replace(/\s+/g, ' ');
   const dup = await sandboxMatch(input, tx, excludeId);
   if (dup) {
@@ -137,7 +143,11 @@ export async function createContact(input: ContactInput, by: { id: string; podId
     individualCrd: (d.individualCrd as string) ?? null, companyName: (d.companyName as string) ?? null, companyDomain: (d.companyDomain as string) ?? null,
     companyCrd: (d.companyCrd as string) ?? null, companyPhone: null,
   };
-  const pod = podId && by.podIds.includes(podId) ? podId : by.podIds.length === 1 ? by.podIds[0] : null;
+  // Admins never own a cold contact (8.1): theirs go in the pod they chose, unclaimed. A rep owns
+  // what they add, in their pod; a rep in several pods says which (B050: never an owner without one).
+  const owns = by.ownsContacts && by.podIds.length > 0;
+  const pod = podId && (by.podIds.includes(podId) || !owns) ? podId : by.podIds.length === 1 ? by.podIds[0] : null;
+  if (owns && !pod) return { ok: false, error: 'Choose which of your pods this contact belongs to.' };
   return prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext('bellwether-push'))`;
     const refused = await refusalFor(row, undefined, tx);
@@ -147,7 +157,7 @@ export async function createContact(input: ContactInput, by: { id: string; podId
     const created = await tx.sandboxContact.create({
       data: {
         ...(d as Prisma.SandboxContactUncheckedCreateInput), ...row, source: 'MANUAL', sortName: sandboxSortName(row.firstName, row.lastName), emailIsRole: isRoleEmail(row.email),
-        country: (d.country as string) ?? 'US', ownerId: by.ownsContacts ? by.id : null, podId: by.ownsContacts ? pod : null, claimedAt: by.ownsContacts ? new Date() : null, firstClaimedAt: by.ownsContacts ? new Date() : null, createdById: by.id, lastActivityAt: new Date(),
+        country: (d.country as string) ?? 'US', ownerId: owns ? by.id : null, podId: pod, claimedAt: owns ? new Date() : null, firstClaimedAt: owns ? new Date() : null, createdById: by.id, lastActivityAt: new Date(),
       },
     });
     await logAudit({ entityType: 'sandbox_contact', entityId: created.id, action: 'created', actor, details: { source: 'MANUAL' } }, tx);
@@ -155,15 +165,20 @@ export async function createContact(input: ContactInput, by: { id: string; podId
   }, { timeout: 20_000 });
 }
 
-/** Edit a contact. Duplicate and Do not contact checks run when an identity field changes (N003). */
+/**
+ * Edit a contact. Duplicate and Do not contact checks run only when an identity field's value really
+ * changed (N003, B051): a form that sends every field unchanged is never refused as a duplicate.
+ */
 export async function updateContact(id: string, input: Partial<ContactInput>, actor: AuditActor, guard: GuardActor | null = null): Promise<ContactResult> {
   const parsed = contactData(input);
   if (!parsed.ok) return parsed;
   const r = await withSubjectLock(coldRef(id), guard, 'edit', async (tx) => {
     const contact = (await tx.sandboxContact.findUnique({ where: { id } }))!;
     const next = { ...contact, ...(parsed.data as Partial<SandboxContact>) };
-    if (['email', 'phone', 'linkedinUrl', 'companyWebsite', 'companyName', 'firstName', 'lastName', 'individualCrd'].some((k) => (input as Record<string, unknown>)[k] !== undefined)) {
-      const refused = await refusalFor(next, id, tx);
+    const data0 = parsed.data as Record<string, unknown>;
+    const was = contact as unknown as Record<string, unknown>;
+    if (['email', 'phone', 'linkedinUrl', 'companyDomain', 'companyName', 'firstName', 'lastName', 'individualCrd'].some((k) => data0[k] !== undefined && data0[k] !== was[k])) {
+      const refused = await refusalFor(next, id, tx, { crmMatch: false });
       if (refused) throw new RefusedError(refuse('not_allowed', refused));
     }
     const data = { ...parsed.data, ...(parsed.data.sortName === null ? { sortName: sandboxSortName(next.firstName, next.lastName) } : {}) };
@@ -173,46 +188,42 @@ export async function updateContact(id: string, input: Partial<ContactInput>, ac
   return r.ok ? { ok: true, id } : { ok: false, error: r.reason };
 }
 
-/** The first claim wins: a contact that has an owner by the time this runs is refused (B193 says who). */
-export async function claimContact(id: string, user: { id: string; podIds: string[] } & Partial<Pick<GuardActor, 'role'>>, actor: AuditActor): Promise<ContactResult> {
+/**
+ * The first claim wins: a contact that has an owner by the time this runs is refused (B193 says who).
+ * The claim goes through transferContact, so the contact's open next step and running campaigns
+ * follow the claimer (B147), and the pod is never left empty (B050): a claimer in several pods
+ * whose pod this contact is not in says which with `podId`.
+ */
+export async function claimContact(id: string, user: { id: string; podIds: string[] } & Partial<Pick<GuardActor, 'role'>>, actor: AuditActor, podId?: string | null): Promise<ContactResult> {
   const guard: GuardActor | null = user.role ? { id: user.id, role: user.role, podIds: user.podIds } : null;
-  const r = await withSubjectLock(coldRef(id), guard, 'claim', async (tx, s) => {
-    if (s.kind !== 'cold') return;
-    if (!guard && s.ownerId && s.ownerActive) throw new RefusedError(refuse('claimed', `${s.ownerName ?? 'Someone else'} claimed this contact first.`));
-    const pod = s.podId && user.podIds.includes(s.podId) ? s.podId : user.podIds.length === 1 ? user.podIds[0] : null;
-    await tx.sandboxContact.update({ where: { id }, data: { ownerId: user.id, podId: pod, claimedAt: new Date() } });
-    await tx.sandboxContact.updateMany({ where: { id, firstClaimedAt: null }, data: { firstClaimedAt: new Date() } });
-    await logAudit({ entityType: 'sandbox_contact', entityId: id, action: 'claimed', actor, details: { from: s.ownerId } }, tx);
-  }, { audit: actor });
+  const r = await transferContact(id, user.id, { act: 'claim', actor, guard, podId });
   return r.ok ? { ok: true, id } : { ok: false, error: r.code === 'claimed' ? r.reason.replace('owns this contact.', 'claimed this contact first.') : r.reason };
 }
 
-/** Give a contact to someone (or let go of it). The pod follows the new owner when they have one; open cold work follows too. */
-export async function assignContact(id: string, toUserId: string | null, actor: AuditActor, podId?: string | null, guard: GuardActor | null = null): Promise<ContactResult> {
-  const to = toUserId ? await prisma.user.findUnique({ where: { id: toUserId }, include: { pods: true } }) : null;
-  if (toUserId && (!to || !to.active)) return { ok: false, error: 'That person is not an active Cadence user.' };
-  const r = await withSubjectLock(coldRef(id), guard, toUserId ? 'assign' : 'release', async (tx, s) => {
-    if (s.kind !== 'cold') return;
-    let pod: string | null = null;
-    if (to) {
-      const theirs = to.pods.map((p) => p.podId);
-      pod = podId && theirs.includes(podId) ? podId : s.podId && theirs.includes(s.podId) ? s.podId : theirs.length === 1 ? theirs[0] : null;
-    }
-    await tx.sandboxContact.update({ where: { id }, data: { ownerId: toUserId, podId: pod, claimedAt: toUserId ? new Date() : null } });
-    if (toUserId) {
-      await tx.sandboxContact.updateMany({ where: { id, firstClaimedAt: null }, data: { firstClaimedAt: new Date() } });
-      await tx.nextAction.updateMany({ where: { sandboxContactId: id, personId: null, state: 'OPEN' }, data: { foUserId: toUserId } });
-    }
-    // The audit names the owner read under the lock, never a stale one (N076).
-    await logAudit({ entityType: 'sandbox_contact', entityId: id, action: toUserId ? 'assigned' : 'released', actor, details: { from: s.ownerId, to: toUserId, podId: pod } }, tx);
-  }, { audit: actor, toUserId });
-  return r.ok ? { ok: true, id } : { ok: false, error: r.reason };
+/**
+ * Give a contact to someone (or let it go), with its work (B049): transferContact under the lock.
+ * `expectedOwnerId` is the owner the giver saw; a claim that landed since wins (N076).
+ */
+export async function assignContact(id: string, toUserId: string | null, actor: AuditActor, podId?: string | null, guard: GuardActor | null = null, expectedOwnerId?: string | null): Promise<ContactResult & { moved?: string }> {
+  const r = await transferContact(id, toUserId, { actor, guard, podId, expectedOwnerId });
+  if (!r.ok) return { ok: false, error: r.reason };
+  return { ok: true, id, moved: workWords(r) };
 }
 
+/**
+ * Set a contact's pod (the pod picker, B050). An owned contact keeps a pod its owner is in: to move
+ * it elsewhere, give it to someone there.
+ */
 export async function setContactPod(id: string, podId: string | null, actor: AuditActor, guard: GuardActor | null = null): Promise<ContactResult> {
-  const r = await withSubjectLock(coldRef(id), guard, 'edit', async (tx) => {
-    await tx.sandboxContact.update({ where: { id }, data: { podId } });
-    await logAudit({ entityType: 'sandbox_contact', entityId: id, action: 'pod_set', actor, details: { podId } }, tx);
+  const r = await withSubjectLock(coldRef(id), guard, 'edit', async (tx, s) => {
+    if (s.kind !== 'cold') return;
+    if (s.ownerId && s.ownerActive) {
+      if (!podId) throw new RefusedError(refuse('not_allowed', 'An owned contact always has a pod. Choose one, or let the contact go first.'));
+      const owner = await tx.userPod.count({ where: { userId: s.ownerId, podId } });
+      if (!owner) throw new RefusedError(refuse('not_allowed', `${s.ownerName ?? 'Its owner'} is not in that pod. Give the contact to someone there instead.`));
+    }
+    await tx.sandboxContact.update({ where: { id }, data: { podId, ...(podId ? {} : { ownerId: null, claimedAt: null }) } });
+    await logAudit({ entityType: 'sandbox_contact', entityId: id, action: 'pod_set', actor, details: { podId, from: s.podId } }, tx);
   }, { audit: actor });
   return r.ok ? { ok: true, id } : { ok: false, error: r.reason };
 }

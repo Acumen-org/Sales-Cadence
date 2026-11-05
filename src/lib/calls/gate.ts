@@ -3,6 +3,7 @@ import { formatInstant } from '../dates';
 import { getSettings } from '../settings';
 import { suppressionReason } from '../sandbox/opt-out';
 import { callingHours } from './hours';
+import { formsHeldBy } from './form-holder';
 
 /**
  * Whether Cadence's Call button may open the dialpad for this contact now, as the button is drawn: a
@@ -13,9 +14,9 @@ import { callingHours } from './hours';
 
 export type CallGate = { blocked: string | null; warning: string | null };
 
-/** The rep's oldest call waiting for its form, named the way the pending bar names it. */
+/** The rep's oldest call waiting for its form (their own, or one handed to them: N010), named the way the pending bar names it. */
 export async function pendingFormBlock(userId: string, timezone: string): Promise<string | null> {
-  const pending = await prisma.callLog.findFirst({ where: { userId, formDueAt: { not: null }, formDoneAt: null }, orderBy: { formDueAt: 'asc' }, include: { person: { select: { firstName: true, lastName: true } }, sandboxContact: { select: { firstName: true, lastName: true } } } });
+  const pending = await prisma.callLog.findFirst({ where: formsHeldBy(userId), orderBy: { formDueAt: 'asc' }, include: { person: { select: { firstName: true, lastName: true } }, sandboxContact: { select: { firstName: true, lastName: true } } } });
   if (!pending) return null;
   const who = pending.person ?? pending.sandboxContact;
   // A removed contact's name was cleared: it reads as one (B008).

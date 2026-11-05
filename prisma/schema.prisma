@@ -1132,6 +1132,9 @@ model SandboxContact {
   emails      SandboxEmail[]
   tickets     Ticket[]
 
+  // CHECK SandboxContact_owner_has_pod ("ownerId" IS NULL OR "podId" IS NOT NULL) lives in the
+  // migrations (B050, M2): an owned contact always has a pod. NOT VALID until W14 validates it.
+
   @@index([status, ownerId])
   @@index([status, podId])
   @@index([status, lastActivityAt])
@@ -1270,6 +1273,10 @@ model CallLog {
   /// Set when a matched rep's call has ended: the post-call form is due from then.
   formDueAt        DateTime?
   formDoneAt       DateTime?
+  /// Who fills the form when it is not the rep who made the call (N010): the replacement after the
+  /// rep's access was removed, or a colleague a leader handed it to. Null: the rep who made it. The
+  /// call keeps its rep, so figures by rep never change.
+  formUserId       String?
   /// A call logged by mistake, discarded by the rep soon after: kept for the audit, out of every
   /// count and form queue (B024).
   discardedAt      DateTime?
@@ -1287,6 +1294,7 @@ model CallLog {
   @@index([podId, startedAt])
   @@index([userId, startedAt])
   @@index([userId, formDoneAt])
+  @@index([formUserId, formDoneAt])
   @@index([personId, startedAt])
   @@index([sandboxContactId, startedAt])
   @@index([campaignId, startedAt])
@@ -1448,6 +1456,12 @@ model SandboxMove {
   count       Int
   /// QUEUED | RUNNING | DONE
   state       String
+  /// What the queue left out and why, for the move's own page (B186): [{ contactId, name, reason }].
+  leftOut     Json      @default("[]")
+  /// The step the dialog gave for contacts without one of their own ({ label, action, dueDate }).
+  nextStep    Json?
+  /// When the mover was told the move ended (B036).
+  notifiedAt  DateTime?
   createdAt   DateTime  @default(now())
   finishedAt  DateTime?
 

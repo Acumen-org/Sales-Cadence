@@ -16,6 +16,7 @@ import { coldRef, personRef } from '../subject';
 import { audienceFor, callPodFor } from '../outreach/audience';
 import { channelOfAction, contactability } from '../outreach/contactability';
 import type { GuardActor } from '../outreach/guard';
+import { formHolderOf, formsHeldBy } from './form-holder';
 
 /**
  * The post-call form (plan section 10): after every call, and a call is complete only once it is in.
@@ -75,10 +76,10 @@ export function validateCallForm(input: CallFormInput, ctx: { rules: RulesSettin
   return { ok: true, value: { outcome: outcome.key, rating, notes: notes?.slice(0, 10_000) ?? null, nextStep: step.key, nextStepDate: step.key === 'none' ? null : date, interest: input.interest || null, productsDiscussed: [...new Set(input.productsDiscussed ?? [])].slice(0, 10), decisionMaker: input.decisionMaker || null } };
 }
 
-/** Calls of this rep that ended and are waiting for their form, oldest first. */
+/** Calls whose form this rep must fill (their own, or handed to them: N010), oldest first. */
 export async function pendingForms(userId: string) {
   return prisma.callLog.findMany({
-    where: { userId, formDueAt: { not: null }, formDoneAt: null },
+    where: formsHeldBy(userId),
     orderBy: { formDueAt: 'asc' },
     include: { person: { select: { firstName: true, lastName: true } }, sandboxContact: { select: { firstName: true, lastName: true } } },
     take: 20,
@@ -91,7 +92,7 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
   const settings = await getSettings();
   const call = await prisma.callLog.findUnique({ where: { id: callId }, include: { form: true } });
   if (!call) return { ok: false, error: 'Call not found.' };
-  if (call.userId !== user.id) return { ok: false, error: 'Only the rep who made this call can fill in its form.' };
+  if (formHolderOf(call) !== user.id) return { ok: false, error: call.formUserId ? 'This form was handed to someone else to fill in.' : 'Only the rep who made this call can fill in its form.' };
   if (call.form) return { ok: false, error: 'This call already has its form.' };
   const today = todayIn(user.timezone, now);
   const valid = validateCallForm(input, { rules: settings.rules, today });

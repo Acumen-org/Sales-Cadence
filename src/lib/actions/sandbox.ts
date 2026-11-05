@@ -12,7 +12,9 @@ import { normalizedFor, type SuppressionKind } from '../sandbox/suppression';
 import { setColdNextStep } from '../sandbox/work';
 import { addToSandboxCampaign, createSandboxCampaign } from '../sandbox/campaigns';
 import { optOutContact } from '../outreach/transitions';
-import { NEXT_ACTION_CHANNELS } from '../next-actions';
+import { NEXT_ACTION_CHANNELS, pushNextAction } from '../next-actions';
+import { reassignStrandedNextActions } from '../outreach/ownership';
+import { afterResponse } from '../engine/sync-out';
 import type { ActionType } from '@prisma/client';
 import type { ActionResult } from './users';
 
@@ -68,25 +70,32 @@ export async function claimContactsAction(fd: FormData): Promise<ActionResult> {
   let claimed = 0;
   const refused: string[] = [];
   for (const id of ids) {
-    const r = await claimContact(id, { id: user.id, podIds: user.podIds, role: user.role }, userActor(user));
+    const r = await claimContact(id, { id: user.id, podIds: user.podIds, role: user.role }, userActor(user), field(fd, 'podId') || null);
     if (r.ok) claimed++; else refused.push(r.error);
   }
   refresh(ids.length === 1 ? ids[0] : undefined);
   return summary(claimed, refused, 'Claimed');
 }
 
+/**
+ * Assign (or release). Each contact goes through transferContact with its work (B049); `owner:<id>`
+ * carries the owner the page showed, so a claim that landed since is never taken away (N076).
+ */
 export async function assignContactsAction(fd: FormData): Promise<ActionResult> {
   const user = await requireUser();
   const ids = fd.getAll('ids').map(String).filter(Boolean);
   const to = String(fd.get('userId') ?? '') || null;
   let done = 0;
   const refused: string[] = [];
+  const moved: string[] = [];
   for (const id of ids) {
-    const r = await assignContact(id, to, userActor(user), field(fd, 'podId') || null, toActor(user));
-    if (r.ok) done++; else refused.push(r.error);
+    const seen = fd.has(`owner:${id}`) ? String(fd.get(`owner:${id}`) ?? '') || null : undefined;
+    const r = await assignContact(id, to, userActor(user), field(fd, 'podId') || null, toActor(user), seen);
+    if (r.ok) { done++; if (r.moved) moved.push(r.moved); } else refused.push(r.error);
   }
   refresh(ids.length === 1 ? ids[0] : undefined);
-  return summary(done, refused, to ? 'Assigned' : 'Released');
+  const r = summary(done, refused, to ? 'Assigned' : 'Released');
+  return r.ok && moved.length && ids.length === 1 ? { ...r, message: `${r.message} Their ${moved[0]} moved too.` } : r;
 }
 
 export async function setPodAction(fd: FormData): Promise<ActionResult> {
@@ -192,4 +201,16 @@ export async function addToSandboxCampaignAction(fd: FormData): Promise<ActionRe
   refresh();
   if (!r.ok) return r;
   return { ok: true, message: `Added ${r.added}.${r.left ? ` Left out: ${r.left}.` : ''}` };
+}
+
+/** N034: a leader gives a removed rep's open next steps to a rep; the CRM ones are written to the CRM again. */
+export async function reassignStrandedNextActionsAction(fd: FormData): Promise<ActionResult> {
+  const user = await requireUser();
+  const r = await reassignStrandedNextActions(String(fd.get('fromUserId') ?? ''), String(fd.get('toUserId') ?? ''), toActor(user), userActor(user));
+  if (!r.ok) return r;
+  const crm = r.crmIds;
+  if (crm.length) await afterResponse(async () => { for (const id of crm) await pushNextAction(id); });
+  refresh();
+  revalidatePath('/tasks');
+  return { ok: true, message: `${r.moved} next step${r.moved === 1 ? '' : 's'} handed on.` };
 }
