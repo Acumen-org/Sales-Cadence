@@ -21,7 +21,7 @@ import { actionTypesFor, classifyMessage, classifyNoteTitle, isInternalAddress, 
 import { completeTask, type EngineContext } from './tasks';
 import { closeFromTouch } from './observed-evidence';
 import { closeEmailNextAction } from '../next-actions';
-import { coldOnlyAddresses, recordColdReply, recordColdSent } from '../mail/cold-email';
+import { coldOnlyAddresses, coldTouchOf, recordColdReply, recordColdSent } from '../mail/cold-email';
 
 export type IngestInput = {
   source: EventSource;
@@ -248,9 +248,12 @@ export const isAutomaticReply = (subject: string | null | undefined) => AUTO_REP
 async function recordTouch(data: { personId: string; channel: 'EMAIL' | 'CALL' | 'LINKEDIN' | 'MEETING'; direction: 'OUTBOUND' | 'INBOUND'; occurredAt: Date; summary: string; externalId: string; actorUserId?: string | null; actorLabel?: string | null }) {
   const person = await prisma.personCache.findUnique({ where: { id: data.personId }, select: { id: true } });
   if (!person) return false;
+  // One email counts once (PLAN 6, 8.14): Outlook tracking may hold this email already as a cold
+  // contact's touch, the contact being "Also in CRM" as this person; then this record is its copy.
+  const copyOf = data.channel === 'EMAIL' ? await coldTouchOf({ personId: data.personId, direction: data.direction, occurredAt: data.occurredAt, summary: data.summary }) : null;
   await prisma.touch.upsert({
     where: { externalId: data.externalId },
-    create: { ...data, actorUserId: data.actorUserId ?? null, actorLabel: data.actorLabel ?? null, audience: 'CRM' },
+    create: { ...data, actorUserId: data.actorUserId ?? null, actorLabel: data.actorLabel ?? null, audience: 'CRM', copyOfTouchId: copyOf },
     update: { summary: data.summary, occurredAt: data.occurredAt },
   });
   return true;

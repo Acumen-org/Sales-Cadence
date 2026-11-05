@@ -754,9 +754,14 @@ model Touch {
   /// CRM or cold outreach (SANDBOX), set once when the touch is recorded and never changed (PLAN 8.4,
   /// B037). Null only on rows written before the stamping code; NOT NULL in W14.
   audience         CampaignAudience?
+  /// Another record of an email already counted: the CRM's copy of an email to an "Also in CRM" cold
+  /// contact, whose cold touch is the one that counts (PLAN 6 rule 2, 8.14). Shown on the person's
+  /// timeline, left out of every figure, so All outreach counts the email once.
+  copyOfTouchId    String?
   createdAt   DateTime       @default(now())
 
   @@index([audience, occurredAt])
+  @@index([copyOfTouchId])
   @@index([personId, occurredAt])
   @@index([sandboxContactId, occurredAt])
   @@index([countedForTaskId])

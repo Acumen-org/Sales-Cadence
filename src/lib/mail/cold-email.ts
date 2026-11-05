@@ -90,6 +90,39 @@ async function activeOwner(ownerId: string | null): Promise<string | null> {
 }
 
 // ---------------------------------------------------------------------------
+// One email, counted once (cold outreach PLAN 6 rule 2, 8.14)
+// ---------------------------------------------------------------------------
+
+type EmailTouch = { id: string; direction: 'INBOUND' | 'OUTBOUND'; occurredAt: Date; summary: string };
+const sameEmail = (a: Pick<EmailTouch, 'direction' | 'occurredAt' | 'summary'>, b: Pick<EmailTouch, 'direction' | 'occurredAt' | 'summary'>) =>
+  a.direction === b.direction && Math.abs(a.occurredAt.getTime() - b.occurredAt.getTime()) <= SAME_EMAIL_MS && subjectKey(a.summary) === subjectKey(b.summary);
+
+/**
+ * An "Also in CRM" cold contact emailed from Outlook is recorded twice: as its own cold touch, and by
+ * the CRM's mail sync as a touch on the real person. Before a move the work is cold (rule 2), so the
+ * cold touch is the one that counts; the CRM's record stays on the person's timeline, marked as its
+ * copy (Touch.copyOfTouchId), which every figure leaves out. Same direction, same subject, within ten
+ * minutes. Called by whichever source records second.
+ */
+export async function markCrmCopiesOf(cold: EmailTouch & { sandboxContactId: string }): Promise<number> {
+  const c = await prisma.sandboxContact.findUnique({ where: { id: cold.sandboxContactId }, select: { crmMatchPersonId: true, crmAutoPersonId: true, twentyPersonId: true } });
+  const twins = [c?.crmMatchPersonId, c?.crmAutoPersonId, c?.twentyPersonId].filter((id): id is string => Boolean(id));
+  if (!twins.length) return 0;
+  const near = await prisma.touch.findMany({ where: { personId: { in: twins }, sandboxContactId: null, channel: 'EMAIL', direction: cold.direction, copyOfTouchId: null, occurredAt: { gte: new Date(cold.occurredAt.getTime() - SAME_EMAIL_MS), lte: new Date(cold.occurredAt.getTime() + SAME_EMAIL_MS) } }, select: { id: true, direction: true, occurredAt: true, summary: true } });
+  const copies = near.filter((t) => sameEmail(t, cold)).map((t) => t.id);
+  if (copies.length) await prisma.touch.updateMany({ where: { id: { in: copies }, copyOfTouchId: null }, data: { copyOfTouchId: cold.id } });
+  return copies.length;
+}
+
+/** The CRM's record of an email to this person, when a cold contact pointing to them already has it: the cold touch it copies. */
+export async function coldTouchOf(crm: { personId: string; direction: 'INBOUND' | 'OUTBOUND'; occurredAt: Date; summary: string }): Promise<string | null> {
+  const contacts = await prisma.sandboxContact.findMany({ where: { OR: [{ crmMatchPersonId: crm.personId }, { crmAutoPersonId: crm.personId }, { twentyPersonId: crm.personId }] }, select: { id: true } });
+  if (!contacts.length) return null;
+  const near = await prisma.touch.findMany({ where: { sandboxContactId: { in: contacts.map((x) => x.id) }, audience: 'SANDBOX', channel: 'EMAIL', direction: crm.direction, copyOfTouchId: null, occurredAt: { gte: new Date(crm.occurredAt.getTime() - SAME_EMAIL_MS), lte: new Date(crm.occurredAt.getTime() + SAME_EMAIL_MS) } }, select: { id: true, direction: true, occurredAt: true, summary: true }, orderBy: { occurredAt: 'asc' } });
+  return near.find((t) => sameEmail(t, crm))?.id ?? null;
+}
+
+// ---------------------------------------------------------------------------
 // Sent
 // ---------------------------------------------------------------------------
 
@@ -131,6 +164,8 @@ async function recordSent(c: SandboxContact, mail: SeenMail): Promise<{ closed: 
   const externalId = touchKey(mail, c.id);
   const summary = `Email sent: ${mail.subject || '(no subject)'}`;
   const touch = await prisma.touch.upsert({ where: { externalId }, create: { sandboxContactId: c.id, channel: 'EMAIL', direction: 'OUTBOUND', occurredAt: mail.at, summary, externalId, actorUserId: mail.mailboxUserId, audience: audienceOf({ sandboxContactId: c.id }, c.status) }, update: {} });
+  // "Also in CRM": the CRM's mail sync may have this email on the real person already; it counts once.
+  if (c.crmMatchPersonId || c.crmAutoPersonId) await markCrmCopiesOf({ id: touch.id, sandboxContactId: c.id, direction: 'OUTBOUND', occurredAt: mail.at, summary: touch.summary });
   const closed = await closeFromTouch({ sandboxContactId: c.id, types: ['EMAIL'], touch: { externalId, channel: 'EMAIL', occurredAt: mail.at, summary: touch.summary }, source: 'OBSERVED_MESSAGE', matching, ctx: { actor: SYSTEM_ACTOR } });
   await prisma.sandboxEmail.createMany({ data: [{ sandboxContactId: c.id, userId: mail.mailboxUserId, kind: 'SENT', internetMessageId: mail.key, conversationId: mail.conversationId, subject: mail.subject, at: mail.at, touchId: touch.id, taskId: closed.code === 'completed' ? closed.taskId ?? null : null }], skipDuplicates: true });
   await closeEmailNextAction({ sandboxContactId: c.id }, mail.at, externalId);
@@ -211,6 +246,7 @@ export async function recordColdReply(from: string, mail: SeenMail, automatic: b
     if (await seenAlready(c.id, ['REPLY', 'AUTO_REPLY'], mail)) continue;
     const externalId = touchKey(mail, c.id);
     const touch = await prisma.touch.upsert({ where: { externalId }, create: { sandboxContactId: c.id, channel: 'EMAIL', direction: 'INBOUND', occurredAt: mail.at, summary: `${automatic ? 'Auto-reply' : 'Reply'}: ${mail.subject || '(no subject)'}`, externalId, audience: audienceOf({ sandboxContactId: c.id }, c.status) }, update: {} });
+    if (c.crmMatchPersonId || c.crmAutoPersonId) await markCrmCopiesOf({ id: touch.id, sandboxContactId: c.id, direction: 'INBOUND', occurredAt: mail.at, summary: touch.summary });
     await prisma.sandboxEmail.createMany({ data: [{ sandboxContactId: c.id, userId: mail.mailboxUserId, kind: automatic ? 'AUTO_REPLY' : 'REPLY', internetMessageId: mail.key, conversationId: mail.conversationId, subject: mail.subject, at: mail.at, touchId: touch.id }], skipDuplicates: true });
     await touchedAt(c.id, mail.at);
     out.contacts.push(c.id);
