@@ -1117,6 +1117,10 @@ model SandboxContact {
   crmMatchedOn        String?
   crmMatchedAt        DateTime?
   piiClearedAt        DateTime?
+  /// The contact's keys as the suppression list keeps them ([{ kind, valueHash, label, subjectId }]),
+  /// saved when Remove or retention clears its details, so the tombstone can still be opted out or
+  /// erased (N027). Hashes only, never the values.
+  keptKeys            Json          @default("[]")
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
 

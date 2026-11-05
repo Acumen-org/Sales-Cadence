@@ -81,6 +81,65 @@ export function widenedKeys(c: Parameters<typeof contactKeys>[0] & { individualC
   return keys;
 }
 
+/**
+ * Every key to check a contact against (B001, B002): its own keys (widenedKeys), and every phone of
+ * every type against the global list too, so a number someone asked us never to call stays blocked
+ * however it is typed now. A shared line still blocks only its own subject (phone_subject).
+ */
+export function checkKeysOf(c: Parameters<typeof widenedKeys>[0], subjectId: string, dialled?: string | null): SuppressionKey[] {
+  const keys = widenedKeys(c, subjectId);
+  const phones = [c.phone, ...readExtraPhones(c.additionalPhones).map((p) => p.number), dialled].map((n) => toE164(n)).filter((n): n is string => Boolean(n));
+  for (const v of phones) {
+    if (!keys.some((k) => k.kind === 'phone' && k.value === v)) keys.push({ kind: 'phone', value: v });
+    if (!keys.some((k) => k.kind === 'phone_subject' && k.value === v)) keys.push({ kind: 'phone_subject', value: v, subjectId });
+  }
+  return keys;
+}
+
+/**
+ * A CRM person's own keys (N011). Twenty does not say whether a number is a direct line, so a CRM
+ * phone is kept for this one person (phone_subject): an office line shared with colleagues never
+ * blocks or opts them out. Emails and LinkedIn are the person's own and protect them anywhere.
+ */
+export function personKeys(p: { id: string; emailNorm?: string | null; email?: string | null; additionalEmailsNorm?: string[]; additionalEmails?: string[]; phoneE164?: string | null; additionalPhoneE164?: string | null; linkedinUrl?: string | null }): SuppressionKey[] {
+  const keys: SuppressionKey[] = [];
+  const emails = [p.emailNorm ?? normalizeEmail(p.email), ...(p.additionalEmailsNorm?.length ? p.additionalEmailsNorm : (p.additionalEmails ?? []).map((e) => normalizeEmail(e)))];
+  for (const e of new Set(emails)) if (e) keys.push({ kind: 'email', value: e });
+  for (const n of new Set([toE164(p.phoneE164), toE164(p.additionalPhoneE164)])) if (n) keys.push({ kind: 'phone_subject', value: n, subjectId: p.id });
+  const li = normalizeLinkedin(p.linkedinUrl);
+  if (li) keys.push({ kind: 'linkedin', value: li });
+  return keys;
+}
+
+/** A CRM person's keys to check: their own, and each of their numbers against the global list too. */
+export function personCheckKeys(p: Parameters<typeof personKeys>[0], dialled?: string | null): SuppressionKey[] {
+  const keys = personKeys(p);
+  for (const v of [p.phoneE164, p.additionalPhoneE164, dialled].map((n) => toE164(n)).filter((n): n is string => Boolean(n))) {
+    if (!keys.some((k) => k.kind === 'phone' && k.value === v)) keys.push({ kind: 'phone', value: v });
+    if (!keys.some((k) => k.kind === 'phone_subject' && k.value === v)) keys.push({ kind: 'phone_subject', value: v, subjectId: p.id });
+  }
+  return keys;
+}
+
+/** A key as kept on a tombstone: the hash only, never the value (N027). */
+export type KeptKey = { kind: SuppressionKind; valueHash: string; label: string | null; subjectId: string | null };
+export const keepKeys = (keys: SuppressionKey[]): KeptKey[] => keys.map((k) => ({ kind: k.kind, valueHash: suppressionHash(k.kind, k.value), label: maskValue(k.kind, k.value), subjectId: k.kind === 'phone_subject' ? k.subjectId ?? null : null }));
+
+/** Suppress keys kept as hashes on a tombstone whose details were cleared (N027). */
+export async function addKeptSuppressions(kept: KeptKey[], meta: { reason: SuppressionReason; source?: string | null; sandboxContactId?: string | null; personId?: string | null; createdById?: string | null }, tx: Tx = prisma): Promise<number> {
+  const rows = kept.filter((k) => k.valueHash && (k.kind !== 'phone_subject' || k.subjectId));
+  if (!rows.length) return 0;
+  const { count } = await tx.suppression.createMany({
+    data: rows.map((k) => ({ kind: k.kind, valueHash: k.valueHash, label: k.label, reason: meta.reason, source: meta.source ?? null, subjectId: k.kind === 'phone_subject' ? k.subjectId : null, sandboxContactId: meta.sandboxContactId ?? null, personId: meta.personId ?? null, createdById: meta.createdById ?? null })),
+    skipDuplicates: true,
+  });
+  return count;
+}
+
+export function readKeptKeys(value: unknown): KeptKey[] {
+  return Array.isArray(value) ? value.filter((k): k is KeptKey => Boolean(k && typeof k === 'object' && typeof (k as KeptKey).valueHash === 'string' && typeof (k as KeptKey).kind === 'string')) : [];
+}
+
 /** The first key that is suppressed, or null. A phone_subject row counts only for its own subject. */
 export async function findSuppressed(keys: SuppressionKey[], tx: Tx = prisma): Promise<SuppressionKey | null> {
   if (!keys.length) return null;

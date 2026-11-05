@@ -4,7 +4,7 @@ import { logAudit, SYSTEM_ACTOR, type AuditActor } from '../audit';
 import { getTwentyClient, type TwentyClient } from '../twenty';
 import { exitEnrollment, OCCUPYING_STATUSES } from '../engine/enrollment';
 import { AUTO_SOURCES } from './crm-cleanup';
-import { crmMatch, refreshCrmCopyFor, type DedupeInput } from './dedupe';
+import { crmMatches, refreshCrmCopyFor, type DedupeInput } from './dedupe';
 import { readExtraPhones } from './normalize';
 
 /**
@@ -54,12 +54,11 @@ export async function checkSandboxAgainstCrm(opts: { now?: Date; client?: Twenty
   const asked = Boolean(client && contacts.length && await refreshCrmCopyFor(contacts.map(dedupeInputOf), client, opts.budgetMs ?? LIVE_BUDGET_MS));
   const stats: CrmCheckStats = { checked: contacts.length, flagged: 0, cleared: 0, asked };
   for (const c of contacts) {
-    let match = await crmMatch(dedupeInputOf(c));
-    if (match) {
-      const person = await prisma.personCache.findUnique({ where: { id: match.person.id }, select: { createdBySource: true } });
-      // The cleanup's to remove; it flags the ones it keeps on crmAutoPersonId.
-      if (isAutoSource(person?.createdBySource) && c.crmAutoPersonId !== match.person.id) match = null;
-    }
+    // B156: a person Twenty's mail or calendar sync created is the cleanup's to remove (it flags the
+    // ones it keeps on crmAutoPersonId), so the check reads past it to a real CRM person behind it.
+    const matches = await crmMatches(dedupeInputOf(c));
+    const sources = new Map((await prisma.personCache.findMany({ where: { id: { in: matches.map((m) => m.person.id) } }, select: { id: true, createdBySource: true } })).map((p) => [p.id, p.createdBySource]));
+    const match = matches.find((m) => !isAutoSource(sources.get(m.person.id)) || c.crmAutoPersonId === m.person.id) ?? null;
     if (match && c.crmMatchPersonId !== match.person.id) {
       await prisma.sandboxContact.update({ where: { id: c.id }, data: { crmMatchPersonId: match.person.id, crmMatchedOn: match.matchedOn, crmMatchedAt: now, statusChangedAt: now } });
       const stopped = await stopOutreach(c.id, actor, now);

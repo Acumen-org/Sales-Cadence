@@ -8,7 +8,7 @@ import { twentyPersonUrl } from '../twenty/urls';
 import { getTwentyClient, type TwentyClient } from '../twenty';
 import { dedupeContact, possibleCrmMatch, refreshCrmCopyFor, type DedupeInput, type MatchedOn } from './dedupe';
 import { isRoleEmail, normalizeCrd, normalizeDomain, normalizeEmail, normalizeLinkedin, parsePhone, PHONE_TYPES, sandboxSortName, toE164, type ExtraPhone } from './normalize';
-import { recordRefusal } from './status';
+import { recordRefusal, type RefusalMatch } from './status';
 
 /**
  * The Bellwether push API (contract: "Shared contract with Bellwether" in
@@ -364,8 +364,8 @@ export async function runContacts(envelope: Envelope, opts: { write: boolean; pu
     results.push(result);
     if (opts.write && opts.pushId) {
       await prisma.bellwetherPushItem.create({ data: { pushId: opts.pushId, bellwetherContactId: result.bellwetherContactId, result: result.result, reason: result.reason, sandboxContactId: result.cadenceContactId, crmPersonId: result.crmPersonId } });
-      if (result.result === 'already_in_crm') await recordRefusal(result.bellwetherContactId, 'already_in_crm', result.crmPersonId, now);
-      if (result.result === 'rejected' && result.reason === 'suppressed') await recordRefusal(result.bellwetherContactId, 'opted_out', null, now);
+      if (result.result === 'already_in_crm') await recordRefusal(result.bellwetherContactId, 'already_in_crm', result.crmPersonId, now, refusalMatches.get(result)?.on ?? null);
+      if (result.result === 'rejected' && result.reason === 'suppressed') await recordRefusal(result.bellwetherContactId, 'opted_out', refusalMatches.get(result)?.personId ?? null, now, refusalMatches.get(result)?.on ?? null);
     }
   }
   return { results, owner };
@@ -373,17 +373,26 @@ export async function runContacts(envelope: Envelope, opts: { write: boolean; pu
 
 type JudgeCtx = { owner: Owner; envelope: Envelope; conn: { baseUrl: string | null }; now: Date; write: boolean; tx: Prisma.TransactionClient | typeof prisma };
 
+/** What each refused result matched on, for the refusal Bellwether keeps reading (N011); never in the response. */
+const refusalMatches = new WeakMap<ContactResult, { on: RefusalMatch; personId: string | null }>();
+const KEY_MATCH: Record<string, RefusalMatch> = { email: 'email', phone: 'phone_personal', phone_subject: 'phone_shared', linkedin: 'linkedin', bellwether_id: 'bellwether_id', individual_crd: 'individual_crd' };
+const SUPPRESSED_WORDS: Record<string, string> = { bellwether_id: 'Bellwether record', individual_crd: 'individual CRD', phone_subject: 'phone' };
+
 async function judgeOne(c: PushContact, warnings: Warning[], ctx: JudgeCtx): Promise<ContactResult> {
   const { owner, tx } = ctx;
   const verdict = await dedupeContact(c, tx);
   const base = { ...blank(c.bellwetherContactId), warnings };
-  if (verdict.kind === 'suppressed') return { ...base, reason: 'suppressed', detail: `This contact's ${verdict.key.kind === 'bellwether_id' ? 'Bellwether record' : verdict.key.kind} is on Cadence's suppression list.` };
+  const matched = (r: ContactResult, on: RefusalMatch | null, personId: string | null = r.crmPersonId) => { if (on) refusalMatches.set(r, { on, personId }); return r; };
+  if (verdict.kind === 'suppressed') return matched({ ...base, reason: 'suppressed', detail: `This contact's ${SUPPRESSED_WORDS[verdict.key.kind] ?? verdict.key.kind} is on Cadence's suppression list.` }, KEY_MATCH[verdict.key.kind] ?? null);
   if (verdict.kind === 'internal_contact') return { ...base, reason: 'internal_contact', detail: REASON_DETAIL.internal_contact };
   if (verdict.kind === 'blocked_account') return { ...base, reason: 'blocked_account', detail: verdict.detail };
+  // N003: the same person by name and firm is Do not contact in the CRM. Bellwether reads opted_out.
+  if (verdict.kind === 'crm_do_not_contact') return matched({ ...base, reason: 'suppressed', detail: `${verdict.person.name} is marked Do not contact in the CRM.` }, 'name_firm', verdict.person.id);
   if (verdict.kind === 'already_in_crm' || verdict.kind === 'moved_tombstone') {
     const personId = verdict.kind === 'already_in_crm' ? verdict.person.id : verdict.contact.twentyPersonId;
     const ownerOf = verdict.kind === 'already_in_crm' ? await ownerOfPerson(verdict.person.ownerMemberId) : null;
-    return { ...base, result: 'already_in_crm', matchedOn: verdict.kind === 'already_in_crm' ? verdict.matchedOn : 'bellwether_contact_id', crmPersonId: personId, crmUrl: personId ? twentyPersonUrl(ctx.conn.baseUrl, personId) : null, ownerEmail: ownerOf?.email ?? null, ownerName: ownerOf?.name ?? null };
+    const on: RefusalMatch = verdict.kind === 'moved_tombstone' ? 'bellwether_id' : verdict.matchedOn === 'linkedin_url' ? 'linkedin' : verdict.matchedOn === 'phone' ? (verdict.sharedLine ? 'phone_shared' : 'phone_personal') : verdict.matchedOn === 'bellwether_contact_id' ? 'bellwether_id' : verdict.matchedOn;
+    return matched({ ...base, result: 'already_in_crm', matchedOn: verdict.kind === 'already_in_crm' ? verdict.matchedOn : 'bellwether_contact_id', crmPersonId: personId, crmUrl: personId ? twentyPersonUrl(ctx.conn.baseUrl, personId) : null, ownerEmail: ownerOf?.email ?? null, ownerName: ownerOf?.name ?? null }, on);
   }
   if (verdict.kind === 'duplicate_in_sandbox') {
     const existing = verdict.contact;

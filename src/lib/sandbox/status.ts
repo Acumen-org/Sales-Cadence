@@ -28,21 +28,30 @@ export type StatusRow = {
 
 export const iso = (d: Date | null | undefined): string | null => (d ? d.toISOString().replace(/\.\d{3}Z$/, 'Z') : null);
 
+/**
+ * What a refusal matched on (BellwetherRefusal.matchedOn): a person's own details (email, linkedin,
+ * phone_personal, bellwether_id, individual_crd, name_firm) or a line that may be shared
+ * (phone_shared). Opting the CRM person out later flips only the first kind (N011).
+ */
+export type RefusalMatch = 'email' | 'linkedin' | 'phone_personal' | 'phone_shared' | 'bellwether_id' | 'individual_crd' | 'name_firm';
+export const OWN_DETAIL_MATCHES: RefusalMatch[] = ['email', 'linkedin', 'phone_personal', 'bellwether_id', 'individual_crd', 'name_firm'];
+
 /** A push refused for a reason Bellwether must keep seeing: the time only moves when the status changes. */
-export async function recordRefusal(bellwetherContactId: string, status: 'already_in_crm' | 'opted_out', crmPersonId: string | null, now = new Date()): Promise<void> {
+export async function recordRefusal(bellwetherContactId: string, status: 'already_in_crm' | 'opted_out', crmPersonId: string | null, now = new Date(), matchedOn: RefusalMatch | null = null): Promise<void> {
   const existing = await prisma.bellwetherRefusal.findUnique({ where: { bellwetherContactId } });
   if (!existing) {
-    await prisma.bellwetherRefusal.create({ data: { bellwetherContactId, status, crmPersonId, statusChangedAt: now } });
+    await prisma.bellwetherRefusal.create({ data: { bellwetherContactId, status, crmPersonId, matchedOn, statusChangedAt: now } });
     return;
   }
-  await prisma.bellwetherRefusal.update({ where: { bellwetherContactId }, data: existing.status === status ? { crmPersonId: crmPersonId ?? existing.crmPersonId } : { status, crmPersonId, statusChangedAt: now } });
+  await prisma.bellwetherRefusal.update({ where: { bellwetherContactId }, data: existing.status === status ? { crmPersonId: crmPersonId ?? existing.crmPersonId, matchedOn: matchedOn ?? existing.matchedOn } : { status, crmPersonId, matchedOn, statusChangedAt: now } });
 }
 
+/** Opted out wins: a contact with an opt-out on it reads opted_out whatever else happened to it (N026). */
 export function statusOfContact(c: Pick<SandboxContact, 'status' | 'optedOutAt' | 'crmMatchPersonId'>): BellwetherStatus {
+  if (c.optedOutAt || c.status === 'OPTED_OUT') return 'opted_out';
   // Twenty gained the person after the push (the daily check, crm-check.ts).
   if (c.status === 'ACTIVE') return c.crmMatchPersonId ? 'already_in_crm' : 'in_sandbox';
-  if (c.status === 'MOVED') return c.optedOutAt ? 'opted_out' : 'moved_to_crm';
-  if (c.status === 'OPTED_OUT') return 'opted_out';
+  if (c.status === 'MOVED') return 'moved_to_crm';
   return 'removed';
 }
 
