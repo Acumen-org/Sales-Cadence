@@ -97,8 +97,8 @@ test("a person's page creates, shows and stops their task", async ({ page }) => 
   await page.getByRole('dialog').getByRole('button', { name: /Create task|Save task/ }).click();
   // On the Task card, and in what Twenty will hold for the person.
   await expect(page.getByText('E2E call about the pilot').first()).toBeVisible();
-  page.once('dialog', (d) => d.accept());
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await page.getByRole('dialog').last().getByRole('button', { name: 'Stop', exact: true }).click();
   await expect(page.getByText('E2E call about the pilot')).toHaveCount(0);
 });
 

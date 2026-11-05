@@ -30,7 +30,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const mine = { AND: [taskScopeWhere(user), WORKABLE, { foUserId: user.id }] };
   // One read for the badge counts: every open touchpoint of mine up to today, bucketed here. The
   // layout runs on every navigation, so each query it saves is felt on every click.
-  const [unread, openGroups, needsReview, myNext, checksCount, pending, pendingTotal, sandboxDue, calling] = await Promise.all([
+  const [unread, openGroups, needsReview, myNext, ticketsCount, pending, pendingTotal, sandboxDue, calling] = await Promise.all([
     unreadNotifications(user),
     prisma.task.findMany({ where: { AND: [mine, { state: 'PENDING' }, { OR: [{ snoozedTo: null, dueDate: { lte: today } }, { snoozedTo: { not: null, lte: today } }] }] }, select: { enrollmentId: true, stepId: true, dueDate: true, snoozedTo: true } }),
     isAdmin(user) ? prisma.activityEvent.count({ where: { needsReview: true } }) : Promise.resolve(0),
@@ -59,7 +59,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <FilterNavigationProvider><div className="flex min-h-screen bg-canvas">
       <a href="#main-content" className="skip-link">Skip to content</a>
-      <Sidebar user={user} mode={e.TWENTY_MODE} dryRun={e.CADENCE_DRY_RUN} todayCount={todayCount} overdueCount={overdueCount} ticketsCount={checksCount} sandboxCount={sandboxDue} />
+      <Sidebar user={user} mode={e.TWENTY_MODE} dryRun={e.CADENCE_DRY_RUN} todayCount={todayCount} overdueCount={overdueCount} ticketsCount={ticketsCount} sandboxCount={sandboxDue} />
       <main id="main-content" tabIndex={-1} className="flex min-w-0 flex-1 flex-col outline-none">
         <LiveRefresh />
         <TopBar role={user.role} unread={unread} needsReview={needsReview} timezone={workspaceTimezone()} />
