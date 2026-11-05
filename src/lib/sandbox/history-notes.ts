@@ -8,6 +8,7 @@ import { callOutcomes } from '../engine/outcomes';
 import type { TwentyClient } from '../twenty';
 import type { CreateNoteInput } from '../twenty/types';
 import { enrollmentStatusLabel } from '../enrollment-labels';
+import { optionLabels } from '../twenty/labels';
 
 /**
  * The Twenty notes a sandbox contact's history becomes when it moves (plan 8.3), and the one note
@@ -22,7 +23,7 @@ export type NoteDraft = { title: string; bodyMarkdown: string; at: Date; key?: s
 const day = (at: Date) => formatLocalDate(toLocalDate(at, workspaceTimezone()), 'year');
 const minutes = (sec: number | null) => (sec == null ? null : sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}m ${sec % 60}s`);
 
-export const NEXT_STEP_LABELS: Record<string, string> = { call_again: 'Call again', email: 'Email', linkedin: 'LinkedIn', meeting: 'Meeting', none: 'No further action' };
+export const NEXT_STEP_LABELS: Record<string, string> = { call_again: 'Call again', email: 'Email', linkedin: 'LinkedIn', meeting: 'Meeting', keep: 'Kept the current next step', campaign: 'The campaign continues', none: 'No further action' };
 
 /** One call with its form, as a note: `[Cadence] Call 14 Oct 2026 by Alyssa - Connected (4/5)`. */
 export async function callNoteDraft(callId: string, prefix?: string): Promise<NoteDraft | null> {
@@ -37,10 +38,10 @@ export async function callNoteDraft(callId: string, prefix?: string): Promise<No
   const f = call.form;
   const lines = [
     `Outcome: ${outcome}${f.rating ? ` (${f.rating}/5)` : ''}`,
-    `Next step: ${NEXT_STEP_LABELS[f.nextStep] ?? f.nextStep}${f.nextStepDate ? `, ${formatLocalDate(f.nextStepDate, 'long')}` : ''}`,
+    `Next step: ${f.nextStepLabel ?? NEXT_STEP_LABELS[f.nextStep] ?? f.nextStep}${f.nextStepDate ? `, ${formatLocalDate(f.nextStepDate, 'long')}` : ''}`,
     ...(f.interest ? [`Interest: ${f.interest}`] : []),
     ...(f.decisionMaker ? [`Decision maker: ${f.decisionMaker}`] : []),
-    ...(f.productsDiscussed.length ? [`Products discussed: ${f.productsDiscussed.join(', ')}`] : []),
+    ...(f.productsDiscussed.length ? [`Products discussed: ${optionLabels(f.productsDiscussed)}`] : []),
     `Duration: ${minutes(call.talkSec) ?? 'not connected'}`,
     `Direction: ${call.direction === 'OUTBOUND' ? 'outbound' : 'inbound'}`,
     ...(campaign ? [`Campaign: ${campaign.name}`] : []),

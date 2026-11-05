@@ -1,4 +1,4 @@
-import type { ActionType, NextAction, NextActionRepeat, Prisma } from '@prisma/client';
+import type { ActionType, NextAction, NextActionKind, NextActionRepeat, Prisma } from '@prisma/client';
 import { prisma } from './db';
 import { logAudit, SYSTEM_ACTOR, type AuditActor } from './audit';
 import { addDays, formatLocalDate, isLocalDate, todayIn, type LocalDate } from './dates';
@@ -66,7 +66,7 @@ export function nextOccurrence(due: LocalDate, repeat: NextActionRepeat, today: 
   return nextWorkingDay(next, workingDays);
 }
 
-export type NextActionInput = { label: string; action: ActionType; dueDate: LocalDate; repeat: NextActionRepeat; /** Null: each person's own FO. */ foUserId: string | null };
+export type NextActionInput = { label: string; action: ActionType; dueDate: LocalDate; repeat: NextActionRepeat; /** Null: each person's own FO. */ foUserId: string | null; /** A meeting, with its time when known (B183). */ kind?: NextActionKind; meetingAt?: Date | null };
 
 export function validateNextAction(raw: { label?: unknown; action?: unknown; dueDate?: unknown; repeat?: unknown; foUserId?: unknown }, today: LocalDate): { ok: true; value: NextActionInput } | { ok: false; error: string } {
   const label = String(raw.label ?? '').trim().replace(/\s+/g, ' ');
@@ -100,7 +100,7 @@ export async function setNextActions(personIds: string[], input: NextActionInput
     // B007: an opted-out person gets no new next action either.
     if (p.optedOut) { skipped.push({ personId: id, reason: 'Asked not to be contacted' }); continue; }
     const foUserId = input.foUserId ?? (p.ownerMemberId ? ownerOf.get(p.ownerMemberId) : undefined) ?? fallbackFoUserId;
-    const data = { label: input.label, action: input.action, dueDate: input.dueDate, repeat: input.repeat, foUserId, crmPending: true, crmError: null };
+    const data = { label: input.label, action: input.action, dueDate: input.dueDate, repeat: input.repeat, foUserId, kind: input.kind ?? 'ACTION', meetingAt: input.meetingAt ?? null, crmPending: true, crmError: null };
     const row = await prisma.$transaction(async (tx) => {
       const open = await tx.nextAction.findFirst({ where: { personId: id, state: 'OPEN' }, select: { id: true } });
       const saved = open

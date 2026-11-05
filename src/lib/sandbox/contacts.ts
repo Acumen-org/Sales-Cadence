@@ -133,7 +133,7 @@ export async function sameNameAtFirm(c: { firstName: string; lastName: string; c
  * the same lock as a Bellwether push, so a push racing it cannot make a twin (N025). The same name at
  * the same firm is refused with the other contact named, unless `addAnyway` (B139).
  */
-export async function createContact(input: ContactInput, by: { id: string; podIds: string[]; ownsContacts: boolean }, actor: AuditActor, podId?: string | null, opts: { addAnyway?: boolean } = {}): Promise<ContactResult & { possibleDuplicate?: string }> {
+export async function createContact(input: ContactInput, by: { id: string; podIds: string[]; ownsContacts: boolean }, actor: AuditActor, podId?: string | null, opts: { addAnyway?: boolean; /** CALL: added from a call nobody was matched to (B026). */ source?: 'MANUAL' | 'CALL' } = {}): Promise<ContactResult & { possibleDuplicate?: string }> {
   const parsed = contactData(input);
   if (!parsed.ok) return parsed;
   const d = parsed.data as Record<string, unknown>;
@@ -156,11 +156,11 @@ export async function createContact(input: ContactInput, by: { id: string; podId
     if (twin) return { ok: false as const, error: `${twin.name} at the same firm is already in Cold outreach${twin.owner ? `, owned by ${twin.owner}` : ', unclaimed'}. Open that contact, or add this one anyway if it is someone else.`, possibleDuplicate: twin.id };
     const created = await tx.sandboxContact.create({
       data: {
-        ...(d as Prisma.SandboxContactUncheckedCreateInput), ...row, source: 'MANUAL', sortName: sandboxSortName(row.firstName, row.lastName), emailIsRole: isRoleEmail(row.email),
+        ...(d as Prisma.SandboxContactUncheckedCreateInput), ...row, source: opts.source ?? 'MANUAL', sortName: sandboxSortName(row.firstName, row.lastName), emailIsRole: isRoleEmail(row.email),
         country: (d.country as string) ?? 'US', ownerId: owns ? by.id : null, podId: pod, claimedAt: owns ? new Date() : null, firstClaimedAt: owns ? new Date() : null, createdById: by.id, lastActivityAt: new Date(),
       },
     });
-    await logAudit({ entityType: 'sandbox_contact', entityId: created.id, action: 'created', actor, details: { source: 'MANUAL' } }, tx);
+    await logAudit({ entityType: 'sandbox_contact', entityId: created.id, action: 'created', actor, details: { source: opts.source ?? 'MANUAL' } }, tx);
     return { ok: true as const, id: created.id };
   }, { timeout: 20_000 });
 }

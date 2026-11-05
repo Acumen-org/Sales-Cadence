@@ -1,4 +1,4 @@
-import type { ActionType, NextActionRepeat, Prisma } from '@prisma/client';
+import type { ActionType, NextActionKind, NextActionRepeat, Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { logAudit, type AuditActor } from '../audit';
 import { coldRef, SANDBOX_TASK, workWhere } from '../subject';
@@ -12,7 +12,8 @@ import { channelOfAction, contactability } from '../outreach/contactability';
  * in Cadence until the contact moves. Work lists only active contacts (B009).
  */
 
-export type ColdNextStepInput = { label: string; action: ActionType; dueDate: string; repeat?: NextActionRepeat; foUserId: string };
+/** A meeting is its own kind of next step, with its time when known (B183). */
+export type ColdNextStepInput = { label: string; action: ActionType; dueDate: string; repeat?: NextActionRepeat; foUserId: string; kind?: NextActionKind; meetingAt?: Date | null };
 export type ColdNextStepOptions = {
   /** The signed-in user the guard judges; null is Cadence itself. */
   guard?: GuardActor | null;
@@ -29,7 +30,7 @@ export type ColdNextStepOptions = {
  */
 export async function setColdNextStep(contactId: string, input: ColdNextStepInput, actor: AuditActor & { id?: string | null }, opts: ColdNextStepOptions = {}): Promise<{ ok: true; id: string } | Refusal> {
   const act = opts.act ?? 'next_step';
-  const data = { label: input.label, action: input.action, dueDate: input.dueDate, repeat: input.repeat ?? 'NONE', foUserId: input.foUserId, crmPending: false, crmError: null };
+  const data = { label: input.label, action: input.action, dueDate: input.dueDate, repeat: input.repeat ?? 'NONE', foUserId: input.foUserId, kind: input.kind ?? 'ACTION', meetingAt: input.meetingAt ?? null, crmPending: false, crmError: null };
   const attempt = () => withSubjectLock(coldRef(contactId), opts.guard ?? null, act === 'form_next_step' ? 'form_next_step' : 'next_action', async (tx) => {
     const row = (await tx.sandboxContact.findUnique({ where: { id: contactId } }))!;
     const check = await contactability({ kind: 'cold', row }, { act, channel: channelOfAction(input.action), user: opts.user ?? null, tx });

@@ -153,6 +153,9 @@ model User {
   /// The rep's Twilio number (E.164), confirmed by an admin in Settings > Calling from Twilio's
   /// IncomingPhoneNumbers. Imported calls from or to it belong to this rep.
   callerNumber   String?   @unique
+  /// When callerNumber was assigned (B165): calls on the line from before then are not this rep's.
+  /// Null for assignments made before the release, which count for every call.
+  callerNumberSince DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
@@ -1347,6 +1350,10 @@ model CallForm {
   /// yes | no | unknown
   decisionMaker     String?
   nextActionId      String?
+  /// The next step's "What" (N043), as its next action reads.
+  nextStepLabel     String?
+  /// What leaders look at (B025, B029): long_voicemail | no_conversation | called_opted_out.
+  flags             String[] @default([])
   /// CRM contact: at once. Sandbox contact: when moved.
   twentyNoteId      String?
   /// The call's audience when the form was filed, never changed (PLAN 8.4, B037).

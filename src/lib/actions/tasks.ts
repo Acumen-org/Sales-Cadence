@@ -64,6 +64,8 @@ export async function completeTaskAction(formData: FormData): Promise<ActionResu
   const chosen = parsed.data.chosenAction ?? task.action;
   const ctx = { actor: userActor(user) };
 
+  // B161: a cold contact's call step closes with its call and its form; the CRM's quick Log call stays.
+  if (chosen === 'CALL' && !task.enrollment.personId) return { ok: false, error: 'A call step closes with its call and its form. Press Call, or Log a call if you called from another phone.' };
   if (chosen === 'CALL') {
     if (!parsed.data.disposition) return { ok: false, error: 'Pick a call outcome first.' };
     const r = await completeCall({ taskId: task.id, disposition: parsed.data.disposition, note: parsed.data.note, chosenAction: 'CALL' }, ctx);

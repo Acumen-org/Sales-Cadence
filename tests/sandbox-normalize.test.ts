@@ -37,7 +37,7 @@ describe('sandbox normalisation', () => {
   it('reads a contact\'s calling hours from the state, else the area code', () => {
     expect(zoneFor({ state: 'IL' }).zone).toBe('America/Chicago');
     expect(zoneFor({ state: 'California' }).zone).toBe('America/Los_Angeles');
-    expect(zoneFor({ phone: '+12125550142' })).toEqual({ zone: 'America/New_York', from: 'area code' });
+    expect(zoneFor({ phone: '+12125550142' })).toEqual(expect.objectContaining({ zone: 'America/New_York', from: 'area code', guessed: false }));
     const calling = DEFAULT_SETTINGS.calling;
     // 03:00 UTC is 22:00 in Chicago the evening before: outside 8:00-21:00.
     expect(callingHours({ state: 'IL' }, calling, new Date('2026-11-04T03:00:00Z')).allowed).toBe(false);

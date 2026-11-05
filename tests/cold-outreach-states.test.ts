@@ -27,7 +27,8 @@ describe('cold contact states', () => {
     await setColdNextStep(c.id, { label: 'Ask Sam about the Harbor deal', action: 'CALL', dueDate: '2099-01-05', foUserId: b.users.alisa.id }, actor());
     const call = await logManualCall({ userId: b.users.alisa.id, sandboxContactId: c.id });
     await prisma.callLog.update({ where: { id: call.id }, data: { toNumber: c.phone } });
-    await submitCallForm(call.id, { outcome: 'connected', rating: 4, notes: 'Sam said his wife is ill', nextStep: 'none' }, { id: b.users.alisa.id, name: 'Alisa', timezone: 'Europe/London' });
+    // A reached call keeps a dated next step (PLAN 4.6): here the one already set.
+    await submitCallForm(call.id, { outcome: 'connected', rating: 4, notes: 'Sam said his wife is ill', nextStep: 'keep' }, { id: b.users.alisa.id, name: 'Alisa', timezone: 'Europe/London' });
     const unmatched = await prisma.callLog.create({ data: { source: 'TWILIO_IMPORT', direction: 'OUTBOUND', toNumber: '+13125550299', matchedBy: 'ambiguous', candidates: [{ kind: 'sandbox', id: c.id, name: 'Sam Rivera' }, { kind: 'person', id: 'person-01', name: 'Nina' }] } });
     await prisma.callIntent.create({ data: { userId: b.users.alisa.id, toNumber: c.phone!, sandboxContactId: c.id } });
     await prisma.sandboxEmail.create({ data: { sandboxContactId: c.id, kind: 'SENT', internetMessageId: 'm1', subject: 'Sam, about your divorce settlement', at: new Date() } });

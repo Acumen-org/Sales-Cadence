@@ -38,6 +38,7 @@ export function enrollmentStatusLabel(e: { status: string; exitReason?: string |
       if (r === 'not_a_prospect') return 'Not a prospect';
       if (r === 'bad_data') return 'Bad data';
       if (r === 'removed') return 'Contact removed';
+      if (r === 'taken_out') return 'Taken out after a call';
       if (r === 'person_deleted') return 'Deleted in the CRM';
       if (r.startsWith('campaign_')) return 'Campaign stopped';
       return 'Removed';

@@ -23,7 +23,12 @@ export const EXTRA_CALL_OUTCOMES: RulesSettings['callDispositions'] = [
   { key: 'not_interested', label: 'Not interested', answered: true, badPhone: false },
   { key: 'meeting_booked', label: 'Meeting booked', answered: true, badPhone: false },
   { key: 'do_not_contact', label: 'Asked not to be contacted', answered: true, badPhone: false },
+  // B025: the line was picked up but nobody spoke (a machine, a hang-up): allowed with a reason.
+  { key: 'no_conversation', label: 'Line connected, no conversation', answered: false, badPhone: false },
 ];
+
+/** "Asked not to be contacted": the person picked up, but it is never a reply (B091). */
+export const OPT_OUT_OUTCOME = 'do_not_contact';
 
 /** Settings > Rules' call outcomes, then the extras it does not already have. */
 export function callOutcomes(rules: RulesSettings): RulesSettings['callDispositions'] {
@@ -38,9 +43,22 @@ export function skipReasonFor(rules: RulesSettings, key: string | null | undefin
   return key ? rules.skipReasons.find((r) => r.key === key) ?? null : null;
 }
 
-export type CallOutcomeInput = { taskId: string; disposition: string; note?: string | null; chosenAction?: 'CALL' | 'EMAIL' | 'LINKEDIN_CONNECT' | 'LINKEDIN_MESSAGE' | null };
+export type CallOutcomeInput = {
+  taskId: string;
+  disposition: string;
+  note?: string | null;
+  chosenAction?: 'CALL' | 'EMAIL' | 'LINKEDIN_CONNECT' | 'LINKEDIN_MESSAGE' | null;
+  /** The call's own touch (B043): the step takes it, so one answered call is one touch and one reply. */
+  callTouchId?: string | null;
+  /** False when the caller opts the person out itself (the post-call form, as a form opt-out). */
+  optOut?: boolean;
+};
 
-/** Complete a call task with a disposition. Answered dispositions finish the sequence as replied. */
+/**
+ * Complete a call task with a disposition. Answered dispositions finish the sequence as replied,
+ * except "Asked not to be contacted": that opts the person out and ends the sequence as Opted out,
+ * never Replied, and its touch is not an answered call (B091).
+ */
 export async function completeCall(input: CallOutcomeInput, ctx: EngineContext): Promise<ResolveResult & { replied?: boolean }> {
   const settings = await getSettings();
   const disposition = dispositionFor(settings.rules, input.disposition);
@@ -48,14 +66,21 @@ export async function completeCall(input: CallOutcomeInput, ctx: EngineContext):
   const task = await prisma.task.findUnique({ where: { id: input.taskId }, include: { enrollment: { select: { personId: true, sandboxContactId: true } } } });
   if (!task) return { ok: false, reason: 'not_found' };
 
-  const shouldReply = disposition.answered && settings.rules.answeredCallIsReply;
-  const r = await completeTask({ taskId: input.taskId, source: 'MANUAL', disposition: disposition.key, note: input.note ?? null, chosenAction: input.chosenAction ?? 'CALL' }, { ...ctx, deferAdvance: shouldReply });
+  const stop = disposition.key === OPT_OUT_OUTCOME;
+  const shouldReply = !stop && disposition.answered && settings.rules.answeredCallIsReply;
+  const r = await completeTask({ taskId: input.taskId, source: 'MANUAL', disposition: disposition.key, note: input.note ?? null, chosenAction: input.chosenAction ?? 'CALL', touchId: input.callTouchId ?? null }, { ...ctx, deferAdvance: shouldReply || stop });
   if (!r.ok) return r;
   if (disposition.badPhone) await setSubjectFlags(task.enrollment, { badPhone: true }, ctx.actor);
+  if (stop) {
+    if (input.optOut !== false) await applyExitConsequence(task.enrollment, 'opted_out', ctx.actor);
+    await exitEnrollment(r.task.enrollmentId, { reason: 'opted_out', actor: ctx.actor, now: ctx.now, skipSync: ctx.skipSync });
+    return { ...r, replied: false };
+  }
   let replied = false;
   if (shouldReply) {
     // The call's touch says the person answered, so every Replies figure counts it as one.
-    await prisma.touch.updateMany({ where: { externalId: `task:${task.id}` }, data: { summary: `${ANSWERED_CALL_PREFIX} ${disposition.label}` } });
+    const evidence = input.callTouchId ? { id: input.callTouchId } : { externalId: `task:${task.id}` };
+    await prisma.touch.updateMany({ where: evidence, data: { summary: `${ANSWERED_CALL_PREFIX} ${disposition.label}` } });
     const res = await markReplied(r.task.enrollmentId, { at: ctx.now ?? new Date(), evidenceId: `task:${task.id}:answered`, actor: ctx.actor, skipSync: ctx.skipSync });
     replied = res.changed;
   }

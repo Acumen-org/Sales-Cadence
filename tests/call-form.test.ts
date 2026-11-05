@@ -38,7 +38,9 @@ describe('the post-call form (plan section 10)', () => {
     });
 
     it('offers the extra outcomes beside Settings > Rules', () => {
-      for (const outcome of ['not_interested', 'meeting_booked', 'do_not_contact']) expect(validateCallForm({ ...base, outcome, rating: 3, notes: 'x', nextStep: 'none' }, { rules, today }).ok).toBe(true);
+      for (const outcome of ['not_interested', 'do_not_contact']) expect(validateCallForm({ ...base, outcome, rating: 3, notes: 'x', nextStep: 'none' }, { rules, today }).ok).toBe(true);
+      // B028: a booked meeting is a Meeting on its day.
+      expect(validateCallForm({ ...base, outcome: 'meeting_booked', rating: 3, notes: 'x', nextStep: 'meeting' }, { rules, today }).ok).toBe(true);
     });
   });
 

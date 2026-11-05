@@ -221,6 +221,8 @@ export type CompleteTaskInput = {
   note?: string | null;
   /** Call outcome key (settings.rules.callDispositions). */
   disposition?: string | null;
+  /** The touch this completion already is: a call's own (B043). None of the task's own is written. */
+  touchId?: string | null;
 };
 
 export type ResolveResult =
@@ -267,7 +269,7 @@ export async function completeTask(input: CompleteTaskInput, ctx: EngineContext)
     });
     if (claimed.count === 0) return { ok: false as const, reason: 'already_resolved' as const };
     const updated = await tx.task.findUniqueOrThrow({ where: { id: task.id } });
-    if (input.source === 'MANUAL') {
+    if (input.source === 'MANUAL' && !input.touchId) {
       await tx.touch.upsert({
         where: { externalId: `task:${task.id}` },
         create: {

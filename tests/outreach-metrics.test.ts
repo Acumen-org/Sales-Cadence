@@ -49,7 +49,8 @@ describe('outreach metrics and the subject layer', () => {
     const period: Period = { from: new Date(Date.now() - 3600_000), to: new Date(Date.now() + 3600_000) };
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
     const coldCall = await logManualCall({ userId: b.users.alisa.id, sandboxContactId: c.id, talkSec: 120 });
-    await submitCallForm(coldCall.id, { outcome: 'meeting_booked', rating: 5, notes: 'Booked', nextStep: 'none' }, alisa());
+    // B028: a booked meeting is a Meeting next step on its day, never "No further action".
+    await submitCallForm(coldCall.id, { outcome: 'meeting_booked', rating: 5, notes: 'Booked', nextStep: 'meeting', nextStepDate: '2099-01-05' }, alisa());
     const crmCall = await logManualCall({ userId: b.users.alisa.id, personId: 'person-01', talkSec: 0 });
     await prisma.callLog.update({ where: { id: crmCall.id }, data: { status: 'NO_ANSWER' } });
     await prisma.touch.create({ data: { sandboxContactId: c.id, channel: 'EMAIL', direction: 'INBOUND', occurredAt: new Date(), summary: 'Reply: yes', externalId: 'r1', audience: 'SANDBOX' } });
@@ -57,7 +58,8 @@ describe('outreach metrics and the subject layer', () => {
 
     const scope = { kind: 'rep' as const, userId: b.users.alisa.id };
     const cold = await outreachMetrics(scope, 'cold', period);
-    expect(cold).toEqual(expect.objectContaining({ dials: 1, connects: 1, meetingsBooked: 1, replies: 1, peopleReached: 1 }));
+    // Two replies: the email, and the call they answered (the form records the call's one touch, B043).
+    expect(cold).toEqual(expect.objectContaining({ dials: 1, connects: 1, meetingsBooked: 1, replies: 2, peopleReached: 1 }));
     expect(await outreachMetrics(scope, 'crm', period)).toEqual(expect.objectContaining({ dials: 1, connects: 0, meetingsBooked: 0, replies: 0 }));
     expect((await outreachMetrics({ kind: 'all' }, 'all', period)).dials).toBe(2);
     expect((await outreachMetrics({ kind: 'pod', podId: b.pods.Alisa.id }, 'all', period)).dials).toBe(2);
