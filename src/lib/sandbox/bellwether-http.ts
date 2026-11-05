@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { apiError, authorize, checkContacts, errorBody, MAX_BATCH, pushWithIdempotency, rateLimit, readJson, validateEnvelope, type ApiError } from './bellwether-api';
 import { decodeCursor, iso, statusByIds, statusChangedSince } from './status';
+import { suppressContacts, validateSuppress } from './bellwether-suppress';
 
-/** HTTP for the four Bellwether endpoints: one place that turns every refusal into the contract's error body. */
+/** HTTP for the Bellwether endpoints: one place that turns every refusal into the contract's error body. */
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 
@@ -60,6 +61,20 @@ export async function handleCheck(req: Request): Promise<NextResponse> {
     const envelope = validateEnvelope(read.body, { idempotencyKey: null, requireKey: false });
     if (isError(envelope)) return errorResponse(envelope);
     return ok(await checkContacts(envelope));
+  });
+}
+
+/** Contract v1.1: a Do not contact set in Bellwether opts the person out in Cadence (B003). Counts against the push limit. */
+export async function handleSuppress(req: Request): Promise<NextResponse> {
+  return guarded(async () => {
+    const key = req.headers.get('x-cadence-api-key');
+    const denied = (await authorize(key)) ?? rateLimit('push', key ?? '');
+    if (denied) return errorResponse(denied);
+    const read = await readJson(req);
+    if (isError(read)) return errorResponse(read);
+    const request = validateSuppress(read.body);
+    if (isError(request)) return errorResponse(request);
+    return ok(await suppressContacts(request));
   });
 }
 
