@@ -18,7 +18,7 @@ import { callOutcomes } from '@/lib/engine/outcomes';
 import { NEXT_STEP_LABELS } from '@/lib/sandbox/history-notes';
 import { PRODUCT_VALUES } from '@/lib/sandbox/bellwether-api';
 import { readExtraPhones } from '@/lib/sandbox/normalize';
-import { ActionForm } from '@/components/action-form';
+import { ActionButton, ActionForm } from '@/components/action-form';
 import { Badge, EmptyState, Notice, Surface, ViewHeader, enrollmentStatusLabel } from '@/components/ui';
 import { CallButton } from '@/components/calls/call-button';
 import { LogCallButton } from '@/components/calls/log-call';
@@ -30,7 +30,7 @@ import { mayHearCall } from '@/lib/calls/access';
 import { formOptOut } from '@/lib/tickets';
 import { FormOptOutControls } from '@/components/tickets/close-ticket-form';
 import { ContactActions } from '@/components/sandbox/contact-actions';
-import { addNoteAction, setNextActionAction, setPodAction, updateContactAction } from '@/lib/actions/sandbox';
+import { addNoteAction, clearPossibleBounceAction, confirmPossibleBounceAction, setNextActionAction, setPodAction, updateContactAction } from '@/lib/actions/sandbox';
 import { ACTION_LABELS } from '@/lib/sequences/steps';
 import { eraseConfirm, optOutConfirm, removeConfirm } from '@/lib/outreach/confirm-words';
 import { coldRef } from '@/lib/subject';
@@ -146,7 +146,14 @@ export default async function SandboxContactPage({ params, searchParams }: { par
             {contact.status === 'MOVED' && contact.twentyPersonId ? <Link href={`/people/${contact.twentyPersonId}`} className="text-brand-700 hover:underline">Open in People</Link> : null}
             {contact.status !== 'MOVED' && contact.crmAutoPersonId ? <Link href={`/people/${contact.crmAutoPersonId}`} className="hover:underline"><Badge tone="amber">{`Also in CRM, created from ${contact.crmAutoSource === 'CALENDAR' ? 'calendar' : 'email'}`}</Badge></Link> : null}
             {live && contact.crmMatchPersonId && contact.crmMatchPersonId !== contact.crmAutoPersonId ? <Link href={`/people/${contact.crmMatchPersonId}`} className="hover:underline"><Badge tone="amber">Also in CRM</Badge></Link> : null}
+            {live && contact.badEmail ? <Badge tone="amber">Email bounced</Badge> : null}
           </div>
+          {/* N097: a notice that may be a bounce: the rep checks the address, then clears or confirms it. */}
+          {live && contact.possibleBounceAt && !contact.badEmail ? <div className="mt-2 flex flex-wrap items-center gap-2 text-[13px]">
+            <Badge tone="amber">Possible bounce</Badge>
+            <span className="text-ink-600">A notice on {formatInstant(contact.possibleBounceAt, user.timezone)} may be a bounce. Check the address.</span>
+            {mayWork ? <><ActionButton action={clearPossibleBounceAction} payload={{ id: contact.id }} className="btn-ghost btn-sm" refresh>Clear</ActionButton><ActionButton action={confirmPossibleBounceAction} payload={{ id: contact.id }} className="btn-secondary btn-sm" refresh confirm={{ title: `Mark ${name}'s email bounced?`, effects: ['The address is marked bounced.', 'Their open email steps are skipped, as "Email bounced" would.', 'Their campaign ends when "exit on bounce" is on in Settings > Rules.'], confirmLabel: 'Mark bounced' }}>Confirm bounce</ActionButton></> : <span className="text-ink-500">Whoever works this contact can clear or confirm it.</span>}
+          </div> : null}
           {live && ready.ready && (ready.warnings.length || signal?.positive) ? <div className="mt-2 text-[12px] text-ink-600">{[signal?.positive ? `Positive outcome: ${signal.positive}` : 'No conversation yet', ...ready.warnings.map((w) => w.text)].join(' · ')}</div> : null}
         </div>
         <div className="flex flex-col items-end gap-2">

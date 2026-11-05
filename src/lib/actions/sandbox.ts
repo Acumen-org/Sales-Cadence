@@ -15,6 +15,7 @@ import { optOutContact } from '../outreach/transitions';
 import { NEXT_ACTION_CHANNELS, pushNextAction } from '../next-actions';
 import { reassignStrandedNextActions } from '../outreach/ownership';
 import { afterResponse } from '../engine/sync-out';
+import { clearPossibleBounce, confirmPossibleBounce } from '../mail/cold-email';
 import type { ActionType } from '@prisma/client';
 import type { ActionResult } from './users';
 
@@ -213,4 +214,21 @@ export async function reassignStrandedNextActionsAction(fd: FormData): Promise<A
   refresh();
   revalidatePath('/tasks');
   return { ok: true, message: `${r.moved} next step${r.moved === 1 ? '' : 's'} handed on.` };
+}
+
+/** N097: a possible bounce checked by the rep: the address is fine (Clear), or it bounced (Confirm). */
+export async function clearPossibleBounceAction(fd: FormData): Promise<ActionResult> {
+  const user = await requireUser();
+  const id = String(fd.get('id') ?? '');
+  const r = await clearPossibleBounce(id, toActor(user), userActor(user));
+  refresh(id);
+  return r;
+}
+
+export async function confirmPossibleBounceAction(fd: FormData): Promise<ActionResult> {
+  const user = await requireUser();
+  const id = String(fd.get('id') ?? '');
+  const r = await confirmPossibleBounce(id, toActor(user), userActor(user));
+  refresh(id);
+  return r;
 }

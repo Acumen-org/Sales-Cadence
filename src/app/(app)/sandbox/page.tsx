@@ -12,6 +12,8 @@ import { listCampaigns } from '@/lib/campaigns-query';
 import { listContacts, type ContactFilters } from '@/lib/sandbox/query';
 import { sandboxWork } from '@/lib/sandbox/work';
 import { callGate } from '@/lib/calls/gate';
+import { emailCloseWords, mailTrackedFor } from '@/lib/mail/graph-mail';
+import { bounceWords } from '@/lib/mail/cold-email';
 import { EmptyState, Surface, Tabs, Toolbar, ViewHeader, Badge, CAMPAIGN_TONE } from '@/components/ui';
 import { ContactsTable } from '@/components/sandbox/contacts-table';
 import { AddContactButton } from '@/components/sandbox/add-contact';
@@ -99,6 +101,8 @@ export default async function SandboxPage({ searchParams }: { searchParams: Prom
       const contact = item.kind === 'step' ? item.t.enrollment.sandboxContact : item.n.sandboxContact;
       if (contact?.phone && !gates.has(contact.id)) gates.set(contact.id, await callGate(user, contact));
     }
+    // N088: an email item says whether it closes itself, by whether Cadence reads its rep's sent mail.
+    const tracked = await mailTrackedFor(items.map((item) => (item.kind === 'step' ? item.t.foUserId : item.n.foUserId)));
     return <Surface flush>
       <Toolbar className="flex items-center gap-3 border-b border-line px-4 py-3 text-[13px]">
         <Link href={href({ owner: mine ? 'all' : null })} className="btn-secondary btn-sm">{mine ? 'Show everyone' : 'Show mine'}</Link>
@@ -109,7 +113,8 @@ export default async function SandboxPage({ searchParams }: { searchParams: Prom
         return <WorkRow key={item.id} kind={item.kind} id={item.id} contact={{ id: contact.id, name: `${contact.firstName} ${contact.lastName}`.trim(), firm: contact.companyName, phone: contact.phone }}
           label={item.kind === 'step' ? `${item.t.label}` : item.n.label} action={item.kind === 'step' ? item.t.action : item.n.kind === 'MEETING' ? 'MEETING' : item.n.action} channelLabel={item.kind === 'next' && item.n.kind === 'MEETING' ? 'Meeting' : ACTION_LABELS[item.kind === 'step' ? item.t.action : item.n.action]}
           due={formatLocalDate(item.due)} dueState={due(item.due)} campaign={item.kind === 'step' ? item.t.enrollment.campaign?.name ?? item.t.enrollment.sequence.name : null} fo={item.kind === 'step' ? item.t.fo.name : item.n.fo.name}
-          callTemplate={settings.rules.clickToCallUrl} gate={gates.get(contact.id) ?? null} skipReasons={settings.rules.skipReasons.map((r) => ({ key: r.key, label: r.label }))} mayWork={mayWork && (isAdmin(user) || (item.kind === 'step' ? item.t.foUserId : item.n.foUserId) === user.id || !isJuniorFo(user))} />;
+          callTemplate={settings.rules.clickToCallUrl} gate={gates.get(contact.id) ?? null} skipReasons={settings.rules.skipReasons.map((r) => ({ key: r.key, label: r.label }))} mayWork={mayWork && (isAdmin(user) || (item.kind === 'step' ? item.t.foUserId : item.n.foUserId) === user.id || !isJuniorFo(user))}
+          warning={bounceWords(contact)} closeWords={emailCloseWords(tracked.has(item.kind === 'step' ? item.t.foUserId : item.n.foUserId))} />;
       })}</ul> : <EmptyState title="Nothing to work in the sandbox" />}
     </Surface>;
   }

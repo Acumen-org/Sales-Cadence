@@ -81,7 +81,7 @@ export function ContactsTable({ rows, owners, sequences, pods, campaigns, today,
           <td className="truncate px-3 py-2"><Link href={`/sandbox/${r.id}`} className="text-ink-900 hover:text-brand-700">{r.name}</Link>{r.title ? <span className="block truncate text-[12px] text-ink-500">{r.title}</span> : null}</td>
           <td className="truncate px-3 py-2 text-ink-700">{r.firm ?? '-'}</td>
           <td className={clsx('truncate px-3 py-2', r.ownerRemoved ? 'text-amber-800' : 'text-ink-700')}>{r.owner ?? 'Unclaimed'}</td>
-          <td className="px-3 py-2"><StatusCell row={r} move={m} /></td>
+          <td className="px-3 py-2"><StatusCell row={r} move={m} />{r.warning ? <Badge tone="amber" className="ml-1.5">{r.warning}</Badge> : null}</td>
           <td className="truncate px-3 py-2">{r.campaign ? <Link href={`/sandbox/campaigns/${r.campaign.id}`} className="hover:text-brand-700">{r.campaign.name}</Link> : <span className="text-ink-400">-</span>}</td>
           <td className="truncate px-3 py-2 text-ink-700">{r.nextAction ?? <span className="text-ink-400">-</span>}</td>
           <td className="px-3 py-2 tabular-nums text-ink-700">{r.lastTouch ?? '-'}</td>

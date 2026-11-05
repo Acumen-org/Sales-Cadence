@@ -4,6 +4,7 @@ import { getSettings } from '../settings';
 import { formatLocalDate, toLocalDate } from '../dates';
 import { workspaceTimezone } from '../workspace';
 import { checkReady, moveSignals, readyLabel } from './ready';
+import { bounceWords } from '../mail/cold-email';
 
 /** The Sandbox > Contacts list: one row per contact with what the table shows. */
 
@@ -43,6 +44,8 @@ export type ContactRow = {
   calls: number; source: string; status: SandboxStatus; twentyPersonId: string | null; movedAt: Date | null;
   /** Twenty gained the person after the push: outreach stopped (crm-check.ts). */
   crmMatchPersonId: string | null;
+  /** "Email bounced" or "Possible bounce" (N097). */
+  warning: string | null;
 };
 
 export async function listContacts(f: ContactFilters, userId: string, page: number): Promise<{ rows: ContactRow[]; total: number; pages: number }> {
@@ -74,6 +77,7 @@ export async function listContacts(f: ContactFilters, userId: string, page: numb
       lastTouch: c.touches[0] ? formatLocalDate(toLocalDate(c.touches[0].occurredAt, workspaceTimezone())) : null,
       calls: c._count.calls, source: `${c.source === 'BELLWETHER' ? 'Bellwether' : c.source === 'MANUAL' ? 'Added' : c.source === 'CSV' ? 'CSV' : 'Call'} · ${formatLocalDate(toLocalDate(c.createdAt, workspaceTimezone()))}`,
       status: c.status, twentyPersonId: c.twentyPersonId, movedAt: c.movedAt, crmMatchPersonId: c.crmMatchPersonId,
+      warning: c.status === 'ACTIVE' ? bounceWords(c) : null,
     };
   });
   const filtered = f.ready === 'ready' ? rows.filter((r) => r.ready) : f.ready === 'not_ready' ? rows.filter((r) => !r.ready) : rows;

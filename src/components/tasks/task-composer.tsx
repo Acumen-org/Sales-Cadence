@@ -6,8 +6,8 @@ import { ActionIcon, IconCheck, IconCopy } from '@/components/icons';
 import { registerDraftWriter } from './draft-registry';
 import { CallButton } from '@/components/calls/call-button';
 
-type Props = { taskId: string; subject: string | null; body: string; html?: string; label: string; channel: 'EMAIL' | 'CALL' | 'LINKEDIN'; revision?: number; readOnly?: boolean; phone?: string | null; /** The dialpad address with {phone}; blank means tel:. */ callTemplate?: string | null; personId?: string | null; sandboxContactId?: string | null; /** Why Call is off now (a form waiting, an opt-out, calling hours), or a calling-hours warning. */ callBlocked?: string | null; callWarning?: string | null };
-export function TaskComposer({ taskId, subject, body, html, label, channel, revision = 0, readOnly = false, phone, callTemplate = null, personId = null, sandboxContactId = null, callBlocked = null, callWarning = null }: Props) {
+type Props = { taskId: string; subject: string | null; body: string; html?: string; label: string; channel: 'EMAIL' | 'CALL' | 'LINKEDIN'; revision?: number; readOnly?: boolean; phone?: string | null; /** The dialpad address with {phone}; blank means tel:. */ callTemplate?: string | null; personId?: string | null; sandboxContactId?: string | null; /** Why Call is off now (a form waiting, an opt-out, calling hours), or a calling-hours warning. */ callBlocked?: string | null; callWarning?: string | null; /** On an email: "Closes itself when you send from Outlook" or "Click Done after sending" (N088, graph-mail.ts emailCloseWords). */ closeWords?: string | null };
+export function TaskComposer({ taskId, subject, body, html, label, channel, revision = 0, readOnly = false, phone, callTemplate = null, personId = null, sandboxContactId = null, callBlocked = null, callWarning = null, closeWords = null }: Props) {
   const initialHtml = html ?? '<p>' + body.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') + '</p>';
   const [draft, setDraft] = useState({ subject: subject ?? '', html: initialHtml, text: body });
   const [state, setState] = useState('Saved');
@@ -80,6 +80,7 @@ export function TaskComposer({ taskId, subject, body, html, label, channel, revi
       </div>
     </div>}
     {channel === 'EMAIL' && <label className="block text-xs text-ink-500">Subject<input aria-label="Email subject" value={draft.subject} readOnly={readOnly} maxLength={300} className="mt-1 w-full !font-medium !text-ink-900" onChange={e => change({ subject: e.target.value })} onBlur={() => { void flush(); }} /></label>}
+    {channel === 'EMAIL' && closeWords ? <p className="text-[12px] text-ink-500">{closeWords}</p> : null}
     <RichTextEditor value={draft.html} label={channel === 'CALL' ? 'Call script' : label + ' message'} disabled={readOnly} onChange={(nextHtml, text) => change({ html: nextHtml, text })} />
     {error && <p role="alert" className="text-sm font-medium text-red-700">{error}</p>}
   </section>;

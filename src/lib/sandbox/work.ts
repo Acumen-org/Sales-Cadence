@@ -57,13 +57,13 @@ export async function setSandboxNextAction(contactId: string, input: ColdNextSte
 const liveContact = { status: 'ACTIVE' } satisfies Prisma.SandboxContactWhereInput;
 
 export const sandboxTaskInclude = {
-  enrollment: { include: { sandboxContact: { select: { id: true, firstName: true, lastName: true, companyName: true, jobTitle: true, email: true, phone: true, linkedinUrl: true, status: true, state: true, companyState: true, country: true, ownerId: true, podId: true } }, campaign: { select: { id: true, name: true, status: true } }, sequence: { select: { name: true } } } },
+  enrollment: { include: { sandboxContact: { select: { id: true, firstName: true, lastName: true, companyName: true, jobTitle: true, email: true, phone: true, linkedinUrl: true, status: true, state: true, companyState: true, country: true, ownerId: true, podId: true, badEmail: true, possibleBounceAt: true } }, campaign: { select: { id: true, name: true, status: true } }, sequence: { select: { name: true } } } },
   fo: { select: { id: true, name: true } },
 } satisfies Prisma.TaskInclude;
 export type SandboxTaskRow = Prisma.TaskGetPayload<{ include: typeof sandboxTaskInclude }>;
 
 export const sandboxNextInclude = {
-  sandboxContact: { select: { id: true, firstName: true, lastName: true, companyName: true, jobTitle: true, email: true, phone: true, linkedinUrl: true, status: true, state: true, companyState: true, country: true, ownerId: true, podId: true } },
+  sandboxContact: { select: { id: true, firstName: true, lastName: true, companyName: true, jobTitle: true, email: true, phone: true, linkedinUrl: true, status: true, state: true, companyState: true, country: true, ownerId: true, podId: true, badEmail: true, possibleBounceAt: true } },
   fo: { select: { id: true, name: true } },
 } satisfies Prisma.NextActionInclude;
 export type SandboxNextRow = Prisma.NextActionGetPayload<{ include: typeof sandboxNextInclude }>;
