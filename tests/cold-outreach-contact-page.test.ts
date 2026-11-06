@@ -89,7 +89,7 @@ describe('Cold contact page: layout and cues (S10, PLAN 4.2)', () => {
     // No next step yet: the blocker says so and offers the fix (4.0).
     expect(text(html)).toContain('Jane has no next step. Set one, or add Jane to a campaign.');
     // The step strip marks this contact's step.
-    expect(html).toContain('this contact is here');
+    expect(html).toContain('This contact is here');
     expect(html).toContain('No next step');
   });
 
