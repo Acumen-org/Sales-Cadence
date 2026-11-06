@@ -2,6 +2,7 @@
 
 import { refreshCacheAction, registerWebhookAction, runReconcileAction, runSchedulerAction, testTwentyConnectionAction } from '@/lib/actions/admin';
 import { ActionButton, ActionForm } from '@/components/action-form';
+import { fullRefreshConfirm } from '@/lib/confirms';
 import { Card, Field } from '@/components/ui';
 
 export function AdminTools({ defaultDays }: { defaultDays: number }) {
@@ -22,7 +23,7 @@ export function AdminTools({ defaultDays }: { defaultDays: number }) {
             <ActionButton action={refreshCacheAction} payload={{ full: 'false' }} className="btn-secondary">
               Refresh changed
             </ActionButton>
-            <ActionButton action={refreshCacheAction} payload={{ full: 'true' }} className="btn-secondary" confirm="Pull every person and company from Twenty? This can take a while on large workspaces.">
+            <ActionButton action={refreshCacheAction} payload={{ full: 'true' }} className="btn-secondary" confirm={fullRefreshConfirm()}>
               Full refresh
             </ActionButton>
           </div>
@@ -35,10 +36,10 @@ export function AdminTools({ defaultDays }: { defaultDays: number }) {
               Run scheduler tick
             </ActionButton>
             <ActionButton action={() => testTwentyConnectionAction()} payload={{}} className="btn-secondary">
-              Test Twenty connection
+              Test CRM connection
             </ActionButton>
             <ActionButton action={() => registerWebhookAction()} payload={{}} className="btn-secondary">
-              Register webhook in Twenty
+              Register webhook in the CRM
             </ActionButton>
           </div>
           <p className="text-xs text-ink-500">The worker container does this automatically every few minutes.</p>

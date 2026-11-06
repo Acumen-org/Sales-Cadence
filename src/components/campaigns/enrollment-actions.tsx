@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { exitEnrollmentAction, pauseEnrollmentAction, reassignEnrollmentAction, resumeEnrollmentAction } from '@/lib/actions/enrollments';
 import { ActionButton, ActionForm } from '@/components/action-form';
+import { exitEnrollmentConfirm } from '@/lib/confirms';
 
 type Props = {
   enrollmentId: string;
@@ -10,10 +11,13 @@ type Props = {
   foUserId: string;
   fos: { id: string; name: string }[];
   compact?: boolean;
+  /** Who and which campaign, for the Exit confirm. */
+  name?: string | null;
+  campaign?: string | null;
 };
 
 /** Row actions for an enrollment: pause / resume / exit / reassign within pod. */
-export function EnrollmentActions({ enrollmentId, status, foUserId, fos, compact }: Props) {
+export function EnrollmentActions({ enrollmentId, status, foUserId, fos, compact, name, campaign }: Props) {
   const [reassigning, setReassigning] = useState(false);
   const open = status === 'ACTIVE' || status === 'PAUSED';
   if (!open) return <span className="text-xs text-ink-400">-</span>;
@@ -33,7 +37,7 @@ export function EnrollmentActions({ enrollmentId, status, foUserId, fos, compact
           Reassign
         </button>
       ) : null}
-      <ActionButton action={exitEnrollmentAction} payload={{ enrollmentId, reason: 'manual' }} className="btn-ghost btn-sm text-red-600" confirm="Exit this person from the sequence? Open tasks will be cancelled.">
+      <ActionButton action={exitEnrollmentAction} payload={{ enrollmentId, reason: 'manual' }} className="btn-ghost btn-sm text-red-600" confirm={exitEnrollmentConfirm({ name, campaign })}>
         Exit
       </ActionButton>
       {reassigning ? (

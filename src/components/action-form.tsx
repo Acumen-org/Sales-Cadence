@@ -12,8 +12,8 @@ type Props = {
   className?: string;
   /** Reset the form fields after a successful submit. */
   resetOnSuccess?: boolean;
-  /** Asked first, in the one ConfirmDialog; a reason it asks for is sent as `reason`. */
-  confirm?: string | ConfirmOptions;
+  /** Asked first, in the one ConfirmDialog, with a title and what happens (PLAN 4.0); a reason it asks for is sent as `reason`. */
+  confirm?: ConfirmOptions;
   onSuccess?: (r: Extract<ActionResult, { ok: true }>) => void;
 };
 
@@ -85,8 +85,8 @@ export function ActionButton({
   payload: Record<string, string>;
   children: ReactNode;
   className?: string;
-  /** Asked first, in the one ConfirmDialog; a reason it asks for is sent as `reason`. */
-  confirm?: string | ConfirmOptions;
+  /** Asked first, in the one ConfirmDialog, with a title and what happens (PLAN 4.0); a reason it asks for is sent as `reason`. */
+  confirm?: ConfirmOptions;
   title?: string;
   /** Re-read the page after it worked, for a page whose answer to the action can arrive late. */
   refresh?: boolean;

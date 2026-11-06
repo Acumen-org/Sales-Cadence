@@ -44,7 +44,7 @@ export async function LegacyColdCampaign({ campaign, manager, editor, canDelete,
       icon={<IconCampaigns size={20} />}
       sub={<span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]"><Link href={COLD_CAMPAIGNS_HREF} className="hover:text-ink-900">Cold outreach · Campaigns</Link><span className="text-ink-300">·</span><span>{campaign.pod.name}</span><span className="text-ink-300">·</span><span>{campaign.sequence.name}</span><span className="text-ink-300">·</span><span>Starts {formatLocalDate(campaign.startDate, 'long')}</span></span>}
       badges={<><Badge tone={CAMPAIGN_TONE[campaign.status] ?? 'gray'}>{campaignStatusLabel(campaign.status)}</Badge><Badge tone="gray">Made before the campaign studio</Badge></>}
-      actions={<>{editor && campaign.status === 'DRAFT' && <Link href={`/campaigns/${campaign.id}/edit`} className="btn-primary">Open in the studio</Link>}{manager && <CampaignLifecycle campaignId={campaign.id} status={campaign.status} />}{manager && ['STOPPED', 'COMPLETED'].includes(campaign.status) && <Link className="btn-secondary" href={`/campaigns/new?restart=${campaign.id}`}>Plan another run</Link>}{canDelete && <DeleteCampaign id={campaign.id} name={campaign.name} simple={!launched} />}</>}
+      actions={<>{editor && campaign.status === 'DRAFT' && <Link href={`/campaigns/${campaign.id}/edit`} className="btn-primary">Open in the studio</Link>}{manager && <CampaignLifecycle campaignId={campaign.id} status={campaign.status} name={campaign.name} />}{manager && ['STOPPED', 'COMPLETED'].includes(campaign.status) && <Link className="btn-secondary" href={`/campaigns/new?restart=${campaign.id}`}>Plan another run</Link>}{canDelete && <DeleteCampaign id={campaign.id} name={campaign.name} simple={!launched} />}</>}
     />
     <ColdCampaignNotes campaign={campaign} launched={launched} timezone={timezone} />
     {launched ? <>
@@ -60,7 +60,7 @@ export async function LegacyColdCampaign({ campaign, manager, editor, canDelete,
             <td className="whitespace-nowrap text-[12.5px] tabular-nums">{formatLocalDate(e.startDate)}</td>
             <td><Badge tone={scheduled ? 'purple' : enrollmentTone(e)}>{scheduled ? 'Scheduled' : enrollmentStatusLabel(e)}</Badge></td>
             <td className="text-[12.5px] text-ink-700">{next ? `${next.label} · ${formatLocalDate(next.snoozedTo ?? next.dueDate)}` : <Empty />}</td>
-            {manager && <td><EnrollmentActions enrollmentId={e.id} status={e.status} foUserId={e.foUserId} fos={[]} compact /></td>}
+            {manager && <td><EnrollmentActions enrollmentId={e.id} status={e.status} foUserId={e.foUserId} fos={[]} compact name={name(e.sandboxContact)} campaign={campaign.name} /></td>}
           </tr>;
         })}</tbody></table></div>
       </Card>

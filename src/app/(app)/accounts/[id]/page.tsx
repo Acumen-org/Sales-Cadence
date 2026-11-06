@@ -15,6 +15,7 @@ import { ActionIcon, IconExternal, IconLock, IconPlus } from '@/components/icons
 import { Avatar, Badge, CAMPAIGN_TONE, Card, Count, enrollmentTone, Empty, EmptyState, EventDetail, IdentityCell, KeyValue, RecordHeader, Stat, Surface, Tabs, TierBadge, enrollmentStatusLabel } from '@/components/ui';
 import { campaignStatusLabel } from '@/lib/campaign-status';
 import { optionLabels } from '@/lib/twenty/labels';
+import { blockAccountConfirm, unblockAccountConfirm } from '@/lib/confirms';
 
 const TABS = [
   { key: 'overview', label: 'Overview' },
@@ -89,14 +90,14 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
               </Link>}
               {isAdmin(user) ? (
                 blocked ? (
-                  <ActionButton action={unblockAccountAction} payload={{ companyId: company.id }} confirm={`Put ${company.name} back in Cadence?`}>
+                  <ActionButton action={unblockAccountAction} payload={{ companyId: company.id }} confirm={unblockAccountConfirm(company.name)}>
                     Unblock account
                   </ActionButton>
                 ) : (
                   <ActionButton
                     action={blockAccountAction}
                     payload={{ companyId: company.id }}
-                    confirm={`Block ${company.name}? It leaves Accounts, People, search and enrichment for everyone, and any sequence its people are in ends.`}
+                    confirm={blockAccountConfirm(company.name)}
                     className="btn-secondary btn-sm !border-red-200 !text-red-700 hover:!bg-red-50"
                   >
                     <IconLock size={13} /> Block account

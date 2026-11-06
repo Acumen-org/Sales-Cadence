@@ -83,7 +83,7 @@ test('an admin blocks an account out of the platform and puts it back', async ({
 
   try {
     await page.getByRole('button', { name: 'Block account' }).click();
-    await confirm('Confirm');
+    await confirm('Block');
     // The block re-renders the record and the directories; a busy runner takes a while.
     await expect(page.getByText('Blocked account', { exact: true })).toBeVisible({ timeout: 30_000 });
     await page.goto('/accounts?pod=&fo=');
@@ -116,7 +116,10 @@ test('only an admin can block an account', async ({ page }) => {
   await page.goto('/accounts?pod=&fo=');
   await page.getByRole('link', { name: 'Dummy Company B' }).click();
   await expect(page.getByRole('button', { name: 'Block account' })).toHaveCount(0);
+  // B215: a non-admin lands on the read-only Cold outreach settings, told who can change them.
   await page.goto('/settings?tab=blocked');
-  await expect(page).not.toHaveURL(/settings/);
+  await expect(page).toHaveURL(/\/settings\?tab=cold-outreach$/);
+  await expect(page.getByText(/^Read only\./)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Unblock' })).toHaveCount(0);
   await logout(page);
 });

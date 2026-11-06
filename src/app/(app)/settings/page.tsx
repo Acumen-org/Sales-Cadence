@@ -13,7 +13,7 @@ import { getTwentyClient } from '@/lib/twenty';
 import { recentEvents } from '@/lib/engine/ingest';
 import { Badge, Card, KeyValue, Surface, Tabs, ViewHeader, Empty, Count } from '@/components/ui';
 import { UsersPanel } from '@/components/settings/users-panel';
-import { leaverHasWork, leaverWork, leaverWorkWords } from '@/lib/outreach/ownership';
+import { leaverHasWork, leaverWork } from '@/lib/outreach/ownership';
 import { BlockedAccountsPanel } from '@/components/settings/blocked-accounts-panel';
 import { NonProspectRulesForm } from '@/components/settings/non-prospect-rules-form';
 import { listBlockedAccounts } from '@/lib/blocked-accounts';
@@ -162,7 +162,7 @@ async function UsersTab({ selfId }: { selfId: string }) {
         openWork: u._count.enrollments,
         openPodIds: [...new Set(u.enrollments.flatMap((e) => e.podId ? [e.podId] : []))],
         podIds: u.pods.map((p) => p.podId),
-        holds: holds.get(u.id) && leaverHasWork(holds.get(u.id)!) ? leaverWorkWords(holds.get(u.id)!) : null,
+        work: holds.get(u.id) && leaverHasWork(holds.get(u.id)!) ? holds.get(u.id)! : null,
         callerNumber: u.callerNumber,
         coldContacts: holds.get(u.id)?.contacts ?? 0,
       }))}

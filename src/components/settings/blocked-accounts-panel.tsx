@@ -7,6 +7,7 @@ import { blockAccountAction, searchAccountsToBlock, unblockAccountAction } from 
 import { IconLock, IconSearch } from '@/components/icons';
 import { Card, Empty, EmptyState } from '@/components/ui';
 import { useConfirm } from '@/components/confirm-dialog';
+import { blockAccountConfirm, unblockAccountConfirm } from '@/lib/confirms';
 
 export type BlockedRow = { companyId: string; name: string; domain: string | null; reason: string | null; byName: string | null; at: string };
 
@@ -82,7 +83,7 @@ export function BlockedAccountsPanel({ rows }: { rows: BlockedRow[] }) {
                     disabled={pending}
                     className="btn-secondary btn-sm !border-red-200 !text-red-700 hover:!bg-red-50"
                     onClick={async () => {
-                      if (!(await ask({ title: `Block ${match.name}?`, effects: ['It leaves Accounts, People, search and enrichment for everyone.', 'Any sequence its people are in ends.'], confirmLabel: 'Block', tone: 'danger' }))) return;
+                      if (!(await ask(blockAccountConfirm(match.name)))) return;
                       run(blockAccountAction, { companyId: match.id, reason });
                     }}
                   >
@@ -129,7 +130,7 @@ export function BlockedAccountsPanel({ rows }: { rows: BlockedRow[] }) {
                         disabled={pending}
                         className="btn-secondary btn-sm"
                         onClick={async () => {
-                          if (!(await ask({ title: `Put ${row.name} back in Cadence?`, effects: ['It shows again in Accounts, People, search and enrichment.'], confirmLabel: 'Unblock' }))) return;
+                          if (!(await ask(unblockAccountConfirm(row.name)))) return;
                           run(unblockAccountAction, { companyId: row.companyId });
                         }}
                       >
