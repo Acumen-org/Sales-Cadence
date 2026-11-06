@@ -22,7 +22,12 @@ import { campaignStatusLabel, enrollConflictLabel } from '@/lib/campaign-status'
 import { CampaignControls, CampaignLifecycle, HardStopToggle } from '@/components/campaigns/campaign-controls';
 import { EnrollmentActions } from '@/components/campaigns/enrollment-actions';
 import { IconCampaigns } from '@/components/icons';
-import { Badge, CAMPAIGN_TONE, Card, Count, enrollmentTone, Empty, RecordHeader, Stat, enrollmentStatusLabel } from '@/components/ui';
+import { Badge, CAMPAIGN_TONE, Card, Count, enrollmentTone, Empty, RecordHeader, Stat, Surface, enrollmentStatusLabel } from '@/components/ui';
+import { ActiveSection } from '@/components/active-section';
+import { ColdOutreachTabs } from '@/components/sandbox/section-tabs';
+import { ColdCampaignNotes } from '@/components/campaigns/cold-campaign-notes';
+import { LegacyColdCampaign } from '@/components/campaigns/legacy-cold-campaign';
+import { COLD_CAMPAIGNS_HREF, COLD_CONTACT_BASE } from '@/lib/subject';
 
 const AUDIENCE_PAGE = 50;
 
@@ -35,19 +40,24 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
   const { id } = await params;
   const sp = await searchParams;
   const today = todayIn(user.timezone);
-  // A sandbox campaign has its own page in the Sandbox section.
-  if ((await prisma.campaign.findUnique({ where: { id }, select: { audience: true } }))?.audience === 'SANDBOX') redirect(`/sandbox/campaigns/${id}`);
   const detail = await campaignDetail(id, today);
   if (!detail) notFound();
   const { campaign, history, summary, byStep, byFo, podFos, enrollments } = detail;
   if (!canSeeAllPods(user) && !user.podIds.includes(campaign.podId)) redirect('/campaigns');
   const manager = canManageCampaigns(user, campaign.podId);
   const editor = canEditCampaign(user, campaign);
+  // One page for both kinds (PLAN 4.4, B134): a cold campaign shows inside Cold outreach, its tab bar
+  // and sidebar item, with the cold notes and its contacts' own pages.
+  const cold = campaign.audience === 'SANDBOX';
+  const section = cold ? <><ActiveSection href={COLD_CONTACT_BASE} /><div className="px-4 pt-4 sm:px-6"><Surface flush><ColdOutreachTabs current="campaigns" /></Surface></div></> : null;
+  if (cold && !campaign.plannerDraft) {
+    return <>{section}<LegacyColdCampaign campaign={campaign} manager={manager} editor={editor} canDelete={canDeleteCampaign(user, { status: campaign.status, podId: campaign.podId, createdById: campaign.createdById, everLaunched: history.length > 0 })} timezone={user.timezone} /></>;
+  }
   if (campaign.plannerDraft) {
     const people = await campaignPeoplePage(campaign, sp.page, sp.q);
     // On the start day of a running campaign, the pod's leaders can still bring in a new FO.
     // Rendered all start day, even once nobody is left to add, so the last "joined" message stays.
-    const joinable = manager && addFoWindow(campaign).open ? await addFoCandidates(id) : null;
+    const joinable = manager && !cold && addFoWindow(campaign).open ? await addFoCandidates(id) : null;
     const addFo = joinable ? <AddFoPanel campaignId={id} campaignName={campaign.name} podId={campaign.podId} candidates={joinable.map((f) => ({ id: f.id, name: f.name }))} defaultPace={(campaign.plannerDraft as unknown as CampaignDraft).defaultBatchSize || 10} today={todayIn(workspaceTimezone())} /> : undefined;
     // The last failed start, unless the campaign was published again after it.
     const failed = campaign.status === 'SCHEDULED' ? await prisma.auditLog.findFirst({ where: { entityType: 'campaign', entityId: id, action: { in: ['launch_failed', 'calendar_published', 'calendar_republished'] } }, orderBy: { createdAt: 'desc' } }) : null;
@@ -55,7 +65,9 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
     // Only someone who can edit gets the Review button; everyone else is told who can.
     const launchError = failure && campaign.followupSourceId && !canApproveCampaign(user, campaign.podId) ? `${failure} Ask a Sales Leader or Pod Manager of ${campaign.pod.name} to fix it.`
       : failure && !editor ? `${failure} Ask whoever created it, or a Senior FO, Sales Leader or Pod Manager of ${campaign.pod.name}, to fix it.` : failure;
-    return <PlannedCampaignDetail canDelete={canDeleteCampaign(user, { status: campaign.status, podId: campaign.podId, createdById: campaign.createdById, everLaunched: people.launched })} campaign={campaign} manager={manager} editor={editor} people={people} q={sp.q ?? ''} launchError={launchError} addFo={addFo} />;
+    const planned = <PlannedCampaignDetail canDelete={canDeleteCampaign(user, { status: campaign.status, podId: campaign.podId, createdById: campaign.createdById, everLaunched: people.launched })} campaign={campaign} manager={manager} editor={editor} people={people} q={sp.q ?? ''} launchError={launchError} addFo={cold ? undefined : addFo}
+      {...(cold ? { back: { label: 'Cold outreach · Campaigns', href: COLD_CAMPAIGNS_HREF }, notes: <ColdCampaignNotes campaign={campaign} launched={people.launched} timezone={user.timezone} /> } : {})} />;
+    return cold ? <>{section}{planned}</> : planned;
   }
   const proposed = ['PENDING_APPROVAL', 'SCHEDULED', 'DRAFT'].includes(campaign.status);
   const page = Math.max(1, Number.parseInt(sp.page ?? '1', 10) || 1);

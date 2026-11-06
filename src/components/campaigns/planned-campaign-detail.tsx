@@ -1,6 +1,6 @@
 import { DeleteCampaign } from './delete-campaign';
 import { barColour } from '@/lib/bar-colour';
-import { diffDays, todayIn, type LocalDate } from '@/lib/dates';
+import { diffDays, formatLocalDate, todayIn, type LocalDate } from '@/lib/dates';
 import { IconCampaigns } from '@/components/icons';
 import { workspaceTimezone } from '@/lib/workspace';
 import Link from 'next/link';
@@ -11,15 +11,24 @@ import type { PublishedCalendar } from '@/lib/campaign-planning-service';
 import { calendarDateLabel } from '@/lib/campaign-planner';
 import { CampaignCalendarView } from './campaign-calendar';
 import { CampaignLifecycle, CampaignControls } from './campaign-controls';
-import { Badge, Empty, Stat, enrollmentStatusLabel } from '@/components/ui';
+import { Badge, Empty, Stat, enrollmentStatusLabel, enrollmentTone } from '@/components/ui';
+import { EnrollmentActions } from './enrollment-actions';
 import { CAMPAIGN_PEOPLE_PAGE, type CampaignPeoplePage } from '@/lib/campaign-people-page';
 import { campaignStatusLabel } from '@/lib/campaign-status';
 
 const daysLeft = (from: LocalDate, to: LocalDate) => { const n = diffDays(from, to); return `${n} ${n === 1 ? 'day' : 'days'}`; };
+/** "Email 2 · Thu 12 Nov": a cold row's earliest open step and its day (B198). */
+const nextStepWords = (step: string) => { const [label, day] = step.split(' · '); return day ? `${label} · ${formatLocalDate(day)}` : label; };
 
-export function PlannedCampaignDetail({ campaign: c, manager, editor = manager, people, q = '', launchError, canDelete = false, addFo }: {
+export function PlannedCampaignDetail({ campaign: c, manager, editor = manager, people, q = '', launchError, canDelete = false, addFo, back = { label: 'Campaigns', href: '/campaigns' }, notes }: {
   campaign: Campaign; manager: boolean; /** May change the plan before it starts: a manager, or whoever created it. */ editor?: boolean; people: CampaignPeoplePage; q?: string; canDelete?: boolean; launchError?: string | null; addFo?: ReactNode;
+  /** The way back: Campaigns, or Cold outreach's Campaigns for a cold campaign (PLAN 4.4). */
+  back?: { label: string; href: string };
+  /** A cold campaign's notes: who was left out when it was published and when it started, and what to know first. */
+  notes?: ReactNode;
 }) {
+  // A cold campaign is the same page (B134), with its contacts' own actions and their own pages.
+  const cold = c.audience === 'SANDBOX';
   const draft = c.plannerDraft as CampaignDraft;
   const plan = c.publishedPlan as unknown as PublishedCalendar | null;
   const editable = ['DRAFT', 'SCHEDULED', 'PENDING_APPROVAL'].includes(c.status) && !people.launched;
@@ -35,8 +44,8 @@ export function PlannedCampaignDetail({ campaign: c, manager, editor = manager, 
       <div className="focus-art" aria-hidden />
       <div className="relative flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <Link href="/campaigns" className="text-[12.5px] font-medium text-[#c1d4ca] hover:text-white">← Campaigns</Link>
-          <p className="mt-4 flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-[#d5e9ad]"><IconCampaigns size={13} /> Campaign<span className={`rounded-full px-2 py-0.5 text-[10.5px] normal-case tracking-normal ${c.status === 'ACTIVE' ? 'bg-[#d5e9ad] text-[#203e35]' : 'bg-white/10 text-white'}`}>{campaignStatusLabel(c.status)}</span></p>
+          <Link href={back.href} className="text-[12.5px] font-medium text-[#c1d4ca] hover:text-white">← {back.label}</Link>
+          <p className="mt-4 flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-[#d5e9ad]"><IconCampaigns size={13} /> {cold ? 'Cold campaign' : 'Campaign'}<span className={`rounded-full px-2 py-0.5 text-[10.5px] normal-case tracking-normal ${c.status === 'ACTIVE' ? 'bg-[#d5e9ad] text-[#203e35]' : 'bg-white/10 text-white'}`}>{campaignStatusLabel(c.status)}</span></p>
           <h1 className="mt-2 break-words text-[30px] font-semibold leading-tight tracking-[-0.03em]">{c.name}</h1>
         </div>
         <div className="flex flex-wrap gap-2">{editor && editable && <Link className="btn-primary" href={`/campaigns/${c.id}/edit`}>Edit campaign</Link>}{canDelete && <DeleteCampaign id={c.id} name={c.name} simple={!people.launched} />}{manager && ['STOPPED', 'COMPLETED'].includes(c.status) && <Link className="btn-primary" href={`/campaigns/new?restart=${c.id}`}>Plan another run</Link>}{manager && c.status !== 'PENDING_APPROVAL' && <CampaignLifecycle campaignId={c.id} status={c.status} />}</div>
@@ -52,16 +61,20 @@ export function PlannedCampaignDetail({ campaign: c, manager, editor = manager, 
       </div>
     </header>
     {launchError && <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-5"><h2 className="font-semibold">This campaign did not start</h2><p className="mt-2 text-sm">{launchError}</p>{editor && editable && <Link href={`/campaigns/${c.id}/edit`} className="btn-secondary mt-3">Review campaign</Link>}</div>}
-    {late > 0 && <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-5"><p className="font-medium">{late} {late === 1 ? 'person has an overdue step' : 'people have overdue steps'}</p></div>}
-    {people.launched && <div className="grid grid-cols-2 gap-3 lg:grid-cols-4"><Stat label="People" value={people.total} /><Stat label="Steps completed" value={completed} /><Stat label="Replies" value={replies} /><Stat label="Meetings" value={meetings} /></div>}
+    {notes}
+    {late > 0 && <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-5"><p className="font-medium">{late} {late === 1 ? (cold ? 'contact has an overdue step' : 'person has an overdue step') : cold ? 'contacts have overdue steps' : 'people have overdue steps'}</p></div>}
+    {people.launched && <div className="grid grid-cols-2 gap-3 lg:grid-cols-4"><Stat label={cold ? 'Contacts' : 'People'} value={people.total} /><Stat label="Steps completed" value={completed} /><Stat label="Replies" value={replies} /><Stat label="Meetings" value={meetings} /></div>}
     {addFo}
     {plan && <section className="surface p-5"><CampaignCalendarView draft={draft} calendar={plan} /></section>}
-    {manager && people.launched && people.stats.finished > 0 && <CampaignControls calendar campaignId={c.id} status={c.status} sequences={[]} currentSequenceId={c.sequenceId} defaultName={`${c.name} - follow-up`} today={todayIn(workspaceTimezone())} />}
+    {manager && !cold && people.launched && people.stats.finished > 0 && <CampaignControls calendar campaignId={c.id} status={c.status} sequences={[]} currentSequenceId={c.sequenceId} defaultName={`${c.name} - follow-up`} today={todayIn(workspaceTimezone())} />}
     {(people.total > 0 || q) && <section className="surface overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-3 p-5"><h2 className="font-semibold">{people.launched ? 'People and progress' : 'People'} <span className="font-normal tabular-nums text-ink-500">{people.total.toLocaleString('en-US')}</span></h2><form><input name="q" defaultValue={q} placeholder="Search people" aria-label="Search people in the campaign" className="!w-72" /></form></div>
-      {people.rows.length ? <div className="overflow-x-auto"><table className="table"><thead><tr><th>Person</th><th>FO</th><th>Outreach</th>{people.launched && <><th>Progress</th><th>Status</th></>}</tr></thead><tbody>{people.rows.map(r => {
+      <div className="flex flex-wrap items-center justify-between gap-3 p-5"><h2 className="font-semibold">{people.launched ? (cold ? 'Contacts and progress' : 'People and progress') : cold ? 'Contacts' : 'People'} <span className="font-normal tabular-nums text-ink-500">{people.total.toLocaleString('en-US')}</span></h2><form><input name="q" defaultValue={q} placeholder={cold ? 'Search contacts' : 'Search people'} aria-label={cold ? 'Search contacts in the campaign' : 'Search people in the campaign'} className="!w-72" /></form></div>
+      {people.rows.length ? <div className="overflow-x-auto"><table className="table"><thead><tr><th>{cold ? 'Contact' : 'Person'}</th><th>FO</th><th>Outreach</th>{people.launched && <><th>Progress</th><th>Status</th></>}{cold && people.launched && <><th>Next step</th>{manager && <th>Manage</th>}</>}</tr></thead><tbody>{people.rows.map(r => {
         const flow = draft.flows.find(f => f.id === r.flowId) ?? draft.flows[0];
-        return <tr key={r.id}><td><Link href={`/people/${r.personId}`} className="font-medium">{r.name}</Link>{r.company ? <div className="text-[12px] text-ink-500">{r.company}</div> : null}</td><td>{r.fo ?? <Empty />}</td><td>{flow.name}</td>{people.launched && <><td className="tabular-nums">{r.step} of {flow.steps.length}</td><td><Badge>{r.status ? enrollmentStatusLabel({ status: r.status, exitReason: r.exitReason }) : ''}</Badge></td></>}</tr>;
+        // B198: a contact whose first step is still ahead is Scheduled, not Active.
+        const scheduled = cold && r.status === 'ACTIVE' && r.startDate && r.startDate > today && r.step === 0;
+        const label = scheduled ? `Scheduled · starts ${formatLocalDate(r.startDate!)}` : r.status ? enrollmentStatusLabel({ status: r.status, exitReason: r.exitReason }) : '';
+        return <tr key={r.id}><td><Link href={r.href} className="font-medium">{r.name}</Link>{r.company ? <div className="text-[12px] text-ink-500">{r.company}</div> : null}</td><td>{r.fo ?? <Empty />}</td><td>{flow.name}</td>{people.launched && <><td className="tabular-nums">{r.step} of {flow.steps.length}</td><td>{cold ? <Badge tone={scheduled ? 'purple' : r.status ? enrollmentTone({ status: r.status, exitReason: r.exitReason }) : 'gray'}>{label}</Badge> : <Badge>{label}</Badge>}</td></>}{cold && people.launched && <><td className="text-[12.5px] text-ink-700">{r.nextStep ? nextStepWords(r.nextStep) : <Empty />}</td>{manager && <td>{r.status && r.foUserId ? <EnrollmentActions enrollmentId={r.id} status={r.status} foUserId={r.foUserId} fos={[]} compact /> : null}</td>}</>}</tr>;
       })}</tbody></table></div> : <p className="px-5 pb-5 text-sm text-ink-500">Nobody matches “{q}”.</p>}
       {people.pages > 1 ? <div className="flex items-center justify-between border-t border-line px-5 py-3 text-[12.5px] text-ink-500"><span className="tabular-nums">{first.toLocaleString('en-US')}-{last.toLocaleString('en-US')} of {people.total.toLocaleString('en-US')}</span><span className="flex items-center gap-2"><span className="tabular-nums">Page {people.page} of {people.pages}</span>{people.page > 1 ? <Link href={pageHref(people.page - 1)} className="btn-secondary btn-sm" scroll={false}>Previous</Link> : null}{people.page < people.pages ? <Link href={pageHref(people.page + 1)} className="btn-secondary btn-sm" scroll={false}>Next</Link> : null}</span></div> : null}
     </section>}

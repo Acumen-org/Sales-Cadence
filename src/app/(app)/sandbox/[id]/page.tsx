@@ -76,6 +76,8 @@ export default async function SandboxContactPage({ params, searchParams }: { par
     },
   });
   if (!contact) notFound();
+  // B144: a campaign that has not started holds the contact in its list, and says so here.
+  const upcoming = await prisma.campaign.findMany({ where: { audience: 'SANDBOX', status: { in: ['SCHEDULED', 'DRAFT'] }, personIds: { has: contact.id } }, orderBy: [{ status: 'desc' }, { startDate: 'asc' }], select: { id: true, name: true, status: true, startDate: true } });
   const actor = toActor(user);
   // B119, B208: Assign offers only the reps this reader may give the contact to.
   const [settings, users, moves, signals, history, pods] = await Promise.all([
@@ -160,7 +162,7 @@ export default async function SandboxContactPage({ params, searchParams }: { par
         <div className="flex flex-col items-end gap-2">
           {contact.phone && live ? <CallButton phone={contact.phone} template={settings.rules.clickToCallUrl} sandboxContactId={contact.id} nextActionId={open?.id ?? null} blocked={callBlocked} warning={gate?.warning} /> : null}
           {mayWork ? <LogCallButton sandboxContactId={contact.id} name={name} steps={callSteps.map((s) => ({ key: `${s.kind}:${s.id}`, words: s.words }))} now={nowLocal} blocked={logBlocked} /> : null}
-          {live ? <ContactActions id={contact.id} name={name} ready={readyToMove} unclaimed={!contact.ownerId || !contact.owner?.active} mayWork={mayWork} mayOptOut={mayOptOut} mayMove={canMoveToCrm(actor, contact)} mayAssign={users.length > 0 && canAssignSandbox(actor, contact, null) && (isAdmin(user) || actor.role !== 'JUNIOR_FO')} mayErase={canEraseContact(actor)} users={users} ownerId={contact.ownerId} work={work} pods={pods} confirms={confirms} openMove={openMove} /> : contact.status === 'REMOVED' || (contact.status === 'OPTED_OUT' && !contact.piiClearedAt) ? <ContactActions id={contact.id} ready={false} unclaimed={false} mayWork={false} mayOptOut={contact.status === 'REMOVED' && mayOptOut} mayMove={false} mayAssign={false} mayErase={canEraseContact(actor)} users={[]} confirms={confirms} /> : null}
+          {live ? <ContactActions id={contact.id} name={name} ready={readyToMove} unclaimed={!contact.ownerId || !contact.owner?.active} mayWork={mayWork} mayOptOut={mayOptOut} mayMove={canMoveToCrm(actor, contact)} mayAssign={users.length > 0 && canAssignSandbox(actor, contact, null) && (isAdmin(user) || actor.role !== 'JUNIOR_FO')} mayRelease={actor.role === 'JUNIOR_FO' && contact.ownerId === user.id && canAssignSandbox(actor, contact, null)} mayErase={canEraseContact(actor)} users={users} ownerId={contact.ownerId} work={work} pods={pods} confirms={confirms} openMove={openMove} /> : contact.status === 'REMOVED' || (contact.status === 'OPTED_OUT' && !contact.piiClearedAt) ? <ContactActions id={contact.id} ready={false} unclaimed={false} mayWork={false} mayOptOut={contact.status === 'REMOVED' && mayOptOut} mayMove={false} mayAssign={false} mayErase={canEraseContact(actor)} users={[]} confirms={confirms} /> : null}
         </div>
       </div>
     </Surface>
@@ -184,7 +186,7 @@ export default async function SandboxContactPage({ params, searchParams }: { par
         </Surface>
         <Surface flush>
           <ViewHeader title="Campaigns" />
-          {contact.enrollments.length ? <ul className="divide-y divide-line text-[13px]">{contact.enrollments.map((e) => <li key={e.id} className="px-4 py-2.5"><Link href={e.campaign ? `/sandbox/campaigns/${e.campaign.id}` : '#'} className="text-ink-900 hover:text-brand-700">{e.campaign?.name ?? e.sequence.name}</Link><span className="text-ink-500"> · {enrollmentStatusLabel(e)}</span><div className="mt-1 flex flex-wrap gap-1.5">{e.tasks.map((t) => <span key={t.id} className={t.state === 'DONE' ? 'text-brand-700' : t.state === 'PENDING' ? 'text-ink-900' : 'text-ink-400'}>{t.label}{t.state === 'PENDING' ? ` (${formatLocalDate(t.dueDate)})` : ''}</span>)}</div></li>)}</ul> : <EmptyState title="Not in a campaign" />}
+          {contact.enrollments.length || upcoming.length ? <ul className="divide-y divide-line text-[13px]">{upcoming.map((c) => <li key={c.id} className="px-4 py-2.5"><Link href={`/campaigns/${c.id}`} className="text-ink-900 hover:text-brand-700">{c.name}</Link><span className="text-ink-500"> · {c.status === 'DRAFT' ? 'Draft: starts when it is published' : `Scheduled: starts ${formatLocalDate(c.startDate)}`}</span></li>)}{contact.enrollments.map((e) => <li key={e.id} className="px-4 py-2.5">{e.campaign ? <Link href={`/campaigns/${e.campaign.id}`} className="text-ink-900 hover:text-brand-700">{e.campaign.name}</Link> : <span className="text-ink-900">{e.sequence.name}</span>}<span className="text-ink-500"> · {enrollmentStatusLabel(e)}</span><div className="mt-1 flex flex-wrap gap-1.5">{e.tasks.map((t) => <span key={t.id} className={t.state === 'DONE' ? 'text-brand-700' : t.state === 'PENDING' ? 'text-ink-900' : 'text-ink-400'}>{t.label}{t.state === 'PENDING' ? ` (${formatLocalDate(t.dueDate)})` : ''}</span>)}</div></li>)}</ul> : <EmptyState title="Not in a campaign" />}
         </Surface>
       </div>
       <div className="space-y-4">
