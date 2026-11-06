@@ -133,7 +133,7 @@ export async function previewEnrollment(req: EnrollRequest, client?: TwentyClien
   // Somebody promised to another upcoming campaign is not promised twice: whichever launched
   // second would otherwise skip them silently as "already in a sequence".
   const scheduledElsewhere = new Map<string, string>();
-  for (const c of await prisma.campaign.findMany({ where: { status: { in: ['PENDING_APPROVAL', 'SCHEDULED'] }, personIds: { hasSome: ids }, ...(req.campaignId ? { id: { not: req.campaignId } } : {}) }, select: { name: true, personIds: true } })) {
+  for (const c of await prisma.campaign.findMany({ where: { audience: 'CRM', status: { in: ['PENDING_APPROVAL', 'SCHEDULED'] }, personIds: { hasSome: ids }, ...(req.campaignId ? { id: { not: req.campaignId } } : {}) }, select: { name: true, personIds: true } })) {
     for (const pid of c.personIds) if (!scheduledElsewhere.has(pid)) scheduledElsewhere.set(pid, c.name);
   }
 

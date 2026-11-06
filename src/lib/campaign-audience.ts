@@ -3,7 +3,7 @@ import { ROLES_NEEDING_POD } from './auth/rbac';
 import { externalPeopleWhere } from './internal-organizations';
 import { cachedPersonName } from './person-cache';
 
-export type AudienceIssueKind = 'deleted' | 'dnd' | 'optedOut' | 'blocked' | 'internal' | 'busy' | 'owner' | 'outside';
+export type AudienceIssueKind = 'deleted' | 'dnd' | 'optedOut' | 'blocked' | 'internal' | 'busy' | 'owner' | 'outside' | 'inCrm';
 /** Someone who cannot be in this campaign, and the one reason that decides it. `ownerId` is set when their owner is an FO of this pod who could run them. */
 export type AudienceIssue = { id: string; name: string; company: string | null; kind: AudienceIssueKind; reason: string; ownerId?: string };
 /** `anyPod`: whoever is choosing may take contacts from any pod (canAddFromAnyPod). `joining`: the FO being added to a running campaign, whose people these are meant to be. */
@@ -30,7 +30,8 @@ export async function campaignAudienceIssues(ids: string[], context?: AudienceCo
     db.personCache.findMany({ where: { id: { in: ids } }, select: { id: true, firstName: true, lastName: true, email: true, companyName: true, companyId: true, deletedAt: true, dnd: true, optedOut: true, podOwner: true, ownerMemberId: true } }),
     db.personCache.findMany({ where: { id: { in: ids }, AND: [await externalPeopleWhere()] }, select: { id: true } }),
     db.blockedAccount.findMany({ select: { companyId: true } }),
-    db.campaign.findMany({ where: { ...(context?.campaignId ? { id: { not: context.campaignId } } : {}), status: { in: ['SCHEDULED', 'PENDING_APPROVAL', 'ACTIVE', 'PAUSED'] }, personIds: { hasSome: ids } }, select: { name: true, personIds: true } }),
+    // B044: only CRM campaigns hold CRM people; a cold campaign's ids are cold contacts.
+    db.campaign.findMany({ where: { ...(context?.campaignId ? { id: { not: context.campaignId } } : {}), audience: 'CRM', status: { in: ['SCHEDULED', 'PENDING_APPROVAL', 'ACTIVE', 'PAUSED'] }, personIds: { hasSome: ids } }, select: { name: true, personIds: true } }),
     db.enrollment.findMany({ where: { personId: { in: ids }, status: { in: ['ACTIVE', 'PAUSED'] }, ...(context?.campaignId ? { OR: [{ campaignId: null }, { campaignId: { not: context.campaignId } }] } : {}) }, select: { personId: true, campaign: { select: { name: true } }, sequence: { select: { name: true } } } }),
     context?.campaignId && !context.anyPod ? campaignMembers(context.campaignId, db) : Promise.resolve(new Set<string>()),
   ]);

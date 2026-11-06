@@ -25,7 +25,7 @@ import { COLD_CONTACT_BASE, coldRef, personRef, subjectHref } from './subject';
  * or when it is answered (a suggestion accepted or dismissed).
  */
 
-export type NotificationKind = 'reply' | 'bounce' | 'possible_bounce' | 'compliance_alert' | 'next_step_suggestion' | 'call_flag' | 'move_finished' | 'retention_warning';
+export type NotificationKind = 'reply' | 'bounce' | 'possible_bounce' | 'compliance_alert' | 'next_step_suggestion' | 'call_flag' | 'move_finished' | 'retention_warning' | 'campaign_published' | 'campaign_back_to_draft';
 
 type Tx = Prisma.TransactionClient | typeof prisma;
 
@@ -158,6 +158,16 @@ export function bellWords(n: Pick<Row, 'id' | 'kind' | 'personId' | 'sandboxCont
       const done = num(p.done), failed = num(p.failed);
       const title = failed ? `${plural(done, 'contact')} moved, ${failed} failed` : `${plural(done, 'contact')} moved`;
       return { kind, name: 'Move to CRM', company: null, title, detail: failed ? 'Open the move to see why and to retry.' : null, href: moveId ? `${COLD_CONTACT_BASE}/moves/${moveId}` : str(p.href), linkLabel: 'Open the move' };
+    }
+    case 'campaign_published': {
+      // B046: a cold campaign needs no approval; its pod's leaders hear that it will run.
+      const campaignId = str(p.campaignId), start = str(p.startDate), people = num(p.people);
+      return { kind, name: str(p.name) ?? 'A cold campaign', company: null, title: `${from} published a cold campaign${start && isLocalDate(start) ? ` starting ${formatLocalDate(start)}` : ''}`, detail: `${plural(people, 'contact')}. You can pause or stop it on its page.`, href: campaignId ? `/campaigns/${campaignId}` : null, linkLabel: 'Open the campaign' };
+    }
+    case 'campaign_back_to_draft': {
+      // The release: cold campaigns that waited for an approval are drafts now, for their creator to publish.
+      const campaignId = str(p.campaignId);
+      return { kind, name: str(p.name) ?? 'A cold campaign', company: null, title: 'Cold campaigns no longer need approval, so this one is a draft again', detail: 'Nothing was sent. Open it, check who is in it and publish it to schedule it.', href: campaignId ? `/campaigns/${campaignId}` : null, linkLabel: 'Open the campaign' };
     }
     case 'retention_warning': {
       const count = num(p.count);

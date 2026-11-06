@@ -1,5 +1,6 @@
 import type { CampaignDraft } from './campaign-planner';
-import type { CampaignStatus, EnrollmentStatus } from '@prisma/client';
+import type { CampaignAudience, CampaignStatus, EnrollmentStatus } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { prisma } from './db';
 import { CRM_SUBJECT } from './subject';
 import { addDays, todayIn, type LocalDate } from './dates';
@@ -116,11 +117,18 @@ function teamOf(c: { plannerDraft: unknown; publishedPlan?: unknown; enrollments
 
 export type CampaignChoice = { calendar: boolean; id: string; name: string; status: CampaignStatus; kind: 'upcoming' | 'running'; startDate: LocalDate; endDate: LocalDate | null; podId: string; podName: string; members: number };
 
-/** Campaigns a person can be added to: upcoming and running ones the reader may manage, or read. */
-export async function campaignChoices(user: SessionUser, opts: { manageOnly?: boolean } = {}): Promise<CampaignChoice[]> {
+/**
+ * Campaigns a person can be added to: upcoming and running ones the reader may manage, or read, of
+ * the one kind asked for (B044): CRM people go into CRM campaigns and cold contacts into cold ones. A
+ * cold choice is a studio campaign that can still take people: never one from before the studio, nor
+ * one whose start date passed without it starting (B131).
+ */
+export async function campaignChoices(user: SessionUser, opts: { manageOnly?: boolean; audience?: CampaignAudience } = {}): Promise<CampaignChoice[]> {
   const pods = visiblePodIds(user);
+  const cold = opts.audience === 'SANDBOX';
+  const today = todayIn(workspaceTimezone());
   const campaigns = await prisma.campaign.findMany({
-    where: { status: { in: [...UPCOMING, 'ACTIVE', 'PAUSED'] }, ...(pods === null ? {} : { podId: { in: pods } }) },
+    where: { audience: opts.audience ?? 'CRM', status: { in: [...UPCOMING, 'ACTIVE', 'PAUSED'] }, ...(pods === null ? {} : { podId: { in: pods } }), ...(cold ? { plannerDraft: { not: Prisma.DbNull }, NOT: { status: 'SCHEDULED', startDate: { lt: today } } } : {}) },
     orderBy: [{ status: 'asc' }, { startDate: 'asc' }],
     select: { id: true, name: true, status: true, startDate: true, endDate: true, podId: true, personIds: true, plannerDraft: true, publishedPlan: true, pod: { select: { name: true } }, enrollments: { distinct: ['foUserId'], select: { foUserId: true } }, _count: { select: { enrollments: { where: { status: { in: ['ACTIVE', 'PAUSED'] } } } } } },
   });
