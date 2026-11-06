@@ -114,12 +114,53 @@ export async function markCrmCopiesOf(cold: EmailTouch & { sandboxContactId: str
   return copies.length;
 }
 
-/** The CRM's record of an email to this person, when a cold contact pointing to them already has it: the cold touch it copies. */
+/**
+ * The CRM's record of an email to this person, when a cold contact pointing to them already has it:
+ * the cold touch it copies. That touch may itself be the copy of a rep's "They replied"
+ * (joinMarkedReply); a copy of a copy is still out of every figure.
+ */
 export async function coldTouchOf(crm: { personId: string; direction: 'INBOUND' | 'OUTBOUND'; occurredAt: Date; summary: string }): Promise<string | null> {
   const contacts = await prisma.sandboxContact.findMany({ where: { OR: [{ crmMatchPersonId: crm.personId }, { crmAutoPersonId: crm.personId }, { twentyPersonId: crm.personId }] }, select: { id: true } });
   if (!contacts.length) return null;
-  const near = await prisma.touch.findMany({ where: { sandboxContactId: { in: contacts.map((x) => x.id) }, audience: 'SANDBOX', channel: 'EMAIL', direction: crm.direction, copyOfTouchId: null, occurredAt: { gte: new Date(crm.occurredAt.getTime() - SAME_EMAIL_MS), lte: new Date(crm.occurredAt.getTime() + SAME_EMAIL_MS) } }, select: { id: true, direction: true, occurredAt: true, summary: true }, orderBy: { occurredAt: 'asc' } });
+  const near = await prisma.touch.findMany({ where: { sandboxContactId: { in: contacts.map((x) => x.id) }, audience: 'SANDBOX', channel: 'EMAIL', direction: crm.direction, occurredAt: { gte: new Date(crm.occurredAt.getTime() - SAME_EMAIL_MS), lte: new Date(crm.occurredAt.getTime() + SAME_EMAIL_MS) } }, select: { id: true, direction: true, occurredAt: true, summary: true }, orderBy: { occurredAt: 'asc' } });
   return near.find((t) => sameEmail(t, crm))?.id ?? null;
+}
+
+/** The reply touch a rep records with "They replied" on a cold step (actions/tasks.ts): one per enrollment. */
+export const MARKED_REPLY_PREFIX = 'replied:';
+/** A rep marks a reply after it came, sometimes days after; a clock may be a few minutes out. */
+const MARKED_AFTER_MS = 7 * 86_400_000;
+
+/**
+ * One reply, counted once (S8): a rep marks "They replied" on a cold step, and Outlook tracking (or the
+ * CRM's mail sync) records the same reply, in either order. Whichever was recorded first counts; the
+ * one recorded now becomes its copy (Touch.copyOfTouchId), stays on the timeline, and every figure
+ * leaves it out, as S6 does for the CRM's copy of an email. "The same reply": the same cold contact,
+ * a real reply (an auto-reply answers nothing), the mark made from ten minutes before the email came
+ * to seven days after it, the nearest such pair, each joined once. Returns the touch it now copies.
+ */
+export async function joinMarkedReply(touch: { id: string; sandboxContactId: string | null; externalId: string; occurredAt: Date }): Promise<string | null> {
+  if (!touch.sandboxContactId) return null;
+  const marked = touch.externalId.startsWith(MARKED_REPLY_PREFIX);
+  // Joined already, as the one that counts (a CRM copy of an email is not a join).
+  if (await prisma.touch.count({ where: { copyOfTouchId: touch.id, ...(marked ? {} : { externalId: { startsWith: MARKED_REPLY_PREFIX } }) } })) return null;
+  const t = touch.occurredAt.getTime();
+  // A mark looks back for the email; an email looks forward for the mark.
+  const window = marked ? { gte: new Date(t - MARKED_AFTER_MS), lte: new Date(t + SAME_EMAIL_MS) } : { gte: new Date(t - SAME_EMAIL_MS), lte: new Date(t + MARKED_AFTER_MS) };
+  const others = await prisma.touch.findMany({
+    where: {
+      sandboxContactId: touch.sandboxContactId, id: { not: touch.id }, direction: 'INBOUND', copyOfTouchId: null, occurredAt: window,
+      ...(marked ? { channel: 'EMAIL', NOT: [{ externalId: { startsWith: MARKED_REPLY_PREFIX } }, { summary: { startsWith: 'Auto-reply' } }] } : { externalId: { startsWith: MARKED_REPLY_PREFIX } }),
+    },
+    select: { id: true, occurredAt: true },
+  });
+  if (!others.length) return null;
+  // Not one already joined to another: a mark copied by an email, or an email copied by a mark.
+  const taken = new Set((await prisma.touch.findMany({ where: { copyOfTouchId: { in: others.map((o) => o.id) }, ...(marked ? { externalId: { startsWith: MARKED_REPLY_PREFIX } } : {}) }, select: { copyOfTouchId: true } })).map((x) => x.copyOfTouchId));
+  const partner = others.filter((o) => !taken.has(o.id)).sort((a, b) => Math.abs(a.occurredAt.getTime() - t) - Math.abs(b.occurredAt.getTime() - t))[0];
+  if (!partner) return null;
+  const joined = await prisma.touch.updateMany({ where: { id: touch.id, copyOfTouchId: null }, data: { copyOfTouchId: partner.id } });
+  return joined.count ? partner.id : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +309,8 @@ export async function recordColdReply(from: string, mail: SeenMail, automatic: b
     // An out-of-office answers nobody: it never stops a campaign and never rings (N064).
     if (automatic) { out.autoReplies++; continue; }
     out.replies++;
+    // The rep may have marked this reply in Tasks already: it counts once.
+    await joinMarkedReply(touch);
     const running = await prisma.enrollment.findMany({ where: { sandboxContactId: c.id, personId: null, status: { in: OCCUPYING_STATUSES } }, select: { id: true, foUserId: true } });
     for (const e of running) await markReplied(e.id, { at: mail.at, evidenceId: externalId, actor: SYSTEM_ACTOR });
     // The campaign's rep, the mailbox it reached and the owner; the pod's leaders when nobody owns it.

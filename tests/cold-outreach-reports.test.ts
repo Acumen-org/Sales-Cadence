@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -8,9 +10,12 @@ import { buildReports, reportingRange, type Activity, type ReportingRange } from
 import { loadReportBundle } from '@/lib/reports-bundle';
 import { callReport } from '@/lib/calls/analytics';
 import { buildHome } from '@/lib/home-query';
-import { repliesByRep } from '@/lib/outreach/metrics';
+import { replyCount, repliesByRep, type Period } from '@/lib/outreach/metrics';
 import { reportsHref } from '@/lib/report-keys';
-import { EMAIL_TO_DO_NOT_CONTACT } from '@/lib/mail/cold-email';
+import { EMAIL_TO_DO_NOT_CONTACT, MARKED_REPLY_PREFIX, recordColdReply, type SeenMail } from '@/lib/mail/cold-email';
+import { ingestEvent } from '@/lib/engine/ingest';
+import { rawFromMessage } from '@/lib/engine/reconcile';
+import { getMockTwentyClient } from '@/lib/twenty/mock-client';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 import { readyContact } from './helpers/sandbox';
 
@@ -28,6 +33,7 @@ const { CallsDocument } = await import('@/components/reports/calls-report');
 const { ReportDocument } = await import('@/components/reports/report-document');
 const { GET: exportReport } = await import('@/app/reports/export/route');
 const { newColdContactFromCallAction } = await import('@/lib/actions/call-forms');
+const { finishFromTaskAction } = await import('@/lib/actions/tasks');
 
 /**
  * S8 (cold outreach PLAN 6, W9): Reports in three views, All outreach · CRM · Cold outreach, every
@@ -355,5 +361,85 @@ describe('Reports: All outreach, CRM and Cold outreach', () => {
     const bundle = await loadReportBundle(admin, { from: '2026-11-02', to: '2026-11-08' });
     expect(bundle.campaigns.find((x) => x.id === campaign.id)?.cold).toBe(true);
     expect((await loadReportBundle(admin, { from: '2026-11-02', to: '2026-11-08', audience: 'crm' })).campaigns.find((x) => x.id === campaign.id)).toBeUndefined();
+  });
+});
+
+describe('one reply counts once: "They replied" and the reply Outlook tracks (S8)', () => {
+  let b: Basics;
+  beforeEach(async () => {
+    await resetDb();
+    b = await seedBasics();
+    auth.user = session(b.users.alisa, [b.pods.Alisa.id]);
+  });
+  const outlook = (key: string, atTime: Date): SeenMail => ({ key, conversationId: `conv-${key}`, subject: 'Re: A quick idea', at: atTime, mailboxUserId: b.users.alisa.id, via: 'outlook' });
+  const around = (t: Date): Period => ({ from: new Date(t.getTime() - 3 * 86_400_000), to: new Date(t.getTime() + 86_400_000) });
+  async function openStep(contactId: string) {
+    const e = await prisma.enrollment.create({ data: { sandboxContactId: contactId, foUserId: b.users.alisa.id, podId: b.pods.Alisa.id, sequenceId: b.sequence.id, startDate: '2026-10-26', audience: 'SANDBOX', currentStep: 0 } });
+    return prisma.task.create({ data: { enrollmentId: e.id, foUserId: b.users.alisa.id, stepIndex: 0, stepId: 's', stepDay: 1, actionIndex: 0, actionId: 'a', action: 'EMAIL', label: 'Email 1', dueDate: '2026-10-26', dueAt: new Date('2026-10-26T15:00:00Z'), plannedDate: '2026-10-26' } });
+  }
+  const theyReplied = async (taskId: string) => { const fd = new FormData(); fd.set('kind', 'replied'); fd.set('taskId', taskId); return finishFromTaskAction(fd); };
+  const replies = async (p: Period) => ({ all: await replyCount({ kind: 'all' }, 'all', p), cold: await replyCount({ kind: 'all' }, 'cold', p) });
+
+  it('the rep marks "They replied", then Outlook tracks the same reply: one reply, the mark counts', async () => {
+    const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+    expect(await theyReplied((await openStep(c.id)).id)).toEqual(expect.objectContaining({ ok: true }));
+    const mark = await prisma.touch.findFirstOrThrow({ where: { sandboxContactId: c.id, externalId: { startsWith: MARKED_REPLY_PREFIX } } });
+    // The email came an hour before the rep marked it; tracking reads it later.
+    await recordColdReply(c.email!, outlook('<r1@x>', new Date(mark.occurredAt.getTime() - 3_600_000)), false);
+    const tracked = await prisma.touch.findFirstOrThrow({ where: { sandboxContactId: c.id, externalId: { startsWith: 'graph:' } } });
+    expect(tracked.copyOfTouchId).toBe(mark.id);
+    expect(await replies(around(mark.occurredAt))).toEqual({ all: 1, cold: 1 });
+  });
+
+  it('the other way round: Outlook tracks the reply, then the rep marks "They replied": one reply, the email counts', async () => {
+    const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+    const atTime = new Date(Date.now() - 2 * 3_600_000);
+    await recordColdReply(c.email!, outlook('<r2@x>', atTime), false);
+    await theyReplied((await openStep(c.id)).id);
+    const tracked = await prisma.touch.findFirstOrThrow({ where: { sandboxContactId: c.id, externalId: { startsWith: 'graph:' } } });
+    const mark = await prisma.touch.findFirstOrThrow({ where: { sandboxContactId: c.id, externalId: { startsWith: MARKED_REPLY_PREFIX } } });
+    expect([tracked.copyOfTouchId, mark.copyOfTouchId]).toEqual([null, tracked.id]);
+    expect(await replies(around(atTime))).toEqual({ all: 1, cold: 1 });
+    // A second, later email is a second reply; an out-of-office answers nothing and joins nothing.
+    await recordColdReply(c.email!, { ...outlook('<r3@x>', new Date(atTime.getTime() + 3_600_000)), subject: 'Re: One more thing' }, false);
+    await recordColdReply(c.email!, { ...outlook('<r4@x>', new Date(atTime.getTime() + 7_200_000)), subject: 'Automatic reply: away' }, true);
+    expect(await replies(around(atTime))).toEqual({ all: 2, cold: 2 });
+  });
+
+  it('an "Also in CRM" contact: the mark, the tracked email and the CRM copy of it are one reply', async () => {
+    const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+    await prisma.personCache.create({ data: { id: 'person-twin', firstName: c.firstName, lastName: c.lastName, email: c.email, emailNorm: c.email, createdBySource: 'MANUAL' } });
+    await prisma.sandboxContact.update({ where: { id: c.id }, data: { crmMatchPersonId: 'person-twin' } });
+    await theyReplied((await openStep(c.id)).id);
+    const mark = await prisma.touch.findFirstOrThrow({ where: { sandboxContactId: c.id, externalId: { startsWith: MARKED_REPLY_PREFIX } } });
+    const atTime = new Date(mark.occurredAt.getTime() - 3_600_000);
+    await recordColdReply(c.email!, outlook('<r5@x>', atTime), false);
+    const msg = getMockTwentyClient().addMessage({ subject: 'Re: A quick idea', receivedAt: new Date(atTime.getTime() + 60_000).toISOString(), from: { handle: c.email!, personId: 'person-twin' }, to: [{ handle: 'alisa@cadence.local', workspaceMemberId: 'wm-alisa' }] });
+    await ingestEvent({ source: 'WEBHOOK', objectType: 'message', eventName: 'message.created', record: rawFromMessage(msg), now: new Date(atTime.getTime() + 120_000) });
+    const tracked = await prisma.touch.findFirstOrThrow({ where: { sandboxContactId: c.id, externalId: { startsWith: 'graph:' } } });
+    expect(await prisma.touch.findFirstOrThrow({ where: { personId: 'person-twin', direction: 'INBOUND' } })).toEqual(expect.objectContaining({ copyOfTouchId: tracked.id }));
+    expect(await replyCount({ kind: 'all' }, 'all', around(mark.occurredAt))).toBe(1);
+  });
+
+  it('the release migration joins the pairs written since 5 Nov, once, and audits each', async () => {
+    const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+    const far = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+    const T0 = new Date('2026-11-05T15:00:00Z');
+    const touch = (contactId: string, externalId: string, occurredAt: Date, summary = 'Reply: Re: Deck', createdAt = occurredAt) => prisma.touch.create({ data: { sandboxContactId: contactId, channel: 'EMAIL', direction: 'INBOUND', occurredAt, summary, externalId, audience: 'SANDBOX', createdAt } });
+    const tracked = await touch(c.id, 'graph:<m1@x>:sbx:1', T0, 'Reply: Re: Deck', new Date(T0.getTime() + 600_000));
+    const mark = await touch(c.id, `${MARKED_REPLY_PREFIX}e1`, new Date(T0.getTime() + 300_000), 'Replied (recorded in Tasks)');
+    await touch(c.id, 'graph:<auto@x>:sbx:1', new Date(T0.getTime() + 60_000), 'Auto-reply: away');
+    // Eight days apart: two replies.
+    await touch(far.id, 'graph:<m2@x>:sbx:2', T0);
+    await touch(far.id, `${MARKED_REPLY_PREFIX}e2`, new Date(T0.getTime() + 8 * 86_400_000), 'Replied (recorded in Tasks)');
+    const sql = fs.readFileSync(path.join(process.cwd(), 'prisma/migrations/20261106000000_reply_counted_once/migration.sql'), 'utf8');
+    const backfill = sql.slice(sql.indexOf('DO $$'));
+    await prisma.$executeRawUnsafe(backfill);
+    await prisma.$executeRawUnsafe(backfill);
+    // The tracked email was recorded after the mark: it is the copy.
+    expect((await prisma.touch.findUniqueOrThrow({ where: { id: tracked.id } })).copyOfTouchId).toBe(mark.id);
+    expect((await prisma.touch.findUniqueOrThrow({ where: { id: mark.id } })).copyOfTouchId).toBeNull();
+    expect(await prisma.touch.count({ where: { sandboxContactId: far.id, copyOfTouchId: { not: null } } })).toBe(0);
+    expect(await prisma.auditLog.count({ where: { action: 'reply_counted_once' } })).toBe(1);
   });
 });

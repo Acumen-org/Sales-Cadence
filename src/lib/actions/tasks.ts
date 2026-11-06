@@ -15,6 +15,7 @@ import { ACTION_TYPES, channelOf } from '../sequences/steps';
 import { getSettings } from '../settings';
 import type { ActionResult } from './users';
 import { cleanRichText } from '../rich-text';
+import { joinMarkedReply, MARKED_REPLY_PREFIX } from '../mail/cold-email';
 
 export async function saveTaskDraftAction(input: { taskId: string; subject: string; html: string; revision: number }): Promise<{ ok: true; revision: number } | { ok: false; error: string }> {
   const parsed = z.object({ taskId: z.string().min(1), subject: z.string().max(2000), html: z.string().max(100000), revision: z.number().int().min(0) }).safeParse(input);
@@ -166,11 +167,13 @@ export async function finishFromTaskAction(formData: FormData): Promise<ActionRe
   if (kind === 'replied' && coldId && finished.status === 'REPLIED' && OCCUPYING_STATUSES.includes(enrollment.status)) {
     const task = await prisma.task.findUnique({ where: { id: taskId }, select: { action: true, chosenAction: true } });
     const now = new Date();
-    await prisma.touch.upsert({
-      where: { externalId: `replied:${enrollment.id}` },
-      create: { sandboxContactId: coldId, channel: channelOf(task?.chosenAction ?? task?.action ?? 'EMAIL'), direction: 'INBOUND', occurredAt: now, summary: 'Replied (recorded in Tasks)', externalId: `replied:${enrollment.id}`, actorUserId: user.id, actorLabel: user.name, audience: 'SANDBOX' },
+    const mark = await prisma.touch.upsert({
+      where: { externalId: `${MARKED_REPLY_PREFIX}${enrollment.id}` },
+      create: { sandboxContactId: coldId, channel: channelOf(task?.chosenAction ?? task?.action ?? 'EMAIL'), direction: 'INBOUND', occurredAt: now, summary: 'Replied (recorded in Tasks)', externalId: `${MARKED_REPLY_PREFIX}${enrollment.id}`, actorUserId: user.id, actorLabel: user.name, audience: 'SANDBOX' },
       update: {},
     });
+    // Outlook may have tracked this very reply already: it counts once (S8).
+    await joinMarkedReply(mark);
     // Recording a reply is activity, which keeps retention away (N032).
     await prisma.sandboxContact.updateMany({ where: { id: coldId, OR: [{ lastActivityAt: null }, { lastActivityAt: { lt: now } }] }, data: { lastActivityAt: now } });
   }
