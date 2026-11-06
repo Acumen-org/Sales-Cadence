@@ -78,14 +78,13 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
   const plan = campaign.endDate ? await planCampaignCapacity({ sequenceId: campaign.sequenceId, podId: campaign.podId, startDate: windowStart, endDate: campaign.endDate, maxRate: campaign.startsPerFoPerDay }) : null;
   const capacity = plan && !('error' in plan) ? plan : null;
 
-  const [sequences, audienceAll, preview, replies, meetings] = await Promise.all([
+  const [sequences, audienceAll, preview, replies] = await Promise.all([
     prisma.sequence.findMany({ where: { archived: false }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
     proposed ? prisma.personCache.findMany({ where: { id: { in: campaign.personIds } }, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }], select: { id: true, firstName: true, lastName: true, companyName: true, email: true } }) : Promise.resolve([]),
     // The same preview the launch will run, so an approver sees who would be left out and why.
     proposed ? previewEnrollment({ personIds: campaign.personIds, sequenceId: campaign.sequenceId, podId: campaign.podId, campaignId: id, startDate: campaign.startDate, assignment: { mode: 'OWNER' }, dailyRampByFo: capacity ? Object.fromEntries(capacity.perFo.map((f) => [f.id, f.rate])) : null, lastStartDate: capacity?.lastStart ?? null, actor: userActor(user) }).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })) : Promise.resolve(null),
-    // Replies and meetings that happened inside the window, for the people in the campaign.
+    // Replies that happened inside the window, for the people in the campaign.
     enrollments.length ? prisma.touch.count({ where: { direction: 'INBOUND', personId: { in: enrollments.map((e) => e.personId!) }, occurredAt: { gte: new Date(`${campaign.startDate}T00:00:00Z`), ...(campaign.endDate ? { lte: new Date(`${addDays(campaign.endDate, 1)}T00:00:00Z`) } : {}) } } }) : Promise.resolve(0),
-    enrollments.length ? prisma.meeting.count({ where: { review: 'APPROVED', attendees: { some: { personId: { in: enrollments.map((e) => e.personId!) } } }, occurredAt: { gte: new Date(`${campaign.startDate}T00:00:00Z`), ...(campaign.endDate ? { lte: new Date(`${addDays(campaign.endDate, 1)}T00:00:00Z`) } : {}) } } }) : Promise.resolve(0),
   ]);
   const previewError = preview && 'error' in preview ? preview.error : campaign.sequence.archived ? 'The sequence is archived; restore it or pick another before launch.' : null;
   const ready = preview && !('error' in preview) ? preview : null;
@@ -145,7 +144,8 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
         <Stat label="Started" value={summary.counts.total} />
         <Stat label="Touches done" value={touchesDone} hint={touchesPlanned ? <>of <span className="font-medium text-ink-900">{touchesPlanned.toLocaleString('en-US')}</span> planned</> : undefined} />
         <Stat label="Replies in window" value={replies} tone="good" />
-        <Stat label="Meetings in window" value={meetings} tone="good" />
+        {/* B128: the campaign's meetings, as its list row and its step and team tables count them. */}
+        <Stat label="Meetings" value={summary.counts.meeting} tone="good" hint="booked through this campaign" />
         <Stat label="Reply rate" value={summary.counts.total ? `${Math.round(summary.replyRate * 100)}%` : '0%'} />
       </div>
 

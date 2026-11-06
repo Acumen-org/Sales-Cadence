@@ -33,6 +33,7 @@ import { FormOptOutControls } from '@/components/tickets/close-ticket-form';
 import { ContactActions } from '@/components/sandbox/contact-actions';
 import { addNoteAction, clearPossibleBounceAction, confirmPossibleBounceAction, setNextActionAction, setPodAction, updateContactAction } from '@/lib/actions/sandbox';
 import { ACTION_LABELS } from '@/lib/sequences/steps';
+import { labelBeyond } from '@/lib/task-cues';
 import { eraseConfirm, optOutConfirm, removeConfirm } from '@/lib/outreach/confirm-words';
 import { coldRef } from '@/lib/subject';
 
@@ -193,7 +194,7 @@ export default async function SandboxContactPage({ params, searchParams }: { par
         <Surface flush>
           <ViewHeader title="Next action" />
           <div className="space-y-3 p-4 text-[13px]">
-            {open ? <div className="text-ink-900">{open.label} · {open.kind === 'MEETING' ? 'Meeting' : ACTION_LABELS[open.action]} · {formatLocalDate(open.dueDate, 'long')}{open.meetingAt ? ` at ${new Intl.DateTimeFormat('en-GB', { timeZone: user.timezone, hour: '2-digit', minute: '2-digit' }).format(open.meetingAt)}` : ''} <span className="text-ink-500">· {open.fo.name}</span></div> : <div className="text-ink-500">None set</div>}
+            {open ? <div className="text-ink-900">{[labelBeyond(open.label, open.kind === 'MEETING' ? 'Meeting' : ACTION_LABELS[open.action]), open.kind === 'MEETING' ? 'Meeting' : ACTION_LABELS[open.action]].filter(Boolean).join(' · ')} · {formatLocalDate(open.dueDate, 'long')}{open.meetingAt ? ` at ${new Intl.DateTimeFormat('en-GB', { timeZone: user.timezone, hour: '2-digit', minute: '2-digit' }).format(open.meetingAt)}` : ''} <span className="text-ink-500">· {open.fo.name}</span></div> : <div className="text-ink-500">None set</div>}
             <SuggestionList items={live ? suggestions.map((s) => ({ id: s.id, from: s.from, words: s.words })) : []} />
             {live && contact.crmMatchPersonId ? <p className="text-ink-600">Outreach stopped: this person was added to the CRM after the push. Move to CRM attaches this history to them.</p> : null}
             {mayWork && !contact.crmMatchPersonId ? <ActionForm action={setNextActionAction} className="flex flex-wrap items-end gap-2">

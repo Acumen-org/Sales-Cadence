@@ -12,6 +12,10 @@ import { callReport } from '@/lib/calls/analytics';
 import { buildHome } from '@/lib/home-query';
 import { replyCount, repliesByRep, type Period } from '@/lib/outreach/metrics';
 import { reportsHref } from '@/lib/report-keys';
+import { campaignDetail, listCampaigns } from '@/lib/campaigns-query';
+import { campaignPeoplePage } from '@/lib/campaign-people-page';
+import { labelBeyond, upNextWords } from '@/lib/task-cues';
+import { accountDetail } from '@/lib/accounts-query';
 import { EMAIL_TO_DO_NOT_CONTACT, MARKED_REPLY_PREFIX, recordColdReply, type SeenMail } from '@/lib/mail/cold-email';
 import { ingestEvent } from '@/lib/engine/ingest';
 import { rawFromMessage } from '@/lib/engine/reconcile';
@@ -441,5 +445,54 @@ describe('one reply counts once: "They replied" and the reply Outlook tracks (S8
     expect((await prisma.touch.findUniqueOrThrow({ where: { id: mark.id } })).copyOfTouchId).toBeNull();
     expect(await prisma.touch.count({ where: { sandboxContactId: far.id, copyOfTouchId: { not: null } } })).toBe(0);
     expect(await prisma.auditLog.count({ where: { action: 'reply_counted_once' } })).toBe(1);
+  });
+});
+
+describe('campaign meetings, copy slips, and the account replies tile', () => {
+  let b: Basics;
+  let admin: SessionUser;
+  beforeEach(async () => {
+    await resetDb();
+    b = await seedBasics();
+    admin = session(b.users.ria, []);
+    auth.user = admin;
+  });
+
+  it('B128: a campaign\'s meetings mean one thing on its list row, its tiles and its step and team tables', async () => {
+    const campaign = await prisma.campaign.create({ data: { name: 'SaaStr', sequenceId: b.sequence.id, podId: b.pods.Alisa.id, startDate: '2026-11-02', status: 'ACTIVE', personIds: ['person-01', 'person-02'] } });
+    await prisma.enrollment.create({ data: { personId: 'person-01', foUserId: b.users.alisa.id, podId: b.pods.Alisa.id, sequenceId: b.sequence.id, campaignId: campaign.id, startDate: '2026-11-02', currentStep: 0, status: 'MEETING', meetingAt: at('2026-11-04T15:00:00Z'), audience: 'CRM' } });
+    await prisma.enrollment.create({ data: { personId: 'person-02', foUserId: b.users.alisa.id, podId: b.pods.Alisa.id, sequenceId: b.sequence.id, campaignId: campaign.id, startDate: '2026-11-02', currentStep: 0, audience: 'CRM' } });
+    // A meeting with someone in the campaign that came from elsewhere is not the campaign's.
+    await prisma.meeting.create({ data: { title: 'Other', sourceUrl: 'https://example.com/o', occurredAt: at('2026-11-05T15:00:00Z'), bookedById: b.users.leigh.id, attendees: { create: [{ personId: 'person-02', email: 'p2@example.com', external: true }] } } });
+    const [row] = await listCampaigns(admin);
+    const detail = (await campaignDetail(campaign.id, TODAY))!;
+    const people = await campaignPeoplePage({ ...campaign, plannerDraft: null, publishedPlan: null }, undefined, undefined);
+    expect([row.counts.meeting, detail.summary.counts.meeting, detail.byStep.reduce((n, s) => n + s.meeting, 0), detail.byFo.reduce((n, f) => n + f.meeting, 0), people.stats.meetings]).toEqual([1, 1, 1, 1, 1]);
+    // The campaign page's tile reads the same figure; "Meetings in window" is gone.
+    const page = fs.readFileSync(path.join(process.cwd(), 'src/app/(app)/campaigns/[id]/page.tsx'), 'utf8');
+    expect(page).toContain('<Stat label="Meetings" value={summary.counts.meeting}');
+    expect(page).not.toContain('Meetings in window');
+  });
+
+  it('B197: "1 call", and a task whose label only repeats its action reads "Email · Acme", not "Email · Email"', async () => {
+    expect(upNextWords({ kind: 'task', campaign: 'Email', company: 'Acme', fo: null }, 'Email', false)).toBe('Acme');
+    expect(upNextWords({ kind: 'task', campaign: 'Follow-up after the call', company: 'Acme', fo: null }, 'Email', false)).toBe('Follow-up after the call · Acme');
+    expect(upNextWords({ kind: 'step', campaign: null, company: null, fo: null }, 'Email', false)).toBe('No campaign');
+    expect(labelBeyond('call again', 'Call again')).toBeNull();
+    // A post-call form's next step is saved as the bare channel; Home's row no longer repeats it.
+    await prisma.nextAction.create({ data: { personId: 'person-01', foUserId: b.users.alisa.id, label: 'Email', action: 'EMAIL', dueDate: TODAY, audience: 'CRM' } });
+    const home = await buildHome(session(b.users.alisa, [b.pods.Alisa.id]), NOW);
+    const next = home.my.nextTasks[0];
+    expect(upNextWords(next, 'Email', false)).not.toMatch(/^Email/);
+    const one = await callReport({ from: WEEK.fromInstant, to: WEEK.toInstant });
+    expect(renderToStaticMarkup(createElement(CallsDocument, { data: { ...one, callsTotal: 1 }, timezone: 'UTC', compared: null }))).toContain('1 call<');
+  });
+
+  it('N004: an Account page counts its own people\'s replies only; an account with none shows 0', async () => {
+    await prisma.touch.create({ data: { personId: 'person-01', channel: 'EMAIL', direction: 'INBOUND', occurredAt: at('2026-11-04T15:00:00Z'), summary: 'Reply: yes', externalId: 'n004:1', audience: 'CRM' } });
+    const p1 = await prisma.personCache.findUniqueOrThrow({ where: { id: 'person-01' } });
+    const other = await prisma.personCache.findFirstOrThrow({ where: { companyId: { not: p1.companyId } } });
+    expect((await accountDetail(p1.companyId!, admin))?.stats.replied).toBe(1);
+    expect((await accountDetail(other.companyId!, admin))?.stats.replied).toBe(0);
   });
 });

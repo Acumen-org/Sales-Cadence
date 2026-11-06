@@ -44,3 +44,12 @@ export function optOutConfirm(exit: string | null | undefined, name: string): { 
 
 /** Accessible names that say which contact a control is for (N105): "Done: Email 1 for Jane Doe". */
 export const rowControlLabel = (verb: string, step: string, name: string) => `${verb}: ${step} for ${name}`;
+
+/** B197: a task's own label, unless it only repeats what its action says ("Email · Email"). */
+export const labelBeyond = (label: string | null | undefined, actionWords: string): string | null => (label?.trim() && label.trim().toLowerCase() !== actionWords.trim().toLowerCase() ? label.trim() : null);
+
+/** What a Home "Up next" row says after its action: the campaign, or a task's own label when it adds something, then the firm or the rep (B197). */
+export function upNextWords(t: { kind: 'step' | 'task'; campaign: string | null; company: string | null; fo: string | null }, actionWords: string, forTeam: boolean): string {
+  const what = t.kind === 'task' ? labelBeyond(t.campaign, actionWords) : t.campaign ?? 'No campaign';
+  return [what, forTeam && t.fo ? t.fo : t.company].filter(Boolean).join(' · ');
+}

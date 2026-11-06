@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { CAMPAIGN_MEETING } from './campaigns-query';
 import { prisma } from './db';
 import { todayIn } from './dates';
 import { workspaceTimezone } from './workspace';
@@ -42,7 +43,7 @@ export async function campaignPeoplePage(campaign: { id: string; personIds: stri
     const [total, replies, meetings, late, states, finished] = await Promise.all([
       prisma.enrollment.count({ where }),
       prisma.enrollment.count({ where: { campaignId: campaign.id, repliedAt: { not: null } } }),
-      prisma.enrollment.count({ where: { campaignId: campaign.id, meetingAt: { not: null } } }),
+      prisma.enrollment.count({ where: { campaignId: campaign.id, ...CAMPAIGN_MEETING } }),
       // Overdue the way Tasks counts it: by the day a step is worked (its snoozed day, if snoozed),
       // and never a step held by a pause. Counting the first due date alone kept every snoozed
       // step here as overdue while Tasks showed none.
@@ -106,7 +107,7 @@ async function coldCampaignPeoplePage(campaign: { id: string; personIds: string[
     const [total, replies, meetings, late, done, finished] = await Promise.all([
       prisma.enrollment.count({ where }),
       prisma.enrollment.count({ where: { campaignId: campaign.id, repliedAt: { not: null } } }),
-      prisma.enrollment.count({ where: { campaignId: campaign.id, meetingAt: { not: null } } }),
+      prisma.enrollment.count({ where: { campaignId: campaign.id, ...CAMPAIGN_MEETING } }),
       prisma.task.findMany({ where: { enrollment: { campaignId: campaign.id, status: 'ACTIVE' }, state: 'PENDING', OR: [{ snoozedTo: null, dueDate: { lt: today } }, { snoozedTo: { not: null, lt: today } }] }, distinct: ['enrollmentId'], select: { enrollmentId: true } }),
       prisma.task.groupBy({ by: ['enrollmentId', 'stepId', 'state'], where: { enrollment: { campaignId: campaign.id } } }),
       prisma.enrollment.count({ where: { campaignId: campaign.id, status: { notIn: ['ACTIVE', 'PAUSED'] } } }),

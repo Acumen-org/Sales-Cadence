@@ -6,6 +6,7 @@ import { diffDays, formatLocalDate } from '@/lib/dates';
 import { buildHome } from '@/lib/home-query';
 import { TASK_CHANNELS, type TaskChannel } from '@/lib/tasks-query';
 import { ACTION_LABELS } from '@/lib/sequences/steps';
+import { upNextWords } from '@/lib/task-cues';
 import { COLD_CONTACT_BASE } from '@/lib/subject';
 import { ActionIcon, IconCalendar, IconCheck, IconChevronRight, IconCompany, IconPeople } from '@/components/icons';
 import { Avatar, EmptyState, Surface } from '@/components/ui';
@@ -109,7 +110,11 @@ async function HomeContent() {
                 <Avatar name={task.name} shape="circle" size={32} />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-ink-900">{task.name}</span>{when !== 'Today' ? <DueLabel due={task.due} today={h.today} /> : null}</span>
-                  <span className="mt-0.5 flex items-center gap-1.5 text-[12.5px] text-ink-700"><span className="flex shrink-0 gap-1 text-ink-500">{task.actions.map((a) => <ActionIcon key={a} action={a} size={13} />)}</span><span className="shrink-0">{task.actions.map((a) => (a === 'MEETING' ? 'Meeting' : ACTION_LABELS[a as keyof typeof ACTION_LABELS] ?? a)).join(' + ')}</span><span className="min-w-0 truncate text-ink-500">· {[task.campaign ?? (task.kind === 'task' ? null : 'No campaign'), h.my.nextForTeam && task.fo ? task.fo : task.company].filter(Boolean).join(' · ')}</span></span>
+                  <span className="mt-0.5 flex items-center gap-1.5 text-[12.5px] text-ink-700"><span className="flex shrink-0 gap-1 text-ink-500">{task.actions.map((a) => <ActionIcon key={a} action={a} size={13} />)}</span>{(() => {
+                    const actionWords = task.actions.map((a) => (a === 'MEETING' ? 'Meeting' : ACTION_LABELS[a as keyof typeof ACTION_LABELS] ?? a)).join(' + ');
+                    const after = upNextWords(task, actionWords, h.my.nextForTeam);
+                    return <><span className="shrink-0">{actionWords}</span>{after ? <span className="min-w-0 truncate text-ink-500">· {after}</span> : null}</>;
+                  })()}</span>
                 </span>
               </Link></li>)}</ul>
             </li> : null;

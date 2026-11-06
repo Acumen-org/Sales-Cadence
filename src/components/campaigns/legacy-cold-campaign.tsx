@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { CAMPAIGN_MEETING } from '@/lib/campaigns-query';
 import type { Campaign } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { formatLocalDate, todayIn } from '@/lib/dates';
@@ -35,7 +36,8 @@ export async function LegacyColdCampaign({ campaign, manager, editor, canDelete,
   const skipped = new Map(issues.map((i) => [i.id, i.reason]));
   const name = (c: { firstName: string; lastName: string } | null) => (c ? `${c.firstName} ${c.lastName}`.trim() || 'Removed contact' : 'Removed contact');
   const replied = enrollments.filter((e) => e.repliedAt).length;
-  const meetings = enrollments.filter((e) => e.meetingAt).length;
+  // B128: the campaign's meetings, as its list and tables count them.
+  const meetings = enrollments.filter((e) => e.status === CAMPAIGN_MEETING.status).length;
   return <div className="space-y-5 px-6 pb-8 pt-2">
     <RecordHeader
       name={campaign.name}
