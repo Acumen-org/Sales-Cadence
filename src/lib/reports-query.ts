@@ -1,14 +1,13 @@
-import type { Prisma } from '@prisma/client';
 import { workspaceTimezone } from './workspace';
 import { prisma } from './db';
-import { CRM_SUBJECT } from './subject';
-import { enrollmentByReply, REPLY_TOUCH_WHERE, type CreditedEnrollment } from './reply-credit';
 import type { SessionUser } from './auth/current-user';
 import { isJuniorFo, visiblePodIds } from './auth/rbac';
 import { addDays, dayOfWeek, diffDays, formatLocalDate, isLocalDate, startOfLocalDay, toLocalDate, type LocalDate } from './dates';
 import { ACTION_LABELS, type ActionType } from './sequences/steps';
-import { callOutcomes } from './call-outcomes';
-import { channelOf, CHANNELS, NO_PRODUCT, productLabel, productRank, SEVERAL_PRODUCTS, type Channel } from './report-keys';
+import { countTaskWhere, type AudienceScope } from './subject';
+import { bookedRows, dialRows, heldRows, inAudience, personKeyOf, peopleSplit, replyRows, sentRows, withPods, type Credit, type Stamp, type Who } from './outreach/metrics';
+import { doNotContactEmails } from './mail/cold-email';
+import { CHANNELS, NO_PRODUCT, productLabel, productRank, SEVERAL_PRODUCTS, type Channel } from './report-keys';
 
 export const reportingTimezone = () => workspaceTimezone();
 export type ReportingRange = { from: LocalDate; to: LocalDate; fromInstant: Date; toInstant: Date; error: string | null };
@@ -46,14 +45,23 @@ export function comparisonRange(from: LocalDate, to: LocalDate): { from: LocalDa
   return { from: addDays(from, -length), to: addDays(from, -1) };
 }
 
-export type ReportFilters = { range: ReportingRange; podId?: string | null; foUserId?: string | null };
+/** Which outreach a report covers (PLAN 6): All outreach, CRM, or Cold outreach. Stored as `?audience=`. */
+export const REPORT_AUDIENCES: { key: AudienceScope; label: string }[] = [
+  { key: 'all', label: 'All outreach' },
+  { key: 'crm', label: 'CRM' },
+  { key: 'cold', label: 'Cold outreach' },
+];
+export const parseReportAudience = (v: string | null | undefined): AudienceScope => (v === 'crm' || v === 'cold' ? v : 'all');
+
+export type ReportFilters = { range: ReportingRange; podId?: string | null; foUserId?: string | null; audience?: AudienceScope };
 
 export { CHANNELS, NO_PRODUCT, SEVERAL_PRODUCTS, productLabel, type Channel };
 
 /**
- * One line of a breakdown. Sent is outreach done (an email sent, a call made, a LinkedIn touch),
- * replies are messages that came back (reply-credit.ts), meetings are the meetings recorded in
- * Meetings. Both rates are out of what was sent.
+ * One line of a breakdown. Sent is outreach done (rule 8: a step, a next step, a call that closed
+ * none), replies are messages that came back and calls they answered, meetings are those held (in
+ * Meetings, or a cold meeting marked done) and booked those the post-call form booked: two figures,
+ * never added (rule 7). Both rates are out of what was sent.
  */
 export type GroupRow = {
   key: string;
@@ -67,8 +75,11 @@ export type GroupRow = {
   reached: number;
   replies: number;
   meetings: number;
+  booked: number;
   replyRate: number;
   meetingRate: number;
+  /** A cold campaign, shown with a badge (PLAN 6 "By campaign includes cold campaigns"). */
+  cold?: boolean;
 };
 
 /** One bar of the time chart: a day, or a week when the period is long. */
@@ -78,36 +89,41 @@ export type Slice = { key: string; label: string; value: number };
 
 export type ChannelRow = { action: ActionType; label: string; done: number; observed: number; manual: number; skipped: number; open: number; overdue: number };
 
-/** CRM outreach this reader's report covers. Sandbox numbers have their own section (sandbox-report.ts). */
-function enrollmentScope(user: SessionUser): Prisma.EnrollmentWhereInput {
-  if (isJuniorFo(user)) return { ...CRM_SUBJECT, foUserId: user.id };
-  const pods = visiblePodIds(user);
-  if (pods === null) return CRM_SUBJECT;
-  return { ...CRM_SUBJECT, OR: [{ podId: { in: pods } }, { foUserId: user.id }] };
-}
+/**
+ * The activity figures of one side (PLAN 6 "activity tiles"): additive, so All outreach = CRM + Cold,
+ * and on calls + Not matched yet.
+ */
+export type Activity = { sent: number; emails: number; calls: number; linkedin: number; dials: number; connects: number; replies: number; meetings: number; booked: number };
+/** A people figure (PLAN 6 "people tiles"): each person once, so All outreach is not CRM + Cold. */
+export type People = { all: number; crm: number; cold: number; both: number };
+
+/** Cold outreach's funnel (PLAN 6): what happened to cold contacts in the period, each contact once per stage. */
+export type ColdFunnel = { added: number; fromBellwether: number; claimed: number; worked: number; connected: number; booked: number; moved: number; optedOut: number; removed: number };
+export type ColdFunnelRow = { key: string; label: string; claimed: number; worked: number; connected: number; booked: number; moved: number };
 
 type Acc = GroupRow & { people: Set<string> };
-const emptyRow = (key: string, label: string): Acc => ({ key, label, sent: 0, emails: 0, calls: 0, answered: 0, linkedin: 0, reached: 0, replies: 0, meetings: 0, replyRate: 0, meetingRate: 0, people: new Set() });
+const emptyRow = (key: string, label: string): Acc => ({ key, label, sent: 0, emails: 0, calls: 0, answered: 0, linkedin: 0, reached: 0, replies: 0, meetings: 0, booked: 0, replyRate: 0, meetingRate: 0, people: new Set() });
 
 /** A roll-up keyed by FO, pod, campaign or product. */
 class Rollup {
   private rows = new Map<string, Acc>();
-  constructor(private label: (key: string) => string) {}
+  constructor(private label: (key: string) => string, private flag?: (key: string) => boolean) {}
   private row(key: string) {
     let r = this.rows.get(key);
-    if (!r) { r = emptyRow(key, this.label(key)); this.rows.set(key, r); }
+    if (!r) { r = emptyRow(key, this.label(key)); if (this.flag?.(key)) r.cold = true; this.rows.set(key, r); }
     return r;
   }
-  sent(key: string, channel: Channel, personId: string, answered: boolean) {
+  sent(key: string, channel: Channel, person: string | null, answered: boolean) {
     const r = this.row(key);
     r.sent += 1;
     if (channel === 'EMAIL') r.emails += 1;
     else if (channel === 'CALL') { r.calls += 1; if (answered) r.answered += 1; }
     else r.linkedin += 1;
-    r.people.add(personId);
+    if (person) r.people.add(person);
   }
   reply(key: string) { this.row(key).replies += 1; }
   meeting(key: string) { this.row(key).meetings += 1; }
+  booked(key: string) { this.row(key).booked += 1; }
   list(order?: (a: GroupRow, b: GroupRow) => number): GroupRow[] {
     return [...this.rows.values()]
       .map(({ people, ...r }) => ({ ...r, reached: people.size, replyRate: r.sent ? r.replies / r.sent : 0, meetingRate: r.sent ? r.meetings / r.sent : 0 }))
@@ -136,149 +152,159 @@ function buckets(from: LocalDate, to: LocalDate): { list: SeriesBucket[]; unit: 
   return { list, unit, of };
 }
 
+const emptyActivity = (): Activity => ({ sent: 0, emails: 0, calls: 0, linkedin: 0, dials: 0, connects: 0, replies: 0, meetings: 0, booked: 0 });
 
 export type Reports = Awaited<ReturnType<typeof buildReports>>;
 
 /**
- * The report for one period. Every read is bounded by the period, and every record is bucketed
- * once, so a 90-day or year-long range costs about what a week does.
+ * The report for one period and one audience (PLAN 6). Every figure is the shared metrics module's
+ * (8.14), read once for every audience as rows credited to a rep and a pod at the time (rules 5, 6)
+ * with the audience stamped when each was written (rule 1), so a move never rewrites the past
+ * (B037), All outreach = CRM + Cold (+ calls not matched yet) for every count of work done (B122),
+ * and Home's board reads the same figure for a rep and week (B096). Every read is bounded by the
+ * period and every row is bucketed once, so a 90-day or year-long range costs about what a week does.
  */
-export async function buildReports(user: SessionUser, today: LocalDate, filters?: ReportFilters) {
+export async function buildReports(user: SessionUser, today: LocalDate, filters?: ReportFilters, now = new Date()) {
   const range = filters?.range ?? reportingRange(undefined, undefined, today);
+  const audience: AudienceScope = filters?.audience ?? 'all';
   const tz = reportingTimezone();
   const podId = filters?.podId ?? null;
   const foUserId = filters?.foUserId ?? null;
-  const scope: Prisma.EnrollmentWhereInput = { AND: [enrollmentScope(user), ...(podId ? [{ podId }] : []), ...(foUserId ? [{ foUserId }] : [])] };
-  const between = { gte: range.fromInstant, lt: range.toInstant };
+  const period = { from: range.fromInstant, to: range.toInstant };
   const junior = isJuniorFo(user);
   const visiblePods = visiblePodIds(user);
-  // The same test in code, for what is credited after the read (replies, meetings).
-  const inScope = (e: { foUserId: string; podId: string | null }) =>
-    (!junior || e.foUserId === user.id)
-    && (visiblePods === null || e.foUserId === user.id || (!!e.podId && visiblePods.includes(e.podId)))
-    && (!podId || e.podId === podId)
-    && (!foUserId || e.foUserId === foUserId);
+  // Who the reader's report covers, then the pod and FO filters, on each row's credit: the rep who
+  // did it and the pod at the time (B040). A junior reads their own work.
+  const inScope = (c: Credit) =>
+    (!junior || c.rep === user.id)
+    && (visiblePods === null || c.rep === user.id || (!!c.pod && visiblePods.includes(c.pod)))
+    && (!podId || c.pod === podId)
+    && (!foUserId || c.rep === foUserId);
 
-  const [done, other, replyTouches, meetings, users, pods, settings] = await Promise.all([
-    prisma.task.findMany({
-      where: { state: 'DONE', completedAt: between, enrollment: scope },
-      select: { action: true, chosenAction: true, disposition: true, completedAt: true, completionSource: true, foUserId: true, enrollment: { select: { personId: true, podId: true, campaignId: true } } },
-    }),
+  const [sentAll, dialsAll, repliesAll, bookedAll, heldAll, otherRead, users, pods, dncAll] = await Promise.all([
+    sentRows('all', period),
+    dialRows('all', period),
+    replyRows('all', period),
+    bookedRows('all', period),
+    heldRows('all', period, now, { full: true }),
     // For the channel table: what was skipped in the period, and what is due in it and still open.
     prisma.task.findMany({
-      where: { AND: [{ enrollment: scope }, { OR: [{ state: 'SKIPPED', OR: [{ completedAt: between }, { completedAt: null, updatedAt: between }] }, { state: 'PENDING', dueDate: { gte: range.from, lte: range.to }, enrollment: { status: { not: 'PAUSED' } } }] }] },
-      select: { state: true, action: true, dueDate: true, snoozedTo: true },
+      where: { AND: [countTaskWhere(audience), { OR: [{ state: 'SKIPPED', OR: [{ completedAt: { gte: period.from, lt: period.to } }, { completedAt: null, updatedAt: { gte: period.from, lt: period.to } }] }, { state: 'PENDING', dueDate: { gte: range.from, lte: range.to }, enrollment: { status: { not: 'PAUSED' } } }] }] },
+      select: { state: true, action: true, dueDate: true, snoozedTo: true, foUserId: true, enrollment: { select: { podId: true } } },
     }),
-    // Replies: what came back from people we reached out to - see reply-credit.ts.
-    prisma.touch.findMany({
-      where: { AND: [REPLY_TOUCH_WHERE, { occurredAt: between, person: { deletedAt: null, enrollments: { some: scope } } }] },
-      select: { id: true, occurredAt: true, personId: true },
-    }),
-    prisma.meeting.findMany({
-      where: { review: 'APPROVED', occurredAt: between },
-      select: { id: true, occurredAt: true, products: true, bookedById: true, createdById: true, attendees: { where: { personId: { not: null } }, select: { personId: true } } },
-    }),
-    prisma.user.findMany({ select: { id: true, name: true, pods: { select: { podId: true } } } }),
+    prisma.user.findMany({ select: { id: true, name: true, active: true } }),
     prisma.pod.findMany({ select: { id: true, name: true } }),
-    import('./settings').then((m) => m.getSettings()),
+    doNotContactEmails(period),
   ]);
+  const sent = sentAll.filter(inScope);
+  const dials = dialsAll.filter(inScope);
+  const replies = repliesAll.filter(inScope);
+  const booked = bookedAll.filter(inScope);
+  const held = heldAll.filter(inScope);
+  const other = (await withPods(otherRead.map((t) => ({ ...t, rep: t.foUserId, pod: t.enrollment.podId })))).filter(inScope);
+  const dnc = (await withPods(dncAll)).filter(inScope);
 
-  // Credit replies, and meetings, to the outreach that was running for that person at the time.
-  const meetingKeys = meetings.flatMap((m) => m.attendees.map((a) => ({ id: `${m.id}:${a.personId}`, personId: a.personId!, occurredAt: m.occurredAt })));
-  const [creditedReplies, creditedMeetings] = await Promise.all([enrollmentByReply(replyTouches), enrollmentByReply(meetingKeys)]);
+  // Each side's activity figures, for the sub-lines of All outreach: "10 · 7 CRM · 3 Cold".
+  const activityOf = (stamp: Stamp | 'all'): Activity => {
+    const on = (s: Stamp) => stamp === 'all' || s === stamp;
+    const a = emptyActivity();
+    for (const r of sent) if (on(r.audience)) { a.sent += 1; if (r.channel === 'EMAIL') a.emails += 1; else if (r.channel === 'CALL') a.calls += 1; else a.linkedin += 1; }
+    for (const r of dials) if (on(r.audience)) { a.dials += 1; if (r.connected) a.connects += 1; }
+    for (const r of replies) if (on(r.audience)) a.replies += 1;
+    for (const r of held) if (on(r.audience)) a.meetings += 1;
+    for (const r of booked) if (on(r.audience)) a.booked += 1;
+    return a;
+  };
+  const parts = { crm: activityOf('CRM'), cold: activityOf('SANDBOX'), unmatched: activityOf(null) };
+  const [reachedPeople, repliedPeople] = await Promise.all([peopleSplit([...sent, ...dials]), peopleSplit(replies)]);
+
+  // From here on, the one audience this report shows.
+  const view = <T extends { audience: Stamp }>(rows: T[]) => rows.filter((r) => inAudience(r.audience, audience));
+  const vSent = view(sent), vDials = view(dials), vReplies = view(replies), vBooked = view(booked), vHeld = view(held);
+  const personKey = await personKeyOf([...vSent, ...vReplies]);
+
   const campaignIds = new Set<string>();
-  for (const t of done) if (t.enrollment.campaignId) campaignIds.add(t.enrollment.campaignId);
-  for (const e of [...creditedReplies.values(), ...creditedMeetings.values()]) if (e.campaignId) campaignIds.add(e.campaignId);
-  const campaigns = campaignIds.size ? await prisma.campaign.findMany({ where: { id: { in: [...campaignIds] } }, select: { id: true, name: true, productInterest: true } }) : [];
+  for (const r of [...vSent, ...vReplies, ...vBooked, ...vHeld]) if (r.campaignId) campaignIds.add(r.campaignId);
+  const campaigns = campaignIds.size ? await prisma.campaign.findMany({ where: { id: { in: [...campaignIds] } }, select: { id: true, name: true, productInterest: true, audience: true } }) : [];
 
-  const userName = new Map(users.map((u) => [u.id, u.name]));
-  const userPod = new Map(users.map((u) => [u.id, u.pods[0]?.podId ?? null]));
+  // N065: a rep who has left keeps their figures, marked "(removed)".
+  const userName = new Map(users.map((u) => [u.id, u.active ? u.name : `${u.name} (removed)`]));
   const podName = new Map(pods.map((p) => [p.id, p.name]));
   const campaignById = new Map(campaigns.map((c) => [c.id, c]));
   const productsOf = (campaignId: string | null) => {
     const list = campaignId ? campaignById.get(campaignId)?.productInterest ?? [] : [];
     return list.length ? list : [NO_PRODUCT];
   };
-  // N055: Not interested, Meeting booked and the rest of the form's outcomes are answered calls too.
-  const answeredKeys = new Set(callOutcomes(settings.rules).filter((d) => d.answered).map((d) => d.key));
 
-  const byFo = new Rollup((k) => userName.get(k) ?? 'Unknown');
+  const byFo = new Rollup((k) => (k === 'none' ? 'No rep yet' : userName.get(k) ?? 'Unknown'));
   const byPod = new Rollup((k) => (k === 'none' ? 'No pod' : podName.get(k) ?? 'Archived pod'));
-  const byCampaign = new Rollup((k) => (k === 'none' ? 'Not in a campaign' : campaignById.get(k)?.name ?? 'Deleted campaign'));
+  const byCampaign = new Rollup((k) => (k === 'none' ? 'Not in a campaign' : campaignById.get(k)?.name ?? 'Deleted campaign'), (k) => campaignById.get(k)?.audience === 'SANDBOX');
   const byProduct = new Rollup(productLabel);
   const series = buckets(range.from, range.to);
   const dayIndex = (at: Date) => series.of.get(toLocalDate(at, tz));
-  const people = new Set<string>();
   const sentBy: Record<Channel, number> = { EMAIL: 0, CALL: 0, LINKEDIN: 0 };
+  const reached = new Set<string>();
   let answered = 0;
 
-  for (const t of done) {
-    const action = t.chosenAction ?? t.action;
-    const channel = channelOf(action);
-    const isAnswered = channel === 'CALL' && !!t.disposition && answeredKeys.has(t.disposition);
-    const personId = t.enrollment.personId;
-    if (!personId) continue;
-    people.add(personId);
-    sentBy[channel] += 1;
-    if (isAnswered) answered += 1;
-    byFo.sent(t.foUserId, channel, personId, isAnswered);
-    byPod.sent(t.enrollment.podId ?? 'none', channel, personId, isAnswered);
-    byCampaign.sent(t.enrollment.campaignId ?? 'none', channel, personId, isAnswered);
-    for (const p of productsOf(t.enrollment.campaignId)) byProduct.sent(p, channel, personId, isAnswered);
-    const i = t.completedAt ? dayIndex(t.completedAt) : undefined;
+  for (const r of vSent) {
+    const person = personKey(r);
+    if (person) reached.add(person);
+    sentBy[r.channel] += 1;
+    if (r.answered) answered += 1;
+    byFo.sent(r.rep ?? 'none', r.channel, person, r.answered);
+    byPod.sent(r.pod ?? 'none', r.channel, person, r.answered);
+    byCampaign.sent(r.campaignId ?? 'none', r.channel, person, r.answered);
+    for (const p of productsOf(r.campaignId)) byProduct.sent(p, r.channel, person, r.answered);
+    const i = dayIndex(r.at);
     if (i !== undefined) {
       const b = series.list[i];
       b.sent += 1;
-      if (channel === 'EMAIL') b.emails += 1; else if (channel === 'CALL') b.calls += 1; else b.linkedin += 1;
+      if (r.channel === 'EMAIL') b.emails += 1; else if (r.channel === 'CALL') b.calls += 1; else b.linkedin += 1;
     }
   }
 
-  let replies = 0;
-  const repliedPeople = new Set<string>();
-  for (const r of replyTouches) {
-    const e = creditedReplies.get(r.id);
-    // Only replies to outreach: a message from someone nobody reached out to answers nothing here.
-    if (!e || !inScope(e)) continue;
-    replies += 1;
-    if (r.personId) repliedPeople.add(r.personId);
-    byFo.reply(e.foUserId);
-    byPod.reply(e.podId ?? 'none');
-    byCampaign.reply(e.campaignId ?? 'none');
-    for (const p of productsOf(e.campaignId)) byProduct.reply(p);
-    const i = dayIndex(r.occurredAt);
+  const replied = new Set<string>();
+  for (const r of vReplies) {
+    const person = personKey(r);
+    if (person) replied.add(person);
+    byFo.reply(r.rep ?? 'none');
+    byPod.reply(r.pod ?? 'none');
+    byCampaign.reply(r.campaignId ?? 'none');
+    for (const p of productsOf(r.campaignId)) byProduct.reply(p);
+    const i = dayIndex(r.at);
     if (i !== undefined) series.list[i].replies += 1;
   }
 
-  // A meeting belongs to the FO who booked it, to the campaign that was reaching its contact, and
+  // A meeting held belongs to whoever booked it, to the campaign that was reaching its contact, and
   // to the products it is tagged with (else that campaign's products).
-  let meetingCount = 0;
   const meetingSlices = new Map<string, number>();
-  for (const m of meetings) {
-    const credit: CreditedEnrollment | undefined = m.attendees.map((a) => creditedMeetings.get(`${m.id}:${a.personId}`)).find(Boolean);
-    const fo = m.bookedById ?? m.createdById ?? credit?.foUserId ?? null;
-    if (!fo) continue;
-    const pod = credit?.podId ?? userPod.get(fo) ?? null;
-    if (!inScope({ foUserId: fo, podId: pod })) continue;
-    meetingCount += 1;
-    byFo.meeting(fo);
-    byPod.meeting(pod ?? 'none');
-    byCampaign.meeting(credit?.campaignId ?? 'none');
-    const tagged = m.products.length ? [...m.products] : productsOf(credit?.campaignId ?? null).filter((p) => p !== NO_PRODUCT);
+  for (const m of vHeld) {
+    byFo.meeting(m.rep ?? 'none');
+    byPod.meeting(m.pod ?? 'none');
+    byCampaign.meeting(m.campaignId ?? 'none');
+    const tagged = m.products.length ? [...m.products] : productsOf(m.campaignId).filter((p) => p !== NO_PRODUCT);
     for (const p of tagged.length ? tagged : [NO_PRODUCT]) byProduct.meeting(p);
     const slice = tagged.length === 1 ? tagged[0] : tagged.length ? SEVERAL_PRODUCTS : NO_PRODUCT;
     meetingSlices.set(slice, (meetingSlices.get(slice) ?? 0) + 1);
-    const i = dayIndex(m.occurredAt);
+    const i = dayIndex(m.at);
     if (i !== undefined) series.list[i].meetings += 1;
   }
+  for (const f of vBooked) {
+    byFo.booked(f.rep ?? 'none');
+    byPod.booked(f.pod ?? 'none');
+    byCampaign.booked(f.campaignId ?? 'none');
+    for (const p of productsOf(f.campaignId)) byProduct.booked(p);
+  }
 
+  // Each channel: what was done and how we know, what was skipped, and what is still open.
+  const doneBy = new Map<string, number>();
   const observed = new Map<string, number>();
   const manual = new Map<string, number>();
-  const doneBy = new Map<string, number>();
-  for (const t of done) {
-    const a = t.chosenAction ?? t.action;
-    doneBy.set(a, (doneBy.get(a) ?? 0) + 1);
-    if (t.completionSource?.startsWith('OBSERVED')) observed.set(a, (observed.get(a) ?? 0) + 1);
-    else if (t.completionSource === 'MANUAL') manual.set(a, (manual.get(a) ?? 0) + 1);
+  const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) ?? 0) + 1);
+  for (const r of vSent) {
+    bump(doneBy, r.action);
+    if (r.source?.startsWith('OBSERVED')) bump(observed, r.action);
+    else if (r.source === 'MANUAL') bump(manual, r.action);
   }
   const channels: ChannelRow[] = (Object.keys(ACTION_LABELS) as ActionType[]).map((action) => {
     const mine = other.filter((t) => t.action === action);
@@ -297,14 +323,26 @@ export async function buildReports(user: SessionUser, today: LocalDate, filters?
 
   const products = byProduct.list((a, b) => (a.key === NO_PRODUCT ? 1 : 0) - (b.key === NO_PRODUCT ? 1 : 0) || productRank(a.key) - productRank(b.key));
   const sliceOrder = (k: string) => (k === NO_PRODUCT ? 99 : k === SEVERAL_PRODUCTS ? 98 : productRank(k));
-  const sent = sentBy.EMAIL + sentBy.CALL + sentBy.LINKEDIN;
+  const total = sentBy.EMAIL + sentBy.CALL + sentBy.LINKEDIN;
+  const connects = vDials.filter((d) => d.connected).length;
+  const cold = audience === 'cold' ? await coldFunnel(period, inScope, { sent: vSent, dials: vDials, booked: vBooked }, userName) : null;
 
   return {
     today,
+    audience,
     range: { from: range.from, to: range.to },
     unit: series.unit,
     series: series.list,
-    totals: { sent, emails: sentBy.EMAIL, calls: sentBy.CALL, answered, linkedin: sentBy.LINKEDIN, reached: people.size, replies, repliedPeople: repliedPeople.size, meetings: meetingCount, replyRate: sent ? replies / sent : 0, meetingRate: sent ? meetingCount / sent : 0 },
+    totals: {
+      sent: total, emails: sentBy.EMAIL, calls: sentBy.CALL, answered, linkedin: sentBy.LINKEDIN, reached: reached.size,
+      replies: vReplies.length, repliedPeople: replied.size, meetings: vHeld.length, booked: vBooked.length,
+      dials: vDials.length, connects, replyRate: total ? vReplies.length / total : 0, meetingRate: total ? vHeld.length / total : 0,
+      /** N016: emails sent to people who must not be contacted, seen in the period. */
+      doNotContactEmails: dnc.filter((d) => inAudience(d.audience, audience)).length,
+    },
+    /** All outreach's sub-lines: each side's activity (additive), and the people figures (each person once). */
+    parts,
+    people: { reached: reachedPeople, replied: repliedPeople },
     sentByChannel: CHANNELS.map((c) => ({ key: c.key, label: c.label, value: sentBy[c.key] })) as Slice[],
     meetingsByProduct: [...meetingSlices.entries()].map(([key, value]) => ({ key, label: productLabel(key), value })).sort((a, b) => sliceOrder(a.key) - sliceOrder(b.key)) as Slice[],
     byFo: byFo.list(),
@@ -312,5 +350,60 @@ export async function buildReports(user: SessionUser, today: LocalDate, filters?
     byCampaign: byCampaign.list(),
     byProduct: products,
     channels,
+    cold,
+  };
+}
+
+/**
+ * Cold outreach's funnel (PLAN 6): Added → Claimed → Worked → Connected → Meeting booked → Moved to
+ * CRM, plus Opted out and Removed, each a number of contacts. Claimed is the first real claim, never a
+ * push (B194); moves, opt-outs and removals are read from the audit log, so an Undo or a lift later
+ * never changes a past period. Worked, Connected and Meeting booked are contacts, not calls (B194).
+ * By rep: who claimed (the owner), worked, called, booked and moved them.
+ */
+async function coldFunnel(period: { from: Date; to: Date }, inScope: (c: Credit) => boolean, rows: { sent: Array<Who & Credit>; dials: Array<Who & Credit & { connected: boolean }>; booked: Array<Who & Credit> }, userName: Map<string, string>): Promise<{ funnel: ColdFunnel; byRep: ColdFunnelRow[] }> {
+  const between = { gte: period.from, lt: period.to };
+  const [created, claimed, audits] = await Promise.all([
+    prisma.sandboxContact.findMany({ where: { createdAt: between }, select: { id: true, ownerId: true, podId: true, source: true } }),
+    prisma.sandboxContact.findMany({ where: { firstClaimedAt: between }, select: { id: true, ownerId: true, podId: true } }),
+    prisma.auditLog.findMany({ where: { entityType: 'sandbox_contact', action: { in: ['sandbox_moved', 'opted_out', 'removed'] }, createdAt: between }, select: { entityId: true, action: true, actorId: true } }),
+  ]);
+  const contacts = new Map((audits.length ? await prisma.sandboxContact.findMany({ where: { id: { in: [...new Set(audits.map((a) => a.entityId))] } }, select: { id: true, ownerId: true, podId: true } }) : []).map((c) => [c.id, c]));
+  const ofContact = (c: { ownerId: string | null; podId: string | null }): Credit => ({ rep: c.ownerId, pod: c.podId });
+  const audited = (action: string, credit: (a: (typeof audits)[number]) => Credit) => {
+    const ids = new Map<string, Credit>();
+    for (const a of audits) if (a.action === action && !ids.has(a.entityId)) { const c = credit(a); if (inScope(c)) ids.set(a.entityId, c); }
+    return ids;
+  };
+  const moved = audited('sandbox_moved', (a) => ({ rep: a.actorId, pod: contacts.get(a.entityId)?.podId ?? null }));
+  const optedOut = audited('opted_out', (a) => ofContact(contacts.get(a.entityId) ?? { ownerId: null, podId: null }));
+  const removed = audited('removed', (a) => ofContact(contacts.get(a.entityId) ?? { ownerId: null, podId: null }));
+  const added = created.filter((c) => inScope(ofContact(c)));
+  const claims = claimed.filter((c) => inScope(ofContact(c)));
+  // One contact per stage, credited to the first rep seen doing it.
+  const contactsBy = (list: Array<Who & Credit>) => {
+    const m = new Map<string, string | null>();
+    for (const r of list) if (r.sandboxContactId && !m.has(r.sandboxContactId)) m.set(r.sandboxContactId, r.rep);
+    return m;
+  };
+  const worked = contactsBy([...rows.sent, ...rows.dials]);
+  const connected = contactsBy(rows.dials.filter((d) => d.connected));
+  const booked = contactsBy(rows.booked);
+
+  const by = new Map<string, ColdFunnelRow>();
+  const row = (rep: string | null) => {
+    const key = rep ?? 'none';
+    let r = by.get(key);
+    if (!r) { r = { key, label: rep ? userName.get(rep) ?? 'Unknown' : 'Nobody', claimed: 0, worked: 0, connected: 0, booked: 0, moved: 0 }; by.set(key, r); }
+    return r;
+  };
+  for (const c of claims) row(c.ownerId).claimed += 1;
+  for (const rep of worked.values()) row(rep).worked += 1;
+  for (const rep of connected.values()) row(rep).connected += 1;
+  for (const rep of booked.values()) row(rep).booked += 1;
+  for (const c of moved.values()) row(c.rep).moved += 1;
+  return {
+    funnel: { added: added.length, fromBellwether: added.filter((c) => c.source === 'BELLWETHER').length, claimed: claims.length, worked: worked.size, connected: connected.size, booked: booked.size, moved: moved.size, optedOut: optedOut.size, removed: removed.size },
+    byRep: [...by.values()].sort((a, b) => b.worked - a.worked || b.claimed - a.claimed || a.label.localeCompare(b.label)),
   };
 }

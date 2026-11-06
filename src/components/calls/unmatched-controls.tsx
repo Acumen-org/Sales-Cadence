@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { ActionForm } from '@/components/action-form';
-import { assignCallRepAction, attachCallContactAction, searchCallContactsAction } from '@/lib/actions/call-forms';
+import { assignCallRepAction, attachCallContactAction, newColdContactFromCallAction, searchCallContactsAction } from '@/lib/actions/call-forms';
 import type { CallContactOption } from '@/lib/calls/form-context';
 
 /** Unmatched list: say which rep made the call (sales reps only, B127). Their form opens if the call is recent. */
@@ -36,5 +36,22 @@ export function AttachCallContact({ callId, candidates }: { callId: string; cand
     <input type="search" aria-label="Find who it was with" placeholder="Find by name or number" value={query} onChange={(e) => setQuery(e.target.value)} className="!w-40 !py-1 text-[13px]" />
     <select name="contact" aria-label="Contact" defaultValue="" className="!w-auto !py-1 text-[13px]"><option value="" disabled>{options.length ? 'Choose contact' : 'Search first'}</option>{options.map((o) => <option key={o.key} value={o.key}>{o.name}</option>)}</select>
     <button type="submit" className="btn-secondary btn-sm">Attach</button>
+  </ActionForm>;
+}
+
+/**
+ * B127: a number nobody holds. The leader can add who it was as a new cold contact, with the call's
+ * number; the call is attached to them and leaves this list once it has a rep too.
+ */
+export function NewColdContactFromCall({ callId }: { callId: string }) {
+  const [open, setOpen] = useState(false);
+  if (!open) return <button type="button" onClick={() => setOpen(true)} className="btn-ghost btn-sm">Add as a cold contact</button>;
+  return <ActionForm action={newColdContactFromCallAction} className="flex flex-wrap items-center gap-1.5">
+    <input type="hidden" name="callId" value={callId} />
+    <input name="firstName" required aria-label="First name" placeholder="First name" className="!w-28 !py-1 text-[13px]" />
+    <input name="lastName" required aria-label="Last name" placeholder="Last name" className="!w-28 !py-1 text-[13px]" />
+    <input name="companyName" aria-label="Firm" placeholder="Firm" className="!w-32 !py-1 text-[13px]" />
+    <button type="submit" className="btn-secondary btn-sm">Add and attach</button>
+    <button type="button" onClick={() => setOpen(false)} className="btn-ghost btn-sm">Cancel</button>
   </ActionForm>;
 }

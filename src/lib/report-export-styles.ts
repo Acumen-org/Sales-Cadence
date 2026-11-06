@@ -56,8 +56,23 @@ export const REPORT_DOCUMENT_STYLES = `
   .rp-progress-fill { height: 100%; border-radius: 999px; }
   .rp-end { text-align: right; color: #3c4a44; font-variant-numeric: tabular-nums; }
   .rp-scroll { overflow-x: auto; }
+  .rp a { color: #1d6b55; text-decoration: none; }
+  .rp a:hover { text-decoration: underline; }
+  /* All outreach's sub-line under a figure: "7 CRM · 3 Cold", or for people "· 1 in both". */
+  .rp-parts { margin-top: 4px; font-size: 11.5px; color: #6b7a74; font-variant-numeric: tabular-nums; }
+  .rp-facts { display: grid; gap: 12px; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .rp-fact { padding: 14px 16px; }
+  .rp-fact-value { margin-top: 6px; font-size: 22px; font-weight: 600; line-height: 1.1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+  .rp-warn { border-color: #f1d08a; background: #fffbeb; }
+  .rp-badge { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: #e0f2fe; color: #075985; font-size: 11px; font-weight: 500; white-space: nowrap; }
+  .rp-flag { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: #fef3c7; color: #92400e; font-size: 11px; white-space: nowrap; }
+  .rp-pager { display: flex; justify-content: space-between; gap: 12px; padding-top: 12px; font-size: 12px; color: #55645d; }
+  .rp-pager a { margin-left: 12px; }
+  @media (max-width: 1400px) {
+    .rp-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
   @media (max-width: 900px) {
-    .rp-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .rp-tiles, .rp-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .rp-row, .rp-campaign { grid-template-columns: minmax(0, 1fr); }
   }
 `;

@@ -234,6 +234,21 @@ export async function emailsToDoNotContact(since: Date): Promise<number> {
   return prisma.auditLog.count({ where: { action: EMAIL_TO_DO_NOT_CONTACT, createdAt: { gte: since } } });
 }
 
+/**
+ * N016 in Reports: each email to someone who must not be contacted, seen in the period, with whose
+ * mailbox sent it, the contact's pod, and its side: a cold contact's is Cold, a CRM person's is CRM,
+ * an address no record holds any more (an erased one) is neither.
+ */
+export async function doNotContactEmails(period: { from: Date; to: Date }): Promise<Array<{ rep: string | null; pod: string | null; audience: 'CRM' | 'SANDBOX' | null }>> {
+  const rows = await prisma.auditLog.findMany({ where: { action: EMAIL_TO_DO_NOT_CONTACT, createdAt: { gte: period.from, lt: period.to } }, select: { entityType: true, entityId: true, details: true } });
+  const coldIds = rows.filter((r) => r.entityType === 'sandbox_contact').map((r) => r.entityId);
+  const pods = new Map((coldIds.length ? await prisma.sandboxContact.findMany({ where: { id: { in: coldIds } }, select: { id: true, podId: true } }) : []).map((c) => [c.id, c.podId]));
+  return rows.map((r) => {
+    const d = (r.details ?? {}) as { mailboxUserId?: string | null };
+    return { rep: d.mailboxUserId ?? null, pod: r.entityType === 'sandbox_contact' ? pods.get(r.entityId) ?? null : null, audience: r.entityType === 'sandbox_contact' ? 'SANDBOX' : r.entityType === 'person' ? 'CRM' : null };
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Replies
 // ---------------------------------------------------------------------------

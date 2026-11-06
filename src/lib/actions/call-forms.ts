@@ -221,14 +221,45 @@ export async function attachCallContactAction(formData: FormData): Promise<Actio
     if (!c) return { ok: false, error: 'That contact is no longer in Cold outreach.' };
     if (c.podId && !user.podIds.includes(c.podId)) return { ok: false, error: `That contact is in ${c.pod?.name ?? 'another pod'}, which is not one of your pods.` };
   }
-  const subject = { personId: kind === 'person' ? id : null, sandboxContactId: kind === 'sandbox' ? id : null };
-  // Stamped once, when the call is matched (PLAN 8.4): an unmatched call had no audience until now.
-  const stamp = { ...(before.audience ? {} : { audience: await audienceFor(subject) }), ...(before.podId ? {} : { podId: await callPodFor({ enrollmentId: before.enrollmentId, sandboxContactId: subject.sandboxContactId, userId: before.userId }) }) };
-  const call = await prisma.callLog.update({ where: { id: callId }, data: { ...subject, matchedBy: 'chosen', ...stamp } });
-  if (call.statusRank >= 4) await recordCallTouch(call);
-  await logAudit({ entityType: 'call', entityId: callId, action: 'contact_chosen', actor: userActor(user), details: { kind, id } });
+  await attachCallTo(callId, before, { personId: kind === 'person' ? id : null, sandboxContactId: kind === 'sandbox' ? id : null }, user);
   refresh();
   return { ok: true, message: 'Attached.' };
+}
+
+/** The call is with this person or contact: matched, stamped once (PLAN 8.4), its touch written, audited. */
+async function attachCallTo(callId: string, before: { audience: string | null; podId: string | null; enrollmentId: string | null; userId: string | null }, subject: { personId: string | null; sandboxContactId: string | null }, user: Awaited<ReturnType<typeof requireUser>>) {
+  // Stamped once, when the call is matched (PLAN 8.4): an unmatched call had no audience until now.
+  const stamp = { ...(before.audience ? {} : { audience: await audienceFor(subject) }), ...(before.podId ? {} : { podId: await callPodFor({ enrollmentId: before.enrollmentId, sandboxContactId: subject.sandboxContactId, userId: before.userId }) }) };
+  const call = await prisma.callLog.update({ where: { id: callId }, data: { ...subject, matchedBy: 'chosen', candidates: undefined, ...stamp } });
+  if (call.statusRank >= 4) await recordCallTouch(call);
+  await logAudit({ entityType: 'call', entityId: callId, action: 'contact_chosen', actor: userActor(user), details: subject.personId ? { kind: 'person', id: subject.personId } : { kind: 'sandbox', id: subject.sandboxContactId } });
+}
+
+/**
+ * B127: Reports' Not matched yet list, a number nobody holds: the leader adds the person as a new cold
+ * contact (source Call) with the call's number, and the call is attached to them. The contact is the
+ * call's rep's when a sales rep made it, else unclaimed in the call's pod; the usual duplicate and
+ * opt-out checks run first.
+ */
+export async function newColdContactFromCallAction(formData: FormData): Promise<ActionResult> {
+  const user = await requireUser();
+  if (!canAttachCalls(toActor(user))) return { ok: false, error: 'Only Senior FOs, Sales Leaders, Pod Managers and admins can attach calls.' };
+  const callId = String(formData.get('callId') ?? '');
+  const call = await prisma.callLog.findUnique({ where: { id: callId }, select: { direction: true, toNumber: true, fromNumber: true, userId: true, podId: true, audience: true, enrollmentId: true, personId: true, sandboxContactId: true } });
+  if (!call) return { ok: false, error: 'Call not found.' };
+  if (call.personId || call.sandboxContactId) return { ok: false, error: 'This call is already matched to someone.' };
+  const rep = call.userId ? await prisma.user.findFirst({ where: { id: call.userId, ...SALES }, select: { id: true, pods: { select: { podId: true } } } }) : null;
+  const podId = call.podId ?? user.podIds[0] ?? null;
+  if (!isAdmin(user) && podId && !user.podIds.includes(podId)) return { ok: false, error: 'This call is in a pod that is not one of yours.' };
+  const owner = rep && (!podId || rep.pods.some((p) => p.podId === podId)) ? { id: rep.id, podIds: rep.pods.map((p) => p.podId), ownsContacts: true } : { id: user.id, podIds: user.podIds, ownsContacts: false };
+  const created = await createContact({
+    firstName: String(formData.get('firstName') ?? ''), lastName: String(formData.get('lastName') ?? ''), companyName: String(formData.get('companyName') ?? '') || null,
+    phone: (call.direction === 'INBOUND' ? call.fromNumber : call.toNumber) ?? null, phoneType: 'unknown',
+  }, owner, userActor(user), podId, { source: 'CALL' });
+  if (!created.ok) return created;
+  await attachCallTo(callId, call, { personId: null, sandboxContactId: created.id }, user);
+  refresh();
+  return { ok: true, message: 'Added to Cold outreach and attached.' };
 }
 
 /** Settings > Calling: read calls from Twilio now, instead of waiting for the worker's next run. One run at a time (B166). */
