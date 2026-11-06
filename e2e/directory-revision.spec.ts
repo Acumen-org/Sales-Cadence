@@ -29,7 +29,7 @@ test('account associations, explicit whole-account count and both sort direction
 test('Twenty tags apply filters, survive reload and can be cleared', async ({ page }) => {
   await login(page);
   await page.goto('/people?pod=&fo=');
-  await expect(page.getByRole('columnheader', { name: 'Tags in Twenty', exact: true })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'Tags in the CRM', exact: true })).toBeVisible();
   await expect(page.getByRole('columnheader', { name: 'Recent activity', exact: true })).toHaveCount(0);
   const tag = page.locator('tbody').getByRole('button', { name: /^Filter by / }).first();
   await expect(tag).toBeVisible();

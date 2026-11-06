@@ -92,12 +92,18 @@ test('search and help are available from every workspace section', async ({ page
   await logout(page);
 });
 
-test('Settings is admin-only, in the sidebar and by URL', async ({ page }) => {
+test('Settings is admin-only, in the sidebar and by URL, except the read-only Cold outreach tab', async ({ page }) => {
   await loginAs(page, 'Karson');
   await expect(page.locator('aside').getByRole('link', { name: 'Settings' })).toHaveCount(0);
   await expect(page.locator('aside').getByRole('link', { name: 'Reports' })).toHaveCount(0);
   await page.goto('/settings');
-  await expect(page).not.toHaveURL(/\/settings/);
+  // B215: anyone may read Settings > Cold outreach (read only); every other tab stays admin-only.
+  await expect(page).toHaveURL(/\/settings\?tab=cold-outreach$/);
+  await expect(page.getByRole('heading', { name: 'Cold outreach settings' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Rules and matching' })).toHaveCount(0);
+  await page.goto('/settings?tab=rules');
+  await expect(page).toHaveURL(/\/settings\?tab=cold-outreach$/);
+  await expect(page.getByLabel(/Daily cap/)).toHaveCount(0);
   await logout(page);
 
   await loginAs(page, 'Admin');
@@ -126,11 +132,11 @@ test('a meeting plays in the app with its transcript and no analysis until a mod
   await expect(team).toContainText('Karson');
 
   // Prospects come from Twenty, by a few letters of a name or an address, never from the team.
-  const finder = page.getByRole('combobox', { name: 'Find a prospect in Twenty' });
+  const finder = page.getByRole('combobox', { name: 'Find a prospect in the CRM' });
   await finder.fill('Karson');
-  await expect(page.getByRole('listbox', { name: 'Find a prospect in Twenty results' })).toContainText('No one in Twenty matches');
+  await expect(page.getByRole('listbox', { name: 'Find a prospect in the CRM results' })).toContainText('No one in the CRM matches');
   await finder.fill('dummy.one@');
-  await page.getByRole('listbox', { name: 'Find a prospect in Twenty results' }).getByRole('option', { name: /Dummy One/ }).click({ timeout: 20_000 });
+  await page.getByRole('listbox', { name: 'Find a prospect in the CRM results' }).getByRole('option', { name: /Dummy One/ }).click({ timeout: 20_000 });
   const prospects = page.getByRole('list', { name: 'Prospects' });
   await expect(prospects).toContainText('Dummy One');
   // Which meeting with them this is, counting itself, and what the meeting counts as.
@@ -193,8 +199,8 @@ test('a Zoom recording link is offered as a link-out, not a broken frame', async
   await page.getByLabel('Recording or meeting link').fill('https://acme.zoom.us/rec/share/e2e');
   await expect(page.getByText('Opens in Zoom', { exact: true })).toBeVisible();
   await page.getByLabel('Date', { exact: true }).fill('2026-09-08');
-  await page.getByRole('combobox', { name: 'Find a prospect in Twenty' }).fill('Dummy Two');
-  await page.getByRole('listbox', { name: 'Find a prospect in Twenty results' }).getByRole('option', { name: /Dummy Two/ }).click({ timeout: 20_000 });
+  await page.getByRole('combobox', { name: 'Find a prospect in the CRM' }).fill('Dummy Two');
+  await page.getByRole('listbox', { name: 'Find a prospect in the CRM results' }).getByRole('option', { name: /Dummy Two/ }).click({ timeout: 20_000 });
   await page.getByRole('group', { name: 'Products' }).getByText('Glynac', { exact: true }).click();
   await page.getByRole('button', { name: /Add meeting|Save/ }).click();
   await expect(page).toHaveURL(/\/meetings\/[0-9a-f-]+$/);

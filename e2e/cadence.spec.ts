@@ -201,7 +201,7 @@ test('outreach is edited inside campaigns and the old library no longer opens', 
   await expect(page.getByLabel('Step 1 email subject')).toHaveValue('Campaign-only subject');
 });
 
-test('admin saves rules; a junior FO cannot open settings', async ({ page }) => {
+test('admin saves rules; a junior FO reads only Cold outreach settings', async ({ page }) => {
   await loginAs(page, 'Admin');
   await page.goto('/settings?tab=rules');
   const cap = page.getByLabel(/Daily cap/);
@@ -214,7 +214,13 @@ test('admin saves rules; a junior FO cannot open settings', async ({ page }) => 
 
   await loginAs(page, 'Karson');
   await page.goto('/settings');
-  await expect(page).not.toHaveURL(/\/settings/);
+  // B215: anyone may read Settings > Cold outreach (read only); every other tab stays admin-only.
+  await expect(page).toHaveURL(/\/settings\?tab=cold-outreach$/);
+  await expect(page.getByRole('heading', { name: 'Cold outreach settings' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Rules and matching' })).toHaveCount(0);
+  await page.goto('/settings?tab=rules');
+  await expect(page).toHaveURL(/\/settings\?tab=cold-outreach$/);
+  await expect(page.getByLabel(/Daily cap/)).toHaveCount(0);
   await page.goto('/tasks');
   // A junior has the pod and FO filters like everyone, opened on their own pod and name.
   await expect(page.getByLabel('Filter by pod')).toBeVisible();
