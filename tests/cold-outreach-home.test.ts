@@ -157,6 +157,14 @@ describe('Home: CRM and cold work together', () => {
     // Reports' donut legend clips a long label before its figures.
     expect(REPORT_DOCUMENT_STYLES).toContain('.rp-slice .rp-key { overflow: hidden; }');
   });
+
+  it('B185: Reports > Calls "By rep" takes the full width below 1536px, and the names of reps stay on one line', () => {
+    expect(REPORT_DOCUMENT_STYLES).toMatch(/@media \(max-width: 1535px\) \{[^}]*\.rp-row\.rp-stack \{ grid-template-columns: minmax\(0, 1fr\); \}/);
+    expect(REPORT_DOCUMENT_STYLES).toContain('.rp-nowrap { white-space: nowrap; }');
+    const src = fs.readFileSync(path.join(process.cwd(), 'src/components/reports/calls-report.tsx'), 'utf8');
+    expect(src).toMatch(/<div className="rp-row rp-stack">\s*<Figure title="By rep">/);
+    expect(src).toContain('<td className="rp-name rp-nowrap">{r.name}</td>');
+  });
 });
 
 describe('one email counts once in All outreach (PLAN 6 rule 2, 8.14)', () => {

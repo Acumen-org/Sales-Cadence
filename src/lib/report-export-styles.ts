@@ -69,6 +69,11 @@ export const REPORT_DOCUMENT_STYLES = `
   .rp-flag { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: #fef3c7; color: #92400e; font-size: 11px; white-space: nowrap; }
   .rp-pager { display: flex; justify-content: space-between; gap: 12px; padding-top: 12px; font-size: 12px; color: #55645d; }
   .rp-pager a { margin-left: 12px; }
+  .rp-nowrap { white-space: nowrap; }
+  @media (max-width: 1535px) {
+    /* B185: Calls' By rep table needs the whole width below 1536px, or names wrap. */
+    .rp-row.rp-stack { grid-template-columns: minmax(0, 1fr); }
+  }
   @media (max-width: 1400px) {
     .rp-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   }

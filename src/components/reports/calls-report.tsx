@@ -93,12 +93,12 @@ export function CallsDocument({ data, timezone, compared, links, unmatchedContro
         </Figure>
       ) : null}
 
-      <div className="rp-row">
+      <div className="rp-row rp-stack">
         <Figure title="By rep">
           {data.byRep.length ? (
             <div className="rp-scroll"><table className="rp-table">
               <thead><tr><th>Rep</th><th className="rp-r">Calls out</th><th className="rp-r">Connects</th><th className="rp-r">Rate</th><th className="rp-r">Meetings booked</th><th className="rp-r">Forms waiting now</th></tr></thead>
-              <tbody>{data.byRep.map((r) => <tr key={r.userId}><td className="rp-name">{r.name}</td><td className="rp-r">{fmt(r.dials)}</td><td className="rp-r">{fmt(r.connects)}</td><td className="rp-r">{pct(r.connectRate)}</td><td className="rp-r">{fmt(r.meetings)}</td><td className="rp-r">{fmt(r.formsOutstanding)}{r.oldestFormDue ? <div className="rp-small">oldest {formatInstant(r.oldestFormDue, timezone)}</div> : null}</td></tr>)}</tbody>
+              <tbody>{data.byRep.map((r) => <tr key={r.userId}><td className="rp-name rp-nowrap">{r.name}</td><td className="rp-r">{fmt(r.dials)}</td><td className="rp-r">{fmt(r.connects)}</td><td className="rp-r">{pct(r.connectRate)}</td><td className="rp-r">{fmt(r.meetings)}</td><td className="rp-r">{fmt(r.formsOutstanding)}{r.oldestFormDue ? <div className="rp-small">oldest {formatInstant(r.oldestFormDue, timezone)}</div> : null}</td></tr>)}</tbody>
             </table></div>
           ) : <p className="rp-empty">No calls in this period</p>}
         </Figure>
