@@ -279,6 +279,9 @@ describe('W3: ownership and team changes', () => {
     const c = await readyContact(b.users.karson.id, b.pods.Alisa.id);
     await prisma.user.update({ where: { id: b.users.karson.id }, data: { active: false } });
     const issues = await coldAudienceIssues([c.id], { podId: b.pods.Alisa.id, podName: 'Pod Alisa', foIds: [] });
-    expect(issues).toEqual([expect.objectContaining({ reason: `${b.users.karson.name} no longer has access: assign these contacts first` })]);
+    expect(issues).toEqual([expect.objectContaining({ reason: `Owned by ${b.users.karson.name}, who no longer has access: assign these contacts first` })]);
+    // Folded into a sentence, the owner's name keeps its capitals.
+    const { whoAndWhy } = await import('@/lib/campaign-audience');
+    expect(whoAndWhy([{ name: 'Jane Doe', reason: issues[0].reason }])).toBe(`Jane Doe (owned by ${b.users.karson.name}, who no longer has access: assign these contacts first)`);
   });
 });

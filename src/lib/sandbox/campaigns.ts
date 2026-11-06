@@ -98,7 +98,7 @@ export async function coldAudienceIssues(ids: string[], context?: ColdAudienceCo
     const check = await contactability({ kind: 'cold', row: c }, { act: 'enroll', tx: db, clear: clear.get(c.id) });
     if (!check.ok) { issue(KIND[check.block] ?? 'blocked', leftOutReason(check, c)); continue; }
     // N069: a removed rep's contact says so, and what to do, rather than "outside this pod".
-    if (c.ownerId && c.owner && !c.owner.active) { issue('owner', `${c.owner.name} no longer has access: assign these contacts first`); continue; }
+    if (c.ownerId && c.owner && !c.owner.active) { issue('owner', `Owned by ${c.owner.name}, who no longer has access: assign these contacts first`); continue; }
     if (context?.actor) {
       const verdict = canAct(context.actor, guardSubject(c), 'enroll');
       if (!verdict.ok) { issue('owner', verdict.reason.replace(/\.$/, '')); continue; }
