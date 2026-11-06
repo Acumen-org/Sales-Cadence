@@ -79,7 +79,9 @@ test('push, call, form, move to CRM and undo', async ({ page, request }) => {
   await form.getByRole('button', { name: 'Save' }).click();
   await expect(bar).toHaveCount(0);
   await page.reload();
-  await expect(page.getByText(/Email · Email · /)).toBeVisible();
+  // B197: the next step says its channel once, then its day.
+  await expect(page.getByText(/Email · (?!Email)/).first()).toBeVisible();
+  await expect(page.getByText(/Email · Email · /)).toHaveCount(0);
   // The form no longer holds Call back; outside 8:00-21:00 in Chicago, calling hours do.
   await expect(page.getByRole('button', { name: /^Call: Fill in the form/ })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Call', exact: true }).or(page.getByRole('button', { name: /^Call: It is .* outside 8:00 to 21:00\.$/ }))).toBeVisible();
