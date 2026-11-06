@@ -1,4 +1,4 @@
-import type { ActionType, NextActionKind, Role } from '@prisma/client';
+import type { ActionType, NextActionKind } from '@prisma/client';
 import { prisma } from '../db';
 import { logAudit, type AuditActor } from '../audit';
 import { formatLocalDate, isLocalDate, todayIn } from '../dates';
@@ -72,7 +72,4 @@ export async function dismissSuggestion(id: string, userId: string, now = new Da
   const done = await prisma.notification.updateMany({ where: { id, userId, kind: 'next_step_suggestion', resolution: null }, data: { resolution: 'dismissed', resolvedAt: now, readAt: now } });
   return done.count ? { ok: true, message: 'Dismissed. Your next step stays as it was.' } : { ok: false, error: 'This suggestion was answered already.' };
 }
-
-/** The roles a suggestion can be accepted by, for hiding the button from those who never can. */
-export const mayAcceptSuggestions = (role: Role) => role !== 'BIZ_OPS';
 

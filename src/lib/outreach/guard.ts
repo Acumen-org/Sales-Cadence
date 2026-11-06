@@ -2,7 +2,7 @@ import type { Prisma, Role, SandboxStatus } from '@prisma/client';
 import { prisma } from '../db';
 import { isAdmin, isBizOps, isJuniorFo, isPodLeader, isPodManager, needsPod } from '../auth/rbac';
 import type { AuditActor } from '../audit';
-import { coldRef, type SubjectRef } from '../subject';
+import type { SubjectRef } from '../subject';
 import { applyTransfer, podForOwner } from './transfer';
 
 /**
@@ -16,7 +16,6 @@ import { applyTransfer, podForOwner } from './transfer';
  */
 
 export type Act = 'note' | 'edit' | 'next_action' | 'call' | 'log_call' | 'form_next_step' | 'claim' | 'assign' | 'release' | 'enroll' | 'move' | 'undo' | 'opt_out' | 'lift_opt_out' | 'remove' | 'erase';
-export const ACTS: Act[] = ['note', 'edit', 'next_action', 'call', 'log_call', 'form_next_step', 'claim', 'assign', 'release', 'enroll', 'move', 'undo', 'opt_out', 'lift_opt_out', 'remove', 'erase'];
 
 /** The button that fixes a refusal, when there is one. */
 export type Fix = { label: string; href?: string | null };
@@ -258,15 +257,4 @@ export async function lockColdIn(tx: Prisma.TransactionClient, id: string, act: 
   if (status) return status;
   if (subject.moving && act !== 'opt_out' && act !== 'erase') return refuse('moving', 'This contact is being moved to the CRM. Try again in a minute.');
   return { ok: true, subject };
-}
-
-/** The guard for many contacts, each in its own lock: one refused never stops the rest. */
-export async function forEachLocked<T>(ids: string[], actor: GuardActor | null, act: Act, work: (tx: Prisma.TransactionClient, subject: GuardSubject) => Promise<T>, opts: LockOptions = {}): Promise<{ done: { id: string; value: T }[]; refused: { id: string; refusal: Refusal }[] }> {
-  const done: { id: string; value: T }[] = [];
-  const refused: { id: string; refusal: Refusal }[] = [];
-  for (const id of [...new Set(ids)]) {
-    const r = await withSubjectLock(coldRef(id), actor, act, work, opts);
-    if (r.ok) done.push({ id, value: r.value }); else refused.push({ id, refusal: r });
-  }
-  return { done, refused };
 }

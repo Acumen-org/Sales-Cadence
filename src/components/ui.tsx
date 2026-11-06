@@ -4,7 +4,7 @@ import clsx from 'clsx';
 import { cloneElement, isValidElement, useId, type CSSProperties, type ReactElement, type ReactNode } from 'react';
 import { artFor, type Accent, type RecordArt } from '@/lib/accent';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
-import { ENROLLMENT_TONES, enrollmentStatusLabel, enrollmentTone } from '@/lib/enrollment-labels';
+import { enrollmentStatusLabel, enrollmentTone } from '@/lib/enrollment-labels';
 
 /* -------------------------------------------------------------------------- */
 /* Page chrome                                                                */
@@ -214,8 +214,6 @@ export function DotTimeline({ points, now, width = 210, days = 30 }: { points: T
 /* -------------------------------------------------------------------------- */
 /* Status tones shared across pages                                           */
 /* -------------------------------------------------------------------------- */
-
-export const ENROLLMENT_TONE: Record<string, BadgeTone> = ENROLLMENT_TONES;
 
 export const TASK_TONE: Record<string, BadgeTone> = {
   PENDING: 'blue',

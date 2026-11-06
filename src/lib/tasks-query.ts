@@ -54,9 +54,6 @@ export const taskRowInclude = {
 } satisfies Prisma.TaskInclude;
 
 export type TaskRow = Prisma.TaskGetPayload<{ include: typeof taskRowInclude }>;
-/** A task in a CRM view: its person is there. */
-export type CrmTaskRow = TaskRow & { enrollment: TaskRow['enrollment'] & { person: NonNullable<TaskRow['enrollment']['person']> } };
-export const hasPerson = <T extends { enrollment: { person: unknown } }>(t: T): t is T & { enrollment: T['enrollment'] & { person: NonNullable<T['enrollment']['person']> } } => Boolean(t.enrollment.person);
 
 /** The name and firm a row shows, whichever kind of subject it is about. */
 export function rowSubject(e: { person: { firstName: string; lastName: string; email: string | null; companyName: string | null } | null; sandboxContact: { firstName: string; lastName: string; email: string | null; companyName: string | null } | null }): { name: string; companyName: string | null } {

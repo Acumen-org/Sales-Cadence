@@ -1,15 +1,13 @@
-import type { ActionType, NextActionKind, NextActionRepeat, Prisma } from '@prisma/client';
-import { prisma } from '../db';
+import type { ActionType, NextActionKind, NextActionRepeat } from '@prisma/client';
 import { logAudit, type AuditActor } from '../audit';
-import { coldRef, SANDBOX_TASK, workWhere } from '../subject';
-import { dueCounts, WORKABLE } from '../tasks-query';
+import { coldRef } from '../subject';
 import { isUniqueViolation } from '../engine/tasks';
 import { refuse, RefusedError, withSubjectLock, type GuardActor, type Refusal } from '../outreach/guard';
 import { channelOfAction, contactability } from '../outreach/contactability';
 
 /**
- * Sandbox > Work: the cold section's own steps and next actions. A cold contact's next action stays
- * in Cadence until the contact moves. Work lists only active contacts (B009).
+ * A cold contact's own next step. It stays in Cadence until the contact moves to the CRM; the one
+ * Tasks list shows it beside the campaign steps (PLAN 4.3), for active contacts only (B009).
  */
 
 /** A meeting is its own kind of next step, with its time when known (B183). */
@@ -52,40 +50,4 @@ export async function setSandboxNextAction(contactId: string, input: ColdNextSte
   const r = await setColdNextStep(contactId, input, actor, opts);
   if (!r.ok) throw new Error(r.reason);
   return r.id;
-}
-
-const liveContact = { status: 'ACTIVE' } satisfies Prisma.SandboxContactWhereInput;
-
-export const sandboxTaskInclude = {
-  enrollment: { include: { sandboxContact: { select: { id: true, firstName: true, lastName: true, companyName: true, jobTitle: true, email: true, phone: true, linkedinUrl: true, status: true, state: true, companyState: true, country: true, ownerId: true, podId: true, badEmail: true, possibleBounceAt: true } }, campaign: { select: { id: true, name: true, status: true } }, sequence: { select: { name: true } } } },
-  fo: { select: { id: true, name: true } },
-} satisfies Prisma.TaskInclude;
-export type SandboxTaskRow = Prisma.TaskGetPayload<{ include: typeof sandboxTaskInclude }>;
-
-export const sandboxNextInclude = {
-  sandboxContact: { select: { id: true, firstName: true, lastName: true, companyName: true, jobTitle: true, email: true, phone: true, linkedinUrl: true, status: true, state: true, companyState: true, country: true, ownerId: true, podId: true, badEmail: true, possibleBounceAt: true } },
-  fo: { select: { id: true, name: true } },
-} satisfies Prisma.NextActionInclude;
-export type SandboxNextRow = Prisma.NextActionGetPayload<{ include: typeof sandboxNextInclude }>;
-
-export type WorkTab = 'today' | 'overdue' | 'upcoming';
-
-/** Open cold steps and next actions of active contacts for whoever the filter names (one FO, or everyone). */
-export async function sandboxWork(filters: { foUserId: string | null; podId: string | null }, today: string): Promise<{ tasks: SandboxTaskRow[]; next: SandboxNextRow[]; counts: Record<WorkTab, number> }> {
-  const who: Prisma.TaskWhereInput = { ...(filters.foUserId ? { foUserId: filters.foUserId } : {}), ...(filters.podId ? { enrollment: { podId: filters.podId } } : {}) };
-  const [tasks, next] = await Promise.all([
-    prisma.task.findMany({ where: { AND: [SANDBOX_TASK, { enrollment: { sandboxContact: liveContact } }, WORKABLE, who, { state: 'PENDING' }] }, include: sandboxTaskInclude, orderBy: [{ dueDate: 'asc' }, { stepIndex: 'asc' }, { actionIndex: 'asc' }], take: 500 }),
-    prisma.nextAction.findMany({ where: { AND: [workWhere('cold'), { state: 'OPEN' }, filters.foUserId ? { foUserId: filters.foUserId } : {}, filters.podId ? { sandboxContact: { podId: filters.podId } } : {}] }, include: sandboxNextInclude, orderBy: [{ dueDate: 'asc' }], take: 500 }),
-  ]);
-  const counts: Record<WorkTab, number> = { today: 0, overdue: 0, upcoming: 0 };
-  const tab = (due: string): WorkTab => (due < today ? 'overdue' : due === today ? 'today' : 'upcoming');
-  for (const t of tasks) counts[tab(t.snoozedTo ?? t.dueDate)]++;
-  for (const n of next) counts[tab(n.dueDate)]++;
-  return { tasks, next, counts };
-}
-
-/** The Cold outreach entry's badge: the user's cold steps and next actions due today or earlier, on active contacts only, counted as its Tasks view counts them (B117). */
-export async function sandboxDueCount(userId: string, today: string): Promise<number> {
-  const due = await dueCounts(userId, 'cold', today);
-  return due.today + due.overdue;
 }

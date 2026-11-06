@@ -152,13 +152,6 @@ export async function findSuppressed(keys: SuppressionKey[], tx: Tx = prisma): P
   }) ?? null;
 }
 
-/** Hashes already on the list, of every kind, for checking many contacts at once. */
-export async function suppressedHashes(keys: SuppressionKey[], tx: Tx = prisma): Promise<Set<string>> {
-  if (!keys.length) return new Set();
-  const rows = await tx.suppression.findMany({ where: { valueHash: { in: keys.map((k) => suppressionHash(k.kind, k.value)) } }, select: { valueHash: true } });
-  return new Set(rows.map((r) => r.valueHash));
-}
-
 /**
  * Add keys to the list; a value already on it keeps its first row (and that row's source). `source`
  * is the opt-out that wrote the rows, so lifting a form opt-out removes only its own (D4). Returns how

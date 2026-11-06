@@ -11,7 +11,6 @@ import { snoozeTask } from '@/lib/engine/tasks';
 import { buildHome } from '@/lib/home-query';
 import { replyCount, meetingsHeld } from '@/lib/outreach/metrics';
 import { optOutContact } from '@/lib/outreach/transitions';
-import { sandboxDueCount } from '@/lib/sandbox/work';
 import { coldRef, COLD_CONTACT_BASE, loadSubjects, refKey } from '@/lib/subject';
 import { channelBlock, optOutConfirm, shortDay, workingDayHint } from '@/lib/task-cues';
 import { COLD_TASKS_HREF, dueCounts, filterOptions, heldWords, listNextActionItems, listTaskGroups, nextActionListInclude, parseTaskAudience, rowSubject, type TaskAudience } from '@/lib/tasks-query';
@@ -121,7 +120,6 @@ describe('one Tasks list for CRM and cold work', () => {
       expect(badge, audience).toEqual({ today: steps.counts.today + next.counts.today, overdue: steps.counts.overdue + next.counts.overdue });
     }
     expect(await dueCounts(b.users.alisa.id, 'cold', TODAY)).toEqual({ today: 2, overdue: 1 });
-    expect(await sandboxDueCount(b.users.alisa.id, TODAY)).toBe(3);
   });
 
   it('N030: every tab counts in the database, past any cap, and the list says how many it shows', async () => {

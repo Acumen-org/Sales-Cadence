@@ -1,12 +1,12 @@
 import Link from 'next/link';
 import clsx from 'clsx';
-import { Badge, contactWarnings, crmStanding } from '@/components/ui';
+import { Badge } from '@/components/ui';
 import type { Cue } from '@/lib/sandbox/cues';
 
 /**
  * One status badge and its warning chips (PLAN 4.0), the same on every screen: the contacts list,
  * the contact header, Tasks rows, Ctrl K and the Move dialog. A cold contact's cues come from
- * `coldCues`; a CRM person's from `crmStanding` and `contactWarnings`, as the CRM screens show them.
+ * `coldCues`.
  */
 export function SubjectBadges({ badge, chips = [], className, links = true, limit }: { badge: Cue | null; chips?: Cue[]; className?: string; /** False inside another link (a list row that is itself a link). */ links?: boolean; /** Show this many chips and "+N" for the rest. */ limit?: number }) {
   const shown = limit !== undefined ? chips.slice(0, limit) : chips;
@@ -23,9 +23,4 @@ function CueBadge({ cue, links, strong }: { cue: Cue; links: boolean; strong?: b
   const node = <Badge tone={cue.tone} className={clsx(strong && cue.tone === 'red' && 'ring-1 ring-red-300')}>{strong && cue.tone === 'red' ? <span aria-hidden className="mr-1">⊘</span> : null}{cue.label}</Badge>;
   const titled = cue.title ? <span title={cue.title} className="inline-flex">{node}</span> : node;
   return links && cue.href ? <Link href={cue.href} className="inline-flex hover:opacity-80" title={cue.title}>{node}</Link> : titled;
-}
-
-/** A CRM person's badge and chips, from the CRM's own words. */
-export function personCues(p: Parameters<typeof crmStanding>[0] & Parameters<typeof contactWarnings>[0]): { badge: Cue; chips: Cue[] } {
-  return { badge: crmStanding(p), chips: contactWarnings(p) };
 }

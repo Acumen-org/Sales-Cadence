@@ -3,19 +3,13 @@ import { prisma } from './db';
 import { COLD_OUTREACH_BASE } from './cold-outreach-paths';
 
 /*
- * An enrollment, next action, task or touch is about a Twenty person, a sandbox contact, or both
- * (a sandbox contact that has since moved to the CRM). CRM views read only rows with a person;
- * the Sandbox section reads the rest. What is in the sandbox stays in the sandbox (decision 2 of
- * docs/outreach-sandbox-plan.md).
+ * An enrollment, next action, task or touch is about a CRM person, a cold contact (a SandboxContact),
+ * or both (a cold contact that has since moved to the CRM). Lists, links and figures tell which through
+ * the subject layer below and the audience stamped on each row (cold outreach PLAN 8.4, 8.13).
  */
 
-/** Rows of a CRM view: enrollments, next actions and touches whose subject is a Twenty person. */
+/** Rows about a CRM person: what only the CRM's own work reads, such as next actions written to the CRM. */
 export const CRM_SUBJECT = { personId: { not: null } } satisfies Prisma.EnrollmentWhereInput & Prisma.NextActionWhereInput & Prisma.TouchWhereInput;
-/** Tasks of a CRM view. */
-export const CRM_TASK = { enrollment: CRM_SUBJECT } satisfies Prisma.TaskWhereInput;
-/** Rows of the Sandbox section: a sandbox contact that has not moved. */
-export const SANDBOX_SUBJECT = { sandboxContactId: { not: null }, personId: null } satisfies Prisma.EnrollmentWhereInput & Prisma.NextActionWhereInput & Prisma.TouchWhereInput;
-export const SANDBOX_TASK = { enrollment: SANDBOX_SUBJECT } satisfies Prisma.TaskWhereInput;
 
 /** Who a row is about, the same shape for either kind: what personalisation and labels read. */
 export type Subject = {
@@ -52,16 +46,10 @@ export function subjectOf(row: { person?: PersonLike | null; sandboxContact?: Sa
   throw new Error('This record has neither a person nor a sandbox contact.');
 }
 
-/** A CRM row's person. CRM queries filter with CRM_SUBJECT, so a missing person is a bug, said plainly. */
-export function crmPerson<T>(person: T | null | undefined): T {
-  if (!person) throw new Error('A sandbox contact reached a CRM view; CRM queries must filter with CRM_SUBJECT.');
-  return person;
-}
-
 // ---------------------------------------------------------------------------
 // The subject layer (cold outreach PLAN 8.13): one way for every list to name, link and filter the
 // person or cold contact a row is about, so a cold row never links to a /people page that does not
-// exist. New lists use these; CRM_SUBJECT and crmPerson() stop classifying rows (W14).
+// exist. Every list uses these.
 // ---------------------------------------------------------------------------
 
 /** Who a row is about: a CRM person, or a cold contact (a SandboxContact). */
@@ -84,8 +72,6 @@ export function refOf(row: { personId?: string | null; sandboxContactId?: string
 export function subjectWhere(ref: SubjectRef): { personId: string } | { sandboxContactId: string } {
   return ref.kind === 'person' ? { personId: ref.id } : { sandboxContactId: ref.id };
 }
-/** The same for Tasks, which reach their subject through the enrollment. */
-export const subjectTaskWhere = (ref: SubjectRef): Prisma.TaskWhereInput => ({ enrollment: subjectWhere(ref) });
 
 /**
  * Where a cold contact's page lives: the Cold outreach section (PLAN 3). Every cold link is built from

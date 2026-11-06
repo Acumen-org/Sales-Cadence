@@ -9,7 +9,6 @@ import { exitEnrollment, markReplied } from '../engine/enrollment';
 import { completeNextAction, setNextActions, stopNextAction } from '../next-actions';
 import { ANSWERED_CALL_PREFIX } from '../reply-credit';
 import { getTwentyClient } from '../twenty';
-import { workspaceTimezone } from '../workspace';
 import { optOutSubject } from '../sandbox/opt-out';
 import { setColdNextStep } from '../sandbox/work';
 import { callNoteDraft, writeNote } from '../sandbox/history-notes';
@@ -59,16 +58,9 @@ export function defaultNextStepDate(today: LocalDate, workingDays: number[]): Lo
 }
 
 export type OutcomeGroup = 'reached' | 'not_reached' | 'stop';
-/** The three labelled groups the outcomes sit in (B182). */
-export const OUTCOME_GROUPS: { key: OutcomeGroup; label: string }[] = [
-  { key: 'reached', label: 'Reached them' },
-  { key: 'not_reached', label: 'Didn\'t reach them' },
-  { key: 'stop', label: 'Stop' },
-];
 /** The red Stop group (N042): each ends the outreach, so choosing one asks first. */
 export const STOP_OUTCOMES = new Set(['not_interested', 'wrong_number', OPT_OUT_OUTCOME]);
-/** Outcomes that mean nothing more should happen: the form opens on No further action. */
-export const ENDING_OUTCOMES = STOP_OUTCOMES;
+/** Which of the form's three labelled groups an outcome sits in (B182). */
 export function outcomeGroup(o: { key: string; answered: boolean; badPhone: boolean }): OutcomeGroup {
   if (STOP_OUTCOMES.has(o.key) || o.badPhone) return 'stop';
   return o.answered ? 'reached' : 'not_reached';
@@ -384,10 +376,4 @@ export async function logManualCall(input: { userId: string; personId?: string |
       audience: await audienceFor(subject), podId: await callPodFor({ enrollmentId: task?.enrollmentId ?? null, sandboxContactId: subject.sandboxContactId, userId: input.userId }),
     },
   });
-}
-
-/** The day the form offers for the next step. */
-export async function nextStepDefault(timezone: string, now = new Date()): Promise<LocalDate> {
-  const { rules } = await getSettings();
-  return defaultNextStepDate(todayIn(timezone || workspaceTimezone(), now), rules.workingDays);
 }

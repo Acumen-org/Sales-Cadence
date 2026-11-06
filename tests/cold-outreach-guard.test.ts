@@ -5,10 +5,11 @@ import { userActor } from '@/lib/audit';
 import { toActor } from '@/lib/auth/rbac';
 import { canAct, type Act, type ColdSubject, type GuardActor } from '@/lib/outreach/guard';
 import { contactability } from '@/lib/outreach/contactability';
-import { coldRef } from '@/lib/subject';
+import { coldRef, workWhere } from '@/lib/subject';
 import { addNote, claimContact, removeContact } from '@/lib/sandbox/contacts';
 import { optOutSandboxContact } from '@/lib/sandbox/opt-out';
-import { sandboxDueCount, sandboxWork, setColdNextStep } from '@/lib/sandbox/work';
+import { setColdNextStep } from '@/lib/sandbox/work';
+import { dueCounts } from '@/lib/tasks-query';
 import { coldAudienceIssues } from '@/lib/sandbox/campaigns';
 import { logManualCall, submitCallForm } from '@/lib/calls/form';
 import { statusByIds } from '@/lib/sandbox/status';
@@ -134,10 +135,10 @@ describe('the guard (PLAN 8.1)', () => {
     const leigh = () => g(b.users.leigh, [b.pods.Leigh.id]);
     const next = { label: 'Call', action: 'CALL' as const, dueDate: '2099-01-05' };
 
-    it('B009: a next step on an opted-out, removed or moved contact is refused, and Work lists active contacts only', async () => {
+    it('B009: a next step on an opted-out, removed or moved contact is refused, and the Tasks list counts active contacts only', async () => {
       const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
       await setColdNextStep(c.id, { ...next, foUserId: b.users.alisa.id }, userActor(b.users.alisa), { guard: alisa() });
-      expect(await sandboxDueCount(b.users.alisa.id, '2099-12-31')).toBe(1);
+      expect(await dueCounts(b.users.alisa.id, 'cold', '2099-12-31')).toEqual({ today: 0, overdue: 1 });
       await optOutSandboxContact(c.id, { source: 'contact_page', actor: userActor(b.users.alisa) });
       const r = await setColdNextStep(c.id, { ...next, foUserId: b.users.alisa.id }, userActor(b.users.alisa), { guard: alisa() });
       expect(r).toEqual(expect.objectContaining({ ok: false, reason: 'This contact was opted out; nothing was changed.' }));
@@ -145,12 +146,12 @@ describe('the guard (PLAN 8.1)', () => {
       const removed = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
       await removeContact(removed.id, userActor(b.users.alisa));
       expect((await setColdNextStep(removed.id, { ...next, foUserId: b.users.alisa.id }, userActor(b.users.alisa), { guard: alisa() }))).toEqual(expect.objectContaining({ ok: false, code: 'removed' }));
-      // A stale open row on a contact that is no longer active never reaches Work.
+      // A stale open row on a contact that is no longer active never reaches the Tasks list or its count.
       const moved = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
       await prisma.nextAction.create({ data: { sandboxContactId: moved.id, foUserId: b.users.alisa.id, ...next } });
       await prisma.sandboxContact.update({ where: { id: moved.id }, data: { status: 'OPTED_OUT' } });
-      expect((await sandboxWork({ foUserId: b.users.alisa.id, podId: null }, '2099-12-31')).next).toHaveLength(0);
-      expect(await sandboxDueCount(b.users.alisa.id, '2099-12-31')).toBe(0);
+      expect(await prisma.nextAction.count({ where: { AND: [workWhere('cold'), { foUserId: b.users.alisa.id, state: 'OPEN' }] } })).toBe(0);
+      expect(await dueCounts(b.users.alisa.id, 'cold', '2099-12-31')).toEqual({ today: 0, overdue: 0 });
     });
 
     it('B048: a note on a moved contact is refused and says where it belongs', async () => {

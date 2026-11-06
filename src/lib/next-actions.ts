@@ -1,4 +1,4 @@
-import type { ActionType, NextAction, NextActionKind, NextActionRepeat, Prisma } from '@prisma/client';
+import type { ActionType, NextActionKind, NextActionRepeat } from '@prisma/client';
 import { prisma } from './db';
 import { logAudit, SYSTEM_ACTOR, type AuditActor } from './audit';
 import { addDays, formatLocalDate, isLocalDate, safeTimezone, toLocalDate, todayIn, type LocalDate } from './dates';
@@ -264,24 +264,6 @@ export async function syncNextActions(now = new Date()): Promise<{ pushed: numbe
   }
   return stats;
 }
-
-export type NextActionRow = NextAction & { person: { id: string; firstName: string; lastName: string; companyName: string | null; email: string | null; phone: string | null; linkedinUrl: string | null; jobTitle: string | null }; fo: { id: string; name: string } };
-
-/** Open next actions in view of the Tasks filters: whose (FO), which pod, which channel. */
-export function nextActionWhere(filters: { podId: string | null; foUserId: string | null; channel: 'CALL' | 'EMAIL' | 'LINKEDIN' | null }): Prisma.NextActionWhereInput {
-  return {
-    state: 'OPEN',
-    ...CRM_SUBJECT,
-    ...(filters.foUserId ? { foUserId: filters.foUserId } : {}),
-    ...(filters.podId ? { fo: { pods: { some: { podId: filters.podId } } } } : {}),
-    ...(filters.channel === 'LINKEDIN' ? { action: { in: ['LINKEDIN_CONNECT', 'LINKEDIN_MESSAGE'] } } : filters.channel ? { action: filters.channel } : {}),
-  };
-}
-
-export const nextActionInclude = {
-  person: { select: { id: true, firstName: true, lastName: true, companyName: true, email: true, phone: true, linkedinUrl: true, jobTitle: true } },
-  fo: { select: { id: true, name: true } },
-} satisfies Prisma.NextActionInclude;
 
 /**
  * Who this reader can give a next action to: an admin every FO, a pod leader the FOs of their
