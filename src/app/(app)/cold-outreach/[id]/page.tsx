@@ -22,7 +22,7 @@ import { EnrollmentActions } from '@/components/campaigns/enrollment-actions';
 import { RemoveFromCampaign } from '@/components/campaigns/add-to-campaign';
 import { UndoMoveButton } from '@/components/sandbox/move-undo';
 import { AssignButton, ContactMoreMenu, MoveButton, WithReason } from '@/components/sandbox/contact-actions';
-import { AddToColdCampaign, ColdNextStepButton, EditContactButton, FillFormButton, NoteComposer, PodPicker, type EditableContact } from '@/components/sandbox/contact-page';
+import { AddToColdCampaign, ClaimWithPod, ColdNextStepButton, EditContactButton, FillFormButton, NoteComposer, PodPicker, type EditableContact } from '@/components/sandbox/contact-page';
 import { ColdOutreachHeader } from '@/components/sandbox/section-tabs';
 import { ColdListLink } from '@/components/sandbox/list-link';
 import { coldRef, subjectHref } from '@/lib/subject';
@@ -106,7 +106,7 @@ export default async function ColdContactPage({ params, searchParams }: { params
 function FixButton({ m, fix }: { m: ContactPage; fix: NonNullable<Blocker['fix']> }) {
   switch (fix.kind) {
     case 'form': return <FillFormButton />;
-    case 'claim': return <ActionButton action={claimContactsAction} payload={{ ids: m.id }} flash>{fix.label}</ActionButton>;
+    case 'claim': return m.claimPods ? <ClaimWithPod id={m.id} pods={m.claimPods} label={fix.label} className="btn-primary btn-sm" /> : <ActionButton action={claimContactsAction} payload={{ ids: m.id }} flash>{fix.label}</ActionButton>;
     case 'assign': return <AssignButton id={m.id} name={m.name} users={m.owners} ownerId={c(m).ownerId} work={m.work} />;
     case 'move': return <MoveButton id={m.id} ready users={m.owners} pods={m.pods} label={fix.label} />;
     case 'next_step': return <ColdNextStepButton id={m.id} today={m.today} workingDays={m.settings.rules.workingDays} initial={{ label: '', action: 'CALL', dueDate: m.today, repeat: 'NONE', foUserId: '' }} />;
@@ -264,7 +264,7 @@ function Overview({ m, timezone }: { m: ContactPage; timezone: string }) {
 
 function ChecklistFix({ m, itemKey, edit }: { m: ContactPage; itemKey: string; edit: (label: string, focus?: 'firstName' | 'companyName' | 'email', className?: string) => ReactNode }) {
   if (itemKey === 'owner') {
-    if (m.mayClaim && !m.admin) return <ActionButton action={claimContactsAction} payload={{ ids: m.id }} className="btn-secondary btn-sm" flash>Claim</ActionButton>;
+    if (m.mayClaim && !m.admin) return m.claimPods ? <ClaimWithPod id={m.id} pods={m.claimPods} /> : <ActionButton action={claimContactsAction} payload={{ ids: m.id }} className="btn-secondary btn-sm" flash>Claim</ActionButton>;
     if (m.more.mayAssign) return <AssignButton id={m.id} name={m.name} users={m.owners} ownerId={c(m).ownerId} work={m.work} />;
     return <span className="text-[12px] text-ink-500">{c(m).owner && !c(m).owner!.active ? 'A pod leader assigns a new owner' : c(m).owner ? 'An admin links their CRM login' : 'A rep in its pod claims it'}</span>;
   }

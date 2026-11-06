@@ -225,6 +225,35 @@ describe('Cold contact page: layout and cues (S10, PLAN 4.2)', () => {
     for (const label of ['Log a call', 'Set next step', '>More<', 'Claim']) expect(ops).not.toContain(label);
   });
 
+  it('B050: a leader in two pods claiming a contact with no pod chooses its pod with the claim, and the claim works', async () => {
+    await prisma.user.update({ where: { id: b.users.leigh.id }, data: { role: 'SALES_LEADER', pods: { create: [{ podId: b.pods.Alisa.id }] } } });
+    const leigh = await sessionOf(b.users.leigh.id);
+    const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { firstName: 'Nopod', ownerId: null, claimedAt: null, podId: null });
+    const m = (await loadContactPage(c.id, leigh))!;
+    expect(m.claimPods?.map((p) => p.id).sort()).toEqual([b.pods.Alisa.id, b.pods.Leigh.id].sort());
+    // Claim and call cannot choose a pod, so Call says "Claim first" instead.
+    expect(m.call.claim).toBe(false);
+    expect(m.call.blocked).toBe('Claim first');
+    expect(await draw(c.id, leigh)).toContain('aria-label="Pod to claim it into"');
+    auth.requireUser.mockResolvedValue(leigh);
+    const fd = new FormData();
+    fd.append('ids', c.id);
+    fd.set('podId', b.pods.Leigh.id);
+    expect(await sandboxActions.claimContactsAction(fd)).toEqual(expect.objectContaining({ ok: true }));
+    expect(await prisma.sandboxContact.findUniqueOrThrow({ where: { id: c.id } })).toEqual(expect.objectContaining({ ownerId: b.users.leigh.id, podId: b.pods.Leigh.id }));
+    // A rep in one pod needs no choice.
+    const d = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { ownerId: null, claimedAt: null, podId: null });
+    expect((await loadContactPage(d.id, karson))!.claimPods).toBeNull();
+  });
+
+  it('B053: a contact already in the CRM: Log a call is off and says why, as Call and Set next step do', async () => {
+    const p = (await prisma.personCache.findFirstOrThrow({ where: { email: { not: null }, dnd: false, optedOut: false } }));
+    const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { crmMatchPersonId: p.id });
+    const m = (await loadContactPage(c.id, alisa))!;
+    expect(m.logCall.blocked).toBe('Outreach stopped: in the CRM');
+    expect(m.nextStep.blocked).toBe('Outreach stopped: in the CRM');
+  });
+
   it('B149: an unclaimed contact is Claim-only for reps: "Claim and call", every other button "Claim first", the blocker offers Claim', async () => {
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { firstName: 'Jane', ownerId: null, claimedAt: null });
     const m = (await loadContactPage(c.id, karson))!;
@@ -265,6 +294,26 @@ describe('Cold contact page: layout and cues (S10, PLAN 4.2)', () => {
     // One toast: the latest outcome only, never an old error beside a new success (B203).
     expect(renderToStaticMarkup(createElement(Flash, { message: 'Saved.' }))).toContain('role="status"');
     expect(readFileSync('src/components/action-form.tsx', 'utf8')).toMatch(/onInput=\{\(\) => \{ if \(result && !result\.ok\) setResult\(null\); \}\}/);
+  });
+});
+
+describe('Cold contact page: refusals from a stale tab (S11b)', () => {
+  it('B148 B203: a note or next step refused in a stale tab keeps the page as it was, so the refusal stays on screen; the note box sends its refusal to the toast', async () => {
+    const { revalidatePath } = await import('next/cache');
+    const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+    await prisma.sandboxContact.update({ where: { id: c.id }, data: { status: 'OPTED_OUT', optedOutAt: new Date() } });
+    auth.requireUser.mockResolvedValue(alisa);
+    vi.mocked(revalidatePath).mockClear();
+    const note = await sandboxActions.addNoteAction(fd({ id: c.id, body: 'Left a message' }));
+    expect(note).toEqual(expect.objectContaining({ ok: false, error: expect.any(String) }));
+    const next = await sandboxActions.setNextActionAction(fd({ id: c.id, label: 'Call back', action: 'CALL', dueDate: '2099-01-05' }));
+    expect(next).toEqual(expect.objectContaining({ ok: false, error: expect.any(String) }));
+    // Nothing was re-read: the dialog and the note box keep their message.
+    expect(revalidatePath).not.toHaveBeenCalled();
+    expect(await prisma.nextAction.count({ where: { sandboxContactId: c.id } })).toBe(0);
+    // The composer's refusal goes to the page's toast (replaced by the next result), never left beside it.
+    const src = readFileSync('src/components/sandbox/contact-page.tsx', 'utf8');
+    expect(src).toContain("else say(r.error, 'error'); return r.ok ? { ok: true } : { ok: false, error: '' };");
   });
 });
 

@@ -368,8 +368,10 @@ export async function tableRows(ids: string[], user: SessionUser, today: string,
     allows.enroll = cue.state === 'already_in_crm' ? 'Already in the CRM: outreach stopped' : inCampaign && c.status === 'ACTIVE' ? 'Already in a campaign' : check('enroll');
     // PLAN 4.0: an unclaimed contact is claimed first; one already in the CRM is moved, not worked.
     allows.next_step = cue.state === 'unclaimed' && c.status === 'ACTIVE' ? 'Claim first' : cue.state === 'already_in_crm' ? 'Already in the CRM: outreach stopped' : check('next_action');
-    allows.move = check('move');
-    allows.remove = check('remove');
+    // B151: what a rep may do once the contact is theirs reads "Claim first", as on the contact page.
+    const claimFirst = (act: Act): true | string => { const v = check(act); return v !== true && cue.state === 'unclaimed' && c.status === 'ACTIVE' && allows.claim === true ? 'Claim first' : v; };
+    allows.move = claimFirst('move');
+    allows.remove = claimFirst('remove');
     const call = c.calls[0];
     const m = moves.get(id);
     const created = formatLocalDate(toLocalDate(c.createdAt, tz()), 'year');

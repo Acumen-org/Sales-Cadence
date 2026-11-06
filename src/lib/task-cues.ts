@@ -36,7 +36,7 @@ export function optOutConfirm(exit: string | null | undefined, name: string): { 
   if (exit !== 'opted_out') return null;
   return {
     title: `${name} asked not to be contacted?`,
-    effects: [`${name} is opted out for good: Cadence never calls, emails or messages them again.`, 'This sequence ends as Opted out.', 'Their other open steps and next steps are cancelled.'],
+    effects: [`${name} is opted out for good: do not email, call or message them again. Cadence blocks calls and campaigns.`, 'This sequence ends as Opted out.', 'Their other open steps and next steps are cancelled.'],
     confirmLabel: 'Opt out',
     tone: 'danger',
   };

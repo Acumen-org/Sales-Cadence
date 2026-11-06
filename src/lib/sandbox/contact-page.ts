@@ -159,6 +159,8 @@ export async function loadContactPage(id: string, user: SessionUser, now = new D
   const claimFirst = live && unclaimed && !admin && work.ok;
   const mayClaim = live && unclaimed && claimV.ok;
   const mayWork = live && work.ok && !claimFirst;
+  // B050: a rep in several pods claiming a contact that has none chooses its pod with the claim.
+  const claimPodIds = mayClaim && !admin && !contact.podId && user.podIds.length > 1 ? user.podIds : null;
   const workWhy = !live ? null : !work.ok ? shortWhy(work, s) : claimFirst ? 'Claim first' : null;
 
   // Names: whoever acted, pushed, removed or erased.
@@ -196,8 +198,8 @@ export async function loadContactPage(id: string, user: SessionUser, now = new D
   const call = {
     show: live && sales,
     phone: contact.phone,
-    claim: claimFirst && mayClaim && Boolean(contact.phone),
-    blocked: !contact.phone ? 'No phone number: add one' : !work.ok ? shortWhy(work, s) : claimFirst && !mayClaim ? (claimV.ok ? null : claimV.reason) : callCheck && !callCheck.ok ? shortForm(callCheck.reason) : null,
+    claim: claimFirst && mayClaim && !claimPodIds && Boolean(contact.phone),
+    blocked: !contact.phone ? 'No phone number: add one' : !work.ok ? shortWhy(work, s) : claimFirst && !mayClaim ? (claimV.ok ? null : claimV.reason) : claimFirst && claimPodIds ? 'Claim first' : callCheck && !callCheck.ok ? shortForm(callCheck.reason) : null,
     // N073: a number marked wrong asks before the dialpad opens; so does a calling-hours warning.
     warning: callCheck && callCheck.ok ? [callCheck.confirm ? 'This number was marked wrong on a call. Call it anyway?' : null, callCheck.warning].filter(Boolean).join(' ') || null : null,
     nextActionId: contact.nextActions.find((n) => n.state === 'OPEN')?.id ?? null,
@@ -214,7 +216,8 @@ export async function loadContactPage(id: string, user: SessionUser, now = new D
   };
   const logCall = {
     show: live && sales,
-    blocked: workWhy ?? shortForm(pendingBlock),
+    // B053: the server refuses a logged call where outreach has stopped, so the button says why first.
+    blocked: workWhy ?? outreachWhy ?? shortForm(pendingBlock),
     steps: mayWork ? (await openCallItems({ personId: null, sandboxContactId: id }, null)).map((st) => ({ key: `${st.kind}:${st.id}`, words: st.words })) : [],
   };
   const open = contact.nextActions.find((n) => n.state === 'OPEN') ?? null;
@@ -405,7 +408,7 @@ export async function loadContactPage(id: string, user: SessionUser, now = new D
   return {
     contact, id, name, firstName, live, erased, removed, sub, cue, step: contactPathStep(cue) as PathStepKey | null, today, settings,
     newerNote: source.newerNote, possibleBounce: live && contact.possibleBounceAt && !contact.badEmail ? { at: contact.possibleBounceAt, on: dayYear(contact.possibleBounceAt), mayAct: work.ok } : null,
-    banner, formOpt, blocker, mayWork, mayClaim, claimFirst, workWhy, admin, bizOps, sales,
+    banner, formOpt, blocker, mayWork, mayClaim, claimFirst, claimPods: claimPodIds ? pods.filter((p) => claimPodIds.includes(p.id)) : null, workWhy, admin, bizOps, sales,
     readOnly: live && !work.ok ? work.reason : null,
     /** The one line under a row of buttons that are all off for the same reason. */
     readOnlyLine: live && !work.ok ? (work.code === 'moving' ? 'Being moved to the CRM: the buttons come back if the move fails.' : work.code === 'not_yours' || work.code === 'other_pod' ? `${shortWhy(work, s)}: you can read it, and opt them out if they ask, but not work it.` : work.reason) : null,

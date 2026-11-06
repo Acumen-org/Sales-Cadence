@@ -59,7 +59,7 @@ export async function coldCues(ids: string[], opts: { today?: LocalDate } = {}):
     getSettings(),
     prisma.sandboxContact.findMany({ where: { id: { in: unique } }, include: { owner: { select: { name: true, twentyMemberId: true, active: true } }, pod: { select: { name: true } } } }),
     prisma.sandboxMoveItem.findMany({ where: { sandboxContactId: { in: unique }, state: { in: ['QUEUED', 'RUNNING'] } }, select: { sandboxContactId: true } }),
-    prisma.enrollment.findMany({ where: { sandboxContactId: { in: unique }, personId: null, status: { in: ['ACTIVE', 'PAUSED'] } }, select: { sandboxContactId: true, status: true, currentStep: true, campaign: { select: { name: true } }, sequence: { select: { name: true, steps: true } }, tasks: { where: { state: 'PENDING' }, orderBy: [{ dueDate: 'asc' }, { stepIndex: 'asc' }], take: 1, select: { action: true, dueDate: true, snoozedTo: true, stepIndex: true } } } }),
+    prisma.enrollment.findMany({ where: { sandboxContactId: { in: unique }, personId: null, status: { in: ['ACTIVE', 'PAUSED'] } }, select: { sandboxContactId: true, status: true, currentStep: true, startDate: true, campaign: { select: { name: true } }, sequence: { select: { name: true, steps: true } }, tasks: { where: { state: 'PENDING' }, orderBy: [{ dueDate: 'asc' }, { stepIndex: 'asc' }], take: 1, select: { action: true, dueDate: true, snoozedTo: true, stepIndex: true } } } }),
     prisma.nextAction.findMany({ where: { sandboxContactId: { in: unique }, personId: null, state: 'OPEN' }, select: { sandboxContactId: true, label: true, action: true, kind: true, dueDate: true } }),
     prisma.callLog.findMany({ where: { sandboxContactId: { in: unique }, formDueAt: { not: null }, formDoneAt: null, discardedAt: null }, select: { sandboxContactId: true } }),
     prisma.callLog.findMany({ where: { sandboxContactId: { in: unique } }, select: { sandboxContactId: true }, distinct: ['sandboxContactId'] }),
@@ -96,6 +96,8 @@ export async function coldCues(ids: string[], opts: { today?: LocalDate } = {}):
     if (own) candidates.push({ label: own.kind === 'MEETING' ? 'Meeting' : ACTION_LABELS[own.action], due: own.dueDate, overdue: own.dueDate < today, source: 'next_step' });
     if (step) { const due = step.snoozedTo ?? step.dueDate; candidates.push({ label: `${ACTION_LABELS[step.action]} · ${enrollment!.campaign?.name ?? enrollment!.sequence.name}`, due, overdue: due < today, source: 'campaign' }); }
     else if (held) candidates.push({ label: `Campaign starts · ${held.name}`, due: held.startDate, overdue: false, source: 'campaign' });
+    // N083: a running campaign whose first touch for this contact is on a later day has no step yet.
+    else if (enrollment?.status === 'ACTIVE' && enrollment.startDate && enrollment.startDate > today) candidates.push({ label: `Campaign starts · ${enrollment.campaign?.name ?? enrollment.sequence.name}`, due: enrollment.startDate, overdue: false, source: 'campaign' });
     const next = candidates.sort((a, b) => a.due.localeCompare(b.due))[0] ?? null;
     const crmName = personName.get(c.crmMatchPersonId ?? c.crmAutoPersonId ?? '') || null;
     const badge = badgeFor(state, { contact: c, signal, enrollment, held, own, today, crmName });

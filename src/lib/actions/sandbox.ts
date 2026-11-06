@@ -119,7 +119,8 @@ export async function addNoteAction(fd: FormData): Promise<ActionResult> {
   const user = await requireUser();
   const id = String(fd.get('id') ?? '');
   const r = await addNote(id, String(fd.get('body') ?? ''), user, userActor(user), toActor(user));
-  refresh(id);
+  // B148: a refusal changes nothing, and re-reading the page would take the box (and its message) away.
+  if (r.ok) refresh(id);
   return r.ok ? { ok: true, message: 'Note added.' } : r;
 }
 
@@ -136,7 +137,8 @@ export async function setNextActionAction(fd: FormData): Promise<ActionResult> {
   // The owner works it; an unclaimed contact (or one whose owner left) is claimed by this write (PLAN 8.1).
   const fo = contact?.ownerId && contact.owner?.active ? contact.ownerId : user.id;
   const r = await setColdNextStep(id, { label, action, dueDate, foUserId: fo }, userActor(user), { guard: toActor(user), act: 'next_step', user });
-  refresh(id);
+  // B148: on a refusal the dialog stays open with the reason; re-reading the page would close it.
+  if (r.ok) refresh(id);
   return r.ok ? { ok: true, message: 'Next step set.' } : { ok: false, error: r.reason };
 }
 

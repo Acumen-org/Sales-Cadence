@@ -173,6 +173,19 @@ describe('Cold outreach: the contacts list (S10)', () => {
     expect(one).not.toContain('leaves out');
   });
 
+  it('B151: an unclaimed contact in the selection is left out of Move and Remove with "Claim first", one full stop', async () => {
+    const own = await readyContact(b.users.karson.id, b.pods.Alisa.id, { lastName: 'Own151' });
+    const free = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { lastName: 'Free151', ownerId: null, claimedAt: null });
+    const rows = (await listContacts(karson, { view: 'all', q: '151' })).rows.filter((r) => [own.id, free.id].includes(r.id));
+    expect(rows).toHaveLength(2);
+    const freeRow = rows.find((r) => r.id === free.id)!;
+    expect(freeRow.allows).toEqual(expect.objectContaining({ claim: true, next_step: 'Claim first', move: 'Claim first', remove: 'Claim first' }));
+    const html = draw(ColdBulkActions, { rows, ...bulk, onDone: () => {} });
+    expect(html).toContain('leave out 1: Claim first.');
+    expect(html).not.toContain('..');
+    expect(html).not.toContain('Only the owner');
+  });
+
   it('B152: one filter row that applies as it changes: search, Owner, Pod and Source, no Apply button, the filters in force as chips', async () => {
     const list = await listContacts(karson, { view: 'no_next_step' });
     const html = draw(PeopleToolbar, { variant: 'cold', q: '', view: list.params.view, owner: 'mine', pod: '', source: '', owners: list.owners, pods: list.pods, myPodIds: list.myPodIds, offersMine: true, offersNeedsOwner: false, chips: list.chips });
@@ -287,6 +300,14 @@ describe('Cold outreach: the contacts list (S10)', () => {
     const html = draw(PeopleTable, { variant: 'cold', rows: [row], canSelect: true, bulk });
     expect(html).toContain('>Next</th>');
     expect(html).toContain('<div class="font-medium text-red-600">Overdue · Tue 3 Nov</div>');
+  });
+
+  it('N083: a running campaign whose first touch for the contact is on a later day shows that day as Next', async () => {
+    const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+    const campaign = await prisma.campaign.create({ data: { name: 'Q4 Later', audience: 'SANDBOX', status: 'ACTIVE', podId: b.pods.Alisa.id, sequenceId: b.sequence.id, startDate: '2026-11-02', createdById: b.users.alisa.id } });
+    await prisma.enrollment.create({ data: { sandboxContactId: c.id, sequenceId: b.sequence.id, campaignId: campaign.id, foUserId: b.users.alisa.id, podId: b.pods.Alisa.id, startDate: '2099-01-06', status: 'ACTIVE', currentStep: 0, audience: 'SANDBOX' } });
+    const row = (await listContacts(alisa, { view: 'all' })).rows.find((r) => r.id === c.id)!;
+    expect(row.next).toEqual(expect.objectContaining({ label: 'Campaign starts · Q4 Later', overdue: false }));
   });
 
   it('N046: a row with a call waiting for its form shows "Form due", and the strip\'s Forms due view lists the contacts whose forms I hold', async () => {

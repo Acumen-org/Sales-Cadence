@@ -80,7 +80,8 @@ export function ColdBulkActions({ rows, owners, pods, today, workingDays, onDone
   // that leave out the same for the same reasons share one line.
   const leftOut = new Map<string, BulkAct[]>();
   for (const [act, list] of shown.filter(([, l]) => l.length < n)) {
-    const why = [...new Set(rows.filter((r) => !list.includes(r)).map((r) => r.allows[act] as string))];
+    // Reasons are sentences of their own ("... can move this contact."); the line adds its own full stop.
+    const why = [...new Set(rows.filter((r) => !list.includes(r)).map((r) => (r.allows[act] as string).replace(/\.+$/, '')))];
     const tail = `${n - list.length}: ${why.slice(0, 2).join('; ')}${why.length > 2 ? '; and more' : ''}.`;
     leftOut.set(tail, [...(leftOut.get(tail) ?? []), act]);
   }

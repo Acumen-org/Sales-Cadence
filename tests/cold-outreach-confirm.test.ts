@@ -14,10 +14,10 @@ describe('ConfirmDialog (cold outreach PLAN 4.0)', () => {
     expect(left.map((f) => path.relative(process.cwd(), f))).toEqual([]);
   });
 
-  it('ConfirmDialog: Opt out names the person and every effect, and asks why', () => {
+  it('ConfirmDialog, N104: Opt out names the person and every effect (the rep must not email, call or message them), and asks why', () => {
     const c = optOutConfirm({ name: 'Jane Doe', campaigns: ['Q4 Harbor'], nextStep: 'Call on Thu 5 Nov', fromBellwether: true });
     expect(c.title).toBe('Opt Jane Doe out?');
-    expect(c.effects).toEqual(['Cadence never calls, emails or messages Jane Doe again.', 'Q4 Harbor ends.', 'The next step (Call on Thu 5 Nov) is cancelled.', 'Bellwether shows them as Do not contact.']);
+    expect(c.effects).toEqual(['Do not email, call or message Jane Doe again. Cadence blocks calls and campaigns.', 'Q4 Harbor ends.', 'The next step (Call on Thu 5 Nov) is cancelled.', 'Bellwether shows them as Do not contact.']);
     expect(c.reason).toEqual(expect.objectContaining({ required: true }));
     expect(c.tone).toBe('danger');
   });

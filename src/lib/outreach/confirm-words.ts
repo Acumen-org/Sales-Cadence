@@ -25,7 +25,8 @@ export function optOutConfirm(c: ContactEffects): ConfirmOptions {
   return {
     title: `Opt ${c.name} out?`,
     effects: [
-      `Cadence never calls, emails or messages ${c.name} again.`,
+      // N104: reps email from Outlook, so the rule is theirs to keep; Cadence enforces what it can.
+      `Do not email, call or message ${c.name} again. Cadence blocks calls and campaigns.`,
       ...ends(c.campaigns),
       ...cancels(c.nextStep),
       ...(c.inCrm ? ['The CRM marks them Do not contact and clears their Next Action.'] : []),

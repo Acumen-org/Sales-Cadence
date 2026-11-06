@@ -62,7 +62,7 @@ export function ActionForm({ action, children, className, resetOnSuccess, confir
       <fieldset disabled={pending} className="contents">
         <div className={className}>
           {children}
-          {result && (!result.ok || result.message) ? (
+          {result && (result.ok ? result.message : result.error) ? (
             <p className={clsx('text-xs', result.ok ? 'text-emerald-700' : 'text-red-700')} role="status">
               {result.ok ? result.message ?? 'Done.' : result.error}
             </p>

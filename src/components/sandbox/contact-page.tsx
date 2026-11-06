@@ -8,7 +8,7 @@ import { useFlash } from '@/components/flash';
 import { IconClose } from '@/components/icons';
 import { NextActionButton, type NextActionDraft } from '@/components/people/next-action-form';
 import { AddToCampaign } from '@/components/campaigns/add-to-campaign';
-import { addNoteAction, setNextActionAction, setPodAction, updateContactAction } from '@/lib/actions/sandbox';
+import { addNoteAction, claimContactsAction, setNextActionAction, setPodAction, updateContactAction } from '@/lib/actions/sandbox';
 import { OPEN_FORM_EVENT } from '@/lib/calls/words';
 import { coldRef, subjectHref } from '@/lib/subject';
 
@@ -131,7 +131,9 @@ export function AddToColdCampaign({ id, className = 'btn-secondary btn-sm' }: { 
 /** The note composer, as on the CRM page. */
 export function NoteComposer({ id }: { id: string }) {
   const say = useFlash();
-  return <ActionForm action={async (fd) => { const r = await addNoteAction(fd); if (r.ok) say(r.message ?? 'Note added.'); return r.ok ? { ok: true } : r; }} resetOnSuccess className="space-y-2 p-4">
+  // B148, B203: a refusal goes to the page's toast like a result, so the next result replaces it and a
+  // re-read page cannot take it away; what was typed stays in the box.
+  return <ActionForm action={async (fd) => { const r = await addNoteAction(fd); if (r.ok) say(r.message ?? 'Note added.'); else say(r.error, 'error'); return r.ok ? { ok: true } : { ok: false, error: '' }; }} resetOnSuccess className="space-y-2 p-4">
     <input type="hidden" name="id" value={id} />
     <textarea name="body" rows={3} aria-label="Note" placeholder="What happened, what they said, what to remember" className="w-full" required />
     <div className="flex justify-end"><button type="submit" className="btn-secondary btn-sm">Add note</button></div>
@@ -145,6 +147,19 @@ export function PodPicker({ id, pods, current }: { id: string; pods: { id: strin
     <input type="hidden" name="id" value={id} />
     <select name="podId" aria-label="Pod" defaultValue={current ?? ''} className="!w-auto !py-1 text-[12.5px]" required><option value="" disabled>Choose its pod</option>{pods.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
     <button type="submit" className="btn-secondary btn-sm">Set pod</button>
+  </ActionForm>;
+}
+
+/**
+ * Claim, with the pod to claim it into when the contact has none and the rep works in several (B050):
+ * the claim needs that choice, so it is asked here rather than refused afterwards.
+ */
+export function ClaimWithPod({ id, pods, label = 'Claim', className = 'btn-secondary btn-sm' }: { id: string; pods: { id: string; name: string }[]; label?: string; className?: string }) {
+  const say = useFlash();
+  return <ActionForm action={async (fd) => { const r = await claimContactsAction(fd); if (r.ok) say(r.message ?? 'Claimed.'); return r.ok ? { ok: true } : r; }} className="inline-flex flex-wrap items-center gap-1.5">
+    <input type="hidden" name="ids" value={id} />
+    <select name="podId" aria-label="Pod to claim it into" defaultValue="" className="!w-auto !py-1 text-[12.5px]" required><option value="" disabled>Choose its pod</option>{pods.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+    <button type="submit" className={className}>{label}</button>
   </ActionForm>;
 }
 
