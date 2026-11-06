@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -17,6 +19,14 @@ import { readyContact } from './helpers/sandbox';
 import { sessionOf } from './helpers/cold-campaign';
 
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }));
+const auth = vi.hoisted(() => ({ requireUser: vi.fn() }));
+vi.mock('@/lib/auth/current-user', () => ({ requireUser: auth.requireUser, requireAdmin: auth.requireUser, toActor: (u: SessionUser) => ({ id: u.id, role: u.role, podIds: u.podIds }) }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {}, push: () => {} }), usePathname: () => '/cold-outreach', useSearchParams: () => new URLSearchParams(), redirect: (to: string) => { throw new Error(`redirect ${to}`); }, notFound: () => { throw new Error('not found'); } }));
+
+const { globalSearchAction } = await import('@/lib/actions/search');
+const { TaskList } = await import('@/components/tasks/task-list');
+const { taskGridClass } = await import('@/components/tasks/tasks-screen');
+const { LIVE } = await import('@/components/live-refresh');
 
 /**
  * Stage S10 (cold outreach W8): the section's screens, the rename, Settings, search and the step strip.
@@ -46,6 +56,29 @@ describe('Cold outreach: the address and the rename (S10)', () => {
     const res = middleware(new NextRequest('http://cadence.local/sandbox/abc?move=1'));
     expect(res.status).toBe(307);
     expect(new URL(res.headers.get('location')!).pathname + new URL(res.headers.get('location')!).search).toBe('/cold-outreach/abc?move=1');
+  });
+
+  it('D1: no page or component shows the words "sandbox" or "Twenty"; they say Cold outreach and CRM', () => {
+    const word = /(?<![A-Za-z_./$-])(Twenty|[Ss]andbox)(?![A-Za-z_(])/;
+    const literal = /'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`|>[^<>{}\n]+</g;
+    const found: string[] = [];
+    const walk = (dir: string) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) { if (e.name !== 'api') walk(p); continue; }
+        if (!/\.tsx?$/.test(e.name)) continue;
+        fs.readFileSync(p, 'utf8').split('\n').forEach((line, i) => {
+          if (/^\s*(\/\/|\*|\/\*|\{\/\*|import )/.test(line)) return;
+          for (const m of line.match(literal) ?? []) {
+            // Internal keys (`sandbox:<id>` in a select's value) are not words anyone reads.
+            if (word.test(m) && !/^[`'"](sandbox|Sandbox|twenty|Twenty)[`'"]$/.test(m) && !m.includes('sandbox_') && !/sandbox'\}:\$\{/.test(m) && !m.includes('/sandbox')) found.push(`${path.relative(process.cwd(), p)}:${i + 1}: ${m}`);
+          }
+        });
+      }
+    };
+    walk(path.join(process.cwd(), 'src', 'app'));
+    walk(path.join(process.cwd(), 'src', 'components'));
+    expect(found).toEqual([]);
   });
 
   it('every cold link is built under /cold-outreach: contacts, Tasks, Campaigns, Moves, From Bellwether', () => {
@@ -141,5 +174,43 @@ describe('Cold outreach screens (S10)', () => {
     expect(contactPathStep({ state: 'no_next_step', formDue: false, worked: false })).toBe('work');
     expect(contactPathStep({ state: 'no_next_step', formDue: false, worked: true })).toBe('next');
     expect(contactPathStep({ state: 'ready_to_move', formDue: true, worked: true })).toBe('form');
+  });
+
+  it('B116: Ctrl K finds cold contacts and cold campaigns, each marked with what it is, a contact with its status badge', async () => {
+    auth.requireUser.mockResolvedValue(alisa);
+    const jane = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { firstName: 'Jané', lastName: 'Quarrington', badPhone: true });
+    await readyContact(b.users.alisa.id, b.pods.Alisa.id, { firstName: 'Old', lastName: 'Quarrington', status: 'OPTED_OUT', optedOutAt: new Date('2026-11-03T12:00:00Z') });
+    const coldCampaign = await prisma.campaign.create({ data: { name: 'Quarrington push', audience: 'SANDBOX', podId: b.pods.Alisa.id, sequenceId: b.sequence.id, startDate: '2026-11-09', createdById: b.users.alisa.id } });
+    const hits = await globalSearchAction('quarrington');
+    const cold = hits.filter((h) => h.kind === 'cold');
+    expect(cold.map((h) => h.title)).toEqual(['Jané Quarrington', 'Old Quarrington']);
+    expect(cold[0]).toEqual(expect.objectContaining({ chip: 'Cold contact', href: `/cold-outreach/${jane.id}`, badge: expect.objectContaining({ label: 'No next step' }) }));
+    expect(cold[1].badge).toEqual(expect.objectContaining({ label: 'Do not contact · 3 Nov 2026', tone: 'red' }));
+    expect(hits.find((h) => h.kind === 'cold_campaign')).toEqual(expect.objectContaining({ id: coldCampaign.id, chip: 'Cold campaign', href: `/campaigns/${coldCampaign.id}` }));
+    // Accents and phone digits find the same contact; a short number is not read as a phone (B055, B206).
+    expect((await globalSearchAction('jane quarrington')).some((h) => h.id === jane.id)).toBe(true);
+    expect((await globalSearchAction(jane.phone!.slice(-7))).some((h) => h.id === jane.id)).toBe(true);
+    expect((await globalSearchAction('people-01')).some((h) => h.kind === 'cold')).toBe(false);
+  });
+
+  it('B211: Cold outreach pages refresh themselves, as Home, Tasks and Activity do', () => {
+    for (const path of ['/cold-outreach', '/cold-outreach/abc', '/cold-outreach/tasks', '/cold-outreach/moves/m1']) expect(LIVE.test(path)).toBe(true);
+    expect(LIVE.test('/reports')).toBe(false);
+  });
+
+  it('N057: from 1280px the contact card sits beside the composer, in its own column, not below it', () => {
+    expect(taskGridClass('list', true)).toContain('xl:grid-cols-[248px_minmax(0,1fr)_288px]');
+    expect(taskGridClass('list', false)).toBe('grid items-start gap-4 xl:grid-cols-[300px_minmax(0,1fr)]');
+    expect(taskGridClass('flow', true)).toContain('xl:grid-cols-[minmax(0,1fr)_380px]');
+  });
+
+  it('PLAN 4.0: the Tasks row of a cold contact carries its warning chips (N073 Wrong number, N046 Form due)', async () => {
+    const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { badPhone: true });
+    await prisma.callLog.create({ data: { source: 'TWILIO_IMPORT', twilioCallSid: 'CA-s10', userId: b.users.alisa.id, sandboxContactId: c.id, direction: 'OUTBOUND', status: 'COMPLETED', toNumber: c.phone!, fromNumber: '+13125550000', startedAt: new Date(), formDueAt: new Date() } });
+    const cue = (await coldCues([c.id])).get(c.id)!;
+    expect(cue.chips.map((x) => x.label)).toEqual(['Wrong number', 'Form due']);
+    const html = renderToStaticMarkup(createElement(TaskList, { rows: [{ id: 't1', personName: 'Sam Rivera', companyName: 'Rivera Wealth', label: 'Call 1', action: 'CALL', stepIndex: 0, stepDay: 1, due: '2026-11-06', snoozed: false, state: 'PENDING', foName: 'Alisa', campaignName: null, chips: cue.chips }], selectedId: null, today: '2026-11-06', showFo: false, hrefTemplate: '/tasks?task=__ID__', dispositions: [], skipReasons: [], fos: [], nextWorkingDay: '2026-11-09', canPickSnoozeDate: true, bulkEnabled: false }));
+    expect(html).toContain('Wrong number');
+    expect(html).toContain('title="Form due"');
   });
 });

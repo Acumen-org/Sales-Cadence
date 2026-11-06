@@ -7,6 +7,7 @@ import clsx from 'clsx';
 import { globalSearchAction, type SearchHit } from '@/lib/actions/search';
 import { IconChevronRight, IconClose, IconSearch } from './icons';
 import { Avatar } from './ui';
+import { SubjectBadges } from './subject-badges';
 import type { Role } from '@prisma/client';
 import { NotificationsBell } from './notifications-bell';
 import { Modal } from './modal';
@@ -86,13 +87,13 @@ function SearchDialog({ onClose }: { onClose: () => void }) {
         if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => hits.length ? (a + 1) % hits.length : 0); }
         if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => hits.length ? (a - 1 + hits.length) % hits.length : 0); }
         if (e.key === 'Enter') { e.preventDefault(); go(hits[active]); }
-      }} placeholder="Search people and campaigns" aria-label="Search" className="!border-0 !bg-transparent !py-5 !text-[14px] !ring-0" />
+      }} placeholder="Search people, contacts and campaigns" aria-label="Search" className="!border-0 !bg-transparent !py-5 !text-[14px] !ring-0" />
       <button type="button" onClick={onClose} aria-label="Close search" className="btn-icon-ghost"><IconClose size={17} /></button>
     </div>
     <div className="max-h-[52vh] overflow-y-auto p-2 scroll-thin" aria-busy={pending}>
-      <p role="status" className={clsx('px-4 py-8 text-center text-[13px] text-ink-500', hits.length > 0 && 'sr-only')}>{error ?? (q.trim().length < 2 ? 'Find a person, campaign, or sequence. Start with two characters.' : pending ? 'Searching your workspace…' : hits.length ? `${hits.length} results` : 'No matches. Try a different name or company.')}</p>
+      <p role="status" className={clsx('px-4 py-8 text-center text-[13px] text-ink-500', hits.length > 0 && 'sr-only')}>{error ?? (q.trim().length < 2 ? 'Find a person, a cold contact or a campaign. Start with two characters.' : pending ? 'Searching your workspace…' : hits.length ? `${hits.length} results` : 'No matches. Try a different name or company.')}</p>
       <ul id="workspace-results" role="listbox" aria-label="Search results">{hits.map((h, i) => <li key={`${h.kind}-${h.id}`} id={`search-hit-${i}`} role="option" aria-selected={i === active} onMouseEnter={() => setActive(i)} onMouseDown={(e) => e.preventDefault()} onClick={() => go(h)} className={clsx('flex cursor-pointer items-center gap-3 rounded-lg px-3 py-3', i === active ? 'bg-brand-50' : 'hover:bg-canvas')}>
-        <Avatar name={h.title} size={34} shape={h.kind === 'person' ? 'circle' : 'square'} /><span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium text-ink-900">{h.title}</span>{h.sub ? <span className="block truncate text-[11px] text-ink-500">{h.sub}</span> : null}</span><span className="rounded border border-line px-1.5 py-0.5 text-[9px] capitalize text-ink-500">{h.kind}</span>
+        <Avatar name={h.title} size={34} shape={h.kind === 'person' || h.kind === 'cold' ? 'circle' : 'square'} /><span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium text-ink-900">{h.title}</span>{h.sub ? <span className="block truncate text-[11px] text-ink-500">{h.sub}</span> : null}{h.badge ? <SubjectBadges badge={h.badge} links={false} className="mt-1" /> : null}</span><span className={clsx('shrink-0 rounded border px-1.5 py-0.5 text-[9px]', h.kind === 'cold' || h.kind === 'cold_campaign' ? 'border-sky-200 bg-sky-50 text-sky-800' : 'border-line text-ink-500')}>{h.chip}</span>
       </li>)}</ul>
     </div>
     <div className="flex gap-4 border-t border-line px-5 py-3 text-[10px] text-ink-500"><span><kbd>↑ ↓</kbd> to navigate</span><span><kbd>Enter</kbd> to open</span><span className="ml-auto"><kbd>Esc</kbd> to close</span></div>

@@ -7,6 +7,8 @@ import { refOf, subjectHref } from '@/lib/subject';
 import type { NextActionListRow } from '@/lib/tasks-query';
 import { ActionIcon, IconRefresh } from '@/components/icons';
 import { Avatar, Badge, Notice, RecordFields, Surface } from '@/components/ui';
+import { SubjectBadges } from '@/components/subject-badges';
+import type { Cue } from '@/lib/sandbox/cues';
 import { NextActionControls } from './next-action-controls';
 
 /*
@@ -58,12 +60,14 @@ type PanelProps = {
   callSlot?: ReactNode;
   /** "Email bounced" or "Possible bounce" on a cold contact (N097). */
   warning?: string | null;
+  /** A cold contact's warning chips (PLAN 4.0), in place of `warning`. */
+  chips?: Cue[];
   /** On a cold Email next step: whether it closes itself when the rep sends from Outlook (N088). */
   closeWords?: string | null;
 };
 
 /** An open created task: the band says it is one and what it is; below, the person and the controls. */
-export function NextActionPanel({ item: n, today, timezone, nextUrl, nextWorkingDay, mayWork, whyNot = null, done = false, workingDays = [], callSlot = null, warning = null, closeWords = null }: PanelProps) {
+export function NextActionPanel({ item: n, today, timezone, nextUrl, nextWorkingDay, mayWork, whyNot = null, done = false, workingDays = [], callSlot = null, warning = null, chips = [], closeWords = null }: PanelProps) {
   const { name, firstName, who } = nextSubject(n);
   const ref = refOf(n);
   const cold = !n.person;
@@ -82,7 +86,7 @@ export function NextActionPanel({ item: n, today, timezone, nextUrl, nextWorking
       </div>
     </div>
     <header className="border-b border-line bg-gradient-to-r from-brand-50/70 to-white p-5">
-      <div className="mb-4 flex items-center gap-3"><Avatar name={name} shape="circle" size={44} /><div>{ref ? <Link href={subjectHref(ref)} className="text-xl font-semibold tracking-tight hover:text-brand-700">{name}</Link> : <span className="text-xl font-semibold tracking-tight">{name}</span>}<div className="mt-1 text-sm text-ink-500">{who?.jobTitle ?? 'Title missing'}</div></div><div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">{cold ? <Badge tone="sky">Cold contact</Badge> : null}{warning ? <Badge tone="amber">{warning}</Badge> : null}<Badge tone={done || n.state !== 'OPEN' ? 'gray' : overdue ? 'red' : n.dueDate === today ? 'green' : 'blue'}>{done ? 'Done' : n.state !== 'OPEN' ? (n.state === 'CANCELLED' ? 'Stopped' : 'Done') : overdue ? 'Overdue' : n.dueDate === today ? 'Due today' : 'Upcoming'}</Badge></div></div>
+      <div className="mb-4 flex items-center gap-3"><Avatar name={name} shape="circle" size={44} /><div>{ref ? <Link href={subjectHref(ref)} className="text-xl font-semibold tracking-tight hover:text-brand-700">{name}</Link> : <span className="text-xl font-semibold tracking-tight">{name}</span>}<div className="mt-1 text-sm text-ink-500">{who?.jobTitle ?? 'Title missing'}</div></div><div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">{cold ? <Badge tone="sky">Cold contact</Badge> : null}{chips.length ? <SubjectBadges badge={null} chips={chips} /> : warning ? <Badge tone="amber">{warning}</Badge> : null}<Badge tone={done || n.state !== 'OPEN' ? 'gray' : overdue ? 'red' : n.dueDate === today ? 'green' : 'blue'}>{done ? 'Done' : n.state !== 'OPEN' ? (n.state === 'CANCELLED' ? 'Stopped' : 'Done') : overdue ? 'Overdue' : n.dueDate === today ? 'Due today' : 'Upcoming'}</Badge></div></div>
       <RecordFields items={[{ label: 'Company', value: who?.companyName ?? null }, { label: 'How', value: how }, { label: 'Due', value: formatLocalDate(n.dueDate, 'long') }, { label: 'Assigned to', value: n.fo.name }, { label: 'Email', value: who?.email ?? null }, { label: 'Phone', value: who?.phone ?? null }, ...(n.lastDoneAt ? [{ label: 'Last done', value: formatInstant(n.lastDoneAt, timezone) }] : [])]} />
       {closeWords && n.action === 'EMAIL' && !meeting ? <p className="mt-3 text-[12px] text-ink-500">{closeWords}</p> : null}
     </header>

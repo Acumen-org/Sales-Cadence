@@ -24,6 +24,8 @@ import { UndoMoveButton } from '@/components/sandbox/move-undo';
 import { AssignButton, ContactMoreMenu, MoveButton, WithReason } from '@/components/sandbox/contact-actions';
 import { AddToColdCampaign, ColdNextStepButton, EditContactButton, FillFormButton, NoteComposer, PodPicker, type EditableContact } from '@/components/sandbox/contact-page';
 import { ColdOutreachHeader } from '@/components/sandbox/section-tabs';
+import { ColdListLink } from '@/components/sandbox/list-link';
+import { coldRef, subjectHref } from '@/lib/subject';
 
 /** "Jane Doe · Cold outreach" (B115). */
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -50,7 +52,7 @@ export default async function ColdContactPage({ params, searchParams }: { params
   const tab: Tab = (TABS as readonly string[]).includes(sp.tab ?? '') ? (sp.tab as Tab) : 'overview';
   const header = await ColdOutreachHeader({ user, current: 'contacts', step: m.step });
   const c = m.contact;
-  const href = (t: Tab) => `/cold-outreach/${id}${t === 'overview' ? '' : `?tab=${t}`}`;
+  const href = (t: Tab) => `${subjectHref(coldRef(id))}${t === 'overview' ? '' : `?tab=${t}`}`;
   const openTasks = m.tasks.filter((t) => t.state === 'open').length;
   const tabs = [
     { key: 'overview', label: 'Overview' },
@@ -67,6 +69,8 @@ export default async function ColdContactPage({ params, searchParams }: { params
   return <>
     <div className="space-y-3 px-6 pt-2">
       {header}
+      {/* B192: back to the list as the reader left it, view and filters kept. */}
+      <div className="text-[12px] text-ink-500"><ColdListLink className="hover:text-ink-700">Cold outreach</ColdListLink> › <span className="text-ink-700">{m.name}</span></div>
       <RecordHeader
         name={m.name}
         sub={m.sub || null}
