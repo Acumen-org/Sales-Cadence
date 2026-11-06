@@ -8,6 +8,7 @@ import { Badge, Notice } from '@/components/ui';
 import { preflightMoveAction, queueMoveAction } from '@/lib/actions/sandbox-move';
 import { assignContactsAction, setPodAction } from '@/lib/actions/sandbox';
 import type { MoveCounts, MoveGroup, MoveNextStep, MoveSelection, PreflightItem } from '@/lib/sandbox/move';
+import { coldRef, subjectHref } from '@/lib/subject';
 
 type Option = { id: string; name: string };
 type Props = {
@@ -41,7 +42,7 @@ function countLine(c: MoveCounts): string {
  * one get the step given here (B034). The body scrolls and the buttons stay in view at 1280x800
  * (B035); a disabled Move says why (B110). Nothing on any contact changes until its move succeeds.
  */
-export function MoveDialog({ ids, onClose, owners = [], pods = [], contactHref = (id) => `/sandbox/${id}` }: Props) {
+export function MoveDialog({ ids, onClose, owners = [], pods = [], contactHref = (id) => subjectHref(coldRef(id)) }: Props) {
   const [items, setItems] = useState<PreflightItem[] | null>(null);
   const [counts, setCounts] = useState<MoveCounts | null>(null);
   const [error, setError] = useState<string | null>(null);

@@ -6,7 +6,7 @@ import { addDays, todayIn } from '@/lib/dates';
 import { defaultTwentySchema } from '@/lib/twenty/twenty-schema';
 import { CampaignWorkspace } from '@/components/campaigns/campaign-workspace';
 import { ActiveSection } from '@/components/active-section';
-import { ColdOutreachTabs } from '@/components/sandbox/section-tabs';
+import { ColdOutreachTabs, seesPushes } from '@/components/sandbox/section-tabs';
 import { prisma } from '@/lib/db';
 import { canManageCampaigns } from '@/lib/auth/rbac';
 import type { CampaignDraft } from '@/lib/campaign-planner';
@@ -20,6 +20,10 @@ import { COLD_CAMPAIGNS_HREF, COLD_CONTACT_BASE } from '@/lib/subject';
  * campaign and Start campaign open it so; the Campaigns section's New campaign never does. A
  * campaign's kind is fixed from here on (B045).
  */
+export async function generateMetadata({ searchParams }: { searchParams: Promise<{ audience?: string }> }) {
+  return { title: (await searchParams).audience === 'cold' ? 'New campaign · Campaigns · Cold outreach' : 'New campaign · Campaigns' };
+}
+
 export default async function NewCampaignPage({ searchParams }: { searchParams: Promise<{ ids?: string; restart?: string; audience?: string }> }) {
   const user = await requireUser();
   if (!canCreateCampaign(user)) redirect('/campaigns');
@@ -30,7 +34,7 @@ export default async function NewCampaignPage({ searchParams }: { searchParams: 
   const studio = (audience: 'CRM' | 'SANDBOX', initial: CampaignDraft) => {
     const cold = audience === 'SANDBOX';
     return <div className="px-4 py-5 sm:px-6">
-      {cold && <><ActiveSection href={COLD_CONTACT_BASE} /><div className="mb-4 surface"><ColdOutreachTabs current="campaigns" /></div></>}
+      {cold && <><ActiveSection href={COLD_CONTACT_BASE} /><div className="mb-4 surface"><ColdOutreachTabs current="campaigns" pushes={seesPushes(user)} /></div></>}
       <CampaignWorkspace today={today} pods={data.pods} products={[...defaultTwentySchema.personValues.productInterest]} initial={initial} audience={audience} {...(cold ? { contactBase: COLD_CONTACT_BASE, section: { label: 'Cold outreach · Campaigns', href: COLD_CAMPAIGNS_HREF } } : {})} />
     </div>;
   };

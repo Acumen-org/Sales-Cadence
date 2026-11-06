@@ -9,6 +9,9 @@ import { AutoRefresh } from '@/components/sandbox/auto-refresh';
 import { UndoMoveButton } from '@/components/sandbox/move-undo';
 import { Badge, EmptyState, Notice, RecordHeader, Stat, Surface, ViewHeader } from '@/components/ui';
 import { retryMoveAction } from '@/lib/actions/sandbox-move';
+import { COLD_CONTACT_BASE, COLD_MOVES_HREF } from '@/lib/subject';
+
+export const metadata = { title: 'Move to CRM · Cold outreach' };
 
 /**
  * One Move to CRM (4.5): a breadcrumb back, the counts and a progress bar, every contact by name with
@@ -24,7 +27,7 @@ export default async function MovePage({ params }: { params: Promise<{ id: strin
   const n = (count: number, one: string) => `${count} ${one}${count === 1 ? '' : 's'}`;
   return <PageFrame className="space-y-4 px-6 pb-8 pt-2">
     {!move.settled ? <AutoRefresh /> : null}
-    <div className="text-[12px] text-ink-500"><Link href="/sandbox" className="hover:text-ink-700">Cold outreach</Link> › <Link href="/sandbox?tab=moves" className="hover:text-ink-700">Moves to CRM</Link></div>
+    <div className="text-[12px] text-ink-500"><Link href={COLD_CONTACT_BASE} className="hover:text-ink-700">Cold outreach</Link> › <Link href={COLD_MOVES_HREF} className="hover:text-ink-700">Moves to CRM</Link></div>
     <RecordHeader
       name={`Move to CRM · ${n(move.count, 'contact')}`}
       sub={`${move.moverName} · ${formatInstant(move.createdAt, user.timezone)}`}

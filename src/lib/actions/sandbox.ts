@@ -17,6 +17,7 @@ import { afterResponse } from '../engine/sync-out';
 import { clearPossibleBounce, confirmPossibleBounce } from '../mail/cold-email';
 import type { ActionType } from '@prisma/client';
 import type { ActionResult } from './users';
+import { COLD_CONTACT_BASE, coldRef, subjectHref } from '@/lib/subject';
 
 /**
  * Cold outreach's server actions. Every one goes through the guard (src/lib/outreach/guard.ts) with
@@ -25,8 +26,8 @@ import type { ActionResult } from './users';
  */
 
 function refresh(id?: string) {
-  revalidatePath('/sandbox');
-  if (id) revalidatePath(`/sandbox/${id}`);
+  revalidatePath(COLD_CONTACT_BASE, 'layout');
+  if (id) revalidatePath(subjectHref(coldRef(id)));
 }
 
 const field = (fd: FormData, k: string) => (fd.has(k) ? String(fd.get(k) ?? '') : undefined);
@@ -46,7 +47,7 @@ export async function createContactAction(fd: FormData): Promise<ActionResult> {
   if (!isAdmin(user) && !needsPod(user.role)) return { ok: false, error: 'Biz Ops can view cold contacts but cannot add them.' };
   const r = await createContact(contactInput(fd) as ContactInput, { id: user.id, podIds: user.podIds, ownsContacts: needsPod(user.role) || isAdmin(user) }, userActor(user), field(fd, 'podId') || null, { addAnyway: field(fd, 'addAnyway') === '1' });
   refresh();
-  return r.ok ? { ok: true, message: 'Added to the sandbox.', redirectTo: `/sandbox/${r.id}` } : r;
+  return r.ok ? { ok: true, message: 'Added to Cold outreach.', redirectTo: subjectHref(coldRef(r.id)) } : r;
 }
 
 export async function updateContactAction(fd: FormData): Promise<ActionResult> {
@@ -155,7 +156,7 @@ export async function removeContactsAction(fd: FormData): Promise<ActionResult> 
   }
   refresh();
   const r = summary(done, refused, 'Removed');
-  return r.ok && ids.length === 1 ? { ...r, redirectTo: '/sandbox' } : r;
+  return r.ok && ids.length === 1 ? { ...r, redirectTo: COLD_CONTACT_BASE } : r;
 }
 
 export async function eraseContactAction(fd: FormData): Promise<ActionResult> {

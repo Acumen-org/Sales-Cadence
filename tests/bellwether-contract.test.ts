@@ -62,7 +62,7 @@ describe('contract v1.1 and the push intake (W11)', () => {
       expect(Object.keys(row)).toEqual(['bellwetherContactId', 'status', 'cadenceContactId', 'ownerEmail', 'ownerName', 'campaignName', 'callCount', 'lastActivityAt', 'movedToCrmAt', 'crmPersonId', 'crmUrl', 'statusChangedAt']);
       // The same contact read with 1.1 has the new fields, and the push's warnings were kept for it.
       const v11 = await statusOf(c.bellwetherContactId, '1.1');
-      expect(v11.cadenceUrl).toMatch(new RegExp(`/sandbox/${row.cadenceContactId}$`));
+      expect(v11.cadenceUrl).toMatch(new RegExp(`/cold-outreach/${row.cadenceContactId}$`));
       const again = await check(envelope([bwContact({ email: null, phone: null })], { pushedBy: { email: 'stranger@bellwether.example' } }), V11);
       expect(codes(again.body.results[0])).toEqual(['no_reach', 'owner_not_found']);
     });

@@ -1,5 +1,6 @@
 import type { PersonCache, Prisma, SandboxContact } from '@prisma/client';
 import { prisma } from './db';
+import { COLD_OUTREACH_BASE } from './cold-outreach-paths';
 
 /*
  * An enrollment, next action, task or touch is about a Twenty person, a sandbox contact, or both
@@ -87,13 +88,17 @@ export function subjectWhere(ref: SubjectRef): { personId: string } | { sandboxC
 export const subjectTaskWhere = (ref: SubjectRef): Prisma.TaskWhereInput => ({ enrollment: subjectWhere(ref) });
 
 /**
- * Where a cold contact's page lives. The section's pages are still under /sandbox; the stage that
- * builds /cold-outreach (S10) changes this one constant, and S11 redirects the old paths, so a link
- * made today keeps working.
+ * Where a cold contact's page lives: the Cold outreach section (PLAN 3). Every cold link is built from
+ * this, and /sandbox addresses redirect here (lib/cold-outreach-paths.ts), so an old link still works.
  */
-export const COLD_CONTACT_BASE = '/sandbox';
-/** Cold outreach's Campaigns tab, where a cold campaign's page leads back to (S10 moves it with the section). */
-export const COLD_CAMPAIGNS_HREF = `${COLD_CONTACT_BASE}?tab=campaigns`;
+export const COLD_CONTACT_BASE = COLD_OUTREACH_BASE;
+/** Cold outreach's Campaigns page, where a cold campaign's page leads back to. */
+export const COLD_CAMPAIGNS_HREF = `${COLD_CONTACT_BASE}/campaigns`;
+/** Moves to CRM: every move, and one move's own page. */
+export const COLD_MOVES_HREF = `${COLD_CONTACT_BASE}/moves`;
+export const coldMoveHref = (moveId: string) => `${COLD_MOVES_HREF}/${moveId}`;
+/** From Bellwether (leaders, PLAN 4.8): every push and what became of each contact in it. */
+export const COLD_FROM_BELLWETHER_HREF = `${COLD_CONTACT_BASE}/from-bellwether`;
 
 /** The page a subject opens on: the person's People page, or the cold contact's own page. */
 export function subjectHref(ref: SubjectRef): string {

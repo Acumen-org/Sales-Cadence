@@ -312,7 +312,7 @@ describe('W4: calls and the post-call form', () => {
       const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
       const call = await logManualCall({ userId: b.users.alisa.id, sandboxContactId: c.id });
       const r = await submitCallForm(call.id, { outcome: 'meeting_booked', rating: 5, notes: 'Demo booked', nextStep: 'meeting', nextStepDate: '2099-01-07', meetingTime: '14:30' }, alisa());
-      expect(r).toEqual(expect.objectContaining({ ok: true, followUp: { addMeeting: null, moveToCrm: `/sandbox/${c.id}?move=1` } }));
+      expect(r).toEqual(expect.objectContaining({ ok: true, followUp: { addMeeting: null, moveToCrm: `/cold-outreach/${c.id}?move=1` } }));
       const next = await prisma.nextAction.findFirstOrThrow({ where: { sandboxContactId: c.id, state: 'OPEN' } });
       expect(next).toEqual(expect.objectContaining({ kind: 'MEETING', dueDate: '2099-01-07', label: 'Meeting' }));
       expect(next.meetingAt?.toISOString()).toBe('2099-01-07T14:30:00.000Z');

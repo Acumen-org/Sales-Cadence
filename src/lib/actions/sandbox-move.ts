@@ -8,11 +8,12 @@ import { isLocalDate, todayIn } from '../dates';
 import { NEXT_ACTION_CHANNELS } from '../next-actions';
 import { finishMoveIfSettled, preflightMove, processMoveItem, queueMove, retryFailedItems, undoMoveItem, type MoveCounts, type MoveNextStep, type MoveSelection, type PreflightItem } from '../sandbox/move';
 import type { ActionResult } from './users';
+import { COLD_CONTACT_BASE, coldMoveHref } from '@/lib/subject';
 
 function refresh(moveId?: string) {
-  revalidatePath('/sandbox');
+  revalidatePath(COLD_CONTACT_BASE, 'layout');
   revalidatePath('/people');
-  if (moveId) revalidatePath(`/sandbox/moves/${moveId}`);
+  if (moveId) revalidatePath(coldMoveHref(moveId));
 }
 
 /** What Move to CRM would do with these contacts, in the dialog's groups (4.5). */
@@ -42,7 +43,7 @@ export async function queueMoveAction(selection: MoveSelection[], nextStep: Move
     await finishMoveIfSettled(r.moveId);
   }
   refresh(r.moveId);
-  return { ok: true, message: `${r.queued} queued to move.${r.left.length ? ` Left out: ${r.left.map((l) => `${l.name} (${l.reason})`).join(', ')}.` : ''}`, redirectTo: `/sandbox/moves/${r.moveId}` };
+  return { ok: true, message: `${r.queued} queued to move.${r.left.length ? ` Left out: ${r.left.map((l) => `${l.name} (${l.reason})`).join(', ')}.` : ''}`, redirectTo: coldMoveHref(r.moveId) };
 }
 
 /** Retry: open to whoever may undo (B188), only where retrying can help (B036, B105). */

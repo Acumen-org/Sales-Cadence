@@ -29,7 +29,7 @@ const outcomes: CallFormContext['outcomes'] = [
 function context(over: Partial<CallFormContext> = {}): CallFormContext {
   return {
     callId: 'call-1', incoming: false, name: 'Jane Doe', number: '+13125550100', at: 'yesterday 20:20 CT', talk: '3m 12s',
-    who: { kind: 'cold', id: 'c1', href: '/sandbox/c1', active: true, standing: null, firstName: 'Jane' },
+    who: { kind: 'cold', id: 'c1', href: '/cold-outreach/c1', active: true, standing: null, firstName: 'Jane' },
     candidates: [], closes: { linked: { key: 'task:t1', words: 'Call 2 of Q4 Harbor' }, choices: [{ key: 'task:t1', words: 'Call 2 of Q4 Harbor', repeats: false }] },
     open: null, campaign: { name: 'Q4 Harbor', next: 'Email 2 on 5 Nov' }, colleague: null, claim: null, outcomes,
     products: [{ key: 'PHH', label: 'PHH' }, { key: 'ACUBOOTH', label: 'AcuBooth' }, { key: 'GLYNAC', label: 'Glynac' }],
@@ -109,7 +109,7 @@ describe('W4 screens', () => {
   });
 
   it('B004, B027, B092, B026: the form says when the contact is gone, whose step stays, the claim, and asks who an unmatched call was with', () => {
-    expect(draw(context({ who: { kind: 'cold', id: 'c1', href: '/sandbox/c1', active: false, standing: 'You called a contact who asked not to be contacted. The call and form are kept; no next step will be set.', firstName: 'Jane' } }))).toContain('no next step will be set');
+    expect(draw(context({ who: { kind: 'cold', id: 'c1', href: '/cold-outreach/c1', active: false, standing: 'You called a contact who asked not to be contacted. The call and form are kept; no next step will be set.', firstName: 'Jane' } }))).toContain('no next step will be set');
     expect(draw(context({ colleague: 'Jane is Alisa&apos;s contact.' }))).toContain('Jane is Alisa');
     expect(draw(context({ claim: 'Saving claims Jane for you.', campaign: null, prefill: 'connected' }))).toContain('Saving claims Jane for you.');
     const who = draw(context({ who: null, name: null, candidates: [{ key: 'sandbox:x', name: 'Sam Rivera', cold: true }] }));

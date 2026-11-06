@@ -17,6 +17,7 @@ import { pushNextAction } from '../next-actions';
 import { handOverLeaverWork, leaverHasWork, leaverWork, leaverWorkWords, rehomeContacts, type HandOverResult } from '../outreach/ownership';
 import { loadOwnerCandidate } from '../outreach/transfer';
 import { RefusedError } from '../outreach/guard';
+import { COLD_CONTACT_BASE } from '@/lib/subject';
 
 export type ActionResult = { ok: true; message?: string; redirectTo?: string; data?: unknown } | { ok: false; error: string };
 
@@ -193,7 +194,7 @@ export async function setUserAccessAction(formData: FormData): Promise<ActionRes
   const crmIds = result.handed?.crmNextActionIds ?? [];
   if (crmIds.length) await afterResponse(async () => { for (const id of crmIds) await pushNextAction(id); });
   refresh();
-  revalidatePath('/sandbox');
+  revalidatePath(COLD_CONTACT_BASE, 'layout');
   if (restore) return { ok: true, message: 'Access restored.' };
   return { ok: true, message: `Access removed. History retained.${handedWords(result.handed, result.to)}` };
 }

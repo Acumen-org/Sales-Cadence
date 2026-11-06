@@ -10,9 +10,10 @@ import { completeNextAction, moveNextAction, setNextActions, stopNextAction, val
 import { personSearchWhere } from '../search-terms';
 import { cachedPersonName } from '../person-cache';
 import type { ActionResult } from './users';
+import { COLD_CONTACT_BASE } from '@/lib/subject';
 
 function revalidate(personIds: string[] = [], sandbox = false) {
-  if (sandbox) revalidatePath('/sandbox', 'layout');
+  if (sandbox) revalidatePath(COLD_CONTACT_BASE, 'layout');
   revalidatePath('/tasks');
   revalidatePath('/people');
   revalidatePath('/home');

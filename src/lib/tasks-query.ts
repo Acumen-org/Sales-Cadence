@@ -1,4 +1,4 @@
-import { workTaskWhere, workWhere, type AudienceScope } from './subject';
+import { COLD_CONTACT_BASE, workTaskWhere, workWhere, type AudienceScope } from './subject';
 import { needsPod, ROLES_NEEDING_POD } from '@/lib/auth/rbac';
 import type { Prisma } from '@prisma/client';
 import { prisma } from './db';
@@ -22,8 +22,8 @@ export const TASK_CHANNELS: TaskChannel[] = ['CALL', 'EMAIL', 'LINKEDIN'];
  */
 export type TaskAudience = Extract<AudienceScope, 'all' | 'cold'>;
 export const parseTaskAudience = (v: string | undefined | null): TaskAudience => (v === 'cold' ? 'cold' : 'all');
-/** The address of Cold outreach > Tasks until the section mounts the screen itself (S10): cold work only, and no filter carried over from Contacts (B158). */
-export const COLD_TASKS_HREF = '/tasks?audience=cold';
+/** Cold outreach > Tasks: the Tasks screen, cold work only, with no filter carried over from Contacts (B158). */
+export const COLD_TASKS_HREF = `${COLD_CONTACT_BASE}/tasks`;
 
 export type TaskFilters = {
   tab: TaskTab;

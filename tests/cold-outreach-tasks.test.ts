@@ -102,8 +102,8 @@ describe('one Tasks list for CRM and cold work', () => {
 
   it('B158: Cold outreach > Tasks opens with no filter carried over from Contacts', () => {
     const url = new URL(COLD_TASKS_HREF, 'http://x');
-    expect(url.pathname).toBe('/tasks');
-    expect([...url.searchParams.keys()]).toEqual(['audience']);
+    expect(url.pathname).toBe('/cold-outreach/tasks');
+    expect([...url.searchParams.keys()]).toEqual([]);
   });
 
   it('B117: the badge counts exactly what the list it opens holds, for all work and for cold work', async () => {

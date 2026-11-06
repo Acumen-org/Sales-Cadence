@@ -27,7 +27,7 @@ import { coldDraft, firstWorkingDay, noonOf, publishColdCampaign, sessionOf } fr
 const auth = vi.hoisted(() => ({ requireUser: vi.fn() }));
 vi.mock('@/lib/auth/current-user', () => ({ requireUser: auth.requireUser, requireAdmin: auth.requireUser, toActor: (u: SessionUser) => ({ id: u.id, role: u.role, podIds: u.podIds }) }));
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {}, push: () => {} }), usePathname: () => '/sandbox', useSearchParams: () => new URLSearchParams(), redirect: (to: string) => { throw new Error(`redirect:${to}`); }, notFound: () => { throw new Error('not found'); } }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {}, push: () => {} }), usePathname: () => '/cold-outreach', useSearchParams: () => new URLSearchParams(), redirect: (to: string) => { throw new Error(`redirect:${to}`); }, notFound: () => { throw new Error('not found'); } }));
 
 const { addPeopleToCampaignAction, approveCampaignAction, rejectCampaignAction } = await import('@/lib/actions/campaigns');
 const { reassignEnrollmentAction } = await import('@/lib/actions/enrollments');
@@ -377,12 +377,12 @@ describe('cold campaigns on the campaign studio (S7)', () => {
   it('B200: Cold outreach > Campaigns is the Campaigns screen: tabs, filters, search and New campaign, for cold campaigns only', async () => {
     const cold = await saveCampaignCalendar(coldDraft(b.pods.Alisa.id, [], [b.users.alisa.id], { name: 'Cold one' }), alisa, { audience: 'SANDBOX' });
     await saveCampaignCalendar(coldDraft(b.pods.Alisa.id, [], [b.users.alisa.id], { name: 'CRM one' }), alisa, { audience: 'CRM' });
-    const html = renderToStaticMarkup(await CampaignsScreen({ user: alisa, sp: {}, audience: 'SANDBOX', title: 'Cold campaigns', base: COLD_CONTACT_BASE, fixed: { tab: 'campaigns' }, tabParam: 'view', newHref: '/campaigns/new?audience=cold' }));
+    const html = renderToStaticMarkup(await CampaignsScreen({ user: alisa, sp: {}, audience: 'SANDBOX', title: 'Cold campaigns', base: COLD_CAMPAIGNS_HREF, newHref: '/campaigns/new?audience=cold' }));
     expect(html).toContain('Cold one');
     expect(html).not.toContain('CRM one');
     expect(html).toContain('href="/campaigns/new?audience=cold"');
     expect(html).toContain('Search campaigns');
-    expect(html).toContain(`${COLD_CONTACT_BASE}?tab=campaigns&amp;view=finished`);
+    expect(html).toContain(`${COLD_CAMPAIGNS_HREF}?tab=finished`);
     expect(html).toContain(`/campaigns/${cold.id}`);
     const crm = renderToStaticMarkup(await CampaignsScreen({ user: alisa, sp: {}, audience: 'CRM', title: 'All campaigns', base: '/campaigns', newHref: '/campaigns/new' }));
     expect(crm).toContain('CRM one');

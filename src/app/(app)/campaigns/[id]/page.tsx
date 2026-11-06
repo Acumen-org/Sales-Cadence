@@ -24,10 +24,11 @@ import { EnrollmentActions } from '@/components/campaigns/enrollment-actions';
 import { IconCampaigns } from '@/components/icons';
 import { Badge, CAMPAIGN_TONE, Card, Count, enrollmentTone, Empty, RecordHeader, Stat, Surface, enrollmentStatusLabel } from '@/components/ui';
 import { ActiveSection } from '@/components/active-section';
-import { ColdOutreachTabs } from '@/components/sandbox/section-tabs';
+import { ColdOutreachTabs, seesPushes } from '@/components/sandbox/section-tabs';
 import { ColdCampaignNotes } from '@/components/campaigns/cold-campaign-notes';
 import { LegacyColdCampaign } from '@/components/campaigns/legacy-cold-campaign';
 import { COLD_CAMPAIGNS_HREF, COLD_CONTACT_BASE } from '@/lib/subject';
+import { campaignTitle } from '@/lib/campaigns-query';
 
 const AUDIENCE_PAGE = 50;
 
@@ -35,6 +36,11 @@ const AUDIENCE_PAGE = 50;
  * One campaign: its window drawn as a bar with today on it, what happened inside that window,
  * who is in it (a page at a time), and how each FO's room is being used.
  */
+/** "Q4 Harbor · Campaigns · Cold outreach" for a cold campaign, "Q4 Harbor · Campaigns" for a CRM one (B115). */
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  return { title: await campaignTitle((await params).id) };
+}
+
 export default async function CampaignDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ page?: string; q?: string }> }) {
   const user = await requireUser();
   const { id } = await params;
@@ -49,7 +55,7 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
   // One page for both kinds (PLAN 4.4, B134): a cold campaign shows inside Cold outreach, its tab bar
   // and sidebar item, with the cold notes and its contacts' own pages.
   const cold = campaign.audience === 'SANDBOX';
-  const section = cold ? <><ActiveSection href={COLD_CONTACT_BASE} /><div className="px-4 pt-4 sm:px-6"><Surface flush><ColdOutreachTabs current="campaigns" /></Surface></div></> : null;
+  const section = cold ? <><ActiveSection href={COLD_CONTACT_BASE} /><div className="px-4 pt-4 sm:px-6"><Surface flush><ColdOutreachTabs current="campaigns" pushes={seesPushes(user)} /></Surface></div></> : null;
   if (cold && !campaign.plannerDraft) {
     return <>{section}<LegacyColdCampaign campaign={campaign} manager={manager} editor={editor} canDelete={canDeleteCampaign(user, { status: campaign.status, podId: campaign.podId, createdById: campaign.createdById, everLaunched: history.length > 0 })} timezone={user.timezone} /></>;
   }

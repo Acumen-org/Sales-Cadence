@@ -224,3 +224,10 @@ export async function nonReplierCandidates(campaignId: string, days: number, now
   for (const reply of inbound) busySet.add(reply.personId);
   return finished.filter((f) => !busySet.has(f.personId) && !f.person!.dnd && !f.person!.optedOut && !f.person!.deletedAt);
 }
+
+/** A campaign's page title: "Q4 Harbor · Campaigns · Cold outreach" for a cold one, "Q4 Harbor · Campaigns" for a CRM one (B115). */
+export async function campaignTitle(id: string): Promise<string> {
+  const c = await prisma.campaign.findUnique({ where: { id }, select: { name: true, audience: true } });
+  if (!c) return 'Campaigns';
+  return c.audience === 'SANDBOX' ? `${c.name} · Campaigns · Cold outreach` : `${c.name} · Campaigns`;
+}

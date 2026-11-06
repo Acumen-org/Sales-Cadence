@@ -1,4 +1,4 @@
-import { Suspense } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import Link from 'next/link';
 import { PageFrame } from '@/components/page-frame';
 import { filterParam, sectionDefaults } from '@/lib/default-filters';
@@ -19,7 +19,7 @@ import { emailCloseWords, mailTrackedFor } from '@/lib/mail/graph-mail';
 import { bounceWords } from '@/lib/mail/cold-email';
 import { channelBlock } from '@/lib/task-cues';
 import { assignableOwners, needsNewOwner } from '@/lib/outreach/ownership';
-import { coldRef, COLD_CONTACT_BASE, subjectHref } from '@/lib/subject';
+import { coldRef, COLD_CAMPAIGNS_HREF, subjectHref } from '@/lib/subject';
 import { CallButton } from '@/components/calls/call-button';
 import { LogCallButton } from '@/components/calls/log-call';
 import { NeedsNewOwner } from '@/components/sandbox/needs-new-owner';
@@ -53,8 +53,8 @@ function CampaignBand({ task, stepIndex, stepCount, sequenceName, cold }: { task
   const campaign = task.enrollment.campaign;
   const ends = campaign?.endDate ? new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(`${campaign.endDate}T12:00:00Z`)) : null;
   const name = campaign ? campaign.name : sequenceName;
-  // A cold campaign's page is in the Cold outreach section; a CRM one's in Campaigns.
-  const href = campaign ? (cold ? `${COLD_CONTACT_BASE}/campaigns/${campaign.id}` : '/campaigns/' + campaign.id) : cold ? null : '/sequences/' + task.enrollment.sequence.id;
+  // One campaign page for both kinds (B134); a cold one shows Cold outreach's tabs.
+  const href = campaign ? '/campaigns/' + campaign.id : cold ? null : '/sequences/' + task.enrollment.sequence.id;
   // The name has the whole second row to itself; the facts sit small in the top-right corner.
   return <div className="flex items-start gap-3 rounded-t-[inherit] bg-brand-900 px-5 py-3.5 text-white">
     <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/10 text-[#d5e9ad]"><IconCampaigns size={17} /></span>
@@ -87,7 +87,7 @@ const localNow = (timezone: string) => new Intl.DateTimeFormat('sv-SE', { timeZo
  * screen filtered to cold work. Creating a task here stays CRM-only; a cold contact's next steps are
  * set on its own page, in the section.
  */
-export async function TasksScreen({ sp, audience, basePath }: { sp: TasksSearch; audience: TaskAudience; basePath: string }) {
+export async function TasksScreen({ sp, audience, basePath, header }: { sp: TasksSearch; audience: TaskAudience; basePath: string; /** Cold outreach's own header and tab bar, when the section mounts the screen. */ header?: ReactNode }) {
   const user = await requireUser();
   const tab = parseTab(sp.tab); const channel = parseChannel(sp.type); const mode = sp.mode === 'flow' ? 'flow' : 'list';
   // Everyone reads every list and gets the pod and FO filters; a junior opens on their own name.
@@ -207,6 +207,7 @@ export async function TasksScreen({ sp, audience, basePath }: { sp: TasksSearch;
   const tabTotal = counts[tab];
   const allHref = (() => { const next = new URLSearchParams(base); next.delete('audience'); return '/tasks?' + next.toString(); })();
   return <PageFrame className="space-y-4 px-6 pb-8 pt-2">
+    {header}
     <Surface flush><Tabs inset={false} current={tab} tabs={TASK_TABS.map(t => ({ key: t, label: TAB_LABELS[t], href: href({ tab: t, task: null }), count: counts[t] }))} />
       <Toolbar>{carry ? <Link href={allHref} className="chip" title="Show CRM and cold work together">Cold outreach only<span aria-hidden className="ml-1">×</span><span className="sr-only">: show all tasks</span></Link> : null}<Link href={href({ type: null, task: null })} className={channel ? 'chip-muted' : 'chip'}>All types</Link>{TASK_CHANNELS.map(c => <Link key={c} href={href({ type: c, task: null })} className={channel === c ? 'chip' : 'chip-muted'}><ActionIcon action={c} size={13} />{CHANNEL_LABELS[c]}<span className="ml-1 tabular-nums">{channelCounts[c]}</span></Link>)}<span className="flex w-full flex-wrap items-center gap-2 sm:ml-auto sm:w-auto"><TaskFilters pods={options.pods} fos={options.fos} podId={podId} foUserId={foUserId} mode={mode} />{taskAccess.canSet && audience === 'all' ? <CreateTaskButton today={today} fos={taskAccess.fos} canAssign={taskAccess.canAssign} query={base.toString()} selfId={user.id} workingDays={settings.rules.workingDays} /> : null}</span></Toolbar>
     </Surface>
@@ -216,7 +217,7 @@ export async function TasksScreen({ sp, audience, basePath }: { sp: TasksSearch;
     {strandedNext.length ? <NeedsNewOwner stranded={strandedNext} owners={owners} /> : null}
     {missing ? <Notice tone="warn">That task is not in your list any more. It may have been completed, cancelled, or reassigned.</Notice> : null}
     {requested && !inView && (brief || cold) ? <Notice tone="info">Showing one touch that is not in <span className="font-medium">{TAB_LABELS[tab]}</span>. <Link href={href({ task: null })} className="font-medium underline">Back to the list</Link></Notice> : null}
-    {heldBy.length ? <Notice tone="info">{heldWords(heldBy)}. {manager ? <Link href={audience === 'cold' ? `${COLD_CONTACT_BASE}?tab=campaigns` : '/campaigns'} className="font-medium underline">Open campaigns</Link> : 'Ask a pod leader to resume it.'}</Notice> : null}
+    {heldBy.length ? <Notice tone="info">{heldWords(heldBy)}. {manager ? <Link href={audience === 'cold' ? COLD_CAMPAIGNS_HREF : '/campaigns'} className="font-medium underline">Open campaigns</Link> : 'Ask a pod leader to resume it.'}</Notice> : null}
     {!rows.length && !brief && !cold && !nextInTab.length && !selectedNext ? <Surface><EmptyState title={EMPTY_TITLES[tab]} icon={<ActionIcon action={channel ?? 'EMAIL'} size={22} />}
       /* An empty Today with work sitting in Overdue is the one case where the FO must not be left
          looking at a clear screen: send them to the tab that actually has the work. */
@@ -256,7 +257,7 @@ export async function TasksScreen({ sp, audience, basePath }: { sp: TasksSearch;
       <header className="border-b border-line bg-gradient-to-r from-brand-50/70 to-white p-5"><div className="mb-4 flex items-center gap-3"><Avatar name={b.name} shape="circle" size={44} /><div><Link href={b.href} className="text-xl font-semibold tracking-tight hover:text-brand-700">{b.name}</Link><div className="mt-1 text-sm text-ink-500">{c.jobTitle ?? 'Title missing'}</div></div><div className="ml-auto flex flex-wrap items-center justify-end gap-1.5"><Badge tone="sky">Cold contact</Badge>{warning ? <Badge tone="amber">{warning}</Badge> : null}<Badge tone={dueState.tone}>{dueState.label}</Badge></div></div>
         <RecordFields items={[{ label: 'Company', value: c.companyName }, { label: 'Outreach', value: b.enrollment.campaignName ?? b.enrollment.sequenceName }, { label: 'Day', value: b.task.stepDay }, { label: 'Due', value: b.task.snoozedTo ?? b.task.dueDate }, { label: 'Assigned to', value: b.enrollment.foName }]} />
       </header>
-      {b.task.enrollment.status === 'PAUSED' ? <div className="border-b border-line px-5 py-4"><Notice tone="warn">This campaign is paused, so these touches are held. {b.task.enrollment.campaign ? <Link href={`${COLD_CONTACT_BASE}/campaigns/${b.task.enrollment.campaign.id}`} className="font-medium underline">Open the campaign</Link> : null}</Notice></div> : null}
+      {b.task.enrollment.status === 'PAUSED' ? <div className="border-b border-line px-5 py-4"><Notice tone="warn">This campaign is paused, so these touches are held. {b.task.enrollment.campaign ? <Link href={`/campaigns/${b.task.enrollment.campaign.id}`} className="font-medium underline">Open the campaign</Link> : null}</Notice></div> : null}
       {!live ? <div className="border-b border-line px-5 py-4"><Notice tone="warn">{c.status === 'MOVED' ? 'This contact is in the CRM now; work them on their People page.' : c.status === 'REMOVED' ? 'This contact was removed from Cold outreach; nothing here can be done.' : 'This contact asked not to be contacted; nothing here can be done.'}</Notice></div> : null}
       <div className="divide-y divide-line">{modules.map(({ task, action }) => { const mayWork = live && mayWorkTask(task); return <div key={task.id} className="space-y-4 p-5">
         <TaskComposer key={task.id} taskId={task.id} label={ACTION_LABELS[task.action]} subject={action.subject} body={action.body} html={action.html} channel={channelOf(task.action)} revision={task.draftRevision} readOnly={task.state !== 'PENDING' || !mayWork} phone={c.phone} callTemplate={settings.rules.clickToCallUrl} sandboxContactId={c.id} callBlocked={coldGate?.blocked ?? null} callWarning={coldGate?.warning ?? null} closeWords={task.action === 'EMAIL' ? emailCloseWords(tracked.has(task.foUserId)) : null} recipient={{ name: b.name, firstName: c.firstName, email: c.email }} profileUrl={c.linkedinHref} addDetailsHref={b.href} />

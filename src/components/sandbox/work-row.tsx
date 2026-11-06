@@ -8,6 +8,7 @@ import { CallButton } from '@/components/calls/call-button';
 import { Badge } from '@/components/ui';
 import { completeTaskAction, skipTaskAction } from '@/lib/actions/tasks';
 import { completeNextActionAction } from '@/lib/actions/next-actions';
+import { coldRef, subjectHref } from '@/lib/subject';
 
 type Props = {
   kind: 'step' | 'next';
@@ -38,7 +39,7 @@ export function WorkRow({ kind, id, contact, label, action, channelLabel, due, d
   return <li className="flex items-center gap-3 px-4 py-2.5 text-[13px]">
     <span className="text-ink-500"><ActionIcon action={action} size={15} /></span>
     <span className="min-w-0 flex-1">
-      <Link href={`/sandbox/${contact.id}`} className="text-ink-900 hover:text-brand-700">{contact.name}</Link>
+      <Link href={subjectHref(coldRef(contact.id))} className="text-ink-900 hover:text-brand-700">{contact.name}</Link>
       <span className="text-ink-500">{contact.firm ? ` · ${contact.firm}` : ''}</span>
       {warning ? <Badge tone="amber" className="ml-2">{warning}</Badge> : null}
       <span className="block truncate text-ink-600">{label}{campaign ? ` · ${campaign}` : ''} · {fo}</span>

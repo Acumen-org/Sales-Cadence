@@ -4,7 +4,8 @@ import { assertUtf8Database, runTool, UTF8_INITDB_FLAGS } from '../../scripts/lo
 import { loadTestPostgres } from './embedded-postgres';
 
 const URL_FILE = path.join(process.cwd(), '.test-db-url');
-const PG_PORT = 54329;
+// TEST_PG_PORT lets two checkouts (git worktrees) run their suites side by side.
+const PG_PORT = Number(process.env.TEST_PG_PORT) || 54329;
 
 type Embedded = {
   initialise(): Promise<void>;

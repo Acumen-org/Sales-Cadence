@@ -12,7 +12,7 @@ import { pushNextAction } from '../next-actions';
 import { workspaceTimezone } from '../workspace';
 import { canUndoMove, whyNotUndoMove, type Actor } from '../auth/rbac';
 import { ACTION_LABELS } from '../sequences/steps';
-import { coldRef } from '../subject';
+import { coldMoveHref, coldRef } from '../subject';
 import { canAct, refuse, RefusedError, withSubjectLock, type ColdSubject } from '../outreach/guard';
 import { contactability } from '../outreach/contactability';
 import { optOutPerson, type OptOutSource } from '../outreach/transitions';
@@ -696,7 +696,7 @@ export async function finishMoveIfSettled(moveId: string, now = new Date()): Pro
   const move = await prisma.sandboxMove.findUniqueOrThrow({ where: { id: moveId }, include: { items: { select: { state: true } } } });
   const done = move.items.filter((i) => i.state === 'DONE').length;
   const failed = move.items.filter((i) => i.state === 'FAILED').length;
-  await prisma.notification.create({ data: { userId: move.createdById, kind: 'move_finished', payload: { moveId, done, failed, text: failed ? `Move to CRM finished: ${done} moved, ${failed} failed.` : `Move to CRM finished: ${done} moved.`, href: `/sandbox/moves/${moveId}` } } });
+  await prisma.notification.create({ data: { userId: move.createdById, kind: 'move_finished', payload: { moveId, done, failed, text: failed ? `Move to CRM finished: ${done} moved, ${failed} failed.` : `Move to CRM finished: ${done} moved.`, href: coldMoveHref(moveId) } } });
 }
 
 // ---------------------------------------------------------------------------

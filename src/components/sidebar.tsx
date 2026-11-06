@@ -11,6 +11,7 @@ import { IconActivity, IconBolt, IconCalendar, IconCampaigns, IconClose, IconCol
 import { Avatar } from './ui';
 import { BrandMark } from './brand';
 import { useActiveSection } from './active-section';
+import { COLD_OUTREACH_BASE } from '@/lib/cold-outreach-paths';
 
 /** A section shows it is opening the moment it is clicked, while its page is read. */
 function Opening() {
@@ -32,7 +33,7 @@ const GROUPS = [
   ] },
   { label: 'Engagement', items: [
     { href: '/campaigns', label: 'Campaigns', icon: IconCampaigns },
-    { href: '/sandbox', label: 'Sandbox', icon: IconBolt },
+    { href: COLD_OUTREACH_BASE, label: 'Cold outreach', icon: IconBolt },
   ] },
   { label: 'Insights', items: [
     { href: '/activity', label: 'Activity', icon: IconActivity },
@@ -40,7 +41,7 @@ const GROUPS = [
   ] },
 ];
 
-type Props = { user: SessionUser; mode: 'mock' | 'graphql'; dryRun: boolean; todayCount: number; overdueCount: number; /** Open tickets of every kind, for Biz Ops and admins. */ ticketsCount?: number; /** The user's sandbox steps and next actions due today or earlier. */ sandboxCount?: number };
+type Props = { user: SessionUser; mode: 'mock' | 'graphql'; dryRun: boolean; todayCount: number; overdueCount: number; /** Open tickets of every kind, for Biz Ops and admins. */ ticketsCount?: number; /** The user's Cold outreach steps and next steps due today or earlier. */ sandboxCount?: number };
 
 export function Sidebar(props: Props) {
   const [open, setOpen] = useState(false);
@@ -72,7 +73,7 @@ function SidebarContent({ user, mode, dryRun, todayCount, overdueCount, ticketsC
               <Opening />
               <Icon size={18} /> <span>{item.label}</span>
               {item.href === '/tasks' && todayCount + overdueCount > 0 ? <span className={clsx('ml-auto rounded-md px-1.5 py-0.5 text-[10px] tabular-nums', overdueCount ? 'bg-red-400/20 text-red-200' : 'bg-white/10 text-[#dfefc1]')} title={overdueCount ? `${overdueCount} overdue` : undefined}>{todayCount + overdueCount}</span> : null}
-              {item.href === '/sandbox' && sandboxCount > 0 ? <span className="ml-auto rounded-md bg-white/10 px-1.5 py-0.5 text-[10px] tabular-nums text-[#dfefc1]">{sandboxCount}</span> : null}
+              {item.href === COLD_OUTREACH_BASE && sandboxCount > 0 ? <span className="ml-auto rounded-md bg-white/10 px-1.5 py-0.5 text-[10px] tabular-nums text-[#dfefc1]">{sandboxCount}</span> : null}
               {item.href === '/tickets' && ticketsCount > 0 ? <span className="ml-auto rounded-md bg-amber-300/20 px-1.5 py-0.5 text-[10px] tabular-nums text-amber-100" title={`${ticketsCount} ${ticketsCount === 1 ? 'ticket' : 'tickets'} open`}>{ticketsCount}</span> : null}
             </Link>;
           })}</div>
@@ -81,7 +82,7 @@ function SidebarContent({ user, mode, dryRun, todayCount, overdueCount, ticketsC
       <div className="shrink-0 px-3 pb-3">
         {user.role === 'ADMIN' ? <Link href="/settings" onClick={close} aria-current={pathname.startsWith('/settings') ? 'page' : undefined} className={clsx('nav-item mb-3', pathname.startsWith('/settings') && 'nav-item-active')}><IconSettings size={18} /> Settings</Link> : null}
         <div className="mx-1 mb-3 rounded-lg border border-white/10 px-3 py-3">
-          <div className="flex items-center gap-2 text-[11px] font-medium text-[#dbe5df]"><span className={clsx('h-1.5 w-1.5 rounded-full', mode === 'mock' ? 'bg-[#d5e9ad]' : 'bg-sky-300')} />{mode === 'mock' ? 'Demo workspace' : dryRun ? 'Twenty · dry run' : 'Twenty workspace'}</div>
+          <div className="flex items-center gap-2 text-[11px] font-medium text-[#dbe5df]"><span className={clsx('h-1.5 w-1.5 rounded-full', mode === 'mock' ? 'bg-[#d5e9ad]' : 'bg-sky-300')} />{mode === 'mock' ? 'Demo workspace' : dryRun ? 'CRM · dry run' : 'CRM workspace'}</div>
         </div>
         <div className="flex items-center gap-2.5 border-t border-white/10 px-2 pt-4">
           <Avatar name={user.name} shape="circle" size={33} />

@@ -40,7 +40,7 @@ describe('the notification bell', () => {
       { kind: 'compliance_alert', sandboxContactId: c.id, fromUserId: alisa.id, payload: { text: 'Alisa emailed Jane Doe (j***@harbor.example) on 4 Nov, 15:00. They asked not to be contacted. Do not email, call or message this person.' }, at: at(4) },
       { kind: 'next_step_suggestion', sandboxContactId: c.id, fromUserId: b.users.karson.id, payload: { what: 'Follow up on pricing', how: 'CALL', kind: 'ACTION', when: '2026-11-12', callId: call.id, from: 'Karson' }, at: at(5) },
       { kind: 'call_flag', fromUserId: b.users.karson.id, payload: { text: 'Karson left a 3m 12s voicemail for Jane Doe.', callId: call.id, href: `/calls/${call.id}` }, at: at(6) },
-      { kind: 'move_finished', payload: { moveId: move.id, done: 3, failed: 1, text: 'Move to CRM finished: 3 moved, 1 failed.', href: `/sandbox/moves/${move.id}` }, at: at(7) },
+      { kind: 'move_finished', payload: { moveId: move.id, done: 3, failed: 1, text: 'Move to CRM finished: 3 moved, 1 failed.', href: `/cold-outreach/moves/${move.id}` }, at: at(7) },
       { kind: 'retention_warning', payload: { count: 2, firstDueOn: '2027-02-01', contactIds: [c.id, other.id] }, at: at(8) },
     ];
     for (const r of rows) await prisma.notification.create({ data: { userId: alisa.id, kind: r.kind, sandboxContactId: r.sandboxContactId ?? null, fromUserId: r.fromUserId ?? null, payload: r.payload as object, createdAt: r.at } });
@@ -49,14 +49,14 @@ describe('the notification bell', () => {
     const page = await listNotifications(viewer(alisa));
     const by = Object.fromEntries(page.items.map((i) => [i.kind, i])) as Record<BellItem['kind'], BellItem>;
     expect(page.items.map((i) => i.kind)).toEqual(['retention_warning', 'move_finished', 'call_flag', 'next_step_suggestion', 'compliance_alert', 'possible_bounce', 'bounce', 'reply', 'crm_reply']);
-    expect(by.reply).toEqual(expect.objectContaining({ name: 'Jane Doe', company: 'Harbor Light', title: 'Replied: Re: A quick idea', href: `/sandbox/${c.id}` }));
-    expect(by.bounce).toEqual(expect.objectContaining({ title: 'Email bounced: Email 1', href: `/sandbox/${c.id}`, detail: expect.stringContaining('campaign ended') }));
+    expect(by.reply).toEqual(expect.objectContaining({ name: 'Jane Doe', company: 'Harbor Light', title: 'Replied: Re: A quick idea', href: `/cold-outreach/${c.id}` }));
+    expect(by.bounce).toEqual(expect.objectContaining({ title: 'Email bounced: Email 1', href: `/cold-outreach/${c.id}`, detail: expect.stringContaining('campaign ended') }));
     expect(by.possible_bounce).toEqual(expect.objectContaining({ title: 'Possible bounce: Email 2', detail: expect.stringContaining('Check the address') }));
-    expect(by.compliance_alert).toEqual(expect.objectContaining({ title: 'Emailed someone who must not be contacted', href: `/sandbox/${c.id}` }));
-    expect(by.next_step_suggestion).toEqual(expect.objectContaining({ title: 'Karson Reed suggests a next step: Follow up on pricing (Call) on 12 Nov', href: `/sandbox/${c.id}`, suggestion: expect.objectContaining({ mayAccept: true, resolution: null }) }));
+    expect(by.compliance_alert).toEqual(expect.objectContaining({ title: 'Emailed someone who must not be contacted', href: `/cold-outreach/${c.id}` }));
+    expect(by.next_step_suggestion).toEqual(expect.objectContaining({ title: 'Karson Reed suggests a next step: Follow up on pricing (Call) on 12 Nov', href: `/cold-outreach/${c.id}`, suggestion: expect.objectContaining({ mayAccept: true, resolution: null }) }));
     expect(by.call_flag).toEqual(expect.objectContaining({ name: 'Karson Reed', title: 'Karson left a 3m 12s voicemail for Jane Doe.', href: `/calls/${call.id}` }));
-    expect(by.move_finished).toEqual(expect.objectContaining({ title: '3 contacts moved, 1 failed', href: `/sandbox/moves/${move.id}`, detail: expect.stringContaining('retry') }));
-    expect(by.retention_warning).toEqual(expect.objectContaining({ title: '2 cold contacts of yours will be removed from 1 Feb 2027 unless someone works them', detail: expect.stringContaining('Jane Doe'), href: '/sandbox?owner=mine' }));
+    expect(by.move_finished).toEqual(expect.objectContaining({ title: '3 contacts moved, 1 failed', href: `/cold-outreach/moves/${move.id}`, detail: expect.stringContaining('retry') }));
+    expect(by.retention_warning).toEqual(expect.objectContaining({ title: '2 cold contacts of yours will be removed from 1 Feb 2027 unless someone works them', detail: expect.stringContaining('Jane Doe'), href: '/cold-outreach?owner=mine' }));
     expect(by.crm_reply).toEqual(expect.objectContaining({ title: 'Reply: Q2 update', href: `/people/${person.id}?tab=emails` }));
     // Plain words: the screen never says "sandbox" or "Twenty".
     for (const i of page.items) expect(words(i)).not.toMatch(/sandbox|twenty/i);

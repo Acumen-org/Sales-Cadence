@@ -35,7 +35,7 @@ import { addNoteAction, clearPossibleBounceAction, confirmPossibleBounceAction, 
 import { ACTION_LABELS } from '@/lib/sequences/steps';
 import { labelBeyond } from '@/lib/task-cues';
 import { eraseConfirm, optOutConfirm, removeConfirm } from '@/lib/outreach/confirm-words';
-import { coldRef } from '@/lib/subject';
+import { coldMoveHref, coldRef, COLD_CONTACT_BASE } from '@/lib/subject';
 
 const STATUS_LABEL = { ACTIVE: 'In Cold outreach', MOVED: 'In CRM', OPTED_OUT: 'Do not contact', REMOVED: 'Removed' } as const;
 
@@ -61,7 +61,13 @@ function historyWords(action: string, d: Record<string, unknown> | null, names: 
   }
 }
 
-/** One sandbox contact: what we know, what happened, and what happens next. Sandbox data is edited in place. */
+/** "Jane Doe · Cold outreach" (B115). */
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  const c = await prisma.sandboxContact.findUnique({ where: { id: (await params).id }, select: { firstName: true, lastName: true } });
+  return { title: `${(c ? `${c.firstName} ${c.lastName}`.trim() : '') || 'Contact'} · Cold outreach` };
+}
+
+/** One cold contact: what we know, what happened, and what happens next. */
 export default async function SandboxContactPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ move?: string }> }) {
   const user = await requireUser();
   const { id } = await params;
@@ -138,7 +144,7 @@ export default async function SandboxContactPage({ params, searchParams }: { par
     <Surface>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <div className="text-[12px] text-ink-500"><Link href="/sandbox" className="hover:text-ink-700">Cold outreach</Link></div>
+          <div className="text-[12px] text-ink-500"><Link href={COLD_CONTACT_BASE} className="hover:text-ink-700">Cold outreach</Link></div>
           <h1 className="text-xl font-semibold tracking-tight text-ink-900">{name}</h1>
           <div className="mt-1 text-sm text-ink-600">{[contact.jobTitle, contact.companyName].filter(Boolean).join(' · ') || 'No title or firm yet'}</div>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-[13px]">
@@ -177,7 +183,7 @@ export default async function SandboxContactPage({ params, searchParams }: { par
       <span><span className="font-medium">Do not contact</span> since {formOpt.at ? formatInstant(formOpt.at, user.timezone) : 'the call'}: {formOpt.byName ?? 'a rep'} chose &quot;Asked not to be contacted&quot; on the post-call form{formOpt.callId ? <> (<Link href={`/calls/${formOpt.callId}`} className="underline">the call</Link>)</> : null}. Do not email, call or message this person.{formOpt.lastTicket?.outcome === 'kept' ? ` Biz Ops checked it: ${formOpt.lastTicket.resolution ?? 'it stays'}.` : ''}</span>
       <FormOptOutControls subject={{ sandboxContactId: contact.id }} name={name} mayLift={isAdmin(user)} ticket={formOpt.ticket ? `Biz Ops are looking at it: raised by ${formOpt.ticket.raisedBy ?? 'someone'} ${formatInstant(formOpt.ticket.raisedAt, user.timezone)}.` : null} />
     </span></Notice> : null}
-    {live && move?.state === 'FAILED' ? <Notice tone="error">Move failed: {move.error ?? 'see the move'} <Link href={`/sandbox/moves/${move.moveId}`} className="underline">{move.failure === 'permanent' ? 'See the move' : 'Retry'}</Link></Notice> : null}
+    {live && move?.state === 'FAILED' ? <Notice tone="error">Move failed: {move.error ?? 'see the move'} <Link href={coldMoveHref(move.moveId)} className="underline">{move.failure === 'permanent' ? 'See the move' : 'Retry'}</Link></Notice> : null}
     {live && contact.owner && !contact.owner.active ? <Notice tone="warn">{contact.owner.name} has left: this contact needs a new owner before it can move or be worked by its pod&apos;s reps.</Notice> : null}
     <div className="grid grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-4">
       <div className="space-y-4">
