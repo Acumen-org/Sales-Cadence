@@ -186,6 +186,11 @@ describe('W4 screens', () => {
     expect(hours).not.toContain('Fill it in');
   });
 
+  it('N043: "What" starts as "Follow up: <first line of the notes>" on a dated step, for the rep to edit', () => {
+    const src = fs.readFileSync('src/components/calls/post-call-form.tsx', 'utf8');
+    expect(src).toContain("const whatShown = whatTouched ? what : DATED.has(step) && firstLine ? `Follow up: ${firstLine}`.slice(0, 200) : '';");
+  });
+
   it('B024: the form of a call just logged stays open when the page re-reads and Log a call turns off', () => {
     // Saving the call makes it the form waiting, so the page re-reads with Log a call blocked; the blocked
     // branch must still hold the form the rep was told would open.
