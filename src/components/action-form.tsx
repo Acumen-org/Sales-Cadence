@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import clsx from 'clsx';
 import type { ActionResult } from '@/lib/actions/users';
 import { useConfirm, type ConfirmOptions } from '@/components/confirm-dialog';
+import { useFlash } from '@/components/flash';
 
 type Props = {
   action: (formData: FormData) => Promise<ActionResult>;
@@ -28,6 +29,8 @@ export function ActionForm({ action, children, className, resetOnSuccess, confir
   return (
     <form
       className={clsx(pending && 'opacity-70')}
+      // B203: an error is about what was typed, so it goes as soon as the fields change.
+      onInput={() => { if (result && !result.ok) setResult(null); }}
       onSubmit={async (e) => {
         e.preventDefault();
         const form = e.currentTarget;
@@ -80,6 +83,7 @@ export function ActionButton({
   confirm,
   title,
   refresh = false,
+  flash = false,
 }: {
   action: (formData: FormData) => Promise<ActionResult>;
   payload: Record<string, string>;
@@ -90,10 +94,16 @@ export function ActionButton({
   title?: string;
   /** Re-read the page after it worked, for a page whose answer to the action can arrive late. */
   refresh?: boolean;
+  /**
+   * Say the result in the page's `?flash=` toast instead of under the button (B148): for a button the
+   * re-read page no longer draws (Claim, Pause), whose message would otherwise vanish with it.
+   */
+  flash?: boolean;
 }) {
   const [pending, start] = useTransition();
   const [result, setResult] = useState<ActionResult | null>(null);
   const router = useRouter();
+  const say = useFlash();
   const [ask, dialog] = useConfirm();
   return (
     <span className="inline-flex flex-col items-start">
@@ -113,6 +123,10 @@ export function ActionButton({
           start(async () => {
             try {
               const r = await action(fd);
+              if (flash) {
+                say(r.ok ? r.message ?? 'Done.' : r.error, r.ok ? 'ok' : 'error', r.ok ? r.redirectTo : undefined);
+                return;
+              }
               setResult(r);
               // Deleting a record leaves the user on a URL that no longer resolves, so an action
               // that says where to go next is followed here rather than only by forms.

@@ -7,6 +7,8 @@ import { recordCallIntentAction } from '@/lib/actions/call-forms';
 import { IconPhone } from '@/components/icons';
 import { useConfirm } from '@/components/confirm-dialog';
 import { FORM_FIRST, OPEN_FORM_EVENT } from '@/lib/calls/words';
+import type { ActionResult } from '@/lib/actions/users';
+import { useRouter } from 'next/navigation';
 
 type Props = {
   phone: string;
@@ -24,6 +26,11 @@ type Props = {
   label?: string;
   /** The accessible name, when the visible label does not say who is called (N105): "Call Jane Doe". */
   ariaLabel?: string;
+  /**
+   * An unclaimed cold contact: the click claims it first ("Claim and call", PLAN 4.0, B149). A claim
+   * someone else won stops the call and says who.
+   */
+  claim?: { action: (fd: FormData) => Promise<ActionResult>; payload: Record<string, string> } | null;
 };
 
 /**
@@ -33,10 +40,12 @@ type Props = {
  * opted out, calling hours ended), so the server checks again first (N008). The dialpad's tab opens
  * at the click, to keep the browser's permission, and closes again when the server says no.
  */
-export function CallButton({ phone, template, taskId, nextActionId, personId, sandboxContactId, blocked, warning, className = 'btn-primary', label = 'Call', ariaLabel }: Props) {
+export function CallButton({ phone, template, taskId, nextActionId, personId, sandboxContactId, blocked, warning, className = 'btn-primary', label: given, ariaLabel, claim = null }: Props) {
   const [refused, setRefused] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [ask, dialog] = useConfirm();
+  const router = useRouter();
+  const label = given ?? (claim ? 'Claim and call' : 'Call');
   // B089: why Call is off shows as text under it, with the fix when there is one; a waiting form reads "Form first".
   if (blocked) {
     const formFirst = blocked.startsWith(FORM_FIRST);
@@ -65,6 +74,12 @@ export function CallButton({ phone, template, taskId, nextActionId, personId, sa
         const input = { phone, taskId, nextActionId, personId, sandboxContactId };
         void (async () => {
           try {
+            if (claim) {
+              const fd = new FormData();
+              for (const [k, v] of Object.entries(claim.payload)) fd.set(k, v);
+              const claimed = await claim.action(fd);
+              if (!claimed.ok) { tab?.close(); setRefused(claimed.error); router.refresh(); return; }
+            }
             // A warning the page already asked about is not asked twice.
             let r = await recordCallIntentAction({ ...input, confirmed: Boolean(warning) });
             // A question asked once (a number marked wrong, calling hours set to warn).
@@ -74,6 +89,7 @@ export function CallButton({ phone, template, taskId, nextActionId, personId, sa
             }
             if (!r.ok) { tab?.close(); setRefused(r.error); return; }
             open(tab);
+            if (claim) router.refresh();
           } catch {
             tab?.close();
             setRefused('Cadence could not check this call. Try again.');

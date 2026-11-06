@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { exitEnrollmentAction, pauseEnrollmentAction, reassignEnrollmentAction, resumeEnrollmentAction } from '@/lib/actions/enrollments';
 import { ActionButton, ActionForm } from '@/components/action-form';
 import { exitEnrollmentConfirm } from '@/lib/confirms';
+import type { ConfirmOptions } from '@/components/confirm-dialog';
 
 type Props = {
   enrollmentId: string;
@@ -14,21 +15,25 @@ type Props = {
   /** Who and which campaign, for the Exit confirm. */
   name?: string | null;
   campaign?: string | null;
+  /** Results in the page's `?flash=` toast (B148): Pause turns into Resume, and a message under it would go with it. */
+  flash?: boolean;
+  /** The Exit confirm, when the page words it itself. */
+  exitConfirm?: ConfirmOptions;
 };
 
 /** Row actions for an enrollment: pause / resume / exit / reassign within pod. */
-export function EnrollmentActions({ enrollmentId, status, foUserId, fos, compact, name, campaign }: Props) {
+export function EnrollmentActions({ enrollmentId, status, foUserId, fos, compact, name, campaign, flash = false, exitConfirm }: Props) {
   const [reassigning, setReassigning] = useState(false);
   const open = status === 'ACTIVE' || status === 'PAUSED';
   if (!open) return <span className="text-xs text-ink-400">-</span>;
   return (
     <div className="flex flex-wrap items-center justify-end gap-1">
       {status === 'ACTIVE' ? (
-        <ActionButton action={pauseEnrollmentAction} payload={{ enrollmentId, reason: 'manual' }} className="btn-ghost btn-sm">
+        <ActionButton action={pauseEnrollmentAction} payload={{ enrollmentId, reason: 'manual' }} className="btn-ghost btn-sm" flash={flash}>
           Pause
         </ActionButton>
       ) : (
-        <ActionButton action={resumeEnrollmentAction} payload={{ enrollmentId }} className="btn-ghost btn-sm">
+        <ActionButton action={resumeEnrollmentAction} payload={{ enrollmentId }} className="btn-ghost btn-sm" flash={flash}>
           Resume
         </ActionButton>
       )}
@@ -37,7 +42,7 @@ export function EnrollmentActions({ enrollmentId, status, foUserId, fos, compact
           Reassign
         </button>
       ) : null}
-      <ActionButton action={exitEnrollmentAction} payload={{ enrollmentId, reason: 'manual' }} className="btn-ghost btn-sm text-red-600" confirm={exitEnrollmentConfirm({ name, campaign })}>
+      <ActionButton action={exitEnrollmentAction} payload={{ enrollmentId, reason: 'manual' }} className="btn-ghost btn-sm text-red-600" confirm={exitConfirm ?? exitEnrollmentConfirm({ name, campaign })} flash={flash}>
         Exit
       </ActionButton>
       {reassigning ? (

@@ -488,11 +488,20 @@ export function RecordHeader({
   icon,
   accent,
   seed,
+  notice,
+  stackOnPhone = false,
 }: {
   name: string;
   sub?: ReactNode;
   badges?: ReactNode;
   actions?: ReactNode;
+  /** Between the record's identity and its actions: what blocks the actions, and its fix (cold outreach PLAN 4.0). */
+  notice?: ReactNode;
+  /**
+   * A header that holds notices and a row of buttons: on a phone the identity takes the whole width
+   * and the ornament steps aside; from tablets up the ornament stays beside the identity, not under the buttons.
+   */
+  stackOnPhone?: boolean;
   shape?: 'square' | 'circle';
   /** For records that are not people: an icon rather than their initials. */
   icon?: ReactNode;
@@ -507,8 +516,8 @@ export function RecordHeader({
       className="surface relative overflow-hidden px-5 py-5"
       style={accent ? { background: `linear-gradient(105deg, ${accent.mid} 0%, ${accent.tint} 60%, ${accent.tint} 100%)`, borderColor: accent.mid } : undefined}
     >
-      {accent && art ? <RecordOrnament accent={accent} art={art} /> : null}
-      <div className={clsx('relative flex min-w-0 items-start gap-4', accent && 'max-w-[calc(100%-260px)]')}>
+      {accent && art ? (stackOnPhone ? <span aria-hidden className="pointer-events-none absolute right-0 top-0 hidden h-[132px] w-[260px] sm:block"><RecordOrnament accent={accent} art={art} /></span> : <RecordOrnament accent={accent} art={art} />) : null}
+      <div className={clsx('relative flex min-w-0 items-start gap-4', accent && (stackOnPhone ? 'sm:max-w-[calc(100%-260px)]' : 'max-w-[calc(100%-260px)]'))}>
         {icon ? (
           <span className={clsx('flex h-12 w-12 shrink-0 items-center justify-center rounded-xl', accent ? 'text-white' : 'bg-brand-50 text-brand-700')} style={accent ? { background: accent.deep } : undefined}>{icon}</span>
         ) : (
@@ -520,6 +529,7 @@ export function RecordHeader({
           {badges ? <div className="mt-2.5 flex flex-wrap items-center gap-1.5">{badges}</div> : null}
         </div>
       </div>
+      {notice ? <div className="relative mt-4 space-y-2">{notice}</div> : null}
       {actions ? <div className="relative mt-4 flex flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
   );
