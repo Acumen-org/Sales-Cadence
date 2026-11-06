@@ -1,10 +1,10 @@
 'use client';
 
 /** Keep large audience selections out of URLs; validation still happens on the server. */
-export function campaignSelectionUrl(path: string, personIds: string[]) {
+export function campaignSelectionUrl(path: string, personIds: string[], extra: Record<string, string> = {}) {
   const token = crypto.randomUUID();
   sessionStorage.setItem(`campaign-selection:${token}`, JSON.stringify({ ids: personIds, savedAt: Date.now() }));
-  return `${path}?selection=${token}`;
+  return `${path}?${new URLSearchParams({ ...extra, selection: token }).toString()}`;
 }
 
 export function readCampaignSelection(token: string | null): string[] {

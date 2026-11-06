@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { Prisma } from '@prisma/client';
+import { Prisma, type CampaignAudience } from '@prisma/client';
 import { prisma, type Tx } from './db';
 import type { SessionUser } from './auth/current-user';
 import { canAddFromAnyPod, canApproveCampaign, canEditCampaign, ROLE_LABELS, ROLES_NEEDING_POD, whyNotCreateCampaign, whyNotEditCampaign } from './auth/rbac';
@@ -15,8 +15,13 @@ import { workspaceTimezone } from './workspace';
 import { lockAccounts } from './account-lock';
 import { nonReplierCandidates } from './campaigns-query';
 import { defaultTwentySchema } from './twenty/twenty-schema';
+import { coldAudienceIssues, coldClaims, coldAudienceWarnings, coldOwnerKey, coldPlannerRows, draftChannels, notifyColdPublished, type ColdPlanNotes } from './sandbox/campaigns';
 
-export type PublishedCalendar = CampaignCalendar & { sequenceIds: Record<string, string> };
+export type PublishedCalendar = CampaignCalendar & {
+  sequenceIds: Record<string, string>;
+  /** A cold campaign: who was left out when it was published, and why (B047), with its claims and warnings. */
+  cold?: ColdPlanNotes & { leftOut: { id: string; name: string; reason: string }[] };
+};
 /** Someone selected who is not in the plan: the audience check's reason, the follow-up rule, or a fit the planner could not make. */
 export type LeftOut = { id: string; name: string; company: string | null; kind: AudienceIssueKind | 'followup' | 'dates' | 'fo'; reason: string; ownerId?: string };
 export type CampaignPlan = {
@@ -32,6 +37,8 @@ export type CampaignPlan = {
   suggestions: CalendarSuggestion[];
   /** For a plan that cannot be made: whether People (audience, dates) or Outreach has to change. */
   stage: 'people' | 'outreach' | null;
+  /** A cold campaign's plan: who each FO claims at launch, and what to know first (PLAN 4.4). */
+  cold?: ColdPlanNotes;
 };
 
 /** "Alyssa", "Alyssa and Avani", "Alyssa, Avani and Rahul". */
@@ -60,7 +67,7 @@ export const calendarFingerprint = (draft: CampaignDraft, calendar: CampaignCale
  * `fitCampaign`. Only a plan the planner cannot make at all comes back invalid, with its issues and
  * suggestions verified the same way.
  */
-export async function planCampaign(input: unknown, user: SessionUser, campaignId: string | undefined, options: { reshapeOutreach: boolean; forPublish?: boolean; /** The caller checked who may change this campaign's people. */ authorized?: boolean }, db: Tx = prisma): Promise<CampaignPlan> {
+export async function planCampaign(input: unknown, user: SessionUser, campaignId: string | undefined, options: { reshapeOutreach: boolean; forPublish?: boolean; /** The caller checked who may change this campaign's people. */ authorized?: boolean; /** A new campaign's people: CRM people or cold contacts. A saved one keeps its own. */ audience?: CampaignAudience }, db: Tx = prisma): Promise<CampaignPlan> {
   const intent = CampaignDraftSchema.parse(input);
   if (intent.productInterest.some(p => !(defaultTwentySchema.personValues.productInterest as readonly string[]).includes(p))) throw new Error('One of the products on this campaign is no longer in Twenty. Choose a product from the list.');
   const pod = await db.pod.findUnique({ where: { id: intent.podId } });
@@ -74,28 +81,35 @@ export async function planCampaign(input: unknown, user: SessionUser, campaignId
   const team = { ...intent, fos: intent.fos.filter(f => fos.some(x => x.id === f.id)) };
   if (!team.fos.length) throw new Error(`None of the FOs you picked can run this campaign: ${gone.map(f => `${goneUsers.get(f.id)?.name ?? 'a former FO'} (${goneWhy(f.id)})`).join('; ')}. Choose at least one FO from ${pod.name}.`);
 
-  const issues = await campaignAudienceIssues(intent.personIds, { podId: pod.id, podOwnerValue: pod.podOwnerValue, podName: pod.name, ownerMemberIds: fos.flatMap(f => f.twentyMemberId ? [f.twentyMemberId] : []), campaignId, checkOwners: true, anyPod: canAddFromAnyPod(user) }, db);
+  const existing = campaignId ? await db.campaign.findUnique({ where: { id: campaignId }, select: { followupSourceId: true, followupWaitDays: true, followupSourceRun: true, audience: true } }) : null;
+  // A cold campaign plans cold contacts: the cold audience check, and owners matched by their Cadence user (W7).
+  const cold = (existing?.audience ?? options.audience ?? 'CRM') === 'SANDBOX';
+  const planFos = cold ? fos.map(f => ({ ...f, twentyMemberId: coldOwnerKey(f.id) })) : fos;
+  const issues = cold
+    ? await coldAudienceIssues(intent.personIds, { podId: pod.id, podName: pod.name, foIds: fos.map(f => f.id), campaignId, anyPod: canAddFromAnyPod(user), actor: user }, db)
+    : await campaignAudienceIssues(intent.personIds, { podId: pod.id, podOwnerValue: pod.podOwnerValue, podName: pod.name, ownerMemberIds: fos.flatMap(f => f.twentyMemberId ? [f.twentyMemberId] : []), campaignId, checkOwners: true, anyPod: canAddFromAnyPod(user) }, db);
   const leftOut: LeftOut[] = [...issues];
   const excluded = new Set(issues.map(i => i.id));
-  const existing = campaignId ? await db.campaign.findUnique({ where: { id: campaignId }, select: { followupSourceId: true, followupWaitDays: true, followupSourceRun: true } }) : null;
   if (existing?.followupSourceId) {
     const eligible = new Set((await nonReplierCandidates(existing.followupSourceId, existing.followupWaitDays, new Date(), existing.followupSourceRun ?? undefined)).map(e => e.personId));
     for (const id of intent.personIds) if (!excluded.has(id) && !eligible.has(id)) { excluded.add(id); leftOut.push({ id, name: '', company: null, kind: 'followup', reason: 'No longer due this follow-up' }); }
   }
   const reachable = intent.personIds.filter(id => !excluded.has(id));
-  const rows = await db.personCache.findMany({ where: { id: { in: [...reachable, ...leftOut.filter(l => !l.name).map(l => l.id)] } }, orderBy: { id: 'asc' } });
+  const lookup = [...reachable, ...leftOut.filter(l => !l.name).map(l => l.id)];
+  const rows: Array<PlannerPerson & { company: string | null }> = cold ? await coldPlannerRows(lookup, db)
+    : (await db.personCache.findMany({ where: { id: { in: lookup } }, orderBy: { id: 'asc' } })).map(p => ({ id: p.id, name: cachedPersonName(p), company: p.companyName, ownerMemberId: p.ownerMemberId, tags: p.tags, contactType: p.contactType, tier: p.tier }));
   const byId = new Map(rows.map(p => [p.id, p]));
-  for (const l of leftOut) if (!l.name) { const r = byId.get(l.id); l.name = r ? cachedPersonName(r) : 'Unknown contact'; l.company = r?.companyName ?? null; }
+  for (const l of leftOut) if (!l.name) { const r = byId.get(l.id); l.name = r ? r.name : 'Unknown contact'; l.company = r?.company ?? null; }
   const target = { ...team, personIds: reachable.filter(id => byId.has(id)) };
-  const people: PlannerPerson[] = target.personIds.map(id => { const p = byId.get(id)!; return { id: p.id, name: cachedPersonName(p), ownerMemberId: p.ownerMemberId, tags: p.tags, contactType: p.contactType, tier: p.tier }; });
-  const describe = (id: string, kind: LeftOut['kind'], reason: string): LeftOut => { const p = byId.get(id); return { id, name: p ? cachedPersonName(p) : 'Unknown contact', company: p?.companyName ?? null, kind, reason }; };
+  const people: PlannerPerson[] = target.personIds.map(id => { const p = byId.get(id)!; return { id: p.id, name: p.name, ownerMemberId: p.ownerMemberId, tags: p.tags, contactType: p.contactType, tier: p.tier }; });
+  const describe = (id: string, kind: LeftOut['kind'], reason: string): LeftOut => { const p = byId.get(id); return { id, name: p ? p.name : 'Unknown contact', company: p?.company ?? null, kind, reason }; };
 
-  const result = people.length ? fitCampaign(target, people, fos, { reshapeOutreach: options.reshapeOutreach }) : null;
+  const result = people.length ? fitCampaign(target, people, planFos, { reshapeOutreach: options.reshapeOutreach }) : null;
   const fit = isFit(result) ? result : null;
   const endLabel = shortDateLabel(intent.endDate, true, intent.startDate.slice(0, 4) !== intent.endDate.slice(0, 4));
   const days = calendarDays(intent.startDate, intent.endDate);
   const keepsAll = (r: ReturnType<typeof fitCampaign>): r is CampaignFit => isFit(r) && r.overflow.length === 0 && r.droppedFos.every(d => d.personIds.length === 0);
-  const fitted = (d: CampaignDraft, reshape: boolean) => { const r = fitCampaign({ ...d, personIds: target.personIds }, people, fos, { reshapeOutreach: reshape, allowTrim: false }); return keepsAll(r) ? r : null; };
+  const fitted = (d: CampaignDraft, reshape: boolean) => { const r = fitCampaign({ ...d, personIds: target.personIds }, people, planFos, { reshapeOutreach: reshape, allowTrim: false }); return keepsAll(r) ? r : null; };
   const verified = (d: CampaignDraft, reshape: boolean) => fitted(d, reshape)?.calendar ?? null;
   /** Verified ways to take everyone reachable, as the request Apply makes: the studio's own outreach, spacing, then dates. */
   const alternatives = (): CalendarSuggestion[] => {
@@ -104,7 +118,7 @@ export async function planCampaign(input: unknown, user: SessionUser, campaignId
       const auto: CampaignDraft = { ...team, flows: [{ id: 'default', name: 'Default', steps: outreachRecipe(1) }], assignments: {}, outreachEdited: false };
       const built = fitted(auto, true);
       if (built) {
-        const groups = outreachInWords(built.draft, fos), fits = `${target.personIds.length === 1 ? 'The 1 person fits' : `All ${target.personIds.length} people fit`} by ${endLabel}.`;
+        const groups = outreachInWords(built.draft, planFos), fits = `${target.personIds.length === 1 ? 'The 1 person fits' : `All ${target.personIds.length} people fit`} by ${endLabel}.`;
         // One group: what it sends. Several on one spacing: say the spacing once, then who sends how many.
         const sends = (g: typeof groups[number], what: string) => `${nameList(g.names)} ${g.names.length > 1 ? 'send' : 'sends'} ${what}`;
         const oneSpacing = groups[0].spacing && groups.every(g => g.spacing === groups[0].spacing);
@@ -114,7 +128,7 @@ export async function planCampaign(input: unknown, user: SessionUser, campaignId
         out.push({ label: 'Let the studio set the outreach', detail, draft: auto, calendar: built.calendar, studio: true });
       }
     }
-    const rest = suggestCampaignCalendar(team, people, fos, { paces: false, outreach: !options.reshapeOutreach, verify: d => verified(d, options.reshapeOutreach) });
+    const rest = suggestCampaignCalendar(team, people, planFos, { paces: false, outreach: !options.reshapeOutreach, verify: d => verified(d, options.reshapeOutreach) });
     return [...out, ...rest].slice(0, 3).map(x => ({ ...x, draft: { ...x.draft, personIds: intent.personIds, outreachEdited: x.draft.outreachEdited ?? intent.outreachEdited } }));
   };
   const droppedFos = gone.map(f => ({ id: f.id, name: goneUsers.get(f.id)?.name ?? 'Former FO', reason: goneWhy(f.id) }));
@@ -136,9 +150,10 @@ export async function planCampaign(input: unknown, user: SessionUser, campaignId
       if (i >= 5) return [flow.id, n + 1];
       const last = flow.steps.at(-1)!;
       const longer = fit.draft.flows.map(f => f.id === flow.id ? { ...f, steps: [...f.steps, { ...structuredClone(last), id: `${last.id}-next`, day: last.day + 1 }] } : f);
-      return [flow.id, keepsAll(fitCampaign({ ...team, flows: longer, assignments: fit.draft.assignments, personIds: target.personIds }, people, fos, { reshapeOutreach: false, allowTrim: false })) ? n + 1 : n];
+      return [flow.id, keepsAll(fitCampaign({ ...team, flows: longer, assignments: fit.draft.assignments, personIds: target.personIds }, people, planFos, { reshapeOutreach: false, allowTrim: false })) ? n + 1 : n];
     }));
-    return { draft: fit.draft, calendar: fit.calendar, fingerprint: calendarFingerprint(fit.draft, fit.calendar), paces: fit.paces, leftOut, droppedFos, limits, suggestions, stage: null };
+    const coldNotes = cold ? { claims: coldClaims(fit.calendar), warnings: await coldAudienceWarnings(fit.draft.personIds, draftChannels(fit.draft.flows), db) } : undefined;
+    return { draft: fit.draft, calendar: fit.calendar, fingerprint: calendarFingerprint(fit.draft, fit.calendar), paces: fit.paces, leftOut, droppedFos, limits, suggestions, stage: null, ...(coldNotes ? { cold: coldNotes } : {}) };
   }
   // No plan: say exactly what stands in the way, each reason once with everyone it applies to.
   const problems: FitProblem[] = result && !isFit(result) ? result.problems : [];
@@ -157,22 +172,29 @@ export async function planCampaign(input: unknown, user: SessionUser, campaignId
     if (search.length) planIssues.push({ title: `${nameList(search.map(p => p.name))}'s steps can't be arranged in these dates.`, detail: 'Cadence could not arrange them so that each FO works at most two steps a day. Change the waits between steps, or choose a later end date.', kind: 'search' });
   } else planIssues.push({ title: `These people can't be planned from ${range}.`, detail: 'Pick other people, or choose other dates.', kind: 'people' });
   const suggestions = stage === 'outreach' && !options.forPublish ? alternatives() : [];
-  const calendar: CampaignCalendar = { version: 1, days, batches: [], people, fos, issues: planIssues, valid: false, exhausted: false };
+  const calendar: CampaignCalendar = { version: 1, days, batches: [], people, fos: planFos, issues: planIssues, valid: false, exhausted: false };
   return { draft: target, calendar, fingerprint: calendarFingerprint(target, calendar), paces: [], leftOut, droppedFos, limits: Object.fromEntries(intent.flows.map(f => [f.id, Math.min(60, days.length)])), suggestions, stage };
 }
 
-export async function previewCampaignCalendar(input: unknown, user: SessionUser, campaignId?: string) {
-  return planCampaign(input, user, campaignId, { reshapeOutreach: outreachIsAutomatic(CampaignDraftSchema.parse(input), campaignId) });
+export async function previewCampaignCalendar(input: unknown, user: SessionUser, campaignId?: string, audience?: CampaignAudience) {
+  return planCampaign(input, user, campaignId, { reshapeOutreach: outreachIsAutomatic(CampaignDraftSchema.parse(input), campaignId), audience });
 }
 
-export async function prepareCampaignStudio(input: unknown, user: SessionUser, campaignId?: string, fit = false) {
+export async function prepareCampaignStudio(input: unknown, user: SessionUser, campaignId?: string, fit = false, audience?: CampaignAudience) {
   const draft = CampaignDraftSchema.parse(input);
   if (draft.startDate < todayIn(workspaceTimezone())) throw new Error(`The start date, ${shortDateLabel(draft.startDate)}, is in the past. Choose today or a later date.`);
-  if (!draft.personIds.length) throw new Error('Select the people for this campaign.');
-  return planCampaign(draft, user, campaignId, { reshapeOutreach: fit });
+  if (!draft.personIds.length) throw new Error(audience === 'SANDBOX' ? 'Select the contacts for this campaign.' : 'Select the people for this campaign.');
+  return planCampaign(draft, user, campaignId, { reshapeOutreach: fit, audience });
 }
 
-async function saveDraft(input: unknown, user: SessionUser, options: { id?: string; revision?: string; auto?: boolean }) {
+/** B045: a campaign's audience is set when it is made; the studio never turns one kind into the other. */
+const AUDIENCE_FIXED = (audience: CampaignAudience) => audience === 'SANDBOX'
+  ? 'This is a cold campaign, so its people stay cold contacts. Start a CRM campaign from Campaigns for CRM people.'
+  : 'This is a CRM campaign, so its people stay CRM people. Start a cold campaign from Cold outreach for cold contacts.';
+
+type SaveOptions = { id?: string; revision?: string; auto?: boolean; /** The studio's kind: CRM people or cold contacts. A saved campaign never changes kind (B045). */ audience?: CampaignAudience };
+
+async function saveDraft(input: unknown, user: SessionUser, options: SaveOptions) {
   const d = CampaignDraftSaveSchema.parse(input);
   const pod = await prisma.pod.findUnique({ where: { id: d.podId } });
   const refused = whyNotCreateCampaign(user, pod);
@@ -185,6 +207,7 @@ async function saveDraft(input: unknown, user: SessionUser, options: { id?: stri
     if (options.id && !existing) throw new Error(DELETED);
     if (existing) {
       if (!canEditCampaign(user, existing)) throw new Error(await editRefusal(tx, user, existing));
+      if (options.audience && existing.audience !== options.audience) throw new Error(AUDIENCE_FIXED(existing.audience));
       if (!['DRAFT', 'SCHEDULED', 'PENDING_APPROVAL'].includes(existing.status) || await tx.enrollment.count({ where: { campaignId: id } })) throw new Error(STARTED);
       if (existing.updatedAt.toISOString() !== options.revision) throw new Error(CHANGED);
     }
@@ -204,7 +227,7 @@ async function saveDraft(input: unknown, user: SessionUser, options: { id?: stri
       plannerDraft: json({ ...d, sequenceIds }), publishedPlan: Prisma.DbNull,
       status: existing?.followupSourceId ? 'PENDING_APPROVAL' as const : 'DRAFT' as const, hardStopAtEnd: true, approvedAt: null, approvedById: null,
     };
-    const campaign = existing ? await tx.campaign.update({ where: { id }, data }) : await tx.campaign.create({ data: { id, ...data, createdById: user.id } });
+    const campaign = existing ? await tx.campaign.update({ where: { id }, data }) : await tx.campaign.create({ data: { id, ...data, createdById: user.id, audience: options.audience ?? 'CRM' } });
     await dropStaleFlows(tx, existing?.plannerDraft, sequenceIds);
     if (!options.auto || !existing) await logAudit({ entityType: 'campaign', entityId: id, action: 'draft_saved', actor: userActor(user), details: { people: d.personIds.length } }, tx);
     return campaign;
@@ -229,14 +252,14 @@ async function dropStaleFlows(tx: Tx, previous: Prisma.JsonValue | null | undefi
   await tx.sequence.deleteMany({ where: { id: { in: Object.values(oldIds).filter(id => !Object.values(sequenceIds).includes(id)) }, campaignOwned: true, campaigns: { none: {} }, enrollments: { none: {} } } });
 }
 
-export async function saveCampaignCalendar(input: unknown, user: SessionUser, options: { id?: string; revision?: string; publish?: boolean; fingerprint?: string; auto?: boolean }) {
+export async function saveCampaignCalendar(input: unknown, user: SessionUser, options: SaveOptions & { publish?: boolean; fingerprint?: string }) {
   if (!options.publish) return saveDraft(input, user, options);
   const automatic = outreachIsAutomatic(CampaignDraftSchema.parse(input), options.id);
-  const checked = await planCampaign(input, user, options.id, { reshapeOutreach: automatic, forPublish: true });
+  const checked = await planCampaign(input, user, options.id, { reshapeOutreach: automatic, forPublish: true, audience: options.audience });
   const request = CampaignDraftSchema.parse(input);
   if (checked.draft.startDate < todayIn(workspaceTimezone())) throw new Error('The start date is in the past. Choose today or a later date.');
   const id = options.id ?? randomUUID();
-  return prisma.$transaction(async tx => {
+  const saved = await prisma.$transaction(async tx => {
     const companies = await tx.personCache.findMany({ where: { id: { in: checked.draft.personIds } }, select: { companyId: true } });
     await lockAccounts(tx, companies.map(p => p.companyId));
     // All planner publications reserve membership atomically, even across different campaigns.
@@ -246,11 +269,12 @@ export async function saveCampaignCalendar(input: unknown, user: SessionUser, op
     if (options.id && !existing) throw new Error(DELETED);
     if (existing) {
       if (!canEditCampaign(user, existing)) throw new Error(await editRefusal(tx, user, existing));
+      if (options.audience && existing.audience !== options.audience) throw new Error(AUDIENCE_FIXED(existing.audience));
       if (existing.followupSourceId && !canApproveCampaign(user, checked.draft.podId)) throw new Error(`This is a follow-up campaign, so only a Sales Leader or Pod Manager of ${(await tx.pod.findUnique({ where: { id: checked.draft.podId }, select: { name: true } }))?.name ?? 'its pod'}, or an admin, can publish it.`);
       if (!['DRAFT', 'SCHEDULED', 'PENDING_APPROVAL'].includes(existing.status) || await tx.enrollment.count({ where: { campaignId: id } })) throw new Error(STARTED);
       if (existing.updatedAt.toISOString() !== options.revision) throw new Error(CHANGED);
     }
-    const fresh = await planCampaign(input, user, options.id, { reshapeOutreach: automatic, forPublish: true }, tx);
+    const fresh = await planCampaign(input, user, options.id, { reshapeOutreach: automatic, forPublish: true, audience: options.audience }, tx);
     const d = fresh.draft;
     if (!fresh.calendar.valid || fresh.fingerprint !== options.fingerprint) throw new Error('Not published: something changed after you opened Schedule. A contact was updated in Twenty, or another campaign took someone. Check what changed, then publish again.');
     const sequenceIds = await saveFlows(tx, d.flows, existing?.plannerDraft);
@@ -259,14 +283,19 @@ export async function saveCampaignCalendar(input: unknown, user: SessionUser, op
       productInterest: d.productInterest, startsPerFoPerDay: d.defaultBatchSize, sequenceId: sequenceIds.default,
       // The plan is what runs and what every page counts; the request is what the editor reopens,
       // so a later change of dates or team can bring back anyone this plan left out.
-      plannerDraft: json({ ...d, sequenceIds, request }), publishedPlan: json({ ...fresh.calendar, sequenceIds }),
+      plannerDraft: json({ ...d, sequenceIds, request }),
+      // A cold plan keeps who was left out and why, and its notes, so the campaign page says so after the redirect (B047).
+      publishedPlan: json({ ...fresh.calendar, sequenceIds, ...(fresh.cold ? { cold: { ...fresh.cold, leftOut: fresh.leftOut.map(l => ({ id: l.id, name: l.name, reason: l.reason })) } } : {}) }),
       status: 'SCHEDULED' as const, hardStopAtEnd: true, approvedAt: new Date(), approvedById: user.id,
     };
-    const campaign = existing ? await tx.campaign.update({ where: { id }, data }) : await tx.campaign.create({ data: { id, ...data, createdById: user.id } });
+    const campaign = existing ? await tx.campaign.update({ where: { id }, data }) : await tx.campaign.create({ data: { id, ...data, createdById: user.id, audience: options.audience ?? 'CRM' } });
     await dropStaleFlows(tx, existing?.plannerDraft, sequenceIds);
     await logAudit({ entityType: 'campaign', entityId: id, action: 'calendar_published', actor: userActor(user), details: { people: d.personIds.length, batches: fresh.calendar.batches.length, leftOut: fresh.leftOut.length } }, tx);
     return campaign;
   }, { timeout: 60000 });
+  // No approval for a cold campaign (owner, 5 Nov): publishing schedules it, and its pod's leaders are told (B046).
+  if (saved.audience === 'SANDBOX') await notifyColdPublished(saved, user);
+  return saved;
 }
 
 const DELETED = 'This campaign has been deleted.';
@@ -304,7 +333,7 @@ export async function replanScheduledCampaign(id: string, change: (request: Camp
     if (plan?.calendar.valid && approvable) {
       const d = plan.draft;
       const sequenceIds = await saveFlows(tx, d.flows, existing.plannerDraft);
-      await tx.campaign.update({ where: { id }, data: { personIds: d.personIds, startsPerFoPerDay: d.defaultBatchSize, sequenceId: sequenceIds.default, plannerDraft: json({ ...d, sequenceIds, request }), publishedPlan: json({ ...plan.calendar, sequenceIds }) } });
+      await tx.campaign.update({ where: { id }, data: { personIds: d.personIds, startsPerFoPerDay: d.defaultBatchSize, sequenceId: sequenceIds.default, plannerDraft: json({ ...d, sequenceIds, request }), publishedPlan: json({ ...plan.calendar, sequenceIds, ...(plan.cold ? { cold: { ...plan.cold, leftOut: plan.leftOut.map(l => ({ id: l.id, name: l.name, reason: l.reason })) } } : {}) }) } });
       await dropStaleFlows(tx, existing.plannerDraft, sequenceIds);
       await logAudit({ entityType: 'campaign', entityId: id, action: 'calendar_republished', actor: userActor(user), details: { reason, people: d.personIds.length, leftOut: plan.leftOut.length } }, tx);
       return { outcome: 'republished', plan, reason: null };

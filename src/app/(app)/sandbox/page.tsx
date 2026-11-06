@@ -7,15 +7,17 @@ import { assignableOwners, needsNewOwner } from '@/lib/outreach/ownership';
 import { latestMoves, listMoves } from '@/lib/sandbox/moves-query';
 import { NeedsNewOwner } from '@/components/sandbox/needs-new-owner';
 import { prisma } from '@/lib/db';
-import { formatInstant, formatLocalDate, todayIn } from '@/lib/dates';
-import { listCampaigns } from '@/lib/campaigns-query';
+import { formatInstant } from '@/lib/dates';
 import { listContacts, type ContactFilters } from '@/lib/sandbox/query';
 import { COLD_TASKS_HREF } from '@/lib/tasks-query';
-import { EmptyState, Surface, Tabs, Toolbar, ViewHeader, Badge, CAMPAIGN_TONE } from '@/components/ui';
+import { COLD_CONTACT_BASE } from '@/lib/subject';
+import { EmptyState, Surface, Toolbar, ViewHeader, Badge } from '@/components/ui';
+import { ColdOutreachTabs } from '@/components/sandbox/section-tabs';
+import { CampaignsScreen, type CampaignsSearch } from '@/components/campaigns/campaigns-screen';
 import { ContactsTable } from '@/components/sandbox/contacts-table';
 import { AddContactButton } from '@/components/sandbox/add-contact';
 
-type Search = { tab?: string; q?: string; owner?: string; status?: string; ready?: string; pod?: string; source?: string; page?: string; state?: string; mover?: string };
+type Search = CampaignsSearch & { tab?: string; q?: string; owner?: string; status?: string; ready?: string; pod?: string; source?: string; page?: string; state?: string; mover?: string };
 
 /**
  * The outreach sandbox (docs/outreach-sandbox-plan.md, section 5): contacts that are not in
@@ -28,7 +30,6 @@ export default async function SandboxPage({ searchParams }: { searchParams: Prom
   // The section's work is the Tasks screen, filtered to cold work (D2, B157): an old Work link lands there.
   if (sp.tab === 'work') redirect(COLD_TASKS_HREF);
   const tab = sp.tab === 'campaigns' || sp.tab === 'moves' ? sp.tab : 'contacts';
-  const today = todayIn(user.timezone);
   const mayWork = !isBizOps(user) && (isAdmin(user) || needsPod(user.role));
   const href = (patch: Record<string, string | null>) => {
     const params = new URLSearchParams(Object.entries({ tab, q: sp.q ?? '', owner: sp.owner ?? '', status: sp.status ?? '', ready: sp.ready ?? '', pod: sp.pod ?? '', source: sp.source ?? '' }).filter(([, v]) => v));
@@ -48,7 +49,7 @@ export default async function SandboxPage({ searchParams }: { searchParams: Prom
   return <PageFrame className="space-y-4 px-6 pb-8 pt-2">
     <Surface flush>
       <ViewHeader title="Sandbox" meta={<span className="tabular-nums text-ink-500">{active} in the sandbox</span>} actions={mayWork ? <AddContactButton pods={pods.filter((p) => isAdmin(user) || user.podIds.includes(p.id))} /> : null} />
-      <Tabs inset={false} current={tab} tabs={[{ key: 'contacts', label: 'Contacts', href: href({ tab: 'contacts', page: null }) }, { key: 'work', label: 'Tasks', href: COLD_TASKS_HREF }, { key: 'campaigns', label: 'Campaigns', href: href({ tab: 'campaigns' }) }, { key: 'moves', label: 'Moves to CRM', href: '/sandbox?tab=moves' }]} />
+      <ColdOutreachTabs current={tab} contactsHref={href({ tab: 'contacts', page: null })} />
     </Surface>
     {stranded.length ? <NeedsNewOwner stranded={stranded} owners={owners} /> : null}
     {tab === 'contacts' ? await ContactsTab() : tab === 'moves' ? await MovesTab() : await CampaignsTab()}
@@ -59,11 +60,7 @@ export default async function SandboxPage({ searchParams }: { searchParams: Prom
     const owner = sp.owner ?? (mayWork && !isAdmin(user) ? 'mine' : 'all');
     const filters: ContactFilters = { q: sp.q ?? '', owner, status: sp.status ?? 'active', ready: sp.ready ?? '', podId: sp.pod ?? '', source: sp.source ?? '' };
     const page = Math.max(1, Number(sp.page ?? 1) || 1);
-    const [{ rows, total, pages }, sequences, campaigns] = await Promise.all([
-      listContacts(filters, user.id, page),
-      prisma.sequence.findMany({ where: { archived: false, campaignOwned: false }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
-      prisma.campaign.findMany({ where: { audience: 'SANDBOX', status: { in: ['DRAFT', 'PENDING_APPROVAL', 'SCHEDULED'] } }, select: { id: true, name: true }, orderBy: { startDate: 'asc' } }),
-    ]);
+    const { rows, total, pages } = await listContacts(filters, user.id, page);
     // Each row's latest move: Undo for whoever may (B106), a failure with its fix (B036), Moving.
     const moves = Object.fromEntries(await latestMoves(rows.map((r) => r.id), toActor(user)));
     return <Surface flush>
@@ -80,7 +77,7 @@ export default async function SandboxPage({ searchParams }: { searchParams: Prom
         </form>
         <span className="ml-auto tabular-nums text-[13px] text-ink-500">{total}</span>
       </Toolbar>
-      {rows.length ? <ContactsTable rows={rows} owners={owners} sequences={sequences} pods={pods.filter((p) => isAdmin(user) || user.podIds.includes(p.id))} campaigns={campaigns} today={today} mayWork={mayWork} moves={moves} /> : <EmptyState title={filters.status === 'active' && !sp.q ? 'No contacts in the sandbox yet' : 'No contacts match'} />}
+      {rows.length ? <ContactsTable rows={rows} owners={owners} pods={pods.filter((p) => isAdmin(user) || user.podIds.includes(p.id))} mayWork={mayWork} moves={moves} /> : <EmptyState title={filters.status === 'active' && !sp.q ? 'No contacts in the sandbox yet' : 'No contacts match'} />}
       {pages > 1 ? <div className="flex items-center justify-end gap-2 border-t border-line px-4 py-2 text-[13px]">{page > 1 ? <Link href={href({ page: String(page - 1) })} className="btn-ghost btn-sm">Previous</Link> : null}<span className="tabular-nums text-ink-500">{page} of {pages}</span>{page < pages ? <Link href={href({ page: String(page + 1) })} className="btn-ghost btn-sm">Next</Link> : null}</div> : null}
     </Surface>;
   }
@@ -110,13 +107,9 @@ export default async function SandboxPage({ searchParams }: { searchParams: Prom
     </Surface>;
   }
 
+  /** Cold outreach > Campaigns: the Campaigns screen for cold campaigns, with its tabs, filters and New campaign (B134, B200). */
   async function CampaignsTab() {
-    const list = await listCampaigns(user, { audience: 'SANDBOX' });
-    return <Surface flush>
-      {list.length ? <table className="w-full text-[13px]"><thead><tr className="border-b border-line text-left text-ink-500"><th className="px-4 py-2 font-normal">Campaign</th><th className="px-4 py-2 font-normal">Status</th><th className="px-4 py-2 font-normal">Pod</th><th className="px-4 py-2 font-normal">Starts</th><th className="px-4 py-2 font-normal">People</th></tr></thead>
-        <tbody className="divide-y divide-line">{list.map((c) => <tr key={c.id}><td className="px-4 py-2"><Link href={`/sandbox/campaigns/${c.id}`} className="text-ink-900 hover:text-brand-700">{c.name}</Link></td><td className="px-4 py-2"><Badge tone={CAMPAIGN_TONE[c.status] ?? 'gray'}>{c.status.replace(/_/g, ' ').toLowerCase()}</Badge></td><td className="px-4 py-2">{c.podName}</td><td className="px-4 py-2 tabular-nums">{formatLocalDate(c.startDate)}</td><td className="px-4 py-2 tabular-nums">{c.counts.total || c.audience}</td></tr>)}</tbody></table>
-        : <EmptyState title="No sandbox campaigns yet" />}
-    </Surface>;
+    return <CampaignsScreen user={user} sp={sp} audience="SANDBOX" title="Cold campaigns" base={COLD_CONTACT_BASE} fixed={{ tab: 'campaigns' }} tabParam="view" newHref="/campaigns/new?audience=cold" />;
   }
 }
 

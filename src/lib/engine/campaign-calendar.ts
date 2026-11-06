@@ -16,6 +16,8 @@ import { advanceEnrollment } from './tasks';
 export async function activateCalendarCampaign(id: string, ctx: EngineContext) {
   const now = ctx.now ?? new Date();
   const initial = await prisma.campaign.findUniqueOrThrow({ where: { id } });
+  // A cold campaign runs the same calendar with its own launch rules: locks per contact, re-checks, claims (8.9).
+  if (initial.audience === 'SANDBOX') return (await import('../sandbox/campaigns')).activateColdCalendar(id, ctx);
   const companies = await prisma.personCache.findMany({ where: { id: { in: initial.personIds } }, select: { companyId: true } });
   const external = await externalPeopleWhere();
   const followupIds = initial.followupSourceId ? new Set((await nonReplierCandidates(initial.followupSourceId, initial.followupWaitDays, now, initial.followupSourceRun ?? undefined)).map(e => e.personId)) : null;

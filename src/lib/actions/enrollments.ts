@@ -56,6 +56,8 @@ export async function reassignEnrollmentAction(formData: FormData): Promise<Acti
   if (!e) return { ok: false, error: error ?? 'Not found.' };
   const foUserId = String(formData.get('foUserId') ?? '');
   if (!foUserId) return { ok: false, error: 'Pick an FO.' };
+  // A cold contact's campaign follows its owner (B049): the contact is given to someone, and its campaign goes with it.
+  if (e.sandboxContactId && !e.personId) return { ok: false, error: 'A cold contact\'s campaign is worked by its owner. Give the contact to someone else from Cold outreach, and its campaign goes with it.' };
   try {
     await reassignEnrollment(e.id, foUserId, { actor: userActor(user) });
   } catch (err) {

@@ -92,6 +92,8 @@ export const subjectTaskWhere = (ref: SubjectRef): Prisma.TaskWhereInput => ({ e
  * made today keeps working.
  */
 export const COLD_CONTACT_BASE = '/sandbox';
+/** Cold outreach's Campaigns tab, where a cold campaign's page leads back to (S10 moves it with the section). */
+export const COLD_CAMPAIGNS_HREF = `${COLD_CONTACT_BASE}?tab=campaigns`;
 
 /** The page a subject opens on: the person's People page, or the cold contact's own page. */
 export function subjectHref(ref: SubjectRef): string {

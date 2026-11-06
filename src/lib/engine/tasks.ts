@@ -29,6 +29,10 @@ export type EngineContext = {
 
 export const RESOLVED_STATES: TaskState[] = ['DONE', 'SKIPPED', 'CANCELLED'];
 
+/** How a cold enrollment ends when its contact left cold outreach (enrollment-labels.ts reads these). */
+const COLD_EXIT: Record<string, string> = { OPTED_OUT: 'opted_out', REMOVED: 'removed', MOVED: 'moved_to_crm' };
+const firstSentence = (text: string) => text.split(/(?<=\.)\s/)[0].replace(/\.$/, '');
+
 export function isUniqueViolation(err: unknown): boolean {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
 }
@@ -71,6 +75,8 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
   const settings = await getSettings();
   const rules = settings.rules;
   const now = ctx.now ?? new Date();
+  /** A cold contact who may no longer be contacted: the enrollment ends with this reason, after the transaction (N002). */
+  let ending: string | null = null;
 
   let result: AdvanceResult;
   try {
@@ -89,6 +95,10 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
       if (!e || e.status !== 'ACTIVE') return { outcome: 'inactive' as const };
       const subject = subjectOf(e);
       if (e.campaign && e.campaign.status !== 'ACTIVE') return { outcome: 'inactive' as const, reason: 'Campaign is not running' };
+      // The safety net (cold outreach PLAN 8.9, N002): a cold contact opted out, removed or moved since
+      // it started never gets another step; its enrollment ends with the reason instead.
+      const cold = e.sandboxContactId && !e.personId ? e.sandboxContact : null;
+      if (cold && cold.status !== 'ACTIVE') { ending = COLD_EXIT[cold.status] ?? 'removed'; return { outcome: 'inactive' as const, reason: 'The contact can no longer be contacted' }; }
       const today = todayIn(workspaceTimezone(), now);
       const steps = parseSteps(e.sequence.steps);
       const currentTasks = e.tasks.filter((t) => t.stepIndex === e.currentStep);
@@ -150,9 +160,31 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
       const startDate = e.currentStep < 0 ? dueDate : e.startDate;
       const dueAt = localDateToInstant(dueDate, workspaceTimezone(), 9);
 
+      // Task generation asks contactability (8.2) for a cold contact before each step: suppressed or Do
+      // not contact ends the enrollment; "Also in CRM" skips the step; an activity with no usable email,
+      // phone or LinkedIn is made already skipped, with the reason (B136). A contact being moved waits.
+      const skipped = new Map<number, string>();
+      if (cold) {
+        const { contactability, channelOfAction } = await import('../outreach/contactability');
+        const check = await contactability({ kind: 'cold', row: cold }, { act: 'task', tx, now });
+        if (!check.ok && check.effect === 'end') {
+          if (check.block === 'inactive') return { outcome: 'waiting' as const, reason: check.reason };
+          ending = check.block === 'do_not_contact' ? 'dnd' : 'opted_out';
+          return { outcome: 'inactive' as const, reason: check.reason };
+        }
+        const stepSkip = !check.ok && check.effect === 'skip' ? firstSentence(check.reason) : null;
+        for (let i = 0; i < step.actions.length; i++) {
+          const channel = channelOfAction(step.actions[i].type);
+          const own = stepSkip ? null : channel ? await contactability({ kind: 'cold', row: cold }, { act: 'task', channel, tx, now }) : null;
+          const why = stepSkip ?? (own && !own.ok && own.effect === 'skip' ? firstSentence(own.reason) : null);
+          if (why) skipped.set(i, why);
+        }
+      }
+
       const taskIds: string[] = [];
       for (let i = 0; i < step.actions.length; i++) {
         const a = step.actions[i];
+        const skip = skipped.get(i) ?? null;
         const t = await tx.task.create({
           data: {
             enrollmentId: e.id,
@@ -170,6 +202,7 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
             plannedDate: planned,
             // When the step opened, on the engine's clock: evidence counts only from here.
             createdAt: now,
+            ...(skip ? { state: 'SKIPPED' as const, skipReason: skip } : {}),
           },
         });
         taskIds.push(t.id);
@@ -184,7 +217,7 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
           entityId: e.id,
           action: 'step_generated',
           actor: ctx.actor,
-          details: { stepIndex: nextIndex, stepId: step.id, day: step.day, plannedDate: planned, dueDate, shiftDays, taskIds },
+          details: { stepIndex: nextIndex, stepId: step.id, day: step.day, plannedDate: planned, dueDate, shiftDays, taskIds, ...(skipped.size ? { skipped: Object.fromEntries([...skipped].map(([i, why]) => [taskIds[i], why])) } : {}) },
         },
         tx,
       );
@@ -193,6 +226,10 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
   } catch (err) {
     if (isUniqueViolation(err)) return { outcome: 'raced' };
     throw err;
+  }
+  if (ending) {
+    const { exitEnrollment } = await import('./enrollment');
+    await exitEnrollment(enrollmentId, { reason: ending, actor: ctx.actor, now, skipSync: ctx.skipSync });
   }
 
   // A step opens as work on its date. An email or call made before then was not this step

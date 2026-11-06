@@ -8,7 +8,8 @@ import { activateCampaign } from '@/lib/engine/campaigns';
 import { upsertPersonCache } from '@/lib/person-cache';
 import { blankPerson, getMockTwentyClient } from '@/lib/twenty/mock-client';
 import type { TwentyPerson } from '@/lib/twenty/types';
-import { createSandboxCampaign, sandboxAudienceIssues } from '@/lib/sandbox/campaigns';
+import { coldAudienceIssues } from '@/lib/sandbox/campaigns';
+import { coldDraft, noonOf, publishColdCampaign, sessionOf } from './helpers/cold-campaign';
 import { checkSandboxAgainstCrm, CLEARED_ACTION, EXIT_REASON, FLAGGED_ACTION } from '@/lib/sandbox/crm-check';
 import { statusByIds } from '@/lib/sandbox/status';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
@@ -33,12 +34,12 @@ describe('Daily check of sandbox contacts against Twenty', () => {
   };
   /** A contact in a running sandbox campaign, with an open next action. */
   async function working() {
-    const { actor, audit } = await actorOf(b.users.alisa.id);
+    const { audit } = await actorOf(b.users.alisa.id);
     const contact = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
-    const created = await createSandboxCampaign({ name: 'Sandbox autumn', sequenceId: b.sequence.id, podId: b.pods.Alisa.id, startDate: todayIn(workspaceTimezone()), contactIds: [contact.id] }, actor, audit);
-    if (!created.ok) throw new Error(created.error);
-    await prisma.campaign.update({ where: { id: created.id }, data: { status: 'SCHEDULED', approvedAt: new Date(), approvedById: b.users.leigh.id } });
-    await activateCampaign(created.id, { actor: audit });
+    // S7: published in the studio, with no approval, and started on its first day.
+    const draft = coldDraft(b.pods.Alisa.id, [contact.id], [b.users.alisa.id]);
+    const { campaign } = await publishColdCampaign(await sessionOf(b.users.alisa.id), draft);
+    await activateCampaign(campaign.id, { actor: audit, now: noonOf(draft.startDate) });
     await prisma.nextAction.create({ data: { sandboxContactId: contact.id, foUserId: b.users.alisa.id, label: 'Call back', action: 'CALL', dueDate: todayIn(workspaceTimezone()), crmPending: false } });
     return contact;
   }
@@ -63,7 +64,7 @@ describe('Daily check of sandbox contacts against Twenty', () => {
     expect(status).toEqual(expect.objectContaining({ status: 'already_in_crm', cadenceContactId: contact.id, crmPersonId: person.id }));
     expect(status.crmUrl).toContain(person.id);
     // No sandbox campaign takes it again.
-    expect((await sandboxAudienceIssues([contact.id], b.pods.Alisa.id)).issues).toEqual([expect.objectContaining({ reason: 'Also in the CRM' })]);
+    expect(await coldAudienceIssues([contact.id], { podId: b.pods.Alisa.id, podName: 'Pod Alisa', foIds: [] })).toEqual([expect.objectContaining({ reason: 'Already in the CRM' })]);
 
     // A second night changes nothing.
     expect(await checkSandboxAgainstCrm()).toEqual(expect.objectContaining({ flagged: 0, cleared: 0 }));

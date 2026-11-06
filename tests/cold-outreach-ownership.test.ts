@@ -6,7 +6,7 @@ import type { SessionUser } from '@/lib/auth/current-user';
 import { addNote, assignContact, claimContact, setContactPod } from '@/lib/sandbox/contacts';
 import { assignableOwners, leaverWork, leaverWorkWords, needsNewOwner, reassignStrandedNextActions, transferContact } from '@/lib/outreach/ownership';
 import { canAct, loadColdSubject, type GuardActor } from '@/lib/outreach/guard';
-import { sandboxAudienceIssues } from '@/lib/sandbox/campaigns';
+import { coldAudienceIssues } from '@/lib/sandbox/campaigns';
 import { setColdNextStep } from '@/lib/sandbox/work';
 import { pendingForms } from '@/lib/calls/form';
 import { pendingFormBlock } from '@/lib/calls/gate';
@@ -278,7 +278,7 @@ describe('W3: ownership and team changes', () => {
   it('N069: a removed rep\'s contacts are left out of a campaign with the real reason', async () => {
     const c = await readyContact(b.users.karson.id, b.pods.Alisa.id);
     await prisma.user.update({ where: { id: b.users.karson.id }, data: { active: false } });
-    const { issues } = await sandboxAudienceIssues([c.id], b.pods.Alisa.id);
+    const issues = await coldAudienceIssues([c.id], { podId: b.pods.Alisa.id, podName: 'Pod Alisa', foIds: [] });
     expect(issues).toEqual([expect.objectContaining({ reason: `${b.users.karson.name} no longer has access: assign these contacts first` })]);
   });
 });

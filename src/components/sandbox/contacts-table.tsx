@@ -4,9 +4,10 @@ import { useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import clsx from 'clsx';
-import { Modal } from '@/components/modal';
 import { Badge } from '@/components/ui';
-import { addToSandboxCampaignAction, assignContactsAction, claimContactsAction, removeContactsAction, startSandboxCampaignAction } from '@/lib/actions/sandbox';
+import { assignContactsAction, claimContactsAction, removeContactsAction } from '@/lib/actions/sandbox';
+import { AddToCampaign } from '@/components/campaigns/add-to-campaign';
+import { campaignSelectionUrl } from '@/lib/campaign-selection';
 import type { ContactRow } from '@/lib/sandbox/query';
 import type { ContactMove } from '@/lib/sandbox/moves-query';
 import type { ActionResult } from '@/lib/actions/users';
@@ -20,20 +21,21 @@ type Props = {
   rows: ContactRow[];
   /** Who this reader may give contacts to: active sales reps of their pods (B119, B208). Empty: no Assign. */
   owners: (Option & { podIds: string[] })[];
-  sequences: Option[];
   pods: Option[];
-  campaigns: Option[];
-  today: string;
   /** Whether this reader may change cold contacts at all (Biz Ops reads only). */
   mayWork: boolean;
   /** Each row's latest move: Undo where this reader may (B106), a failure with its fix (B036), Moving. */
   moves: Record<string, ContactMove>;
 };
 
-/** The Contacts table: select, then claim, assign, start or add to a campaign, move to the CRM or remove. */
-export function ContactsTable({ rows, owners, sequences, pods, campaigns, today, mayWork, moves }: Props) {
+/**
+ * The Contacts table: select, then claim, assign, start or add to a campaign, move to the CRM or
+ * remove. A campaign is started in the campaign studio and added to through the same "Add to
+ * campaign" as People, both for cold campaigns only (B133, B044).
+ */
+export function ContactsTable({ rows, owners, pods, mayWork, moves }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [dialog, setDialog] = useState<'move' | 'campaign' | 'assign' | null>(null);
+  const [dialog, setDialog] = useState<'move' | 'assign' | null>(null);
   const [assignTo, setAssignTo] = useState('');
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
@@ -63,8 +65,8 @@ export function ContactsTable({ rows, owners, sequences, pods, campaigns, today,
       <span className="tabular-nums text-ink-700">{selected.size} selected</span>
       <button type="button" className="btn-secondary btn-sm" disabled={pending} onClick={() => run(claimContactsAction)}>Claim</button>
       {owners.length ? <button type="button" className="btn-secondary btn-sm" disabled={pending} onClick={() => { setAssignTo(''); setDialog('assign'); }}>Assign</button> : null}
-      <button type="button" className="btn-secondary btn-sm" disabled={pending} onClick={() => setDialog('campaign')}>Start campaign</button>
-      {campaigns.length ? <select aria-label="Add to campaign" className="!py-1 text-[13px]" defaultValue="" disabled={pending} onChange={(e) => { const v = e.target.value; e.target.value = ''; if (v) run(addToSandboxCampaignAction, { campaignId: v }); }}><option value="" disabled>Add to campaign</option>{campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select> : null}
+      <button type="button" className="btn-secondary btn-sm" disabled={pending} onClick={() => { try { router.push(campaignSelectionUrl('/campaigns/new', ids, { audience: 'cold' })); } catch { setMessage({ ok: false, text: 'Your browser could not keep this selection. Open New campaign from Campaigns and choose the contacts there.' }); } }}>Start campaign</button>
+      <AddToCampaign personIds={ids} audience="SANDBOX" className="btn-secondary btn-sm" onDone={(m) => { setSelected(new Set()); if (m) setMessage({ ok: true, text: m }); }} />
       <button type="button" className="btn-primary btn-sm" disabled={pending} onClick={() => setDialog('move')}>Move to CRM</button>
       <button type="button" className="btn-ghost btn-sm" disabled={pending} onClick={() => run(removeContactsAction, {}, removeConfirm(selected.size))}>Remove</button>
     </div> : null}
@@ -82,7 +84,7 @@ export function ContactsTable({ rows, owners, sequences, pods, campaigns, today,
           <td className="truncate px-3 py-2 text-ink-700">{r.firm ?? '-'}</td>
           <td className={clsx('truncate px-3 py-2', r.ownerRemoved ? 'text-amber-800' : 'text-ink-700')}>{r.owner ?? 'Unclaimed'}</td>
           <td className="px-3 py-2"><StatusCell row={r} move={m} />{r.warning ? <Badge tone="amber" className="ml-1.5">{r.warning}</Badge> : null}</td>
-          <td className="truncate px-3 py-2">{r.campaign ? <Link href={`/sandbox/campaigns/${r.campaign.id}`} className="hover:text-brand-700">{r.campaign.name}</Link> : <span className="text-ink-400">-</span>}</td>
+          <td className="truncate px-3 py-2">{r.campaign ? <><Link href={`/campaigns/${r.campaign.id}`} className="hover:text-brand-700">{r.campaign.name}</Link>{r.campaign.startsOn ? <span className="block truncate text-[12px] text-ink-500">Starts {r.campaign.startsOn}</span> : null}</> : <span className="text-ink-400">-</span>}</td>
           <td className="truncate px-3 py-2 text-ink-700">{r.nextAction ?? <span className="text-ink-400">-</span>}</td>
           <td className="px-3 py-2 tabular-nums text-ink-700">{r.lastTouch ?? '-'}</td>
           <td className="px-3 py-2 tabular-nums text-ink-700">{r.calls}</td>
@@ -102,19 +104,6 @@ export function ContactsTable({ rows, owners, sequences, pods, campaigns, today,
     >
       <label className="block text-xs text-ink-500">To<select className="mt-1 w-full" value={assignTo} onChange={(e) => setAssignTo(e.target.value)}><option value="">Choose a rep</option><option value="release">Nobody: let {selected.size === 1 ? 'it' : 'them'} go</option>{owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select></label>
     </ConfirmDialog> : null}
-    {dialog === 'campaign' ? <Modal label="Start a cold campaign" onClose={() => setDialog(null)} className="max-w-lg">
-      <form className="space-y-3 p-5" onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); setDialog(null); run(startSandboxCampaignAction, Object.fromEntries([...fd.entries()].map(([k, v]) => [k, String(v)]))); }}>
-        <h2 className="text-base font-semibold text-ink-900">Start a campaign with {selected.size}</h2>
-        <label className="block text-xs text-ink-500">Name<input name="name" required className="mt-1 w-full" /></label>
-        <label className="block text-xs text-ink-500">Sequence<select name="sequenceId" required className="mt-1 w-full" defaultValue={sequences[0]?.id}>{sequences.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-        <div className="grid grid-cols-3 gap-3">
-          <label className="block text-xs text-ink-500">Pod<select name="podId" required className="mt-1 w-full" defaultValue={pods[0]?.id}>{pods.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-          <label className="block text-xs text-ink-500">Starts<input type="date" name="startDate" required min={today} defaultValue={today} className="mt-1 w-full" /></label>
-          <label className="block text-xs text-ink-500">New a day per FO<input type="number" name="pace" min={1} max={200} defaultValue={20} className="mt-1 w-full" /></label>
-        </div>
-        <div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="btn-primary">Start</button></div>
-      </form>
-    </Modal> : null}
   </div>;
 }
 

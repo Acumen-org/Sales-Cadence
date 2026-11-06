@@ -4,13 +4,16 @@ import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../db';
 import { requireUser } from '../auth/current-user';
-import { canAddFromAnyPod, needsPod, visiblePodIds, whyNotCreateCampaign } from '../auth/rbac';
+import { canAddFromAnyPod, needsPod, ROLES_NEEDING_POD, visiblePodIds, whyNotCreateCampaign } from '../auth/rbac';
 import { foPeopleWhere, peopleScopeWhere } from '../people-scope';
 import { personSearchWhere } from '../search-terms';
 import { cachedPersonName } from '../person-cache';
 import { campaignAudienceIssues, campaignMembers, podLabel, whoAndWhy } from '../campaign-audience';
 import { valuePriorityGroups } from '../campaign-planner';
 import { defaultTwentySchema } from '../twenty/twenty-schema';
+import { getSettings } from '../settings';
+import { checkReady, moveSignals, readyLabel } from '../sandbox/ready';
+import { coldAudienceIssues, type ColdAudienceContext } from '../sandbox/campaigns';
 
 /**
  * The directory, filtered, for choosing a campaign's people. The same scope and the same filters
@@ -38,7 +41,7 @@ const Filters = z.object({
   page: z.number().int().min(1).max(100000).default(1),
 });
 export type PickerFilters = z.infer<typeof Filters>;
-export type PickerRow = { ineligibleReason?: string; id: string; name: string; company: string | null; title: string | null; pod: string | null; tier: string | null; state: 'In a campaign' | 'Replied' | 'Finished' | 'Never in a campaign' | 'Do not contact' };
+export type PickerRow = { ineligibleReason?: string; id: string; name: string; company: string | null; title: string | null; pod: string | null; tier: string | null; state: 'In a campaign' | 'Replied' | 'Finished' | 'Never in a campaign' | 'Do not contact'; /** Cold contacts: who owns them (null: unclaimed) and how ready they are. */ owner?: string | null; ready?: string | null; readyTone?: 'green' | 'gray' };
 
 /** A page of the picker. Not exported: a "use server" module may only export async functions; the response carries it. */
 const PICKER_PAGE = 50;
@@ -162,4 +165,135 @@ export async function pickerOptionsAction(): Promise<PickerOptions> {
   const known = new Set<string>([...v.tier, ...v.contactType, ...v.productInterest, ...v.listCategory]);
   const tags = [...new Set(tagRows.flatMap((r) => r.tags))].filter((t) => !known.has(t)).sort();
   return { pods: pods.map((p) => ({ value: p.podOwnerValue, name: p.name })), fos, tiers: [...v.tier], types: [...v.contactType], products: [...v.productInterest], tags };
+}
+
+// ---------------------------------------------------------------------------
+// Cold contacts, for a cold campaign (cold outreach PLAN 4.4, W7)
+// ---------------------------------------------------------------------------
+
+/**
+ * The same picker for a cold campaign's contacts: Owner (mine, unclaimed, a rep), Pod, Source,
+ * readiness and "Not in a campaign", each row with its owner and readiness. Who cannot join says why
+ * on the row, from the one cold audience check the studio and launch use.
+ */
+const ColdFilters = z.object({
+  campaignPodId: z.string().optional(),
+  campaignFoIds: z.array(z.string()).max(100).optional(),
+  campaignId: z.string().optional(),
+  withinIds: z.array(z.string()).max(10000).optional(),
+  q: z.string().trim().max(200).default(''),
+  owner: z.string().trim().max(100).default(''),
+  pod: z.string().trim().max(100).default(''),
+  source: z.enum(['', 'BELLWETHER', 'MANUAL', 'CALL', 'CSV']).default(''),
+  ready: z.enum(['', 'ready', 'not_ready']).default(''),
+  state: z.enum(['free', 'any']).default('free'),
+  page: z.number().int().min(1).max(100000).default(1),
+});
+export type ColdPickerFilters = z.infer<typeof ColdFilters>;
+
+async function coldContext(f: ColdPickerFilters, user: Awaited<ReturnType<typeof requireUser>>): Promise<ColdAudienceContext | undefined> {
+  if (!f.campaignPodId) return undefined;
+  const pod = await prisma.pod.findUniqueOrThrow({ where: { id: f.campaignPodId } });
+  const refused = whyNotCreateCampaign(user, pod);
+  if (refused) throw new Error(refused);
+  const fos = await prisma.user.findMany({ where: { id: { in: f.campaignFoIds ?? [] }, active: true, pods: { some: { podId: pod.id } } }, select: { id: true } });
+  return { podId: pod.id, podName: pod.name, foIds: fos.map((x) => x.id), campaignId: f.campaignId, anyPod: canAddFromAnyPod(user), actor: user };
+}
+
+async function coldPickerWhere(f: ColdPickerFilters, user: Awaited<ReturnType<typeof requireUser>>, context: ColdAudienceContext | undefined): Promise<Prisma.SandboxContactWhereInput> {
+  // The selection view shows whoever is chosen, gone or not, so they can be taken out; otherwise live contacts only.
+  const and: Prisma.SandboxContactWhereInput[] = f.withinIds ? [{ id: { in: f.withinIds } }] : [{ status: 'ACTIVE' }];
+  if (context && !context.anyPod) and.push({ OR: [{ podId: context.podId }, { podId: null }, { ownerId: { in: context.foIds } }, ...(context.campaignId ? [{ id: { in: [...await campaignMembers(context.campaignId)] } }] : [])] });
+  if (f.owner === 'mine') and.push({ ownerId: user.id });
+  else if (f.owner === 'unclaimed') and.push({ OR: [{ ownerId: null }, { owner: { active: false } }] });
+  else if (f.owner) and.push({ ownerId: f.owner });
+  if (f.pod) and.push({ podId: f.pod });
+  if (f.source) and.push({ source: f.source });
+  if (f.state === 'free') and.push({ enrollments: { none: { status: { in: ['ACTIVE', 'PAUSED'] } } } });
+  for (const term of f.q.split(/\s+/).filter(Boolean).slice(0, 5)) {
+    const like = { contains: term, mode: 'insensitive' as const };
+    and.push({ OR: [{ firstName: like }, { lastName: like }, { email: like }, { companyName: like }, { jobTitle: like }] });
+  }
+  return { AND: and };
+}
+
+const COLD_ORDER: Prisma.SandboxContactOrderByWithRelationInput[] = [{ sortName: { sort: 'asc', nulls: 'last' } }, { id: 'asc' }];
+const COLD_INCLUDE = { owner: { select: { name: true, active: true, twentyMemberId: true } }, pod: { select: { name: true } }, enrollments: { orderBy: { createdAt: 'desc' as const }, take: 1, select: { status: true } } } satisfies Prisma.SandboxContactInclude;
+type ColdPickerContact = Prisma.SandboxContactGetPayload<{ include: typeof COLD_INCLUDE }>;
+
+/** Readiness as the contacts list says it: Ready to move (D3), CRM details complete, or what is missing. */
+async function coldReadiness(rows: ColdPickerContact[]) {
+  const settings = (await getSettings()).sandbox;
+  const signals = await moveSignals(rows.map((r) => r.id));
+  return new Map(rows.map((c) => {
+    const r = checkReady(c, { owner: c.owner, podName: c.pod?.name ?? null, settings });
+    const ready = r.ready && Boolean(signals.get(c.id)?.positive);
+    return [c.id, { ready, text: ready ? 'Ready to move' : r.ready ? 'CRM details complete' : readyLabel(r) }];
+  }));
+}
+
+export async function pickColdContactsAction(input: unknown): Promise<{ ok: true; rows: PickerRow[]; total: number; page: number; pageSize: number; scopeNote?: string } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const refused = whyNotCreateCampaign(user);
+  if (refused) return { ok: false, error: refused };
+  const parsed = ColdFilters.safeParse(input ?? {});
+  if (!parsed.success) return { ok: false, error: 'These filters could not be read. Reload the page and choose them again.' };
+  const f = parsed.data;
+  try {
+    const context = await coldContext(f, user);
+    const where = await coldPickerWhere(f, user, context);
+    // Readiness is worked out per contact, so a readiness filter reads every match (as the contacts list does).
+    let page: ColdPickerContact[];
+    let total: number;
+    let readiness: Awaited<ReturnType<typeof coldReadiness>>;
+    if (f.ready) {
+      const all = await prisma.sandboxContact.findMany({ where, orderBy: COLD_ORDER, include: COLD_INCLUDE });
+      readiness = await coldReadiness(all);
+      const kept = all.filter((c) => readiness.get(c.id)!.ready === (f.ready === 'ready'));
+      total = kept.length;
+      page = kept.slice((f.page - 1) * PICKER_PAGE, f.page * PICKER_PAGE);
+    } else {
+      [page, total] = await Promise.all([prisma.sandboxContact.findMany({ where, orderBy: COLD_ORDER, include: COLD_INCLUDE, take: PICKER_PAGE, skip: (f.page - 1) * PICKER_PAGE }), prisma.sandboxContact.count({ where })]);
+      readiness = await coldReadiness(page);
+    }
+    const issues = new Map((await coldAudienceIssues(page.map((c) => c.id), context)).map((i) => [i.id, i.reason]));
+    const rows: PickerRow[] = page.map((c) => {
+      const e = c.enrollments[0];
+      const state: PickerRow['state'] = c.status === 'OPTED_OUT' ? 'Do not contact' : !e ? 'Never in a campaign' : e.status === 'ACTIVE' || e.status === 'PAUSED' ? 'In a campaign' : e.status === 'REPLIED' || e.status === 'MEETING' ? 'Replied' : 'Finished';
+      const ready = readiness.get(c.id);
+      return { ineligibleReason: issues.get(c.id), id: c.id, name: `${c.firstName} ${c.lastName}`.trim() || 'Removed contact', company: c.companyName, title: c.jobTitle, pod: c.pod?.name ?? null, tier: null, state, owner: c.owner?.active ? c.owner.name : c.owner ? `${c.owner.name} (left)` : null, ready: ready?.text ?? null, readyTone: ready?.ready ? 'green' : 'gray' };
+    });
+    const scopeNote = context && !context.anyPod && f.pod && f.pod !== context.podId ? `Only Pod Managers and admins can add contacts from other pods. You can add contacts in ${podLabel(context.podName)}, unclaimed ones and those of this campaign's FOs.` : undefined;
+    return { ok: true, rows, total, page: f.page, pageSize: PICKER_PAGE, scopeNote };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'These contacts could not be read.' };
+  }
+}
+
+/** Every cold contact the filters match that can join, for "Select all matching". */
+export async function pickAllColdIdsAction(input: unknown): Promise<{ ok: true; ids: string[]; skipped: number; why: string } | { ok: false; error: string }> {
+  const user = await requireUser();
+  const refused = whyNotCreateCampaign(user);
+  if (refused) return { ok: false, error: refused };
+  const parsed = ColdFilters.safeParse(input ?? {});
+  if (!parsed.success) return { ok: false, error: 'These filters could not be read. Reload the page and choose them again.' };
+  const context = await coldContext(parsed.data, user);
+  const all = await prisma.sandboxContact.findMany({ where: await coldPickerWhere(parsed.data, user, context), orderBy: COLD_ORDER, include: COLD_INCLUDE });
+  const readiness = parsed.data.ready ? await coldReadiness(all) : null;
+  const ids = all.filter((c) => !readiness || readiness.get(c.id)!.ready === (parsed.data.ready === 'ready')).map((c) => c.id);
+  const issues = await coldAudienceIssues(ids, context);
+  const out = new Set(issues.map((i) => i.id));
+  return { ok: true, ids: ids.filter((id) => !out.has(id)), skipped: out.size, why: whoAndWhy(issues) };
+}
+
+export type ColdPickerOptions = { owners: { id: string; name: string }[]; pods: { value: string; name: string }[] };
+
+export async function coldPickerOptionsAction(): Promise<ColdPickerOptions> {
+  const user = await requireUser();
+  const visible = visiblePodIds(user);
+  const [pods, owners] = await Promise.all([
+    prisma.pod.findMany({ where: { archived: false, ...(visible === null ? {} : { id: { in: visible } }) }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
+    prisma.user.findMany({ where: { active: true, role: { in: ROLES_NEEDING_POD } }, orderBy: { name: 'asc' }, select: { id: true, name: true } }),
+  ]);
+  return { owners, pods: pods.map((p) => ({ value: p.id, name: p.name })) };
 }

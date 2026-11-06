@@ -40,7 +40,8 @@ export type ContactRow = {
   closed: string | null;
   /** The owner's access was removed (N033): shown "Karson (removed)". */
   ownerRemoved: boolean;
-  campaign: { id: string; name: string } | null; nextAction: string | null; lastTouch: string | null;
+  /** The running campaign, or one that has not started and holds the contact: "Starts 12 Nov" or "Draft" (B144). */
+  campaign: { id: string; name: string; startsOn?: string | null } | null; nextAction: string | null; lastTouch: string | null;
   calls: number; source: string; status: SandboxStatus; twentyPersonId: string | null; movedAt: Date | null;
   /** Twenty gained the person after the push: outreach stopped (crm-check.ts). */
   crmMatchPersonId: string | null;
@@ -63,6 +64,11 @@ export async function listContacts(f: ContactFilters, userId: string, page: numb
     },
   });
   const signals = await moveSignals(all.filter((c) => c.status === 'ACTIVE').map((c) => c.id));
+  // B144: a campaign that has not started holds its contacts in its list, not in enrollments.
+  const upcoming = new Map<string, { id: string; name: string; startsOn: string }>();
+  for (const u of await prisma.campaign.findMany({ where: { audience: 'SANDBOX', status: { in: ['SCHEDULED', 'DRAFT'] }, personIds: { hasSome: all.map((c) => c.id) } }, orderBy: [{ status: 'desc' }, { startDate: 'asc' }], select: { id: true, name: true, status: true, startDate: true, personIds: true } })) {
+    for (const id of u.personIds) if (!upcoming.has(id)) upcoming.set(id, { id: u.id, name: u.name, startsOn: u.status === 'DRAFT' ? 'when published (draft)' : formatLocalDate(u.startDate) });
+  }
   const rows: ContactRow[] = all.map((c) => {
     const r = checkReady(c, { owner: c.owner, podName: c.pod?.name ?? null, settings: settings.sandbox });
     const na = c.nextActions[0];
@@ -72,7 +78,7 @@ export async function listContacts(f: ContactFilters, userId: string, page: numb
     return {
       id: c.id, name: `${c.firstName} ${c.lastName}`.trim() || 'Removed contact', title: c.jobTitle, firm: c.companyName, owner: c.owner ? `${c.owner.name}${c.owner.active ? '' : ' (removed)'}` : null, ownerId: c.ownerId, podId: c.podId,
       ready: readyToMove, readyText: closed ?? (readyToMove ? 'Ready to move' : r.ready ? 'CRM details complete' : readyLabel(r)), detailsComplete: r.ready, closed, ownerRemoved: Boolean(c.owner && !c.owner.active),
-      campaign: c.enrollments[0]?.campaign ?? null,
+      campaign: c.enrollments[0]?.campaign ?? upcoming.get(c.id) ?? null,
       nextAction: na ? `${na.label} · ${formatLocalDate(na.dueDate)}` : null,
       lastTouch: c.touches[0] ? formatLocalDate(toLocalDate(c.touches[0].occurredAt, workspaceTimezone())) : null,
       calls: c._count.calls, source: `${c.source === 'BELLWETHER' ? 'Bellwether' : c.source === 'MANUAL' ? 'Added' : c.source === 'CSV' ? 'CSV' : 'Call'} · ${formatLocalDate(toLocalDate(c.createdAt, workspaceTimezone()))}`,

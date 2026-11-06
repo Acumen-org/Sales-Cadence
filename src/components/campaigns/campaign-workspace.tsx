@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { CampaignDraftSaveSchema, CampaignDraftSchema, calendarDays, outreachIsAutomatic, quietDays, shortDateLabel, workingDay, type CalendarSuggestion, type CampaignDraft } from '@/lib/campaign-planner';
+import { CAMPAIGN_NAME_MAX, CampaignDraftSaveSchema, CampaignDraftSchema, calendarDays, outreachIsAutomatic, quietDays, shortDateLabel, workingDay, type CalendarSuggestion, type CampaignDraft } from '@/lib/campaign-planner';
 import { addDays } from '@/lib/dates';
 import type { LeftOut } from '@/lib/campaign-planning-service';
 import { prepareStudioAction, previewCalendarAction, saveCalendarAction } from '@/lib/actions/campaign-planner';
@@ -25,7 +25,16 @@ type SaveState = 'idle' | 'saving' | 'saved' | 'failed';
  * reached, the paces that fill the most working days, and who was left out and why. Publishing
  * sends the request again and the server refits it; the fingerprint proves it is the plan shown.
  */
-export function CampaignWorkspace({ initial, pods, products, campaignId, revision: initialRevision, canPublish = true, status, today }: { initial: CampaignDraft; pods: WorkspacePod[]; products: string[]; campaignId?: string; revision?: string; canPublish?: boolean; status?: string; today: string }) {
+export function CampaignWorkspace({ initial, pods, products, campaignId, revision: initialRevision, canPublish = true, status, today, audience = 'CRM', contactBase = '/people', section }: {
+  initial: CampaignDraft; pods: WorkspacePod[]; products: string[]; campaignId?: string; revision?: string; canPublish?: boolean; status?: string; today: string;
+  /** SANDBOX: a cold campaign, fixed when it is made (W7, B045): cold contacts, the cold checks, and who claims whom. */
+  audience?: 'CRM' | 'SANDBOX';
+  /** Where a left-out person's page is: People, or the cold contact pages. */
+  contactBase?: string;
+  /** The section the page sits in, for the way back ("Cold outreach · Campaigns"). */
+  section?: { label: string; href: string };
+}) {
+  const cold = audience === 'SANDBOX';
   const router = useRouter();
   const [askConfirm, confirmDialog] = useConfirm();
   const [draft, setDraft] = useState(initial);
@@ -56,6 +65,8 @@ export function CampaignWorkspace({ initial, pods, products, campaignId, revisio
   // Saves run one at a time against the latest revision; refs let a queued save see the newest.
   const latest = useRef(draft); latest.current = draft;
   const idRef = useRef(campaignId); const revRef = useRef(initialRevision);
+  // A campaign's kind never changes once it is made (B045), so saves read it once.
+  const audienceRef = useRef(audience);
   const inFlight = useRef<Promise<boolean>>(Promise.resolve(true));
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The error a failed save showed, so the banner can say Not saved only for that one.
@@ -78,7 +89,7 @@ export function CampaignWorkspace({ initial, pods, products, campaignId, revisio
     const run = async () => {
       const snapshot = latest.current, at = edits.current;
       if (!options.publish) setSaveState('saving');
-      const r = await saveCalendarAction(snapshot, { id: idRef.current, revision: revRef.current, ...options });
+      const r = await saveCalendarAction(snapshot, { id: idRef.current, revision: revRef.current, ...options, audience: audienceRef.current });
       if (!r.ok) { if (options.publish) lastPublishError.current = r.error; else { setSaveState('failed'); lastSaveError.current = r.error; } setError(r.error); return false; }
       idRef.current = r.id; revRef.current = r.revision; setId(r.id);
       if (at === edits.current) { dirty.current = false; setSaveState('saved'); } else setSaveState('idle');
@@ -119,7 +130,7 @@ export function CampaignWorkspace({ initial, pods, products, campaignId, revisio
     !draft.fos.length && 'an FO',
     !pace(draft.defaultBatchSize) && 'a number from 1 to 500 in New people a day',
     draft.fos.some(f => !pace(f.batchSize)) && `a number from 1 to 500 in New people a day for ${list(draft.fos.filter(f => !pace(f.batchSize)).map(f => pod?.fos.find(x => x.id === f.id)?.name ?? 'an FO'))}`,
-    !draft.personIds.length && 'at least one person in the audience',
+    !draft.personIds.length && (cold ? 'at least one contact' : 'at least one person in the audience'),
   ].filter((m): m is string => !!m);
   const basicsValid = missing.length === 0;
   const startPassed = !!draft.startDate && draft.startDate < today;
@@ -129,7 +140,7 @@ export function CampaignWorkspace({ initial, pods, products, campaignId, revisio
   const noWorkingDays = !!firstWorkingDay;
   const inspect = async (value: CampaignDraft) => {
     const request = ++generation.current; setChecking(true); setError(null);
-    const r = await previewCalendarAction(value, id);
+    const r = await previewCalendarAction(value, id, audience);
     if (request !== generation.current) return;
     setChecking(false);
     if (r.ok) { setReview(r.data); reviewedKey.current = JSON.stringify(value); } else { setReview(null); setError(r.error); }
@@ -150,7 +161,7 @@ export function CampaignWorkspace({ initial, pods, products, campaignId, revisio
   /** Plan from the People inputs: the server leaves out who it must, fits paces and, until someone edits it, the outreach. */
   const plan = async (next: CampaignDraft, then?: () => void) => {
     setError(null); setHold(null); setPlanning(true);
-    const r = await prepareStudioAction(next, id, reshapes(next));
+    const r = await prepareStudioAction(next, id, reshapes(next), audience);
     setPlanning(false);
     if (!r.ok) { setError(r.error); if (tab === 0) setHold(r.error); return null; }
     // A built outreach comes with who is on which of its groups (an FO's own outreach, when one was needed).
@@ -182,7 +193,7 @@ export function CampaignWorkspace({ initial, pods, products, campaignId, revisio
     const ok = await persist({ publish: true, fingerprint: review?.fingerprint });
     if (ok) { router.push(`/campaigns/${idRef.current}`); router.refresh(); return; }
     // A changed CRM detail or another campaign moved the plan: show the new one to review.
-    const r = await previewCalendarAction(latest.current, idRef.current);
+    const r = await previewCalendarAction(latest.current, idRef.current, audience);
     if (r.ok) { setReview(r.data); checkedPeople.current = peopleKey(latest.current); if (!r.data.calendar.valid) setTab(r.data.stage === 'people' ? 0 : 1); }
   });
   const editOutreach = (part: Partial<CampaignDraft>) => patch({ ...part, outreachEdited: true });
@@ -217,7 +228,7 @@ export function CampaignWorkspace({ initial, pods, products, campaignId, revisio
   const updateCalendar = (next: CampaignDraft, fix?: CalendarSuggestion) => start(async () => {
     const before = draft;
     setQuickError(null); setQuickReview(null);
-    const r = await prepareStudioAction(next, id, reshapes(next));
+    const r = await prepareStudioAction(next, id, reshapes(next), audience);
     if (!r.ok) { setQuickError(r.error); return; }
     if (!r.data.calendar.valid) { setQuickReview(r.data); return; }
     const merged = reshapes(next) ? { ...next, flows: r.data.draft.flows, assignments: r.data.draft.assignments } : next;
@@ -232,25 +243,25 @@ export function CampaignWorkspace({ initial, pods, products, campaignId, revisio
   return <div className="space-y-5 pb-4">
     {confirmDialog}
     <header className="surface p-5 sm:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-4"><div><h1 className="text-2xl font-semibold tracking-tight text-ink-900">{draft.name || 'New campaign'}</h1></div><div className="flex items-center gap-3">{saveLabel && <span role="status" className={`text-sm ${saveState === 'failed' ? 'text-red-700' : 'text-ink-500'}`}>{saveLabel}</span>}{(!canAutosave || saveState === 'failed') && <button type="button" className="btn-secondary" disabled={pending} onClick={saveDraft}>{canAutosave ? 'Retry save' : 'Save draft'}</button>}</div></div>
+      <div className="flex flex-wrap items-center justify-between gap-4"><div>{section && <a href={section.href} className="text-[12.5px] font-medium text-ink-500 hover:text-ink-800">{section.label}</a>}<h1 className="text-2xl font-semibold tracking-tight text-ink-900">{draft.name || (cold ? 'New cold campaign' : 'New campaign')}</h1></div><div className="flex items-center gap-3">{saveLabel && <span role="status" className={`text-sm ${saveState === 'failed' ? 'text-red-700' : 'text-ink-500'}`}>{saveLabel}</span>}{(!canAutosave || saveState === 'failed') && <button type="button" className="btn-secondary" disabled={pending} onClick={saveDraft}>{canAutosave ? 'Retry save' : 'Save draft'}</button>}</div></div>
       <nav aria-label="Campaign setup" className="mt-6 grid grid-cols-3 gap-1 sm:flex sm:gap-2">{steps.map((name, i) => <button type="button" key={name} disabled={pending || planning || (i === 2 && tab !== 2 && (tab !== 1 || !review?.calendar.valid || checking))} aria-current={tab === i ? 'step' : undefined} onClick={() => go(i)} className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-2.5 text-xs sm:gap-2 sm:px-4 sm:text-sm ${tab === i ? 'bg-brand-600 font-semibold text-white shadow-sm' : 'bg-white/70 font-medium text-ink-500 hover:bg-white'}`}><span className="opacity-60">0{i + 1}</span>{name}</button>)}</nav>
     </header>
     {error && <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3"><div className="min-w-0 flex-1"><span className="block font-medium text-red-900">{error === lastPublishError.current ? 'Not published' : error === lastSaveError.current ? 'Not saved' : "Can't continue yet"}</span><p className="mt-1 text-sm text-red-800">{error}</p></div></div>}
-    {tab > 0 && planned && view && <PlanSummary review={view} pod={pod} onAddFo={addFo} onUntick={untick} onApply={applySuggestion} busy={pending || planning || stale} undo={undo && <UndoLine label={undo.label} busy={pending || planning} onUndo={() => { void undoFix(); }} />} />}
+    {tab > 0 && planned && view && <PlanSummary review={view} pod={pod} contactBase={contactBase} onAddFo={addFo} onUntick={untick} onApply={applySuggestion} busy={pending || planning || stale} undo={undo && <UndoLine label={undo.label} busy={pending || planning} onUndo={() => { void undoFix(); }} />} />}
     {undo && !(tab > 0 && planned && view) && <div className="surface px-5 py-3 text-sm"><UndoLine label={undo.label} busy={pending || planning} onUndo={() => { void undoFix(); }} /></div>}
     <fieldset disabled={pending || planning} className="min-w-0 space-y-5">
     {tab === 0 && <>
       <section className="surface grid gap-4 p-5 md:grid-cols-2 lg:grid-cols-4">
-        <Field label="Campaign name" required><input aria-label="Campaign name" value={draft.name} onChange={e => patch({ name: e.target.value })} className="w-full" /></Field>
+        <Field label="Campaign name" required><input aria-label="Campaign name" value={draft.name} maxLength={CAMPAIGN_NAME_MAX} onChange={e => patch({ name: e.target.value })} className="w-full" /><p className={`mt-1 text-xs ${draft.name.length >= CAMPAIGN_NAME_MAX ? 'text-amber-800' : 'text-ink-500'}`}>{draft.name.length >= CAMPAIGN_NAME_MAX ? `That is the limit: ${CAMPAIGN_NAME_MAX} characters.` : `Up to ${CAMPAIGN_NAME_MAX} characters`}</p></Field>
         <Field label="Pod" required><select aria-label="Campaign pod" value={draft.podId} onChange={e => { const p = pods.find(p => p.id === e.target.value)!; patch({ podId: p.id, fos: [], personIds: [], assignments: {}, foAssignments: undefined }); }} className="w-full">{pods.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
         <Field label="Start date" required><input aria-label="Start date" type="date" value={draft.startDate} onChange={e => patch({ startDate: e.target.value })} className={`w-full ${startPassed ? '!border-red-300' : ''}`} />{startPassed && <p className="mt-1 text-xs text-red-700">This date has passed. <button type="button" className="font-medium text-brand-700 hover:underline" onClick={startToday}>Use today</button></p>}</Field>
         <Field label="End date" required><input aria-label="End date" type="date" value={draft.endDate} min={draft.startDate} onChange={e => patch({ endDate: e.target.value })} className={`w-full ${noWorkingDays ? '!border-amber-300' : ''}`} />{noWorkingDays && !startPassed && <p className="mt-1 text-xs text-amber-800">No working days in these dates. <button type="button" className="font-medium text-brand-700 hover:underline" onClick={() => patch({ endDate: firstWorkingDay })}>End on {shortDateLabel(firstWorkingDay)}</button></p>}</Field>
         <div className="md:col-span-2 lg:col-span-4"><span className="mb-2 block text-sm font-medium">Products</span><div className="flex flex-wrap gap-2">{products.map(p => <button key={p} type="button" aria-pressed={draft.productInterest.includes(p)} onClick={() => patch({ productInterest: draft.productInterest.includes(p) ? draft.productInterest.filter(x => x !== p) : [...draft.productInterest, p] })} className={draft.productInterest.includes(p) ? 'chip' : 'chip-muted !border !border-line'}>{optionLabel(p)}</button>)}</div></div>
       </section>
-      <section className="surface p-5"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">Who will run this campaign?</h2><label className="flex items-center gap-3 text-sm">New people a day<input aria-label="Default new people per day" className="!w-20 !font-medium" type="number" min={1} max={500} value={draft.defaultBatchSize || ''} onChange={e => { const n = Number(e.target.value); patch({ defaultBatchSize: n, fos: draft.fos.map(f => f.batchSize === draft.defaultBatchSize ? { ...f, batchSize: n } : f) }); }} /></label></div>{pod && !pod.fos.length && <p className="text-sm text-ink-500">No FOs work in {pod.name}.</p>}<div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{pod?.fos.map(fo => { const selected = draft.fos.find(f => f.id === fo.id); return <div key={fo.id} className={`flex items-center justify-between gap-2 rounded-xl border p-3 ${selected ? 'border-brand-200 bg-brand-50/40' : 'border-line'}`}><label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={!!selected} onChange={() => patch({ fos: selected ? draft.fos.filter(f => f.id !== fo.id) : [...draft.fos, { id: fo.id, batchSize: draft.defaultBatchSize }] })} />{fo.name}{selected && review?.droppedFos.some(d => d.id === fo.id) && <span className="text-xs font-normal text-ink-500">Sends nothing: {review.droppedFos.find(d => d.id === fo.id)!.reason}</span>}</label>{selected && <input type="number" aria-label={`${fo.name} new people per day`} min={1} max={500} value={selected.batchSize || ''} className="!w-20 !font-medium" onChange={e => patch({ fos: draft.fos.map(f => f.id === fo.id ? { ...f, batchSize: Number(e.target.value) } : f) })} />}</div>; })}</div></section>
-      <section className="surface p-5"><div className="mb-4 flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold">Your audience <span className="ml-2 rounded-full bg-brand-50 px-2 py-1 font-medium text-brand-800">{draft.personIds.length}</span></h2></div><PeoplePicker campaignPodId={draft.podId} campaignFoIds={draft.fos.map(f => f.id)} campaignId={id} key={draft.podId} initialPod={pod?.podOwnerValue} value={draft.personIds} onChange={personIds => { setSubset(s => s.filter(id => personIds.includes(id))); patch({ personIds, assignments: Object.fromEntries(Object.entries(draft.assignments).filter(([id]) => personIds.includes(id))) }); }} /></section>
+      <section className="surface p-5"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">Who will run this campaign?</h2>{cold && <p className="mt-1 text-sm text-ink-600">A contact nobody owns is claimed by the FO who runs it when the campaign starts. A contact someone owns stays theirs, so pick its owner too.</p>}</div><label className="flex items-center gap-3 text-sm">New people a day<input aria-label="Default new people per day" className="!w-20 !font-medium" type="number" min={1} max={500} value={draft.defaultBatchSize || ''} onChange={e => { const n = Number(e.target.value); patch({ defaultBatchSize: n, fos: draft.fos.map(f => f.batchSize === draft.defaultBatchSize ? { ...f, batchSize: n } : f) }); }} /></label></div>{pod && !pod.fos.length && <p className="text-sm text-ink-500">No FOs work in {pod.name}.</p>}<div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{pod?.fos.map(fo => { const selected = draft.fos.find(f => f.id === fo.id); return <div key={fo.id} className={`flex items-center justify-between gap-2 rounded-xl border p-3 ${selected ? 'border-brand-200 bg-brand-50/40' : 'border-line'}`}><label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={!!selected} onChange={() => patch({ fos: selected ? draft.fos.filter(f => f.id !== fo.id) : [...draft.fos, { id: fo.id, batchSize: draft.defaultBatchSize }] })} />{fo.name}{selected && review?.droppedFos.some(d => d.id === fo.id) && <span className="text-xs font-normal text-ink-500">Sends nothing: {review.droppedFos.find(d => d.id === fo.id)!.reason}</span>}</label>{selected && <input type="number" aria-label={`${fo.name} new people per day`} min={1} max={500} value={selected.batchSize || ''} className="!w-20 !font-medium" onChange={e => patch({ fos: draft.fos.map(f => f.id === fo.id ? { ...f, batchSize: Number(e.target.value) } : f) })} />}</div>; })}</div></section>
+      <section className="surface p-5"><div className="mb-4 flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold">{cold ? 'Your contacts' : 'Your audience'} <span className="ml-2 rounded-full bg-brand-50 px-2 py-1 font-medium text-brand-800">{draft.personIds.length}</span></h2></div><PeoplePicker audience={audience} campaignPodId={draft.podId} campaignFoIds={draft.fos.map(f => f.id)} campaignId={id} key={draft.podId} initialPod={pod?.podOwnerValue} value={draft.personIds} onChange={personIds => { setSubset(s => s.filter(id => personIds.includes(id))); patch({ personIds, assignments: Object.fromEntries(Object.entries(draft.assignments).filter(([id]) => personIds.includes(id))) }); }} /></section>
     </>}
-    {tab === 0 && review && !review.calendar.valid && review.stage === 'people' && <div ref={feedback} className="space-y-3"><PlannerFeedback review={review} onApply={applySuggestion} busy={pending || planning} />{review.leftOut.length > 0 && <LeftOutList leftOut={review.leftOut} pod={pod} onAddFo={addFo} busy={pending} />}</div>}
+    {tab === 0 && review && !review.calendar.valid && review.stage === 'people' && <div ref={feedback} className="space-y-3"><PlannerFeedback review={review} onApply={applySuggestion} busy={pending || planning} />{review.leftOut.length > 0 && <LeftOutList leftOut={review.leftOut} pod={pod} contactBase={contactBase} onAddFo={addFo} busy={pending} />}</div>}
     {tab === 1 && view && !view.calendar.valid && <div ref={feedback} className="scroll-mt-4"><PlannerFeedback review={view} onApply={applySuggestion} onBack={() => setTab(0)} busy={pending || planning || stale} /></div>}
     {tab === 1 && <div className="grid items-start gap-5 lg:grid-cols-[260px_minmax(0,1fr)]">
       <aside className="surface space-y-2 p-3 lg:sticky lg:top-4" aria-label="Outreach groups">
@@ -272,7 +283,7 @@ export function CampaignWorkspace({ initial, pods, products, campaignId, revisio
       <CampaignCalendarView draft={planned} calendar={review.calendar} actions={<><button type="button" className="btn-secondary btn-sm" onClick={() => { setQuickDraft(structuredClone(draft)); setQuickReview(null); setQuickError(null); }}>Dates and limits</button><button type="button" className="btn-secondary btn-sm" onClick={() => setTab(1)}>Edit outreach</button></>} />
     </section>}
     </fieldset>
-    {groupEditor && <Modal label={groupEditor === 'new' ? 'Add outreach group' : 'Manage group people'} onClose={() => setGroupEditor(null)}><div className="space-y-4 p-5"><h2 className="text-lg font-semibold">{groupEditor === 'new' ? 'Add outreach group' : 'Manage group people'}</h2><p className="text-sm text-ink-600">Choose people from Default. People in another custom group are unavailable.</p><PeoplePicker campaignPodId={draft.podId} campaignFoIds={draft.fos.map(f => f.id)} campaignId={id} withinIds={plannedIds} disabledIds={plannedIds.filter(id => draft.assignments[id] && draft.assignments[id] !== 'default' && draft.assignments[id] !== groupEditor)} value={subset} onChange={setSubset} /><div className="flex justify-end gap-2"><button type="button" className="btn-ghost" onClick={() => setGroupEditor(null)}>Cancel</button><button type="button" className="btn-primary" disabled={!subset.length} onClick={commitGroup}>{groupEditor === 'new' ? 'Create outreach group' : 'Save people'} ({subset.length})</button></div></div></Modal>}
+    {groupEditor && <Modal label={groupEditor === 'new' ? 'Add outreach group' : 'Manage group people'} onClose={() => setGroupEditor(null)}><div className="space-y-4 p-5"><h2 className="text-lg font-semibold">{groupEditor === 'new' ? 'Add outreach group' : 'Manage group people'}</h2><p className="text-sm text-ink-600">Choose people from Default. People in another custom group are unavailable.</p><PeoplePicker audience={audience} campaignPodId={draft.podId} campaignFoIds={draft.fos.map(f => f.id)} campaignId={id} withinIds={plannedIds} disabledIds={plannedIds.filter(id => draft.assignments[id] && draft.assignments[id] !== 'default' && draft.assignments[id] !== groupEditor)} value={subset} onChange={setSubset} /><div className="flex justify-end gap-2"><button type="button" className="btn-ghost" onClick={() => setGroupEditor(null)}>Cancel</button><button type="button" className="btn-primary" disabled={!subset.length} onClick={commitGroup}>{groupEditor === 'new' ? 'Create outreach group' : 'Save people'} ({subset.length})</button></div></div></Modal>}
     {quickDraft && <Modal label="Dates and limits" onClose={() => setQuickDraft(null)}><div className="space-y-4 p-5"><h2 className="text-lg font-semibold">Dates and limits</h2><div className="grid grid-cols-2 gap-3"><Field label="Start date"><input aria-label="Adjust start date" type="date" value={quickDraft.startDate} onChange={e => { setQuickDraft({ ...quickDraft, startDate: e.target.value }); setQuickReview(null); }} /></Field><Field label="End date"><input aria-label="Adjust end date" type="date" value={quickDraft.endDate} onChange={e => { setQuickDraft({ ...quickDraft, endDate: e.target.value }); setQuickReview(null); }} />{quickWeekend && <p className="mt-1 text-xs text-amber-800">No working days in these dates. <button type="button" className="font-medium text-brand-700 hover:underline" onClick={() => { setQuickDraft({ ...quickDraft, endDate: quickWeekend }); setQuickReview(null); }}>End on {shortDateLabel(quickWeekend)}</button></p>}</Field></div>{quickDraft.fos.length > 0 && <div className="flex justify-between text-xs font-medium text-ink-500"><span>FO</span><span>New people a day</span></div>}{quickDraft.fos.map(f => <label key={f.id} className="flex items-center justify-between gap-3 text-sm">{pod?.fos.find(fo => fo.id === f.id)?.name}<input aria-label={`Adjust ${pod?.fos.find(fo => fo.id === f.id)?.name ?? 'FO'} new people per day`} className="!w-20 !font-medium" type="number" min={1} max={500} value={f.batchSize || ''} onChange={e => { setQuickDraft({ ...quickDraft, fos: quickDraft.fos.map(fo => fo.id === f.id ? { ...fo, batchSize: Number(e.target.value) } : fo) }); setQuickReview(null); }} /></label>)}{quickError && <p role="alert" className="text-sm text-red-700">{quickError}</p>}{quickReview && <PlannerFeedback review={quickReview} onApply={s => updateCalendar(s.draft, s)} busy={pending} />}<div className="flex justify-end gap-2"><button type="button" className="btn-ghost" onClick={() => setQuickDraft(null)}>Cancel</button><button type="button" className="btn-primary" disabled={pending || !!quickReview || !!quickWeekend} onClick={() => updateCalendar(quickDraft)}>Update calendar</button></div></div></Modal>}
     <footer className="sticky bottom-3 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-white/95 p-4 shadow-sm backdrop-blur">
       <span className="min-w-0 flex-1 text-sm text-ink-600">{tab === 0
@@ -305,7 +316,7 @@ function weekendOnly(start: string, end: string) {
   return d;
 }
 
-function PlanSummary({ review, pod, onAddFo, onUntick, onApply, busy, undo }: { review: Review; pod?: WorkspacePod; onAddFo: (id: string) => void; onUntick: (ids: string[]) => void; onApply: (s: CalendarSuggestion) => void; busy: boolean; undo?: ReactNode }) {
+function PlanSummary({ review, pod, contactBase, onAddFo, onUntick, onApply, busy, undo }: { review: Review; pod?: WorkspacePod; contactBase: string; onAddFo: (id: string) => void; onUntick: (ids: string[]) => void; onApply: (s: CalendarSuggestion) => void; busy: boolean; undo?: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [paces, setPaces] = useState(false);
   const planned = review.draft.personIds.length;
@@ -321,24 +332,41 @@ function PlanSummary({ review, pod, onAddFo, onUntick, onApply, busy, undo }: { 
       {undo && <span className="ml-auto">{undo}</span>}
     </div>
     {paces && review.paces.length > 4 && <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-x-6 gap-y-1 border-t border-line px-5 py-3 text-sm">{review.paces.map(p => <div key={p.foId} className="flex items-center justify-between gap-3"><span className="truncate text-ink-800">{p.name}</span><span className="tabular-nums">{p.from !== p.to && <span className="text-ink-400">{p.from} → </span>}<span className={p.to > p.from ? 'text-amber-700' : 'text-ink-900'}>{p.to}</span></span></div>)}</div>}
+    {review.cold && <ColdNotes review={review} />}
     {review.suggestions.length > 0 && <div className="border-t border-line"><p className="px-5 pt-3 text-sm font-medium text-ink-900">To fit everyone in</p><Fixes suggestions={review.suggestions} onApply={onApply} busy={busy} /></div>}
-    {open && <div className="border-t border-line"><LeftOutList leftOut={review.leftOut} pod={pod} onAddFo={onAddFo} busy={busy} flat /></div>}
+    {open && <div className="border-t border-line"><LeftOutList leftOut={review.leftOut} pod={pod} contactBase={contactBase} onAddFo={onAddFo} busy={busy} flat /></div>}
   </section>;
 }
 
-function LeftOutList({ leftOut, pod, onAddFo, busy, flat = false }: { leftOut: LeftOut[]; pod?: WorkspacePod; onAddFo: (id: string) => void; busy: boolean; flat?: boolean }) {
-  const groups = [...leftOut.reduce((m, p) => { const g = m.get(p.reason) ?? { reason: p.reason, ownerId: p.ownerId, people: [] as LeftOut[] }; g.people.push(p); return m.set(p.reason, g); }, new Map<string, { reason: string; ownerId?: string; people: LeftOut[] }>()).values()].sort((a, b) => b.people.length - a.people.length);
-  return <div className={`${flat ? '' : 'surface'} divide-y divide-line`} aria-label="Left out">
-    {groups.map(g => <LeftOutGroup key={g.reason} reason={g.reason} people={g.people} owner={g.ownerId ? pod?.fos.find(f => f.id === g.ownerId) : undefined} onAddFo={onAddFo} busy={busy} />)}
+/**
+ * A cold plan's preview (PLAN 4.4): when it starts, who will start and who is left out, who claims the
+ * unclaimed contacts (B135), and what to know first: no email or phone for the steps (B136), calls
+ * still waiting for their form (N070). Warnings never leave anyone out.
+ */
+function ColdNotes({ review }: { review: Review }) {
+  const notes = review.cold!;
+  const planned = review.draft.personIds.length;
+  const reasons = [...review.leftOut.reduce((m, l) => m.set(l.reason, (m.get(l.reason) ?? 0) + 1), new Map<string, number>())].map(([reason, n]) => `${n} ${reason.charAt(0).toLowerCase()}${reason.slice(1)}`);
+  const claimed = notes.claims.reduce((n, c) => n + c.count, 0);
+  return <div className="space-y-2 border-t border-line px-5 py-3 text-sm" aria-label="What publishing does">
+    <p className="text-ink-900">Starts {shortDateLabel(review.draft.startDate)} · {planned} will start{review.leftOut.length ? ` · ${review.leftOut.length} left out: ${reasons.join(', ')}` : ''}{claimed ? ` · ${claimed} unclaimed will be claimed by ${list(notes.claims.map(c => notes.claims.length > 1 ? `${c.name} (${c.count})` : c.name))}` : ''}</p>
+    {notes.warnings.map(w => <p key={w.reason} className="flex items-start gap-2 text-amber-800"><IconAlert size={15} className="mt-0.5 shrink-0" /><span>{w.reason}: {list(w.people.slice(0, 3).map(p => p.name))}{w.people.length > 3 ? ` and ${w.people.length - 3} more` : ''}.</span></p>)}
   </div>;
 }
 
-function LeftOutGroup({ reason, people, owner, onAddFo, busy }: { reason: string; people: LeftOut[]; owner?: { id: string; name: string }; onAddFo: (id: string) => void; busy: boolean }) {
+function LeftOutList({ leftOut, pod, contactBase, onAddFo, busy, flat = false }: { leftOut: LeftOut[]; pod?: WorkspacePod; contactBase: string; onAddFo: (id: string) => void; busy: boolean; flat?: boolean }) {
+  const groups = [...leftOut.reduce((m, p) => { const g = m.get(p.reason) ?? { reason: p.reason, ownerId: p.ownerId, people: [] as LeftOut[] }; g.people.push(p); return m.set(p.reason, g); }, new Map<string, { reason: string; ownerId?: string; people: LeftOut[] }>()).values()].sort((a, b) => b.people.length - a.people.length);
+  return <div className={`${flat ? '' : 'surface'} divide-y divide-line`} aria-label="Left out">
+    {groups.map(g => <LeftOutGroup key={g.reason} reason={g.reason} people={g.people} contactBase={contactBase} owner={g.ownerId ? pod?.fos.find(f => f.id === g.ownerId) : undefined} onAddFo={onAddFo} busy={busy} />)}
+  </div>;
+}
+
+function LeftOutGroup({ reason, people, contactBase, owner, onAddFo, busy }: { reason: string; people: LeftOut[]; contactBase: string; owner?: { id: string; name: string }; onAddFo: (id: string) => void; busy: boolean }) {
   const [all, setAll] = useState(false);
   const shown = all ? people : people.slice(0, 12);
   return <div className="px-5 py-3">
     <div className="flex flex-wrap items-center gap-3"><span className="text-sm font-medium text-ink-900">{reason}</span><span className="text-xs tabular-nums text-ink-500">{people.length.toLocaleString('en-US')}</span>{owner && <button type="button" className="btn-secondary btn-sm ml-auto" disabled={busy} onClick={() => onAddFo(owner.id)}>Add {owner.name}</button>}</div>
-    <div className="mt-1.5 grid grid-cols-4 gap-x-6 gap-y-1 text-[13px] text-ink-700">{shown.map(p => <a key={p.id} href={`/people/${p.id}`} target="_blank" rel="noreferrer" className="min-w-0 truncate hover:text-ink-900 hover:underline">{p.name}{p.company ? <span className="text-ink-400"> · {p.company}</span> : null}</a>)}{people.length > shown.length && <button type="button" className="text-left text-brand-700 hover:underline" onClick={() => setAll(true)}>+{(people.length - shown.length).toLocaleString('en-US')} more</button>}</div>
+    <div className="mt-1.5 grid grid-cols-4 gap-x-6 gap-y-1 text-[13px] text-ink-700">{shown.map(p => <a key={p.id} href={`${contactBase}/${p.id}`} target="_blank" rel="noreferrer" className="min-w-0 truncate hover:text-ink-900 hover:underline">{p.name}{p.company ? <span className="text-ink-400"> · {p.company}</span> : null}</a>)}{people.length > shown.length && <button type="button" className="text-left text-brand-700 hover:underline" onClick={() => setAll(true)}>+{(people.length - shown.length).toLocaleString('en-US')} more</button>}</div>
   </div>;
 }
 

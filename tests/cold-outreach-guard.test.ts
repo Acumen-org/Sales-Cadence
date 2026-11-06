@@ -9,7 +9,7 @@ import { coldRef } from '@/lib/subject';
 import { addNote, claimContact, removeContact } from '@/lib/sandbox/contacts';
 import { optOutSandboxContact } from '@/lib/sandbox/opt-out';
 import { sandboxDueCount, sandboxWork, setColdNextStep } from '@/lib/sandbox/work';
-import { sandboxAudienceIssues } from '@/lib/sandbox/campaigns';
+import { coldAudienceIssues } from '@/lib/sandbox/campaigns';
 import { logManualCall, submitCallForm } from '@/lib/calls/form';
 import { statusByIds } from '@/lib/sandbox/status';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
@@ -229,9 +229,9 @@ describe('the guard (PLAN 8.1)', () => {
     it('B132: a Junior FO cannot put a colleague\'s contact in a campaign', async () => {
       const mine = await readyContact(b.users.karson.id, b.pods.Alisa.id);
       const hers = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
-      const r = await sandboxAudienceIssues([mine.id, hers.id], b.pods.Alisa.id, undefined, karson());
-      expect(r.eligible).toEqual([mine.id]);
-      expect(r.issues).toEqual([expect.objectContaining({ id: hers.id, reason: `Owned by ${b.users.alisa.name}. Junior FOs add only their own contacts` })]);
+      // S7: the one cold audience check the studio, adding people and launch use.
+      const issues = await coldAudienceIssues([mine.id, hers.id], { podId: b.pods.Alisa.id, podName: 'Pod Alisa', foIds: [], actor: karson() });
+      expect(issues).toEqual([expect.objectContaining({ id: hers.id, reason: `Owned by ${b.users.alisa.name}. Junior FOs add only their own contacts` })]);
     });
 
     it('N008: the Call check at the click refuses a pending form, an opt-out and calling hours', async () => {

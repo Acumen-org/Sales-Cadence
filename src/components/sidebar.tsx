@@ -10,6 +10,7 @@ import { logoutAction } from '@/lib/actions/auth';
 import { IconActivity, IconBolt, IconCalendar, IconCampaigns, IconClose, IconColumns, IconCompany, IconHelp, IconHome, IconLogout, IconMenu, IconPeople, IconReports, IconSettings, IconTasks } from './icons';
 import { Avatar } from './ui';
 import { BrandMark } from './brand';
+import { useActiveSection } from './active-section';
 
 /** A section shows it is opening the moment it is clicked, while its page is read. */
 function Opening() {
@@ -52,6 +53,8 @@ export function Sidebar(props: Props) {
 
 function SidebarContent({ user, mode, dryRun, todayCount, overdueCount, ticketsCount = 0, sandboxCount = 0, close }: Props & { close?: () => void }) {
   const pathname = usePathname();
+  // A page of one section under another's address (a cold campaign under /campaigns) names its section.
+  const section = useActiveSection();
   return (
     <aside className="sidebar-shell">
       <div className="flex h-[88px] shrink-0 items-center gap-3 px-6">
@@ -63,7 +66,7 @@ function SidebarContent({ user, mode, dryRun, todayCount, overdueCount, ticketsC
         {GROUPS.map((group) => <div key={group.label}>
           <div className="mb-2 px-3 text-[9px] font-semibold uppercase tracking-[0.16em] text-[#91a79d]">{group.label}</div>
           <div className="space-y-1">{group.items.filter((item) => (item.href !== '/reports' || canViewReports(user)) && (item.href !== '/tickets' || canCheckMeetingNumbers(user))).map((item) => {
-            const active = pathname === item.href || pathname.startsWith(item.href + '/');
+            const active = section ? item.href === section : pathname === item.href || pathname.startsWith(item.href + '/');
             const Icon = item.icon;
             return <Link key={item.href} href={item.href} onClick={close} aria-current={active ? 'page' : undefined} className={clsx('nav-item', active && 'nav-item-active')}>
               <Opening />

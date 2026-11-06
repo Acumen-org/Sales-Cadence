@@ -10,7 +10,6 @@ import { addNote, assignContact, claimContact, createContact, eraseContact, remo
 import { suppressValue } from '../sandbox/opt-out';
 import { normalizedFor, type SuppressionKind } from '../sandbox/suppression';
 import { setColdNextStep } from '../sandbox/work';
-import { addToSandboxCampaign, createSandboxCampaign } from '../sandbox/campaigns';
 import { optOutContact } from '../outreach/transitions';
 import { NEXT_ACTION_CHANNELS, pushNextAction } from '../next-actions';
 import { reassignStrandedNextActions } from '../outreach/ownership';
@@ -179,29 +178,6 @@ export async function addSuppressionAction(fd: FormData): Promise<ActionResult> 
   revalidatePath('/settings');
   refresh();
   return { ok: true, message: `${r.added ? 'Added' : 'Already on the list'}${r.optedOut ? `; ${r.optedOut} contact${r.optedOut === 1 ? '' : 's'} opted out` : ''}.` };
-}
-
-export async function startSandboxCampaignAction(fd: FormData): Promise<ActionResult> {
-  const user = await requireUser();
-  const r = await createSandboxCampaign({ name: String(fd.get('name') ?? ''), sequenceId: String(fd.get('sequenceId') ?? ''), podId: String(fd.get('podId') ?? ''), startDate: String(fd.get('startDate') ?? ''), contactIds: fd.getAll('ids').map(String).filter(Boolean), startsPerFoPerDay: fd.get('pace') ? Number(fd.get('pace')) : null }, toActor(user), userActor(user));
-  refresh();
-  if (!r.ok) return r;
-  // A campaign that starts today starts now, as an approved CRM campaign would.
-  const { activateCampaign } = await import('../engine/campaigns');
-  await activateCampaign(r.id, { actor: userActor(user) }).catch(() => undefined);
-  return { ok: true, message: r.left ? `Campaign created. Left out: ${r.left}.` : 'Campaign created.', redirectTo: `/sandbox/campaigns/${r.id}` };
-}
-
-export async function addToSandboxCampaignAction(fd: FormData): Promise<ActionResult> {
-  const user = await requireUser();
-  const campaignId = String(fd.get('campaignId') ?? '');
-  const campaign = await prisma.campaign.findUnique({ where: { id: campaignId }, select: { podId: true, createdById: true } });
-  if (!campaign) return { ok: false, error: 'Campaign not found.' };
-  if (!isAdmin(user) && !user.podIds.includes(campaign.podId)) return { ok: false, error: 'You can add contacts only to campaigns of your pods.' };
-  const r = await addToSandboxCampaign(campaignId, fd.getAll('ids').map(String).filter(Boolean), userActor(user), toActor(user));
-  refresh();
-  if (!r.ok) return r;
-  return { ok: true, message: `Added ${r.added}.${r.left ? ` Left out: ${r.left}.` : ''}` };
 }
 
 /** N034: a leader gives a removed rep's open next steps to a rep; the CRM ones are written to the CRM again. */
