@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { PageFrame } from '@/components/page-frame';
 import { requireUser } from '@/lib/auth/current-user';
+import { isAdmin, isBizOps } from '@/lib/auth/rbac';
 import { formatInstant } from '@/lib/dates';
 import { listPushes } from '@/lib/sandbox/pushes-query';
 import { COLD_FROM_BELLWETHER_HREF } from '@/lib/subject';
@@ -22,12 +23,12 @@ export default async function FromBellwetherPage({ searchParams }: { searchParam
       <Notice tone="info">From Bellwether is for Sales Leaders, Pod Managers, Biz Ops and admins. Ask your pod leader what happened to a push.</Notice>
     </PageFrame>;
   }
-  const { rows, total, pages, page } = await listPushes(Number(sp.page ?? 1) || 1);
+  const { rows, total, pages, page } = await listPushes(user, Number(sp.page ?? 1) || 1);
   const pageHref = (n: number) => `${COLD_FROM_BELLWETHER_HREF}?page=${n}`;
   return <PageFrame className="space-y-4 px-6 pb-8 pt-2">
     <ColdOutreachHeader user={user} current="bellwether" />
     <Surface flush>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-3 text-[13px]"><span className="text-ink-600">Every push from Bellwether, newest first. Open one to see what happened to each contact and why.</span><span className="tabular-nums text-ink-500">{total === 1 ? '1 push' : `${total} pushes`}</span></div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-3 text-[13px]"><span className="text-ink-600">{isAdmin(user) || isBizOps(user) ? 'Every push from Bellwether' : `Pushes from Bellwether for ${user.pods.map((x) => x.name).join(', ') || 'your pods'}`}, newest first. Open one to see what happened to each contact and why.</span><span className="tabular-nums text-ink-500">{total === 1 ? '1 push' : `${total} pushes`}</span></div>
       {rows.length ? <ul className="divide-y divide-line">{rows.map((p) => <li key={p.id}>
         <details className="group">
           <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-4 gap-y-1.5 px-5 py-3 text-[13px] hover:bg-canvas/60">

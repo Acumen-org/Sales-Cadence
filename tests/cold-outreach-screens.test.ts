@@ -124,7 +124,7 @@ describe('Cold outreach screens (S10)', () => {
         { bellwetherContactId: 'bw-4', result: 'rejected', reason: 'suppressed' },
       ] },
     } });
-    const { rows, total } = await listPushes(1);
+    const { rows, total } = await listPushes(await sessionOf(b.users.ria.id), 1);
     expect(total).toBe(1);
     expect(rows[0]).toEqual(expect.objectContaining({ added: 2, unclaimed: 1, inCrm: 1, refused: 1, merged: 0 }));
     expect(rows[0].by).toMatch(/^Alisa/);
@@ -132,6 +132,31 @@ describe('Cold outreach screens (S10)', () => {
     expect(byName.get('Jane Doe')).toEqual(expect.objectContaining({ result: 'Added', href: `/cold-outreach/${added.id}` }));
     expect(byName.get('Bob Lee')).toEqual(expect.objectContaining({ result: 'Added, unclaimed', tone: 'amber' }));
     expect(byName.get('Bellwether contact bw-4')).toEqual(expect.objectContaining({ result: 'Refused', why: 'This person asked not to be contacted.' }));
+  });
+
+  it('B057: From Bellwether is scoped like every leader view: a leader sees the pushes for their pods, Biz Ops and admins every push', async () => {
+    const sally = await prisma.user.create({ data: { email: 'sally@cadence.local', name: 'Sally Leader', role: 'SALES_LEADER', passwordHash: 'x', timezone: 'Europe/London', pods: { create: [{ podId: b.pods.Alisa.id }] } } });
+    const bea = await prisma.user.create({ data: { email: 'bea@cadence.local', name: 'Bea Ops', role: 'BIZ_OPS', passwordHash: 'x', timezone: 'Europe/London' } });
+    const pushOf = (key: string, email: string, podId: string | null) => prisma.bellwetherPush.create({ data: { idempotencyKey: key, bodyHash: 'h', state: 'DONE', pushedByEmail: email, podId, contactCount: 0 } });
+    const mine = await pushOf('p-alisa', 'alisa@cadence.local', b.pods.Alisa.id);
+    const theirs = await pushOf('p-leigh', 'leigh@cadence.local', b.pods.Leigh.id);
+    // Before the pod was kept: Karson (Alisa's pod) and Daniel (Leigh's) pushed with no pod on the push.
+    const oldOurs = await pushOf('p-old-karson', 'Karson@Cadence.local', null);
+    const oldTheirs = await pushOf('p-old-daniel', 'daniel@cadence.local', null);
+    const ids = async (u: SessionUser) => (await listPushes(u, 1)).rows.map((r) => r.id).sort();
+    expect(await ids(await sessionOf(sally.id))).toEqual([mine.id, oldOurs.id].sort());
+    expect(await ids(await sessionOf(bea.id))).toEqual([mine.id, theirs.id, oldOurs.id, oldTheirs.id].sort());
+    expect(await ids(await sessionOf(b.users.ria.id))).toHaveLength(4);
+    // A push records its pod: the owner's.
+    const { push, envelope, bwContact, enableBellwether, disableBellwether } = await import('./helpers/sandbox');
+    enableBellwether();
+    try {
+      const res = await push(envelope([bwContact()]));
+      expect(res.status).toBe(200);
+      expect((await prisma.bellwetherPush.findUniqueOrThrow({ where: { id: res.body.pushId } })).podId).toBe(b.pods.Alisa.id);
+    } finally {
+      disableBellwether();
+    }
   });
 
   it('PLAN 4.0: one badge per contact from one function, in the table\'s words, and the warning chips beside it', async () => {

@@ -269,7 +269,7 @@ describe('Cold contact page: layout and cues (S10, PLAN 4.2)', () => {
 });
 
 describe('Cold contact page: tabs (S10)', () => {
-  it('B144 B145: every membership incl. scheduled and draft holds; Add to campaign; Pause and Exit where the reader may; exits read "Moved to CRM" / "Opted out"', async () => {
+  it('B144 B145: every membership incl. scheduled holds; Add to campaign; Pause and Exit where the reader may; exits read "Moved to CRM" / "Opted out"', async () => {
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
     await runningCampaign(c.id, b.users.alisa.id, b.pods.Alisa.id);
     await prisma.campaign.create({ data: { name: 'Spring push', audience: 'SANDBOX', sequenceId: b.sequence.id, podId: b.pods.Alisa.id, personIds: [c.id], startDate: '2099-11-12', status: 'SCHEDULED' } });
@@ -287,6 +287,23 @@ describe('Cold contact page: tabs (S10)', () => {
     // A Junior FO cannot pause his colleague's campaign: no controls, no dead buttons.
     const forKarson = (await loadContactPage(c.id, karson))!;
     expect(forKarson.memberships.find((e) => e.name === 'Q4 Harbor')!.mayManage).toBe(false);
+  });
+
+  it('S7 rule: a draft campaign does not hold the contact on its page', async () => {
+    const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+    await prisma.campaign.create({ data: { name: 'Q4 Draft', audience: 'SANDBOX', sequenceId: b.sequence.id, podId: b.pods.Alisa.id, personIds: [c.id], startDate: '2099-11-12', status: 'DRAFT' } });
+    const m = (await loadContactPage(c.id, alisa))!;
+    // Not a hold, not "in a campaign", and nothing it blocks: the contact can still join a campaign.
+    expect(m.holds).toEqual([]);
+    expect(m.drafts.map((d) => d.name)).toEqual(['Q4 Draft']);
+    expect(m.cue.state).toBe('no_next_step');
+    expect(m.mayEnroll).toBe(true);
+    const { coldAudienceIssues } = await import('@/lib/sandbox/campaigns');
+    expect(await coldAudienceIssues([c.id], { podId: b.pods.Alisa.id, podName: 'Pod Alisa', foIds: [b.users.alisa.id] })).toEqual([]);
+    const html = text(await draw(c.id, alisa, { tab: 'sequences' }));
+    expect(html).toMatch(/In draft: ?Q4 Draft ?\(not started\)/);
+    expect(html).not.toContain('Upcoming');
+    expect(html).toContain('Not in a campaign.');
   });
 
   it('B140: Activity shows every event in words: pushed, claimed, assigned, enrolled, skipped, exited, opted out, moved and undone', async () => {

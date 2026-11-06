@@ -856,7 +856,9 @@ export async function pushWithIdempotency(envelope: Envelope, rawBody: string, r
   }
   const { results, owner } = await runContacts(envelope, { write: true, pushId: push.id, now });
   const response: PushResponse = { pushId: push.id, replayed: false, receivedAt: now.toISOString().replace(/\.\d{3}Z$/, 'Z'), owner: owner ? { email: owner.email, name: owner.name } : null, summary: summarize(results), results };
-  await prisma.bellwetherPush.update({ where: { id: push.id }, data: { state: 'DONE', ownerId: owner?.id ?? null, response: response as unknown as Prisma.InputJsonValue } });
+  // The pod the push is for (From Bellwether scopes leaders by it): its owner's, else the one Bellwether named.
+  const named = !owner && envelope.pod ? await prisma.pod.findFirst({ where: { archived: false, OR: [{ podOwnerValue: { equals: envelope.pod, mode: 'insensitive' } }, { name: { equals: envelope.pod, mode: 'insensitive' } }] }, select: { id: true } }) : null;
+  await prisma.bellwetherPush.update({ where: { id: push.id }, data: { state: 'DONE', ownerId: owner?.id ?? null, podId: owner?.podId ?? named?.id ?? null, response: response as unknown as Prisma.InputJsonValue } });
   await logAudit({ entityType: 'bellwether', entityId: push.id, action: 'push_received', actor: { type: 'WEBHOOK', label: `bellwether:${envelope.pushedBy.email}` }, details: { ...response.summary, internalErrors: results.filter((r) => r.reason === 'internal_error').length } });
   return { status: 200, body: response };
 }

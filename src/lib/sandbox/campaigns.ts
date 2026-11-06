@@ -34,7 +34,9 @@ const contactName = (c: Pick<SandboxContact, 'firstName' | 'lastName'>) => `${c.
 const and = (items: string[]) => (items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`);
 
 /** Campaigns that hold their people: scheduled or running (a draft holds nobody, as for CRM campaigns). */
-const HOLDING = ['SCHEDULED', 'ACTIVE', 'PAUSED'] as const;
+export const HOLDING = ['SCHEDULED', 'ACTIVE', 'PAUSED'] as const;
+/** Whether a cold campaign in this state holds the contacts in its list (S7: never a draft). */
+export const campaignHolds = (status: string) => (HOLDING as readonly string[]).includes(status);
 
 export type ColdAudienceContext = {
   podId: string;

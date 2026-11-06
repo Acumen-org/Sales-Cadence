@@ -281,10 +281,15 @@ function Chips({ values }: { values: string[] }) {
 function Campaigns({ m }: { m: ContactPage }) {
   return <div className="space-y-3">
     <Card title="Campaigns" actions={m.mayEnroll ? <AddToColdCampaign id={m.id} /> : null}>
-      {!m.memberships.length && !m.holds.length ? <div className="p-4 text-[13px] text-ink-500">Not in a campaign.{m.mayEnroll ? ` Add ${m.firstName} to a cold campaign, or set a next step.` : ''}</div> : null}
+      {!m.memberships.length && !m.holds.length ? <div className="p-4 text-[13px] text-ink-500">Not in a campaign.{m.drafts.length ? ' A draft holds nobody until it is published.' : ''}{m.mayEnroll ? ` Add ${m.firstName} to a cold campaign, or set a next step.` : ''}</div> : null}
       {m.holds.length ? <ul className="divide-y divide-line">{m.holds.map((h) => <li key={h.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-[13px]">
         <span className="text-ink-700">In <Link href={`/campaigns/${h.id}`} className="font-medium text-ink-900 hover:text-brand-700">{h.name}</Link>, {h.words}</span>
         <span className="flex items-center gap-2"><Badge tone="purple">Upcoming</Badge>{h.mayRemove ? <RemoveFromCampaign campaignId={h.id} campaignName={h.name} personIds={[m.id]} className="btn-ghost btn-sm" label="Take out" /> : null}</span>
+      </li>)}</ul> : null}
+      {/* S7: a draft holds nobody; it is named as a draft that has not started, and blocks nothing. */}
+      {m.drafts.length ? <ul className="divide-y divide-line border-t border-line">{m.drafts.map((d) => <li key={d.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-[13px]">
+        <span className="text-ink-600">In draft: <Link href={`/campaigns/${d.id}`} className="font-medium text-ink-900 hover:text-brand-700">{d.name}</Link> (not started)</span>
+        <span className="flex items-center gap-2"><Badge tone="gray">Draft</Badge>{d.mayRemove ? <RemoveFromCampaign campaignId={d.id} campaignName={d.name} personIds={[m.id]} className="btn-ghost btn-sm" label="Take out" /> : null}</span>
       </li>)}</ul> : null}
     </Card>
     {m.memberships.map((e) => <Card key={e.id} title={e.campaignId ? <Link href={`/campaigns/${e.campaignId}`} className="font-medium hover:underline">{e.name}</Link> : e.name} actions={<span className="flex items-center gap-2"><Badge tone={enrollmentTone(e)}>{enrollmentStatusLabel(e)}</Badge>{e.mayManage ? <EnrollmentActions enrollmentId={e.id} status={e.status} foUserId="" fos={[]} flash exitConfirm={{ title: `Take ${m.name} out of ${e.name}?`, effects: ['Their open steps in it are cancelled.', 'They stay in Cold outreach: set a next step after.'], confirmLabel: 'Take out' }} /> : null}</span>}>

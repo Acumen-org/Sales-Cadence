@@ -33,6 +33,7 @@ import { countryChoices, linkedinHref, readExtraPhones } from './normalize';
 import { NEXT_STEP_LABELS } from './history-notes';
 import { PRODUCT_VALUES } from './bellwether-api';
 import { detailsVersion } from './contacts';
+import { campaignHolds } from './campaigns';
 
 /*
  * The cold contact page (cold outreach PLAN 4.2), decided in one place: what the rep can do, why
@@ -131,8 +132,9 @@ export async function loadContactPage(id: string, user: SessionUser, now = new D
   const enrollmentIds = contact.enrollments.map((e) => e.id);
   const [subject, cues, moves, owners, upcoming, audits, pushes, version, pods, suggestions] = await Promise.all([
     loadColdSubject(id), coldCues([id], { today }), latestMoves([id], actor, now), assignableOwners(user),
-    // B144: a campaign that has not started holds the contact in its list.
-    prisma.campaign.findMany({ where: { audience: 'SANDBOX', status: { in: ['SCHEDULED', 'DRAFT', 'PENDING_APPROVAL'] }, personIds: { has: id } }, orderBy: [{ startDate: 'asc' }], select: { id: true, name: true, status: true, startDate: true, podId: true, pod: { select: { name: true } }, plannerDraft: true, enrollments: { distinct: ['foUserId'], select: { foUserId: true } } } }),
+    // B144: a campaign that has not started holds the contact in its list, unless it is a draft (S7:
+    // drafts hold nobody, the rule coldAudienceIssues applies). A draft is shown as one, holding nothing.
+    prisma.campaign.findMany({ where: { audience: 'SANDBOX', status: { in: ['SCHEDULED', 'DRAFT'] }, personIds: { has: id } }, orderBy: [{ startDate: 'asc' }], select: { id: true, name: true, status: true, startDate: true, podId: true, pod: { select: { name: true } }, plannerDraft: true, enrollments: { distinct: ['foUserId'], select: { foUserId: true } } } }),
     prisma.auditLog.findMany({ where: { OR: [{ entityType: 'sandbox_contact', entityId: id }, ...(enrollmentIds.length ? [{ entityType: 'enrollment', entityId: { in: enrollmentIds } }] : [])] }, orderBy: { createdAt: 'desc' }, take: 300 }),
     prisma.bellwetherPushItem.findMany({ where: { sandboxContactId: id }, orderBy: { createdAt: 'asc' }, include: { push: { select: { pushedByEmail: true, createdAt: true } } } }),
     detailsVersion(id),
@@ -327,10 +329,11 @@ export async function loadContactPage(id: string, user: SessionUser, now = new D
   };
 
   // Campaigns (B144, B145): holds of campaigns not started yet, and every enrollment.
-  const holds = upcoming.map((c) => {
-    const foIds = [...new Set([...((c.plannerDraft as { fos?: { id: string }[] } | null)?.fos ?? []).map((f) => f.id), ...c.enrollments.map((e) => e.foUserId)])];
-    return { id: c.id, name: c.name, words: c.status === 'DRAFT' ? 'a draft: nothing starts until it is published' : `starts ${shortDay(c.startDate)}`, mayRemove: live && canChangeCampaignPeople(actor, { podId: c.podId, foIds }) };
-  });
+  const enrolledIn = new Set(contact.enrollments.map((e) => e.campaignId).filter(Boolean));
+  const mayTakeOut = (c: (typeof upcoming)[number]) => live && canChangeCampaignPeople(actor, { podId: c.podId, foIds: [...new Set([...((c.plannerDraft as { fos?: { id: string }[] } | null)?.fos ?? []).map((f) => f.id), ...c.enrollments.map((e) => e.foUserId)])] });
+  const holds = upcoming.filter((c) => campaignHolds(c.status) && !enrolledIn.has(c.id)).map((c) => ({ id: c.id, name: c.name, words: `starts ${shortDay(c.startDate)}`, mayRemove: mayTakeOut(c) }));
+  // In a draft's list, but a draft holds nobody: "In draft: Q4 Harbor (not started)".
+  const drafts = upcoming.filter((c) => !campaignHolds(c.status)).map((c) => ({ id: c.id, name: c.name, mayRemove: mayTakeOut(c) }));
   const memberships = contact.enrollments.map((e) => {
     const steps = e.tasks.map<StepWords>((t) => ({
       id: t.id, label: t.label,
@@ -411,7 +414,7 @@ export async function loadContactPage(id: string, user: SessionUser, now = new D
     confirms: { optOut: optOutConfirm(effects), remove: removeConfirm(effects), erase: eraseConfirm(effects) },
     checklist, edit: { may: mayWork, why: workWhy ?? (live ? null : contact.status === 'MOVED' ? 'Moved to the CRM: edit them in People' : contact.status === 'OPTED_OUT' ? 'Do not contact: kept read only' : 'Not in Cold outreach any more'), version },
     details: { extraPhones, verification: verificationWords(contact), products: productWords(contact.productInterest) },
-    source, holds, memberships, mayEnroll, tasks, history, emails, emailSteps, tracked, suggestions,
+    source, holds, drafts, memberships, mayEnroll, tasks, history, emails, emailSteps, tracked, suggestions,
     nextLine: live ? nextWords(cue, firstName) : null,
     countries: countryChoices(), productChoices: PRODUCT_VALUES.map((v) => ({ value: v, label: PRODUCT_WORDS[v] ?? v })),
     contactsHref: COLD_CONTACT_BASE,

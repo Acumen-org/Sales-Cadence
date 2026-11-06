@@ -1440,6 +1440,9 @@ model BellwetherPush {
   state          String
   pushedByEmail  String
   ownerId        String?
+  /// The pod the push is for: its owner's pod, else the pod Bellwether named. Leaders see the pushes
+  /// of their pods (From Bellwether). Null on pushes from before it was kept: the pusher's pods decide.
+  podId          String?
   contactCount   Int
   response       Json?
   createdAt      DateTime @default(now())
@@ -1447,6 +1450,7 @@ model BellwetherPush {
   items BellwetherPushItem[]
 
   @@index([createdAt])
+  @@index([podId, createdAt])
 }
 
 /// Per-contact result of a push, kept as long as the contact's status may be asked for.

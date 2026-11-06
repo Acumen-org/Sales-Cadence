@@ -1,4 +1,7 @@
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../db';
+import type { SessionUser } from '../auth/current-user';
+import { isAdmin, isBizOps } from '../auth/rbac';
 import { coldRef, personRef, subjectHref } from '../subject';
 import type { ContactResult } from './bellwether-api';
 
@@ -36,11 +39,25 @@ const REASON_WORDS: Record<string, string> = {
   owner_not_found: 'Its owner is not a sales rep in Cadence',
 };
 
-export async function listPushes(page: number): Promise<{ rows: PushRow[]; total: number; pages: number; page: number }> {
-  const total = await prisma.bellwetherPush.count();
+/**
+ * Which pushes a reader sees, as every leader view is scoped: Biz Ops and admins every push; anyone
+ * else the pushes for their pods. A push carries its pod (its owner's, or the one Bellwether named);
+ * one from before it was kept counts for its pusher's pods.
+ */
+export async function pushScope(user: Pick<SessionUser, 'role' | 'podIds' | 'id'>): Promise<Prisma.BellwetherPushWhereInput> {
+  if (isAdmin(user) || isBizOps(user)) return {};
+  if (!user.podIds.length) return { id: { in: [] } };
+  const members = await prisma.user.findMany({ where: { pods: { some: { podId: { in: user.podIds } } } }, select: { email: true, aliases: true } });
+  const pushers = [...new Set(members.flatMap((m) => [m.email, ...m.aliases].map((e) => e.toLowerCase())))];
+  return { OR: [{ podId: { in: user.podIds } }, { podId: null, pushedByEmail: { in: pushers, mode: 'insensitive' } }] };
+}
+
+export async function listPushes(user: Pick<SessionUser, 'role' | 'podIds' | 'id'>, page: number): Promise<{ rows: PushRow[]; total: number; pages: number; page: number }> {
+  const where = await pushScope(user);
+  const total = await prisma.bellwetherPush.count({ where });
   const pages = Math.max(1, Math.ceil(total / PUSHES_PAGE));
   const p = Math.min(Math.max(1, page), pages);
-  const pushes = await prisma.bellwetherPush.findMany({ orderBy: { createdAt: 'desc' }, skip: (p - 1) * PUSHES_PAGE, take: PUSHES_PAGE, include: { items: { orderBy: { createdAt: 'asc' } } } });
+  const pushes = await prisma.bellwetherPush.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (p - 1) * PUSHES_PAGE, take: PUSHES_PAGE, include: { items: { orderBy: { createdAt: 'asc' } } } });
   const contactIds = [...new Set(pushes.flatMap((x) => x.items.flatMap((i) => (i.sandboxContactId ? [i.sandboxContactId] : []))))];
   const personIds = [...new Set(pushes.flatMap((x) => x.items.flatMap((i) => (i.crmPersonId ? [i.crmPersonId] : []))))];
   const emails = [...new Set(pushes.map((x) => x.pushedByEmail.toLowerCase()))];
