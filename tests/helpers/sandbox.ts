@@ -3,7 +3,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { resetEnvCache } from '@/lib/env';
 import { resetRateLimits } from '@/lib/sandbox/bellwether-api';
-import { handleCheck, handlePing, handlePush, handleStatus } from '@/lib/sandbox/bellwether-http';
+import { handleCheck, handleOwners, handlePing, handlePush, handleStatus } from '@/lib/sandbox/bellwether-http';
 
 export const KEY = 'test-bellwether-key-0123456789abcdef0123456789';
 
@@ -44,11 +44,13 @@ export function bwContact(over: Record<string, unknown> = {}, firm: Record<strin
 
 export const envelope = (contacts: unknown[], over: Record<string, unknown> = {}) => ({ pushedBy: { email: 'alisa@cadence.local', name: 'Alisa' }, contacts, ...over });
 
-type Init = { key?: string | null; idempotencyKey?: string | null; contentType?: string; raw?: string };
+/** `contract: '1.1'` sends X-Cadence-Contract: 1.1, as Bellwether does once ping lists it (PLAN 7.3). */
+type Init = { key?: string | null; idempotencyKey?: string | null; contentType?: string; raw?: string; contract?: '1.1' };
 function request(path: string, body: unknown, init: Init = {}, method = 'POST') {
   const headers: Record<string, string> = { 'content-type': init.contentType ?? 'application/json' };
   if (init.key !== null) headers['x-cadence-api-key'] = init.key ?? KEY;
   if (init.idempotencyKey !== null && init.idempotencyKey !== undefined) headers['idempotency-key'] = init.idempotencyKey;
+  if (init.contract) headers['x-cadence-contract'] = init.contract;
   return new Request(`http://localhost/api/integrations/bellwether/v1${path}`, { method, headers, body: method === 'GET' ? undefined : init.raw ?? JSON.stringify(body) });
 }
 
@@ -66,6 +68,10 @@ export async function check(body: unknown, init: Init = {}) {
 }
 export async function status(body: unknown, init: Init = {}) {
   const res = await handleStatus(request('/contacts/status', body, init));
+  return { status: res.status, body: (await res.json()) as Body };
+}
+export async function owners(init: Init = {}) {
+  const res = await handleOwners(request('/owners', null, init, 'GET'));
   return { status: res.status, body: (await res.json()) as Body };
 }
 export async function ping(init: Init = {}) {

@@ -35,7 +35,7 @@ describe('who a campaign can reach', () => {
     const issues = await campaignAudienceIssues(['aud-1', 'dnd', 'optout', 'deleted', 'outside', 'karsons', 'andrews', 'seatless', 'missing'], context);
     const reason = Object.fromEntries(issues.map(i => [i.id, i.reason]));
     // An owner in another pod is named with their pod, so it is plain why they cannot be added here.
-    expect(reason).toEqual({ dnd: 'Marked Do not contact in Twenty', optout: 'Asked not to be contacted', deleted: 'Deleted in Twenty', outside: 'In Pod Andrew, so only a Pod Manager or admin can add them', karsons: `Owned by ${b.users.karson.name}, who is not on this campaign`, andrews: `Owned by ${b.users.andrew.name} in another pod (Pod Andrew)`, seatless: 'Their owner in Twenty is not a Cadence user', missing: 'Deleted in Twenty' });
+    expect(reason).toEqual({ dnd: 'Marked Do not contact in the CRM', optout: 'Asked not to be contacted', deleted: 'Deleted in the CRM', outside: 'In Pod Andrew, so only a Pod Manager or admin can add them', karsons: `Owned by ${b.users.karson.name}, who is not on this campaign`, andrews: `Owned by ${b.users.andrew.name} in another pod (Pod Andrew)`, seatless: 'Their owner in the CRM is not a Cadence user', missing: 'Deleted in the CRM' });
     // Karson works this pod and could be added; Andrew does not.
     expect(issues.find(i => i.id === 'karsons')?.ownerId).toBe(b.users.karson.id);
     expect(issues.find(i => i.id === 'andrews')?.ownerId).toBeUndefined();
@@ -170,9 +170,9 @@ describe('choosing people by priority', () => {
     ] });
     const filters = { q: 'Pick', state: 'any' as const, campaignPodId: b.pods.Alisa.id, campaignFoIds: [b.users.alisa.id] };
     const r = await pickPeopleAction(filters); if (!r.ok) throw new Error(r.error);
-    expect(Object.fromEntries(r.rows.map(x => [x.id, x.ineligibleReason ?? null]))).toEqual({ 'pick-dnd': 'Marked Do not contact in Twenty', 'pick-karson': `Owned by ${b.users.karson.name}, who is not on this campaign`, 'pick-ok': null });
+    expect(Object.fromEntries(r.rows.map(x => [x.id, x.ineligibleReason ?? null]))).toEqual({ 'pick-dnd': 'Marked Do not contact in the CRM', 'pick-karson': `Owned by ${b.users.karson.name}, who is not on this campaign`, 'pick-ok': null });
     const all = await pickAllIdsAction(filters); if (!all.ok) throw new Error(all.error);
-    expect(all).toEqual({ ok: true, ids: ['pick-ok'], skipped: 2, why: `Pick Dnd (marked Do not contact in Twenty); Pick Karson (owned by ${b.users.karson.name}, who is not on this campaign)` });
+    expect(all).toEqual({ ok: true, ids: ['pick-ok'], skipped: 2, why: `Pick Dnd (marked Do not contact in the CRM); Pick Karson (owned by ${b.users.karson.name}, who is not on this campaign)` });
     const early = await pickPeopleAction({ ...filters, campaignFoIds: [] }); if (!early.ok) throw new Error(early.error);
     expect(early.rows.find(x => x.id === 'pick-karson')?.ineligibleReason).toBeUndefined();
   });

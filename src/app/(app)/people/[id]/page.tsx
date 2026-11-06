@@ -5,7 +5,13 @@ import { RecordSync } from '@/components/record-sync';
 import { canReadPerson } from '@/lib/people-scope';
 import { accountScopeCompanyIds } from '@/lib/accounts-query';
 import { notFound } from 'next/navigation';
-import { requireUser } from '@/lib/auth/current-user';
+import { requireUser, toActor } from '@/lib/auth/current-user';
+import { canAct, loadPersonSubject } from '@/lib/outreach/guard';
+import { openSuggestions } from '@/lib/outreach/suggestions';
+import { SuggestionList } from '@/components/calls/suggestions';
+import { formOptOut } from '@/lib/tickets';
+import { FormOptOutControls } from '@/components/tickets/close-ticket-form';
+import { personRef } from '@/lib/subject';
 import { nextActionAccess, REPEAT_LABELS } from '@/lib/next-actions';
 import { ACTION_LABELS } from '@/lib/sequences/steps';
 import { completeNextActionAction, stopNextActionAction } from '@/lib/actions/next-actions';
@@ -29,7 +35,7 @@ import { twentyPersonUrl } from '@/lib/twenty/urls';
 import { CrmHistory } from '@/components/people/crm-history';
 import { ActionIcon, IconExternal } from '@/components/icons';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
-import { Avatar, Badge, Card, contactWarnings, crmStanding, ENROLLMENT_TONE, enrollmentStatusLabel, KeyValue, RecordFields, RecordHeader, Surface, Tabs, TierBadge } from '@/components/ui';
+import { Avatar, Badge, Card, contactWarnings, crmStanding, enrollmentTone, enrollmentStatusLabel, KeyValue, Notice, RecordFields, RecordHeader, Surface, Tabs, TierBadge } from '@/components/ui';
 import { campaignStatusLabel } from '@/lib/campaign-status';
 
 type TimelineItem = { at: Date; kind: 'touch' | 'note' | 'task' | 'state'; icon: string; title: string; detail?: string | null; tone?: 'in' | 'out' | 'neutral' };
@@ -62,11 +68,19 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
     person.companyId ? prisma.personCache.findMany({ where: { companyId: person.companyId, id: { not: id }, deletedAt: null }, include: { enrollments: { orderBy: { createdAt: 'desc' }, take: 1 } }, take: 30 }) : Promise.resolve([]),
   ]);
 
-  const [openNext, nextAccess] = await Promise.all([
+  const [openNext, nextAccess, suggestions, subject] = await Promise.all([
     prisma.nextAction.findFirst({ where: { personId: id, state: 'OPEN' }, include: { fo: { select: { id: true, name: true } } } }),
     nextActionAccess(user),
+    // B027: a colleague's call left a suggested next step for this owner.
+    openSuggestions(user.id, { personId: id }),
+    loadPersonSubject(id),
   ]);
-  const callGateNow = person.phone ? await callGate(user, { phone: person.phone, state: person.city?.split(',').pop()?.trim() ?? null, optedOut: person.optedOut, dnd: person.dnd, email: person.email, linkedinUrl: person.linkedinUrl }) : null;
+  // B120: Call says why when this viewer may not call (Biz Ops read only), in words under the button.
+  const callVerdict = subject ? canAct(toActor(user), subject, 'call') : null;
+  const gateNow = person.phone ? await callGate(user, { phone: person.phone, state: person.city?.split(',').pop()?.trim() ?? null, optedOut: person.optedOut, dnd: person.dnd, email: person.email, linkedinUrl: person.linkedinUrl }) : null;
+  const callGateNow = gateNow && callVerdict && !callVerdict.ok ? { blocked: callVerdict.reason, warning: null } : gateNow;
+  // D4: an opt-out from the post-call form can be questioned by anyone and undone by an admin.
+  const formOpt = person.optedOut ? await formOptOut(personRef(id)) : null;
   const mayWorkNext = openNext ? openNext.foUserId === user.id || user.role === 'ADMIN' || (nextAccess.canAssign && nextAccess.fos.some((f) => f.id === openNext.foUserId)) : false;
 
   let notes: TwentyNote[] = [];
@@ -108,7 +122,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
     ...audit
       .filter((a) => ['enrolled', 'replied', 'meeting', 'exited', 'completed', 'paused', 'resumed', 'finished', 'moved_to_step', 'flags_updated', 'reassigned'].includes(a.action))
       .map<TimelineItem>((a) => {
-        const { title, fields } = describeAudit(a.action, a.details as Record<string, unknown> | null, a.actorLabel);
+        const { title, fields } = describeAudit(a.action, a.details as Record<string, unknown> | null, a.actorLabel, a.entityType);
         return { at: a.createdAt, kind: 'state', icon: 'STATE', title, detail: auditDetailText(fields), fields, tone: 'neutral' };
       }),
   ].sort((a, b) => b.at.getTime() - a.at.getTime());
@@ -164,7 +178,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
               ) : null}
               {twentyUrl ? (
                 <a href={twentyUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm">
-                  <IconExternal size={13} /> Twenty
+                  <IconExternal size={13} /> CRM
                 </a>
               ) : null}
               <Link href="/people" className="btn-ghost btn-sm">
@@ -173,6 +187,10 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
             </>
           }
         />
+        {formOpt ? <div className="mt-2"><Notice tone="error"><span className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+          <span><span className="font-medium">Do not contact</span> since {formOpt.at ? formatInstant(formOpt.at, user.timezone) : 'the call'}: {formOpt.byName ?? 'a rep'} chose &quot;Asked not to be contacted&quot; on the post-call form.</span>
+          <FormOptOutControls subject={{ personId: id }} name={cachedPersonName(person)} mayLift={user.role === 'ADMIN'} ticket={formOpt.ticket ? `Biz Ops are looking at it: raised by ${formOpt.ticket.raisedBy ?? 'someone'}.` : null} />
+        </span></Notice></div> : null}
       </div>
       <div className="grid gap-3 px-6 pb-8 pt-3 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0">
@@ -243,7 +261,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                     <Card
                       key={e.id}
                       title={<span className="flex items-center gap-2"><Link href={`/sequences/${e.sequenceId}`} className="font-medium hover:underline">{e.sequence.name}</Link>{e.cycle > 1 ? <Badge tone="blue">Round {e.cycle}</Badge> : null}</span>}
-                      actions={<Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'}>{enrollmentStatusLabel(e)}</Badge>}
+                      actions={<Badge tone={enrollmentTone(e)}>{enrollmentStatusLabel(e)}</Badge>}
                     >
                       <div className="border-b border-line bg-canvas/50 p-4"><RecordFields className="lg:grid-cols-4" items={[
                         { label: 'Campaign', value: e.campaign ? <Link href={`/campaigns/${e.campaign.id}`} className="text-brand-700 hover:underline">{e.campaign.name}</Link> : 'Direct enrollment' },
@@ -286,7 +304,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                   actions={nextAccess.canSet ? <span className="flex items-center gap-2">
                     {openNext && mayWorkNext ? <ActionButton action={completeNextActionAction} payload={{ id: openNext.id }} className="btn-primary btn-sm" refresh>Done</ActionButton> : null}
                     {person.dnd || (openNext && !mayWorkNext) ? null : <NextActionButton personIds={[id]} today={today} fos={nextAccess.fos} canAssign={nextAccess.canAssign} label={openNext ? 'Change' : 'Create task'} icon={openNext ? 'refresh' : 'plus'} initial={openNext ? { label: openNext.label, action: openNext.action, dueDate: openNext.dueDate < today ? today : openNext.dueDate, repeat: openNext.repeat, foUserId: openNext.foUserId } : undefined} />}
-                    {openNext && mayWorkNext ? <ActionButton action={stopNextActionAction} payload={{ id: openNext.id }} className="btn-ghost btn-sm" confirm="Stop this task? It is cleared in Twenty too." refresh>Stop</ActionButton> : null}
+                    {openNext && mayWorkNext ? <ActionButton action={stopNextActionAction} payload={{ id: openNext.id }} className="btn-ghost btn-sm" confirm={{ title: 'Stop this task?', effects: ['It closes without being done.', 'It is cleared in the CRM too.'], confirmLabel: 'Stop' }} refresh>Stop</ActionButton> : null}
                   </span> : null}
                 >
                   {openNext ? (
@@ -300,6 +318,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                       ]} />
                     </div>
                   ) : <p className="p-4 text-[13px] text-ink-500">None</p>}
+                  {suggestions.length ? <div className="border-t border-line p-4"><SuggestionList items={suggestions.map((s) => ({ id: s.id, from: s.from, words: s.words }))} /></div> : null}
                 </Card>
 
                 <Card title={memberships.some((m) => m.kind !== 'finished') || !memberships.length ? 'Campaigns' : 'Last campaign'} actions={<span className="flex items-center gap-2">{mayChangeCampaignPeople(user) ? <AddToCampaign personIds={[id]} className="btn-secondary btn-sm" /> : null}<Link href={`/people/${id}?tab=sequences`} className="btn-ghost btn-sm">View history</Link></span>}>
@@ -319,7 +338,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                     {/* Consent only appears when there is a restriction: its absence is normal. */}
                     {person.dnd ? (
                       <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-[12.5px] font-medium text-red-700">
-                        {optionLabel(person.dndReason ?? 'DO_NOT_CONTACT')} - set in Twenty.
+                        {optionLabel(person.dndReason ?? 'DO_NOT_CONTACT')} - set in the CRM.
                       </p>
                     ) : null}
                     <KeyValue
@@ -366,10 +385,10 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                             : null,
                         },
                         { k: 'Lead source', v: optionLabels(person.leadSource) || null },
-                        { k: 'Lead source notes', v: person.leadSourceNotes },
+                        { k: 'Lead source notes', v: person.leadSourceNotes ? <span className="whitespace-pre-line">{person.leadSourceNotes}</span> : null },
                         { k: 'Product interest', v: optionLabels(person.productInterest) || null },
                         { k: 'Primary product', v: person.primaryProduct ? optionLabel(person.primaryProduct) : null },
-                        { k: 'Campaigns in Twenty', v: optionLabels(person.campaigns) || null },
+                        { k: 'Campaigns in the CRM', v: optionLabels(person.campaigns) || null },
                         { k: 'Deal signal', v: person.dealSignalStrength ? optionLabel(person.dealSignalStrength) : null },
                         { k: 'Calling list', v: person.onCallingList ? 'Yes' : null },
                         {
@@ -426,8 +445,8 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                   <div className="p-4">
                     <KeyValue
                       items={[
-                        { k: 'Twenty id', v: <span className="font-mono text-xs">{person.id}</span> },
-                        { k: 'Changed in Twenty', v: formatInstant(person.twentyUpdatedAt, user.timezone) },
+                        { k: 'CRM id', v: <span className="font-mono text-xs">{person.id}</span> },
+                        { k: 'Changed in the CRM', v: formatInstant(person.twentyUpdatedAt, user.timezone) },
                         { k: 'Last synced', v: formatInstant(person.syncedAt, user.timezone) },
                       ]}
                     />

@@ -18,8 +18,8 @@ test('a doubted meeting number reaches Biz Ops, who sets it and closes the check
   await page.goto('/meetings/new');
   await page.getByLabel('Title').fill('E2E number check');
   await page.getByLabel('Date', { exact: true }).fill('2026-10-02');
-  await page.getByRole('combobox', { name: 'Find a prospect in Twenty' }).fill('Dummy Three');
-  await page.getByRole('listbox', { name: 'Find a prospect in Twenty results' }).getByRole('option', { name: /Dummy Three/ }).click({ timeout: 20_000 });
+  await page.getByRole('combobox', { name: 'Find a prospect in the CRM' }).fill('Dummy Three');
+  await page.getByRole('listbox', { name: 'Find a prospect in the CRM results' }).getByRole('option', { name: /Dummy Three/ }).click({ timeout: 20_000 });
   const prospects = page.getByRole('list', { name: 'Prospects' });
   await expect(prospects.getByText(/^\d+(st|nd|rd|th) meeting$/)).toBeVisible();
 
@@ -39,8 +39,11 @@ test('a doubted meeting number reaches Biz Ops, who sets it and closes the check
   await expect(page).toHaveURL(/\/login/);
 
   await signIn(page, 'admin@cadence.local', 'admin12345');
-  // The open check shows on Meetings in the sidebar.
-  await expect(page.locator('aside').getByRole('link', { name: /Meetings/ })).toContainText(/\d/);
+  // The open check counts on Tickets in the sidebar (D4: every kind of open ticket is listed there),
+  // and the Tickets list shows it beside the other kinds.
+  await expect(page.locator('aside').getByRole('link', { name: /Tickets/ })).toContainText(/\d/);
+  await page.goto('/tickets');
+  await expect(page.getByText('Dummy Three').first()).toBeVisible();
   await page.goto('/meetings/checks');
   const row = page.getByRole('row').filter({ hasText: 'Dummy Three' }).filter({ hasText: 'E2E number check' }).first();
   await expect(row).toContainText('Two calls before Cadence');

@@ -22,3 +22,12 @@ if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 
 export type Db = PrismaClient;
 export type Tx = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
+
+/**
+ * The database's clock. Bellwether reads status changes since a time Cadence gave it, so statusChangedAt
+ * and that serverTime come from one clock every app server shares, not each server's own (B062).
+ */
+export async function databaseNow(tx: Tx | PrismaClient = prisma): Promise<Date> {
+  const [row] = await tx.$queryRaw<{ now: Date }[]>`SELECT now() AS now`;
+  return row.now;
+}

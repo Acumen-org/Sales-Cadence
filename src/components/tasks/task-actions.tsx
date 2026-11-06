@@ -9,6 +9,9 @@ import type { ActionResult } from '@/lib/actions/users';
 import { type ActionType } from '@/lib/sequences/steps';
 import { formatLocalDate } from '@/lib/dates';
 import { IconCheck, IconChevronLeft, IconChevronRight, IconClock, IconExternal, IconPhone, IconSkip } from '@/components/icons';
+import { useConfirm } from '@/components/confirm-dialog';
+import { optOutConfirm, rowControlLabel } from '@/lib/task-cues';
+import { WorkingDayHint } from './working-day-hint';
 
 export type DispositionOption = { key: string; label: string; answered: boolean };
 export type SkipReasonOption = { key: string; label: string; exit: string };
@@ -39,6 +42,19 @@ type Props = {
   /** Pod-mates this touchpoint can be handed to (managers only). */
   delegates?: { id: string; name: string }[];
   currentFoId?: string;
+  /** Who the task is for and what the step is called, so each control names its contact (N105). */
+  subjectName?: string;
+  stepLabel?: string;
+  /** Why Done is off for this module, shown under it: no email, no LinkedIn profile (N056). */
+  doneBlocked?: string | null;
+  /** A cold contact's call closes only with its call and its form (B161): Call and "Called from another phone?" stand where Done would. */
+  callSlot?: React.ReactNode;
+  /** Where "They replied" goes on to: for a cold contact, the prompt to set a next step or move it to the CRM (N031). */
+  afterRepliedUrl?: string | null;
+  /** The reasons a sequence can end with: every one (CRM), or the three a cold contact has (N031). */
+  endReasons?: 'all' | 'cold';
+  /** Settings > Rules' working days, for the weekend cue on the snooze date (N103). */
+  workingDays?: number[];
 };
 
 type Panel = 'none' | 'call' | 'skip' | 'snooze' | 'more';
@@ -54,9 +70,11 @@ const END_REASONS = [
   { key: 'not_interested', label: 'Not interested', detail: 'They said no.' },
   { key: 'not_a_prospect', label: 'Not a prospect for this product', detail: 'They are not a fit for the product this outreach is about.' },
   { key: 'opted_out', label: 'Asked not to be contacted', detail: 'Stops all outreach to this person.' },
-  { key: 'bad_data', label: 'Wrong or missing details', detail: 'Ends the sequence. Correct the record in Twenty or Enrichment.' },
+  { key: 'bad_data', label: 'Wrong or missing details', detail: 'Ends the sequence. Correct the record in the CRM or Enrichment.' },
   { key: 'removed', label: 'Another reason', detail: 'Ends the sequence without one of the labels above.' },
 ] as const;
+/** A cold contact's sequence ends because they replied, said no, or asked to be left alone (N031). */
+const COLD_END_REASONS = new Set<string>(['replied', 'not_interested', 'opted_out']);
 
 /**
  * The controls under a task. Every control sits in one row, and every panel opens in the one
@@ -80,7 +98,7 @@ export function TaskActions(p: Props) {
   const noteRef = useRef<HTMLTextAreaElement>(null);
 
   const run = useCallback(
-    (fn: () => Promise<ActionResult>, advance = true) => {
+    (fn: () => Promise<ActionResult>, advance = true, goTo: string | null = null) => {
       start(async () => {
         try {
           if (!(await flushTaskDrafts())) { setError('Save or copy your draft before continuing.'); return; }
@@ -94,7 +112,7 @@ export function TaskActions(p: Props) {
           setNote('');
           setDisposition('');
           // The confirmation travels in the URL so it survives the navigation to the next task.
-          const target = new URL(advance && p.nextUrl ? p.nextUrl : window.location.pathname + window.location.search, window.location.origin);
+          const target = new URL(goTo ?? (advance && p.nextUrl ? p.nextUrl : window.location.pathname + window.location.search), window.location.origin);
           if (r.message) target.searchParams.set('flash', r.message);
           router.push(target.pathname + target.search);
           router.refresh();
@@ -106,8 +124,12 @@ export function TaskActions(p: Props) {
     [p.nextUrl, router],
   );
 
+  const [ask, confirmDialog] = useConfirm();
   const submitComplete = useCallback(
-    (chosen: ActionType, dispositionKey?: string) => {
+    async (chosen: ActionType, dispositionKey?: string) => {
+      // N042: "Asked not to be contacted" opts the person out for good, so it asks first, naming what it does.
+      // The quick Log call offers only Settings > Rules' outcomes; this guards a rule set that ever holds that key.
+      if (dispositionKey === 'do_not_contact' && !(await ask({ title: 'Asked not to be contacted?', effects: ['This person is opted out for good: do not email, call or message them again. Cadence blocks calls and campaigns.', 'This sequence ends as Opted out.', 'The CRM marks them Do not contact and clears their Next Action.'], confirmLabel: 'Opt out', tone: 'danger' }))) return;
       const fd = new FormData();
       fd.set('taskId', p.taskId);
       fd.set('chosenAction', chosen);
@@ -115,27 +137,34 @@ export function TaskActions(p: Props) {
       if (note.trim()) fd.set('note', note.trim());
       run(() => completeTaskAction(fd));
     },
-    [note, p.taskId, run],
+    [ask, note, p.taskId, run],
   );
 
+  const who = p.subjectName ?? 'this person';
   const startDone = useCallback(
     (chosen: ActionType) => {
+      // B161: a cold call closes with the call and its form; D says so instead of closing it.
+      if (p.callSlot && chosen === 'CALL') { setError('Call first: press Call, or use "Called from another phone?" to log it and fill its form.'); return; }
+      if (p.doneBlocked) { setError(p.doneBlocked); return; }
       setPendingAction(chosen);
       if (chosen === 'CALL') {
         setPanel('call');
         setTimeout(() => noteRef.current?.focus(), 0);
       } else submitComplete(chosen);
     },
-    [submitComplete],
+    [p.callSlot, p.doneBlocked, submitComplete],
   );
 
-  const submitSkip = useCallback(() => {
+  const submitSkip = useCallback(async () => {
+    // B059: "Asked not to be contacted" opts the person out for good, so it asks first, naming what it does.
+    const confirm = optOutConfirm(p.skipReasons.find((r) => r.key === reasonKey)?.exit, who);
+    if (confirm && !(await ask(confirm))) return;
     const fd = new FormData();
     fd.set('taskId', p.taskId);
     fd.set('reasonKey', reasonKey);
     if (note.trim()) fd.set('note', note.trim());
     run(() => skipTaskAction(fd));
-  }, [note, p.taskId, reasonKey, run]);
+  }, [ask, note, p.skipReasons, p.taskId, reasonKey, run, who]);
 
   const submitSnooze = useCallback(() => {
     const ids = p.snoozeTaskIds?.length ? p.snoozeTaskIds : [p.taskId];
@@ -152,17 +181,19 @@ export function TaskActions(p: Props) {
     });
   }, [p.canPickSnoozeDate, p.snoozeTaskIds, p.taskId, run, snoozeDate]);
 
-  const submitEnd = useCallback(() => {
+  const submitEnd = useCallback(async () => {
+    const confirm = optOutConfirm(endReason, who);
+    if (confirm && !(await ask(confirm))) return;
     const fd = new FormData();
     fd.set('taskId', p.taskId);
     if (endReason === 'replied' || endReason === 'no_reply') {
       fd.set('kind', endReason);
-      run(() => finishFromTaskAction(fd));
+      run(() => finishFromTaskAction(fd), true, endReason === 'replied' ? p.afterRepliedUrl ?? null : null);
     } else {
       fd.set('reason', endReason);
       run(() => removeFromSequenceAction(fd));
     }
-  }, [endReason, p.taskId, run]);
+  }, [ask, endReason, p.afterRepliedUrl, p.taskId, run, who]);
 
   const [delegateTo, setDelegateTo] = useState('');
   const submitDelegate = useCallback(() => {
@@ -202,7 +233,7 @@ export function TaskActions(p: Props) {
           submitComplete(pendingAction, disposition);
         } else if (panel === 'skip') {
           e.preventDefault();
-          submitSkip();
+          void submitSkip();
         } else if (panel === 'snooze') {
           e.preventDefault();
           submitSnooze();
@@ -259,14 +290,15 @@ export function TaskActions(p: Props) {
 
   return (
     <div>
+      {confirmDialog}
       {/* One row of controls, in one place. Its height never changes and nothing above it grows,
           so the buttons are always where the FO last saw them. */}
       <div className="flex flex-wrap items-center gap-2">
         {variant !== 'step' ? <>
-        <button type="button" disabled={pending} className={primary} onClick={() => startDone(p.action)}>
+        {p.callSlot && p.action === 'CALL' ? p.callSlot : <button type="button" disabled={pending || Boolean(p.doneBlocked)} className={primary} onClick={() => startDone(p.action)} aria-label={p.subjectName ? rowControlLabel(p.action === 'CALL' ? 'Log call' : 'Done', p.stepLabel ?? 'this step', p.subjectName) : undefined}>
           {p.action === 'CALL' ? <IconPhone size={16} /> : <IconCheck size={16} />} {p.action === 'CALL' ? 'Log call' : 'Done'}
-        </button>
-        <button type="button" disabled={pending} className={clsx(secondary, panel === 'skip' && 'border-ink-300 bg-canvas')} onClick={() => toggle('skip')}>
+        </button>}
+        <button type="button" disabled={pending} className={clsx(secondary, panel === 'skip' && 'border-ink-300 bg-canvas')} onClick={() => toggle('skip')} aria-label={p.subjectName ? rowControlLabel('Skip', p.stepLabel ?? 'this step', p.subjectName) : undefined}>
           <IconSkip size={16} /> Skip
         </button>
         </> : null}
@@ -275,8 +307,8 @@ export function TaskActions(p: Props) {
           <IconClock size={16} /> Snooze
         </button>
         {p.twentyUrl ? (
-          <a href={p.twentyUrl} target="_blank" rel="noreferrer" className={secondary} title="Open this person in Twenty (O)">
-            <IconExternal size={16} /> Twenty
+          <a href={p.twentyUrl} target="_blank" rel="noreferrer" className={secondary} title="Open this person in the CRM (O)">
+            <IconExternal size={16} /> CRM
           </a>
         ) : null}
         <button
@@ -305,6 +337,8 @@ export function TaskActions(p: Props) {
         </> : null}
       </div>
 
+      {/* N056: why Done is off, as words beside the controls, not only on hover. */}
+      {p.doneBlocked && variant !== 'step' ? <p className="mt-2 text-[12.5px] text-ink-600">{p.doneBlocked}</p> : null}
       {/* The one panel slot. Everything opens here, in this order, and nowhere else. */}
       {panel !== 'none' || error ? (
         <div className="mt-3">
@@ -340,7 +374,7 @@ export function TaskActions(p: Props) {
                 ))}
               </div>
               <div className="mt-3 space-y-1">
-                <label htmlFor={`note-${p.taskId}`}>Call notes, saved to Twenty</label>
+                <label htmlFor={`note-${p.taskId}`}>Call notes, saved to the CRM</label>
                 <textarea id={`note-${p.taskId}`} ref={noteRef} rows={3} value={note} onChange={(e) => setNote(e.target.value)} className="w-full" placeholder="What was said, the next step, the best time to call back..." />
               </div>
               <div className="mt-3 flex items-center gap-2">
@@ -359,7 +393,7 @@ export function TaskActions(p: Props) {
               className="rounded-xl border border-amber-200 bg-amber-50/70 p-3.5"
               onSubmit={(e) => {
                 e.preventDefault();
-                submitSkip();
+                void submitSkip();
               }}
             >
               <p className="mb-2 text-[12.5px] font-medium text-amber-800">Skip this one step</p>
@@ -401,6 +435,9 @@ export function TaskActions(p: Props) {
                     <label htmlFor={`snooze-${p.taskId}`}>Snooze until</label>
                     <input id={`snooze-${p.taskId}`} type="date" value={snoozeDate} min={p.nextWorkingDay} onChange={(e) => setSnoozeDate(e.target.value)} />
                   </div>
+                ) : null}
+                {p.canPickSnoozeDate ? (
+                  <WorkingDayHint date={snoozeDate} workingDays={p.workingDays ?? []} onMove={setSnoozeDate} />
                 ) : (
                   <p className="text-[13px] text-sky-900">Moves to {formatLocalDate(p.nextWorkingDay, 'long')}.</p>
                 )}
@@ -417,13 +454,13 @@ export function TaskActions(p: Props) {
                 className="space-y-2"
                 onSubmit={(e) => {
                   e.preventDefault();
-                  submitEnd();
+                  void submitEnd();
                 }}
               >
                 <p className="text-[12.5px] font-medium text-ink-700">End the sequence</p>
                 <div className="flex overflow-hidden rounded-[10px] border border-line bg-white focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100">
                   <select value={endReason} onChange={(e) => setEndReason(e.target.value)} aria-label="Why are you ending the sequence?" className="min-w-0 flex-1 !rounded-none !border-0 !bg-transparent !ring-0">
-                    {END_REASONS.map((r) => (
+                    {END_REASONS.filter((r) => p.endReasons !== 'cold' || COLD_END_REASONS.has(r.key)).map((r) => (
                       <option key={r.key} value={r.key} title={r.detail}>
                         {r.label}
                       </option>

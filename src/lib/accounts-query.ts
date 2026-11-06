@@ -9,6 +9,7 @@ import { foPeopleWhere, myPeopleWhere } from './people-scope';
 import { meetingReadWhere } from './meetings-query';
 import { prisma } from './db';
 import { REPLY_TOUCH_WHERE } from './reply-credit';
+import { COUNTED_TOUCH } from './outreach/metrics';
 import { liveCampaignMemberIds } from './campaign-membership';
 import type { SessionUser } from './auth/current-user';
 import { visiblePodIds, canSeeAllPods, isAdmin, needsPod } from './auth/rbac';
@@ -509,7 +510,9 @@ export async function accountDetail(companyId: string, user: SessionUser) {
   // counting them here would promise the FO something they cannot open.
   const openTasks = tasks.filter((t) => t.state === 'PENDING' && t.enrollment.status !== 'PAUSED');
   const inCampaign = await liveCampaignMemberIds();
-  const inboundReplies = await prisma.touch.count({ where: { personId: { in: accountPeople.map((p) => p.id) }, person: { deletedAt: null }, ...REPLY_TOUCH_WHERE } });
+  // N004: the reply rule and the account's people together (AND): spread, the rule's own personId
+  // replaced the account's list and the tile showed the whole workspace. Copies are left out (8.14).
+  const inboundReplies = await prisma.touch.count({ where: { AND: [REPLY_TOUCH_WHERE, COUNTED_TOUCH, { personId: { in: accountPeople.map((p) => p.id) }, person: { deletedAt: null } }] } });
   return {
     company,
     blocked: blocked ? { reason: blocked.reason, byName: blocked.blockedBy?.name ?? null, at: blocked.createdAt } : null,

@@ -9,11 +9,12 @@ import { TIMEZONE_CHOICES } from '@/lib/workspace';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-function Check({ name, label, checked }: { name: string; label: string; checked: boolean }) {
+/** A labelled checkbox, as every Settings form uses one. `value` for one box of a group sharing a name. */
+export function Check({ name, label, checked, value }: { name: string; label: string; checked: boolean; value?: string }) {
   return (
     <div className="flex items-start gap-2">
       <label className="flex items-start gap-2 text-sm font-normal text-ink-700">
-        <input type="checkbox" name={name} defaultChecked={checked} className="mt-0.5 h-4 w-4 rounded" />
+        <input type="checkbox" name={name} value={value} defaultChecked={checked} className="mt-0.5 h-4 w-4 rounded" />
         <span>{label}</span>
       </label>
     </div>
@@ -25,7 +26,7 @@ export function TwentyConnectionForm({ twenty, envBaseUrl, defaultSchemaJson }: 
     <Card title="Connection and schema mapping">
       <ActionForm action={saveTwentySettingsAction} className="space-y-4 p-4">
         <div className="grid gap-4 md:grid-cols-2">
-          <Field label="Twenty base URL">
+          <Field label="CRM base URL">
             <input name="baseUrl" defaultValue={twenty.baseUrl ?? ''} className="w-full" placeholder={envBaseUrl ? `${envBaseUrl} (from the environment)` : 'https://twenty.example.com'} />
           </Field>
           <Field label="API key">
@@ -41,7 +42,7 @@ export function TwentyConnectionForm({ twenty, envBaseUrl, defaultSchemaJson }: 
           <pre className="mt-2 max-h-64 overflow-auto rounded bg-canvas p-3 text-[11px] text-ink-700">{defaultSchemaJson}</pre>
         </details>
         <button type="submit" className="btn-primary">
-          Save Twenty settings
+          Save CRM settings
         </button>
       </ActionForm>
     </Card>
@@ -281,11 +282,11 @@ function SkipReasonsEditor({ initial }: { initial: SkipReason[] }) {
 
 export function SyncForm({ sync }: { sync: Settings['sync'] }) {
   return (
-    <Card title="Sync out to Twenty">
+    <Card title="Sync out to the CRM">
       <ActionForm action={saveSyncSettingsAction} className="space-y-3 p-4">
         <Check name="writeCompletionNotes" label="Write a [Cadence] note on the person for every completed action" checked={sync.writeCompletionNotes} />
-        <Check name="mirrorOpenTasks" label="Mirror open Cadence tasks as Twenty Tasks (assigned to the FO, due on the task day)" checked={sync.mirrorOpenTasks} />
-        <Check name="deleteMirroredTaskOnSkip" label="Delete the mirrored Twenty task when a Cadence task is skipped or cancelled (otherwise mark it done)" checked={sync.deleteMirroredTaskOnSkip} />
+        <Check name="mirrorOpenTasks" label="Mirror open Cadence tasks as CRM tasks (assigned to the FO, due on the task day)" checked={sync.mirrorOpenTasks} />
+        <Check name="deleteMirroredTaskOnSkip" label="Delete the mirrored CRM task when a Cadence task is skipped or cancelled (otherwise mark it done)" checked={sync.deleteMirroredTaskOnSkip} />
         <Check name="writeCadenceTaskIdField" label="Write the Cadence task id into the optional Task.cadenceTaskId field" checked={sync.writeCadenceTaskIdField} />
         <button type="submit" className="btn-primary">
           Save sync settings

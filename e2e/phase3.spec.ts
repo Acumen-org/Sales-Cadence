@@ -47,7 +47,7 @@ test('enrichment has three views, scores by field and carries the record filters
   for (const label of ['Search records to enrich', 'Filter by pod', 'Filter by FO', 'Missing information', 'Sort']) await expect(page.getByLabel(label, { exact: true })).toBeVisible();
   await expect(page.getByLabel('Filter by tier', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: /^Filters/ }).click();
-  for (const label of ['Filter by account', 'Filter by tier', 'Filter by contact type', 'Filter by product', 'Filter by campaign', 'Filter by Twenty tag']) {
+  for (const label of ['Filter by account', 'Filter by tier', 'Filter by contact type', 'Filter by product', 'Filter by campaign', 'Filter by CRM tag']) {
     await expect(page.getByLabel(label, { exact: true })).toBeVisible();
   }
   for (const label of ['Filter by priority', 'Show open or not-found gaps']) await expect(page.getByLabel(label, { exact: true })).toHaveCount(0);

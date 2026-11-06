@@ -2,13 +2,15 @@ import clsx from 'clsx';
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { requireUser } from '@/lib/auth/current-user';
-import { barColour } from '@/lib/bar-colour';
 import { diffDays, formatLocalDate } from '@/lib/dates';
-import { buildHome, weekTotal, type TeamRow } from '@/lib/home-query';
+import { buildHome } from '@/lib/home-query';
 import { TASK_CHANNELS, type TaskChannel } from '@/lib/tasks-query';
 import { ACTION_LABELS } from '@/lib/sequences/steps';
+import { upNextWords } from '@/lib/task-cues';
+import { COLD_CONTACT_BASE } from '@/lib/subject';
 import { ActionIcon, IconCalendar, IconCheck, IconChevronRight, IconCompany, IconPeople } from '@/components/icons';
 import { Avatar, EmptyState, Surface } from '@/components/ui';
+import { TeamBoard } from '@/components/home/team-board';
 
 const CHANNEL_LABELS: Record<TaskChannel, string> = { CALL: 'Calls', EMAIL: 'Emails', LINKEDIN: 'LinkedIn' };
 
@@ -49,7 +51,8 @@ async function HomeContent() {
   const h = await buildHome(user);
   const first = user.name.split(/\s+/)[0];
   const mine = `fo=${encodeURIComponent(user.id)}`;
-  const focusTab = h.my.overdueTotal ? 'overdue' : h.my.todayTotal ? 'today' : 'upcoming';
+  // B094: the tab the panel shows; the user's own most urgent tab when it lists their work.
+  const focusTab = h.my.focusTab;
   const completed = h.my.completedToday;
 
   return (
@@ -65,13 +68,15 @@ async function HomeContent() {
           label="To reach today"
           value={h.my.peopleToReachToday}
           hint={h.my.overdueTotal ? <><N tone="warn">{h.my.overdueTotal}</N> overdue {h.my.overdueTotal === 1 ? 'step' : 'steps'}</> : <><N>{h.my.todayTotal}</N> {h.my.todayTotal === 1 ? 'step' : 'steps'} due</>}
-          href={`/tasks?tab=today&mode=flow&${mine}`}
+          // B095: overdue work is work to do today, and the tile opens the tab that holds it.
+          href={`/tasks?tab=${h.my.overdueTotal ? 'overdue' : 'today'}&mode=flow&${mine}`}
           icon={<IconPeople size={17} />}
           tone={h.my.overdueTotal ? 'warn' : undefined}
         />
         <Tile label="Completed today" value={completed} hint={h.my.todayTotal ? <><N>{h.my.todayTotal}</N> still due today</> : undefined} href={`/tasks?tab=done&${mine}`} icon={<IconCheck size={17} />} />
         <Tile label="My accounts" value={h.my.accounts} hint={<><N>{h.my.activeAccounts}</N> with live work</>} href={`/accounts?pod=&fo=${user.id}`} icon={<IconCompany size={17} />} />
-        <Tile label="My people" value={h.my.relationships} hint={<><N>{h.my.inSequence}</N> in a campaign</>} href={`/people?pod=&fo=${user.id}`} icon={<IconPeople size={17} />} />
+        {/* D2: CRM people and live cold contacts owned, with no distinction; a rep with only cold contacts opens them. */}
+        <Tile label="My people" value={h.my.people} hint={<><N>{h.my.inSequence}</N> in a campaign</>} href={h.my.relationships || !h.my.coldContacts ? `/people?pod=&fo=${user.id}` : `${COLD_CONTACT_BASE}?owner=mine`} icon={<IconPeople size={17} />} />
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(300px,1fr)]">
@@ -80,12 +85,12 @@ async function HomeContent() {
             <div className="focus-art" aria-hidden />
             <div className="relative">
               <h2 className="flex items-baseline gap-3 text-[25px] font-medium leading-[1.25] tracking-[-0.035em]">
-                <span className="text-[46px] font-semibold leading-none tracking-[-0.04em]">{h.my.overdueTotal || h.my.todayTotal || h.my.peopleToReachToday}</span>
+                <span className="text-[46px] font-semibold leading-none tracking-[-0.04em]">{h.my.overdueTotal || h.my.todayTotal || h.my.peopleDueToday}</span>
                 <span>{h.my.overdueTotal ? `overdue ${h.my.overdueTotal === 1 ? 'step' : 'steps'}` : h.my.todayTotal ? `${h.my.todayTotal === 1 ? 'step' : 'steps'} due today` : 'due today'}</span>
               </h2>
               <p className="mb-5 mt-3 text-[12px] text-[#c1d4ca]">
-                {h.my.overdueTotal && h.my.todayTotal ? <><span className="font-medium text-white">{h.my.todayTotal}</span> more due today across <span className="font-medium text-white">{h.my.peopleToReachToday}</span> {h.my.peopleToReachToday === 1 ? 'person' : 'people'}</> : null}
-                {!h.my.overdueTotal && h.my.todayTotal ? <>across <span className="font-medium text-white">{h.my.peopleToReachToday}</span> {h.my.peopleToReachToday === 1 ? 'person' : 'people'}, <span className="font-medium text-white">{completed}</span> already done</> : null}
+                {h.my.overdueTotal && h.my.todayTotal ? <><span className="font-medium text-white">{h.my.todayTotal}</span> more due today across <span className="font-medium text-white">{h.my.peopleDueToday}</span> {h.my.peopleDueToday === 1 ? 'person' : 'people'}</> : null}
+                {!h.my.overdueTotal && h.my.todayTotal ? <>across <span className="font-medium text-white">{h.my.peopleDueToday}</span> {h.my.peopleDueToday === 1 ? 'person' : 'people'}, <span className="font-medium text-white">{completed}</span> already done</> : null}
                 {!h.my.overdueTotal && !h.my.todayTotal ? <><span className="font-medium text-white">{completed}</span> completed today</> : null}
               </p>
               <Link href={`/tasks?tab=${focusTab}&mode=flow&${mine}`} className="inline-flex items-center gap-3 rounded-lg bg-[#d5e9ad] px-4 py-2.5 text-[12px] font-semibold text-[#203e35] transition hover:bg-[#e2f0c6]">{h.my.todayTotal || h.my.overdueTotal ? 'Start task flow' : 'View upcoming tasks'}<IconChevronRight size={15} /></Link>
@@ -105,7 +110,11 @@ async function HomeContent() {
                 <Avatar name={task.name} shape="circle" size={32} />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-ink-900">{task.name}</span>{when !== 'Today' ? <DueLabel due={task.due} today={h.today} /> : null}</span>
-                  <span className="mt-0.5 flex items-center gap-1.5 text-[12.5px] text-ink-700"><span className="flex shrink-0 gap-1 text-ink-500">{task.actions.map((a) => <ActionIcon key={a} action={a} size={13} />)}</span><span className="shrink-0">{task.actions.map((a) => ACTION_LABELS[a as keyof typeof ACTION_LABELS] ?? a).join(' + ')}</span><span className="min-w-0 truncate text-ink-500">· {[task.campaign ?? (task.kind === 'task' ? null : 'No campaign'), h.my.nextForTeam && task.fo ? task.fo : task.company].filter(Boolean).join(' · ')}</span></span>
+                  <span className="mt-0.5 flex items-center gap-1.5 text-[12.5px] text-ink-700"><span className="flex shrink-0 gap-1 text-ink-500">{task.actions.map((a) => <ActionIcon key={a} action={a} size={13} />)}</span>{(() => {
+                    const actionWords = task.actions.map((a) => (a === 'MEETING' ? 'Meeting' : ACTION_LABELS[a as keyof typeof ACTION_LABELS] ?? a)).join(' + ');
+                    const after = upNextWords(task, actionWords, h.my.nextForTeam);
+                    return <><span className="shrink-0">{actionWords}</span>{after ? <span className="min-w-0 truncate text-ink-500">· {after}</span> : null}</>;
+                  })()}</span>
                 </span>
               </Link></li>)}</ul>
             </li> : null;
@@ -123,102 +132,4 @@ function DueLabel({ due, today }: { due: string; today: string }) {
   const late = diffDays(due, today);
   const [tone, text] = due < today ? ['bg-red-50 text-red-700', late === 1 ? '1 day' : `${late} days`] : ['bg-canvas text-ink-600', formatLocalDate(due)];
   return <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11.5px] font-medium tabular-nums ${tone}`}>{text}</span>;
-}
-
-/** One figure on the board, centred and easy to read; zero is quiet so the eye lands on work. */
-function Figure({ value, tone }: { value: number; tone?: 'warn' | 'good' | 'brand' }) {
-  if (!value) return <span className="text-ink-300">0</span>;
-  const colour = tone === 'warn' ? 'text-red-700' : tone === 'good' ? 'text-emerald-700' : tone === 'brand' ? 'text-brand-700' : 'text-ink-900';
-  return <span className={`font-medium ${colour}`}>{value.toLocaleString('en-US')}</span>;
-}
-
-/** How far through the week an FO is: done out of done, overdue, due today and later this week. */
-function WeekProgress({ done, total }: { done: number; total: number }) {
-  const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
-  return <div className="min-w-[180px]">
-    <div className="mb-2 text-[14px] tabular-nums text-ink-600"><span className="font-medium text-ink-900">{done.toLocaleString('en-US')}</span> of {total.toLocaleString('en-US')} done</div>
-    <div className="h-2.5 overflow-hidden rounded-full bg-line" role="img" aria-label={`${pct}% of this week's tasks done`}><div className="h-full rounded-full transition-[width,background-color]" style={{ width: `${pct}%`, background: barColour(pct / 100) }} /></div>
-  </div>;
-}
-
-/**
- * The week's board, Monday to Sunday. Each FO with work this week is a row. The bar is their own
- * week: done out of everything the week holds, and the four columns after it are exactly that
- * total - done, overdue, due today and later this week - so "X of Y" can be checked at a glance.
- * Then what came back. Those with nothing this week share one line at the foot.
- */
-function TeamBoard({ rows, week, title }: { rows: TeamRow[]; week: { from: string; to: string }; title: string }) {
-  const busy = rows.filter((r) => weekTotal(r) + r.replies + r.meetings > 0);
-  const idle = rows.filter((r) => !busy.includes(r));
-  const total = busy.reduce(
-    (a, r) => ({ done: a.done + r.done, overdue: a.overdue + r.overdue, today: a.today + r.today, later: a.later + r.later, replies: a.replies + r.replies, meetings: a.meetings + r.meetings }),
-    { done: 0, overdue: 0, today: 0, later: 0, replies: 0, meetings: 0 },
-  );
-  const head = 'whitespace-nowrap px-2 py-3 text-center font-medium';
-  const cell = 'px-3 py-4 text-center text-[18px] tabular-nums';
-  const figures = (r: typeof total) => <>
-    <td className={cell}><Figure value={r.done} tone="good" /></td>
-    <td className={cell}><Figure value={r.overdue} tone="warn" /></td>
-    <td className={cell}><Figure value={r.today} /></td>
-    <td className={cell}><Figure value={r.later} /></td>
-    <td className={clsx(cell, 'border-l border-line/70')}><Figure value={r.replies} tone="good" /></td>
-    <td className={cell}><Figure value={r.meetings} tone="brand" /></td>
-  </>;
-  return (
-    <Surface flush>
-      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line px-5 py-4">
-        <h2 className="text-[15px] font-semibold text-ink-900">{title}</h2>
-        <p className="text-[13px] text-ink-500">{formatLocalDate(week.from)} to {formatLocalDate(week.to)}</p>
-      </div>
-      <table className="w-full table-fixed border-collapse text-[15px]">
-        <colgroup><col className="w-[220px]" /><col /><col className="w-[84px]" /><col className="w-[96px]" /><col className="w-[104px]" /><col className="w-[150px]" /><col className="w-[96px]" /><col className="w-[104px]" /><col className="w-[48px]" /></colgroup>
-        <thead>
-          <tr className="border-b border-line bg-[#fafbf9] text-[11.5px] text-ink-500">
-            <th className="px-5 py-3 text-left font-medium">FO</th>
-            <th className="px-3 py-3 text-left font-medium">This week</th>
-            <th className={head}>Done</th>
-            <th className={head}>Overdue</th>
-            <th className={head}>Due today</th>
-            <th className={head}>Later this week</th>
-            <th className={clsx(head, 'border-l border-line/70')}>Replies</th>
-            <th className={head}>Meetings</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {busy.map((t) => (
-            <tr key={t.id} className="group border-b border-line/70 transition last:border-b-0 hover:bg-canvas/60">
-              <td className="px-5 py-4">
-                <div className="flex items-center gap-3">
-                  <Avatar name={t.name} shape="circle" size={36} />
-                  <span className="min-w-0"><span className="block truncate text-[16px] font-medium text-ink-900">{t.name}</span>{t.pod ? <span className="mt-0.5 block truncate text-[12.5px] text-ink-500">{t.pod}</span> : null}</span>
-                </div>
-              </td>
-              <td className="px-3 py-4">{weekTotal(t) ? <WeekProgress done={t.done} total={weekTotal(t)} /> : <span className="text-[14px] text-ink-400">Nothing planned</span>}</td>
-              {figures(t)}
-              <td className="px-3 py-4 text-right">
-                <Link href={`/tasks?tab=${t.overdue ? 'overdue' : t.today ? 'today' : 'upcoming'}&pod=&fo=${t.id}`} aria-label={`${t.name}'s tasks`} className="inline-grid h-8 w-8 place-items-center rounded-lg text-ink-400 transition hover:bg-brand-50 hover:text-brand-700 group-hover:text-brand-700"><IconChevronRight size={16} /></Link>
-              </td>
-            </tr>
-          ))}
-          {!busy.length ? <tr><td colSpan={9} className="px-5 py-8 text-center text-[14px] text-ink-500">Nothing planned for anyone this week</td></tr> : null}
-        </tbody>
-        <tfoot>
-          {busy.length > 1 ? (
-            <tr className="border-t border-line bg-canvas/50 text-ink-700">
-              <td className="px-5 py-3.5 text-[15px] font-medium">Everyone</td>
-              <td className="px-3 py-3.5">{weekTotal(total) ? <WeekProgress done={total.done} total={weekTotal(total)} /> : null}</td>
-              {figures(total)}
-              <td />
-            </tr>
-          ) : null}
-          {idle.length ? (
-            <tr className="border-t border-line">
-              <td colSpan={9} className="px-5 py-3 text-[13px] text-ink-500"><span className="text-ink-700">Nothing this week:</span> {idle.map((r, i) => <span key={r.id}>{i ? ', ' : ''}<Link href={`/tasks?tab=upcoming&pod=&fo=${r.id}`} className="hover:text-brand-700 hover:underline">{r.name}</Link></span>)}</td>
-            </tr>
-          ) : null}
-        </tfoot>
-      </table>
-    </Surface>
-  );
 }

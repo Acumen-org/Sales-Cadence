@@ -13,6 +13,7 @@ import { afterResponse, loadSyncTask, loadSyncTasks, syncTaskCompleted, syncTask
 import { resolveNextStep } from './sequence-plan';
 import { workspaceTimezone } from '../workspace';
 import { workingDay } from '../campaign-planner';
+import { audienceOf } from '../outreach/audience';
 import { catchUpObservedEvidence } from './observed-evidence';
 
 /** Who is acting, what time it is (tests), and whether to skip Twenty writes. */
@@ -27,6 +28,10 @@ export type EngineContext = {
 };
 
 export const RESOLVED_STATES: TaskState[] = ['DONE', 'SKIPPED', 'CANCELLED'];
+
+/** How a cold enrollment ends when its contact left cold outreach (enrollment-labels.ts reads these). */
+const COLD_EXIT: Record<string, string> = { OPTED_OUT: 'opted_out', REMOVED: 'removed', MOVED: 'moved_to_crm' };
+const firstSentence = (text: string) => text.split(/(?<=\.)\s/)[0].replace(/\.$/, '');
 
 export function isUniqueViolation(err: unknown): boolean {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
@@ -70,17 +75,22 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
   const settings = await getSettings();
   const rules = settings.rules;
   const now = ctx.now ?? new Date();
+  /** A cold contact who may no longer be contacted: the enrollment ends with this reason, after the transaction (N002). */
+  let ending: string | null = null;
 
   let result: AdvanceResult;
   try {
     result = await prisma.$transaction(async (tx) => {
-      const identity = await tx.enrollment.findUnique({ where: { id: enrollmentId }, select: { sequenceId: true, campaignId: true, companyId: true, person: { select: { companyId: true } } } });
+      const identity = await tx.enrollment.findUnique({ where: { id: enrollmentId }, select: { sequenceId: true, campaignId: true, companyId: true, personId: true, sandboxContactId: true, person: { select: { companyId: true } } } });
       if (!identity) return { outcome: 'inactive' as const };
       const accountIds = [identity.companyId, identity.person?.companyId].filter((id): id is string => Boolean(id));
       await lockAccounts(tx, accountIds);
       if (await tx.blockedAccount.count({ where: { companyId: { in: accountIds } } })) return { outcome: 'inactive' as const, reason: 'Account is blocked' };
       if (identity.campaignId) await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`campaign:${identity.campaignId}`}))`;
       await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${identity.sequenceId}))`;
+      // N002: the contact's row, as an opt-out takes it, so an opt-out landing now waits for this step or
+      // this step sees the opt-out; never a step made for someone who just opted out.
+      if (identity.sandboxContactId && !identity.personId) await tx.$queryRaw`SELECT 1 FROM "SandboxContact" WHERE id = ${identity.sandboxContactId} FOR UPDATE`;
       const e = await tx.enrollment.findUnique({
         where: { id: enrollmentId },
         include: { fo: true, campaign: true, sequence: true, tasks: true, person: true, sandboxContact: true },
@@ -88,6 +98,10 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
       if (!e || e.status !== 'ACTIVE') return { outcome: 'inactive' as const };
       const subject = subjectOf(e);
       if (e.campaign && e.campaign.status !== 'ACTIVE') return { outcome: 'inactive' as const, reason: 'Campaign is not running' };
+      // The safety net (cold outreach PLAN 8.9, N002): a cold contact opted out, removed or moved since
+      // it started never gets another step; its enrollment ends with the reason instead.
+      const cold = e.sandboxContactId && !e.personId ? e.sandboxContact : null;
+      if (cold && cold.status !== 'ACTIVE') { ending = COLD_EXIT[cold.status] ?? 'removed'; return { outcome: 'inactive' as const, reason: 'The contact can no longer be contacted' }; }
       const today = todayIn(workspaceTimezone(), now);
       const steps = parseSteps(e.sequence.steps);
       const currentTasks = e.tasks.filter((t) => t.stepIndex === e.currentStep);
@@ -113,6 +127,8 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
             data: {
               personId: e.personId, sandboxContactId: e.sandboxContactId, companyId: e.companyId, foUserId: e.foUserId, podId: e.podId, campaignId: e.campaignId, campaignRun: e.campaignRun,
               sequenceId: e.sequenceId, startDate: restart, currentStep: -1, shiftDays: 0, status: 'ACTIVE', createdById: e.createdById, cycle: e.cycle + 1,
+              // The next pass keeps the first pass's audience (PLAN 8.4).
+              audience: e.audience ?? audienceOf(e),
             },
           });
           await logAudit({ entityType: 'enrollment', entityId: next.id, action: 'repeated', actor: ctx.actor, details: { from: e.id, cycle: e.cycle + 1, startDate: restart, everyDays: repeat } }, tx);
@@ -147,9 +163,31 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
       const startDate = e.currentStep < 0 ? dueDate : e.startDate;
       const dueAt = localDateToInstant(dueDate, workspaceTimezone(), 9);
 
+      // Task generation asks contactability (8.2) for a cold contact before each step: suppressed or Do
+      // not contact ends the enrollment; "Also in CRM" skips the step; an activity with no usable email,
+      // phone or LinkedIn is made already skipped, with the reason (B136). A contact being moved waits.
+      const skipped = new Map<number, string>();
+      if (cold) {
+        const { contactability, channelOfAction } = await import('../outreach/contactability');
+        const check = await contactability({ kind: 'cold', row: cold }, { act: 'task', tx, now });
+        if (!check.ok && check.effect === 'end') {
+          if (check.block === 'inactive') return { outcome: 'waiting' as const, reason: check.reason };
+          ending = check.block === 'do_not_contact' ? 'dnd' : 'opted_out';
+          return { outcome: 'inactive' as const, reason: check.reason };
+        }
+        const stepSkip = !check.ok && check.effect === 'skip' ? firstSentence(check.reason) : null;
+        for (let i = 0; i < step.actions.length; i++) {
+          const channel = channelOfAction(step.actions[i].type);
+          const own = stepSkip ? null : channel ? await contactability({ kind: 'cold', row: cold }, { act: 'task', channel, tx, now }) : null;
+          const why = stepSkip ?? (own && !own.ok && own.effect === 'skip' ? firstSentence(own.reason) : null);
+          if (why) skipped.set(i, why);
+        }
+      }
+
       const taskIds: string[] = [];
       for (let i = 0; i < step.actions.length; i++) {
         const a = step.actions[i];
+        const skip = skipped.get(i) ?? null;
         const t = await tx.task.create({
           data: {
             enrollmentId: e.id,
@@ -167,6 +205,7 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
             plannedDate: planned,
             // When the step opened, on the engine's clock: evidence counts only from here.
             createdAt: now,
+            ...(skip ? { state: 'SKIPPED' as const, skipReason: skip } : {}),
           },
         });
         taskIds.push(t.id);
@@ -181,7 +220,7 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
           entityId: e.id,
           action: 'step_generated',
           actor: ctx.actor,
-          details: { stepIndex: nextIndex, stepId: step.id, day: step.day, plannedDate: planned, dueDate, shiftDays, taskIds },
+          details: { stepIndex: nextIndex, stepId: step.id, day: step.day, plannedDate: planned, dueDate, shiftDays, taskIds, ...(skipped.size ? { skipped: Object.fromEntries([...skipped].map(([i, why]) => [taskIds[i], why])) } : {}) },
         },
         tx,
       );
@@ -190,6 +229,10 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
   } catch (err) {
     if (isUniqueViolation(err)) return { outcome: 'raced' };
     throw err;
+  }
+  if (ending) {
+    const { exitEnrollment } = await import('./enrollment');
+    await exitEnrollment(enrollmentId, { reason: ending, actor: ctx.actor, now, skipSync: ctx.skipSync });
   }
 
   // A step opens as work on its date. An email or call made before then was not this step
@@ -218,6 +261,8 @@ export type CompleteTaskInput = {
   note?: string | null;
   /** Call outcome key (settings.rules.callDispositions). */
   disposition?: string | null;
+  /** The touch this completion already is: a call's own (B043). None of the task's own is written. */
+  touchId?: string | null;
 };
 
 export type ResolveResult =
@@ -264,7 +309,7 @@ export async function completeTask(input: CompleteTaskInput, ctx: EngineContext)
     });
     if (claimed.count === 0) return { ok: false as const, reason: 'already_resolved' as const };
     const updated = await tx.task.findUniqueOrThrow({ where: { id: task.id } });
-    if (input.source === 'MANUAL') {
+    if (input.source === 'MANUAL' && !input.touchId) {
       await tx.touch.upsert({
         where: { externalId: `task:${task.id}` },
         create: {
@@ -277,6 +322,7 @@ export async function completeTask(input: CompleteTaskInput, ctx: EngineContext)
           externalId: `task:${task.id}`,
           actorUserId: task.foUserId,
           actorLabel: ctx.actor.label ?? null,
+          audience: task.enrollment.audience ?? audienceOf(task.enrollment),
         },
         update: {},
       });

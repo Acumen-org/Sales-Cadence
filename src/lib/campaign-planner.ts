@@ -4,8 +4,11 @@ import { StepsSchema, type SequenceStep } from './sequences/steps';
 
 const date = z.string().refine(isLocalDate, 'Choose a valid date.');
 const PACE_RANGE = 'New people a day must be a whole number from 1 to 500.';
+/** B199: the name limit, said in the field and in the refusal, never a silent cut. */
+export const CAMPAIGN_NAME_MAX = 120;
+const NAME_TOO_LONG = `Campaign names can be up to ${CAMPAIGN_NAME_MAX} characters. Shorten this one.`;
 export const CampaignDraftSchema = z.object({
-  name: z.string().trim().min(1, 'Name your campaign.').max(120),
+  name: z.string().trim().min(1, 'Name your campaign.').max(CAMPAIGN_NAME_MAX, NAME_TOO_LONG),
   podId: z.string().min(1), startDate: date, endDate: date,
   productInterest: z.array(z.string().min(1)).min(1, 'Choose a product.'),
   defaultBatchSize: z.number({ error: PACE_RANGE }).int(PACE_RANGE).min(1, PACE_RANGE).max(500, PACE_RANGE),
@@ -37,7 +40,7 @@ export const outreachIsAutomatic = (d: Pick<CampaignDraft, 'outreachEdited' | 'f
   d.outreachEdited === false || (d.outreachEdited === undefined && !campaignId && d.flows.length === 1 && d.flows[0].steps.every(s => s.id.startsWith('starter-')));
 /** What a draft needs to be kept: a name, a pod and two dates. Everything else is checked when it is planned. */
 export const CampaignDraftSaveSchema = z.object({
-  name: z.string().trim().min(1, 'Name your campaign.').max(120),
+  name: z.string().trim().min(1, 'Name your campaign.').max(CAMPAIGN_NAME_MAX, NAME_TOO_LONG),
   podId: z.string().min(1), startDate: date, endDate: date,
   productInterest: z.array(z.string().min(1)).max(20),
   defaultBatchSize: z.number().int().min(0).max(500),

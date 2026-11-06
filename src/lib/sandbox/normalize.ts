@@ -4,11 +4,30 @@
  * matching, so a value compared anywhere was cleaned the same way everywhere.
  */
 
-/** Trim and lower-case the whole address. Dots and +tags are kept. Null when it is not an address. */
+/** One address: a local part with no spaces or brackets, and a domain of letter-or-digit labels with a real top level. */
+const EMAIL = /^[^\s@<>()[\],;:"\\]+@(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?\.)+[\p{L}]{2,63}$/u;
+
+/**
+ * Trim and lower-case the whole address. Dots and +tags are kept; a `mailto:` in front and a dot at
+ * the end are dropped (B169). Null when it is not an address.
+ */
 export function normalizeEmail(raw: string | null | undefined): string | null {
-  const value = (raw ?? '').trim().toLowerCase();
+  const value = (raw ?? '').trim().toLowerCase().replace(/^mailto:/, '').replace(/\.+$/, '');
   if (!value || value.length > 254) return null;
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? value : null;
+  return EMAIL.test(value) ? value : null;
+}
+
+/**
+ * The local part of a shared inbox (info@, sales@, compliance@...), which nobody in particular reads
+ * and different people really do share. The same pattern as Bellwether's ROLE_RE (prospect/contacts.py)
+ * and the 20261105000001_cold_outreach_backfill migration, so all three agree on which address is one.
+ */
+export const ROLE_EMAIL = /^(info|contact|hello|hi|hey|enquir(y|ies)|inquir(y|ies)|sales|support|help|admin|office|team|mail|press|media|marketing|careers|jobs|hr|recruit(ing|ment)?|billing|accounts?|accounting|finance|invoices?|legal|privacy|security|partners|partnerships|business|bd|general|customerservice|customer[-_.]?care|service|services|booking|reservations|orders?|webmaster|hostmaster|it|desk|reception|newsletter|subscribe|feedback|questions|ask|talk|connect|compliance|operations|ops|clientservices?|client[-_.]?service|clients?|advisors?|planning|wealth|invest(ments?|ing)?|trading|trade|custody|transfers?|documents?|statements?|noreply|no[-_.]?reply|frontdesk|main|appointments?|scheduling|events?)s?([-_.].*)?$/i;
+
+/** Whether an address is a shared inbox rather than one person's (B177, N025). */
+export function isRoleEmail(email: string | null | undefined): boolean {
+  const at = (email ?? '').lastIndexOf('@');
+  return at > 0 && ROLE_EMAIL.test((email ?? '').slice(0, at));
 }
 
 /** Calling codes for the regions Bellwether sends today, keyed by ISO 3166-1 alpha-2. */
@@ -25,8 +44,10 @@ export type ParsedPhone = { e164: string; extension: string | null };
 /**
  * Parse a phone number to E.164 with the region from `country` (default US). The extension is
  * split off. Handles North American numbers in any common format and any number written with a
- * leading + or 00 and its country code; a national number from another region is read with that
- * region's calling code after dropping its trunk 0. Null when it cannot be a real number.
+ * leading + or 00 and its country code, the "+44 (0)20" trunk included; a national number from
+ * another region is read with that region's calling code after dropping its trunk 0. Null when it
+ * cannot be a real number: a North American number is 10 digits, or 11 with the leading 1, and any
+ * other count is a typo, never a foreign number (B014).
  */
 export function parsePhone(raw: string | null | undefined, country: string | null | undefined = 'US'): ParsedPhone | null {
   let value = (raw ?? '').trim();
@@ -38,6 +59,8 @@ export function parsePhone(raw: string | null | undefined, country: string | nul
     value = value.slice(0, ext.index);
   }
   const international = /^\s*(\+|00)/.test(value);
+  // "+44 (0)20 7946 0000": the (0) is the trunk prefix, dialled only from inside the country.
+  if (international) value = value.replace(/\(\s*0\s*\)/g, '');
   let digits = value.replace(/\D/g, '');
   if (international && value.trim().startsWith('00')) digits = digits.slice(2);
   const region = (country ?? 'US').trim().toUpperCase() || 'US';
@@ -47,8 +70,11 @@ export function parsePhone(raw: string | null | undefined, country: string | nul
   } else {
     const code = CALLING_CODES[region];
     if (!code) return null;
-    if (code === '1') full = digits.length === 10 ? `1${digits}` : digits;
-    else full = `${code}${digits.replace(/^0+/, '')}`;
+    if (code === '1') {
+      if (digits.length === 10) full = `1${digits}`;
+      else if (digits.length === 11 && digits.startsWith('1')) full = digits;
+      else return null;
+    } else full = `${code}${digits.replace(/^0+/, '')}`;
   }
   if (full.startsWith('1')) {
     if (!NANP.test(full)) return null;
@@ -62,16 +88,20 @@ export function toE164(raw: string | null | undefined, country?: string | null):
   return parsePhone(raw, country)?.e164 ?? null;
 }
 
-/** linkedin.com/in/<slug>, or null for anything that is not a person profile. */
+/**
+ * linkedin.com/in/<slug>, or null for anything that is not a person profile. The slug is decoded
+ * first and lower-cased after, so an encoded capital (%C3%89) compares equal to its small letter (B169).
+ */
 export function normalizeLinkedin(raw: string | null | undefined): string | null {
-  let value = (raw ?? '').trim().toLowerCase();
+  let value = (raw ?? '').trim();
   if (!value) return null;
-  value = value.replace(/^[a-z]+:\/\//, '').replace(/[?#].*$/, '').replace(/\/+$/, '');
-  value = value.replace(/^(www\.|[a-z]{2}\.|m\.)/, '');
-  const match = value.match(/^linkedin\.com\/in\/([^/\s]+)/);
+  value = value.replace(/^[a-z]+:\/\//i, '').replace(/[?#].*$/, '').replace(/\/+$/, '');
+  value = value.replace(/^(www\.|[a-z]{2}\.|m\.)/i, '');
+  const match = value.match(/^linkedin\.com\/in\/([^/\s]+)/i);
   if (!match) return null;
   let slug = match[1];
   try { slug = decodeURIComponent(slug); } catch { /* keep as is */ }
+  slug = slug.toLowerCase();
   return slug ? `linkedin.com/in/${slug}` : null;
 }
 
@@ -92,19 +122,144 @@ export function normalizeDomain(raw: string | null | undefined): string | null {
   return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(value) ? value : null;
 }
 
-/** A firm name compared loosely: no LLC/Inc./Ltd, punctuation or case. */
+/**
+ * A firm name compared loosely: no LLC/Inc./Ltd, punctuation or case. Letters of every alphabet are
+ * kept, so "Müller Vermögen" is never compared as "m ller verm gen" (B170).
+ */
 export function normalizeFirmName(raw: string | null | undefined): string {
   return (raw ?? '')
+    .normalize('NFC')
     .toLowerCase()
     .replace(/&/g, ' and ')
-    .replace(/[^a-z0-9 ]+/g, ' ')
-    .replace(/\b(llc|l l c|inc|incorporated|ltd|limited|corp|corporation|co|company|lp|llp|plc|pllc|pc|the)\b/g, ' ')
+    .replace(/[^\p{L}\p{N} ]+/gu, ' ')
+    .replace(/(?<![\p{L}\p{N}])(llc|l l c|inc|incorporated|ltd|limited|corp|corporation|co|company|lp|llp|plc|pllc|pc|the)(?![\p{L}\p{N}])/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
+/** Common ways of writing a country that are not its ISO 3166-1 alpha-2 code. */
+const COUNTRY_ALIASES: Record<string, string> = {
+  UK: 'GB', USA: 'US', 'U S': 'US', 'U S A': 'US', AMERICA: 'US', 'UNITED STATES OF AMERICA': 'US', 'GREAT BRITAIN': 'GB', BRITAIN: 'GB', ENGLAND: 'GB', SCOTLAND: 'GB',
+  WALES: 'GB', 'NORTHERN IRELAND': 'GB', GBR: 'GB', CAN: 'CA', AUS: 'AU', IRL: 'IE', DEU: 'DE', FRA: 'FR', CHE: 'CH', NLD: 'NL', SGP: 'SG', HKG: 'HK', IND: 'IN', NZL: 'NZ',
+  ESP: 'ES', ITA: 'IT', BEL: 'BE', SWE: 'SE', NOR: 'NO', DNK: 'DK', FIN: 'FI', AUT: 'AT', PRT: 'PT', POL: 'PL', ISR: 'IL', ZAF: 'ZA', MEX: 'MX', BRA: 'BR', JPN: 'JP',
+  CHN: 'CN', ARE: 'AE', PRI: 'PR', UAE: 'AE', HOLLAND: 'NL',
+};
+/** Codes that name no country: the UN, the EU, private-use and pseudo regions. */
+const NOT_COUNTRIES = new Set(['UN', 'EU', 'EZ', 'QO', 'ZZ', 'XA', 'XB']);
+const countryKey =(v: string) => v.normalize('NFKD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z]+/g, ' ').trim();
+let regionNames: Map<string, string> | null = null;
+/** Every region's English name, keyed loosely, to its code ("United Kingdom" to GB). */
+function regionsByName(): Map<string, string> {
+  if (regionNames) return regionNames;
+  regionNames = new Map();
+  const names = new Intl.DisplayNames(['en'], { type: 'region' });
+  for (let a = 65; a <= 90; a++) {
+    for (let b = 65; b <= 90; b++) {
+      const code = String.fromCharCode(a, b);
+      let name: string | undefined;
+      try { name = names.of(code); } catch { name = undefined; }
+      // A retired code (UK, BU, DD) names its successor's country: only the code in use is kept.
+      if (name && name !== code && !NOT_COUNTRIES.has(code) && Intl.getCanonicalLocales(`und-${code}`)[0] === `und-${code}`) regionNames.set(countryKey(name), code);
+    }
+  }
+  return regionNames;
+}
+
+/**
+ * A country as ISO 3166-1 alpha-2 (B072): a code as given, "UK" as GB, an English name or a common
+ * alias as its code. Null when it is not a country Cadence knows, so the caller can say so rather
+ * than file "United Kingdom" as US or "UN".
+ */
+export function normalizeCountry(raw: string | null | undefined): string | null {
+  const key = countryKey(raw ?? '');
+  if (!key) return null;
+  if (COUNTRY_ALIASES[key]) return COUNTRY_ALIASES[key];
+  if (/^[A-Z]{2}$/.test(key)) return [...regionsByName().values()].includes(key) ? key : null;
+  return regionsByName().get(key) ?? null;
+}
+
+/** Countries a person picks from first: where nearly every contact is. */
+const USUAL_COUNTRIES = ['US', 'CA', 'GB'];
+
+/**
+ * Every country Cadence knows, for a country select (B138): the usual ones first, then the rest by
+ * name. The same codes `normalizeCountry` accepts, so nothing picked here is ever refused.
+ */
+export function countryChoices(): { code: string; name: string }[] {
+  const names = new Intl.DisplayNames(['en'], { type: 'region' });
+  const all = [...new Set(regionsByName().values())].map((code) => ({ code, name: names.of(code) ?? code }));
+  const usual = USUAL_COUNTRIES.flatMap((code) => all.filter((c) => c.code === code));
+  return [...usual, ...all.filter((c) => !USUAL_COUNTRIES.includes(c.code)).sort((a, b) => a.name.localeCompare(b.name))];
+}
+
+/** Control characters other than tab and newline: never stored (a NUL breaks Postgres text, B012). */
+const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
+export const stripControl = (s: string) => s.replace(CONTROL, '');
+export const hasControl = (s: string) => /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(s);
+
+const ENTITIES: Record<string, string> = { nbsp: ' ', lt: '<', gt: '>', quot: '"', apos: "'", '#39': "'", amp: '&' };
+
+/**
+ * Text from outside Cadence as plain text (B114): HTML tags and comments gone (a block tag becomes a
+ * line break), a markdown link or image reduced to its words and its http(s) address (any other
+ * address is dropped), no control characters. Used at Bellwether's intake and on every note Cadence
+ * writes to the CRM, so neither HTML nor a crafted link reaches a CRM note.
+ */
+export function plainText(raw: string): string {
+  return stripControl(raw)
+    .replace(/&(nbsp|lt|gt|quot|apos|#39|amp);/g, (_, name: string) => ENTITIES[name])
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<\/?(?:p|div|br|li|ul|ol|h[1-6]|tr|table|blockquote)(?:\s[^<>]*)?\/?>/gi, '\n')
+    .replace(/<\/?[a-z][a-z0-9-]*(?:\s[^<>]*)?\/?>/gi, '')
+    .replace(/!?\[([^\]]*)\]\(\s*<?((?:[^()\s>]|\([^()\s]*\))*)>?(?:\s+"[^"]*")?\s*\)/g, (_, words: string, href: string) => (/^https?:\/\//i.test(href) ? `${words.trim()} (${href})`.trim() : words.trim()))
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** A person's name from outside Cadence: plain text, then no brackets or angle brackets left at all (B114). */
+export const plainName = (raw: string) => plainText(raw).replace(/[<>[\]()]/g, ' ').replace(/\s+/g, ' ').trim();
+
+/**
+ * Cut text at a word boundary to at most `max` characters (B072, B172): never mid-word, and without
+ * a trailing comma or dash. A single word longer than `max` is cut at `max`.
+ */
+export function cutAtWord(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const head = text.slice(0, max + 1);
+  const at = head.search(/\s\S*$/);
+  const cut = (at > max / 2 ? head.slice(0, at) : text.slice(0, max)).replace(/[\s,;:.\-\u2013]+$/, '');
+  return cut || text.slice(0, max);
+}
+
 export const PHONE_TYPES = ['direct', 'mobile', 'office', 'main', 'toll_free', 'unknown'] as const;
 export type PhoneType = (typeof PHONE_TYPES)[number];
+/** The phone types in words: one list for Add contact and Edit (B201). */
+export const PHONE_TYPE_LABELS: Record<PhoneType, string> = { direct: 'Direct', mobile: 'Mobile', office: 'Office', main: 'Main line', toll_free: 'Toll free', unknown: 'Unknown' };
+
+/** The countries whose national numbers Cadence reads, for Add contact's Country (B204). */
+export const PHONE_COUNTRIES: string[] = Object.keys(CALLING_CODES);
+
+/** The country of a number written with + and its calling code ("+44 20…" is GB), or null (B204). */
+export function countryOfPhone(raw: string | null | undefined): string | null {
+  if (!/^\s*(\+|00)/.test(raw ?? '')) return null;
+  const parsed = parsePhone(raw, 'US');
+  return parsed ? splitE164(parsed.e164)?.country || null : null;
+}
+
+const CJK = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+$/u;
+
+/**
+ * A name as people write it (N085): a Chinese, Japanese or Korean name family name first with no
+ * space, as Bellwether shows it ("王小明"); any other name first name first.
+ */
+export function displayName(firstName: string, lastName: string): string {
+  const first = firstName.trim();
+  const last = lastName.trim();
+  if (first && last && CJK.test(first) && CJK.test(last)) return `${last}${first}`;
+  return `${first} ${last}`.trim();
+}
 
 /** Numbers that belong to one person: the only ones that may match a call or a sandbox contact. */
 export const personalPhone = (type: string | null | undefined) => type === 'direct' || type === 'mobile';

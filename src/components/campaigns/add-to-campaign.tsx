@@ -9,6 +9,7 @@ import { IconCampaigns, IconClose, IconPlus } from '@/components/icons';
 import { Badge, Count, EmptyState } from '@/components/ui';
 import { campaignSelectionUrl } from '@/lib/campaign-selection';
 import { formatLocalDate } from '@/lib/dates';
+import { useConfirm } from '@/components/confirm-dialog';
 
 type Choice = CampaignChoice & { placesLeft: number | null };
 
@@ -16,7 +17,8 @@ type Choice = CampaignChoice & { placesLeft: number | null };
  * "Add to campaign": the upcoming and running campaigns the reader may change, each with the
  * places it still has, and a new campaign at the end. Works for one person or a selection.
  */
-export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', label = 'Add to campaign', onDone, disabled = false, disabledTitle, alreadyIn = 0 }: { personIds: string[]; /** Chosen people left out because they are already in a campaign, said in the title. */ alreadyIn?: number; className?: string; label?: string; /** Gets the result, to show once this closes (the bulk bar unmounts it). */ onDone?: (message?: string) => void; /** Greyed out, with the reason on hover: everyone chosen is already in a campaign. */ disabled?: boolean; disabledTitle?: string }) {
+export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', label = 'Add to campaign', onDone, disabled = false, disabledTitle, alreadyIn = 0, audience = 'CRM' }: { personIds: string[]; /** Chosen people left out because they are already in a campaign, said in the title. */ alreadyIn?: number; className?: string; label?: string; /** Gets the result, to show once this closes (the bulk bar unmounts it). */ onDone?: (message?: string) => void; /** Greyed out, with the reason on hover: everyone chosen is already in a campaign. */ disabled?: boolean; disabledTitle?: string; /** SANDBOX: cold contacts, offered cold campaigns only (B044). */ audience?: 'CRM' | 'SANDBOX' }) {
+  const cold = audience === 'SANDBOX';
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [choices, setChoices] = useState<Choice[] | null>(null);
@@ -29,8 +31,8 @@ export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', lab
     setChoices(null);
     setError(null);
     setMessage(null);
-    void campaignChoicesAction().then((r) => { if (r.ok) setChoices(r.data as Choice[]); else setError(r.error); });
-  }, [open]);
+    void campaignChoicesAction(audience).then((r) => { if (r.ok) setChoices(r.data as Choice[]); else setError(r.error); });
+  }, [open, audience]);
 
   const add = (campaignId: string) =>
     start(async () => {
@@ -38,6 +40,7 @@ export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', lab
       const fd = new FormData();
       fd.set('campaignId', campaignId);
       fd.set('personIds', JSON.stringify(personIds));
+      fd.set('audience', audience);
       const r = await addPeopleToCampaignAction(fd);
       if (r.ok) { setMessage(r.message ?? 'Done.'); router.refresh(); onDone?.(r.message); }
       else setError(r.error);
@@ -51,14 +54,14 @@ export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', lab
       {open ? (
         <Modal label="Add to campaign" onClose={() => setOpen(false)}>
           <div className="flex items-center gap-3 border-b border-line p-5">
-            <h2 className="text-lg font-semibold">Add <Count value={personIds.length} /> {personIds.length === 1 ? 'person' : 'people'} to a campaign{alreadyIn ? <span className="ml-2 text-[13px] font-normal text-ink-500">{alreadyIn} already in a campaign {alreadyIn === 1 ? 'is' : 'are'} left out</span> : null}</h2>
+            <h2 className="text-lg font-semibold">Add <Count value={personIds.length} /> {cold ? (personIds.length === 1 ? 'contact' : 'contacts') : personIds.length === 1 ? 'person' : 'people'} to a {cold ? 'cold ' : ''}campaign{alreadyIn ? <span className="ml-2 text-[13px] font-normal text-ink-500">{alreadyIn} already in a campaign {alreadyIn === 1 ? 'is' : 'are'} left out</span> : null}</h2>
             <button type="button" aria-label="Close" className="btn-icon-ghost ml-auto" onClick={() => setOpen(false)}><IconClose size={16} /></button>
           </div>
           <div className="max-h-[60vh] overflow-y-auto">
             {error ? <p role="alert" className="p-5 text-sm text-red-700">{error}</p> : null}
             {message ? <p role="status" className="p-5 text-sm text-emerald-700">{message}</p> : null}
             {!choices && !error ? <p role="status" className="p-5 text-sm text-ink-500">Loading campaigns…</p> : null}
-            {choices && !choices.length ? <EmptyState icon={<IconCampaigns size={20} />} title="No campaign you can add people to" hint="You can add people to upcoming or running campaigns you are an FO on. Sales Leaders and Pod Managers can add to any campaign in their pods." /> : null}
+            {choices && !choices.length ? <EmptyState icon={<IconCampaigns size={20} />} title={cold ? 'No cold campaign you can add contacts to' : 'No campaign you can add people to'} hint={cold ? 'You can add contacts to upcoming or running cold campaigns you are an FO on. Sales Leaders and Pod Managers can add to any in their pods. Or start a new one.' : 'You can add people to upcoming or running campaigns you are an FO on. Sales Leaders and Pod Managers can add to any campaign in their pods.'} /> : null}
             {choices?.length ? (
               <ul className="divide-y divide-line">
                 {choices.map((c) => {
@@ -82,7 +85,7 @@ export function AddToCampaign({ personIds, className = 'btn-primary btn-sm', lab
             ) : null}
           </div>
           <div className="flex items-center justify-between gap-3 border-t border-line p-4">
-            <button type="button" onClick={() => { try { router.push(campaignSelectionUrl('/campaigns/new', personIds)); } catch { setError('Your browser could not retain this selection. Open a new campaign and select people there.'); } }} className="btn-primary btn-sm"><IconPlus size={13} /> New campaign</button>
+            <button type="button" onClick={() => { try { router.push(campaignSelectionUrl('/campaigns/new', personIds, cold ? { audience: 'cold' } : {})); } catch { setError('Your browser could not retain this selection. Open a new campaign and select people there.'); } }} className="btn-primary btn-sm"><IconPlus size={13} /> New campaign</button>
             <button type="button" className="btn-ghost btn-sm" onClick={() => setOpen(false)}>Close</button>
           </div>
         </Modal>
@@ -96,14 +99,16 @@ export function RemoveFromCampaign({ campaignId, campaignName, personIds, classN
   const router = useRouter();
   const [pending, start] = useTransition();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [ask, dialog] = useConfirm();
   return (
     <span className="inline-flex flex-col items-start">
+      {dialog}
       <button
         type="button"
         className={className}
         disabled={pending || !personIds.length}
-        onClick={() => {
-          if (!window.confirm(`Remove ${personIds.length} ${personIds.length === 1 ? 'person' : 'people'} from ${campaignName}? Their outreach stops.`)) return;
+        onClick={async () => {
+          if (!(await ask({ title: `Remove ${personIds.length} ${personIds.length === 1 ? 'person' : 'people'} from ${campaignName}?`, effects: ['Their outreach in this campaign stops.'], confirmLabel: 'Remove', tone: 'danger' }))) return;
           start(async () => {
             const fd = new FormData();
             fd.set('campaignId', campaignId);
@@ -129,14 +134,16 @@ export function RemoveFromCampaigns({ people, className = 'btn-danger btn-sm', o
   const byCampaign = new Map<string, { name: string; ids: string[] }>();
   for (const p of people) { const g = byCampaign.get(p.campaignId) ?? { name: p.campaignName, ids: [] }; g.ids.push(p.id); byCampaign.set(p.campaignId, g); }
   const names = [...byCampaign.values()].map((g) => g.name);
+  const [ask, dialog] = useConfirm();
   return (
     <span className="inline-flex flex-col items-start">
+      {dialog}
       <button
         type="button"
         className={className}
         disabled={pending || !people.length}
-        onClick={() => {
-          if (!window.confirm(`Remove ${people.length} ${people.length === 1 ? 'person' : 'people'} from ${names.length === 1 ? names[0] : `${names.length} campaigns`}? Their outreach stops.`)) return;
+        onClick={async () => {
+          if (!(await ask({ title: `Remove ${people.length} ${people.length === 1 ? 'person' : 'people'} from ${names.length === 1 ? names[0] : `${names.length} campaigns`}?`, effects: ['Their outreach in these campaigns stops.'], confirmLabel: 'Remove', tone: 'danger' }))) return;
           start(async () => {
             const results: string[] = [];
             let failed = false;

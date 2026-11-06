@@ -44,7 +44,7 @@ export async function raiseNumberCheckAction(input: z.input<typeof Raise>): Prom
     prisma.personCache.findFirst({ where: { id: d.personId, deletedAt: null }, select: { id: true } }),
     d.meetingId ? prisma.meeting.findUnique({ where: { id: d.meetingId }, select: { id: true } }) : Promise.resolve(null),
   ]);
-  if (!person) return { ok: false, error: 'That prospect is no longer in Twenty.' };
+  if (!person) return { ok: false, error: 'That prospect is no longer in the CRM.' };
   const ticket = await prisma.meetingNumberTicket.create({ data: { personId: d.personId, meetingId: meeting?.id ?? null, meetingDay: day, shownNumber: d.shownNumber, expectedNumber: d.expectedNumber ?? null, note: d.note || null, raisedById: user.id } });
   await logAudit({ entityType: 'numberCheck', entityId: ticket.id, action: 'raised', actor: userActor(user), details: { personId: d.personId, shown: d.shownNumber, expected: d.expectedNumber ?? null } });
   revalidatePath('/meetings/checks');

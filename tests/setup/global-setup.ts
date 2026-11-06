@@ -1,17 +1,18 @@
-import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { assertUtf8Database, runTool, UTF8_INITDB_FLAGS } from '../../scripts/local-runtime';
 import { loadTestPostgres } from './embedded-postgres';
 
 const URL_FILE = path.join(process.cwd(), '.test-db-url');
-const PG_PORT = 54329;
+// TEST_PG_PORT lets two checkouts (git worktrees) run their suites side by side.
+const PG_PORT = Number(process.env.TEST_PG_PORT) || 54329;
 
 type Embedded = {
   initialise(): Promise<void>;
   start(): Promise<void>;
   stop(): Promise<void>;
   createDatabase(name: string): Promise<void>;
-};
+} & Parameters<typeof assertUtf8Database>[0];
 
 let embedded: Embedded | undefined;
 
@@ -32,6 +33,8 @@ export default async function setup() {
       password: 'postgres',
       port: PG_PORT,
       persistent: false,
+      // UTF8 on every machine, so the tests catch what a name outside Latin-1 does (B013).
+      initdbFlags: UTF8_INITDB_FLAGS,
       onLog: () => {},
       onError: (msg: unknown) => {
         if (String(msg).includes('FATAL')) console.error('[embedded-postgres]', msg);
@@ -40,6 +43,7 @@ export default async function setup() {
     await embedded.initialise();
     await embedded.start();
     await embedded.createDatabase('cadence_test');
+    await assertUtf8Database(embedded, 'cadence_test', databaseDir);
     url = `postgresql://postgres:postgres@localhost:${PG_PORT}/cadence_test`;
   }
 
@@ -48,8 +52,9 @@ export default async function setup() {
   process.env.CADENCE_ALLOW_MOCK = '1';
   fs.writeFileSync(URL_FILE, url);
 
-  const prismaBin = path.join(process.cwd(), 'node_modules', '.bin', process.platform === 'win32' ? 'prisma.cmd' : 'prisma');
-  execSync(`"${prismaBin}" migrate deploy`, { stdio: 'inherit', env: { ...process.env, DATABASE_URL: url }, shell: process.platform === 'win32' ? 'cmd.exe' : undefined });
+  // No shell, as the launcher does it, so the folder's path may hold spaces (L001).
+  const migrated = runTool(process.cwd(), 'prisma', ['migrate', 'deploy'], { ...process.env, DATABASE_URL: url });
+  if (migrated.error || migrated.status !== 0) throw new Error(`prisma migrate deploy failed: ${migrated.error?.message ?? `exit ${migrated.status}`}`);
 
   return async () => {
     try {

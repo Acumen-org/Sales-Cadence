@@ -99,7 +99,8 @@ describe('home', () => {
     // The week's total is exactly its parts: done, overdue, due today and later this week.
     expect(weekTotal(row)).toBe(row.done + row.overdue + row.today + row.later);
     expect(weekTotal(row)).toBe(1);
-    expect(home.team.length).toBeGreaterThan(1); // admins see everyone
+    // B032: admins see everyone with anything this week; a rep with nothing simply has no row.
+    expect(home.team.map((t) => t.id)).not.toContain(b.users.leigh.id);
     // FOs only: an admin carries no outreach and is not a row.
     expect(home.team.some((t) => t.id === b.users.ria.id)).toBe(false);
   });
@@ -125,11 +126,11 @@ describe('home', () => {
     expect(home.team.filter((t) => t.replies > 0)).toHaveLength(1);
   });
 
-  // A junior leads nobody, so the board is their own week and nobody else's - not an empty card,
-  // which left the Home screen of the role that uses this app most stopping half way down.
-  it('gives a junior the same board as everyone: their own row among their colleagues', async () => {
+  // A junior reads the same board as everyone: the colleagues with work this week. B032 (owner, 3 Nov):
+  // nobody is named for having nothing, so Karson, with no work, has no row, and no idle line names him.
+  it('gives a junior the same board as everyone: colleagues with work, and no row for nothing (B032)', async () => {
     const home = await buildHome(sessionUser(b.users.karson, [b.pods.Alisa.id]), TUESDAY);
-    expect(home.team.map((t) => t.id)).toContain(b.users.karson.id);
+    expect(home.team.map((t) => t.id)).not.toContain(b.users.karson.id);
     expect(home.team.map((t) => t.id)).toContain(b.users.alisa.id);
     expect(home.needsReview).toBe(0);
   });

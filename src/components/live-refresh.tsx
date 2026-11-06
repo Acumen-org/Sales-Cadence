@@ -12,12 +12,13 @@ import { usePathname, useRouter } from 'next/navigation';
  * page in the app. And it never interrupts someone mid-sentence: an open dialog or a focused input
  * means the refresh waits for the next tick.
  *
- * Only the screens where work arrives by itself refresh: Home, Tasks and Activity. Every other
+ * Only the screens where work arrives by itself refresh: Home, Tasks, Activity and Cold outreach
+ * (pushes, claims and forms land there from other people; B211). Every other
  * page (Reports, the directories, a campaign, Settings) re-ran all of its reads each minute that
  * anything anywhere changed - which on a live workspace is every minute - and again on every return
  * to the tab, competing with the clicks of everyone using it.
  */
-const LIVE = /^\/(home|tasks|activity)(\/|$)/;
+export const LIVE = /^\/(home|tasks|activity|cold-outreach)(\/|$)/;
 
 export function LiveRefresh() {
   const router = useRouter();

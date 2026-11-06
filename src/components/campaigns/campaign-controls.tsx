@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { approveCampaignAction, rejectCampaignAction, pauseCampaignAction, reenrollNonRepliersAction, restartCampaignAction, resumeCampaignAction, setHardStopAction, stopCampaignAction, type FollowupPreview } from '@/lib/actions/campaigns';
 import { ActionButton, ActionForm } from '@/components/action-form';
+import { stopCampaignConfirm } from '@/lib/confirms';
 import { Card, Empty, Field } from '@/components/ui';
 
 type Props = { calendar?: boolean; campaignId: string; status: string; sequences: {id:string;name:string}[]; currentSequenceId:string; defaultName:string; today:string };
@@ -20,12 +21,12 @@ export function CampaignControls({ calendar, campaignId,status,currentSequenceId
 }
 
 /** The campaign's own lifecycle, for the record header. */
-export function CampaignLifecycle({ campaignId, status, canApprove = false }: { campaignId: string; status: string; canApprove?: boolean }) {
+export function CampaignLifecycle({ campaignId, status, canApprove = false, name, restartable = false }: { campaignId: string; status: string; canApprove?: boolean; name?: string; /** A stopped one can be restarted from the beginning (pre-studio CRM campaigns). */ restartable?: boolean }) {
  return <>
    {status === 'PENDING_APPROVAL' && (canApprove ? <><ActionButton action={approveCampaignAction} payload={{campaignId}} className="btn-primary">Approve campaign</ActionButton><ActionButton action={rejectCampaignAction} payload={{campaignId}}>Decline</ActionButton></> : <span className="chip">Awaiting Sales Leader approval</span>)}
    {(status === 'ACTIVE' || status === 'SCHEDULED') && <ActionButton action={pauseCampaignAction} payload={{campaignId}}>Pause campaign</ActionButton>}
    {status === 'PAUSED' && <ActionButton action={resumeCampaignAction} payload={{campaignId}}>Resume campaign</ActionButton>}
-   {['ACTIVE','PAUSED','SCHEDULED'].includes(status) && <ActionButton action={stopCampaignAction} payload={{campaignId}} className="btn-ghost text-red-700" confirm="Stop outreach for everyone in this campaign? You can restart it from the beginning later.">Stop campaign</ActionButton>}
+   {['ACTIVE','PAUSED','SCHEDULED'].includes(status) && <ActionButton action={stopCampaignAction} payload={{campaignId}} className="btn-ghost text-red-700" confirm={stopCampaignConfirm({ name, restartable })}>Stop campaign</ActionButton>}
  </>;
 }
 

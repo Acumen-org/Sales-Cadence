@@ -4,14 +4,14 @@ import { filterParam, sectionDefaults } from '@/lib/default-filters';
 import { requireUser } from '@/lib/auth/current-user';
 import { isJuniorFo, visiblePodIds } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
-import { ACTIVITY_KINDS, KIND_LABELS, listActivity, type ActivityKind } from '@/lib/activity-query';
+import { ACTIVITY_KINDS, KIND_LABELS, listActivity, parseActivityAudience, type ActivityKind } from '@/lib/activity-query';
 import { formatInstant, formatLocalDate, toLocalDate, todayIn } from '@/lib/dates';
 import { reportingRange, reportingTimezone } from '@/lib/reports-query';
 import { ActivityToolbar } from '@/components/activity/activity-toolbar';
 import { ActionIcon } from '@/components/icons';
 import { Badge, DataValue, EmptyState, EventDetail, Notice, Surface, Toolbar, ViewHeader } from '@/components/ui';
 
-type Search = { actor?: string; pod?: string; channel?: string; kind?: string; q?: string; before?: string; from?: string; to?: string };
+type Search = { actor?: string; pod?: string; channel?: string; kind?: string; q?: string; before?: string; from?: string; to?: string; audience?: string };
 
 /**
  * The page's content sits inside its own Suspense boundary, for hydration rather than loading.
@@ -38,6 +38,7 @@ async function ActivityContent({ searchParams }: { searchParams: Promise<Search>
   const channel = ['EMAIL', 'CALL', 'LINKEDIN'].includes(sp.channel ?? '') ? sp.channel as 'EMAIL' | 'CALL' | 'LINKEDIN' : null;
   const before = sp.before?.trim() || null;
   const q = (sp.q ?? '').trim().slice(0, 200);
+  const audience = parseActivityAudience(sp.audience);
   const defaults = await sectionDefaults(user);
   const actorId = filterParam(sp.actor, defaults.foUserId);
   const podId = filterParam(sp.pod, defaults.podId);
@@ -46,7 +47,7 @@ async function ActivityContent({ searchParams }: { searchParams: Promise<Search>
   const defaultRange = reportingRange(undefined, undefined, today, 7);
   const visiblePods = visiblePodIds(user);
   const [page, users, pods] = await Promise.all([
-    listActivity({ before, actorId, podId, channel, kinds: kinds.length ? kinds : null, q, from: range.fromInstant, to: range.toInstant, viewer: user, limit: 60 }),
+    listActivity({ before, actorId, podId, channel, audience, kinds: kinds.length ? kinds : null, q, from: range.fromInstant, to: range.toInstant, viewer: user, limit: 60 }),
     prisma.user.findMany({
       where: isJuniorFo(user) ? { id: user.id } : visiblePods === null ? {} : { OR: [{ id: user.id }, { pods: { some: { podId: { in: visiblePods } } } }] },
       select: { id: true, name: true, pods: { select: { podId: true } } }, orderBy: { name: 'asc' },
@@ -65,6 +66,7 @@ async function ActivityContent({ searchParams }: { searchParams: Promise<Search>
     params.set('actor', actorId ?? '');
     params.set('pod', podId ?? '');
     if (channel) params.set('channel', channel);
+    if (audience !== 'all') params.set('audience', audience);
     if (kinds.length) params.set('kind', kinds.join(','));
     if (q) params.set('q', q);
     if (cursor) params.set('before', cursor);
@@ -74,9 +76,10 @@ async function ActivityContent({ searchParams }: { searchParams: Promise<Search>
     <div className="space-y-4 px-6 pb-8 pt-2">
       <Surface flush>
         <ViewHeader title="Workspace timeline" meta={<><span className="font-medium text-ink-900">{page.items.length}{page.hasMore ? '+' : ''}</span> <span className="text-ink-500">events</span></>} />
-        <Toolbar><ActivityToolbar key={`${podId}:${actorId}:${range.from}:${range.to}:${channel}:${kinds.join(',')}:${q}`} users={users.map((item) => ({ id: item.id, name: item.name, podIds: item.pods.map((pod) => pod.podId) }))} pods={pods} actorId={actorId} podId={podId} channel={channel} defaultRange={{ from: defaultRange.from, to: defaultRange.to }} kinds={kinds} q={q} from={range.from} to={range.to} /></Toolbar>
+        <Toolbar><ActivityToolbar key={`${podId}:${actorId}:${range.from}:${range.to}:${channel}:${audience}:${kinds.join(',')}:${q}`} audience={audience === 'all' ? '' : audience} users={users.map((item) => ({ id: item.id, name: item.name, podIds: item.pods.map((pod) => pod.podId) }))} pods={pods} actorId={actorId} podId={podId} channel={channel} defaultRange={{ from: defaultRange.from, to: defaultRange.to }} kinds={kinds} q={q} from={range.from} to={range.to} /></Toolbar>
         {range.error ? <div className="px-4 pb-4"><Notice tone="error">{range.error}</Notice></div> : null}
-        {page.items.length === 0 ? <EmptyState title="No activity in this view" action={<Link href="/activity" className="btn-secondary">Reset filters</Link>} /> : (
+        {page.lookedTo ? <div className="px-4 pb-3"><Notice>Looked back to {formatInstant(page.lookedTo, reportingTimezone())} for this view. Load older activity to look further.</Notice></div> : null}
+        {page.items.length === 0 ? <EmptyState title={page.lookedTo ? 'Nothing in this view among the newest events' : 'No activity in this view'} action={<Link href="/activity" className="btn-secondary">Reset filters</Link>} /> : (
           <div>{groups.map((group) => (
             <section key={group.day}>
               <h2 className="flex flex-wrap items-center justify-between gap-2 border-y border-line bg-canvas/80 px-5 py-3">
@@ -94,7 +97,7 @@ async function ActivityContent({ searchParams }: { searchParams: Promise<Search>
                     {item.subjectName ? <div className="flex flex-wrap items-center gap-x-3 gap-y-1">{item.subjectHref ? <Link href={item.subjectHref} className="text-[14px] font-medium text-brand-700 hover:underline">{item.subjectName}</Link> : <DataValue>{item.subjectName}</DataValue>}{item.companyName ? <DataValue>{item.companyName}</DataValue> : null}</div> : null}
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px]"><span className="inline-flex items-center gap-2 text-ink-500">By <DataValue>{item.actorName ?? 'System'}</DataValue></span><EventDetail fields={item.fields} /></div>
                   </div>
-                  <div className="col-start-2 sm:col-start-auto"><Badge tone={item.tone === 'in' ? 'green' : 'gray'}>{item.kind === 'touch' ? item.icon === 'EMAIL' ? 'Email' : item.icon === 'CALL' ? 'Call' : item.icon === 'LINKEDIN' ? 'LinkedIn' : item.icon === 'MEETING' ? 'Meeting' : KIND_LABELS[item.kind] : KIND_LABELS[item.kind]}</Badge></div>
+                  <div className="col-start-2 flex flex-wrap items-start gap-1.5 sm:col-start-auto sm:justify-end">{item.audience === 'cold' ? <Badge tone="sky">Cold outreach</Badge> : null}<Badge tone={item.tone === 'in' ? 'green' : 'gray'}>{item.kind === 'touch' ? item.icon === 'EMAIL' ? 'Email' : item.icon === 'CALL' ? 'Call' : item.icon === 'LINKEDIN' ? 'LinkedIn' : item.icon === 'MEETING' ? 'Meeting' : KIND_LABELS[item.kind] : KIND_LABELS[item.kind]}</Badge></div>
                 </li>
               ))}</ol>
             </section>

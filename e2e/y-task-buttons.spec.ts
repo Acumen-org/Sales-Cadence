@@ -78,7 +78,7 @@ test('a task created for two people in People is worked in Tasks and moves on wh
   await expect(page.getByText('Created tasks', { exact: false }).first()).toBeVisible();
   await page.locator('a[href*="next="]').filter({ hasText: 'E2E send the one-pager' }).first().click();
   await expect(page.getByText('Task', { exact: true }).first()).toBeVisible();
-  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await page.getByRole('button', { name: /^Done(: .+)?$/ }).click();
   await expect(page.getByText(/Done\. Next one on \w{3}, \d{1,2} \w{3,4} \d{4}\./)).toBeVisible();
   // The other one: snoozed, then stopped.
   await page.locator('a[href*="next="]').filter({ hasText: 'E2E send the one-pager' }).first().click();
@@ -97,8 +97,8 @@ test("a person's page creates, shows and stops their task", async ({ page }) => 
   await page.getByRole('dialog').getByRole('button', { name: /Create task|Save task/ }).click();
   // On the Task card, and in what Twenty will hold for the person.
   await expect(page.getByText('E2E call about the pilot').first()).toBeVisible();
-  page.once('dialog', (d) => d.accept());
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await page.getByRole('dialog').last().getByRole('button', { name: 'Stop', exact: true }).click();
   await expect(page.getByText('E2E call about the pilot')).toHaveCount(0);
 });
 

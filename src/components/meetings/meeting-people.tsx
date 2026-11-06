@@ -284,13 +284,13 @@ export function MeetingPeople({ fos, value, onChange, day, meetingId, showBooked
           </ul>
         ) : null}
         <Finder<ProspectOption>
-          label="Find a prospect in Twenty"
-          placeholder="Find a prospect in Twenty: name, email or company"
+          label="Find a prospect in the CRM"
+          placeholder="Find a prospect in the CRM: name, email or company"
           search={searchProspectsAction}
           keyOf={(p) => p.personId}
           exclude={new Set(ids)}
           onPick={(p) => set({ prospects: [...value.prospects, p] })}
-          empty={(q) => `No one in Twenty matches "${q}"`}
+          empty={(q) => `No one in the CRM matches "${q}"`}
           render={(p) => <>
             <Avatar name={p.name} shape="circle" size={28} />
             <span className="min-w-0 flex-1">

@@ -3,7 +3,7 @@ import { ROLES_NEEDING_POD } from './auth/rbac';
 import { externalPeopleWhere } from './internal-organizations';
 import { cachedPersonName } from './person-cache';
 
-export type AudienceIssueKind = 'deleted' | 'dnd' | 'optedOut' | 'blocked' | 'internal' | 'busy' | 'owner' | 'outside';
+export type AudienceIssueKind = 'deleted' | 'dnd' | 'optedOut' | 'blocked' | 'internal' | 'busy' | 'owner' | 'outside' | 'inCrm';
 /** Someone who cannot be in this campaign, and the one reason that decides it. `ownerId` is set when their owner is an FO of this pod who could run them. */
 export type AudienceIssue = { id: string; name: string; company: string | null; kind: AudienceIssueKind; reason: string; ownerId?: string };
 /** `anyPod`: whoever is choosing may take contacts from any pod (canAddFromAnyPod). `joining`: the FO being added to a running campaign, whose people these are meant to be. */
@@ -30,7 +30,8 @@ export async function campaignAudienceIssues(ids: string[], context?: AudienceCo
     db.personCache.findMany({ where: { id: { in: ids } }, select: { id: true, firstName: true, lastName: true, email: true, companyName: true, companyId: true, deletedAt: true, dnd: true, optedOut: true, podOwner: true, ownerMemberId: true } }),
     db.personCache.findMany({ where: { id: { in: ids }, AND: [await externalPeopleWhere()] }, select: { id: true } }),
     db.blockedAccount.findMany({ select: { companyId: true } }),
-    db.campaign.findMany({ where: { ...(context?.campaignId ? { id: { not: context.campaignId } } : {}), status: { in: ['SCHEDULED', 'PENDING_APPROVAL', 'ACTIVE', 'PAUSED'] }, personIds: { hasSome: ids } }, select: { name: true, personIds: true } }),
+    // B044: only CRM campaigns hold CRM people; a cold campaign's ids are cold contacts.
+    db.campaign.findMany({ where: { ...(context?.campaignId ? { id: { not: context.campaignId } } : {}), audience: 'CRM', status: { in: ['SCHEDULED', 'PENDING_APPROVAL', 'ACTIVE', 'PAUSED'] }, personIds: { hasSome: ids } }, select: { name: true, personIds: true } }),
     db.enrollment.findMany({ where: { personId: { in: ids }, status: { in: ['ACTIVE', 'PAUSED'] }, ...(context?.campaignId ? { OR: [{ campaignId: null }, { campaignId: { not: context.campaignId } }] } : {}) }, select: { personId: true, campaign: { select: { name: true } }, sequence: { select: { name: true } } } }),
     context?.campaignId && !context.anyPod ? campaignMembers(context.campaignId, db) : Promise.resolve(new Set<string>()),
   ]);
@@ -52,8 +53,8 @@ export async function campaignAudienceIssues(ids: string[], context?: AudienceCo
     const p = byId.get(id);
     const issue = (kind: AudienceIssueKind, reason: string, ownerId?: string): AudienceIssue[] => [{ id, name: p ? cachedPersonName(p) : 'Unknown contact', company: p?.companyName ?? null, kind, reason, ...(ownerId ? { ownerId } : {}) }];
     // Each reason is one plain clause that says why, so it reads on its own in a list of names.
-    if (!p || p.deletedAt) return issue('deleted', 'Deleted in Twenty');
-    if (p.dnd) return issue('dnd', 'Marked Do not contact in Twenty');
+    if (!p || p.deletedAt) return issue('deleted', 'Deleted in the CRM');
+    if (p.dnd) return issue('dnd', 'Marked Do not contact in the CRM');
     if (p.optedOut) return issue('optedOut', 'Asked not to be contacted');
     if (p.companyId && blockedIds.has(p.companyId)) return issue('blocked', 'Their company is blocked, and only an admin can unblock it');
     if (!externalIds.has(id)) return issue('internal', 'Works at one of our own companies');
@@ -65,7 +66,7 @@ export async function campaignAudienceIssues(ids: string[], context?: AudienceCo
     const runsHere = fo && owner!.pods.some(x => x.podId === context.podId);
     const elsewhere = fo && !runsHere ? owner!.pods.map(x => podLabel(x.pod.name)) : [];
     const ownedBy = () => issue('owner',
-      !owner ? 'Their owner in Twenty is not a Cadence user'
+      !owner ? 'Their owner in the CRM is not a Cadence user'
         : !owner.active ? `Owned by ${owner.name}, who no longer has access to Cadence`
         : !fo ? `Owned by ${owner.name}, who does not run outreach`
         : runsHere ? context.joining ? `Owned by ${owner.name}, not ${context.joining}` : `Owned by ${owner.name}, who is not on this campaign`
@@ -74,7 +75,7 @@ export async function campaignAudienceIssues(ids: string[], context?: AudienceCo
       runsHere ? owner!.id : undefined);
     if (context.checkOwners && p.ownerMemberId && !ownedHere) return ownedBy();
     if (!ownedHere && p.podOwner !== context.podOwnerValue) {
-      if (!context.anyPod && !kept.has(id)) return issue('outside', `${p.podOwner ? `In ${podLabel(podNamed.get(p.podOwner) ?? p.podOwner)}` : 'In no pod in Twenty'}, so only a Pod Manager or admin can add them`);
+      if (!context.anyPod && !kept.has(id)) return issue('outside', `${p.podOwner ? `In ${podLabel(podNamed.get(p.podOwner) ?? p.podOwner)}` : 'In no pod in the CRM'}, so only a Pod Manager or admin can add them`);
       if (p.ownerMemberId && !runsHere) return ownedBy();
     }
     return [];

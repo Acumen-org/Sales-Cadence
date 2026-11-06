@@ -8,13 +8,14 @@ import { requireUser, toActor, type SessionUser } from '../auth/current-user';
 import { canActOnTask, canManageEnrollment, canSnoozeFreely, whyNotManageEnrollment, whyNotWorkTask } from '../auth/rbac';
 import { userActor } from '../audit';
 import { formatLocalDate, isLocalDate, todayIn } from '../dates';
-import { exitEnrollment, finishEnrollment, reassignEnrollment } from '../engine/enrollment';
+import { exitEnrollment, finishEnrollment, OCCUPYING_STATUSES, reassignEnrollment } from '../engine/enrollment';
 import { applyExitConsequence, completeCall, moveToStep, skipWithReason } from '../engine/outcomes';
 import { completeTask, skipTask, snoozeDefault, snoozeTask } from '../engine/tasks';
-import { ACTION_TYPES } from '../sequences/steps';
+import { ACTION_TYPES, channelOf } from '../sequences/steps';
 import { getSettings } from '../settings';
 import type { ActionResult } from './users';
 import { cleanRichText } from '../rich-text';
+import { joinMarkedReply, MARKED_REPLY_PREFIX } from '../mail/cold-email';
 
 export async function saveTaskDraftAction(input: { taskId: string; subject: string; html: string; revision: number }): Promise<{ ok: true; revision: number } | { ok: false; error: string }> {
   const parsed = z.object({ taskId: z.string().min(1), subject: z.string().max(2000), html: z.string().max(100000), revision: z.number().int().min(0) }).safeParse(input);
@@ -26,10 +27,20 @@ export async function saveTaskDraftAction(input: { taskId: string; subject: stri
   return { ok: true, revision: input.revision + 1 };
 }
 
+/** Why a cold contact's step can no longer be worked: it was opted out, removed or moved since the page was opened (B212). */
+async function coldContactGone(sandboxContactId: string | null, personId: string | null): Promise<string | null> {
+  if (personId || !sandboxContactId) return null;
+  const c = await prisma.sandboxContact.findUnique({ where: { id: sandboxContactId }, select: { status: true } });
+  if (!c || c.status === 'ACTIVE') return null;
+  return c.status === 'MOVED' ? 'This contact is in the CRM now; nothing was changed here. Work them on their People page.' : c.status === 'REMOVED' ? 'This contact was removed from Cold outreach; nothing was changed.' : 'This contact asked not to be contacted; nothing was changed.';
+}
+
 async function loadForUser(taskId: string, user?: SessionUser) {
   const u = user ?? (await requireUser());
-  const task = await prisma.task.findUnique({ where: { id: taskId }, include: { enrollment: { select: { id: true, podId: true, personId: true } } } });
+  const task = await prisma.task.findUnique({ where: { id: taskId }, include: { enrollment: { select: { id: true, podId: true, personId: true, sandboxContactId: true } } } });
   if (!task) return { user: u, task: null, error: 'Task not found.' };
+  const gone = await coldContactGone(task.enrollment.sandboxContactId, task.enrollment.personId);
+  if (gone) return { user: u, task: null, error: gone };
   if (!canActOnTask(toActor(u), { foUserId: task.foUserId, podId: task.enrollment.podId })) {
     const [fo, pod] = await Promise.all([prisma.user.findUnique({ where: { id: task.foUserId }, select: { name: true } }), task.enrollment.podId ? prisma.pod.findUnique({ where: { id: task.enrollment.podId }, select: { name: true } }) : null]);
     return { user: u, task: null, error: whyNotWorkTask(toActor(u), fo?.name ?? 'someone else', pod?.name) };
@@ -64,16 +75,20 @@ export async function completeTaskAction(formData: FormData): Promise<ActionResu
   const chosen = parsed.data.chosenAction ?? task.action;
   const ctx = { actor: userActor(user) };
 
+  // B161: a cold contact's call step closes with its call and its form; the CRM's quick Log call stays.
+  if (chosen === 'CALL' && !task.enrollment.personId) return { ok: false, error: 'A call step closes with its call and its form. Press Call, or Log a call if you called from another phone.' };
   if (chosen === 'CALL') {
     if (!parsed.data.disposition) return { ok: false, error: 'Pick a call outcome first.' };
     const r = await completeCall({ taskId: task.id, disposition: parsed.data.disposition, note: parsed.data.note, chosenAction: 'CALL' }, ctx);
-    revalidate();
+    // B212: a refusal (the step closed in another tab) changes nothing, and re-reading the page would
+    // take the buttons and their message away; only a done call re-reads it.
     if (!r.ok) return { ok: false, error: describeFailure(r.reason, r.detail) };
+    revalidate();
     return { ok: true, message: r.replied ? 'Call logged. The person answered, so the sequence is finished as replied.' : r.advance.outcome === 'completed' ? 'Call logged. Sequence finished for this person.' : 'Call logged.' };
   }
   const r = await completeTask({ taskId: task.id, source: 'MANUAL', chosenAction: chosen, note: parsed.data.note ?? null }, ctx);
-  revalidate();
   if (!r.ok) return { ok: false, error: describeFailure(r.reason, r.detail) };
+  revalidate();
   return { ok: true, message: r.advance.outcome === 'completed' ? 'Done. Sequence finished for this person.' : 'Done.' };
 }
 
@@ -90,8 +105,8 @@ export async function skipTaskAction(formData: FormData): Promise<ActionResult> 
   const r = known
     ? await skipWithReason({ taskId: task.id, reasonKey: parsed.data.reasonKey, note: parsed.data.note }, { actor: userActor(user) })
     : await skipTask({ taskId: task.id, reason: parsed.data.reasonKey, note: parsed.data.note }, { actor: userActor(user) });
-  revalidate();
   if (!r.ok) return { ok: false, error: describeFailure(r.reason, r.detail) };
+  revalidate();
   const exited = (r as { exited?: string | null }).exited ?? null;
   return { ok: true, message: exited ? `Skipped and removed from the sequence (${exited.replace(/_/g, ' ')}).` : 'Skipped.' };
 }
@@ -142,16 +157,37 @@ async function loadEnrollmentForTask(taskId: string, opts: { manage?: boolean } 
 export async function finishFromTaskAction(formData: FormData): Promise<ActionResult> {
   const kind = String(formData.get('kind') ?? '');
   if (kind !== 'replied' && kind !== 'no_reply') return { ok: false, error: 'Invalid request.' };
-  const { user, enrollment, error } = await loadEnrollmentForTask(String(formData.get('taskId') ?? ''));
+  const taskId = String(formData.get('taskId') ?? '');
+  const { user, enrollment, error } = await loadEnrollmentForTask(taskId);
   if (!enrollment) return { ok: false, error: error ?? 'Not found.' };
-  await finishEnrollment(enrollment.id, kind, { actor: userActor(user) });
+  const gone = await coldContactGone(enrollment.sandboxContactId, enrollment.personId);
+  if (gone) return { ok: false, error: gone };
+  const finished = await finishEnrollment(enrollment.id, kind, { actor: userActor(user) });
+  // N031: a cold contact who answered by email or LinkedIn, said so here, is a reply in Reports: the
+  // one reply rule counts a reply touch, so one is recorded, once per enrollment, stamped Cold.
+  const coldId = !enrollment.personId ? enrollment.sandboxContactId : null;
+  if (kind === 'replied' && coldId && finished.status === 'REPLIED' && OCCUPYING_STATUSES.includes(enrollment.status)) {
+    const task = await prisma.task.findUnique({ where: { id: taskId }, select: { action: true, chosenAction: true } });
+    const now = new Date();
+    const mark = await prisma.touch.upsert({
+      where: { externalId: `${MARKED_REPLY_PREFIX}${enrollment.id}` },
+      create: { sandboxContactId: coldId, channel: channelOf(task?.chosenAction ?? task?.action ?? 'EMAIL'), direction: 'INBOUND', occurredAt: now, summary: 'Replied (recorded in Tasks)', externalId: `${MARKED_REPLY_PREFIX}${enrollment.id}`, actorUserId: user.id, actorLabel: user.name, audience: 'SANDBOX' },
+      update: {},
+    });
+    // Outlook may have tracked this very reply already: it counts once (S8).
+    await joinMarkedReply(mark);
+    // Recording a reply is activity, which keeps retention away (N032).
+    await prisma.sandboxContact.updateMany({ where: { id: coldId, OR: [{ lastActivityAt: null }, { lastActivityAt: { lt: now } }] }, data: { lastActivityAt: now } });
+  }
   revalidate();
-  return { ok: true, message: kind === 'replied' ? 'Sequence ended: they replied.' : 'Sequence ended with no reply.' };
+  return { ok: true, message: kind === 'replied' ? (coldId ? 'Sequence ended: they replied. Set a next step, or move them to the CRM.' : 'Sequence ended: they replied.') : 'Sequence ended with no reply.' };
 }
 
 export async function removeFromSequenceAction(formData: FormData): Promise<ActionResult> {
   const { user, enrollment, error } = await loadEnrollmentForTask(String(formData.get('taskId') ?? ''));
   if (!enrollment) return { ok: false, error: error ?? 'Not found.' };
+  const gone = await coldContactGone(enrollment.sandboxContactId, enrollment.personId);
+  if (gone) return { ok: false, error: gone };
   const reason = String(formData.get('reason') ?? 'removed').trim() || 'removed';
   await exitEnrollment(enrollment.id, { reason, actor: userActor(user) });
   // "Asked not to be contacted" has to hold for every future campaign, not just this one.
@@ -223,6 +259,11 @@ export async function bulkTasksAction(formData: FormData): Promise<ActionResult>
     }
     try {
       if (d.op === 'complete') {
+        // B161: a cold contact's call step closes with its call and its form, in a list as on its own.
+        if (task.action === 'CALL' && !task.enrollment.personId) {
+          problems.push(`${task.label}: a cold call step closes with its call and its form`);
+          continue;
+        }
         if (task.action === 'CALL') {
           if (!d.disposition) {
             problems.push(`${task.label}: calls need an outcome`);

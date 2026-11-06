@@ -32,6 +32,13 @@ describe('database', () => {
     await expect(prisma.enrollment.create({ data: { ...base, status: 'ACTIVE' } })).resolves.toBeTruthy();
   });
 
+  it('B013: the database is UTF8, so a name outside Latin-1 saves and reads back', async () => {
+    const [{ encoding }] = await prisma.$queryRaw<{ encoding: string }[]>`SELECT pg_encoding_to_char(encoding) AS encoding FROM pg_database WHERE datname = current_database()`;
+    expect(encoding).toBe('UTF8');
+    const c = await prisma.sandboxContact.create({ data: { source: 'MANUAL', firstName: '王小明', lastName: 'Παπαδόπουλος', companyName: 'Ёлка Капитал' } });
+    expect(await prisma.sandboxContact.findUniqueOrThrow({ where: { id: c.id }, select: { firstName: true, lastName: true, companyName: true } })).toEqual({ firstName: '王小明', lastName: 'Παπαδόπουλος', companyName: 'Ёлка Капитал' });
+  });
+
   it('stores and reloads settings with defaults', async () => {
     const before = await getSettings();
     expect(before.rules.dailyCap).toBe(40);

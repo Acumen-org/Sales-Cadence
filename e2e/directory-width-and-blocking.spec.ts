@@ -70,18 +70,20 @@ test('people keeps one row of filters and no list-category dropdown', async ({ p
 });
 
 test('an admin blocks an account out of the platform and puts it back', async ({ page }) => {
-  page.on('dialog', (dialog) => dialog.accept());
+  // Each confirm is Cadence's own dialog now (ConfirmDialog), answered by its button.
+  const confirm = (name: string) => page.getByRole('dialog').last().getByRole('button', { name, exact: true }).click();
   await admin(page);
   // A retried run may find the account still blocked from the attempt before: put it back first.
   await page.goto('/settings?tab=blocked');
   const stale = page.locator('tbody tr', { hasText: 'Dummy Company B' });
-  if (await stale.count()) { await stale.getByRole('button', { name: 'Unblock' }).click(); await expect(stale).toHaveCount(0); }
+  if (await stale.count()) { await stale.getByRole('button', { name: 'Unblock' }).click(); await confirm('Unblock'); await expect(stale).toHaveCount(0); }
   await page.goto('/accounts?pod=&fo=');
   await page.getByRole('link', { name: 'Dummy Company B' }).click();
   await expect(page.getByRole('heading', { name: 'Dummy Company B' })).toBeVisible();
 
   try {
     await page.getByRole('button', { name: 'Block account' }).click();
+    await confirm('Block');
     // The block re-renders the record and the directories; a busy runner takes a while.
     await expect(page.getByText('Blocked account', { exact: true })).toBeVisible({ timeout: 30_000 });
     await page.goto('/accounts?pod=&fo=');
@@ -98,7 +100,7 @@ test('an admin blocks an account out of the platform and puts it back', async ({
     // Whatever happened above, the workspace goes back as it was for the cases that follow.
     await page.goto('/settings?tab=blocked');
     const row = page.locator('tbody tr', { hasText: 'Dummy Company B' });
-    if (await row.count()) await row.getByRole('button', { name: 'Unblock' }).click();
+    if (await row.count()) { await row.getByRole('button', { name: 'Unblock' }).click(); await confirm('Unblock'); }
     await expect(page.locator('tbody tr', { hasText: 'Dummy Company B' })).toHaveCount(0);
   }
 
@@ -114,7 +116,10 @@ test('only an admin can block an account', async ({ page }) => {
   await page.goto('/accounts?pod=&fo=');
   await page.getByRole('link', { name: 'Dummy Company B' }).click();
   await expect(page.getByRole('button', { name: 'Block account' })).toHaveCount(0);
+  // B215: a non-admin lands on the read-only Cold outreach settings, told who can change them.
   await page.goto('/settings?tab=blocked');
-  await expect(page).not.toHaveURL(/settings/);
+  await expect(page).toHaveURL(/\/settings\?tab=cold-outreach$/);
+  await expect(page.getByText(/^Read only\./)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Unblock' })).toHaveCount(0);
   await logout(page);
 });

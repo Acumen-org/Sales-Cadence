@@ -32,6 +32,13 @@ export type CampaignSummary = {
   meetingRate: number;
 };
 
+/**
+ * B128: what "Meetings" means for a campaign, the same on its list row, its tiles and its step and
+ * team tables: people in it whose outreach booked a meeting (enrollment status MEETING). A meeting
+ * with someone in the campaign that came from elsewhere is not the campaign's.
+ */
+export const CAMPAIGN_MEETING = { status: 'MEETING' } as const satisfies Prisma.EnrollmentWhereInput;
+
 function summarise(rows: Array<{ status: string; _count: { _all: number } }>) {
   const c = { total: 0, active: 0, paused: 0, replied: 0, meeting: 0, completed: 0, exited: 0 };
   for (const r of rows) {
@@ -216,4 +223,11 @@ export async function nonReplierCandidates(campaignId: string, days: number, now
   const inbound = await prisma.touch.findMany({ where: { personId: { in: ids }, direction: 'INBOUND', occurredAt: { gte: campaign.createdAt } }, select: { personId: true } });
   for (const reply of inbound) busySet.add(reply.personId);
   return finished.filter((f) => !busySet.has(f.personId) && !f.person!.dnd && !f.person!.optedOut && !f.person!.deletedAt);
+}
+
+/** A campaign's page title: "Q4 Harbor · Campaigns · Cold outreach" for a cold one, "Q4 Harbor · Campaigns" for a CRM one (B115). */
+export async function campaignTitle(id: string): Promise<string> {
+  const c = await prisma.campaign.findUnique({ where: { id }, select: { name: true, audience: true } });
+  if (!c) return 'Campaigns';
+  return c.audience === 'SANDBOX' ? `${c.name} · Campaigns · Cold outreach` : `${c.name} · Campaigns`;
 }

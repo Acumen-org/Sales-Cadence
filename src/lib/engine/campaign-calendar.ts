@@ -16,6 +16,8 @@ import { advanceEnrollment } from './tasks';
 export async function activateCalendarCampaign(id: string, ctx: EngineContext) {
   const now = ctx.now ?? new Date();
   const initial = await prisma.campaign.findUniqueOrThrow({ where: { id } });
+  // A cold campaign runs the same calendar with its own launch rules: locks per contact, re-checks, claims (8.9).
+  if (initial.audience === 'SANDBOX') return (await import('../sandbox/campaigns')).activateColdCalendar(id, ctx);
   const companies = await prisma.personCache.findMany({ where: { id: { in: initial.personIds } }, select: { companyId: true } });
   const external = await externalPeopleWhere();
   const followupIds = initial.followupSourceId ? new Set((await nonReplierCandidates(initial.followupSourceId, initial.followupWaitDays, now, initial.followupSourceRun ?? undefined)).map(e => e.personId)) : null;
@@ -48,9 +50,9 @@ export async function activateCalendarCampaign(id: string, ctx: EngineContext) {
       ].filter(Boolean).join('; '));
     }
     const originalOwners = new Map(plan.people.map(p => [p.id, p.ownerMemberId]));
-    const moved = people.filter(p => p.ownerMemberId !== originalOwners.get(p.id)).map(p => ({ name: nameOf.get(p.id) ?? 'Someone', reason: 'Has a different owner in Twenty now' }));
+    const moved = people.filter(p => p.ownerMemberId !== originalOwners.get(p.id)).map(p => ({ name: nameOf.get(p.id) ?? 'Someone', reason: 'Has a different owner in the CRM now' }));
     const lapsed = followupIds ? people.filter(p => !followupIds.has(p.id)).map(p => ({ name: nameOf.get(p.id) ?? 'Someone', reason: 'No longer due this follow-up' })) : [];
-    const renamed = fos.filter(f => f.twentyMemberId !== plan.fos.find(old => old.id === f.id)?.twentyMemberId).map(f => `${f.name} is linked to a different Twenty user now`);
+    const renamed = fos.filter(f => f.twentyMemberId !== plan.fos.find(old => old.id === f.id)?.twentyMemberId).map(f => `${f.name} is linked to a different CRM user now`);
     if (moved.length || lapsed.length || renamed.length) throw notStarted([whoAndWhy([...moved, ...lapsed]), ...renamed].filter(Boolean).join('; '));
     const rows = [];
     for (const b of plan.batches) {
@@ -58,7 +60,7 @@ export async function activateCalendarCampaign(id: string, ctx: EngineContext) {
       for (const personId of b.personIds) rows.push({
         personId, companyId: eligible.get(personId)!.companyId, campaignId: id, campaignRun: c.runNumber,
         foUserId: b.foId, podId: c.podId, sequenceId: plan.sequenceIds[b.flowId], startDate: b.dates[0], scheduleDates: b.dates,
-        createdById: c.createdById, status: 'ACTIVE' as const,
+        createdById: c.createdById, status: 'ACTIVE' as const, audience: 'CRM' as const,
       });
     }
     await tx.enrollment.createMany({ data: rows });

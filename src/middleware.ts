@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { coldOutreachRedirect } from './lib/cold-outreach-paths';
 
 const SESSION_COOKIE = 'cadence_session';
 const PUBLIC_PREFIXES = ['/login', '/api/auth', '/api/health', '/api/webhooks', '/api/integrations', '/_next', '/fonts', '/favicon.ico', '/icon.svg'];
@@ -10,6 +11,15 @@ const PUBLIC_PREFIXES = ['/login', '/api/auth', '/api/health', '/api/webhooks', 
  */
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  // The section moved from /sandbox to /cold-outreach (PLAN 3): old links land on the new page, 307.
+  const moved = coldOutreachRedirect(pathname, req.nextUrl.search);
+  if (moved) {
+    const url = req.nextUrl.clone();
+    const [path, query] = moved.split('?');
+    url.pathname = path;
+    url.search = query ? `?${query}` : '';
+    return NextResponse.redirect(url, 307);
+  }
   if (PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + '/'))) {
     return NextResponse.next();
   }

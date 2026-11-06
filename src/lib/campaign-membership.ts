@@ -1,5 +1,6 @@
 import type { CampaignDraft } from './campaign-planner';
-import type { CampaignStatus, EnrollmentStatus } from '@prisma/client';
+import type { CampaignAudience, CampaignStatus, EnrollmentStatus } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { prisma } from './db';
 import { CRM_SUBJECT } from './subject';
 import { addDays, todayIn, type LocalDate } from './dates';
@@ -7,6 +8,7 @@ import { workspaceTimezone } from './workspace';
 import { safeParseSteps } from './sequences/steps';
 import type { SessionUser } from './auth/current-user';
 import { canChangeCampaignPeople, visiblePodIds } from './auth/rbac';
+import { enrollmentStatusLabel } from './enrollment-labels';
 
 /**
  * Who is in which campaign - before it starts as well as after.
@@ -32,6 +34,8 @@ export type Membership = {
   /** The person's own state inside the campaign; null before it launches. */
   enrollmentId: string | null;
   enrollmentStatus: EnrollmentStatus | null;
+  /** Why an ended enrollment ended ("moved_to_crm", "opted_out"...), for its label (B102). */
+  exitReason?: string | null;
   sequenceId: string;
   sequenceName: string;
   /** Zero-based current step and the plan's step count; step is null before anything is generated. */
@@ -51,7 +55,7 @@ export function membershipLabel(m: Membership): { label: string; tone: 'gray' | 
     case 'REPLIED': return { label: 'Finished (Replied)', tone: 'blue' };
     case 'MEETING': return { label: 'Meeting booked', tone: 'blue' };
     case 'COMPLETED': return { label: 'Finished (No reply)', tone: 'gray' };
-    case 'EXITED': return { label: 'Removed', tone: 'gray' };
+    case 'EXITED': return { label: enrollmentStatusLabel({ status: 'EXITED', exitReason: m.exitReason }), tone: m.exitReason === 'moved_to_crm' ? 'green' : 'gray' };
     default: return { label: m.campaignStatus === 'STOPPED' ? 'Stopped' : 'Finished', tone: 'gray' };
   }
 }
@@ -62,7 +66,7 @@ export async function membershipFor(personIds: string[]): Promise<Map<string, Me
   if (!personIds.length) return out;
   const [scheduled, enrollments] = await Promise.all([
     prisma.campaign.findMany({ where: { status: { in: UPCOMING }, personIds: { hasSome: personIds } }, select: { id: true, name: true, status: true, startDate: true, endDate: true, podId: true, personIds: true, plannerDraft: true, publishedPlan: true, enrollments: { distinct: ['foUserId'], select: { foUserId: true } }, sequenceId: true, sequence: { select: { name: true, steps: true } } } }),
-    prisma.enrollment.findMany({ where: { personId: { in: personIds }, campaignId: { not: null } }, orderBy: { createdAt: 'desc' }, select: { id: true, personId: true, foUserId: true, status: true, currentStep: true, sequenceId: true, sequence: { select: { name: true, steps: true } }, campaign: { select: { id: true, name: true, status: true, startDate: true, endDate: true, podId: true, plannerDraft: true, publishedPlan: true, sequenceId: true, sequence: { select: { name: true, steps: true } } } } } }),
+    prisma.enrollment.findMany({ where: { personId: { in: personIds }, campaignId: { not: null } }, orderBy: { createdAt: 'desc' }, select: { id: true, personId: true, foUserId: true, status: true, exitReason: true, currentStep: true, sequenceId: true, sequence: { select: { name: true, steps: true } }, campaign: { select: { id: true, name: true, status: true, startDate: true, endDate: true, podId: true, plannerDraft: true, publishedPlan: true, sequenceId: true, sequence: { select: { name: true, steps: true } } } } } }),
   ]);
   const want = new Set(personIds);
   const stepCount = (steps: unknown) => { const parsed = safeParseSteps(steps); return parsed.ok ? parsed.steps.length : 0; };
@@ -76,7 +80,7 @@ export async function membershipFor(personIds: string[]): Promise<Map<string, Me
     if (!e.personId) continue;
     const c = e.campaign!;
     const running = e.status === 'ACTIVE' || e.status === 'PAUSED';
-    push(e.personId, { campaignId: c.id, campaignName: c.name, campaignStatus: c.status, kind: running ? 'running' : 'finished', startDate: c.startDate, endDate: c.endDate, podId: c.podId, foIds: [...new Set([...teamOf(c), e.foUserId])], podWide: false, enrollmentId: e.id, enrollmentStatus: e.status, sequenceId: e.sequenceId, sequenceName: e.sequence.name, step: e.currentStep >= 0 ? e.currentStep : null, steps: stepCount(e.sequence.steps) });
+    push(e.personId, { campaignId: c.id, campaignName: c.name, campaignStatus: c.status, kind: running ? 'running' : 'finished', startDate: c.startDate, endDate: c.endDate, podId: c.podId, foIds: [...new Set([...teamOf(c), e.foUserId])], podWide: false, enrollmentId: e.id, enrollmentStatus: e.status, exitReason: e.exitReason, sequenceId: e.sequenceId, sequenceName: e.sequence.name, step: e.currentStep >= 0 ? e.currentStep : null, steps: stepCount(e.sequence.steps) });
   }
   const order: Record<MembershipKind, number> = { running: 0, upcoming: 1, finished: 2 };
   for (const list of out.values()) list.sort((a, b) => order[a.kind] - order[b.kind]);
@@ -113,11 +117,18 @@ function teamOf(c: { plannerDraft: unknown; publishedPlan?: unknown; enrollments
 
 export type CampaignChoice = { calendar: boolean; id: string; name: string; status: CampaignStatus; kind: 'upcoming' | 'running'; startDate: LocalDate; endDate: LocalDate | null; podId: string; podName: string; members: number };
 
-/** Campaigns a person can be added to: upcoming and running ones the reader may manage, or read. */
-export async function campaignChoices(user: SessionUser, opts: { manageOnly?: boolean } = {}): Promise<CampaignChoice[]> {
+/**
+ * Campaigns a person can be added to: upcoming and running ones the reader may manage, or read, of
+ * the one kind asked for (B044): CRM people go into CRM campaigns and cold contacts into cold ones. A
+ * cold choice is a studio campaign that can still take people: never one from before the studio, nor
+ * one whose start date passed without it starting (B131).
+ */
+export async function campaignChoices(user: SessionUser, opts: { manageOnly?: boolean; audience?: CampaignAudience } = {}): Promise<CampaignChoice[]> {
   const pods = visiblePodIds(user);
+  const cold = opts.audience === 'SANDBOX';
+  const today = todayIn(workspaceTimezone());
   const campaigns = await prisma.campaign.findMany({
-    where: { status: { in: [...UPCOMING, 'ACTIVE', 'PAUSED'] }, ...(pods === null ? {} : { podId: { in: pods } }) },
+    where: { audience: opts.audience ?? 'CRM', status: { in: [...UPCOMING, 'ACTIVE', 'PAUSED'] }, ...(pods === null ? {} : { podId: { in: pods } }), ...(cold ? { plannerDraft: { not: Prisma.DbNull }, NOT: { status: 'SCHEDULED', startDate: { lt: today } } } : {}) },
     orderBy: [{ status: 'asc' }, { startDate: 'asc' }],
     select: { id: true, name: true, status: true, startDate: true, endDate: true, podId: true, personIds: true, plannerDraft: true, publishedPlan: true, pod: { select: { name: true } }, enrollments: { distinct: ['foUserId'], select: { foUserId: true } }, _count: { select: { enrollments: { where: { status: { in: ['ACTIVE', 'PAUSED'] } } } } } },
   });

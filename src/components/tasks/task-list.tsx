@@ -9,6 +9,8 @@ import type { ActionResult } from '@/lib/actions/users';
 import { relativeDays, formatLocalDate, type LocalDate } from '@/lib/dates';
 import { ActionIcon } from '@/components/icons';
 import { Avatar, Badge } from '@/components/ui';
+import { SubjectBadges } from '@/components/subject-badges';
+import type { Cue } from '@/lib/sandbox/cues';
 import type { DispositionOption, SkipReasonOption } from './task-actions';
 import { flushTaskDrafts } from './draft-registry';
 
@@ -31,6 +33,10 @@ export type TaskListRow = {
   state: string;
   foName: string;
   campaignName: string | null;
+  /** "Email bounced" or "Possible bounce" on a cold contact (N097), beside the firm. */
+  warning?: string | null;
+  /** A cold contact's warning chips, as every Cold outreach screen shows them (PLAN 4.0: N073, N097, N046). */
+  chips?: Cue[];
 };
 
 type Props = {
@@ -174,6 +180,7 @@ export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispos
                   <span className="mt-0.5 flex items-center gap-2 text-[11.5px] text-ink-500">
                     <span className="min-w-0 flex-1 truncate">{t.companyName ?? 'No company'}</span>
                     <span className="shrink-0">Day <span className="font-medium text-ink-700">{t.stepDay}</span></span>
+                    {t.chips?.length ? <SubjectBadges badge={null} chips={t.chips} limit={1} links={false} className="shrink-0 flex-nowrap" /> : t.warning ? <Badge tone="amber">{t.warning}</Badge> : null}
                     {t.snoozed ? <Badge tone="sky">snoozed</Badge> : null}
                   </span>
                   {showFo ? <span className="mt-1 block truncate text-[11px] text-ink-500">FO <span className="font-medium text-ink-700">{t.foName}</span></span> : null}

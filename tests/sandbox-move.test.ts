@@ -28,8 +28,8 @@ describe('Move to CRM (plan section 8)', () => {
     for (let i = 0; i < 51; i++) contacts.push(await readyContact(b.users.alisa.id, b.pods.Alisa.id));
     const over = await preflightMove(contacts.map((c) => c.id), actor);
     expect(over.refused).toBe('You selected 51 contacts. Move at most 50 at a time.');
-    expect(await queueMove(contacts.map((c) => ({ contactId: c.id, mode: 'create' as const })), actor, audit)).toEqual({ ok: false, error: 'You selected 51 contacts. Move at most 50 at a time.' });
-    const ok = await queueMove(contacts.slice(0, 50).map((c) => ({ contactId: c.id, mode: 'create' as const })), actor, audit);
+    expect(await queueMove(contacts.map((c) => ({ contactId: c.id, mode: 'create' as const, noConversation: true })), actor, audit)).toEqual({ ok: false, error: 'You selected 51 contacts. Move at most 50 at a time.' });
+    const ok = await queueMove(contacts.slice(0, 50).map((c) => ({ contactId: c.id, mode: 'create' as const, noConversation: true })), actor, audit);
     expect(ok).toEqual(expect.objectContaining({ ok: true, queued: 50 }));
   }, 120_000);
 
@@ -39,8 +39,8 @@ describe('Move to CRM (plan section 8)', () => {
     await prisma.sandboxNote.create({ data: { sandboxContactId: contact.id, body: 'Prefers mornings', authorName: 'Alisa' } });
     const touch = await prisma.touch.create({ data: { sandboxContactId: contact.id, channel: 'EMAIL', direction: 'OUTBOUND', occurredAt: new Date(), summary: 'Email sent: Hello', externalId: `graph:test:${contact.id}` } });
     const pre = await preflightMove([contact.id], actor);
-    expect(pre.items[0]).toEqual(expect.objectContaining({ state: 'ready', firm: { action: 'create', name: 'Rivera Wealth Partners' } }));
-    const q = await queueMove([{ contactId: contact.id, mode: 'create' }], actor, audit);
+    expect(pre.items[0]).toEqual(expect.objectContaining({ group: 'no_conversation', firm: { action: 'create', name: 'Rivera Wealth Partners' } }));
+    const q = await queueMove([{ contactId: contact.id, mode: 'create', noConversation: true }], actor, audit);
     if (!q.ok) throw new Error(q.error);
     expect(await runMoveQueue()).toEqual({ done: 1, failed: 0, dryRun: 0 });
     const mock = getMockTwentyClient();
@@ -53,7 +53,7 @@ describe('Move to CRM (plan section 8)', () => {
     const item = await prisma.sandboxMoveItem.findFirstOrThrow({ where: { moveId: q.moveId } });
     expect(item).toEqual(expect.objectContaining({ state: 'DONE', companyAction: 'created' }));
     const notes = mock.notes.filter((n) => n.personIds.includes(item.twentyPersonId!));
-    expect(notes.map((n) => n.title)).toEqual(expect.arrayContaining([expect.stringMatching(/^\[Cadence\] Note .* by Alisa$/), '[Cadence] Sandbox history']));
+    expect(notes.map((n) => n.title)).toEqual(expect.arrayContaining([expect.stringMatching(/^\[Cadence\] Note .* by Alisa$/), '[Cadence] Cold outreach history']));
     expect(await prisma.personCache.findUnique({ where: { id: item.twentyPersonId! } })).not.toBeNull();
     expect((await prisma.touch.findUniqueOrThrow({ where: { id: touch.id } })).personId).toBe(item.twentyPersonId);
     expect(await prisma.sandboxContact.findUniqueOrThrow({ where: { id: contact.id } })).toEqual(expect.objectContaining({ status: 'MOVED', twentyPersonId: item.twentyPersonId }));
@@ -64,7 +64,7 @@ describe('Move to CRM (plan section 8)', () => {
     const { actor, audit } = await actorOf(b.users.alisa.id);
     const company = await prisma.companyCache.findFirstOrThrow({ where: { domain: { not: null } } });
     const contact = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { companyName: company.name, companyDomain: company.domain, companyWebsite: null });
-    const q = await queueMove([{ contactId: contact.id, mode: 'create' }], actor, audit);
+    const q = await queueMove([{ contactId: contact.id, mode: 'create', noConversation: true }], actor, audit);
     if (!q.ok) throw new Error(q.error);
     await runMoveQueue();
     expect(await prisma.sandboxMoveItem.findFirstOrThrow({ where: { moveId: q.moveId } })).toEqual(expect.objectContaining({ state: 'DONE', companyAction: 'linked', twentyCompanyId: company.id }));
@@ -74,7 +74,7 @@ describe('Move to CRM (plan section 8)', () => {
     const { actor } = await actorOf(b.users.alisa.id);
     const contact = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { email: null, phone: null, companyName: null });
     const pre = await preflightMove([contact.id], actor);
-    expect(pre.items[0].state).toBe('needs');
+    expect(pre.items[0].group).toBe('needs');
     expect(pre.items[0].missing.map((m) => m.key)).toEqual(['companyName', 'email']);
   });
 
@@ -83,7 +83,7 @@ describe('Move to CRM (plan section 8)', () => {
     resetEnvCache();
     const { actor, audit } = await actorOf(b.users.alisa.id);
     const contact = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
-    const q = await queueMove([{ contactId: contact.id, mode: 'create' }], actor, audit);
+    const q = await queueMove([{ contactId: contact.id, mode: 'create', noConversation: true }], actor, audit);
     if (!q.ok) throw new Error(q.error);
     await runMoveQueue();
     expect((await prisma.sandboxMoveItem.findFirstOrThrow({ where: { moveId: q.moveId } })).state).toBe('DRY_RUN');
@@ -94,7 +94,7 @@ describe('Move to CRM (plan section 8)', () => {
   it('undoes a move within the year, and refuses after it', async () => {
     const { actor, audit } = await actorOf(b.users.alisa.id);
     const contact = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
-    const q = await queueMove([{ contactId: contact.id, mode: 'create' }], actor, audit);
+    const q = await queueMove([{ contactId: contact.id, mode: 'create', noConversation: true }], actor, audit);
     if (!q.ok) throw new Error(q.error);
     await runMoveQueue();
     const item = await prisma.sandboxMoveItem.findFirstOrThrow({ where: { moveId: q.moveId } });
@@ -106,27 +106,27 @@ describe('Move to CRM (plan section 8)', () => {
     expect(getMockTwentyClient().notes.filter((n) => n.personIds.includes(item.twentyPersonId!))).toHaveLength(0);
     expect((await statusByIds([contact.bellwetherContactId!]))[0].status).toBe('in_sandbox');
 
-    const again = await queueMove([{ contactId: contact.id, mode: 'create' }], actor, audit);
+    const again = await queueMove([{ contactId: contact.id, mode: 'create', noConversation: true }], actor, audit);
     if (!again.ok) throw new Error(again.error);
     await runMoveQueue();
     const second = await prisma.sandboxMoveItem.findFirstOrThrow({ where: { moveId: again.moveId } });
     const afterAYear = new Date(second.doneAt!.getTime() + 366 * 86_400_000);
     const refused = await undoMoveItem(second.id, actor, audit, afterAYear);
     expect(refused.ok).toBe(false);
-    expect(!refused.ok && refused.error).toMatch(/can no longer be undone: the one-year window closed on/);
+    expect(!refused.ok && refused.error).toMatch(/can no longer be undone: its undo window closed on/);
   });
 
   it('keeps the move when someone changed the person in Twenty', async () => {
     const { actor, audit } = await actorOf(b.users.alisa.id);
     const contact = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
-    const q = await queueMove([{ contactId: contact.id, mode: 'create' }], actor, audit);
+    const q = await queueMove([{ contactId: contact.id, mode: 'create', noConversation: true }], actor, audit);
     if (!q.ok) throw new Error(q.error);
     await runMoveQueue();
     const item = await prisma.sandboxMoveItem.findFirstOrThrow({ where: { moveId: q.moveId } });
     getMockTwentyClient().updatePerson(item.twentyPersonId!, { jobTitle: 'Changed in Twenty', updatedAt: new Date(Date.now() + 60_000).toISOString() });
     const r = await undoMoveItem(item.id, actor, audit);
     expect(r.ok).toBe(false);
-    expect(!r.ok && r.error).toMatch(/Someone changed this person in Twenty/);
+    expect(!r.ok && r.error).toMatch(/Someone changed .* in the CRM/);
   });
 
   it('attaches the history to a person already in Twenty instead of creating one', async () => {
@@ -134,7 +134,7 @@ describe('Move to CRM (plan section 8)', () => {
     const existing = await prisma.personCache.findFirstOrThrow({ where: { email: { not: null } } });
     const contact = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { email: existing.email });
     const pre = await preflightMove([contact.id], actor);
-    expect(pre.items[0]).toEqual(expect.objectContaining({ state: 'attach', crmPerson: expect.objectContaining({ id: existing.id }) }));
+    expect(pre.items[0]).toEqual(expect.objectContaining({ group: 'in_crm', crmPerson: expect.objectContaining({ id: existing.id }) }));
     const q = await queueMove([{ contactId: contact.id, mode: 'attach' }], actor, audit);
     if (!q.ok) throw new Error(q.error);
     await processMoveItem((await prisma.sandboxMoveItem.findFirstOrThrow({ where: { moveId: q.moveId } })).id);

@@ -91,7 +91,7 @@ export async function previewEnrollment(req: EnrollRequest, client?: TwentyClien
     const c = client ?? (await getTwentyClient());
     await ensurePeopleCached(c, ids);
   } catch (err) {
-    warnings.push(`Could not fetch people from Twenty (${err instanceof Error ? err.message : String(err)}); using the local cache.`);
+    warnings.push(`Could not fetch people from the CRM (${err instanceof Error ? err.message : String(err)}); using the local cache.`);
   }
   const people = await prisma.personCache.findMany({ where: { id: { in: ids } } });
   const byId = new Map(people.map((p) => [p.id, p]));
@@ -133,7 +133,7 @@ export async function previewEnrollment(req: EnrollRequest, client?: TwentyClien
   // Somebody promised to another upcoming campaign is not promised twice: whichever launched
   // second would otherwise skip them silently as "already in a sequence".
   const scheduledElsewhere = new Map<string, string>();
-  for (const c of await prisma.campaign.findMany({ where: { status: { in: ['PENDING_APPROVAL', 'SCHEDULED'] }, personIds: { hasSome: ids }, ...(req.campaignId ? { id: { not: req.campaignId } } : {}) }, select: { name: true, personIds: true } })) {
+  for (const c of await prisma.campaign.findMany({ where: { audience: 'CRM', status: { in: ['PENDING_APPROVAL', 'SCHEDULED'] }, personIds: { hasSome: ids }, ...(req.campaignId ? { id: { not: req.campaignId } } : {}) }, select: { name: true, personIds: true } })) {
     for (const pid of c.personIds) if (!scheduledElsewhere.has(pid)) scheduledElsewhere.set(pid, c.name);
   }
 
@@ -159,18 +159,19 @@ export async function previewEnrollment(req: EnrollRequest, client?: TwentyClien
       conflicts.push({ personId: id, name, reason: 'internal', detail: 'Internal team or organisation; excluded from outreach' });
       continue;
     }
-    if (p.dnd) {
-      conflicts.push({ personId: id, name, reason: 'dnd', detail: 'Do not contact is set in Twenty' });
-      continue;
-    }
+    // Cadence's own opt-out first: since D6 it also sets the CRM's Do not contact, and it says more.
     if (p.optedOut) {
       conflicts.push({ personId: id, name, reason: 'opted_out', detail: 'Asked not to be contacted (recorded in Cadence)' });
+      continue;
+    }
+    if (p.dnd) {
+      conflicts.push({ personId: id, name, reason: 'dnd', detail: 'Do not contact is set in the CRM' });
       continue;
     }
     if (p.podOwner && p.podOwner !== pod.podOwnerValue) {
       // Pods follow Twenty: a person is worked by the pod Twenty says owns them. Moving them is a
       // change to make in Twenty, not something a pasted id should do quietly.
-      conflicts.push({ personId: id, name, reason: 'pod_mismatch', detail: `Belongs to ${optionLabel(p.podOwner)} in Twenty` });
+      conflicts.push({ personId: id, name, reason: 'pod_mismatch', detail: `Belongs to ${optionLabel(p.podOwner)} in the CRM` });
       continue;
     }
     if (p.badEmail && p.badPhone) warnings.push(`${name}: email and phone are flagged as bad data.`);
@@ -273,6 +274,7 @@ export async function enrollPeople(req: EnrollRequest, ctx: Omit<EngineContext, 
             sequenceId: sequence.id,
             startDate: c.startDate,
             status: 'ACTIVE',
+            audience: 'CRM',
             createdById: req.actor.type === 'USER' ? req.actor.id ?? null : null,
             // The engine's clock, not the database's. In production they are the same instant;
             // in a replay or a test they must agree, because the evidence window is measured

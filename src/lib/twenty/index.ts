@@ -6,7 +6,7 @@ import type { TwentyClient } from './client';
 import { TwentyGraphqlClient } from './graphql-client';
 import { getMockTwentyClient } from './mock-client';
 import { mockStoreEnabled, sharedMock } from './mock-store';
-import type { CreateNoteInput, UpdateNoteInput, TwentyMeetingSchema, TwentyMeetingRecordInput, TwentyTagField, CreateTaskInput, UpdateTaskInput, EnrichPersonInput, PersonNextActionInput, EnrichCompanyInput, TwentyPerson, TwentyCompany, CreatePersonInput, CreateCompanyInput } from './types';
+import type { CreateNoteInput, UpdateNoteInput, TwentyMeetingSchema, TwentyMeetingRecordInput, TwentyTagField, CreateTaskInput, UpdateTaskInput, EnrichPersonInput, PersonNextActionInput, PersonDndInput, EnrichCompanyInput, TwentyPerson, TwentyCompany, CreatePersonInput, CreateCompanyInput } from './types';
 import { blankPerson } from './mock-client';
 
 /**
@@ -90,12 +90,15 @@ export class DryRunTwentyClient implements TwentyClient {
   }
   async enrichPerson(id: string, patch: EnrichPersonInput, current?: TwentyPerson) {
     const record = current ?? await this.inner.getPerson(id);
-    if (!record) throw new Error('This contact no longer exists in Twenty.');
+    if (!record) throw new Error('This contact no longer exists in the CRM.');
     await this.record('enrichPerson', 'person', { id, ...patch }, id);
     return record;
   }
   async setPersonNextAction(id: string, patch: PersonNextActionInput) {
     await this.record('setPersonNextAction', 'person', { id, ...patch }, id);
+  }
+  async setPersonDnd(id: string, patch: PersonDndInput) {
+    await this.record('setPersonDnd', 'person', { id, ...patch }, id);
   }
   findPeople: TwentyClient['findPeople'] = (q) => this.inner.findPeople(q);
   findCompanies: TwentyClient['findCompanies'] = (q) => this.inner.findCompanies(q);
@@ -119,7 +122,7 @@ export class DryRunTwentyClient implements TwentyClient {
   }
   async enrichCompany(id: string, patch: EnrichCompanyInput, current?: TwentyCompany) {
     const record = current ?? (await this.inner.listCompanies({ ids: [id], limit: 1 })).items[0];
-    if (!record) throw new Error('This account no longer exists in Twenty.');
+    if (!record) throw new Error('This account no longer exists in the CRM.');
     await this.record('enrichCompany', 'company', { id, ...patch }, id);
     return record;
   }
@@ -146,7 +149,7 @@ export async function getTwentyClient(): Promise<TwentyClient> {
     base = mockStoreEnabled() ? sharedMock(getMockTwentyClient()) : getMockTwentyClient();
   } else {
     if (!conn.baseUrl || !conn.apiKey) {
-      throw new Error('TWENTY_MODE=graphql but TWENTY_API_URL / TWENTY_API_KEY are not configured (env or Settings > Twenty).');
+      throw new Error('TWENTY_MODE=graphql but TWENTY_API_URL / TWENTY_API_KEY are not configured (env or Settings > CRM).');
     }
     const schema = await getTwentySchema();
     const key = `${conn.baseUrl}|${conn.apiKey}|${JSON.stringify(schema)}`;

@@ -39,7 +39,7 @@ function datasetFor(kind: MockDataset) {
     podOptions: DEMO_POD_OPTIONS,
   };
 }
-import type { PersonNextActionInput, TwentyCalendarEvent, TwentyCalendarParticipant } from './types';
+import type { PersonDndInput, PersonNextActionInput, TwentyCalendarEvent, TwentyCalendarParticipant } from './types';
 import type {
   CreateNoteInput,
   CreateTaskInput,
@@ -76,6 +76,7 @@ export type MockWrite =
   | { op: 'enrichPerson'; id: string; patch: EnrichPersonInput }
   | { op: 'enrichCompany'; id: string; patch: EnrichCompanyInput }
   | { op: 'setPersonNextAction'; id: string; patch: PersonNextActionInput }
+  | { op: 'setPersonDnd'; id: string; patch: PersonDndInput }
   | { op: 'deleteTask'; id: string }
   | { op: 'createPerson'; id: string; input: CreatePersonInput }
   | { op: 'createCompany'; id: string; input: CreateCompanyInput }
@@ -392,7 +393,7 @@ export class MockTwentyClient implements TwentyClient {
   async getViewPeople(viewId: string) {
     this.maybeFail();
     const view = this.views.find((v) => v.id === viewId);
-    if (!view) throw new Error(`Twenty view ${viewId} not found`);
+    if (!view) throw new Error(`CRM view ${viewId} not found`);
     const set = new Set(view.personIds ?? []);
     return { view: clone(view), people: clone(this.people.filter((p) => set.has(p.id) && !p.deletedAt)) };
   }
@@ -602,7 +603,7 @@ export class MockTwentyClient implements TwentyClient {
   async enrichPerson(id: string, patch: EnrichPersonInput) {
     this.maybeFail();
     const person = this.people.find((item) => item.id === id && !item.deletedAt);
-    if (!person) throw new Error('This contact no longer exists in Twenty.');
+    if (!person) throw new Error('This contact no longer exists in the CRM.');
     Object.assign(person, patch, { updatedAt: new Date().toISOString() });
     this.writes.push({ op: 'enrichPerson', id, patch: clone(patch) });
     return clone(person);
@@ -611,15 +612,23 @@ export class MockTwentyClient implements TwentyClient {
   async setPersonNextAction(id: string, patch: PersonNextActionInput) {
     this.maybeFail();
     const person = this.people.find((item) => item.id === id && !item.deletedAt);
-    if (!person) throw new Error('This contact no longer exists in Twenty.');
+    if (!person) throw new Error('This contact no longer exists in the CRM.');
     Object.assign(person, patch, { updatedAt: new Date().toISOString() });
     this.writes.push({ op: 'setPersonNextAction', id, patch: clone(patch) });
+  }
+
+  async setPersonDnd(id: string, patch: PersonDndInput) {
+    this.maybeFail();
+    const person = this.people.find((item) => item.id === id && !item.deletedAt);
+    if (!person) throw new Error('This contact no longer exists in the CRM.');
+    Object.assign(person, { dnd: patch.dnd, dndReason: patch.dnd ? patch.reason ?? 'DO_NOT_DISTURB' : null, updatedAt: new Date().toISOString() });
+    this.writes.push({ op: 'setPersonDnd', id, patch: clone(patch) });
   }
 
   async enrichCompany(id: string, patch: EnrichCompanyInput) {
     this.maybeFail();
     const company = this.companies.find((item) => item.id === id && !item.deletedAt);
-    if (!company) throw new Error('This account no longer exists in Twenty.');
+    if (!company) throw new Error('This account no longer exists in the CRM.');
     Object.assign(company, patch, { updatedAt: new Date().toISOString() });
     this.writes.push({ op: 'enrichCompany', id, patch: clone(patch) });
     return clone(company);

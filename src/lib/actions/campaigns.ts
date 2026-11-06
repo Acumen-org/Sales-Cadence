@@ -199,7 +199,7 @@ export async function stopCampaignAction(data: FormData) { return transition(dat
 export async function restartCampaignAction(data: FormData): Promise<ActionResult> {
   const { user, campaign, error } = await loadCampaignForUser(String(data.get('campaignId') ?? ''), 'plan another run of this campaign');
   if (!campaign) return { ok: false, error: error ?? 'Not found.' };
-  if (campaign.plannerDraft) return { ok: false, error: 'Use Plan another run on this campaign: a campaign built in the studio starts again from a new calendar.' };
+  if (campaign.plannerDraft || campaign.audience === 'SANDBOX') return { ok: false, error: 'Use Plan another run on this campaign: a campaign built in the studio starts again from a new calendar.' };
   const startDate = String(data.get('startDate') ?? todayIn(user.timezone));
   if (!isLocalDate(startDate)) return { ok: false, error: 'Pick a valid start date.' };
   try {
@@ -213,9 +213,13 @@ export async function restartCampaignAction(data: FormData): Promise<ActionResul
     return { ok: true, message: 'New campaign run scheduled. Previous history is retained.' };
   } catch (error) { return failure(error); }
 }
+/** Cold campaigns need no approval (owner, 5 Nov): publishing schedules them, as for CRM campaigns. */
+const COLD_NO_APPROVAL = 'Cold campaigns need no approval: publishing one schedules it.';
+
 export async function approveCampaignAction(data: FormData): Promise<ActionResult> {
   const { user, campaign, error } = await loadCampaignForUser(String(data.get('campaignId') ?? ''), 'approve this campaign', true);
   if (!campaign) return { ok: false, error: error ?? 'Not found.' };
+  if (campaign.audience === 'SANDBOX') return { ok: false, error: COLD_NO_APPROVAL };
   if (campaign.plannerDraft) return { ok: false, error: 'Open this campaign in the studio to review it. A campaign built in the studio is approved by publishing its calendar.' };
   if (!canApproveCampaign(user, campaign.podId)) return { ok: false, error: whyNotApproveCampaign(user, campaign.podId, campaign.pod.name)! };
   try {
@@ -233,6 +237,7 @@ export async function approveCampaignAction(data: FormData): Promise<ActionResul
 export async function rejectCampaignAction(data: FormData): Promise<ActionResult> {
   const { user, campaign, error } = await loadCampaignForUser(String(data.get('campaignId') ?? ''), 'decline this campaign', true);
   if (!campaign) return { ok: false, error: error ?? 'Not found.' };
+  if (campaign.audience === 'SANDBOX') return { ok: false, error: `${COLD_NO_APPROVAL} To keep it from running, stop it or delete it.` };
   if (!canApproveCampaign(user, campaign.podId)) return { ok: false, error: whyNotApproveCampaign(user, campaign.podId, campaign.pod.name)! };
   const changed = await prisma.campaign.updateMany({ where: { id: campaign.id, status: 'PENDING_APPROVAL' }, data: { status: 'STOPPED' } });
   if (!changed.count) return { ok: false, error: 'This request was already handled.' };
@@ -247,6 +252,7 @@ export async function reenrollNonRepliersAction(data: FormData): Promise<ActionR
   if (!parsed.success || !isLocalDate(parsed.data.startDate)) return { ok: false, error: 'Choose a sequence, campaign name, wait time and start date.' };
   const d = parsed.data; const { user, campaign, error } = await loadCampaignForUser(d.campaignId, 'start a follow-up from this campaign');
   if (!campaign) return { ok: false, error: error ?? 'Not found.' };
+  if (campaign.audience === 'SANDBOX') return { ok: false, error: 'Follow-ups are for CRM campaigns. For cold contacts, plan another run of this campaign, or a new cold campaign.' };
   const sequence = await prisma.sequence.findFirst({ where: { id: d.sequenceId, archived: false } });
   if (!sequence) return { ok: false, error: 'Choose an available sequence.' };
   const candidates = await nonReplierCandidates(campaign.id, d.days);
@@ -280,10 +286,10 @@ function idsField(formData: FormData): string[] {
   }
 }
 
-/** The campaigns the reader may add people to, with the places each still has. */
-export async function campaignChoicesAction(): Promise<ActionResult> {
+/** The campaigns the reader may add people to, with the places each still has: CRM ones for people, cold ones for cold contacts (B044). */
+export async function campaignChoicesAction(audience: 'CRM' | 'SANDBOX' = 'CRM'): Promise<ActionResult> {
   const user = await requireUser();
-  const choices = await campaignChoices(user, { manageOnly: true });
+  const choices = await campaignChoices(user, { manageOnly: true, audience: audience === 'SANDBOX' ? 'SANDBOX' : 'CRM' });
   const today = todayIn(user.timezone);
   const withRoom = await Promise.all(choices.map(async (c) => {
     if (c.calendar) return { ...c, placesLeft: null as number | null };
@@ -298,15 +304,25 @@ export async function campaignChoicesAction(): Promise<ActionResult> {
   return { ok: true, data: withRoom };
 }
 
+/** B044: people go into campaigns of their own kind, and the refusal says which kind this one is. */
+function wrongKind(campaign: { name: string }, cold: boolean): string {
+  return cold ? `${campaign.name} is a CRM campaign, so it takes CRM people only. Add cold contacts to a cold campaign.` : `${campaign.name} is a cold campaign, so it takes cold contacts only. Add CRM people to a CRM campaign.`;
+}
+
 export async function addPeopleToCampaignAction(formData: FormData): Promise<ActionResult> {
   const user = await requireUser();
   const campaignId = String(formData.get('campaignId') ?? '');
+  // Cold contacts come from Cold outreach and say so; everything else is CRM people.
+  const cold = String(formData.get('audience') ?? '') === 'SANDBOX';
   const ids = idsField(formData);
-  if (!ids.length) return { ok: false, error: 'Choose at least one person.' };
+  if (!ids.length) return { ok: false, error: cold ? 'Choose at least one contact.' : 'Choose at least one person.' };
   const campaign = await prisma.campaign.findUnique({ where: { id: campaignId }, include: { pod: { select: { name: true } } } });
   if (!campaign) return { ok: false, error: 'This campaign has been deleted.' };
+  if ((campaign.audience === 'SANDBOX') !== cold) return { ok: false, error: wrongKind(campaign, cold) };
   const refused = whyNotChangeCampaignPeople(user, await campaignTeam(campaign), campaign.pod.name);
   if (refused) return { ok: false, error: refused };
+  // A cold campaign takes contacts only through its studio plan, which every cold campaign has (W14).
+  if (cold && !campaign.plannerDraft) return { ok: false, error: `${campaign.name} has no plan to add contacts to. Open it in the studio first.` };
   try {
     if (campaign.plannerDraft) {
       const r = await addPeopleToCalendarCampaign(user, campaign, ids);
@@ -388,7 +404,7 @@ export async function removePeopleFromCampaignAction(formData: FormData): Promis
     const wanted = new Set(ids);
     const remaining = campaign.personIds.filter((id) => !wanted.has(id));
     const dropped = campaign.personIds.length - remaining.length;
-    const live = await prisma.enrollment.findMany({ where: { campaignId, personId: { in: ids }, status: { in: ['ACTIVE', 'PAUSED'] } }, select: { id: true } });
+    const live = await prisma.enrollment.findMany({ where: { campaignId, ...(campaign.audience === 'SANDBOX' ? { sandboxContactId: { in: ids }, personId: null } : { personId: { in: ids } }), status: { in: ['ACTIVE', 'PAUSED'] } }, select: { id: true } });
     for (const e of live) await exitEnrollment(e.id, { reason: 'removed', actor: userActor(user) });
     if (dropped) await prisma.campaign.update({ where: { id: campaignId }, data: { personIds: remaining } });
     await logAudit({ entityType: 'campaign', entityId: campaignId, action: 'people_removed', actor: userActor(user), details: { removed: ids.length, endedEnrollments: live.length } });

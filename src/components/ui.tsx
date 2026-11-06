@@ -4,6 +4,7 @@ import clsx from 'clsx';
 import { cloneElement, isValidElement, useId, type CSSProperties, type ReactElement, type ReactNode } from 'react';
 import { artFor, type Accent, type RecordArt } from '@/lib/accent';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
+import { enrollmentStatusLabel, enrollmentTone } from '@/lib/enrollment-labels';
 
 /* -------------------------------------------------------------------------- */
 /* Page chrome                                                                */
@@ -153,20 +154,24 @@ export function Avatar({ name, size = 32, shape = 'square', className, style }: 
   );
 }
 
-/** Two-line cell: avatar, primary name (optionally a link), and a muted second line. */
-export function IdentityCell({ name, sub, href, shape = 'square', size = 32 }: { name: string; sub?: ReactNode; href?: string; shape?: 'square' | 'circle'; size?: number }) {
+/**
+ * Two-line cell: avatar, primary name (optionally a link), and a muted second line. `wrap` lets both
+ * lines wrap instead of being cut off, for a column too narrow for a long name or firm.
+ */
+export function IdentityCell({ name, sub, href, shape = 'square', size = 32, wrap = false }: { name: string; sub?: ReactNode; href?: string; shape?: 'square' | 'circle'; size?: number; wrap?: boolean }) {
+  const line = wrap ? 'break-words' : 'max-w-[22rem] truncate';
   return (
     <div className="flex min-w-0 items-center gap-3">
       <Avatar name={name} shape={shape} size={size} />
       <div className="min-w-0">
         {href ? (
-          <Link href={href} title={name} className="block max-w-[22rem] truncate text-[13px] font-semibold leading-5 text-ink-900 hover:text-brand-700">
+          <Link href={href} title={name} className={clsx('block', line, 'text-[13px] font-semibold leading-5 text-ink-900 hover:text-brand-700')}>
             {name}
           </Link>
         ) : (
-          <div title={name} className="max-w-[22rem] truncate text-[13px] font-semibold leading-5 text-ink-900">{name}</div>
+          <div title={name} className={clsx(line, 'text-[13px] font-semibold leading-5 text-ink-900')}>{name}</div>
         )}
-        {sub ? <div title={typeof sub === 'string' ? sub : undefined} className="mt-0.5 max-w-[22rem] truncate text-[12px] leading-5 text-ink-500">{sub}</div> : null}
+        {sub ? <div title={typeof sub === 'string' ? sub : undefined} className={clsx('mt-0.5', line, 'text-[12px] leading-5 text-ink-500')}>{sub}</div> : null}
       </div>
     </div>
   );
@@ -210,15 +215,6 @@ export function DotTimeline({ points, now, width = 210, days = 30 }: { points: T
 /* Status tones shared across pages                                           */
 /* -------------------------------------------------------------------------- */
 
-export const ENROLLMENT_TONE: Record<string, BadgeTone> = {
-  ACTIVE: 'blue',
-  PAUSED: 'amber',
-  REPLIED: 'green',
-  MEETING: 'purple',
-  COMPLETED: 'gray',
-  EXITED: 'red',
-};
-
 export const TASK_TONE: Record<string, BadgeTone> = {
   PENDING: 'blue',
   DONE: 'green',
@@ -234,35 +230,8 @@ export const CAMPAIGN_TONE: Record<string, BadgeTone> = {
   COMPLETED: 'green',
 };
 
-/** Outreach-style wording for an enrollment's state. */
-export function enrollmentStatusLabel(e: { status: string; exitReason?: string | null }): string {
-  switch (e.status) {
-    case 'ACTIVE':
-      return 'Active';
-    case 'PAUSED':
-      return 'Paused';
-    case 'REPLIED':
-      return 'Finished (Replied)';
-    case 'MEETING':
-      return 'Meeting booked';
-    case 'COMPLETED':
-      return 'Finished (No reply)';
-    case 'EXITED': {
-      const r = e.exitReason ?? '';
-      if (r === 'bounced') return 'Bounced';
-      if (r === 'opted_out') return 'Opted out';
-      if (r === 'dnd') return 'Do not contact';
-      if (r === 'not_interested') return 'Not interested';
-      if (r === 'not_a_prospect') return 'Not a prospect';
-      if (r === 'bad_data') return 'Bad data';
-      if (r === 'person_deleted') return 'Deleted in Twenty';
-      if (r.startsWith('campaign_')) return 'Campaign stopped';
-      return 'Removed';
-    }
-    default:
-      return e.status.charAt(0) + e.status.slice(1).toLowerCase();
-  }
-}
+/** Outreach-style wording for an enrollment's state, and its tone (B102): see lib/enrollment-labels.ts. */
+export { enrollmentStatusLabel, enrollmentTone };
 
 /** How Twenty classifies the person: its own funnel stage, then contact type, then the list. */
 const STAGE_TONE: Record<string, BadgeTone> = { PROSPECT: 'blue', QUALIFY: 'sky', RETAIN: 'green' };
@@ -517,11 +486,20 @@ export function RecordHeader({
   icon,
   accent,
   seed,
+  notice,
+  stackOnPhone = false,
 }: {
   name: string;
   sub?: ReactNode;
   badges?: ReactNode;
   actions?: ReactNode;
+  /** Between the record's identity and its actions: what blocks the actions, and its fix (cold outreach PLAN 4.0). */
+  notice?: ReactNode;
+  /**
+   * A header that holds notices and a row of buttons: on a phone the identity takes the whole width
+   * and the ornament steps aside; from tablets up the ornament stays beside the identity, not under the buttons.
+   */
+  stackOnPhone?: boolean;
   shape?: 'square' | 'circle';
   /** For records that are not people: an icon rather than their initials. */
   icon?: ReactNode;
@@ -536,8 +514,8 @@ export function RecordHeader({
       className="surface relative overflow-hidden px-5 py-5"
       style={accent ? { background: `linear-gradient(105deg, ${accent.mid} 0%, ${accent.tint} 60%, ${accent.tint} 100%)`, borderColor: accent.mid } : undefined}
     >
-      {accent && art ? <RecordOrnament accent={accent} art={art} /> : null}
-      <div className={clsx('relative flex min-w-0 items-start gap-4', accent && 'max-w-[calc(100%-260px)]')}>
+      {accent && art ? (stackOnPhone ? <span aria-hidden className="pointer-events-none absolute right-0 top-0 hidden h-[132px] w-[260px] sm:block"><RecordOrnament accent={accent} art={art} /></span> : <RecordOrnament accent={accent} art={art} />) : null}
+      <div className={clsx('relative flex min-w-0 items-start gap-4', accent && (stackOnPhone ? 'sm:max-w-[calc(100%-260px)]' : 'max-w-[calc(100%-260px)]'))}>
         {icon ? (
           <span className={clsx('flex h-12 w-12 shrink-0 items-center justify-center rounded-xl', accent ? 'text-white' : 'bg-brand-50 text-brand-700')} style={accent ? { background: accent.deep } : undefined}>{icon}</span>
         ) : (
@@ -549,6 +527,7 @@ export function RecordHeader({
           {badges ? <div className="mt-2.5 flex flex-wrap items-center gap-1.5">{badges}</div> : null}
         </div>
       </div>
+      {notice ? <div className="relative mt-4 space-y-2">{notice}</div> : null}
       {actions ? <div className="relative mt-4 flex flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
   );

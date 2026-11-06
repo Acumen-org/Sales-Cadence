@@ -3,10 +3,11 @@ import { prisma } from '../db';
 import { getSettings, type RulesSettings } from '../settings';
 import { isInternalCompany } from '../internal-organizations';
 import { isNeverProspect } from '../non-prospects';
-import { normalizeDomain, normalizeFirmName, normalizeLinkedin, readExtraPhones, toE164, type ExtraPhone } from './normalize';
+import { isRoleEmail, normalizeDomain, normalizeFirmName, normalizeLinkedin, personalPhone, readExtraPhones, toE164, type ExtraPhone } from './normalize';
 import { findSuppressed, type SuppressionKey } from './suppression';
 import { markPersonDeleted, upsertPersonCache } from '../person-cache';
 import type { TwentyClient } from '../twenty/client';
+import type { TwentyPerson } from '../twenty/types';
 
 /**
  * The dedupe rules of the Bellwether contract (plan 14.6), in order; the first hit decides. Also
@@ -37,9 +38,11 @@ export type DedupeInput = {
 
 export type DedupeVerdict =
   | { kind: 'suppressed'; key: SuppressionKey }
+  /** The same person, by name and firm, is marked Do not contact (or opted out) in the CRM (N003). */
+  | { kind: 'crm_do_not_contact'; person: { id: string; name: string } }
   | { kind: 'internal_contact' }
   | { kind: 'blocked_account'; detail: string }
-  | { kind: 'already_in_crm'; matchedOn: MatchedOn; person: Pick<PersonCache, 'id' | 'ownerMemberId' | 'firstName' | 'lastName'> }
+  | { kind: 'already_in_crm'; matchedOn: MatchedOn; person: Pick<PersonCache, 'id' | 'ownerMemberId' | 'firstName' | 'lastName'>; /** Matched on an office or unknown line, which may be shared. */ sharedLine?: boolean }
   | { kind: 'duplicate_in_sandbox'; matchedOn: MatchedOn; contact: SandboxContact }
   | { kind: 'moved_tombstone'; contact: SandboxContact }
   | { kind: 'new' };
@@ -56,13 +59,74 @@ export function pushedPhones(c: Pick<DedupeInput, 'phone' | 'phoneType' | 'addit
   return list.filter((p) => toE164(p.number)).map((p) => ({ number: toE164(p.number)!, type: p.type }));
 }
 
-/** Rule 2: the email, a direct or mobile phone, the LinkedIn URL or the Bellwether id is suppressed. */
+/**
+ * Rule 2, wider in contract 1.1 (B001, B002): the email, any phone of any type, the LinkedIn URL, the
+ * Bellwether id or the individual CRD is suppressed. A number someone asked us never to call stays
+ * blocked however it is typed now; a shared line suppressed for one person (phone_subject) never
+ * refuses anyone else.
+ */
 export function suppressionKeysOf(c: DedupeInput): SuppressionKey[] {
   const keys: SuppressionKey[] = emailsOf(c).map((value) => ({ kind: 'email' as const, value }));
-  for (const p of pushedPhones(c)) if (p.type === 'direct' || p.type === 'mobile') keys.push({ kind: 'phone', value: p.number });
+  for (const p of pushedPhones(c)) if (!keys.some((k) => k.kind === 'phone' && k.value === p.number)) keys.push({ kind: 'phone', value: p.number });
   if (c.linkedinUrl) keys.push({ kind: 'linkedin', value: c.linkedinUrl });
   if (c.bellwetherContactId) keys.push({ kind: 'bellwether_id', value: c.bellwetherContactId });
+  if (c.individualCrd) keys.push({ kind: 'individual_crd', value: c.individualCrd });
   return keys;
+}
+
+/**
+ * Rule 2 also reads the opted-out contacts themselves (B002, PLAN 8.3): a personal email, the CRD,
+ * the LinkedIn URL or a direct or mobile phone of a contact who asked not to be contacted counts as
+ * suppressed, even where an old opt-out was never hashed under that key. Shared inboxes (info@)
+ * never count: different people really do share them.
+ */
+export async function optedOutTwin(c: Pick<DedupeInput, 'email' | 'additionalEmails' | 'linkedinUrl' | 'individualCrd' | 'phone' | 'phoneType' | 'additionalPhones'>, tx: Tx = prisma, excludeId?: string): Promise<{ id: string; matchedOn: MatchedOn } | null> {
+  const optedOut = { optedOutAt: { not: null }, piiClearedAt: null, ...(excludeId ? { id: { not: excludeId } } : {}) } satisfies Prisma.SandboxContactWhereInput;
+  const emails = [...new Set([c.email, ...c.additionalEmails].filter((e): e is string => Boolean(e) && !isRoleEmail(e)))];
+  if (emails.length) {
+    const hit = await tx.sandboxContact.findFirst({ where: { ...optedOut, OR: [{ email: { in: emails } }, { additionalEmails: { hasSome: emails } }] }, select: { id: true } });
+    if (hit) return { id: hit.id, matchedOn: 'email' };
+  }
+  if (c.individualCrd) {
+    const hit = await tx.sandboxContact.findFirst({ where: { ...optedOut, individualCrd: c.individualCrd }, select: { id: true } });
+    if (hit) return { id: hit.id, matchedOn: 'individual_crd' };
+  }
+  if (c.linkedinUrl) {
+    const hit = await tx.sandboxContact.findFirst({ where: { ...optedOut, linkedinUrl: c.linkedinUrl }, select: { id: true } });
+    if (hit) return { id: hit.id, matchedOn: 'linkedin_url' };
+  }
+  for (const p of pushedPhones({ phone: c.phone, phoneType: c.phoneType, additionalPhones: c.additionalPhones })) {
+    if (!personalPhone(p.type)) continue;
+    const rows = await tx.sandboxContact.findMany({ where: { ...optedOut, OR: [{ phone: p.number }, { additionalPhones: { array_contains: [{ number: p.number }] } }] }, select: { id: true, phone: true, phoneType: true, additionalPhones: true }, take: 10 });
+    const hit = rows.find((r) => (r.phone === p.number && personalPhone(r.phoneType)) || readExtraPhones(r.additionalPhones).some((x) => x.number === p.number && personalPhone(x.type)));
+    if (hit) return { id: hit.id, matchedOn: 'phone' };
+  }
+  return null;
+}
+
+/**
+ * N003: a CRM person with the same first and last name at the same firm (by name, domain or CRD)
+ * who is marked Do not contact in the CRM or opted out in Cadence. Such a contact is refused on add,
+ * push and edit ("Dummy Nine is marked Do not contact in the CRM"), and never moved.
+ */
+export async function crmDoNotContactTwin(c: Pick<DedupeInput, 'firstName' | 'lastName' | 'companyName' | 'companyDomain' | 'companyCrd'>, tx: Tx = prisma): Promise<{ id: string; name: string } | null> {
+  if (!c.firstName.trim() || !c.lastName.trim() || (!c.companyName && !c.companyDomain && !c.companyCrd)) return null;
+  const people = await tx.personCache.findMany({
+    where: { deletedAt: null, firstName: { equals: c.firstName.trim(), mode: 'insensitive' }, lastName: { equals: c.lastName.trim(), mode: 'insensitive' }, OR: [{ dnd: true }, { optedOut: true }] },
+    select: { id: true, firstName: true, lastName: true, companyId: true, companyName: true }, take: 10,
+  });
+  if (!people.length) return null;
+  const firm = normalizeFirmName(c.companyName);
+  const companyIds = people.flatMap((p) => (p.companyId ? [p.companyId] : []));
+  const companies = companyIds.length ? await tx.companyCache.findMany({ where: { id: { in: companyIds } }, select: { id: true, name: true, domain: true, raw: true } }) : [];
+  const sameFirm = (p: (typeof people)[number]) => {
+    if (firm && normalizeFirmName(p.companyName) === firm) return true;
+    const co = companies.find((x) => x.id === p.companyId);
+    if (!co) return false;
+    return Boolean((firm && normalizeFirmName(co.name) === firm) || (c.companyDomain && normalizeDomain(co.domain) === c.companyDomain) || (c.companyCrd && String((co.raw as Record<string, unknown> | null)?.crd ?? '') === c.companyCrd));
+  };
+  const hit = people.find(sameFirm);
+  return hit ? { id: hit.id, name: `${hit.firstName} ${hit.lastName}`.trim() } : null;
 }
 
 /** Rule 3: one of Acumen's own domains, or a firm an admin blocked or the never-prospect list names. */
@@ -106,35 +170,54 @@ export function companyMainLine(raw: unknown): string | null {
  * person's company in Twenty); main and toll_free never match.
  */
 export async function crmMatch(c: DedupeInput, tx: Tx = prisma): Promise<Extract<DedupeVerdict, { kind: 'already_in_crm' }> | null> {
+  return (await crmMatches(c, tx, { first: true }))[0] ?? null;
+}
+
+/**
+ * Every CRM person rule 4 finds, in rule order (email, LinkedIn, phone), each once. The nightly
+ * check reads past an auto-created person to a real one behind it (B156). Emails are compared
+ * through the normalised copies, so capitals never hide a person (B073).
+ */
+export async function crmMatches(c: DedupeInput, tx: Tx = prisma, opts: { first?: boolean } = {}): Promise<Extract<DedupeVerdict, { kind: 'already_in_crm' }>[]> {
   const team = await teamEmails(tx);
   const live = (p: Pick<PersonCache, 'email'>) => !p.email || !team.has(p.email.toLowerCase());
   const select = { id: true, ownerMemberId: true, firstName: true, lastName: true, email: true, companyId: true } as const;
-  const emails = emailsOf(c);
+  const found: Extract<DedupeVerdict, { kind: 'already_in_crm' }>[] = [];
+  /** True when the caller wants only the first. */
+  const add = (matchedOn: MatchedOn, person: Pick<PersonCache, 'id' | 'ownerMemberId' | 'firstName' | 'lastName'>) => {
+    if (!found.some((f) => f.person.id === person.id)) found.push({ kind: 'already_in_crm', matchedOn, person });
+    return Boolean(opts.first);
+  };
+  const emails = emailsOf(c).map((e) => e.toLowerCase());
   if (emails.length) {
-    const people = await tx.personCache.findMany({ where: { deletedAt: null, OR: [{ email: { in: emails, mode: 'insensitive' } }, { additionalEmails: { hasSome: emails } }] }, select, take: 5 });
-    const hit = people.find(live);
-    if (hit) return { kind: 'already_in_crm', matchedOn: 'email', person: hit };
+    const people = await tx.personCache.findMany({ where: { deletedAt: null, OR: [{ emailNorm: { in: emails } }, { additionalEmailsNorm: { hasSome: emails } }] }, select, orderBy: { id: 'asc' }, take: 10 });
+    for (const p of people.filter(live)) if (add('email', p)) return found;
   }
   if (c.linkedinUrl) {
+    // B169: the CRM may keep the profile percent-encoded; both spellings find it, and the normalised URL decides.
     const slug = c.linkedinUrl.replace('linkedin.com/in/', '');
-    const people = await tx.personCache.findMany({ where: { deletedAt: null, linkedinUrl: { contains: slug, mode: 'insensitive' } }, select: { ...select, linkedinUrl: true }, take: 10 });
-    const hit = people.find((p) => live(p) && normalizeLinkedin(p.linkedinUrl) === c.linkedinUrl);
-    if (hit) return { kind: 'already_in_crm', matchedOn: 'linkedin_url', person: hit };
+    const encoded = encodeURIComponent(slug);
+    const people = await tx.personCache.findMany({ where: { deletedAt: null, OR: [{ linkedinUrl: { contains: slug, mode: 'insensitive' } }, ...(encoded !== slug ? [{ linkedinUrl: { contains: encoded, mode: 'insensitive' as const } }] : [])] }, select: { ...select, linkedinUrl: true }, orderBy: { id: 'asc' }, take: 10 });
+    for (const p of people.filter((x) => live(x) && normalizeLinkedin(x.linkedinUrl) === c.linkedinUrl)) if (add('linkedin_url', p)) return found;
   }
   const candidates = pushedPhones(c).filter((p) => p.type === 'direct' || p.type === 'mobile' || p.type === 'office' || p.type === 'unknown');
   for (const p of candidates) {
     if (p.type !== 'direct' && p.type !== 'mobile' && c.companyPhone && p.number === c.companyPhone) continue;
-    const people = await tx.personCache.findMany({ where: { deletedAt: null, OR: [{ phoneE164: p.number }, { additionalPhoneE164: p.number }] }, select, take: 10 });
+    const people = await tx.personCache.findMany({ where: { deletedAt: null, OR: [{ phoneE164: p.number }, { additionalPhoneE164: p.number }] }, select, orderBy: { id: 'asc' }, take: 10 });
     for (const person of people) {
       if (!live(person)) continue;
       if (p.type === 'office' || p.type === 'unknown') {
         const company = person.companyId ? await tx.companyCache.findUnique({ where: { id: person.companyId }, select: { raw: true } }) : null;
         if (company && companyMainLine(company.raw) === p.number) continue;
       }
-      return { kind: 'already_in_crm', matchedOn: 'phone', person };
+      const fresh = !found.some((f) => f.person.id === person.id);
+      const stop = add('phone', person);
+      // An office or unknown line may be shared: a refusal on it never opts the CRM person's colleagues out (N011).
+      if (fresh && !personalPhone(p.type)) found[found.length - 1].sharedLine = true;
+      if (stop) return found;
     }
   }
-  return null;
+  return found;
 }
 
 /** Rule 5: an ACTIVE sandbox contact with the same Bellwether id, CRD, email, LinkedIn or direct/mobile phone. */
@@ -148,7 +231,8 @@ export async function sandboxMatch(c: DedupeInput, tx: Tx = prisma, excludeId?: 
     const hit = await tx.sandboxContact.findFirst({ where: { ...active, individualCrd: c.individualCrd } });
     if (hit) return { matchedOn: 'individual_crd', contact: hit };
   }
-  const emails = emailsOf(c);
+  // A shared inbox (info@) is not one person's: two people at a firm may both have it (PLAN 8.3, B177).
+  const emails = emailsOf(c).filter((e) => !isRoleEmail(e));
   if (emails.length) {
     const hit = await tx.sandboxContact.findFirst({ where: { ...active, OR: [{ email: { in: emails } }, { additionalEmails: { hasSome: emails } }] } });
     if (hit) return { matchedOn: 'email', contact: hit };
@@ -166,13 +250,19 @@ export async function sandboxMatch(c: DedupeInput, tx: Tx = prisma, excludeId?: 
   return null;
 }
 
+const TWIN_KIND: Record<MatchedOn, SuppressionKey['kind']> = { bellwether_contact_id: 'bellwether_id', individual_crd: 'individual_crd', email: 'email', linkedin_url: 'linkedin', phone: 'phone' };
+
 /** Rules 2 to 5 for one contact (rule 1, within the request, is the caller's). */
 export async function dedupeContact(c: DedupeInput, tx: Tx = prisma): Promise<DedupeVerdict> {
   const settings = await getSettings();
   const suppressed = await findSuppressed(suppressionKeysOf(c), tx);
   if (suppressed) return { kind: 'suppressed', key: suppressed };
+  const twin = await optedOutTwin(c, tx);
+  if (twin) return { kind: 'suppressed', key: { kind: TWIN_KIND[twin.matchedOn], value: '' } };
   const blocked = await internalOrBlocked(c, settings.rules, tx);
   if (blocked) return blocked;
+  const dnc = await crmDoNotContactTwin(c, tx);
+  if (dnc) return { kind: 'crm_do_not_contact', person: dnc };
   const crm = await crmMatch(c, tx);
   if (crm) return crm;
   const sandbox = await sandboxMatch(c, tx);
@@ -235,6 +325,72 @@ export async function refreshCrmCopyFor(contacts: DedupeInput[], client: TwentyC
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** What Twenty itself said for a check (B073): the people it has, and copy hits it no longer has. */
+export type TwentyAnswer = { found: TwentyPerson[]; gone: { id: string; at: Date }[] };
+
+/**
+ * Ask Twenty about these contacts without writing anything (the check before a push, B069, B073):
+ * the people it has for their emails, phones and LinkedIn profiles, and every person Cadence's copy
+ * matches that Twenty no longer has. The check applies the answer inside the transaction it rolls
+ * back (applyTwentyAnswer), so it judges exactly as the push would and leaves the copy as it was.
+ * Null when Twenty cannot be reached: the copy decides on its own, as for a push.
+ */
+export async function askTwentyFor(contacts: DedupeInput[], client: TwentyClient, budgetMs = LIVE_BUDGET_MS): Promise<TwentyAnswer | null> {
+  const answer: TwentyAnswer = { found: [], gone: [] };
+  const deadline = Date.now() + budgetMs;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`no answer within ${budgetMs} ms`)), budgetMs); });
+  late.catch(() => undefined);
+  const inTime = <T>(p: Promise<T>) => Promise.race([p, late]);
+  try {
+    for (let i = 0; i < contacts.length && Date.now() < deadline; i += LIVE_CHUNK) {
+      const chunk = contacts.slice(i, i + LIVE_CHUNK);
+      const found = await inTime(client.findPeople({ emails: chunk.flatMap(emailsOf), phones: chunk.flatMap((c) => pushedPhones(c).map((p) => p.number)), linkedinUrls: chunk.flatMap((c) => (c.linkedinUrl ? [c.linkedinUrl] : [])) }));
+      answer.found.push(...found);
+      const live = new Set(found.map((p) => p.id));
+      const hits = [...new Set((await Promise.all(chunk.map((c) => crmMatches(c)))).flat().map((m) => m.person.id).filter((id) => !live.has(id)))];
+      if (!hits.length) continue;
+      const kept = new Map((await inTime(client.getPeopleByIds(hits))).map((p) => [p.id, p]));
+      for (const id of hits) {
+        const p = kept.get(id);
+        if (p && !p.deletedAt) continue;
+        answer.gone.push({ id, at: p?.deletedAt ? new Date(p.deletedAt) : new Date() });
+      }
+    }
+    return answer;
+  } catch (err) {
+    console.warn('[bellwether] Twenty could not be asked for the check; Cadence\'s copy decides', err);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Twenty's answer into Cadence's copy, inside the caller's transaction (no opt-out runs from it). */
+export async function applyTwentyAnswer(answer: TwentyAnswer, tx: Prisma.TransactionClient): Promise<void> {
+  for (const p of answer.found) await upsertPersonCache(p, tx);
+  for (const g of answer.gone) await markPersonDeleted(g.id, g.at, tx);
+}
+
+/**
+ * B017: an active cold contact who may be the same person as a pushed one: at the same firm (by name,
+ * domain or CRD) with the same last name, or sharing an office or unknown line that is not the firm's
+ * main one. Never a refusal: the push creates the contact and warns.
+ */
+export async function possibleSandboxTwin(c: DedupeInput, tx: Tx = prisma): Promise<{ id: string; name: string } | null> {
+  const firm = normalizeFirmName(c.companyName);
+  const sameFirm = (r: Pick<SandboxContact, 'companyName' | 'companyDomain' | 'companyCrd'>) => Boolean((firm && normalizeFirmName(r.companyName) === firm) || (c.companyDomain && r.companyDomain === c.companyDomain) || (c.companyCrd && r.companyCrd === c.companyCrd));
+  const select = { id: true, firstName: true, lastName: true, companyName: true, companyDomain: true, companyCrd: true } as const;
+  const byName = await tx.sandboxContact.findMany({ where: { status: 'ACTIVE', lastName: { equals: c.lastName.trim(), mode: 'insensitive' } }, select, orderBy: { createdAt: 'asc' }, take: 20 });
+  let hit = byName.find(sameFirm);
+  const lines = pushedPhones(c).filter((p) => !personalPhone(p.type) && p.number !== c.companyPhone).map((p) => p.number);
+  if (!hit && lines.length) {
+    const byLine = await tx.sandboxContact.findMany({ where: { status: 'ACTIVE', OR: [{ phone: { in: lines } }, ...lines.map((n) => ({ additionalPhones: { array_contains: [{ number: n }] } }))] }, select, orderBy: { createdAt: 'asc' }, take: 20 });
+    hit = byLine.find(sameFirm);
+  }
+  return hit ? { id: hit.id, name: `${hit.firstName} ${hit.lastName}`.trim() } : null;
 }
 
 /** A Twenty person with the same first and last name at a company with the same domain or CRD. */

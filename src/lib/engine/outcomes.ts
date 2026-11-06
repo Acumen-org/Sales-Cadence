@@ -1,11 +1,12 @@
-import { prisma } from '../db';
+import { databaseNow, prisma } from '../db';
 import { logAudit, type AuditActor } from '../audit';
 import { getSettings, type RulesSettings } from '../settings';
 import { exitEnrollment, finishEnrollment, markReplied, setPersonFlags } from './enrollment';
-import { optOutPerson, optOutSandboxContact, type SubjectRef } from '../sandbox/opt-out';
+import { optOutPerson, optOutSandboxContact, type RowSubject as SubjectRef } from '../sandbox/opt-out';
 import { advanceEnrollment, cancelOpenTasks, completeTask, skipTask, syncCancelled, type EngineContext, type ResolveResult } from './tasks';
 import { parseSteps } from '../sequences/steps';
 import { ANSWERED_CALL_PREFIX } from '../reply-credit';
+import { callOutcomes, OPT_OUT_OUTCOME } from '../call-outcomes';
 
 /**
  * Outreach-style outcomes layered on the primitive task operations:
@@ -15,20 +16,9 @@ import { ANSWERED_CALL_PREFIX } from '../reply-credit';
  *  - move a person ahead to a later step, finish (replied / no reply)
  */
 
-/**
- * Outcomes the post-call form always offers beside the ones in Settings > Rules (plan section 10):
- * each means the person picked up, so each ends the sequence as a reply.
- */
-export const EXTRA_CALL_OUTCOMES: RulesSettings['callDispositions'] = [
-  { key: 'not_interested', label: 'Not interested', answered: true, badPhone: false },
-  { key: 'meeting_booked', label: 'Meeting booked', answered: true, badPhone: false },
-  { key: 'do_not_contact', label: 'Asked not to be contacted', answered: true, badPhone: false },
-];
-
-/** Settings > Rules' call outcomes, then the extras it does not already have. */
-export function callOutcomes(rules: RulesSettings): RulesSettings['callDispositions'] {
-  return [...rules.callDispositions, ...EXTRA_CALL_OUTCOMES.filter((x) => !rules.callDispositions.some((d) => d.key === x.key))];
-}
+// The one outcome list lives in call-outcomes.ts (N055), apart from the engine, so the sync and the
+// reports can read it too.
+export { callOutcomes, EXTRA_CALL_OUTCOMES, OPT_OUT_OUTCOME } from '../call-outcomes';
 
 export function dispositionFor(rules: RulesSettings, key: string | null | undefined) {
   return key ? callOutcomes(rules).find((d) => d.key === key) ?? null : null;
@@ -38,9 +28,22 @@ export function skipReasonFor(rules: RulesSettings, key: string | null | undefin
   return key ? rules.skipReasons.find((r) => r.key === key) ?? null : null;
 }
 
-export type CallOutcomeInput = { taskId: string; disposition: string; note?: string | null; chosenAction?: 'CALL' | 'EMAIL' | 'LINKEDIN_CONNECT' | 'LINKEDIN_MESSAGE' | null };
+export type CallOutcomeInput = {
+  taskId: string;
+  disposition: string;
+  note?: string | null;
+  chosenAction?: 'CALL' | 'EMAIL' | 'LINKEDIN_CONNECT' | 'LINKEDIN_MESSAGE' | null;
+  /** The call's own touch (B043): the step takes it, so one answered call is one touch and one reply. */
+  callTouchId?: string | null;
+  /** False when the caller opts the person out itself (the post-call form, as a form opt-out). */
+  optOut?: boolean;
+};
 
-/** Complete a call task with a disposition. Answered dispositions finish the sequence as replied. */
+/**
+ * Complete a call task with a disposition. Answered dispositions finish the sequence as replied,
+ * except "Asked not to be contacted": that opts the person out and ends the sequence as Opted out,
+ * never Replied, and its touch is not an answered call (B091).
+ */
 export async function completeCall(input: CallOutcomeInput, ctx: EngineContext): Promise<ResolveResult & { replied?: boolean }> {
   const settings = await getSettings();
   const disposition = dispositionFor(settings.rules, input.disposition);
@@ -48,14 +51,21 @@ export async function completeCall(input: CallOutcomeInput, ctx: EngineContext):
   const task = await prisma.task.findUnique({ where: { id: input.taskId }, include: { enrollment: { select: { personId: true, sandboxContactId: true } } } });
   if (!task) return { ok: false, reason: 'not_found' };
 
-  const shouldReply = disposition.answered && settings.rules.answeredCallIsReply;
-  const r = await completeTask({ taskId: input.taskId, source: 'MANUAL', disposition: disposition.key, note: input.note ?? null, chosenAction: input.chosenAction ?? 'CALL' }, { ...ctx, deferAdvance: shouldReply });
+  const stop = disposition.key === OPT_OUT_OUTCOME;
+  const shouldReply = !stop && disposition.answered && settings.rules.answeredCallIsReply;
+  const r = await completeTask({ taskId: input.taskId, source: 'MANUAL', disposition: disposition.key, note: input.note ?? null, chosenAction: input.chosenAction ?? 'CALL', touchId: input.callTouchId ?? null }, { ...ctx, deferAdvance: shouldReply || stop });
   if (!r.ok) return r;
   if (disposition.badPhone) await setSubjectFlags(task.enrollment, { badPhone: true }, ctx.actor);
+  if (stop) {
+    if (input.optOut !== false) await applyExitConsequence(task.enrollment, 'opted_out', ctx.actor);
+    await exitEnrollment(r.task.enrollmentId, { reason: 'opted_out', actor: ctx.actor, now: ctx.now, skipSync: ctx.skipSync });
+    return { ...r, replied: false };
+  }
   let replied = false;
   if (shouldReply) {
     // The call's touch says the person answered, so every Replies figure counts it as one.
-    await prisma.touch.updateMany({ where: { externalId: `task:${task.id}` }, data: { summary: `${ANSWERED_CALL_PREFIX} ${disposition.label}` } });
+    const evidence = input.callTouchId ? { id: input.callTouchId } : { externalId: `task:${task.id}` };
+    await prisma.touch.updateMany({ where: evidence, data: { summary: `${ANSWERED_CALL_PREFIX} ${disposition.label}` } });
     const res = await markReplied(r.task.enrollmentId, { at: ctx.now ?? new Date(), evidenceId: `task:${task.id}:answered`, actor: ctx.actor, skipSync: ctx.skipSync });
     replied = res.changed;
   }
@@ -79,7 +89,8 @@ export async function setSubjectFlags(subject: SubjectRef, flags: { optedOut?: b
   const data: Record<string, boolean> = {};
   for (const [k, v] of Object.entries(rest)) if (typeof v === 'boolean') data[k] = v;
   if (!Object.keys(data).length) return;
-  await prisma.sandboxContact.update({ where: { id: subject.sandboxContactId }, data });
+  // A bounce reaches Bellwether (contract 1.1 emailBounced, N040) at its next read of changes.
+  await prisma.sandboxContact.update({ where: { id: subject.sandboxContactId }, data: { ...data, ...(data.badEmail ? { statusChangedAt: await databaseNow() } : {}) } });
   await logAudit({ entityType: 'sandbox_contact', entityId: subject.sandboxContactId, action: 'flags_updated', actor, details: data });
 }
 
@@ -97,29 +108,61 @@ export async function applyExitConsequence(subject: string | SubjectRef, reason:
 
 export type SkipOutcomeInput = { taskId: string; reasonKey: string; note?: string | null };
 
+type SkipReason = NonNullable<ReturnType<typeof skipReasonFor>>;
+/** Whether a reason ends the enrollment: "Email bounced" only while "exit on bounce" is on. */
+const endsEnrollment = (reason: SkipReason, rules: RulesSettings) => reason.exit !== 'none' && (reason.exit !== 'bounced' || rules.exitOnBounce);
+
+/** What a reason does beyond the skipped step: flags on the subject, and the end of the enrollment when it ends it. */
+async function applySkipReason(enrollment: { id: string; personId: string | null; sandboxContactId: string | null; status: string }, reason: SkipReason, rules: RulesSettings, ctx: EngineContext): Promise<string | null> {
+  if (reason.badEmail || reason.badPhone) {
+    await setSubjectFlags(enrollment, { badEmail: reason.badEmail || undefined, badPhone: reason.badPhone || undefined }, ctx.actor);
+  }
+  if (!endsEnrollment(reason, rules)) return null;
+  if (reason.exit === 'opted_out') await setSubjectFlags(enrollment, { optedOut: true }, ctx.actor);
+  if (enrollment.status !== 'ACTIVE' && enrollment.status !== 'PAUSED') return null;
+  await exitEnrollment(enrollment.id, { reason: reason.exit, actor: ctx.actor, now: ctx.now, skipSync: ctx.skipSync });
+  return reason.exit;
+}
+
 /** Skip with a configured reason; some reasons end the enrollment and flag the person. */
 export async function skipWithReason(input: SkipOutcomeInput, ctx: EngineContext): Promise<ResolveResult & { exited?: string | null }> {
   const settings = await getSettings();
   const reason = skipReasonFor(settings.rules, input.reasonKey);
   const label = reason?.label ?? input.reasonKey;
-  const shouldExit = Boolean(reason && reason.exit !== 'none' && (reason.exit !== 'bounced' || settings.rules.exitOnBounce));
+  const shouldExit = Boolean(reason && endsEnrollment(reason, settings.rules));
   const r = await skipTask({ taskId: input.taskId, reason: label, note: input.note ?? null }, { ...ctx, deferAdvance: shouldExit });
   if (!r.ok) return r;
   const task = await prisma.task.findUnique({ where: { id: input.taskId }, include: { enrollment: { select: { id: true, personId: true, sandboxContactId: true, status: true } } } });
   if (!task || !reason) return r;
+  const exited = await applySkipReason(task.enrollment, reason, settings.rules, ctx);
+  return { ...r, exited };
+}
 
-  if (reason.badEmail || reason.badPhone) {
-    await setSubjectFlags(task.enrollment, { badEmail: reason.badEmail || undefined, badPhone: reason.badPhone || undefined }, ctx.actor);
+/**
+ * A bounce Cadence saw in a mailbox, or one a rep confirmed by hand, follows the same rule as the
+ * "Email bounced" skip (N060): every email step still open is skipped with that reason, the address
+ * is flagged, and the running campaign ends when "exit on bounce" is on. With no campaign running,
+ * the address is flagged all the same.
+ */
+export async function bounceDetected(subject: { personId?: string | null; sandboxContactId?: string | null }, ctx: EngineContext): Promise<{ skipped: number; exited: string | null }> {
+  const settings = await getSettings();
+  const reason: SkipReason = skipReasonFor(settings.rules, 'bounced') ?? { key: 'bounced', label: 'Email bounced', exit: 'bounced', badEmail: true, badPhone: false };
+  const who = subject.personId ? { personId: subject.personId } : subject.sandboxContactId ? { sandboxContactId: subject.sandboxContactId, personId: null } : null;
+  if (!who) return { skipped: 0, exited: null };
+  const ends = endsEnrollment(reason, settings.rules);
+  const running = await prisma.enrollment.findMany({ where: { ...who, status: { in: ['ACTIVE', 'PAUSED'] } }, select: { id: true, personId: true, sandboxContactId: true, status: true } });
+  let skipped = 0;
+  for (const e of running) {
+    const open = await prisma.task.findMany({ where: { enrollmentId: e.id, state: 'PENDING', action: 'EMAIL' }, orderBy: [{ stepIndex: 'asc' }, { actionIndex: 'asc' }], select: { id: true } });
+    for (const t of open) if ((await skipTask({ taskId: t.id, reason: reason.label }, { ...ctx, deferAdvance: ends })).ok) skipped++;
+  }
+  if (!running.length) {
+    if (reason.badEmail) await setSubjectFlags(who, { badEmail: true }, ctx.actor);
+    return { skipped, exited: null };
   }
   let exited: string | null = null;
-  if (reason.exit !== 'none' && (reason.exit !== 'bounced' || settings.rules.exitOnBounce)) {
-    if (reason.exit === 'opted_out') await setSubjectFlags(task.enrollment, { optedOut: true }, ctx.actor);
-    if (task.enrollment.status === 'ACTIVE' || task.enrollment.status === 'PAUSED') {
-      await exitEnrollment(task.enrollment.id, { reason: reason.exit, actor: ctx.actor, now: ctx.now, skipSync: ctx.skipSync });
-      exited = reason.exit;
-    }
-  }
-  return { ...r, exited };
+  for (const e of running) exited = (await applySkipReason(e, reason, settings.rules, ctx)) ?? exited;
+  return { skipped, exited };
 }
 
 /**

@@ -13,6 +13,7 @@ import { getTwentyClient } from '@/lib/twenty';
 import { recentEvents } from '@/lib/engine/ingest';
 import { Badge, Card, KeyValue, Surface, Tabs, ViewHeader, Empty, Count } from '@/components/ui';
 import { UsersPanel } from '@/components/settings/users-panel';
+import { leaverHasWork, leaverWork } from '@/lib/outreach/ownership';
 import { BlockedAccountsPanel } from '@/components/settings/blocked-accounts-panel';
 import { NonProspectRulesForm } from '@/components/settings/non-prospect-rules-form';
 import { listBlockedAccounts } from '@/lib/blocked-accounts';
@@ -37,17 +38,20 @@ import { graphMailState } from '@/lib/mail/graph-mail';
 import { getTwilioReader, twilioStatus } from '@/lib/calls/twilio';
 import { importStatus } from '@/lib/calls/import';
 import { toE164 } from '@/lib/sandbox/normalize';
-import { CallerNumberRow, CallingSettingsForm, CleanupNowButton, ImportNowButton, SandboxSettingsForm, SuppressionForm } from '@/components/settings/sandbox-settings';
-import { cleanupCounts } from '@/lib/sandbox/crm-cleanup';
+import { CallerNumberRow, CallingSettingsForm, ImportNowButton } from '@/components/settings/sandbox-settings';
+import { ColdOutreachSettings } from '@/components/settings/cold-outreach-settings';
+import { loadColdOutreachSettings } from '@/lib/sandbox/cold-settings';
+import { COLD_OUTREACH_SETTINGS_TAB, settingsRoute } from '@/lib/settings-tabs';
 
 const TABS = [
-  { key: 'twenty', label: 'Twenty' },
+  // Keys stay as they were (links and bookmarks hold them); the labels say what a user calls each one.
+  { key: 'twenty', label: 'CRM' },
   { key: 'rules', label: 'Rules and matching' },
   { key: 'sync', label: 'Sync out' },
   { key: 'users', label: 'Team & pods' },
   { key: 'signin', label: 'Sign-in' },
   { key: 'calling', label: 'Calling' },
-  { key: 'sandbox', label: 'Sandbox' },
+  { key: COLD_OUTREACH_SETTINGS_TAB, label: 'Cold outreach' },
   { key: 'blocked', label: 'Blocked accounts' },
   { key: ASSISTANT_SETTINGS_TAB, label: ASSISTANT_NAME },
   { key: 'activity', label: 'Activity log' },
@@ -55,10 +59,20 @@ const TABS = [
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const user = await requireUser();
-  if (!isAdmin(user)) redirect('/tasks');
-  const asked = (await searchParams).tab;
-  // An unknown or empty tab opens the first one rather than a page with nothing on it.
-  const tab = TABS.some((t) => t.key === asked) ? asked! : 'twenty';
+  const admin = isAdmin(user);
+  // B215: anyone else reads Settings > Cold outreach, told who can change it; the old `sandbox` key redirects.
+  const route = settingsRoute((await searchParams).tab, admin, TABS.map((t) => t.key));
+  if ('redirect' in route) redirect(route.redirect);
+  const { tab } = route;
+  const loading = <Surface><p className="text-[13px] text-ink-500">Loading…</p></Surface>;
+  if (!admin) {
+    return (
+      <PageFrame className="space-y-3 px-6 pb-8 pt-2">
+        <Surface flush><ViewHeader title="Cold outreach settings" /></Surface>
+        <Suspense fallback={loading}><ColdOutreachTab admin={false} timezone={user.timezone} /></Suspense>
+      </PageFrame>
+    );
+  }
   const settings = await getSettings();
   const e = env();
   const reviewCount = await prisma.activityEvent.count({ where: { needsReview: true } });
@@ -70,8 +84,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <Tabs inset={false} current={tab} tabs={TABS.map((t) => ({ ...t, href: `/settings?tab=${t.key}`, count: t.key === 'activity' && reviewCount ? reviewCount : undefined }))} />
       </Surface>
 
-      {/* The Twenty tab asks Twenty itself how it is; the page opens first and the answer follows. */}
-      {tab === 'twenty' ? <Suspense fallback={<Surface><p className="text-[13px] text-ink-500">Loading…</p></Surface>}><TwentyTab mode={e.TWENTY_MODE} dryRun={e.CADENCE_DRY_RUN} hasEnvKey={Boolean(e.TWENTY_API_KEY)} /></Suspense> : null}
+      {/* The CRM tab asks the CRM itself how it is; the page opens first and the answer follows. */}
+      {tab === 'twenty' ? <Suspense fallback={loading}><TwentyTab mode={e.TWENTY_MODE} dryRun={e.CADENCE_DRY_RUN} hasEnvKey={Boolean(e.TWENTY_API_KEY)} /></Suspense> : null}
       {tab === 'rules' ? (
         <div className="space-y-3">
           <RulesForm rules={settings.rules} />
@@ -82,7 +96,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       {tab === 'users' ? <UsersTab selfId={user.id} /> : null}
       {tab === 'signin' ? <SignInTab /> : null}
       {tab === 'calling' ? <CallingTab timezone={user.timezone} /> : null}
-      {tab === 'sandbox' ? <SandboxTab timezone={user.timezone} /> : null}
+      {/* Cold outreach asks the CRM for its options, so it follows the page in the same way. */}
+      {tab === COLD_OUTREACH_SETTINGS_TAB ? <Suspense fallback={loading}><ColdOutreachTab admin timezone={user.timezone} /></Suspense> : null}
       {tab === 'blocked' ? <BlockedTab timezone={user.timezone} /> : null}
       {tab === ASSISTANT_SETTINGS_TAB ? <AssistantTab /> : null}
       {tab === 'activity' ? <ActivityTab /> : null}
@@ -131,6 +146,8 @@ async function UsersTab({ selfId }: { selfId: string }) {
   ]);
   const peopleCount = new Map(peopleByPod.map((r) => [r.podOwner, r._count._all]));
   const { microsoft } = await signInMethods();
+  // N089: what each active member holds, for the Remove access dialog.
+  const holds = await leaverWork(users.filter((u) => u.active).map((u) => u.id));
   return (
     <UsersPanel
       selfId={selfId}
@@ -145,6 +162,9 @@ async function UsersTab({ selfId }: { selfId: string }) {
         openWork: u._count.enrollments,
         openPodIds: [...new Set(u.enrollments.flatMap((e) => e.podId ? [e.podId] : []))],
         podIds: u.pods.map((p) => p.podId),
+        work: holds.get(u.id) && leaverHasWork(holds.get(u.id)!) ? holds.get(u.id)! : null,
+        callerNumber: u.callerNumber,
+        coldContacts: holds.get(u.id)?.contacts ?? 0,
       }))}
       pods={pods.map((p) => ({
         id: p.id,
@@ -166,22 +186,61 @@ async function SignInTab() {
   const passwords = !methods.password ? `Off since ${formatInstant(new Date(signIn.passwordRetiredAt!), workspaceTimezone())}` : methods.microsoft && !signIn.passwordRetiredAt ? 'On until the first Microsoft sign-in' : 'On';
   const [recordings, transcripts] = methods.microsoft ? await Promise.all([sharePointPlayerStatus(), teamsTranscriptStatus()]) : [null, null];
   const mail = await graphMailState();
+  const tz = workspaceTimezone();
+  const read = mail.mailboxes.filter((m) => m.folders.some((f) => f.state !== 'not_started')).length;
   return (
-    <Card title="Microsoft sign-in">
-      <div className="p-4">
-        <KeyValue items={[
-          { k: 'Microsoft', v: methods.microsoft ? <Badge tone="green">On</Badge> : <Badge>Off</Badge> },
-          { k: 'Passwords', v: passwords },
-          { k: 'Redirect URI', v: <code className="text-[12px]">{microsoftRedirectUri()}</code> },
-          ...(recordings ? [{ k: 'SharePoint recordings', v: recordings.plays ? <Badge tone="green">Play in Cadence</Badge> : <span className="flex flex-wrap items-center gap-2"><Badge>Open in SharePoint</Badge><span className="text-[12.5px] text-ink-600">{recordings.why}</span></span> }] : []),
-          ...(transcripts ? [{ k: 'Teams transcripts', v: transcripts.fetches ? <Badge tone="green">Fetched automatically</Badge> : <span className="flex flex-wrap items-center gap-2"><Badge>Pasted by hand</Badge><span className="text-[12.5px] text-ink-600">{transcripts.why}</span></span> }] : []),
-          { k: 'Sales mailboxes (Mail.Read)', v: !mail.enabled ? <Badge>Off</Badge> : mail.refusal ? <span className="flex flex-wrap items-center gap-2"><Badge tone="amber">Refused</Badge><span className="text-[12.5px] text-ink-600">{mail.refusal}</span></span> : mail.lastRunAt ? <span className="flex items-center gap-2"><Badge tone="green">Read</Badge><span className="text-[12.5px] text-ink-600">{mail.mailboxes} mailboxes · {formatInstant(mail.lastRunAt, workspaceTimezone())}</span></span> : <Badge>Waiting for the first run</Badge> },
-          ...(fromServer ? [{ k: 'Set by', v: 'The server' }] : []),
-        ]} />
-      </div>
-      {fromServer ? null : <SignInForm clientId={signIn.microsoftClientId} tenantId={signIn.microsoftTenantId} hasSecret={Boolean(signIn.microsoftClientSecret)} />}
-    </Card>
+    <div className="space-y-3">
+      <Card title="Microsoft sign-in">
+        <div className="p-4">
+          <KeyValue items={[
+            { k: 'Microsoft', v: methods.microsoft ? <Badge tone="green">On</Badge> : <Badge>Off</Badge> },
+            { k: 'Passwords', v: passwords },
+            { k: 'Redirect URI', v: <code className="text-[12px]">{microsoftRedirectUri()}</code> },
+            ...(recordings ? [{ k: 'SharePoint recordings', v: recordings.plays ? <Badge tone="green">Play in Cadence</Badge> : <span className="flex flex-wrap items-center gap-2"><Badge>Open in SharePoint</Badge><span className="text-[12.5px] text-ink-600">{recordings.why}</span></span> }] : []),
+            ...(transcripts ? [{ k: 'Teams transcripts', v: transcripts.fetches ? <Badge tone="green">Fetched automatically</Badge> : <span className="flex flex-wrap items-center gap-2"><Badge>Pasted by hand</Badge><span className="text-[12.5px] text-ink-600">{transcripts.why}</span></span> }] : []),
+            // N088: why tracking is off; N015: amber when any mailbox fails, never a green "Read" over errors.
+            { k: 'Sales mailboxes (Mail.Read)', v: mail.why ? <span className="flex flex-wrap items-center gap-2"><Badge>Off</Badge><span className="text-[12.5px] text-ink-600">{mail.why} Email steps close only when a rep clicks Done.</span></span>
+              : mail.refusal ? <span className="flex flex-wrap items-center gap-2"><Badge tone="amber">Refused</Badge><span className="text-[12.5px] text-ink-600">{mail.refusal}</span></span>
+              : mail.failing ? <span className="flex flex-wrap items-center gap-2"><Badge tone="amber">{`${mail.failing} failing`}</Badge><span className="text-[12.5px] text-ink-600">{read} of {mail.mailboxes.length} mailboxes read{mail.lastRunAt ? ` · last run ${formatInstant(mail.lastRunAt, tz)}` : ''}. See Mail tracking below.</span></span>
+              : mail.lastRunAt ? <span className="flex flex-wrap items-center gap-2"><Badge tone="green">Read</Badge><span className="text-[12.5px] text-ink-600">{read} of {mail.mailboxes.length} mailboxes · {formatInstant(mail.lastRunAt, tz)}</span></span>
+              : <Badge>Waiting for the first run</Badge> },
+            ...(fromServer ? [{ k: 'Set by', v: 'The server' }] : []),
+          ]} />
+        </div>
+        {fromServer ? null : <SignInForm clientId={signIn.microsoftClientId} tenantId={signIn.microsoftTenantId} hasSecret={Boolean(signIn.microsoftClientSecret)} />}
+      </Card>
+      {mail.enabled ? <MailTrackingCard mail={mail} tz={tz} /> : null}
+    </div>
   );
+}
+
+const FOLDER_WORDS = { sentitems: 'Sent items', inbox: 'Inbox' } as const;
+
+/**
+ * Outlook tracking, mailbox by mailbox (N015, N088): each folder's state, its last good read and
+ * its last error, amber when one fails; and how many emails went to people who must not be
+ * contacted (N016).
+ */
+function MailTrackingCard({ mail, tz }: { mail: Awaited<ReturnType<typeof graphMailState>>; tz: string }) {
+  const folderWords = (f: Awaited<ReturnType<typeof graphMailState>>['mailboxes'][number]['folders'][number], signedIn: boolean) => {
+    if (f.state === 'not_started') return <span className="text-ink-500">{signedIn ? 'Not read yet' : 'Not signed in with Microsoft yet: not read'}</span>;
+    const good = f.lastSuccessAt ? `last read ${formatInstant(f.lastSuccessAt, tz)}` : 'never read';
+    if (f.state === 'failing') return <span className="flex flex-wrap items-center gap-1.5"><Badge tone="amber">Failing</Badge><span className="text-ink-600">since {formatInstant(f.errorAt, tz)} · {good}</span><span className="block w-full break-words text-[12px] text-amber-800">{f.error}</span></span>;
+    return <span className="flex flex-wrap items-center gap-1.5">{f.state === 'in_step' ? <Badge tone="green">Up to date</Badge> : <Badge tone="blue">Catching up</Badge>}<span className="text-ink-600">{good}</span>{f.resetAt ? <span className="block w-full text-[12px] text-ink-500">The sync link expired on {formatInstant(f.resetAt, tz)}; it was read again from the last good read.</span> : null}</span>;
+  };
+  return <Card title="Mail tracking" flush>
+    <p className="border-b border-line px-4 py-3 text-[13px] text-ink-600">
+      Cadence reads each sales mailbox&apos;s sent items and inbox from the day tracking started: who an email went to, its subject and time, never the message. An email to a cold contact closes its step; a reply stops the campaign.
+      {' '}{mail.emailsToDoNotContact ? <span className="font-medium text-red-700">{mail.emailsToDoNotContact === 1 ? '1 email' : `${mail.emailsToDoNotContact} emails`} went to people who must not be contacted in the last 30 days; the rep and their pod leaders were told.</span> : 'No email went to anyone who must not be contacted in the last 30 days.'}
+    </p>
+    {mail.mailboxes.length ? <table className="w-full text-[13px]">
+      <thead><tr className="border-b border-line text-left text-ink-500"><th className="px-4 py-2 font-normal">Mailbox</th><th className="px-4 py-2 font-normal">{FOLDER_WORDS.sentitems}</th><th className="px-4 py-2 font-normal">{FOLDER_WORDS.inbox}</th></tr></thead>
+      <tbody className="divide-y divide-line">{mail.mailboxes.map((m) => <tr key={m.userId} className={m.failing ? 'bg-amber-50/50' : undefined}>
+        <td className="px-4 py-2 align-top"><span className="text-ink-900">{m.name}</span><span className="block text-[12px] text-ink-500">{m.email}</span></td>
+        {m.folders.map((f) => <td key={f.folder} className="px-4 py-2 align-top">{folderWords(f, m.signedIn)}</td>)}
+      </tr>)}</tbody>
+    </table> : <p className="px-4 py-3 text-[13px] text-ink-500">No sales reps yet.</p>}
+  </Card>;
 }
 
 async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: boolean; hasEnvKey: boolean }) {
@@ -206,9 +265,9 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
     ['Meeting Number', meetings.fields.meetingNumber], ['First Meeting', meetings.fields.firstMeeting], ['Meeting contacts', meetings.contact],
   ] as const) : [];
   const meetingsMissing = meetingParts.filter(([, found]) => !found).map(([name]) => name);
-  // Names Twenty has no tag for and Cadence could not add one: an admin adds them in Twenty.
+  // Names the CRM has no tag for and Cadence could not add one: an admin adds them in the CRM.
   const missingTags = meetings ? await missingMeetingTags() : [];
-  // Records someone added in Twenty itself: Cadence neither numbers nor changes them.
+  // Records someone added in the CRM itself: Cadence neither numbers nor changes them.
   const notFromCadence = meetings ? await meetingsNotFromCadence() : { count: 0, items: [] };
   const [settings, schema, lastReconcile, continuous, cachedPeople, cachedCompanies, webhooks24h] = await Promise.all([
     getSettings(),
@@ -232,7 +291,7 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
         <div className="p-4">
           <KeyValue
             items={[
-              { k: 'Mode', v: mode === 'mock' ? 'Demo workspace' : 'Twenty (GraphQL)' },
+              { k: 'Mode', v: mode === 'mock' ? 'Demo workspace' : 'Live CRM (GraphQL)' },
               { k: 'Dry run', v: dryRun ? <span className="flex flex-wrap items-center gap-2"><Badge tone="amber">On</Badge><code className="text-[12px]">CADENCE_DRY_RUN=true</code></span> : <Badge tone="green">Off</Badge> },
               // Webhooks are the instant path; zero here means only the minute-by-minute pass is syncing.
               { k: 'Webhooks (24h)', v: webhooks24h ? <span className="flex items-center gap-2"><Badge tone="green">{webhooks24h}</Badge><span className="text-[12px] text-ink-500">inbound events</span></span> : <Badge tone="amber">None received</Badge> },
@@ -249,7 +308,7 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
               },
               ...stageErrors.map(([stage, message]) => ({ k: `Stage ${stage}`, v: <span className="text-[12px] text-red-700">{message}</span> })),
               {
-                k: 'Meetings in Twenty',
+                k: 'Meetings in the CRM',
                 v: meetings === undefined
                   ? <Badge tone="gray">Not checked</Badge>
                   : meetings === null
@@ -261,11 +320,11 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
               { k: 'Full refresh', v: sync?.lastFullRefresh ? formatInstant(new Date(sync.lastFullRefresh), workspaceTimezone()) : <Badge tone="gray">Not yet</Badge> },
               {
                 k: 'People',
-                v: <span className="flex flex-wrap items-center gap-3"><span><Count value={cachedPeople} /> cached</span>{counts.people !== undefined ? <span><Count value={counts.people} /> in Twenty</span> : null}{peopleShort ? <Badge tone="red">{counts.people! - cachedPeople} missing</Badge> : null}</span>,
+                v: <span className="flex flex-wrap items-center gap-3"><span><Count value={cachedPeople} /> cached</span>{counts.people !== undefined ? <span><Count value={counts.people} /> in the CRM</span> : null}{peopleShort ? <Badge tone="red">{counts.people! - cachedPeople} missing</Badge> : null}</span>,
               },
               {
                 k: 'Companies',
-                v: <span className="flex flex-wrap items-center gap-3"><span><Count value={cachedCompanies} /> cached</span>{counts.companies !== undefined ? <span><Count value={counts.companies} /> in Twenty</span> : null}{companiesShort ? <Badge tone="red">{counts.companies! - cachedCompanies} missing</Badge> : null}</span>,
+                v: <span className="flex flex-wrap items-center gap-3"><span><Count value={cachedCompanies} /> cached</span>{counts.companies !== undefined ? <span><Count value={counts.companies} /> in the CRM</span> : null}{companiesShort ? <Badge tone="red">{counts.companies! - cachedCompanies} missing</Badge> : null}</span>,
               },
               ...(sync?.needsReview ? [{ k: 'Needs review', v: <Link href="/settings?tab=activity" className="text-[12px] text-brand-700 hover:underline"><Count value={sync.needsReview} /> CRM events</Link> }] : []),
               ...(last?.stats?.cacheFailed ? [{ k: 'Could not cache', v: <span className="text-[12px] text-red-700">{last.stats.cacheFailed} record{last.stats.cacheFailed === 1 ? '' : 's'}: {last.stats.cacheError}</span> }] : []),
@@ -309,9 +368,9 @@ async function ActivityTab() {
   ]);
   return (
     <div className="space-y-3">
-      <Card title={<span className="flex items-center gap-2">Waiting to reach Twenty {failed.length ? <Badge tone="red">{failed.length}</Badge> : <Badge tone="gray">0</Badge>}</span>} actions={failed.length ? <RetryWriteButton>Retry all now</RetryWriteButton> : undefined}>
+      <Card title={<span className="flex items-center gap-2">Waiting to reach the CRM {failed.length ? <Badge tone="red">{failed.length}</Badge> : <Badge tone="gray">0</Badge>}</span>} actions={failed.length ? <RetryWriteButton>Retry all now</RetryWriteButton> : undefined}>
         {failed.length === 0 ? (
-          <div className="p-4 text-[13px] text-ink-500">Every note and mirrored task has reached Twenty.</div>
+          <div className="p-4 text-[13px] text-ink-500">Every note and mirrored task has reached the CRM.</div>
         ) : (
           <div className="max-h-[26rem] overflow-auto scroll-thin">
             <table className="table table-tight">
@@ -378,7 +437,7 @@ async function ActivityTab() {
           </div>
         )}
       </Card>
-      <Card title="Writes to Twenty (notes, mirrored tasks)">
+      <Card title="Writes to the CRM (notes, mirrored tasks)">
         {writes.length === 0 ? (
           <div className="p-4 text-[13px] text-ink-500">Nothing written yet.</div>
         ) : (
@@ -389,7 +448,7 @@ async function ActivityTab() {
                   <th>When</th>
                   <th>Operation</th>
                   <th>Object</th>
-                  <th>Twenty id</th>
+                  <th>CRM id</th>
                   <th>Payload</th>
                 </tr>
               </thead>
@@ -418,7 +477,20 @@ async function ActivityTab() {
 async function CallingTab({ timezone }: { timezone: string }) {
   const settings = await getSettings();
   const status = twilioStatus();
-  const [last, users] = await Promise.all([importStatus(), prisma.user.findMany({ where: { active: true }, select: { id: true, name: true, aliases: true, callerNumber: true }, orderBy: { name: 'asc' } })]);
+  const [last, everyone, released] = await Promise.all([
+    importStatus(),
+    prisma.user.findMany({ select: { id: true, name: true, aliases: true, callerNumber: true, active: true, role: true }, orderBy: { name: 'asc' } }),
+    prisma.auditLog.findMany({ where: { entityType: 'user', action: 'caller_number_released' }, orderBy: { createdAt: 'desc' }, take: 200, select: { entityId: true, details: true } }),
+  ]);
+  // B208: a calling number goes to someone who calls: not Biz Ops. N107: a removed rep's line says whose it was.
+  const users = everyone.filter((u) => u.active && u.role !== 'BIZ_OPS');
+  const formerOf = (number: string) => {
+    const held = everyone.find((u) => !u.active && u.callerNumber === number);
+    if (held) return `${held.name} (removed)`;
+    const r = released.find((a) => (a.details as { number?: string } | null)?.number === number);
+    const who = r ? everyone.find((u) => u.id === r.entityId) : null;
+    return who && !who.active ? `${who.name} (removed)` : null;
+  };
   let numbers: { phoneNumber: string; friendlyName: string }[] = [];
   let numbersError: string | null = null;
   try { numbers = status.configured ? (await getTwilioReader()?.listNumbers()) ?? [] : []; } catch (err) { numbersError = err instanceof Error ? err.message : String(err); }
@@ -438,47 +510,26 @@ async function CallingTab({ timezone }: { timezone: string }) {
     <Card title="Numbers and reps">
       <div className="space-y-2 p-4 text-[13px]">
         {numbersError ? <p className="text-red-700">{numbersError}</p> : null}
-        {numbers.map((n) => { const e164 = toE164(n.phoneNumber) ?? n.phoneNumber; return <CallerNumberRow key={e164} number={e164} friendlyName={n.friendlyName} userId={users.find((u) => u.callerNumber === e164)?.id ?? null} suggestion={suggest(n.friendlyName)} users={users.map((u) => ({ id: u.id, name: u.name }))} />; })}
+        {numbers.map((n) => {
+          const e164 = toE164(n.phoneNumber) ?? n.phoneNumber;
+          const holder = users.find((u) => u.callerNumber === e164) ?? null;
+          const suggested = holder ? null : users.find((u) => u.id === suggest(n.friendlyName)) ?? null;
+          return <CallerNumberRow key={e164} number={e164} friendlyName={n.friendlyName} holder={holder ? { id: holder.id, name: holder.name } : null} suggestion={suggested ? { id: suggested.id, name: suggested.name } : null} users={users.map((u) => ({ id: u.id, name: u.name, number: u.callerNumber }))} former={holder ? null : formerOf(e164)} />;
+        })}
         {!numbers.length && !numbersError ? <p className="text-ink-500">{status.configured ? 'No numbers on the account' : 'Connect Twilio to see its numbers'}</p> : null}
+        {numbers.length ? (() => {
+          // B167: the reps who still have no calling line, so none is missed.
+          const without = users.filter((u) => u.role !== 'ADMIN' && !u.callerNumber);
+          return without.length ? <p className="border-t border-line pt-2 text-[12.5px] text-ink-600">Reps without a calling line: {without.map((u) => u.name).join(', ')}.</p> : null;
+        })() : null}
       </div>
     </Card>
     <Card title="Calling hours and connects"><CallingSettingsForm c={settings.calling} /></Card>
   </div>;
 }
 
-async function SandboxTab({ timezone }: { timezone: string }) {
-  const e = env();
-  const settings = await getSettings();
-  const week = new Date(Date.now() - 7 * 86_400_000);
-  const [lastPush, pushes, created, suppressions, suppressionCount, cleanup] = await Promise.all([
-    prisma.bellwetherPush.findFirst({ orderBy: { createdAt: 'desc' }, select: { createdAt: true, pushedByEmail: true } }),
-    prisma.bellwetherPush.count({ where: { createdAt: { gte: week } } }),
-    prisma.sandboxContact.count({ where: { createdAt: { gte: week }, source: 'BELLWETHER' } }),
-    prisma.suppression.findMany({ orderBy: { createdAt: 'desc' }, take: 50 }),
-    prisma.suppression.count(),
-    cleanupCounts(),
-  ]);
-  return <div className="space-y-3">
-    <Card title="Bellwether">
-      <div className="p-4"><KeyValue items={[
-        { k: 'Key', v: e.BELLWETHER_API_KEY ? <Badge tone="green">Set</Badge> : <Badge>Not set</Badge> },
-        { k: 'Previous key', v: e.BELLWETHER_API_KEY_PREVIOUS ? 'Accepted during the rotation' : <Empty /> },
-        { k: 'Last push', v: lastPush ? `${formatInstant(lastPush.createdAt, timezone)} · ${lastPush.pushedByEmail}` : <Empty /> },
-        { k: 'Last 7 days', v: <span className="tabular-nums">{pushes} pushes · {created} contacts</span> },
-      ]} /></div>
-    </Card>
-    <Card title="Sandbox rules"><SandboxSettingsForm s={settings.sandbox} /></Card>
-    <Card title="CRM cleanup" actions={<CleanupNowButton />}>
-      <div className="p-4"><KeyValue items={[
-        { k: 'Status', v: settings.sandbox.cleanupAutoCreated ? <Badge tone="green">On, every 5 minutes</Badge> : <Badge>Off</Badge> },
-        { k: 'Removed', v: <span className="tabular-nums">{cleanup.total} people · {cleanup.week} in the last 7 days</span> },
-        { k: 'Kept and flagged', v: <span className="tabular-nums">{cleanup.kept} contacts</span> },
-      ]} /></div>
-      <p className="px-4 pb-4 text-[12px] text-ink-500">People Twenty created from email or calendar for a sandbox contact, that nobody has edited, noted, tasked or put in a campaign. They go to Twenty&apos;s trash and can be restored there.</p>
-    </Card>
-    <Card title="Suppression list" actions={<Count value={suppressionCount} />}>
-      <SuppressionForm />
-      <table className="w-full text-[13px]"><tbody className="divide-y divide-line">{suppressions.map((s) => <tr key={s.id}><td className="px-4 py-2 tabular-nums">{s.label ?? s.kind}</td><td className="px-4 py-2 text-ink-600">{s.kind.replace('_', ' ')}</td><td className="px-4 py-2 text-ink-600">{s.reason.replace('_', ' ')}</td><td className="px-4 py-2 tabular-nums text-ink-500">{formatInstant(s.createdAt, timezone)}</td></tr>)}</tbody></table>
-    </Card>
-  </div>;
+/** Settings > Cold outreach (PLAN 4.7): admins change it; anyone else reads it (B215). */
+async function ColdOutreachTab({ admin, timezone }: { admin: boolean; timezone: string }) {
+  const data = await loadColdOutreachSettings({ full: admin });
+  return <ColdOutreachSettings data={data} canEdit={admin} timezone={timezone} />;
 }

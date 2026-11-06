@@ -22,7 +22,12 @@ import { campaignStatusLabel, enrollConflictLabel } from '@/lib/campaign-status'
 import { CampaignControls, CampaignLifecycle, HardStopToggle } from '@/components/campaigns/campaign-controls';
 import { EnrollmentActions } from '@/components/campaigns/enrollment-actions';
 import { IconCampaigns } from '@/components/icons';
-import { Badge, CAMPAIGN_TONE, Card, Count, ENROLLMENT_TONE, Empty, RecordHeader, Stat, enrollmentStatusLabel } from '@/components/ui';
+import { Badge, CAMPAIGN_TONE, Card, Count, enrollmentTone, Empty, RecordHeader, Stat, Surface, enrollmentStatusLabel } from '@/components/ui';
+import { ActiveSection } from '@/components/active-section';
+import { ColdOutreachTabs, seesPushes } from '@/components/sandbox/section-tabs';
+import { ColdCampaignNotes } from '@/components/campaigns/cold-campaign-notes';
+import { COLD_CAMPAIGNS_HREF, COLD_CONTACT_BASE } from '@/lib/subject';
+import { campaignTitle } from '@/lib/campaigns-query';
 
 const AUDIENCE_PAGE = 50;
 
@@ -30,24 +35,34 @@ const AUDIENCE_PAGE = 50;
  * One campaign: its window drawn as a bar with today on it, what happened inside that window,
  * who is in it (a page at a time), and how each FO's room is being used.
  */
+/** "Q4 Harbor · Campaigns · Cold outreach" for a cold campaign, "Q4 Harbor · Campaigns" for a CRM one (B115). */
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  return { title: await campaignTitle((await params).id) };
+}
+
 export default async function CampaignDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ page?: string; q?: string }> }) {
   const user = await requireUser();
   const { id } = await params;
   const sp = await searchParams;
   const today = todayIn(user.timezone);
-  // A sandbox campaign has its own page in the Sandbox section.
-  if ((await prisma.campaign.findUnique({ where: { id }, select: { audience: true } }))?.audience === 'SANDBOX') redirect(`/sandbox/campaigns/${id}`);
   const detail = await campaignDetail(id, today);
   if (!detail) notFound();
   const { campaign, history, summary, byStep, byFo, podFos, enrollments } = detail;
   if (!canSeeAllPods(user) && !user.podIds.includes(campaign.podId)) redirect('/campaigns');
   const manager = canManageCampaigns(user, campaign.podId);
   const editor = canEditCampaign(user, campaign);
+  // One page for both kinds (PLAN 4.4, B134): a cold campaign shows inside Cold outreach, its tab bar
+  // and sidebar item, with the cold notes and its contacts' own pages.
+  const cold = campaign.audience === 'SANDBOX';
+  const section = cold ? <><ActiveSection href={COLD_CONTACT_BASE} /><div className="px-4 pt-4 sm:px-6"><Surface flush><ColdOutreachTabs current="campaigns" pushes={seesPushes(user)} /></Surface></div></> : null;
+  // Every cold campaign has a studio plan (the release moved the old ones onto the studio), so the
+  // page below, which is the CRM's campaigns from before the studio, never draws a cold one.
+  if (cold && !campaign.plannerDraft) notFound();
   if (campaign.plannerDraft) {
     const people = await campaignPeoplePage(campaign, sp.page, sp.q);
     // On the start day of a running campaign, the pod's leaders can still bring in a new FO.
     // Rendered all start day, even once nobody is left to add, so the last "joined" message stays.
-    const joinable = manager && addFoWindow(campaign).open ? await addFoCandidates(id) : null;
+    const joinable = manager && !cold && addFoWindow(campaign).open ? await addFoCandidates(id) : null;
     const addFo = joinable ? <AddFoPanel campaignId={id} campaignName={campaign.name} podId={campaign.podId} candidates={joinable.map((f) => ({ id: f.id, name: f.name }))} defaultPace={(campaign.plannerDraft as unknown as CampaignDraft).defaultBatchSize || 10} today={todayIn(workspaceTimezone())} /> : undefined;
     // The last failed start, unless the campaign was published again after it.
     const failed = campaign.status === 'SCHEDULED' ? await prisma.auditLog.findFirst({ where: { entityType: 'campaign', entityId: id, action: { in: ['launch_failed', 'calendar_published', 'calendar_republished'] } }, orderBy: { createdAt: 'desc' } }) : null;
@@ -55,7 +70,9 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
     // Only someone who can edit gets the Review button; everyone else is told who can.
     const launchError = failure && campaign.followupSourceId && !canApproveCampaign(user, campaign.podId) ? `${failure} Ask a Sales Leader or Pod Manager of ${campaign.pod.name} to fix it.`
       : failure && !editor ? `${failure} Ask whoever created it, or a Senior FO, Sales Leader or Pod Manager of ${campaign.pod.name}, to fix it.` : failure;
-    return <PlannedCampaignDetail canDelete={canDeleteCampaign(user, { status: campaign.status, podId: campaign.podId, createdById: campaign.createdById, everLaunched: people.launched })} campaign={campaign} manager={manager} editor={editor} people={people} q={sp.q ?? ''} launchError={launchError} addFo={addFo} />;
+    const planned = <PlannedCampaignDetail canDelete={canDeleteCampaign(user, { status: campaign.status, podId: campaign.podId, createdById: campaign.createdById, everLaunched: people.launched })} campaign={campaign} manager={manager} editor={editor} people={people} q={sp.q ?? ''} launchError={launchError} addFo={cold ? undefined : addFo}
+      {...(cold ? { back: { label: 'Cold outreach · Campaigns', href: COLD_CAMPAIGNS_HREF }, notes: <ColdCampaignNotes campaign={campaign} launched={people.launched} timezone={user.timezone} /> } : {})} />;
+    return cold ? <>{section}{planned}</> : planned;
   }
   const proposed = ['PENDING_APPROVAL', 'SCHEDULED', 'DRAFT'].includes(campaign.status);
   const page = Math.max(1, Number.parseInt(sp.page ?? '1', 10) || 1);
@@ -66,14 +83,13 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
   const plan = campaign.endDate ? await planCampaignCapacity({ sequenceId: campaign.sequenceId, podId: campaign.podId, startDate: windowStart, endDate: campaign.endDate, maxRate: campaign.startsPerFoPerDay }) : null;
   const capacity = plan && !('error' in plan) ? plan : null;
 
-  const [sequences, audienceAll, preview, replies, meetings] = await Promise.all([
+  const [sequences, audienceAll, preview, replies] = await Promise.all([
     prisma.sequence.findMany({ where: { archived: false }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
     proposed ? prisma.personCache.findMany({ where: { id: { in: campaign.personIds } }, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }], select: { id: true, firstName: true, lastName: true, companyName: true, email: true } }) : Promise.resolve([]),
     // The same preview the launch will run, so an approver sees who would be left out and why.
     proposed ? previewEnrollment({ personIds: campaign.personIds, sequenceId: campaign.sequenceId, podId: campaign.podId, campaignId: id, startDate: campaign.startDate, assignment: { mode: 'OWNER' }, dailyRampByFo: capacity ? Object.fromEntries(capacity.perFo.map((f) => [f.id, f.rate])) : null, lastStartDate: capacity?.lastStart ?? null, actor: userActor(user) }).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })) : Promise.resolve(null),
-    // Replies and meetings that happened inside the window, for the people in the campaign.
+    // Replies that happened inside the window, for the people in the campaign.
     enrollments.length ? prisma.touch.count({ where: { direction: 'INBOUND', personId: { in: enrollments.map((e) => e.personId!) }, occurredAt: { gte: new Date(`${campaign.startDate}T00:00:00Z`), ...(campaign.endDate ? { lte: new Date(`${addDays(campaign.endDate, 1)}T00:00:00Z`) } : {}) } } }) : Promise.resolve(0),
-    enrollments.length ? prisma.meeting.count({ where: { review: 'APPROVED', attendees: { some: { personId: { in: enrollments.map((e) => e.personId!) } } }, occurredAt: { gte: new Date(`${campaign.startDate}T00:00:00Z`), ...(campaign.endDate ? { lte: new Date(`${addDays(campaign.endDate, 1)}T00:00:00Z`) } : {}) } } }) : Promise.resolve(0),
   ]);
   const previewError = preview && 'error' in preview ? preview.error : campaign.sequence.archived ? 'The sequence is archived; restore it or pick another before launch.' : null;
   const ready = preview && !('error' in preview) ? preview : null;
@@ -110,7 +126,7 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
         icon={<IconCampaigns size={20} />}
         sub={<span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]"><span>{campaign.pod.name}</span><span className="text-ink-300">·</span><span>{campaign.sequence.name}</span>{campaign.productInterest.length ? <><span className="text-ink-300">·</span><span>{campaign.productInterest.map(optionLabel).join(', ')}</span></> : null}</span>}
         badges={<><Badge tone={CAMPAIGN_TONE[campaign.status] ?? 'gray'}>{campaignStatusLabel(campaign.status)}</Badge>{ranOver ? <Badge tone="amber">{ranOver} ran over</Badge> : null}{campaign.hardStopAtEnd ? <Badge tone="gray">Stops at end date</Badge> : null}</>}
-        actions={<>{editor && ['DRAFT','SCHEDULED','PENDING_APPROVAL'].includes(campaign.status) && !history.length && <Link href={`/campaigns/${id}/edit`} className="btn-primary">Edit campaign</Link>}{manager && <CampaignLifecycle campaignId={id} status={campaign.status} canApprove={canApproveCampaign(user, campaign.podId)} />}{canDeleteCampaign(user, { status: campaign.status, podId: campaign.podId, createdById: campaign.createdById, everLaunched: history.length > 0 }) && <DeleteCampaign id={id} name={campaign.name} simple={!history.length && ['DRAFT', 'PENDING_APPROVAL'].includes(campaign.status)} />}<Link href="/campaigns" className="btn-ghost btn-sm">All campaigns</Link></>}
+        actions={<>{editor && ['DRAFT','SCHEDULED','PENDING_APPROVAL'].includes(campaign.status) && !history.length && <Link href={`/campaigns/${id}/edit`} className="btn-primary">Edit campaign</Link>}{manager && <CampaignLifecycle campaignId={id} status={campaign.status} canApprove={canApproveCampaign(user, campaign.podId)} name={campaign.name} restartable />}{canDeleteCampaign(user, { status: campaign.status, podId: campaign.podId, createdById: campaign.createdById, everLaunched: history.length > 0 }) && <DeleteCampaign id={id} name={campaign.name} simple={!history.length && ['DRAFT', 'PENDING_APPROVAL'].includes(campaign.status)} />}<Link href="/campaigns" className="btn-ghost btn-sm">All campaigns</Link></>}
       />
 
       {/* The window. */}
@@ -133,7 +149,8 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
         <Stat label="Started" value={summary.counts.total} />
         <Stat label="Touches done" value={touchesDone} hint={touchesPlanned ? <>of <span className="font-medium text-ink-900">{touchesPlanned.toLocaleString('en-US')}</span> planned</> : undefined} />
         <Stat label="Replies in window" value={replies} tone="good" />
-        <Stat label="Meetings in window" value={meetings} tone="good" />
+        {/* B128: the campaign's meetings, as its list row and its step and team tables count them. */}
+        <Stat label="Meetings" value={summary.counts.meeting} tone="good" hint="booked through this campaign" />
         <Stat label="Reply rate" value={summary.counts.total ? `${Math.round(summary.replyRate * 100)}%` : '0%'} />
       </div>
 
@@ -171,7 +188,7 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
         </div>
         <Card title={`People in the campaign · ${history.length.toLocaleString('en-US')}`}>
           <form className="border-b border-line px-5 py-3"><input name="q" defaultValue={sp.q ?? ''} placeholder="Search people" aria-label="Search people in the campaign" className="!w-72" /></form>
-          <div className="overflow-x-auto"><table className="table table-dense"><thead><tr><th>Person</th><th>FO</th><th>Run</th><th>Status</th><th>Started</th><th>Step</th>{manager && <th>Manage</th>}</tr></thead><tbody>{historyPage.map((e) => <tr key={e.id}><td><Link href={'/people/' + e.personId} className="text-[13px] font-medium text-ink-900 hover:text-brand-700">{cachedPersonName(e.person!)}</Link></td><td className="text-[12.5px]">{e.fo.name}</td><td className="tabular-nums">{e.campaignRun}</td><td><Badge tone={ENROLLMENT_TONE[e.status] ?? 'gray'}>{enrollmentStatusLabel(e)}</Badge></td><td className="whitespace-nowrap text-[12.5px]">{formatLocalDate(e.startDate)}</td><td className="text-[12.5px]">{e.currentStep < 0 ? 'Not started' : `${e.currentStep + 1} of ${detail.steps.length}`}</td>{manager && <td><EnrollmentActions enrollmentId={e.id} status={e.status} foUserId={e.foUserId} fos={podFos} compact /></td>}</tr>)}</tbody></table></div>
+          <div className="overflow-x-auto"><table className="table table-dense"><thead><tr><th>Person</th><th>FO</th><th>Run</th><th>Status</th><th>Started</th><th>Step</th>{manager && <th>Manage</th>}</tr></thead><tbody>{historyPage.map((e) => <tr key={e.id}><td><Link href={'/people/' + e.personId} className="text-[13px] font-medium text-ink-900 hover:text-brand-700">{cachedPersonName(e.person!)}</Link></td><td className="text-[12.5px]">{e.fo.name}</td><td className="tabular-nums">{e.campaignRun}</td><td><Badge tone={enrollmentTone(e)}>{enrollmentStatusLabel(e)}</Badge></td><td className="whitespace-nowrap text-[12.5px]">{formatLocalDate(e.startDate)}</td><td className="text-[12.5px]">{e.currentStep < 0 ? 'Not started' : `${e.currentStep + 1} of ${detail.steps.length}`}</td>{manager && <td><EnrollmentActions enrollmentId={e.id} status={e.status} foUserId={e.foUserId} fos={podFos} compact name={cachedPersonName(e.person!)} campaign={campaign.name} /></td>}</tr>)}</tbody></table></div>
           {historyPages > 1 ? <div className="flex items-center justify-between border-t border-line px-5 py-3 text-[12.5px] text-ink-500"><span>Page {page} of {historyPages}</span><span className="flex gap-2">{page > 1 ? <Link href={pageHref(page - 1)} className="btn-secondary btn-sm">Previous</Link> : null}{page < historyPages ? <Link href={pageHref(page + 1)} className="btn-secondary btn-sm">Next</Link> : null}</span></div> : null}
         </Card>
       </>}

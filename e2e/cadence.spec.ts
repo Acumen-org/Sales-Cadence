@@ -106,12 +106,12 @@ test('task flow: complete an email, log a call with an outcome, skip with a boun
   await expect(page.getByText(/^\d+ \/ \d+$/).first()).toBeVisible();
   const firstPerson = (await page.locator('#main-content a[href^="/people/"]').first().textContent())!.trim();
   await expect(page.getByLabel('Email subject').first()).toBeVisible(); // template rendered
-  await page.getByRole('button', { name: 'Done', exact: true }).first().click();
+  await page.getByRole('button', { name: /^Done(: .+)?$/ }).first().click();
   await expect(page.getByRole('status').or(page.getByText(/Step \d+ of \d+/))).toBeVisible();
   // A step is one unit of work: while its LinkedIn module is open the row stays where it is.
   await page.goto(`/tasks?tab=${tab}&type=LINKEDIN`);
   await page.getByRole('link', { name: new RegExp(firstPerson) }).first().click();
-  await page.getByRole('button', { name: 'Done', exact: true }).first().click();
+  await page.getByRole('button', { name: /^Done(: .+)?$/ }).first().click();
   await expect(page.getByRole('status')).toContainText(/Done\./);
 
   // Now that both modules are resolved the step has moved to Done, and step 2 is generated.
@@ -137,7 +137,7 @@ test('task flow: complete an email, log a call with an outcome, skip with a boun
   const secondLink = page.locator('a[href*="task="]').filter({ hasNot: page.getByText(firstPerson, { exact: true }) }).first();
   const secondPerson = (await secondLink.getByTestId('task-person').textContent())!.trim();
   await secondLink.click();
-  await page.getByRole('button', { name: 'Skip', exact: true }).first().click();
+  await page.getByRole('button', { name: /^Skip(: .+)?$/ }).first().click();
   await page.getByLabel('Why?', { exact: true }).selectOption('bounced');
   await page.getByRole('button', { name: 'Skip step' }).first().click();
   await expect(page.getByText(/Skipped and removed from the sequence \(bounced\)/)).toBeVisible();
@@ -163,11 +163,11 @@ test('answered call finishes the sequence as replied and shows on Home', async (
   const link = page.locator('a[href*="task="]').first();
   const person = (await link.getByTestId('task-person').textContent())!.trim();
   await link.click();
-  await page.getByRole('button', { name: 'Done', exact: true }).first().click();
+  await page.getByRole('button', { name: /^Done(: .+)?$/ }).first().click();
   await expect(page.getByText(/Done\./).first()).toBeVisible();
   await page.goto(`/tasks?tab=${tab}&type=LINKEDIN`);
   await page.getByRole('link', { name: new RegExp(person) }).first().click();
-  await page.getByRole('button', { name: 'Done', exact: true }).first().click();
+  await page.getByRole('button', { name: /^Done(: .+)?$/ }).first().click();
   await expect(page.getByText(/Done\./).first()).toBeVisible();
   await page.goto('/tasks?tab=upcoming&type=CALL');
   await page.getByRole('link', { name: new RegExp(person) }).first().click();
@@ -201,7 +201,7 @@ test('outreach is edited inside campaigns and the old library no longer opens', 
   await expect(page.getByLabel('Step 1 email subject')).toHaveValue('Campaign-only subject');
 });
 
-test('admin saves rules; a junior FO cannot open settings', async ({ page }) => {
+test('admin saves rules; a junior FO reads only Cold outreach settings', async ({ page }) => {
   await loginAs(page, 'Admin');
   await page.goto('/settings?tab=rules');
   const cap = page.getByLabel(/Daily cap/);
@@ -214,7 +214,13 @@ test('admin saves rules; a junior FO cannot open settings', async ({ page }) => 
 
   await loginAs(page, 'Karson');
   await page.goto('/settings');
-  await expect(page).not.toHaveURL(/\/settings/);
+  // B215: anyone may read Settings > Cold outreach (read only); every other tab stays admin-only.
+  await expect(page).toHaveURL(/\/settings\?tab=cold-outreach$/);
+  await expect(page.getByRole('heading', { name: 'Cold outreach settings' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Rules and matching' })).toHaveCount(0);
+  await page.goto('/settings?tab=rules');
+  await expect(page).toHaveURL(/\/settings\?tab=cold-outreach$/);
+  await expect(page.getByLabel(/Daily cap/)).toHaveCount(0);
   await page.goto('/tasks');
   // A junior has the pod and FO filters like everyone, opened on their own pod and name.
   await expect(page.getByLabel('Filter by pod')).toBeVisible();

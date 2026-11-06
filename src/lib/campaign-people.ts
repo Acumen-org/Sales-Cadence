@@ -7,6 +7,7 @@ import { addFoWindow } from './campaign-add-fo';
 import type { CampaignDraft } from './campaign-planner';
 import { replanScheduledCampaign, type PublishedCalendar } from './campaign-planning-service';
 import { logAudit, userActor } from './audit';
+import { coldAudienceIssues } from './sandbox/campaigns';
 
 /**
  * The FOs working a campaign: its plan's team and anyone running one of its enrollments. These
@@ -51,12 +52,16 @@ export async function addPeopleToCalendarCampaign(user: SessionUser, campaign: C
   if (!['DRAFT', 'PENDING_APPROVAL', 'SCHEDULED'].includes(campaign.status)) return { ok: false, error: `${campaign.name} has started, so its people can't change.${addFoWindow(campaign).open && canManageCampaigns(user, campaign.podId) ? ' Today is its start day, so you can still add a new FO with their own people from the campaign page.' : ''}` };
   if (campaign.followupSourceId) return { ok: false, error: `${campaign.name} is a follow-up: it holds only the people who did not reply to the campaign before it.` };
   const fresh = ids.filter((id) => !campaign.personIds.includes(id));
-  if (!fresh.length) return { ok: true, message: 'Everyone chosen is already in this campaign.' };
+  // B130: for cold contacts, adding nobody is an error that says why, never a green "Added 0".
+  if (!fresh.length) return campaign.audience === 'SANDBOX' ? { ok: false, error: `Everyone chosen is already in ${campaign.name}.` } : { ok: true, message: 'Everyone chosen is already in this campaign.' };
   const pod = await prisma.pod.findUniqueOrThrow({ where: { id: campaign.podId } });
   const draft = campaign.plannerDraft as unknown as CampaignDraft & { request?: CampaignDraft };
-  const fos = await prisma.user.findMany({ where: { id: { in: (draft.request ?? draft).fos.map((f) => f.id) } }, select: { twentyMemberId: true } });
+  const fos = await prisma.user.findMany({ where: { id: { in: (draft.request ?? draft).fos.map((f) => f.id) } }, select: { id: true, twentyMemberId: true } });
   const ownerMemberIds = fos.flatMap((f) => (f.twentyMemberId ? [f.twentyMemberId] : []));
-  const issues = await campaignAudienceIssues(fresh, { podId: pod.id, podOwnerValue: pod.podOwnerValue, podName: pod.name, ownerMemberIds, campaignId: campaign.id, checkOwners: ownerMemberIds.length > 0, anyPod: canAddFromAnyPod(user) });
+  // A cold campaign takes cold contacts by the cold rules, the guard's included (B132).
+  const issues = campaign.audience === 'SANDBOX'
+    ? await coldAudienceIssues(fresh, { podId: pod.id, podName: pod.name, foIds: fos.map((f) => f.id), campaignId: campaign.id, anyPod: canAddFromAnyPod(user), actor: user })
+    : await campaignAudienceIssues(fresh, { podId: pod.id, podOwnerValue: pod.podOwnerValue, podName: pod.name, ownerMemberIds, campaignId: campaign.id, checkOwners: ownerMemberIds.length > 0, anyPod: canAddFromAnyPod(user) });
   const refused = new Set(issues.map((i) => i.id));
   const accepted = fresh.filter((id) => !refused.has(id));
   const note = skipped(issues);

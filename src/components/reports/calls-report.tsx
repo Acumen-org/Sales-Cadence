@@ -1,86 +1,158 @@
-import Link from 'next/link';
-import type { callReport, sandboxReport, CallTotals } from '@/lib/calls/analytics';
-import { formatInstant } from '@/lib/dates';
-import { Stat, Surface, ViewHeader, EmptyState } from '@/components/ui';
-import { AssignCallRep, AttachCallContact } from '@/components/calls/unmatched-controls';
+import type { ReactNode } from 'react';
+import type { CallListRow, CallReport, CallTotals } from '@/lib/calls/analytics';
+import { CALLS_PAGE, callStatusWords } from '@/lib/calls/analytics';
+import { formatInstant, formatLocalDate } from '@/lib/dates';
+import { Fact, ACTIVITY_TIP } from './report-document';
+import { Figure, pct } from './charts';
 
-type CallData = Awaited<ReturnType<typeof callReport>>;
-type SandboxData = Awaited<ReturnType<typeof sandboxReport>>;
+/**
+ * Reports > Calls (PLAN 6) for one audience, as a document: the page shows it with its controls and
+ * paging, the export renders it unchanged with neither (B125). In All outreach the calls are CRM +
+ * Cold + Not matched yet (B122). It names the period it compares with, as Outreach does (B195).
+ */
 
-const pct = (n: number) => `${Math.round(n * 100)}%`;
+const fmt = (n: number) => n.toLocaleString('en-US');
+const plural = (n: number, one: string, many = `${one}s`) => `${fmt(n)} ${n === 1 ? one : many}`;
 const mins = (sec: number) => (sec < 60 ? `${sec}s` : sec < 3600 ? `${Math.floor(sec / 60)}m ${sec % 60}s` : `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`);
-const delta = (now: number, before: number) => (before === now ? 'same as before' : `${now > before ? '+' : ''}${now - before} on the period before`);
 
-const METRICS: { key: keyof CallTotals; label: string; show: (v: number | null) => string }[] = [
-  { key: 'dials', label: 'Dials', show: (v) => String(v ?? 0) },
-  { key: 'connects', label: 'Connects', show: (v) => String(v ?? 0) },
+/** The figures each side has, in the CRM / Cold / not matched yet table. */
+const MEASURES: { key: keyof CallTotals; label: string; show: (v: number | null) => string }[] = [
+  { key: 'dials', label: 'Calls out', show: (v) => fmt(v ?? 0) },
+  { key: 'connects', label: 'Connects', show: (v) => fmt(v ?? 0) },
   { key: 'connectRate', label: 'Connect rate', show: (v) => pct(v ?? 0) },
-  { key: 'conversations', label: 'Conversations', show: (v) => String(v ?? 0) },
+  { key: 'inbound', label: 'Calls in', show: (v) => fmt(v ?? 0) },
+  { key: 'conversations', label: 'Conversations', show: (v) => fmt(v ?? 0) },
   { key: 'talkSec', label: 'Talk time', show: (v) => mins(v ?? 0) },
-  { key: 'meetings', label: 'Meetings booked', show: (v) => String(v ?? 0) },
+  { key: 'meetings', label: 'Meetings booked', show: (v) => fmt(v ?? 0) },
   { key: 'avgRating', label: 'Average rating', show: (v) => (v == null ? '-' : String(v)) },
-  { key: 'formsOutstanding', label: 'Forms outstanding', show: (v) => String(v ?? 0) },
   { key: 'costUsd', label: 'Cost', show: (v) => `$${(v ?? 0).toFixed(2)}` },
 ];
 
-/** Reports > Calls (plan section 11): every tile is the platform total; the table splits CRM and sandbox. */
-export function CallsReport({ data, timezone, reps, mayAttach }: { data: CallData; timezone: string; reps: { id: string; name: string }[]; mayAttach: boolean }) {
-  const t = data.totals;
-  return <div className="space-y-5">
-    <div className="grid grid-cols-5 gap-3">
-      <Stat label="Dials" value={t.dials} hint={delta(t.dials, data.previous.dials)} />
-      <Stat label="Connects" value={t.connects} hint={delta(t.connects, data.previous.connects)} />
-      <Stat label="Connect rate" value={pct(t.connectRate)} hint={`${pct(data.previous.connectRate)} before`} />
-      <Stat label="Talk time" value={mins(t.talkSec)} hint={t.connects ? `${mins(t.avgTalkPerConnect)} a connect` : undefined} />
-      <Stat label="Forms outstanding" value={t.formsOutstanding} tone={t.formsOutstanding ? 'warn' : 'default'} hint={t.medianMinutesToForm == null ? undefined : `median ${t.medianMinutesToForm} min to a form`} />
+/** S4's form flags in words (B029 and the long voicemail rule). */
+const FLAG_WORDS: Record<string, string> = { called_opted_out: 'Called someone who opted out', long_voicemail: 'Voicemail over 2 minutes', no_conversation: 'No conversation' };
+
+export type CallsDocumentProps = {
+  data: CallReport;
+  timezone: string;
+  /** The period the figures are compared with, named as on Outreach (B195). */
+  compared: { from: string; to: string } | null;
+  /** Links to calls, contacts and the next page: the page has them, the exported file does not. */
+  links?: { call: (id: string) => string; page: (patch: { page?: number; upage?: number }) => string } | null;
+  /** The page's controls on an unmatched call (a rep to give it to, a contact to attach): client parts the export never renders. */
+  unmatchedControls?: ((c: CallListRow) => { rep: ReactNode; contact: ReactNode }) | null;
+};
+
+function Pager({ page, pages, total, shown, href }: { page: number; pages: number; total: number; shown: number; href: ((n: number) => string) | null }) {
+  if (total <= shown && page === 1) return null;
+  const first = (page - 1) * CALLS_PAGE + 1;
+  return (
+    <div className="rp-pager">
+      <span>Showing {fmt(first)} to {fmt(first + shown - 1)} of {fmt(total)}</span>
+      {href ? <span>{page > 1 ? <a href={href(page - 1)}>Previous</a> : null}{page < pages ? <a href={href(page + 1)}>Next</a> : null}</span> : null}
     </div>
-    <Surface flush>
-      <ViewHeader title="CRM, sandbox and platform" />
-      <table className="w-full text-[13px]"><thead><tr className="text-left text-ink-500"><th className="px-4 py-2 font-normal">Measure</th><th className="px-4 py-2 font-normal">CRM</th><th className="px-4 py-2 font-normal">Sandbox</th><th className="px-4 py-2 font-normal">Platform</th></tr></thead>
-        <tbody className="divide-y divide-line">{METRICS.map((m) => <tr key={m.key}><td className="px-4 py-2 text-ink-700">{m.label}</td>{(['crm', 'sandbox', 'platform'] as const).map((a) => <td key={a} className="px-4 py-2 tabular-nums text-ink-900">{m.show(data.split[a][m.key] as number | null)}</td>)}</tr>)}</tbody></table>
-    </Surface>
-    <div className="grid grid-cols-2 gap-5">
-      <Surface flush><ViewHeader title="By rep" />{data.byRep.length ? <table className="w-full text-[13px]"><thead><tr className="text-left text-ink-500"><th className="px-4 py-2 font-normal">Rep</th><th className="px-4 py-2 font-normal">Dials</th><th className="px-4 py-2 font-normal">Connects</th><th className="px-4 py-2 font-normal">Rate</th><th className="px-4 py-2 font-normal">Meetings</th><th className="px-4 py-2 font-normal">Forms due</th></tr></thead><tbody className="divide-y divide-line">{data.byRep.map((r) => <tr key={r.userId}><td className="px-4 py-2">{r.name}</td><td className="px-4 py-2 tabular-nums">{r.dials}</td><td className="px-4 py-2 tabular-nums">{r.connects}</td><td className="px-4 py-2 tabular-nums">{pct(r.connectRate)}</td><td className="px-4 py-2 tabular-nums">{r.meetings}</td><td className="px-4 py-2 tabular-nums">{r.formsOutstanding}</td></tr>)}</tbody></table> : <EmptyState title="No calls in this period" />}</Surface>
-      <Surface flush><ViewHeader title="Outcomes and best hours" /><div className="grid grid-cols-2 gap-4 p-4 text-[13px]">
-        <ul className="space-y-1">{data.byOutcome.map((o) => <li key={o.key} className="flex justify-between"><span className="text-ink-700">{o.label}</span><span className="tabular-nums">{o.count}</span></li>)}{!data.byOutcome.length ? <li className="text-ink-500">No forms yet</li> : null}</ul>
-        <ul className="space-y-1">{data.bestHours.map((h) => <li key={h.slot} className="flex justify-between"><span className="text-ink-700">{h.slot}:00</span><span className="tabular-nums">{pct(h.rate)} of {h.dials}</span></li>)}{!data.bestHours.length ? <li className="text-ink-500">Not enough dials yet</li> : null}</ul>
-      </div></Surface>
-    </div>
-    <Surface flush>
-      <ViewHeader title="Calls" />
-      {data.calls.length ? <table className="w-full text-[13px]"><thead><tr className="text-left text-ink-500"><th className="px-4 py-2 font-normal">When</th><th className="px-4 py-2 font-normal">Rep</th><th className="px-4 py-2 font-normal">Contact</th><th className="px-4 py-2 font-normal">Outcome</th><th className="px-4 py-2 font-normal">Rating</th><th className="px-4 py-2 font-normal">Talk</th><th className="px-4 py-2 font-normal">Recording</th></tr></thead>
-        <tbody className="divide-y divide-line">{data.calls.map((c) => <tr key={c.id}><td className="px-4 py-2"><Link href={`/calls/${c.id}`} className="hover:text-brand-700">{formatInstant(c.startedAt ?? c.createdAt, timezone)}</Link></td><td className="px-4 py-2">{c.user?.name ?? '-'}</td><td className="px-4 py-2">{c.personId ? <Link href={`/people/${c.personId}`} className="hover:text-brand-700">CRM</Link> : c.sandboxContactId ? <Link href={`/sandbox/${c.sandboxContactId}`} className="hover:text-brand-700">Sandbox</Link> : (c.direction === 'OUTBOUND' ? c.toNumber : c.fromNumber) ?? '-'}</td><td className="px-4 py-2">{c.form ? data.outcomes.find((o) => o.key === c.form!.outcome)?.label ?? c.form.outcome : c.formDueAt ? 'Form due' : c.twilioStatus ?? '-'}</td><td className="px-4 py-2 tabular-nums">{c.form?.rating ?? '-'}</td><td className="px-4 py-2 tabular-nums">{c.talkSec ? mins(c.talkSec) : '-'}</td><td className="px-4 py-2">{c.recordingSid ? <Link href={`/calls/${c.id}`} className="text-brand-700 hover:underline">Play</Link> : '-'}</td></tr>)}</tbody></table> : <EmptyState title="No calls in this period" />}
-    </Surface>
-    <Surface flush>
-      <ViewHeader title="Unmatched" meta={<span className="tabular-nums text-ink-500">{data.unmatched.length}</span>} />
-      {data.unmatched.length ? <table className="w-full text-[13px]"><thead><tr className="text-left text-ink-500"><th className="px-4 py-2 font-normal">When</th><th className="px-4 py-2 font-normal">From</th><th className="px-4 py-2 font-normal">To</th><th className="px-4 py-2 font-normal">Rep</th><th className="px-4 py-2 font-normal">Contact</th></tr></thead>
-        <tbody className="divide-y divide-line">{data.unmatched.map((c) => <tr key={c.id}><td className="px-4 py-2">{formatInstant(c.startedAt ?? c.createdAt, timezone)}</td><td className="px-4 py-2 tabular-nums">{c.fromNumber}</td><td className="px-4 py-2 tabular-nums">{c.toNumber}</td><td className="px-4 py-2">{c.userId ? reps.find((r) => r.id === c.userId)?.name : mayAttach ? <AssignCallRep callId={c.id} reps={reps} /> : 'Unknown'}</td><td className="px-4 py-2">{c.matchedBy === 'ambiguous' && mayAttach ? <AttachCallContact callId={c.id} candidates={(c.candidates as { kind: string; id: string; name: string }[] | null) ?? []} /> : c.personId || c.sandboxContactId ? 'Attached' : 'Not found'}</td></tr>)}</tbody></table> : <EmptyState title="Every call is matched" />}
-    </Surface>
-  </div>;
+  );
 }
 
-/** Reports' Sandbox section and the Platform totals (decision 2). */
-export function SandboxAndPlatform({ data }: { data: SandboxData }) {
-  const s = data.sandbox;
-  return <div className="grid grid-cols-2 gap-5">
-    <Surface flush>
-      <ViewHeader title="Sandbox" />
-      <div className="grid grid-cols-3 gap-3 p-4">
-        <Stat label="Added" value={s.added} hint={`${s.pushed} from Bellwether`} />
-        <Stat label="Claimed" value={s.claimed} />
-        <Stat label="Called" value={s.called} hint={`${s.calls} calls`} />
-        <Stat label="Connected" value={s.connected} />
-        <Stat label="Meetings" value={s.meetings} />
-        <Stat label="Moved to CRM" value={s.moved} />
-        <Stat label="Opted out" value={s.optedOut} />
-        <Stat label="Steps done" value={s.stepsDone} />
-        <Stat label="Next actions done" value={s.nextActionsDone} />
+function Contact({ c, link }: { c: CallListRow; link: boolean }) {
+  if (!c.subject) return <>{(c.direction === 'OUTBOUND' ? c.toNumber : c.fromNumber) ?? '-'}</>;
+  const name = `${c.subject.firstName} ${c.subject.lastName}`.trim() || 'Unnamed';
+  return (
+    <>
+      {link ? <a href={c.subject.href}>{name}</a> : name}
+      {c.audience === 'SANDBOX' ? <span className="rp-badge">Cold</span> : null}
+      {c.subject.companyName ? <div className="rp-small">{c.subject.companyName}</div> : null}
+    </>
+  );
+}
+
+export function CallsDocument({ data, timezone, compared, links, unmatchedControls }: CallsDocumentProps) {
+  const t = data.totals;
+  const b = data.previous;
+  const all = data.audience === 'all';
+  const parts = (key: keyof CallTotals) => (all ? [`${fmt(data.split.crm[key] as number)} CRM`, `${fmt(data.split.cold[key] as number)} Cold`, ...((data.split.unmatched[key] as number) ? [`${fmt(data.split.unmatched[key] as number)} not matched yet`] : [])].join(' · ') : null);
+  // B195: a period with no calls before says so, never "0% before".
+  const noneBefore = b !== null && b.dials === 0 && b.inbound === 0;
+  return (
+    <div className="rp">
+      <div className="rp-meta"><span>{compared ? <>Compared with {formatLocalDate(compared.from, 'short')} → {formatLocalDate(compared.to, 'short')}{noneBefore ? ': no calls then' : ''}</> : null}</span></div>
+      <div className="rp-facts">
+        <Fact label="Calls out" tip={ACTIVITY_TIP} value={t.dials} previous={noneBefore ? null : b?.dials ?? null} parts={parts('dials')} />
+        <Fact label="Connects" tip={`${ACTIVITY_TIP}. Calls out that the person answered; calls in are not connects.`} value={t.connects} previous={noneBefore ? null : b?.connects ?? null} parts={parts('connects')} />
+        <Fact label="Connect rate" tip="Connects out of calls out: the same calls" value={t.connectRate} shown={pct(t.connectRate)} previous={noneBefore || !b?.dials ? null : b.connectRate} rate />
+        <Fact label="Talk time" tip="Talk on calls that connected" value={t.talkSec} shown={mins(t.talkSec)} previous={null} note={t.connects ? <span>{mins(t.avgTalkPerConnect)} a connect</span> : null} />
+        <Fact label="Forms waiting now" tip="Post-call forms not filled in yet, whatever the period" value={t.formsOutstanding} previous={null} warn note={t.medianMinutesToForm == null ? null : <span>median {t.medianMinutesToForm} min to a form</span>} />
+        <Fact label="Calls to people who opted out" tip="Calls whose form says the person had opted out (B029)" value={t.calledOptedOut} previous={null} warn note={t.longVoicemails ? <span>{plural(t.longVoicemails, 'voicemail')} over 2 minutes</span> : null} />
       </div>
-    </Surface>
-    <Surface flush>
-      <ViewHeader title="Platform" />
-      <table className="w-full text-[13px]"><thead><tr className="text-left text-ink-500"><th className="px-4 py-2 font-normal">Measure</th><th className="px-4 py-2 font-normal">CRM</th><th className="px-4 py-2 font-normal">Sandbox</th><th className="px-4 py-2 font-normal">Platform</th></tr></thead>
-        <tbody className="divide-y divide-line">{([['stepsDone', 'Steps done'], ['calls', 'Calls'], ['connects', 'Connects'], ['meetings', 'Meetings booked on calls'], ['nextActionsDone', 'Next actions done']] as const).map(([k, label]) => <tr key={k}><td className="px-4 py-2 text-ink-700">{label}</td><td className="px-4 py-2 tabular-nums">{data.platform[k].crm}</td><td className="px-4 py-2 tabular-nums">{data.platform[k].sandbox}</td><td className="px-4 py-2 tabular-nums">{data.platform[k].platform}</td></tr>)}</tbody></table>
-    </Surface>
-  </div>;
+
+      {all ? (
+        <Figure title="CRM, Cold outreach and not matched yet">
+          <div className="rp-scroll"><table className="rp-table">
+            <thead><tr><th>Measure</th><th className="rp-r">CRM</th><th className="rp-r">Cold outreach</th><th className="rp-r">Not matched yet</th><th className="rp-r">All outreach</th></tr></thead>
+            <tbody>{MEASURES.map((m) => <tr key={m.key}><td className="rp-name">{m.label}</td>{(['crm', 'cold', 'unmatched', 'all'] as const).map((a) => <td key={a} className="rp-r">{m.show(data.split[a][m.key] as number | null)}</td>)}</tr>)}</tbody>
+          </table></div>
+        </Figure>
+      ) : null}
+
+      <div className="rp-row rp-stack">
+        <Figure title="By rep">
+          {data.byRep.length ? (
+            <div className="rp-scroll"><table className="rp-table">
+              <thead><tr><th>Rep</th><th className="rp-r">Calls out</th><th className="rp-r">Connects</th><th className="rp-r">Rate</th><th className="rp-r">Meetings booked</th><th className="rp-r">Forms waiting now</th></tr></thead>
+              <tbody>{data.byRep.map((r) => <tr key={r.userId}><td className="rp-name rp-nowrap">{r.name}</td><td className="rp-r">{fmt(r.dials)}</td><td className="rp-r">{fmt(r.connects)}</td><td className="rp-r">{pct(r.connectRate)}</td><td className="rp-r">{fmt(r.meetings)}</td><td className="rp-r">{fmt(r.formsOutstanding)}{r.oldestFormDue ? <div className="rp-small">oldest {formatInstant(r.oldestFormDue, timezone)}</div> : null}</td></tr>)}</tbody>
+            </table></div>
+          ) : <p className="rp-empty">No calls in this period</p>}
+        </Figure>
+        <Figure title="Outcomes and best hours">
+          <table className="rp-table"><tbody>
+            {data.byOutcome.map((o) => <tr key={o.key}><td className="rp-name">{o.label}</td><td className="rp-r">{fmt(o.count)}</td></tr>)}
+            {!data.byOutcome.length ? <tr><td className="rp-muted">No forms yet</td></tr> : null}
+            {data.bestHours.map((h) => <tr key={h.slot}><td className="rp-name">{h.slot}:00</td><td className="rp-r">{pct(h.rate)} of {fmt(h.dials)}</td></tr>)}
+            {!data.bestHours.length ? <tr><td className="rp-muted">Not enough calls out yet for best hours</td></tr> : null}
+          </tbody></table>
+        </Figure>
+      </div>
+
+      <Figure title="Calls" aside={plural(data.callsTotal, 'call')}>
+        {data.calls.length ? (
+          <div className="rp-scroll"><table className="rp-table">
+            <thead><tr><th>When</th><th>Rep</th><th>Who</th><th>Direction</th><th>Result</th><th className="rp-r">Rating</th><th className="rp-r">Talk</th></tr></thead>
+            <tbody>{data.calls.map((c) => (
+              <tr key={c.id}>
+                <td>{links ? <a href={links.call(c.id)}>{formatInstant(c.startedAt ?? c.createdAt, timezone)}</a> : formatInstant(c.startedAt ?? c.createdAt, timezone)}</td>
+                <td>{c.user?.name ?? 'No rep yet'}</td>
+                <td><Contact c={c} link={Boolean(links)} /></td>
+                <td>{c.direction === 'OUTBOUND' ? 'Out' : 'In'}</td>
+                <td>{c.form ? data.outcomes.find((o) => o.key === c.form!.outcome)?.label ?? 'Other' : callStatusWords(c)}{c.form?.flags.filter((f) => FLAG_WORDS[f]).map((f) => <span key={f} className="rp-flag">{FLAG_WORDS[f]}</span>)}</td>
+                <td className="rp-r">{c.form?.rating ?? '-'}</td>
+                <td className="rp-r">{c.talkSec ? mins(c.talkSec) : '-'}</td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        ) : <p className="rp-empty">No calls in this period</p>}
+        <Pager page={data.page} pages={data.pages} total={data.callsTotal} shown={data.calls.length} href={links ? (n) => links.page({ page: n }) : null} />
+      </Figure>
+
+      <Figure title="Not matched yet" aside={plural(data.unmatchedTotal, 'call')}>
+        {data.unmatched.length ? (
+          <div className="rp-scroll"><table className="rp-table">
+            <thead><tr><th>When</th><th>From</th><th>To</th><th>Rep</th><th>Who</th></tr></thead>
+            <tbody>{data.unmatched.map((c) => {
+              const controls = unmatchedControls?.(c) ?? null;
+              return (
+                <tr key={c.id}>
+                  <td>{formatInstant(c.startedAt ?? c.createdAt, timezone)}</td>
+                  <td className="rp-num">{c.fromNumber ?? '-'}</td>
+                  <td className="rp-num">{c.toNumber ?? '-'}</td>
+                  {/* B196: a call nobody is matched to shows in every filter, and says so. */}
+                  <td>{c.user?.name ?? controls?.rep ?? <span className="rp-muted">No rep yet: shown in every filter</span>}</td>
+                  <td>{c.subject ? <>{`${c.subject.firstName} ${c.subject.lastName}`.trim()}<div className="rp-small">Contact found, rep missing</div></> : controls?.contact ?? <span className="rp-muted">Nobody found for this number</span>}</td>
+                </tr>
+              );
+            })}</tbody>
+          </table></div>
+        ) : <p className="rp-empty">Every call is matched</p>}
+        <Pager page={data.unmatchedPage} pages={data.unmatchedPages} total={data.unmatchedTotal} shown={data.unmatched.length} href={links ? (n) => links.page({ upage: n }) : null} />
+      </Figure>
+    </div>
+  );
 }

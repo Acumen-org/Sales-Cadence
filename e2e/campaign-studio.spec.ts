@@ -111,7 +111,7 @@ test('adapts the starter and keeps custom groups exclusive with sidebar editing'
  await sidebar.getByRole('button',{name:'Add outreach group',exact:true}).click();await expect(page.getByLabel('Select StudioGroups 1',{exact:true})).toBeDisabled();await page.getByLabel('Select everyone shown',{exact:true}).check();await page.getByRole('button',{name:'Create outreach group (3)'}).click();await page.getByLabel('Outreach group name').fill('Other contacts');
  await expect(sidebar.getByRole('button',{name:'Default',exact:true}).locator('..').locator('..')).toContainText('0 people');
  await expect(sidebar.getByRole('button',{name:'Add outreach group',exact:true})).toBeDisabled();
- page.once('dialog',dialog=>dialog.accept());await sidebar.getByRole('button',{name:'Delete Other contacts',exact:true}).click();
+ await sidebar.getByRole('button',{name:'Delete Other contacts',exact:true}).click();await page.getByRole('dialog').last().getByRole('button',{name:'Delete group',exact:true}).click();
  await expect(sidebar.getByRole('button',{name:'Default',exact:true}).locator('..').locator('..')).toContainText('3 people');
  await expect(sidebar.getByRole('button',{name:'Clients',exact:true})).toBeVisible();
 });
@@ -123,7 +123,7 @@ test('People campaign controls are bulk-only and mixed selections add only avail
  await page.getByLabel('Select StudioBulk 1',{exact:true}).check();await expect(page.getByRole('button',{name:'Add to campaign',exact:true})).toBeDisabled();await expect(page.getByRole('button',{name:'Remove from campaign',exact:true})).toBeEnabled();
  await page.getByLabel('Select StudioBulk Free',{exact:true}).check();await page.getByRole('button',{name:'Add to campaign',exact:true}).click();await expect(page.getByRole('dialog')).toContainText('Add 1 person to a campaign');await page.getByRole('button',{name:'Close',exact:true}).last().click();
  await page.getByLabel('Select StudioBulk 1',{exact:true}).uncheck();await expect(page.getByRole('button',{name:'Remove from campaign',exact:true})).toBeDisabled();
- await page.getByLabel('Select StudioBulk Free',{exact:true}).uncheck();await page.getByLabel('Select StudioBulk 1',{exact:true}).check();page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Remove from campaign',exact:true}).click();await expect(page.getByText('1 person removed from StudioBulk, and its calendar was updated.')).toBeVisible();
+ await page.getByLabel('Select StudioBulk Free',{exact:true}).uncheck();await page.getByLabel('Select StudioBulk 1',{exact:true}).check();await page.getByRole('button',{name:'Remove from campaign',exact:true}).click();await page.getByRole('dialog').last().getByRole('button',{name:'Remove',exact:true}).click();await expect(page.getByText('1 person removed from StudioBulk, and its calendar was updated.')).toBeVisible();
  // A scheduled campaign is planned again and stays scheduled, without the person taken out.
  const c=await db.campaign.findUniqueOrThrow({where:{id}});expect(c.status).toBe('SCHEDULED');expect(c.personIds).not.toContain('StudioBulk-0');
  const plan=c.publishedPlan as {batches:{personIds:string[]}[]};expect(plan.batches.flatMap(b=>b.personIds).sort()).toEqual(['StudioBulk-1','StudioBulk-2','StudioBulk-3']);
@@ -143,7 +143,7 @@ test('unreachable contacts are skipped in the picker and left out of the plan wi
  await db.personCache.createMany({data:[{id:'AudienceReview-dnd',firstName:'AudienceReview',lastName:'DoNotContact',sortName:'audiencereview donotcontact',podOwner:'ALISA',dnd:true},{id:'AudienceReview-optout',firstName:'AudienceReview',lastName:'OptedOut',sortName:'audiencereview optedout',podOwner:'ALISA',optedOut:true}]});
  await page.getByLabel('Search people to add').fill('AudienceReview');await expect(page.getByText('6 matching')).toBeVisible();await expect(page.getByRole('button',{name:'Select all matching',exact:true})).toBeEnabled();
  await expect(page.getByLabel('Select AudienceReview DoNotContact',{exact:true})).toBeDisabled();await expect(page.getByLabel('Select AudienceReview OptedOut',{exact:true})).toBeDisabled();
- await page.getByRole('button',{name:'Select all matching',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'Not added: AudienceReview DoNotContact (marked Do not contact in Twenty); AudienceReview OptedOut (asked not to be contacted).'})).toBeVisible();
+ await page.getByRole('button',{name:'Select all matching',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'Not added: AudienceReview DoNotContact (marked Do not contact in the CRM); AudienceReview OptedOut (asked not to be contacted).'})).toBeVisible();
  // A CRM flag set after selection does not stop the campaign: that person is left out, by name.
  await db.personCache.update({where:{id:'AudienceReview-0'},data:{dnd:true}});
  await page.getByRole('button',{name:'Next: Outreach',exact:true}).click();await expect(page.getByRole('heading',{name:'Outreach groups',exact:true})).toBeVisible();

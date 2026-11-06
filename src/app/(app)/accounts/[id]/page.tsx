@@ -12,9 +12,10 @@ import { accentFor } from '@/lib/accent';
 import { membershipFor, membershipLabel, primaryMembership } from '@/lib/campaign-membership';
 import { OrgTree, type TreePerson } from '@/components/accounts/org-tree';
 import { ActionIcon, IconExternal, IconLock, IconPlus } from '@/components/icons';
-import { Avatar, Badge, CAMPAIGN_TONE, Card, Count, ENROLLMENT_TONE, Empty, EmptyState, EventDetail, IdentityCell, KeyValue, RecordHeader, Stat, Surface, Tabs, TierBadge, enrollmentStatusLabel, type BadgeTone } from '@/components/ui';
+import { Avatar, Badge, CAMPAIGN_TONE, Card, Count, enrollmentTone, Empty, EmptyState, EventDetail, IdentityCell, KeyValue, RecordHeader, Stat, Surface, Tabs, TierBadge, enrollmentStatusLabel } from '@/components/ui';
 import { campaignStatusLabel } from '@/lib/campaign-status';
 import { optionLabels } from '@/lib/twenty/labels';
+import { blockAccountConfirm, unblockAccountConfirm } from '@/lib/confirms';
 
 const TABS = [
   { key: 'overview', label: 'Overview' },
@@ -46,7 +47,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
       ? {
           status: p.enrollment.status,
           label: enrollmentStatusLabel(p.enrollment),
-          tone: (ENROLLMENT_TONE[p.enrollment.status] ?? 'gray') as BadgeTone,
+          tone: enrollmentTone(p.enrollment),
           foName: p.enrollment.foName,
           stepIndex: p.enrollment.stepIndex,
           steps: p.enrollment.steps,
@@ -89,14 +90,14 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
               </Link>}
               {isAdmin(user) ? (
                 blocked ? (
-                  <ActionButton action={unblockAccountAction} payload={{ companyId: company.id }} confirm={`Put ${company.name} back in Cadence?`}>
+                  <ActionButton action={unblockAccountAction} payload={{ companyId: company.id }} confirm={unblockAccountConfirm(company.name)}>
                     Unblock account
                   </ActionButton>
                 ) : (
                   <ActionButton
                     action={blockAccountAction}
                     payload={{ companyId: company.id }}
-                    confirm={`Block ${company.name}? It leaves Accounts, People, search and enrichment for everyone, and any sequence its people are in ends.`}
+                    confirm={blockAccountConfirm(company.name)}
                     className="btn-secondary btn-sm !border-red-200 !text-red-700 hover:!bg-red-50"
                   >
                     <IconLock size={13} /> Block account
@@ -155,7 +156,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                       // The handle, not the whole URL set in bold, matching the person record.
                       { k: 'LinkedIn', v: company.linkedinUrl ? <a href={company.linkedinUrl} target="_blank" rel="noreferrer" title={company.linkedinUrl} className="text-brand-700 hover:underline">{company.linkedinUrl.replace(/^https?:\/\/(www\.)?linkedin\.com\//i, '')}</a> : null },
                       { k: 'Last synced', v: company.syncedAt ? formatInstant(company.syncedAt, user.timezone) : null },
-                      { k: 'Twenty id', v: <span className="font-mono text-[11px]">{company.id}</span> },
+                      { k: 'CRM id', v: <span className="font-mono text-[11px]">{company.id}</span> },
                     ]}
                   />
                 </div>
@@ -214,7 +215,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                       <th>Person</th>
                       <th>Tier</th>
                       <th>Type</th>
-                      <th>Next in Twenty</th>
+                      <th>Next in the CRM</th>
                       <th>Campaign</th>
                       <th>Sequence</th>
                       <th className="num">Touches</th>

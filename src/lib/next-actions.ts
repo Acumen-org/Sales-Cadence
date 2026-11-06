@@ -1,10 +1,12 @@
-import type { ActionType, NextAction, NextActionRepeat, Prisma } from '@prisma/client';
+import type { ActionType, NextActionKind, NextActionRepeat } from '@prisma/client';
 import { prisma } from './db';
 import { logAudit, SYSTEM_ACTOR, type AuditActor } from './audit';
-import { addDays, formatLocalDate, isLocalDate, todayIn, type LocalDate } from './dates';
+import { addDays, formatLocalDate, isLocalDate, safeTimezone, toLocalDate, todayIn, type LocalDate } from './dates';
+import { workspaceTimezone } from './workspace';
 import { nextWorkingDay } from './engine/clock';
 import { getSettings } from './settings';
 import { getTwentyClient } from './twenty';
+import { logOwnPersonWrite } from './twenty/own-writes';
 import { afterResponse } from './engine/sync-out';
 import { CRM_SUBJECT } from './subject';
 
@@ -65,7 +67,7 @@ export function nextOccurrence(due: LocalDate, repeat: NextActionRepeat, today: 
   return nextWorkingDay(next, workingDays);
 }
 
-export type NextActionInput = { label: string; action: ActionType; dueDate: LocalDate; repeat: NextActionRepeat; /** Null: each person's own FO. */ foUserId: string | null };
+export type NextActionInput = { label: string; action: ActionType; dueDate: LocalDate; repeat: NextActionRepeat; /** Null: each person's own FO. */ foUserId: string | null; /** A meeting, with its time when known (B183). */ kind?: NextActionKind; meetingAt?: Date | null };
 
 export function validateNextAction(raw: { label?: unknown; action?: unknown; dueDate?: unknown; repeat?: unknown; foUserId?: unknown }, today: LocalDate): { ok: true; value: NextActionInput } | { ok: false; error: string } {
   const label = String(raw.label ?? '').trim().replace(/\s+/g, ' ');
@@ -87,7 +89,7 @@ export function validateNextAction(raw: { label?: unknown; action?: unknown; due
  * Twenty's two fields can only hold one. Returns how many were set and who was left out.
  */
 export async function setNextActions(personIds: string[], input: NextActionInput, actor: AuditActor & { id?: string | null }, fallbackFoUserId: string): Promise<{ set: string[]; skipped: { personId: string; reason: string }[] }> {
-  const people = await prisma.personCache.findMany({ where: { id: { in: [...new Set(personIds)] } }, select: { id: true, deletedAt: true, dnd: true, ownerMemberId: true } });
+  const people = await prisma.personCache.findMany({ where: { id: { in: [...new Set(personIds)] } }, select: { id: true, deletedAt: true, dnd: true, optedOut: true, ownerMemberId: true } });
   const owners = await prisma.user.findMany({ where: { active: true, twentyMemberId: { in: people.flatMap((p) => (p.ownerMemberId ? [p.ownerMemberId] : [])) } }, select: { id: true, twentyMemberId: true } });
   const ownerOf = new Map(owners.map((u) => [u.twentyMemberId, u.id]));
   const set: string[] = [];
@@ -96,13 +98,15 @@ export async function setNextActions(personIds: string[], input: NextActionInput
     const p = people.find((x) => x.id === id);
     if (!p || p.deletedAt) { skipped.push({ personId: id, reason: 'Not in the CRM any more' }); continue; }
     if (p.dnd) { skipped.push({ personId: id, reason: 'Marked do not contact' }); continue; }
+    // B007: an opted-out person gets no new next action either.
+    if (p.optedOut) { skipped.push({ personId: id, reason: 'Asked not to be contacted' }); continue; }
     const foUserId = input.foUserId ?? (p.ownerMemberId ? ownerOf.get(p.ownerMemberId) : undefined) ?? fallbackFoUserId;
-    const data = { label: input.label, action: input.action, dueDate: input.dueDate, repeat: input.repeat, foUserId, crmPending: true, crmError: null };
+    const data = { label: input.label, action: input.action, dueDate: input.dueDate, repeat: input.repeat, foUserId, kind: input.kind ?? 'ACTION', meetingAt: input.meetingAt ?? null, crmPending: true, crmError: null };
     const row = await prisma.$transaction(async (tx) => {
       const open = await tx.nextAction.findFirst({ where: { personId: id, state: 'OPEN' }, select: { id: true } });
       const saved = open
         ? await tx.nextAction.update({ where: { id: open.id }, data })
-        : await tx.nextAction.create({ data: { ...data, personId: id, createdById: actor.id ?? null } });
+        : await tx.nextAction.create({ data: { ...data, personId: id, createdById: actor.id ?? null, audience: 'CRM' } });
       // What Twenty will hold once the write lands, shown at once rather than after it.
       await tx.personCache.update({ where: { id }, data: { nextAction: saved.label, nextActionDueDate: saved.dueDate } });
       return saved;
@@ -131,9 +135,33 @@ export async function completeNextAction(id: string, actor: AuditActor & { id?: 
   });
   if (!claimed.count) return { ok: false, error: 'Someone else just changed this task.' };
   if (na.personId) await mirrorToPerson(na.personId, next ? { label: na.label, dueDate: next } : null);
+  // A cold contact's next step done is activity, which keeps retention away (N032).
+  else if (na.sandboxContactId) await prisma.sandboxContact.updateMany({ where: { id: na.sandboxContactId }, data: { lastActivityAt: now } });
   await logAudit({ ...auditSubject(na), action: 'next_action_done', actor, details: { label: na.label, dueDate: na.dueDate, next } });
   await afterResponse(async () => { await pushNextAction(id); });
   return { ok: true, next };
+}
+
+/**
+ * An email Cadence saw go to the person closes their open Email next step when it is due that day
+ * or earlier: the day of the step's rep, never UTC's, so an email sent at 7 pm in Chicago does not
+ * close tomorrow's step (N098). CRM people and cold contacts follow this one rule, whether Outlook
+ * tracking or the CRM's mail sync saw the email, and each close is logged with the email behind it.
+ * A repeating one moves on, as Done would. Returns the next action closed, if any.
+ */
+export async function closeEmailNextAction(subject: { personId: string } | { sandboxContactId: string }, at: Date, evidence: string): Promise<string | null> {
+  const where = 'personId' in subject ? { personId: subject.personId } : { sandboxContactId: subject.sandboxContactId, personId: null };
+  const open = await prisma.nextAction.findMany({ where: { ...where, state: 'OPEN', action: 'EMAIL', kind: 'ACTION' }, include: { fo: { select: { timezone: true } } }, orderBy: { dueDate: 'asc' } });
+  for (const na of open) {
+    const day = toLocalDate(at, safeTimezone(na.fo?.timezone ?? workspaceTimezone()));
+    // An email sent before the step was set is not the one it asks for (a few minutes' grace).
+    if (na.dueDate > day || at.getTime() < na.createdAt.getTime() - 30 * 60_000) continue;
+    const r = await completeNextAction(na.id, SYSTEM_ACTOR, at, na.dueDate);
+    if (!r.ok) continue;
+    await logAudit({ ...auditSubject(na), action: 'next_action_auto_closed', actor: SYSTEM_ACTOR, details: { nextActionId: na.id, label: na.label, dueDate: na.dueDate, emailDay: day, evidence, next: r.next } });
+    return na.id;
+  }
+  return null;
 }
 
 /** Move it to another day. A repeating one keeps its rhythm from the new day. */
@@ -189,6 +217,8 @@ export async function pushNextAction(id: string): Promise<boolean> {
   try {
     const client = await getTwentyClient();
     await client.setPersonNextAction(personId, patch);
+    // B033: a moved person's updatedAt after Cadence's own write, so Undo does not mistake it for an edit.
+    await logOwnPersonWrite(client, personId, 'setPersonNextAction', { id: personId, ...patch });
     // Only if nothing changed meanwhile: a newer change is still pending and goes on the next pass.
     await prisma.nextAction.updateMany({ where: { id, updatedAt: na.updatedAt }, data: { crmPending: false, crmSyncedAt: new Date(), crmError: null } });
     await prisma.personCache.updateMany({ where: { id: personId }, data: patch });
@@ -224,34 +254,16 @@ export async function syncNextActions(now = new Date()): Promise<{ pushed: numbe
     if (date === na.dueDate && label === na.label) { await prisma.nextAction.update({ where: { id: na.id }, data: { crmSyncedAt: crm.twentyUpdatedAt } }); continue; }
     if (!date) {
       await prisma.nextAction.update({ where: { id: na.id }, data: { state: 'CANCELLED', closedAt: now, crmSyncedAt: crm.twentyUpdatedAt } });
-      await logAudit({ entityType: 'person', entityId: na.personId, action: 'next_action_stopped', actor: SYSTEM_ACTOR, details: { label: na.label, dueDate: na.dueDate, reason: 'Cleared in Twenty' } });
+      await logAudit({ entityType: 'person', entityId: na.personId, action: 'next_action_stopped', actor: SYSTEM_ACTOR, details: { label: na.label, dueDate: na.dueDate, reason: 'Cleared in the CRM' } });
       stats.closed++;
       continue;
     }
     await prisma.nextAction.update({ where: { id: na.id }, data: { dueDate: date, label, crmSyncedAt: crm.twentyUpdatedAt } });
-    await logAudit({ entityType: 'person', entityId: na.personId, action: 'next_action_moved', actor: SYSTEM_ACTOR, details: { label, from: na.dueDate, to: date, reason: 'Changed in Twenty' } });
+    await logAudit({ entityType: 'person', entityId: na.personId, action: 'next_action_moved', actor: SYSTEM_ACTOR, details: { label, from: na.dueDate, to: date, reason: 'Changed in the CRM' } });
     stats.followed++;
   }
   return stats;
 }
-
-export type NextActionRow = NextAction & { person: { id: string; firstName: string; lastName: string; companyName: string | null; email: string | null; phone: string | null; linkedinUrl: string | null; jobTitle: string | null }; fo: { id: string; name: string } };
-
-/** Open next actions in view of the Tasks filters: whose (FO), which pod, which channel. */
-export function nextActionWhere(filters: { podId: string | null; foUserId: string | null; channel: 'CALL' | 'EMAIL' | 'LINKEDIN' | null }): Prisma.NextActionWhereInput {
-  return {
-    state: 'OPEN',
-    ...CRM_SUBJECT,
-    ...(filters.foUserId ? { foUserId: filters.foUserId } : {}),
-    ...(filters.podId ? { fo: { pods: { some: { podId: filters.podId } } } } : {}),
-    ...(filters.channel === 'LINKEDIN' ? { action: { in: ['LINKEDIN_CONNECT', 'LINKEDIN_MESSAGE'] } } : filters.channel ? { action: filters.channel } : {}),
-  };
-}
-
-export const nextActionInclude = {
-  person: { select: { id: true, firstName: true, lastName: true, companyName: true, email: true, phone: true, linkedinUrl: true, jobTitle: true } },
-  fo: { select: { id: true, name: true } },
-} satisfies Prisma.NextActionInclude;
 
 /**
  * Who this reader can give a next action to: an admin every FO, a pod leader the FOs of their

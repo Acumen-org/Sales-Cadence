@@ -71,6 +71,11 @@ async function replay(client: TwentyClient, row: TwentyWrite): Promise<string | 
   const payload = row.payload as Record<string, unknown>;
   switch (row.operation) {
     case 'createNote': {
+      // B099: a move's history note waiting here is dropped once the move is undone.
+      if (typeof payload.cadenceMoveItemId === 'string') {
+        const item = await prisma.sandboxMoveItem.findUnique({ where: { id: payload.cadenceMoveItemId }, select: { state: true } });
+        if (!item || ['UNDOING', 'UNDONE', 'UNDO_PARTIAL'].includes(item.state)) return null;
+      }
       const { id } = await client.createNote(payload as unknown as NoteInput);
       if (row.taskId) await prisma.task.updateMany({ where: { id: row.taskId, twentyNoteId: null }, data: { twentyNoteId: id } });
       return id;
@@ -103,6 +108,17 @@ async function replay(client: TwentyClient, row: TwentyWrite): Promise<string | 
     case 'deleteNote': {
       const id = String(payload.id);
       await client.deleteNote(id);
+      return id;
+    }
+    case 'setPersonDnd': {
+      // An opt-out's Do not contact (D6), written again until Twenty takes it.
+      const { id, dnd, reason } = payload as { id: string; dnd: boolean; reason?: string | null };
+      await client.setPersonDnd(id, { dnd, reason: reason ?? null });
+      return id;
+    }
+    case 'setPersonNextAction': {
+      const { id, nextAction, nextActionDueDate } = payload as { id: string; nextAction: string | null; nextActionDueDate: string | null };
+      await client.setPersonNextAction(id, { nextAction, nextActionDueDate });
       return id;
     }
     case 'deleteTask': {

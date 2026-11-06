@@ -190,7 +190,7 @@ describe('adding an FO to a running campaign', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     const why = Object.fromEntries(r.preview.leftOut.map((l) => [l.id, l.reason]));
-    expect(why).toEqual({ 'person-01': 'Already in Calendar', 'person-09': `Owned by ${b.users.alisa.name}, not ${b.users.karson.name}`, 'person-10': 'Marked Do not contact in Twenty', 'person-11': 'Already in Elsewhere' });
+    expect(why).toEqual({ 'person-01': 'Already in Calendar', 'person-09': `Owned by ${b.users.alisa.name}, not ${b.users.karson.name}`, 'person-10': 'Marked Do not contact in the CRM', 'person-11': 'Already in Elsewhere' });
     expect(r.preview.people.map((p) => p.id).sort()).toEqual(KARSON_PEOPLE);
     const applied = await applyAddFo(admin, campaignId, input([...KARSON_PEOPLE, 'person-01', 'person-09', 'person-10', 'person-11']), r.preview.fingerprint, { now: START, skipSync: true });
     expect(applied.enrolled).toBe(4);

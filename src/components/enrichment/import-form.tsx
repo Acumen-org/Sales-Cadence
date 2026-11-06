@@ -64,7 +64,7 @@ export function EnrichmentImportForm({ initialEntity = 'person' }: { initialEnti
             <td><select aria-label={`Map ${header}`} value={mapping[header] ?? ''} onChange={(event) => setMapping({ ...mapping, [header]: event.target.value })}><option value="">Ignore column</option>{fields.map((field) => <option key={field.key} value={field.key}>{field.label}</option>)}</select></td>
           </tr>)}</tbody>
         </table></div>
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line p-5"><span className="text-[13px] text-ink-500">Match with a Twenty ID or an existing {entity === 'person' ? 'email' : 'domain'}.</span><button type="button" className="btn-primary" disabled={pending} onClick={preview}>{pending ? 'Checking records…' : 'Validate and preview'}</button></div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line p-5"><span className="text-[13px] text-ink-500">Match with a CRM ID or an existing {entity === 'person' ? 'email' : 'domain'}.</span><button type="button" className="btn-primary" disabled={pending} onClick={preview}>{pending ? 'Checking records…' : 'Validate and preview'}</button></div>
       </Surface> : pending ? <div role="status" className="p-5 text-[14px] font-medium text-ink-900">Reading file…</div> : null}
     </div>
   );

@@ -9,7 +9,8 @@ export const REPORT_DOCUMENT_STYLES = `
   .rp-strong { font-weight: 500; color: #1f2a26; }
   .rp-card { background: #fff; border: 1px solid #e3e8e2; border-radius: 14px; min-width: 0; }
   .rp-tiles { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .rp-tile { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 20px; }
+  .rp-tile { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 0 12px; padding: 18px 20px; }
+  .rp-tile-parts { flex-basis: 100%; }
   .rp-label { font-size: 12px; font-weight: 500; color: #6b7a74; }
   .rp-value { margin-top: 8px; font-size: 30px; font-weight: 600; line-height: 1.1; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
   .rp-zero { color: #98a59f; }
@@ -22,6 +23,9 @@ export const REPORT_DOCUMENT_STYLES = `
   .rp-aside { font-size: 12px; color: #6b7a74; }
   .rp-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 8px; font-size: 12px; color: #3c4a44; }
   .rp-key { display: inline-flex; align-items: center; gap: 7px; min-width: 0; white-space: nowrap; }
+  /* B185: in a narrow donut card a long label stops before its figures instead of running over them. */
+  .rp-slice .rp-key { overflow: hidden; }
+  .rp-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .rp-swatch { display: inline-block; flex-shrink: 0; width: 10px; height: 10px; border-radius: 3px; }
   .rp-svg { display: block; width: 100%; height: auto; overflow: visible; }
   .rp-col:hover rect, .rp-col:hover path { opacity: 0.86; }
@@ -53,8 +57,28 @@ export const REPORT_DOCUMENT_STYLES = `
   .rp-progress-fill { height: 100%; border-radius: 999px; }
   .rp-end { text-align: right; color: #3c4a44; font-variant-numeric: tabular-nums; }
   .rp-scroll { overflow-x: auto; }
+  .rp a { color: #1d6b55; text-decoration: none; }
+  .rp a:hover { text-decoration: underline; }
+  /* All outreach's sub-line under a figure: "7 CRM · 3 Cold", or for people "· 1 in both". */
+  .rp-parts { margin-top: 4px; font-size: 11.5px; color: #6b7a74; font-variant-numeric: tabular-nums; }
+  .rp-facts { display: grid; gap: 12px; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .rp-fact { padding: 14px 16px; }
+  .rp-fact-value { margin-top: 6px; font-size: 22px; font-weight: 600; line-height: 1.1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+  .rp-warn { border-color: #f1d08a; background: #fffbeb; }
+  .rp-badge { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: #e0f2fe; color: #075985; font-size: 11px; font-weight: 500; white-space: nowrap; }
+  .rp-flag { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: #fef3c7; color: #92400e; font-size: 11px; white-space: nowrap; }
+  .rp-pager { display: flex; justify-content: space-between; gap: 12px; padding-top: 12px; font-size: 12px; color: #55645d; }
+  .rp-pager a { margin-left: 12px; }
+  .rp-nowrap { white-space: nowrap; }
+  @media (max-width: 1535px) {
+    /* B185: Calls' By rep table needs the whole width below 1536px, or names wrap. */
+    .rp-row.rp-stack { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 1400px) {
+    .rp-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
   @media (max-width: 900px) {
-    .rp-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .rp-tiles, .rp-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .rp-row, .rp-campaign { grid-template-columns: minmax(0, 1fr); }
   }
 `;

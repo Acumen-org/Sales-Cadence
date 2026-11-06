@@ -59,7 +59,7 @@ test('capture screens', async ({ page }) => {
 
   for (const type of ['EMAIL', 'LINKEDIN']) {
     await page.goto(`/tasks?tab=today&type=${type}`);
-    const done = page.getByRole('button', { name: 'Done', exact: true }).first();
+    const done = page.getByRole('button', { name: /^Done(: .+)?$/ }).first();
     if (await done.isVisible().catch(() => false)) {
       await done.click();
       await page.waitForLoadState('networkidle').catch(() => {});
@@ -152,7 +152,7 @@ test('capture screens', async ({ page }) => {
   // Global search is available throughout the workspace.
   await page.goto('/tasks');
   await page.getByTitle('Search (Ctrl+K)').click();
-  await page.getByPlaceholder('Search people and campaigns').fill('Dummy');
+  await page.getByPlaceholder('Search people, contacts and campaigns').fill('Dummy');
   await page.waitForTimeout(600);
   await shot(page, '15-search');
   await page.keyboard.press('Escape');

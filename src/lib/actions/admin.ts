@@ -20,7 +20,7 @@ export async function syncNowAction(): Promise<ActionResult> {
   try {
     const stats = await syncContinuously();
     for (const path of ['/settings', '/people', '/accounts', '/tasks', '/home']) revalidatePath(path);
-    // One word is the answer wanted here: did it update. Detail lives in Settings > Twenty.
+    // One word is the answer wanted here: did it update. Detail lives in Settings > CRM.
     const stages = Object.keys(stats.stageErrors);
     if (stages.length) return { ok: false, error: `Synced, except ${stages.join(', ')}.` };
     return { ok: true, message: 'Synced.' };
@@ -70,8 +70,8 @@ export async function syncPodsAction(): Promise<ActionResult> {
     const r = await syncPodsFromTwenty(client);
     revalidatePath('/settings');
     revalidatePath('/people');
-    if (!r.options) return { ok: false, error: 'Twenty did not report any podOwner options (check the field name in Settings > Twenty).' };
-    return { ok: true, message: `${r.options} pod options in Twenty. ${r.created.length ? `Created: ${r.created.join(', ')}. ` : ''}${r.renamed.length ? `Renamed: ${r.renamed.join(', ')}. ` : ''}${!r.created.length && !r.renamed.length ? 'Pods already match.' : ''}` };
+    if (!r.options) return { ok: false, error: 'The CRM did not report any pod options (check the podOwner field name in Settings > CRM).' };
+    return { ok: true, message: `${r.options} pod options in the CRM. ${r.created.length ? `Created: ${r.created.join(', ')}. ` : ''}${r.renamed.length ? `Renamed: ${r.renamed.join(', ')}. ` : ''}${!r.created.length && !r.renamed.length ? 'Pods already match.' : ''}` };
   } catch (err) {
     return { ok: false, error: `Pod sync failed: ${err instanceof Error ? err.message : String(err)}` };
   }
@@ -90,7 +90,7 @@ export async function retryTwentyWriteAction(formData: FormData): Promise<Action
   const result = await retryFailedWrites(writeId ? { ids: [writeId] } : { limit: 100, ignoreBackoff: true });
   revalidatePath('/settings');
   if (!result.retried) return { ok: false, error: 'Nothing is waiting to be retried, or a retry is already in progress.' };
-  if (result.succeeded === result.retried) return { ok: true, message: result.retried === 1 ? 'Written to Twenty.' : `${result.succeeded} writes reached Twenty.` };
+  if (result.succeeded === result.retried) return { ok: true, message: result.retried === 1 ? 'Written to the CRM.' : `${result.succeeded} writes reached the CRM.` };
   return { ok: false, error: `${result.retried - result.succeeded} of ${result.retried} still failing: ${result.errors[0] ?? 'unknown error'}` };
 }
 
@@ -100,7 +100,7 @@ export async function discardTwentyWriteAction(formData: FormData): Promise<Acti
   const writeId = String(formData.get('writeId') ?? '');
   const changed = await prisma.twentyWrite.updateMany({ where: { id: writeId, status: { in: ['FAILED', 'RETRYING'] } }, data: { status: 'DISCARDED', nextAttemptAt: null } });
   revalidatePath('/settings');
-  return changed.count ? { ok: true, message: 'Discarded. Twenty will not receive this write.' } : { ok: false, error: 'That write is no longer waiting.' };
+  return changed.count ? { ok: true, message: 'Discarded. The CRM will not receive this write.' } : { ok: false, error: 'That write is no longer waiting.' };
 }
 
 export async function resolveReviewAction(formData: FormData): Promise<ActionResult> {
@@ -126,11 +126,11 @@ export async function registerWebhookAction(): Promise<ActionResult> {
     const targetUrl = `${e.APP_URL.replace(/\/+$/, '')}/api/webhooks/twenty${!e.TWENTY_WEBHOOK_SECRET && e.CADENCE_WEBHOOK_TOKEN ? `?token=${encodeURIComponent(e.CADENCE_WEBHOOK_TOKEN)}` : ''}`;
     const client = await getTwentyClient();
     const existing = (await client.listWebhooks()).filter((w) => w.targetUrl.split('?')[0] === targetUrl.split('?')[0]);
-    if (existing.length) return { ok: true, message: `Twenty already posts to this Cadence (${existing.length} webhook${existing.length === 1 ? '' : 's'}, ${existing.map((w) => w.operations.join(', ') || 'all operations').join('; ')}).` };
+    if (existing.length) return { ok: true, message: `The CRM already posts to this Cadence (${existing.length} webhook${existing.length === 1 ? '' : 's'}, ${existing.map((w) => w.operations.join(', ') || 'all operations').join('; ')}).` };
     const hook = await client.createWebhook({ targetUrl, secret: e.TWENTY_WEBHOOK_SECRET ?? null, description: 'Cadence' });
     await logAudit({ entityType: 'settings', entityId: 'twenty', action: 'webhook_registered', actor: userActor(user), details: { id: hook.id, targetUrl: targetUrl.split('?')[0], operations: hook.operations } });
     revalidatePath('/settings');
-    return { ok: true, message: client.kind === 'dry-run' ? 'Dry run: the webhook was not created.' : `Registered. Twenty now posts every change to this Cadence (${hook.operations.join(', ') || 'all operations'}).` };
+    return { ok: true, message: client.kind === 'dry-run' ? 'Dry run: the webhook was not created.' : `Registered. The CRM now posts every change to this Cadence (${hook.operations.join(', ') || 'all operations'}).` };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }

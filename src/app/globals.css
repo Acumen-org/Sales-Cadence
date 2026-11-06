@@ -258,7 +258,8 @@
   }
   .cadence-modal {
     width: min(580px, calc(100vw - 32px));
-    max-height: calc(100dvh - 48px);
+    /* The top margin plus the height fit the window, so a tall dialog's buttons stay in view (B035). */
+    max-height: calc(100dvh - 12vh - 24px);
     margin: 12vh auto auto;
     padding: 0;
     overflow: auto;

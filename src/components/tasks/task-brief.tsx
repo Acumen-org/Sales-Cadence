@@ -6,9 +6,9 @@ import { compareLocalDates, formatInstant, formatLocalDate, type LocalDate } fro
 import { ACTION_LABELS } from '@/lib/sequences/steps';
 import { ActionIcon, IconExternal, IconNote } from '@/components/icons';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
-import { Avatar, Badge, contactWarnings, crmStanding, ENROLLMENT_TONE, enrollmentStatusLabel, KeyValue, Notice, RecordFields, Surface, TierBadge, type BadgeTone } from '@/components/ui';
+import { Avatar, Badge, contactWarnings, crmStanding, enrollmentTone, enrollmentStatusLabel, KeyValue, Notice, RecordFields, Surface, TierBadge, type BadgeTone } from '@/components/ui';
 
-function Section({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
+export function Section({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
   return <section className="border-b border-line px-4 py-4 last:border-b-0"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold text-ink-900">{title}</h3>{right}</div>{children}</section>;
 }
 /** Standing, tier and data-quality flags for the person a task is about: shown once, beside the name. */
@@ -26,7 +26,7 @@ const filled = (items: { k: string; v: React.ReactNode }[]) => items.filter((i) 
 function dueTone(due: LocalDate, today: LocalDate): BadgeTone { const comparison = compareLocalDates(due, today); return comparison < 0 ? 'red' : comparison === 0 ? 'amber' : 'gray'; }
 const KIND_ICON: Record<BriefTimelineItem['kind'], string> = { email: 'EMAIL', call: 'CALL', linkedin: 'LINKEDIN_MESSAGE', note: 'NOTE', meeting: 'MEETING', state: 'STATE' };
 
-function TimelineRow({ item, timezone }: { item: BriefTimelineItem; timezone: string }) {
+export function TimelineRow({ item, timezone }: { item: BriefTimelineItem; timezone: string }) {
   const icon = KIND_ICON[item.kind];
   return <li className="relative pl-7"><span aria-hidden className="absolute left-[7px] top-2 h-full w-px bg-line" /><span aria-hidden className="absolute left-0 top-1 rounded-full bg-white text-brand-700">{icon === 'NOTE' ? <IconNote size={15} /> : <ActionIcon action={icon} size={15} />}</span>
     <div className="space-y-2 pb-5"><div className="text-sm font-medium leading-relaxed text-ink-900">{item.title}</div>{item.detail ? <details><summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden text-xs font-medium text-brand-700">Details</summary><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed text-ink-800">{item.detail}</p></details> : null}<div className="flex flex-wrap gap-2"><time dateTime={item.at.toISOString()} className="text-xs text-ink-500">{formatInstant(item.at, timezone)}</time>{item.direction === 'in' ? <Badge tone="green">Inbound</Badge> : null}</div>{item.actor ? <div className="text-xs"><span className="text-ink-500">By</span><strong className="ml-2 text-ink-900">{item.actor}</strong></div> : null}</div>
@@ -53,8 +53,9 @@ export function TaskBriefPanel({ brief, timezone, callTemplate, gate }: { brief:
         // value on hover instead, and the link still carries all of it.
         { k: 'Email', v: person.email ? <a href={`mailto:${person.email}`} className="block break-words text-brand-700 hover:underline [overflow-wrap:anywhere]">{person.email}</a> : null },
         { k: 'Other emails', v: person.additionalEmails.length ? <span className="space-y-1">{person.additionalEmails.map((email) => <a key={email} href={`mailto:${email}`} className="block break-all text-brand-700 hover:underline">{email}</a>)}</span> : null },
-        { k: 'Phone', v: person.phone ? <CallButton phone={person.phone} template={callTemplate ?? null} taskId={brief.task.id} personId={person.id} blocked={gate?.blocked} warning={gate?.warning} label={person.phone} className="inline-flex items-center gap-1 text-brand-700 hover:underline" /> : null },
-        { k: 'Other phone', v: person.additionalPhone ? <CallButton phone={person.additionalPhone} template={callTemplate ?? null} taskId={brief.task.id} personId={person.id} blocked={gate?.blocked} warning={gate?.warning} label={person.additionalPhone} className="inline-flex items-center gap-1 text-brand-700 hover:underline" /> : null },
+        // N013: a call ties to the task only when the task is a call step; the import links any other call by its rule.
+        { k: 'Phone', v: person.phone ? <CallButton phone={person.phone} template={callTemplate ?? null} taskId={brief.task.action === 'CALL' ? brief.task.id : null} personId={person.id} blocked={gate?.blocked} warning={gate?.warning} label={person.phone} className="inline-flex items-center gap-1 text-brand-700 hover:underline" /> : null },
+        { k: 'Other phone', v: person.additionalPhone ? <CallButton phone={person.additionalPhone} template={callTemplate ?? null} taskId={brief.task.action === 'CALL' ? brief.task.id : null} personId={person.id} blocked={gate?.blocked} warning={gate?.warning} label={person.additionalPhone} className="inline-flex items-center gap-1 text-brand-700 hover:underline" /> : null },
         { k: 'City', v: person.city }, { k: 'Owner', v: brief.ownerName }, { k: 'Pod', v: brief.podName ?? (person.podOwner ? optionLabel(person.podOwner) : null) },
       ])} />
       <div className="mt-3 flex flex-wrap gap-2">{person.linkedinUrl ? <a href={person.linkedinUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm"><ActionIcon action="LINKEDIN_MESSAGE" size={13} />LinkedIn</a> : null}{person.xUrl ? <a href={person.xUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm">X profile<IconExternal size={12} /></a> : null}<Link href={`/people/${person.id}`} className="btn-ghost btn-sm">Full overview</Link></div>
@@ -81,7 +82,7 @@ export function TaskBriefPanel({ brief, timezone, callTemplate, gate }: { brief:
 
     {person.recordingUrl || person.meetingUrl ? <Section title="Meetings"><div className="flex flex-wrap gap-2">{person.meetingUrl ? <a href={person.meetingUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm">Meeting link<IconExternal size={12} /></a> : null}{person.recordingUrl ? <Link href={`/meetings/new?personId=${person.id}&url=${encodeURIComponent(person.recordingUrl)}`} className="btn-secondary btn-sm">Add recording</Link> : null}</div>{person.bookingId ? <div className="mt-3"><RecordFields items={[{ label: 'Booking ID', value: person.bookingId }]} /></div> : null}</Section> : null}
 
-    <Section title="Outreach progress" right={<Badge tone={ENROLLMENT_TONE[brief.enrollment.status] ?? 'gray'}>{enrollmentStatusLabel(brief.enrollment)}</Badge>}>
+    <Section title="Outreach progress" right={<Badge tone={enrollmentTone(brief.enrollment)}>{enrollmentStatusLabel(brief.enrollment)}</Badge>}>
       <KeyValue items={[
         // The campaign and the step lead the task in its band; this is the rest of the story.
         { k: 'Outreach', v: <Link href={`/sequences/${brief.task.enrollment.sequence.id}`} className="text-brand-700 hover:underline">{brief.enrollment.sequenceName}</Link> },
@@ -98,7 +99,7 @@ export function TaskBriefPanel({ brief, timezone, callTemplate, gate }: { brief:
     </Section>
 
     <Section title="Colleagues" right={person.companyId ? <Link href={`/accounts/${person.companyId}?tab=people`} className="text-xs font-medium text-brand-700 hover:underline">All company people</Link> : null}>
-      {brief.colleagues.length ? <ul className="space-y-4">{brief.colleagues.map((colleague) => <li key={colleague.personId} className="flex items-start gap-2.5"><Avatar name={colleague.name} shape="circle" size={28} /><div className="min-w-0 flex-1"><Link href={`/people/${colleague.personId}`} className="text-sm font-medium text-ink-900 hover:text-brand-700">{colleague.name}</Link>{colleague.jobTitle ? <div className="mt-1 text-xs text-ink-500">{colleague.jobTitle}</div> : null}{colleague.status ? <div className="mt-2"><Badge tone={colleague.status === 'DND' ? 'red' : ENROLLMENT_TONE[colleague.status] ?? 'gray'}>{enrollmentStatusLabel({ status: colleague.status, exitReason: colleague.exitReason })}</Badge></div> : null}</div></li>)}</ul> : <span className="text-sm text-ink-500">No other people linked</span>}
+      {brief.colleagues.length ? <ul className="space-y-4">{brief.colleagues.map((colleague) => <li key={colleague.personId} className="flex items-start gap-2.5"><Avatar name={colleague.name} shape="circle" size={28} /><div className="min-w-0 flex-1"><Link href={`/people/${colleague.personId}`} className="text-sm font-medium text-ink-900 hover:text-brand-700">{colleague.name}</Link>{colleague.jobTitle ? <div className="mt-1 text-xs text-ink-500">{colleague.jobTitle}</div> : null}{colleague.status ? <div className="mt-2"><Badge tone={colleague.status === 'DND' ? 'red' : enrollmentTone({ status: colleague.status ?? '' })}>{enrollmentStatusLabel({ status: colleague.status, exitReason: colleague.exitReason })}</Badge></div> : null}</div></li>)}</ul> : <span className="text-sm text-ink-500">No other people linked</span>}
     </Section>
     {/* Last, so nothing above moves when Twenty answers; one boundary per person, so moving to the next task never waits on the last one's. */}
     <Suspense key={person.id} fallback={null}><OpenOpportunities personId={person.id} /></Suspense>

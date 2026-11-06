@@ -1,5 +1,6 @@
 'use client';
 
+import { WorkingDayHint } from '@/components/tasks/working-day-hint';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { findPeopleForTaskAction, saveNextActionAction, type TaskPersonOption } from '@/lib/actions/next-actions';
@@ -7,6 +8,7 @@ import { Modal } from '@/components/modal';
 import { IconClose, IconPlus, IconRefresh } from '@/components/icons';
 import { Avatar } from '@/components/ui';
 import { formatLocalDate } from '@/lib/dates';
+import type { ActionResult } from '@/lib/actions/users';
 
 export type NextActionDraft = { label: string; action: string; dueDate: string; repeat: string; foUserId: string };
 
@@ -91,7 +93,10 @@ function PersonPicker({ chosen, onChoose }: { chosen: TaskPersonOption | null; o
  * Action Due Date in Twenty, and shows up in Tasks on its day. A person has one open task at a
  * time (Twenty's fields hold one), so a new one replaces theirs.
  */
-export function NextActionButton({ personIds, today, fos, canAssign, initial, label = 'Create task', className = 'btn-secondary btn-sm', onDone, existing, icon = 'plus' }: {
+/** Mon to Fri, Settings > Rules' default, when the caller does not pass the workspace's own. */
+const DEFAULT_WORKING_DAYS = [1, 2, 3, 4, 5];
+
+export function NextActionButton({ personIds, today, fos, canAssign, initial, label = 'Create task', className = 'btn-secondary btn-sm', onDone, existing, icon = 'plus', workingDays = DEFAULT_WORKING_DAYS, save, saveFields = {}, noun = 'task', repeats = true }: {
   /** Who it is for; leave out to choose the person in the dialog. */
   personIds?: string[];
   today: string;
@@ -105,6 +110,18 @@ export function NextActionButton({ personIds, today, fos, canAssign, initial, la
   /** The open task this one would replace, for one person. */
   existing?: { label: string; dueDate: string } | null;
   icon?: 'refresh' | 'plus';
+  /** Settings > Rules' working days, for the weekend cue under the date (N103). */
+  workingDays?: number[];
+  /**
+   * Another record's own save, in place of the CRM task's: a cold contact's next step (cold outreach
+   * PLAN 4.2) posts `saveFields` with the label, how and when to it.
+   */
+  save?: (fd: FormData) => Promise<ActionResult>;
+  saveFields?: Record<string, string>;
+  /** What the dialog calls it: "task" for a CRM person, "next step" for a cold contact. */
+  noun?: string;
+  /** False where the record's steps do not repeat. */
+  repeats?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -113,37 +130,38 @@ export function NextActionButton({ personIds, today, fos, canAssign, initial, la
   const [person, setPerson] = useState<TaskPersonOption | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  const picking = personIds === undefined;
-  const ids = picking ? (person ? [person.id] : []) : personIds;
+  const picking = personIds === undefined && !save;
+  const ids = picking ? (person ? [person.id] : []) : personIds ?? [];
   const many = ids.length > 1;
   const replaces = picking ? person?.openTask ?? null : existing ?? null;
 
   const submit = () =>
     start(async () => {
-      if (!ids.length) { setError('Choose who the task is for.'); return; }
+      if (!save && !ids.length) { setError('Choose who the task is for.'); return; }
       const fd = new FormData();
-      fd.set('personIds', JSON.stringify(ids));
-      for (const [k, v] of Object.entries(draft)) fd.set(k, v);
-      let r: Awaited<ReturnType<typeof saveNextActionAction>>;
-      try { r = await saveNextActionAction(fd); } catch { setError('The task could not be saved. Try again.'); return; }
+      if (save) for (const [k, v] of Object.entries(saveFields)) fd.set(k, v);
+      else fd.set('personIds', JSON.stringify(ids));
+      for (const [k, v] of Object.entries(draft)) if (repeats || k !== 'repeat') fd.set(k, v);
+      let r: ActionResult;
+      try { r = await (save ?? saveNextActionAction)(fd); } catch { setError(`The ${noun} could not be saved. Try again.`); return; }
       if (!r.ok) { setError(r.error); return; }
       setError(null);
       setOpen(false);
       const created = { ids: ((r.data as { ids?: string[] } | undefined)?.ids) ?? [], dueDate: draft.dueDate };
       router.refresh();
-      onDone?.(r.message ?? 'Task created.', created);
+      onDone?.(r.message ?? (noun === 'task' ? 'Task created.' : 'Saved.'), created);
     });
 
   return (
     <>
-      <button type="button" className={className} disabled={!picking && !personIds.length} onClick={() => { setDraft(fresh()); setPerson(null); setError(null); setOpen(true); }}>
+      <button type="button" className={className} disabled={!picking && !save && !ids.length} onClick={() => { setDraft(fresh()); setPerson(null); setError(null); setOpen(true); }}>
         {icon === 'plus' ? <IconPlus size={14} /> : <IconRefresh size={13} />} {label}
       </button>
       {open ? (
-        <Modal label="Create task" onClose={() => setOpen(false)}>
+        <Modal label={noun === 'task' ? 'Create task' : label} onClose={() => setOpen(false)}>
           <form className="space-y-4 p-5" onSubmit={(e) => { e.preventDefault(); submit(); }}>
             <div className="flex items-center gap-3">
-              <h2 className="text-lg font-semibold">{many ? `Create a task for ${ids.length} people` : label === 'Change' ? 'Change task' : 'Create task'}</h2>
+              <h2 className="text-lg font-semibold">{many ? `Create a task for ${ids.length} people` : label === 'Change' ? `Change ${noun}` : noun === 'task' ? 'Create task' : `Set ${noun}`}</h2>
               <button type="button" aria-label="Close" className="btn-icon-ghost ml-auto" onClick={() => setOpen(false)}><IconClose size={16} /></button>
             </div>
             {picking ? <div className="space-y-1.5"><span className="text-[12px] font-medium text-ink-600">For</span><PersonPicker chosen={person} onChoose={setPerson} /></div> : null}
@@ -156,10 +174,11 @@ export function NextActionButton({ personIds, today, fos, canAssign, initial, la
               </label>
               <label className="block space-y-1.5"><span className="text-[12px] font-medium text-ink-600">Due</span>
                 <input type="date" required min={today} value={draft.dueDate} onChange={(e) => { setDraft({ ...draft, dueDate: e.target.value }); setError(null); }} />
+                <WorkingDayHint date={draft.dueDate} workingDays={workingDays} onMove={(d) => setDraft({ ...draft, dueDate: d })} />
               </label>
-              <label className="block space-y-1.5"><span className="text-[12px] font-medium text-ink-600">Repeats</span>
+              {repeats ? <label className="block space-y-1.5"><span className="text-[12px] font-medium text-ink-600">Repeats</span>
                 <select value={draft.repeat} onChange={(e) => setDraft({ ...draft, repeat: e.target.value })}>{REPEATS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}</select>
-              </label>
+              </label> : null}
               {canAssign ? (
                 <label className="block space-y-1.5"><span className="text-[12px] font-medium text-ink-600">FO</span>
                   <select value={draft.foUserId} onChange={(e) => setDraft({ ...draft, foUserId: e.target.value })}>
@@ -169,11 +188,11 @@ export function NextActionButton({ personIds, today, fos, canAssign, initial, la
                 </label>
               ) : null}
             </div>
-            {replaces && !many ? <p className="rounded-lg bg-canvas px-3 py-2 text-[12.5px] text-ink-600">Replaces their open task: {replaces.label}, due {formatLocalDate(replaces.dueDate, 'long')}</p> : null}
+            {replaces && !many ? <p className="rounded-lg bg-canvas px-3 py-2 text-[12.5px] text-ink-600">Replaces their open {noun}: {replaces.label}, due {formatLocalDate(replaces.dueDate, 'long')}</p> : null}
             {error ? <p role="alert" className="text-[13px] text-red-700">{error}</p> : null}
             <div className="flex justify-end gap-2">
               <button type="button" className="btn-ghost" onClick={() => setOpen(false)}>Cancel</button>
-              <button type="submit" className="btn-primary" disabled={pending || (picking && !person)}>{pending ? 'Saving…' : label === 'Change' ? 'Save task' : 'Create task'}</button>
+              <button type="submit" className="btn-primary" disabled={pending || (picking && !person)}>{pending ? 'Saving…' : label === 'Change' ? `Save ${noun}` : noun === 'task' ? 'Create task' : `Set ${noun}`}</button>
             </div>
           </form>
         </Modal>

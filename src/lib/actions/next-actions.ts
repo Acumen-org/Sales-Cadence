@@ -10,9 +10,10 @@ import { completeNextAction, moveNextAction, setNextActions, stopNextAction, val
 import { personSearchWhere } from '../search-terms';
 import { cachedPersonName } from '../person-cache';
 import type { ActionResult } from './users';
+import { COLD_CONTACT_BASE } from '@/lib/subject';
 
 function revalidate(personIds: string[] = [], sandbox = false) {
-  if (sandbox) revalidatePath('/sandbox', 'layout');
+  if (sandbox) revalidatePath(COLD_CONTACT_BASE, 'layout');
   revalidatePath('/tasks');
   revalidatePath('/people');
   revalidatePath('/home');
@@ -74,9 +75,12 @@ export async function saveNextActionAction(formData: FormData): Promise<ActionRe
   return { ok: true, message: left ? `${who}. ${left} left out (${[...new Set([...r.skipped.map((x) => x.reason.toLowerCase()), ...refused.map((x) => x.reason)])].join('; ')}).` : `${who}.`, data: { ids: r.set } };
 }
 
+/** Why Done does not close a cold call step (B161). */
+const COLD_CALL_CLOSES = 'A call step closes with its call and its form. Press Call, or Log a call if you called from another phone.';
+
 async function loadOwn(id: string) {
   const user = await requireUser();
-  const na = await prisma.nextAction.findUnique({ where: { id }, select: { id: true, foUserId: true, personId: true, state: true } });
+  const na = await prisma.nextAction.findUnique({ where: { id }, select: { id: true, foUserId: true, personId: true, state: true, action: true, kind: true } });
   if (!na) return { user, na: null, error: 'Task not found.' };
   if (!(await mayWork(user, na.foUserId))) return { user, na: null, error: whyNotWorkTask(toActor(user), (await prisma.user.findUnique({ where: { id: na.foUserId }, select: { name: true } }))?.name ?? 'someone else') };
   return { user, na, error: null };
@@ -85,9 +89,13 @@ async function loadOwn(id: string) {
 export async function completeNextActionAction(formData: FormData): Promise<ActionResult> {
   const { user, na, error } = await loadOwn(String(formData.get('id') ?? ''));
   if (!na) return { ok: false, error: error! };
+  // B161: a cold contact's call step closes with its call and its form, never with Done.
+  if (!na.personId && na.action === 'CALL' && na.kind === 'ACTION') return { ok: false, error: COLD_CALL_CLOSES };
   const r = await completeNextAction(na.id, userActor(user), new Date(), String(formData.get('dueDate') ?? '') || null);
   revalidate(na.personId ? [na.personId] : [], !na.personId);
   if (!r.ok) return r;
+  // A meeting next step done is a meeting held (B183): Meetings held counts a cold one from here.
+  if (na.kind === 'MEETING') return { ok: true, message: 'Meeting recorded as held.' };
   return { ok: true, message: r.next ? `Done. Next one on ${formatLocalDate(r.next, 'long')}.` : 'Done.' };
 }
 

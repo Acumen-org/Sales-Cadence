@@ -30,7 +30,7 @@ export async function setMipStars(user: SessionUser, personId: string, stars: nu
   if (!Number.isInteger(stars) || stars < 0 || stars > 3) throw new Error('Stars run from none to three.');
   const person = await prisma.personCache.findUnique({ where: { id: personId }, select: { id: true, podOwner: true, tags: true, deletedAt: true } });
   if (!person || person.deletedAt) throw new Error('This person is not in the directory.');
-  if (!isMip(person.tags)) throw new Error('Only someone tagged MIP in Twenty can be starred.');
+  if (!isMip(person.tags)) throw new Error('Only someone tagged MIP in the CRM can be starred.');
   if (!canRate(await ratablePodOwners(user), person.podOwner)) throw new Error("Only that pod, or an admin, can star this person.");
   if (stars === 0) { await prisma.mipStars.deleteMany({ where: { personId } }); return { stars: 0 }; }
   await prisma.mipStars.upsert({ where: { personId }, create: { personId, stars, updatedById: user.id }, update: { stars, updatedById: user.id } });

@@ -19,6 +19,7 @@ import { AttendeeEditor } from '@/components/meetings/attendee-editor';
 import { MeetingStage } from '@/components/meetings/meeting-stage';
 import { IconExternal } from '@/components/icons';
 import { ordinal } from '@/lib/meetings/numbering';
+import { deleteMeetingConfirm } from '@/lib/confirms';
 import { prospectOptions, teamOptions } from '@/lib/meetings/people-search';
 import { Avatar, Badge, Card, EmptyState, Field, KeyValue, RecordFields, RecordHeader } from '@/components/ui';
 
@@ -76,7 +77,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
                 </Link>
               ) : null}
               {mayEdit ? (
-                <ActionButton action={deleteMeetingAction} payload={{ meetingId: meeting.id }} className="btn-ghost btn-sm text-red-600" confirm="Delete this meeting and its transcript? Its note in Twenty is removed too.">
+                <ActionButton action={deleteMeetingAction} payload={{ meetingId: meeting.id }} className="btn-ghost btn-sm text-red-600" confirm={deleteMeetingConfirm({ title: meeting.title, inCrm: Boolean(meeting.twentyMeetingId || meeting.twentyNoteId) })}>
                   Delete
                 </ActionButton>
               ) : null}

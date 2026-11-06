@@ -1,5 +1,6 @@
 import type {
   PersonNextActionInput,
+  PersonDndInput,
   CreateNoteInput,
   CreateTaskInput,
   Page,
@@ -103,6 +104,8 @@ export interface TwentyClient {
   enrichCompany(id: string, patch: EnrichCompanyInput, current?: TwentyCompany): Promise<TwentyCompany>;
   /** A person's Next Action and Next Action Due Date, kept in step with Cadence's next action. */
   setPersonNextAction(id: string, patch: PersonNextActionInput): Promise<void>;
+  /** The person's Do not contact field (D6): every opt-out of a CRM person sets it. */
+  setPersonDnd(id: string, patch: PersonDndInput): Promise<void>;
 
   // ---- Move to CRM: the only records Cadence creates, and the only ones undo may delete ----
   /** Live people matching any email, phone (E.164), LinkedIn profile or sandbox id given. */
@@ -132,11 +135,11 @@ export async function* paginate<T>(
     const page: Page<T> = await fetchPage(after);
     for (const item of page.items) yield item;
     if (!page.hasNextPage) return;
-    if (!page.endCursor || cursors.has(page.endCursor)) throw new Error('Twenty pagination did not advance; sync is incomplete.');
+    if (!page.endCursor || cursors.has(page.endCursor)) throw new Error('CRM paging did not advance; sync is incomplete.');
     cursors.add(page.endCursor);
     after = page.endCursor;
   }
-  throw new Error(`Twenty pagination exceeded ${maxPages} pages; sync is incomplete.`);
+  throw new Error(`CRM paging exceeded ${maxPages} pages; sync is incomplete.`);
 }
 
 export async function collectAll<T>(fetchPage: (after: string | null) => Promise<Page<T>>): Promise<T[]> {
