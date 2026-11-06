@@ -157,7 +157,9 @@ describe('cold outreach data model (S1)', () => {
     const d = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
     const both = await Promise.all([queueMove([{ contactId: d.id, mode: 'create', noConversation: true }], actor, audit), queueMove([{ contactId: d.id, mode: 'create', noConversation: true }], actor, audit)]);
     expect(both.filter((r) => r.ok)).toHaveLength(1);
-    expect(both.find((r) => !r.ok)).toEqual({ ok: false, error: expect.stringContaining('already being moved') });
+    // Which check stops the second depends on timing: the database's one-move-in-flight index when both
+    // got past the checks, or the checks themselves when the first had already queued. Both refuse it.
+    expect(both.find((r) => !r.ok)).toEqual({ ok: false, error: expect.stringMatching(/already being moved|Being moved already/) });
     expect(await prisma.sandboxMoveItem.count({ where: { sandboxContactId: d.id } })).toBe(1);
     expect(await runMoveQueue()).toEqual({ done: 2, failed: 0, dryRun: 0 });
     expect(getMockTwentyClient().writes.filter((w) => w.op === 'createPerson')).toHaveLength(2);
