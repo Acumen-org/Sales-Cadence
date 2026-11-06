@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -93,7 +94,7 @@ describe('W4 screens', () => {
   it('N042: the Stop outcomes ask first, naming every effect', () => {
     const ctx = context({ open: { words: 'Call on 9 Nov', repeats: false, mine: true, foName: 'Alisa' } });
     expect(stopEffects(outcomes.find((o) => o.key === 'do_not_contact')!, ctx)).toEqual([
-      'Jane is opted out for good: Cadence never calls, emails or messages them again.',
+      'Jane is opted out for good: do not email, call or message them again. Cadence blocks calls and campaigns.',
       'Q4 Harbor ends as Opted out.',
       'The next step (Call on 9 Nov) is cancelled.',
       'Bellwether shows them as Do not contact.',
@@ -146,6 +147,35 @@ describe('W4 screens', () => {
     expect(renderToStaticMarkup(createElement(PendingCalls, { calls: [], total: 0, calling: 'Jane Doe' }))).toContain('Calling Jane Doe… when you hang up, the form opens here (within 2 minutes).');
   });
 
+  it('B088: a long backlog names the oldest five and counts the rest, so the notice stays one short block', () => {
+    const calls = Array.from({ length: 22 }, (_, i) => ({ id: `c${i}`, name: `Rep Call ${i}`, at: 'today 10:00 CT', incoming: false }));
+    const html = renderToStaticMarkup(createElement(PendingCalls, { calls, total: 22, calling: null }));
+    expect(html).toContain('22 calls need their form before you can call again.');
+    expect(html.match(/Call with Rep Call/g)).toHaveLength(5);
+    expect(html).toContain('Call with Rep Call 4 ·');
+    expect(html).not.toContain('Call with Rep Call 5 ·');
+    expect(html).toContain('and 17 more');
+  });
+
+  it('B093: an incoming call they answered keeps the planned next step by default, whatever was said', () => {
+    const ctx = context({ incoming: true, campaign: null, open: { words: 'Email on 9 Nov', repeats: false, mine: true, foName: 'Alisa' }, closes: { linked: null, choices: [] } });
+    const o = (key: string) => outcomes.find((x) => x.key === key);
+    expect(defaultStep(o('connected'), ctx)).toBe('keep');
+    expect(defaultStep(o('meeting_booked'), ctx)).toBe('meeting');
+    expect(defaultStep(o('do_not_contact'), ctx)).toBe('none');
+    // An outbound call that reached them still proposes calling again.
+    expect(defaultStep(o('connected'), { ...ctx, incoming: false })).toBe('call_again');
+  });
+
+  it('N054: a call on a repeating next step keeps the series by default, and replacing it says so first', () => {
+    const ctx = context({ campaign: null, open: { words: 'Call every week, next Mon 9 Nov', repeats: true, mine: true, foName: 'Alisa' } });
+    const o = (key: string) => outcomes.find((x) => x.key === key);
+    expect(defaultStep(o('connected'), ctx)).toBe('keep');
+    expect(defaultStep(o('no_answer'), ctx)).toBe('keep');
+    expect(defaultStep(o('meeting_booked'), ctx)).toBe('meeting');
+    expect(draw(context({ campaign: null, prefill: 'connected', open: { words: 'Call every week, next Mon 9 Nov', repeats: true, mine: true, foName: 'Alisa' } }))).toContain('Keep: Call every week, next Mon 9 Nov (repeats)');
+  });
+
   it('B089: a blocked Call says why in visible text; a waiting form reads "Form first" with a way to fill it in', () => {
     const html = renderToStaticMarkup(createElement(CallButton, { phone: '+13125550100', template: null, blocked: 'Fill in the form for your call with Jane Doe (yesterday 20:20 CT) first.' }));
     expect(html).toContain('Form first');
@@ -154,6 +184,19 @@ describe('W4 screens', () => {
     const hours = renderToStaticMarkup(createElement(CallButton, { phone: '+13125550100', template: null, blocked: 'It is 21:30 CT for this contact, outside 8:00 to 21:00.' }));
     expect(hours).toContain('outside 8:00 to 21:00');
     expect(hours).not.toContain('Fill it in');
+  });
+
+  it('N051: the next step words are never filled from the call notes, which only the rep and leaders may read', () => {
+    const html = draw(context({ prefill: 'connected' }));
+    expect(html).not.toContain('Follow up:');
+    expect(fs.readFileSync('src/components/calls/post-call-form.tsx', 'utf8')).toContain("const whatShown = whatTouched ? what : '';");
+  });
+
+  it('B024: the form of a call just logged stays open when the page re-reads and Log a call turns off', () => {
+    // Saving the call makes it the form waiting, so the page re-reads with Log a call blocked; the blocked
+    // branch must still hold the form the rep was told would open.
+    const src = fs.readFileSync('src/components/calls/log-call.tsx', 'utf8');
+    expect(src).toMatch(/if \(blocked\) return <>.*\{formDialog\}<\/>;/);
   });
 
   it('B024: Log a call opens a dialog that asks first; while a form waits it says why it is off', () => {

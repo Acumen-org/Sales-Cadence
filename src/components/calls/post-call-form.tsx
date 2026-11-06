@@ -53,8 +53,10 @@ export function defaultStep(outcome: FormOutcomeView | undefined, ctx: Pick<Call
   if (!outcome) return ctx.incoming && ctx.open ? 'keep' : ctx.campaign ? 'campaign' : 'call_again';
   if (outcome.key === 'meeting_booked') return 'meeting';
   if (outcome.group === 'stop') return 'none';
+  // B093: a call they made to us leaves the step we had planned alone unless the rep changes it.
+  // N054: so does a call on a repeating next step: the series rolls on unless the rep replaces it.
+  if (ctx.open && (ctx.incoming || ctx.open.repeats)) return 'keep';
   if (outcome.group === 'reached') return 'call_again';
-  if (ctx.incoming && ctx.open) return 'keep';
   if (ctx.campaign) return 'campaign';
   return ctx.open ? 'keep' : 'call_again';
 }
@@ -64,7 +66,7 @@ export function stopEffects(outcome: FormOutcomeView, ctx: CallFormContext): str
   const who = ctx.who?.firstName ?? 'This person';
   const campaign = ctx.campaign ? [`${ctx.campaign.name} ends.`] : [];
   const open = ctx.open ? [`The next step (${ctx.open.words}) is cancelled.`] : [];
-  if (outcome.key === 'do_not_contact') return [`${who} is opted out for good: Cadence never calls, emails or messages them again.`, ...campaign.map((c) => c.replace('ends.', 'ends as Opted out.')), ...open, ...(ctx.who?.kind === 'person' ? ['The CRM marks them Do not contact and clears their Next Action.'] : ['Bellwether shows them as Do not contact.']), 'An admin can lift it if it was a mistake.'];
+  if (outcome.key === 'do_not_contact') return [`${who} is opted out for good: do not email, call or message them again. Cadence blocks calls and campaigns.`, ...campaign.map((c) => c.replace('ends.', 'ends as Opted out.')), ...open, ...(ctx.who?.kind === 'person' ? ['The CRM marks them Do not contact and clears their Next Action.'] : ['Bellwether shows them as Do not contact.']), 'An admin can lift it if it was a mistake.'];
   if (outcome.key === 'not_interested') return [`${who} is closed: no next step.`, ...campaign, ...open];
   return [`The number is marked wrong: nobody is asked to call it again.`, 'Only an Email, a LinkedIn message or nothing can follow.'];
 }
@@ -148,8 +150,9 @@ export function PostCallForm({ callId, onClose, initial }: { callId: string; onC
   const first = ctx.who?.firstName ?? 'them';
   const steps = !ctx.who || !ctx.who.active ? ['none'] : chosen?.key === 'do_not_contact' || chosen?.key === 'not_interested' ? ['none'] : chosen?.group === 'stop' ? ['email', 'linkedin', 'none'] : [...(ctx.open ? ['keep'] : []), ...(ctx.campaign && !reached ? ['campaign'] : []), 'call_again', 'email', 'linkedin', 'meeting', ...(reached ? [] : ['none'])];
   const stepWords = (key: string) => key === 'keep' && ctx.open ? `Keep: ${ctx.open.words}${ctx.open.repeats ? ' (repeats)' : ''}` : key === 'campaign' && ctx.campaign ? `The campaign continues${ctx.campaign.next ? `: next is ${ctx.campaign.next}` : ''}` : ctx.campaign && !reached && DATED.has(key) && key !== 'meeting' ? `Take ${first} out: ${STEP_LABELS[key].toLowerCase()}` : STEP_LABELS[key];
-  const firstLine = notes.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
-  const whatShown = whatTouched ? what : DATED.has(step) && firstLine ? `Follow up: ${firstLine}`.slice(0, 200) : '';
+  // N051: the next step's words show to anyone who sees the contact, and the call's notes do not, so
+  // the notes are never copied into them; the rep writes what to do, or the step's name is used.
+  const whatShown = whatTouched ? what : '';
   const needsReason = outcome === 'no_conversation';
   const missing = !outcome ? 'Pick what happened.' : reached && !rating ? 'Rate the call.' : (reached || needsReason) && !notes.trim() ? needsReason ? 'Say why there was no conversation.' : 'Write what was said.' : !steps.includes(step) ? 'Pick the next step.' : DATED.has(step) && !date ? 'Pick the day of the next step.' : closes === '' ? 'Say which step this call closes, or none.' : null;
 
@@ -231,6 +234,7 @@ export function PostCallForm({ callId, onClose, initial }: { callId: string; onC
       {DATED.has(step) ? <label className="block text-xs text-ink-500">What<input value={whatShown} maxLength={200} placeholder={STEP_LABELS[step]} onChange={(e) => { setWhat(e.target.value); setWhatTouched(true); }} className="mt-1 w-full" /></label> : null}
       {step === 'none' && ctx.open ? <p className="text-[12.5px] text-ink-600">No further action cancels the open next step ({ctx.open.words}).</p> : null}
       {step === 'keep' && ctx.open?.repeats ? <p className="text-[12.5px] text-ink-600">This call counts as done for the repeating step; it rolls on to its next date.</p> : null}
+      {DATED.has(step) && ctx.open?.repeats ? <p className="text-[12.5px] text-amber-800">{ctx.open.words} repeats. This one-off step replaces it, and it stops repeating. Pick Keep to keep it.</p> : null}
       {ctx.claim && DATED.has(step) ? <label className="flex items-center gap-2 text-[13px] text-ink-800"><input type="checkbox" checked={claim} onChange={(e) => setClaim(e.target.checked)} />{ctx.claim}</label> : null}
     </fieldset>
 
@@ -351,6 +355,9 @@ export function CallFormDialog({ callId, title, onClose }: { callId: string; tit
  * notice says the form will open here (PLAN 4.6). The dialog stays open when its call leaves the
  * list, so a save in another tab never loses what was typed here (B184).
  */
+/** B088: the notice names the oldest few and counts the rest, so a backlog never fills the screen. */
+export const PENDING_SHOWN = 5;
+
 export function PendingCalls({ calls, total, calling }: { calls: PendingCall[]; total: number; calling: string | null }) {
   const [open, setOpen] = useState<PendingCall | null>(null);
   useEffect(() => {
@@ -365,7 +372,7 @@ export function PendingCalls({ calls, total, calling }: { calls: PendingCall[]; 
         <span className="font-medium">{total === 1 ? '1 call needs its form' : `${total} calls need their form`} before you can call again.</span>
         <button type="button" className="btn-secondary btn-sm" onClick={() => calls[0] && setOpen(calls[0])}>Fill the first</button>
       </div>
-      <ul className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">{calls.map((c) => <li key={c.id}><button type="button" className="underline-offset-2 hover:underline" onClick={() => setOpen(c)}>{label(c)} · {c.at}</button></li>)}{total > calls.length ? <li>and {total - calls.length} more</li> : null}</ul>
+      <ul className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">{calls.slice(0, PENDING_SHOWN).map((c) => <li key={c.id}><button type="button" className="underline-offset-2 hover:underline" onClick={() => setOpen(c)}>{label(c)} · {c.at}</button></li>)}{total > Math.min(calls.length, PENDING_SHOWN) ? <li>and {total - Math.min(calls.length, PENDING_SHOWN)} more</li> : null}</ul>
     </Notice></div> : calling ? <div className="px-6 pt-3"><Notice tone="info">Calling {calling}… when you hang up, the form opens here (within 2 minutes).</Notice></div> : null}
     {open ? <CallFormDialog callId={open.id} title={label(open)} onClose={() => setOpen(null)} /> : null}
   </>;

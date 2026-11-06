@@ -357,6 +357,20 @@ describe('W4: calls and the post-call form', () => {
       expect(await prisma.nextAction.count({ where: { sandboxContactId: c.id, state: 'OPEN' } })).toBe(0);
     });
 
+    it('B004: a reached call (Connected) to a contact opted out, removed or moved since saves with No further action', async () => {
+      for (const gone of ['opted_out', 'removed', 'moved'] as const) {
+        const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+        const call = await logManualCall({ userId: b.users.alisa.id, sandboxContactId: c.id });
+        if (gone === 'opted_out') await optOutContact(c.id, { source: 'contact_page', actor: userActor(b.users.alisa) });
+        else await prisma.sandboxContact.update({ where: { id: c.id }, data: { status: gone === 'removed' ? 'REMOVED' : 'MOVED' } });
+        // The form offers only No further action; what was said still saves.
+        const r = await submitCallForm(call.id, { outcome: 'connected', rating: 3, notes: 'They picked up anyway', nextStep: 'none' }, alisa());
+        expect(r).toEqual(expect.objectContaining({ ok: true }));
+        expect(await prisma.callForm.count({ where: { callId: call.id } })).toBe(1);
+        expect(await prisma.nextAction.count({ where: { sandboxContactId: c.id, state: 'OPEN' } })).toBe(0);
+      }
+    });
+
     it('B092: saving a form for an unclaimed contact claims it, unless the rep unticks it', async () => {
       const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { ownerId: null, claimedAt: null });
       const call = await logManualCall({ userId: b.users.karson.id, sandboxContactId: c.id });
@@ -408,7 +422,9 @@ describe('W4: calls and the post-call form', () => {
     it('B024: a mistaken call is discarded before its form, within a day, with a reason; it leaves the queue and the counts', async () => {
       const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
       auth.requireUser.mockResolvedValue(session(b.users.alisa, [b.pods.Alisa.id]));
-      const logged = await logManualCallAction(form({ sandboxContactId: c.id, startedAt: '2026-11-05T10:15', minutes: '2' }));
+      // An hour ago on Alisa's clock (London): a fixed date stops being "within a day" once it is past.
+      const hourAgo = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(Date.now() - 3600_000)).replace(' ', 'T');
+      const logged = await logManualCallAction(form({ sandboxContactId: c.id, startedAt: hourAgo, minutes: '2' }));
       expect(logged).toEqual(expect.objectContaining({ ok: true, data: { callId: expect.any(String) } }));
       const callId = (logged as { data: { callId: string } }).data.callId;
       expect((await prisma.callLog.findUniqueOrThrow({ where: { id: callId } })).talkSec).toBe(120);

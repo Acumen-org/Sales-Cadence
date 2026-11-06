@@ -105,6 +105,8 @@ export type FormRulesContext = {
   hasOpenStep?: boolean;
   /** Nobody is matched to the call yet: no next step can be kept, whatever the outcome (B026). */
   noSubject?: boolean;
+  /** B004: the person or contact can take no next step now (opted out, removed, moved, Do not contact). */
+  subjectGone?: boolean;
 };
 
 export function validateCallForm(input: CallFormInput, ctx: FormRulesContext): { ok: true; value: CallFormValue } | { ok: false; error: string; field: string } {
@@ -124,6 +126,9 @@ export function validateCallForm(input: CallFormInput, ctx: FormRulesContext): {
   const group = outcomeGroup(outcome);
   if (ctx.noSubject) {
     if (step.key !== 'none') return { ok: false, error: 'Nobody is matched to this call, so no next step can be saved. Say who it was with first, or pick No further action.', field: 'nextStep' };
+  } else if (ctx.subjectGone) {
+    // B004: the call and form are kept whatever was said, and no next step is set (the save says so),
+    // so the rules about which step follows which outcome do not apply.
   } else if (outcome.key === OPT_OUT_OUTCOME || outcome.key === 'not_interested') {
     if (step.key !== 'none') return { ok: false, error: `After "${outcome.label}" there is no next step: pick No further action.`, field: 'nextStep' };
   } else if (outcome.badPhone) {
@@ -134,13 +139,13 @@ export function validateCallForm(input: CallFormInput, ctx: FormRulesContext): {
   } else if (group === 'reached' && !dated(step.key) && step.key !== 'keep') {
     return { ok: false, error: 'They answered, so the campaign ends: set a dated next step.', field: 'nextStep' };
   }
-  if (step.key === 'campaign') {
+  if (step.key === 'campaign' && !ctx.subjectGone) {
     if (!ctx.inCampaign) return { ok: false, error: 'This contact is not in a running campaign. Pick another next step.', field: 'nextStep' };
     if (group !== 'not_reached') return { ok: false, error: 'They were reached, so the campaign ends. Pick a dated next step.', field: 'nextStep' };
   }
-  if (step.key === 'keep' && !ctx.hasOpenStep) return { ok: false, error: 'There is no next step to keep. Pick one.', field: 'nextStep' };
+  if (step.key === 'keep' && !ctx.hasOpenStep && !ctx.subjectGone) return { ok: false, error: 'There is no next step to keep. Pick one.', field: 'nextStep' };
   const date = input.nextStepDate?.trim() || null;
-  if (dated(step.key)) {
+  if (dated(step.key) && !ctx.subjectGone) {
     if (!date || !isLocalDate(date)) return { ok: false, error: `Pick the day for "${step.label}".`, field: 'nextStepDate' };
     if (date < ctx.today) return { ok: false, error: 'The next step cannot be in the past.', field: 'nextStepDate' };
   }
@@ -201,6 +206,17 @@ async function nextWords(subject: { personId: string | null; sandboxContactId: s
   return open ? `${open.kind === 'MEETING' ? `${open.label === 'Meeting' ? 'Meeting' : `Meeting: ${open.label}`}` : open.label} on ${formatLocalDate(open.dueDate, 'long')}` : null;
 }
 
+/** B004: the form's subject can take no next step (the form offers only No further action then). */
+async function subjectGone(subject: { personId: string | null; sandboxContactId: string | null }): Promise<boolean> {
+  if (subject.sandboxContactId && !subject.personId) {
+    const c = await prisma.sandboxContact.findUnique({ where: { id: subject.sandboxContactId }, select: { status: true } });
+    return !c || c.status !== 'ACTIVE';
+  }
+  if (!subject.personId) return false;
+  const p = await prisma.personCache.findUnique({ where: { id: subject.personId }, select: { deletedAt: true, optedOut: true, dnd: true } });
+  return !p || Boolean(p.deletedAt || p.optedOut || p.dnd);
+}
+
 export async function submitCallForm(callId: string, input: CallFormInput, user: { id: string; name: string; timezone: string; role?: Role; podIds?: string[] }, now = new Date()): Promise<SubmitResult> {
   const settings = await getSettings();
   const call = await prisma.callLog.findUnique({ where: { id: callId }, include: { form: true } });
@@ -219,7 +235,7 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
   const running = await runningEnrollment(subject);
   const open = await openStepAfter(subject, closes);
   // B026: with nobody to set it on, no next step can be kept; the rep says who it was first.
-  const valid = validateCallForm(input, { rules: settings.rules, today, talkSec: call.talkSec, connectSeconds: settings.calling.connectSeconds, inCampaign: Boolean(running), hasOpenStep: Boolean(open), noSubject: !hasSubject });
+  const valid = validateCallForm(input, { rules: settings.rules, today, talkSec: call.talkSec, connectSeconds: settings.calling.connectSeconds, inCampaign: Boolean(running), hasOpenStep: Boolean(open), noSubject: !hasSubject, subjectGone: hasSubject && (await subjectGone(subject)) });
   if (!valid.ok) return valid;
   const v = valid.value;
   const actor: AuditActor & { id: string } = { type: 'USER', id: user.id, label: user.name };

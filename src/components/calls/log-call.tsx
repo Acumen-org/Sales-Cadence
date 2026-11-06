@@ -32,7 +32,9 @@ export function LogCallButton({ personId = null, sandboxContactId = null, name, 
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
-  if (blocked) return <span className="inline-flex flex-col items-start gap-1"><button type="button" className={className} disabled>{label}</button><span className="max-w-xs text-[12px] text-ink-600">{blocked}</span></span>;
+  const formDialog = callId ? <CallFormDialog callId={callId} title={`Your call with ${name}`} onClose={() => setCallId(null)} /> : null;
+  // B024: the call just logged is now the form waiting, so the page re-reads as blocked; its form stays open.
+  if (blocked) return <><span className="inline-flex flex-col items-start gap-1"><button type="button" className={className} disabled>{label}</button><span className="max-w-xs text-[12px] text-ink-600">{blocked}</span></span>{formDialog}</>;
   return <>
     <button type="button" className={className} onClick={() => { setError(null); setOpen(true); }}>{label}</button>
     {open ? <Modal label={`Log a call with ${name}`} onClose={() => setOpen(false)} className="max-w-md">
@@ -64,6 +66,6 @@ export function LogCallButton({ personId = null, sandboxContactId = null, name, 
         </div>
       </form>
     </Modal> : null}
-    {callId ? <CallFormDialog callId={callId} title={`Your call with ${name}`} onClose={() => setCallId(null)} /> : null}
+    {formDialog}
   </>;
 }
