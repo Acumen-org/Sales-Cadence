@@ -204,7 +204,7 @@ export async function writeCrmDoNotContact(personId: string, what: { dnd: boolea
   try { client = await getTwentyClient(); } catch { client = null; }
   for (const w of writes) {
     try {
-      if (!client) throw new Error('Twenty is not configured.');
+      if (!client) throw new Error('The CRM is not configured.');
       if (w.operation === 'setPersonDnd') await client.setPersonDnd(personId, { dnd: Boolean(w.payload.dnd) });
       else await client.setPersonNextAction(personId, { nextAction: null, nextActionDueDate: null });
       if (client.kind !== 'dry-run') await prisma.twentyWrite.create({ data: { operation: w.operation, objectType: 'person', twentyId: personId, payload: w.payload as Prisma.InputJsonValue, dryRun: false, resultUpdatedAt: await ownWriteStamp(client, personId) } });

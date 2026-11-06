@@ -101,7 +101,7 @@ export function EnrichmentToolbar({ tab, q, fields, wanted, pods, fos, tiers, ty
             {filterSelect({ name: 'type', value: values.type, title: 'Filter by contact type', all: 'Any type', options: plain(types) })}
             {filterSelect({ name: 'product', value: values.product, title: 'Filter by product', all: 'Any product', options: plain(products) })}
             {filterSelect({ name: 'campaign', value: values.campaign, title: 'Filter by campaign', all: 'In or out of campaigns', options: [{ value: 'any', label: 'In a campaign' }, { value: 'none', label: 'Not in a campaign' }] })}
-            {filterSelect({ name: 'tag', value: values.tag, title: 'Filter by Twenty tag', all: 'Any Twenty tag', options: plain(tags) })}
+            {filterSelect({ name: 'tag', value: values.tag, title: 'Filter by CRM tag', all: 'Any CRM tag', options: plain(tags) })}
           </> : null}
         </div>
       ) : null}

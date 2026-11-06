@@ -53,8 +53,8 @@ export async function campaignAudienceIssues(ids: string[], context?: AudienceCo
     const p = byId.get(id);
     const issue = (kind: AudienceIssueKind, reason: string, ownerId?: string): AudienceIssue[] => [{ id, name: p ? cachedPersonName(p) : 'Unknown contact', company: p?.companyName ?? null, kind, reason, ...(ownerId ? { ownerId } : {}) }];
     // Each reason is one plain clause that says why, so it reads on its own in a list of names.
-    if (!p || p.deletedAt) return issue('deleted', 'Deleted in Twenty');
-    if (p.dnd) return issue('dnd', 'Marked Do not contact in Twenty');
+    if (!p || p.deletedAt) return issue('deleted', 'Deleted in the CRM');
+    if (p.dnd) return issue('dnd', 'Marked Do not contact in the CRM');
     if (p.optedOut) return issue('optedOut', 'Asked not to be contacted');
     if (p.companyId && blockedIds.has(p.companyId)) return issue('blocked', 'Their company is blocked, and only an admin can unblock it');
     if (!externalIds.has(id)) return issue('internal', 'Works at one of our own companies');
@@ -66,7 +66,7 @@ export async function campaignAudienceIssues(ids: string[], context?: AudienceCo
     const runsHere = fo && owner!.pods.some(x => x.podId === context.podId);
     const elsewhere = fo && !runsHere ? owner!.pods.map(x => podLabel(x.pod.name)) : [];
     const ownedBy = () => issue('owner',
-      !owner ? 'Their owner in Twenty is not a Cadence user'
+      !owner ? 'Their owner in the CRM is not a Cadence user'
         : !owner.active ? `Owned by ${owner.name}, who no longer has access to Cadence`
         : !fo ? `Owned by ${owner.name}, who does not run outreach`
         : runsHere ? context.joining ? `Owned by ${owner.name}, not ${context.joining}` : `Owned by ${owner.name}, who is not on this campaign`
@@ -75,7 +75,7 @@ export async function campaignAudienceIssues(ids: string[], context?: AudienceCo
       runsHere ? owner!.id : undefined);
     if (context.checkOwners && p.ownerMemberId && !ownedHere) return ownedBy();
     if (!ownedHere && p.podOwner !== context.podOwnerValue) {
-      if (!context.anyPod && !kept.has(id)) return issue('outside', `${p.podOwner ? `In ${podLabel(podNamed.get(p.podOwner) ?? p.podOwner)}` : 'In no pod in Twenty'}, so only a Pod Manager or admin can add them`);
+      if (!context.anyPod && !kept.has(id)) return issue('outside', `${p.podOwner ? `In ${podLabel(podNamed.get(p.podOwner) ?? p.podOwner)}` : 'In no pod in the CRM'}, so only a Pod Manager or admin can add them`);
       if (p.ownerMemberId && !runsHere) return ownedBy();
     }
     return [];

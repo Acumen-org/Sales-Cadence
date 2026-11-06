@@ -73,7 +73,7 @@ export async function syncContinuously(now = new Date(), injected?: TwentyClient
       companies = full.companies;
       for (const [name, message] of Object.entries(full.stageErrors)) if (message) stageErrors[`full.${name}`] = message;
       if (!Object.keys(full.stageErrors).length && !full.failed) lastFullRefresh = now.toISOString();
-      if (full.stageErrors.people && !state?.watermark) throw new Error(`People could not be listed from Twenty: ${full.stageErrors.people}`);
+      if (full.stageErrors.people && !state?.watermark) throw new Error(`People could not be listed from the CRM: ${full.stageErrors.people}`);
     }
     try {
       await syncWorkspaceMembers(client);
@@ -92,7 +92,7 @@ export async function syncContinuously(now = new Date(), injected?: TwentyClient
       stageErrors.nonProspects = error instanceof Error ? error.message : String(error);
     }
     const peopleFailed = stageErrors['cache.people'] ?? stageErrors.people;
-    if (peopleFailed) throw new Error(`People could not be listed from Twenty: ${peopleFailed}`);
+    if (peopleFailed) throw new Error(`People could not be listed from the CRM: ${peopleFailed}`);
     const failing = Object.keys(stageErrors);
     for (const stage of CURSOR_STAGES) if (!stageErrors[stage]) stageWatermarks[stage] = now.toISOString();
     await save({

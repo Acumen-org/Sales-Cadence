@@ -17,11 +17,11 @@ export async function deleteCampaignPermanently(id: string, name: string, user: 
     const tasks = c.enrollments.flatMap(e => e.tasks);
     // Notes and real messages are CRM relationship history, not campaign records.
     // Refuse an ambiguous purge instead of deleting third-party conversation data.
-    if (tasks.some(t => t.twentyNoteId)) throw new Error('This campaign wrote notes to Twenty, and deleting it would lose that history. Delete those notes in Twenty first.');
+    if (tasks.some(t => t.twentyNoteId)) throw new Error('This campaign wrote notes to the CRM, and deleting it would lose that history. Delete those notes in the CRM first.');
     const mirrored = [...new Set(tasks.flatMap(t => t.twentyTaskId ? [t.twentyTaskId] : []))];
     if (mirrored.length) {
       const client = await getTwentyClient();
-      if (client.kind === 'dry-run') throw new Error('Not deleted: its tasks are still in Twenty, and Cadence cannot remove them while dry run is on.');
+      if (client.kind === 'dry-run') throw new Error('Not deleted: its tasks are still in the CRM, and Cadence cannot remove them while dry run is on.');
       for (let i = 0; i < mirrored.length; i += 8) await Promise.all(mirrored.slice(i, i + 8).map(async taskId => {
         if (await client.getTask(taskId)) await client.deleteTask(taskId);
       }));

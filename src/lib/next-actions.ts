@@ -254,12 +254,12 @@ export async function syncNextActions(now = new Date()): Promise<{ pushed: numbe
     if (date === na.dueDate && label === na.label) { await prisma.nextAction.update({ where: { id: na.id }, data: { crmSyncedAt: crm.twentyUpdatedAt } }); continue; }
     if (!date) {
       await prisma.nextAction.update({ where: { id: na.id }, data: { state: 'CANCELLED', closedAt: now, crmSyncedAt: crm.twentyUpdatedAt } });
-      await logAudit({ entityType: 'person', entityId: na.personId, action: 'next_action_stopped', actor: SYSTEM_ACTOR, details: { label: na.label, dueDate: na.dueDate, reason: 'Cleared in Twenty' } });
+      await logAudit({ entityType: 'person', entityId: na.personId, action: 'next_action_stopped', actor: SYSTEM_ACTOR, details: { label: na.label, dueDate: na.dueDate, reason: 'Cleared in the CRM' } });
       stats.closed++;
       continue;
     }
     await prisma.nextAction.update({ where: { id: na.id }, data: { dueDate: date, label, crmSyncedAt: crm.twentyUpdatedAt } });
-    await logAudit({ entityType: 'person', entityId: na.personId, action: 'next_action_moved', actor: SYSTEM_ACTOR, details: { label, from: na.dueDate, to: date, reason: 'Changed in Twenty' } });
+    await logAudit({ entityType: 'person', entityId: na.personId, action: 'next_action_moved', actor: SYSTEM_ACTOR, details: { label, from: na.dueDate, to: date, reason: 'Changed in the CRM' } });
     stats.followed++;
   }
   return stats;

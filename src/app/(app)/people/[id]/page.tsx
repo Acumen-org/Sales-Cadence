@@ -178,7 +178,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
               ) : null}
               {twentyUrl ? (
                 <a href={twentyUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm">
-                  <IconExternal size={13} /> Twenty
+                  <IconExternal size={13} /> CRM
                 </a>
               ) : null}
               <Link href="/people" className="btn-ghost btn-sm">
@@ -338,7 +338,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                     {/* Consent only appears when there is a restriction: its absence is normal. */}
                     {person.dnd ? (
                       <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-[12.5px] font-medium text-red-700">
-                        {optionLabel(person.dndReason ?? 'DO_NOT_CONTACT')} - set in Twenty.
+                        {optionLabel(person.dndReason ?? 'DO_NOT_CONTACT')} - set in the CRM.
                       </p>
                     ) : null}
                     <KeyValue
@@ -388,7 +388,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                         { k: 'Lead source notes', v: person.leadSourceNotes ? <span className="whitespace-pre-line">{person.leadSourceNotes}</span> : null },
                         { k: 'Product interest', v: optionLabels(person.productInterest) || null },
                         { k: 'Primary product', v: person.primaryProduct ? optionLabel(person.primaryProduct) : null },
-                        { k: 'Campaigns in Twenty', v: optionLabels(person.campaigns) || null },
+                        { k: 'Campaigns in the CRM', v: optionLabels(person.campaigns) || null },
                         { k: 'Deal signal', v: person.dealSignalStrength ? optionLabel(person.dealSignalStrength) : null },
                         { k: 'Calling list', v: person.onCallingList ? 'Yes' : null },
                         {
@@ -445,8 +445,8 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                   <div className="p-4">
                     <KeyValue
                       items={[
-                        { k: 'Twenty id', v: <span className="font-mono text-xs">{person.id}</span> },
-                        { k: 'Changed in Twenty', v: formatInstant(person.twentyUpdatedAt, user.timezone) },
+                        { k: 'CRM id', v: <span className="font-mono text-xs">{person.id}</span> },
+                        { k: 'Changed in the CRM', v: formatInstant(person.twentyUpdatedAt, user.timezone) },
                         { k: 'Last synced', v: formatInstant(person.syncedAt, user.timezone) },
                       ]}
                     />

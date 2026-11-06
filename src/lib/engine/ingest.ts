@@ -166,7 +166,7 @@ async function process(type: CanonicalObject, input: IngestInput, ctx: EngineCon
       const p = normalizeParticipant(input.record, schema);
       if (!p.messageId) return { result: 'ignored_no_message_id' };
       const full = await fetchMessage(p.messageId, client);
-      if (!full) return { result: 'ignored_message_not_found', needsReview: true, reviewNote: `message ${p.messageId} not found in Twenty` };
+      if (!full) return { result: 'ignored_message_not_found', needsReview: true, reviewNote: `message ${p.messageId} not found in the CRM` };
       return handleMessage(full, ctx, settings);
     }
     case 'task':

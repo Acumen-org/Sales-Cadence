@@ -68,7 +68,7 @@ describe('published campaign execution', () => {
     const p = await previewCampaignCalendar(d, user);
     const c = await saveCampaignCalendar(d, user, { publish: true, fingerprint: p.fingerprint });
     await prisma.personCache.update({ where: { id: 'person-01' }, data: { ownerMemberId: null } });
-    await expect(activateCampaign(c.id, { actor: SYSTEM_ACTOR, now: new Date('2027-01-04T16:00:00Z'), skipSync: true })).rejects.toThrow(/^Not started, because things changed after it was published: .+ \(has a different owner in Twenty now\)\./);
+    await expect(activateCampaign(c.id, { actor: SYSTEM_ACTOR, now: new Date('2027-01-04T16:00:00Z'), skipSync: true })).rejects.toThrow(/^Not started, because things changed after it was published: .+ \(has a different owner in the CRM now\)\./);
     expect(await prisma.enrollment.count({ where: { campaignId: c.id } })).toBe(0);
   });
   it('never generates overdue follow-ups on weekends or after the campaign end', async () => {

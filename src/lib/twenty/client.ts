@@ -135,11 +135,11 @@ export async function* paginate<T>(
     const page: Page<T> = await fetchPage(after);
     for (const item of page.items) yield item;
     if (!page.hasNextPage) return;
-    if (!page.endCursor || cursors.has(page.endCursor)) throw new Error('Twenty pagination did not advance; sync is incomplete.');
+    if (!page.endCursor || cursors.has(page.endCursor)) throw new Error('CRM paging did not advance; sync is incomplete.');
     cursors.add(page.endCursor);
     after = page.endCursor;
   }
-  throw new Error(`Twenty pagination exceeded ${maxPages} pages; sync is incomplete.`);
+  throw new Error(`CRM paging exceeded ${maxPages} pages; sync is incomplete.`);
 }
 
 export async function collectAll<T>(fetchPage: (after: string | null) => Promise<Page<T>>): Promise<T[]> {

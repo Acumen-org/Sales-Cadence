@@ -29,7 +29,7 @@ export async function startCallAction(payload: { taskId: string }): Promise<Call
   if (!task) return { ok: false, error: 'Task not found.' };
   if (!canActOnTask(toActor(user), { foUserId: task.foUserId, podId: task.enrollment.podId })) return { ok: false, error: 'This is not your task.' };
   const to = task.enrollment.person!.phone;
-  if (!to) return { ok: false, error: 'This person has no phone number in Twenty.' };
+  if (!to) return { ok: false, error: 'This person has no phone number in the CRM.' };
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10_000);

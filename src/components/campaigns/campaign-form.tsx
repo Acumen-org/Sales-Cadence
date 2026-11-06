@@ -165,7 +165,7 @@ export function CampaignForm({ sequences, pods, products, defaultStartDate, defa
               <PeoplePicker value={picked} onChange={setPicked} />
             ) : (
               <div className="space-y-3">
-                <Field label="CSV export from Twenty" required>
+                <Field label="CSV export from the CRM" required>
                   <input type="file" accept=".csv,text/csv" onChange={async (e) => { const f = e.target.files?.[0]; if (!f) return; setCsvName(f.name); setCsvText(await f.text()); }} />
                 </Field>
                 {csvName ? <p className="text-[12.5px] text-ink-600">{csvName} · <Count value={Math.max(0, audience)} /> rows</p> : null}

@@ -90,7 +90,7 @@ export class DryRunTwentyClient implements TwentyClient {
   }
   async enrichPerson(id: string, patch: EnrichPersonInput, current?: TwentyPerson) {
     const record = current ?? await this.inner.getPerson(id);
-    if (!record) throw new Error('This contact no longer exists in Twenty.');
+    if (!record) throw new Error('This contact no longer exists in the CRM.');
     await this.record('enrichPerson', 'person', { id, ...patch }, id);
     return record;
   }
@@ -122,7 +122,7 @@ export class DryRunTwentyClient implements TwentyClient {
   }
   async enrichCompany(id: string, patch: EnrichCompanyInput, current?: TwentyCompany) {
     const record = current ?? (await this.inner.listCompanies({ ids: [id], limit: 1 })).items[0];
-    if (!record) throw new Error('This account no longer exists in Twenty.');
+    if (!record) throw new Error('This account no longer exists in the CRM.');
     await this.record('enrichCompany', 'company', { id, ...patch }, id);
     return record;
   }

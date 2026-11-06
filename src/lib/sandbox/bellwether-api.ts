@@ -60,7 +60,7 @@ export async function authorize(header: string | null): Promise<ApiError | null>
   const e = env();
   const current = e.BELLWETHER_API_KEY?.trim();
   if (!current) return apiError(503, 'integration_disabled', 'The Bellwether integration is not configured in Cadence.');
-  if (!(await getSettings()).sandbox.enabled) return apiError(503, 'integration_disabled', 'The sandbox is switched off in Cadence.');
+  if (!(await getSettings()).sandbox.enabled) return apiError(503, 'integration_disabled', 'Cold outreach is switched off in Cadence.');
   const given = (header ?? '').trim();
   const previous = e.BELLWETHER_API_KEY_PREVIOUS?.trim();
   const ok = Boolean(given) && (sameKey(given, current) || (previous ? sameKey(given, previous) : false));

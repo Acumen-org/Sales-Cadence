@@ -253,18 +253,18 @@ export const canViewCalls = (a: Actor) => canViewReports(a);
 export const canAttachCalls = (a: Actor) => isAdmin(a) || isPodLeader(a);
 
 export function whyNotWorkSandboxContact(a: Actor, ownerName: string | null, podName: string | null): string | null {
-  if (isBizOps(a)) return 'Biz Ops can view sandbox contacts but cannot change them.';
-  if (!needsPod(a.role) && !isAdmin(a)) return 'Only sales roles and admins can work sandbox contacts.';
+  if (isBizOps(a)) return 'Biz Ops can view cold contacts but cannot change them.';
+  if (!needsPod(a.role) && !isAdmin(a)) return 'Only sales roles and admins can work cold contacts.';
   if (isJuniorFo(a)) return `This is ${ownerName ?? 'someone else'}'s contact. Junior FOs can work only their own contacts and unclaimed ones.`;
   return `This is ${ownerName ?? 'someone else'}'s contact${podName ? ` in ${podName}, which is not one of your pods` : ''}. Only ${podName ? leadersOf(podName) : 'its owner'}, and admins, can change it.`;
 }
 export function whyNotMoveToCrm(a: Actor, ownerName: string | null, podName: string | null): string | null {
-  if (isBizOps(a)) return 'Biz Ops can view sandbox contacts but cannot move them to the CRM.';
+  if (isBizOps(a)) return 'Biz Ops can view cold contacts but cannot move them to the CRM.';
   if (isJuniorFo(a)) return `Only ${ownerName ?? 'the owner'}, ${podName ? leadersOf(podName) : 'the leaders of its pod'}, and admins can move this contact. Junior FOs move their own.`;
   return `Only ${ownerName ?? 'the owner'}, ${podName ? leadersOf(podName) : 'the leaders of its pod'}, and admins can move this contact.`;
 }
 export function whyNotAssignSandbox(a: Actor, podName: string | null): string | null {
-  if (isBizOps(a)) return 'Biz Ops can view sandbox contacts but cannot assign them.';
+  if (isBizOps(a)) return 'Biz Ops can view cold contacts but cannot assign them.';
   if (isJuniorFo(a)) return 'Junior FOs can let go of their own contacts but cannot give contacts to someone else.';
   return `Only ${podName ? leadersOf(podName) : 'the leaders of its pod'}, and admins, can give this contact to someone else.`;
 }

@@ -152,8 +152,8 @@ function CrmPeopleTable({ rows, canMove = true, nextActions }: Props) {
                 {canSelect ? <input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={!selectable.length} aria-label="Select people" /> : null}
               </th>
               <th>Name</th>
-              <th>Tags in Twenty</th>
-              {showNext ? <th>Next in Twenty</th> : null}
+              <th>Tags in the CRM</th>
+              {showNext ? <th>Next in the CRM</th> : null}
               <th>Campaign</th>
               <th>MIP</th>
               <th>Pod</th>

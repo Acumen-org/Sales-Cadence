@@ -45,7 +45,7 @@ export function completionNoteTitle(task: Pick<SyncTask, 'label' | 'chosenAction
 }
 
 export function mirroredTaskTitle(task: SyncTask): string {
-  return `Cadence: ${task.label} - ${task.enrollment.person ? cachedPersonName(task.enrollment.person) : 'sandbox contact'}`;
+  return `Cadence: ${task.label} - ${task.enrollment.person ? cachedPersonName(task.enrollment.person) : 'cold contact'}`;
 }
 
 async function recordWrite(client: TwentyClient, operation: string, objectType: string, payload: unknown, twentyId: string | null, taskId: string | null) {

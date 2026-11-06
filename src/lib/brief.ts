@@ -265,8 +265,8 @@ function buildTimeline(input: {
   const covered = (at: Date, kind: BriefTimelineItem['kind']) =>
     items.some((x) => x.kind === kind && Math.abs(x.at.getTime() - at.getTime()) < 5 * 60_000);
   for (const [at, kind, title] of [
-    [input.crm.lastCallAt, 'call' as const, 'Called, according to Twenty'],
-    [input.crm.lastEmailAt, 'email' as const, 'Emailed, according to Twenty'],
+    [input.crm.lastCallAt, 'call' as const, 'Called, according to the CRM'],
+    [input.crm.lastEmailAt, 'email' as const, 'Emailed, according to the CRM'],
   ] as const) {
     if (at && !covered(at, kind)) {
       items.push({ id: `crm:${kind}`, at, kind, direction: 'out', title, detail: null, actor: null });
@@ -283,7 +283,7 @@ export async function fetchOpportunities(personId: string): Promise<{ opportunit
     const page = await client.listOpportunities({ personId, limit: 10 });
     return { opportunities: page.items };
   } catch (err) {
-    return { opportunities: [], error: `Twenty unavailable: ${err instanceof Error ? err.message : String(err)}` };
+    return { opportunities: [], error: `The CRM is unavailable: ${err instanceof Error ? err.message : String(err)}` };
   }
 }
 

@@ -151,7 +151,7 @@ export function PeoplePicker({ campaignPodId, campaignFoIds, campaignId, value, 
             {showMore || moreCount ? <div className="flex w-full flex-wrap items-center gap-2 rounded-[10px] border border-line bg-canvas/70 p-2">
               {filterSelect({ name: 'type', label: 'Filter by contact type', all: 'Any type', items: options.types.map((t) => ({ value: t, label: optionLabel(t) })) })}
               {filterSelect({ name: 'product', label: 'Filter by product', all: 'Any product', items: options.products.map((p) => ({ value: p, label: optionLabel(p) })) })}
-              {options.tags.length ? filterSelect({ name: 'tag', label: 'Filter by Twenty tag', all: 'Any tag', items: options.tags.map((t) => ({ value: t, label: optionLabel(t) })) }) : null}
+              {options.tags.length ? filterSelect({ name: 'tag', label: 'Filter by CRM tag', all: 'Any tag', items: options.tags.map((t) => ({ value: t, label: optionLabel(t) })) }) : null}
             </div> : null}
           </>
         ) : null}

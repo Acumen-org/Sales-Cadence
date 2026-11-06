@@ -50,9 +50,9 @@ export async function activateCalendarCampaign(id: string, ctx: EngineContext) {
       ].filter(Boolean).join('; '));
     }
     const originalOwners = new Map(plan.people.map(p => [p.id, p.ownerMemberId]));
-    const moved = people.filter(p => p.ownerMemberId !== originalOwners.get(p.id)).map(p => ({ name: nameOf.get(p.id) ?? 'Someone', reason: 'Has a different owner in Twenty now' }));
+    const moved = people.filter(p => p.ownerMemberId !== originalOwners.get(p.id)).map(p => ({ name: nameOf.get(p.id) ?? 'Someone', reason: 'Has a different owner in the CRM now' }));
     const lapsed = followupIds ? people.filter(p => !followupIds.has(p.id)).map(p => ({ name: nameOf.get(p.id) ?? 'Someone', reason: 'No longer due this follow-up' })) : [];
-    const renamed = fos.filter(f => f.twentyMemberId !== plan.fos.find(old => old.id === f.id)?.twentyMemberId).map(f => `${f.name} is linked to a different Twenty user now`);
+    const renamed = fos.filter(f => f.twentyMemberId !== plan.fos.find(old => old.id === f.id)?.twentyMemberId).map(f => `${f.name} is linked to a different CRM user now`);
     if (moved.length || lapsed.length || renamed.length) throw notStarted([whoAndWhy([...moved, ...lapsed]), ...renamed].filter(Boolean).join('; '));
     const rows = [];
     for (const b of plan.batches) {

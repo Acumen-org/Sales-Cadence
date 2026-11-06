@@ -168,7 +168,7 @@ function CrmToolbar({ pods, fos, products, tiers, types, q, pod, fo, product, so
         {filterSelect({ name: 'product', value: product, label: 'Filter by product interest', options: products, all: 'Any product' })}
         {filterSelect({ name: 'tier', value: tier, label: 'Filter by tier', options: tiers, all: 'Any tier' })}
         {filterSelect({ name: 'type', value: type, label: 'Filter by contact type', options: types, all: 'Any type' })}
-        {filterSelect({ name: 'tag', value: tag, label: 'Filter by Twenty tag', options: tags, all: 'Any Twenty tag' })}
+        {filterSelect({ name: 'tag', value: tag, label: 'Filter by CRM tag', options: tags, all: 'Any CRM tag' })}
         <select value={status} onChange={(e) => update({ status: e.target.value || null })} aria-label="Filter by campaign state" className="!w-auto !py-2 !text-[12.5px]">
           {SEQUENCE_STATES.map((s) => (
             <option key={s.value} value={s.value}>

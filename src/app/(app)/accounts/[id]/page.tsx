@@ -156,7 +156,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                       // The handle, not the whole URL set in bold, matching the person record.
                       { k: 'LinkedIn', v: company.linkedinUrl ? <a href={company.linkedinUrl} target="_blank" rel="noreferrer" title={company.linkedinUrl} className="text-brand-700 hover:underline">{company.linkedinUrl.replace(/^https?:\/\/(www\.)?linkedin\.com\//i, '')}</a> : null },
                       { k: 'Last synced', v: company.syncedAt ? formatInstant(company.syncedAt, user.timezone) : null },
-                      { k: 'Twenty id', v: <span className="font-mono text-[11px]">{company.id}</span> },
+                      { k: 'CRM id', v: <span className="font-mono text-[11px]">{company.id}</span> },
                     ]}
                   />
                 </div>
@@ -215,7 +215,7 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
                       <th>Person</th>
                       <th>Tier</th>
                       <th>Type</th>
-                      <th>Next in Twenty</th>
+                      <th>Next in the CRM</th>
                       <th>Campaign</th>
                       <th>Sequence</th>
                       <th className="num">Touches</th>

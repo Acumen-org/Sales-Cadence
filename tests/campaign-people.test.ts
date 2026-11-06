@@ -97,7 +97,7 @@ describe('changing a studio campaign’s people from People', () => {
   it('adds to a draft’s audience, skipping who cannot be in it, and says why', async () => {
     const id = await draft();
     const r = await addPeopleToCampaignAction(form(id, ['person-09', 'person-10', 'person-01', 'person-05']));
-    expect(r).toEqual({ ok: true, message: expect.stringMatching(/^1 person added to Karson only\. They are planned when it is published\. Not added: .+\(marked Do not contact in Twenty\)/) });
+    expect(r).toEqual({ ok: true, message: expect.stringMatching(/^1 person added to Karson only\. They are planned when it is published\. Not added: .+\(marked Do not contact in the CRM\)/) });
     expect(r.ok && r.message).toMatch(/\(owned by Alisa .*, who is not on this campaign\)/);
     const c = await load(id);
     expect(c.status).toBe('DRAFT');
@@ -106,7 +106,7 @@ describe('changing a studio campaign’s people from People', () => {
     expect(saved.personIds).toEqual([...KARSON, 'person-09']);
     if (saved.request) expect(saved.request.personIds).toEqual([...KARSON, 'person-09']);
     // Nobody who can join: refused, and nothing changes.
-    expect(await addPeopleToCampaignAction(form(id, ['person-10']))).toEqual({ ok: false, error: expect.stringMatching(/^Nobody could be added to Karson only: .+ \(marked Do not contact in Twenty\)\.$/) });
+    expect(await addPeopleToCampaignAction(form(id, ['person-10']))).toEqual({ ok: false, error: expect.stringMatching(/^Nobody could be added to Karson only: .+ \(marked Do not contact in the CRM\)\.$/) });
     // Taking someone out of a draft drops them from its outreach choices too.
     const withChoice = { ...(await stored(id)), assignments: { 'person-09': 'default' } };
     await prisma.campaign.update({ where: { id }, data: { plannerDraft: withChoice } });

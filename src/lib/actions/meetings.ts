@@ -131,7 +131,7 @@ async function meetingPeople(formData: FormData, hostUserId: string | null, keep
     prisma.personCache.findMany({ where: { id: { in: prospectIds }, deletedAt: null }, select: { id: true } }),
   ]);
   if (users.length !== teamIds.length) return { error: 'Someone chosen from the team no longer has access to Cadence. Remove them and try again.' };
-  if (people.length !== prospectIds.length) return { error: 'A prospect chosen is no longer in Twenty. Remove them and try again.' };
+  if (people.length !== prospectIds.length) return { error: 'A prospect chosen is no longer in the CRM. Remove them and try again.' };
   let resolved: Awaited<ReturnType<typeof resolveAttendees>>;
   try {
     resolved = await resolveAttendees([

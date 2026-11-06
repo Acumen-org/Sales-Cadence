@@ -116,7 +116,7 @@ export class TwentyGraphqlClient implements TwentyClient {
           continue;
         }
         if (!res.ok) {
-          const err = new TwentyApiError(`Twenty ${endpoint} responded ${res.status}: ${text.slice(0, 300)}`, res.status);
+          const err = new TwentyApiError(`The CRM's ${endpoint} responded ${res.status}: ${text.slice(0, 300)}`, res.status);
           if (res.status >= 500 && attempt === 0) {
             lastErr = err;
             continue;
@@ -127,12 +127,12 @@ export class TwentyGraphqlClient implements TwentyClient {
         try {
           json = JSON.parse(text);
         } catch {
-          throw new TwentyApiError(`Twenty ${endpoint} returned non-JSON: ${text.slice(0, 200)}`, res.status);
+          throw new TwentyApiError(`The CRM's ${endpoint} returned non-JSON: ${text.slice(0, 200)}`, res.status);
         }
         if (json.errors?.length) {
-          throw new TwentyApiError(`Twenty GraphQL error: ${json.errors.map((e) => e.message ?? 'unknown').join('; ')}`, res.status, json.errors);
+          throw new TwentyApiError(`CRM GraphQL error: ${json.errors.map((e) => e.message ?? 'unknown').join('; ')}`, res.status, json.errors);
         }
-        if (!json.data) throw new TwentyApiError('Twenty returned no data', res.status);
+        if (!json.data) throw new TwentyApiError('The CRM returned no data', res.status);
         return json.data;
       } catch (err) {
         if (err instanceof TwentyApiError) throw err;
@@ -142,7 +142,7 @@ export class TwentyGraphqlClient implements TwentyClient {
         clearTimeout(timer);
       }
     }
-    throw new TwentyApiError(`Twenty unreachable at ${url}: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
+    throw new TwentyApiError(`The CRM is unreachable at ${url}: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
   }
 
   /** Injectable so a test can run a rate-limit retry without waiting. */
@@ -205,7 +205,7 @@ export class TwentyGraphqlClient implements TwentyClient {
 
   async listWebhooks(): Promise<TwentyWebhook[]> {
     const res = await this.rest<Raw>('GET', 'webhooks?limit=60');
-    if (res.status >= 400) throw new TwentyApiError(`Twenty webhooks responded ${res.status}: ${res.text.slice(0, 300)}`, res.status);
+    if (res.status >= 400) throw new TwentyApiError(`The CRM's webhooks responded ${res.status}: ${res.text.slice(0, 300)}`, res.status);
     const data = (res.json?.data ?? res.json ?? {}) as Raw;
     const list = (Array.isArray(data.webhooks) ? data.webhooks : Array.isArray(data) ? data : []) as Raw[];
     return list.map(TwentyGraphqlClient.webhookOf);
@@ -220,7 +220,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     const base: Raw = { targetUrl: input.targetUrl, description: input.description ?? 'Cadence', ...(input.secret ? { secret: input.secret } : {}) };
     let res = await this.rest<Raw>('POST', 'webhooks', { ...base, operations: ['*.*'] });
     if (res.status === 400 || res.status === 422) res = await this.rest<Raw>('POST', 'webhooks', { ...base, operation: '*.*' });
-    if (res.status >= 400) throw new TwentyApiError(`Twenty webhooks responded ${res.status}: ${res.text.slice(0, 300)}`, res.status);
+    if (res.status >= 400) throw new TwentyApiError(`The CRM's webhooks responded ${res.status}: ${res.text.slice(0, 300)}`, res.status);
     const data = (res.json?.data ?? res.json ?? {}) as Raw;
     const created = (data.createWebhook ?? data.webhook ?? data) as Raw;
     return TwentyGraphqlClient.webhookOf(created);
@@ -542,7 +542,7 @@ export class TwentyGraphqlClient implements TwentyClient {
       { id: viewId },
     );
     const node = data.views?.edges?.[0]?.node;
-    if (!node) throw new TwentyApiError(`Twenty view ${viewId} not found. Paste person ids instead.`);
+    if (!node) throw new TwentyApiError(`CRM view ${viewId} not found. Paste person ids instead.`);
     const meta = await this.metadataObjects();
     const personMeta = meta.find((o) => o.nameSingular === this.s.objects.person.singular);
     if (!personMeta) throw new TwentyApiError('Could not read person metadata to translate the view filters.');
@@ -798,14 +798,14 @@ export class TwentyGraphqlClient implements TwentyClient {
 
   private async assertWritableFields(type: string, data: Raw) {
     const available = await this.availableFields(type);
-    if (!available) throw new TwentyApiError('Twenty schema could not be verified. Check API permissions before applying enrichment.');
+    if (!available) throw new TwentyApiError('The CRM fields could not be verified. Check API permissions before applying enrichment.');
     const missing = Object.keys(data).filter((key) => !available.has(key));
-    if (missing.length) throw new TwentyApiError(`Twenty is missing mapped fields: ${missing.join(', ')}. Update the field mapping before retrying.`);
+    if (missing.length) throw new TwentyApiError(`The CRM is missing mapped fields: ${missing.join(', ')}. Update the field mapping before retrying.`);
   }
 
   async enrichPerson(id: string, patch: EnrichPersonInput, current?: TwentyPerson): Promise<TwentyPerson> {
     const person = current ?? await this.getPerson(id);
-    if (!person || person.deletedAt) throw new TwentyApiError('This contact no longer exists in Twenty.');
+    if (!person || person.deletedAt) throw new TwentyApiError('This contact no longer exists in the CRM.');
     const fields = this.s.person;
     const data: Raw = {
       ...(patch.firstName !== undefined || patch.lastName !== undefined ? { [fields.name]: { firstName: patch.firstName ?? person.firstName, lastName: patch.lastName ?? person.lastName } } : {}),
@@ -819,7 +819,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     await this.assertWritableFields(type, data);
     const selection = await this.personSelection();
     const result = await this.request<Record<string, Raw>>(`mutation EnrichPerson($id: UUID!, $data: ${type}UpdateInput!) { update${type}(id: $id, data: $data) { ${selection} } }`, { id, data });
-    if (!result[`update${type}`]) throw new TwentyApiError('Twenty did not return the updated contact.');
+    if (!result[`update${type}`]) throw new TwentyApiError('The CRM did not return the updated contact.');
     return normalizePerson(result[`update${type}`], this.s);
   }
 
@@ -829,7 +829,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     const type = this.s.objects.person.typeName;
     await this.assertWritableFields(type, data);
     const result = await this.request<Record<string, Raw>>(`mutation SetNextAction($id: UUID!, $data: ${type}UpdateInput!) { update${type}(id: $id, data: $data) { id } }`, { id, data });
-    if (!result[`update${type}`]) throw new TwentyApiError('Twenty did not update the contact.');
+    if (!result[`update${type}`]) throw new TwentyApiError('The CRM did not update the contact.');
   }
 
   /**
@@ -843,12 +843,12 @@ export class TwentyGraphqlClient implements TwentyClient {
     const type = this.s.objects.person.typeName;
     await this.assertWritableFields(type, data);
     const result = await this.request<Record<string, Raw>>(`mutation SetDnd($id: UUID!, $data: ${type}UpdateInput!) { update${type}(id: $id, data: $data) { id } }`, { id, data });
-    if (!result[`update${type}`]) throw new TwentyApiError('Twenty did not update the contact.');
+    if (!result[`update${type}`]) throw new TwentyApiError('The CRM did not update the contact.');
   }
 
   async enrichCompany(id: string, patch: EnrichCompanyInput, current?: TwentyCompany): Promise<TwentyCompany> {
     const company = current ?? (await this.listCompanies({ ids: [id], limit: 1 })).items[0];
-    if (!company || company.deletedAt) throw new TwentyApiError('This account no longer exists in Twenty.');
+    if (!company || company.deletedAt) throw new TwentyApiError('This account no longer exists in the CRM.');
     const fields = this.s.company;
     const data: Raw = {
       ...(patch.name !== undefined ? { [fields.name]: patch.name } : {}),
@@ -862,7 +862,7 @@ export class TwentyGraphqlClient implements TwentyClient {
       const type = await this.companyAumType();
       if (!type) throw new TwentyApiError('Map company.aum to a Number or USD Currency field in Settings before applying AUM enrichment.');
       const previous = company.raw?.[fields.aum] as { currencyCode?: string } | null | undefined;
-      if (type === 'currency' && previous?.currencyCode && previous.currencyCode !== 'USD') throw new TwentyApiError('This AUM field uses another currency. Convert the enrichment value in Twenty before importing USD amounts.');
+      if (type === 'currency' && previous?.currencyCode && previous.currencyCode !== 'USD') throw new TwentyApiError('This AUM field uses another currency. Convert the enrichment value in the CRM before importing USD amounts.');
       if (type === 'number' && patch.aum != null && Number(patch.aum).toFixed(2) !== patch.aum) throw new TwentyApiError('This amount exceeds the Number field’s precision. Use a Currency field for exact AUM amounts.');
       const [whole, fraction = ''] = (patch.aum ?? '0').split('.');
       const micros = BigInt(whole) * BigInt(1_000_000) + BigInt(fraction.padEnd(6, '0'));
@@ -872,7 +872,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     await this.assertWritableFields(type, data);
     const selection = await this.companySelection();
     const result = await this.request<Record<string, Raw>>(`mutation EnrichCompany($id: UUID!, $data: ${type}UpdateInput!) { update${type}(id: $id, data: $data) { ${selection} } }`, { id, data });
-    if (!result[`update${type}`]) throw new TwentyApiError('Twenty did not return the updated account.');
+    if (!result[`update${type}`]) throw new TwentyApiError('The CRM did not return the updated account.');
     return normalizeCompany(result[`update${type}`], this.s);
   }
 
@@ -980,7 +980,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     }, [p.name, p.emails]);
     const selection = await this.personSelection();
     const result = await this.request<Record<string, Raw>>(`mutation CreatePerson($data: ${type}CreateInput!) { create${type}(data: $data) { ${selection} } }`, { data });
-    if (!result[`create${type}`]) throw new TwentyApiError('Twenty did not return the new contact.');
+    if (!result[`create${type}`]) throw new TwentyApiError('The CRM did not return the new contact.');
     return normalizePerson(result[`create${type}`], this.s);
   }
 
@@ -1000,7 +1000,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     }, [c.name]);
     const selection = await this.companySelection();
     const result = await this.request<Record<string, Raw>>(`mutation CreateCompany($data: ${type}CreateInput!) { create${type}(data: $data) { ${selection} } }`, { data });
-    if (!result[`create${type}`]) throw new TwentyApiError('Twenty did not return the new account.');
+    if (!result[`create${type}`]) throw new TwentyApiError('The CRM did not return the new account.');
     return normalizeCompany(result[`create${type}`], this.s);
   }
 

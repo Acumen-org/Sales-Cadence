@@ -22,12 +22,12 @@ export type EnrichmentField = {
 };
 export const ENRICHMENT_FIELDS: Record<EnrichmentEntity, EnrichmentField[]> = {
   person: [
-    { key: 'recordId', label: 'Twenty contact ID', identity: true }, { key: 'matchEmail', label: 'Existing email (match only)', identity: true },
+    { key: 'recordId', label: 'CRM contact ID', identity: true }, { key: 'matchEmail', label: 'Existing email (match only)', identity: true },
     { key: 'firstName', label: 'First name' }, { key: 'lastName', label: 'Last name' }, { key: 'email', label: 'Email' },
     { key: 'phone', label: 'Phone' }, { key: 'jobTitle', label: 'Job title' }, { key: 'linkedinUrl', label: 'LinkedIn URL' }, { key: 'city', label: 'City' },
   ],
   company: [
-    { key: 'recordId', label: 'Twenty account ID', identity: true }, { key: 'matchDomain', label: 'Existing domain (match only)', identity: true },
+    { key: 'recordId', label: 'CRM account ID', identity: true }, { key: 'matchDomain', label: 'Existing domain (match only)', identity: true },
     { key: 'name', label: 'Account name', deliberate: true }, { key: 'domain', label: 'Website domain' }, { key: 'industry', label: 'Industry' }, { key: 'employees', label: 'Employees' },
     { key: 'aum', label: 'AUM (USD)' }, { key: 'city', label: 'City' }, { key: 'linkedinUrl', label: 'LinkedIn URL' },
   ],
@@ -204,7 +204,7 @@ export async function previewEnrichment(user: SessionUser, entity: EnrichmentEnt
   const targets = Object.entries(mapping).filter(([header, target]) => parsed.headers.includes(header) && target);
   const fields = ENRICHMENT_FIELDS[entity];
   if (!targets.length || targets.some(([, target]) => !fields.some((field) => field.key === target)) || new Set(targets.map(([, target]) => target)).size !== targets.length) throw new Error('Map each destination field once using the available fields.');
-  if (!targets.some(([, target]) => ['recordId', entity === 'person' ? 'matchEmail' : 'matchDomain', entity === 'person' ? 'email' : 'domain'].includes(target))) throw new Error('Map a Twenty ID or an existing unique email/domain to identify each record.');
+  if (!targets.some(([, target]) => ['recordId', entity === 'person' ? 'matchEmail' : 'matchDomain', entity === 'person' ? 'email' : 'domain'].includes(target))) throw new Error('Map a CRM ID or an existing unique email/domain to identify each record.');
   const scope = entity === 'person' ? await enrichmentWritePeopleScope(user) : await enrichmentWriteCompanyScope(user);
   const records = entity === 'person' ? await prisma.personCache.findMany({ where: scope as Prisma.PersonCacheWhereInput }) : await prisma.companyCache.findMany({ where: scope as Prisma.CompanyCacheWhereInput });
   const byId = new Map(records.map((record) => [record.id, record]));
@@ -227,9 +227,9 @@ export async function previewEnrichment(user: SessionUser, entity: EnrichmentEnt
       const identityField = entity === 'person' ? 'matchEmail' : 'matchDomain';
       const identity = mapped[identityField] || mapped[entity === 'person' ? 'email' : 'domain'];
       const matches = mapped.recordId ? [mapped.recordId] : identity ? byIdentity.get(String(validateEnrichmentValue(identityField, identity))) ?? [] : [];
-      if (matches.length > 1) throw new Error('Ambiguous match. Supply the exact Twenty record ID.');
+      if (matches.length > 1) throw new Error('Ambiguous match. Supply the exact CRM record ID.');
       const record = matches.length === 1 ? byId.get(matches[0]) : null;
-      if (!record) throw new Error('No matching record in your scope. Supply an existing Twenty ID or matching email/domain.');
+      if (!record) throw new Error('No matching record in your scope. Supply an existing CRM ID or matching email/domain.');
       row.recordId = record.id;
       row.recordLabel = entity === 'person' ? cachedPersonName(record as { firstName: string; lastName: string }) : (record as { name: string }).name;
       if (mapped.recordId && mapped[identityField]) {
@@ -293,7 +293,7 @@ export async function applyEnrichmentChunk(user: SessionUser, batchId: string, c
         const changes = row.changes as Patch;
         const original = row.original as Patch;
         const current = batch.entity === 'person' ? await client.getPerson(row.recordId) : (await client.listCompanies({ ids: [row.recordId], limit: 1 })).items[0];
-        if (!current || current.deletedAt) throw new Error('The matched record was removed from Twenty.');
+        if (!current || current.deletedAt) throw new Error('The matched record was removed from the CRM.');
         if (batch.entity === 'person') await upsertPersonCache(current as TwentyPerson); else await upsertCompanyCache(current as TwentyCompany);
         const allowed = batch.entity === 'person' ? await prisma.personCache.count({ where: { AND: [await enrichmentWritePeopleScope(user), { id: row.recordId }] } }) : await prisma.companyCache.count({ where: { AND: [await enrichmentWriteCompanyScope(user), { id: row.recordId }] } });
         assertAllowed(allowed > 0, 'Not updated: this record now belongs to a pod you are not in, so only its own pod or an admin can change it.');
@@ -310,11 +310,11 @@ export async function applyEnrichmentChunk(user: SessionUser, batchId: string, c
         if (!alreadyApplied) {
           const updated = batch.entity === 'person' ? await client.enrichPerson(row.recordId, changes as EnrichPersonInput, current as TwentyPerson) : await client.enrichCompany(row.recordId, changes as EnrichCompanyInput, current as TwentyCompany);
           if (client.kind === 'dry-run') {
-            await prisma.enrichmentRow.update({ where: { id: row.id }, data: { status: 'DRY_RUN', error: 'Write simulated. Twenty was not changed.' } });
+            await prisma.enrichmentRow.update({ where: { id: row.id }, data: { status: 'DRY_RUN', error: 'Write simulated. The CRM was not changed.' } });
             return;
           }
           const verified = Object.keys(changes).every((field) => equal(fieldValue(updated as unknown as Record<string, unknown>, field), changes[field]));
-          if (!verified) throw new Error('Twenty returned a different value. Review the record before retrying.');
+          if (!verified) throw new Error('The CRM returned a different value. Review the record before retrying.');
           if (batch.entity === 'person') await upsertPersonCache(updated as TwentyPerson); else await upsertCompanyCache(updated as TwentyCompany);
           await prisma.twentyWrite.create({ data: { operation: batch.entity === 'person' ? 'enrichPerson' : 'enrichCompany', objectType: batch.entity, twentyId: row.recordId, payload: { batchId, rowNumber: row.rowNumber, original, changes }, dryRun: false } });
         }

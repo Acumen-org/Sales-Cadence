@@ -119,7 +119,7 @@ export function EnrichmentTable({ entity, rows, fields, assignees, canMark, notF
             <th>{entity === 'person' ? 'Person' : 'Account'}</th>
             <th>{notFound ? 'Marked not found' : 'Information needed'}</th>
             <th>Priority</th>
-            <th><span className="sr-only">Open in Twenty</span></th>
+            <th><span className="sr-only">Open in the CRM</span></th>
           </tr>
         </thead>
         <tbody>
@@ -130,7 +130,7 @@ export function EnrichmentTable({ entity, rows, fields, assignees, canMark, notF
               <td>
                 <div className="flex flex-wrap gap-1.5">
                   {!r.gaps.length ? <span className="text-ink-500">Nothing missing</span> : null}{r.gaps.map((gap) => {
-                    const title = [gap.fixInTwenty ? 'A relation or an assignment: an import cannot write it. Link it on the record in Twenty.' : null, gap.assignee ? `Researching: ${gap.assignee}` : null, gap.markedBy && gap.markedAt ? `Marked by ${gap.markedBy}, ${gap.markedAt}` : null].filter(Boolean).join(' ');
+                    const title = [gap.fixInTwenty ? 'A relation or an assignment: an import cannot write it. Link it on the record in the CRM.' : null, gap.assignee ? `Researching: ${gap.assignee}` : null, gap.markedBy && gap.markedAt ? `Marked by ${gap.markedBy}, ${gap.markedAt}` : null].filter(Boolean).join(' ');
                     return (
                       <span key={gap.field} className="inline-flex items-center gap-1" title={title || undefined}>
                         <Badge tone={gap.assignee && !notFound ? 'blue' : 'gray'}>
@@ -143,7 +143,7 @@ export function EnrichmentTable({ entity, rows, fields, assignees, canMark, notF
                 </div>
               </td>
               <td className="whitespace-nowrap text-[12.5px]">{!r.gaps.length ? null : r.critical ? <span className="font-medium text-red-700">Critical</span> : <span className="text-ink-500">Nice to have</span>}</td>
-              <td className="pr-4 text-right">{r.twentyUrl ? <a href={r.twentyUrl} target="_blank" rel="noreferrer" className="btn-ghost btn-sm !px-1.5" aria-label={`Open ${r.label} in Twenty`} title="Open in Twenty"><IconExternal size={14} /></a> : null}</td>
+              <td className="pr-4 text-right">{r.twentyUrl ? <a href={r.twentyUrl} target="_blank" rel="noreferrer" className="btn-ghost btn-sm !px-1.5" aria-label={`Open ${r.label} in the CRM`} title="Open in the CRM"><IconExternal size={14} /></a> : null}</td>
             </tr>
           ))}
         </tbody>

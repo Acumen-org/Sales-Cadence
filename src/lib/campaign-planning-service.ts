@@ -69,7 +69,7 @@ export const calendarFingerprint = (draft: CampaignDraft, calendar: CampaignCale
  */
 export async function planCampaign(input: unknown, user: SessionUser, campaignId: string | undefined, options: { reshapeOutreach: boolean; forPublish?: boolean; /** The caller checked who may change this campaign's people. */ authorized?: boolean; /** A new campaign's people: CRM people or cold contacts. A saved one keeps its own. */ audience?: CampaignAudience }, db: Tx = prisma): Promise<CampaignPlan> {
   const intent = CampaignDraftSchema.parse(input);
-  if (intent.productInterest.some(p => !(defaultTwentySchema.personValues.productInterest as readonly string[]).includes(p))) throw new Error('One of the products on this campaign is no longer in Twenty. Choose a product from the list.');
+  if (intent.productInterest.some(p => !(defaultTwentySchema.personValues.productInterest as readonly string[]).includes(p))) throw new Error('One of the products on this campaign is no longer in the CRM. Choose a product from the list.');
   const pod = await db.pod.findUnique({ where: { id: intent.podId } });
   const refused = options.authorized ? null : whyNotCreateCampaign(user, pod);
   if (refused) throw new Error(refused);
@@ -276,7 +276,7 @@ export async function saveCampaignCalendar(input: unknown, user: SessionUser, op
     }
     const fresh = await planCampaign(input, user, options.id, { reshapeOutreach: automatic, forPublish: true, audience: options.audience }, tx);
     const d = fresh.draft;
-    if (!fresh.calendar.valid || fresh.fingerprint !== options.fingerprint) throw new Error('Not published: something changed after you opened Schedule. A contact was updated in Twenty, or another campaign took someone. Check what changed, then publish again.');
+    if (!fresh.calendar.valid || fresh.fingerprint !== options.fingerprint) throw new Error('Not published: something changed after you opened Schedule. A contact was updated in the CRM, or another campaign took someone. Check what changed, then publish again.');
     const sequenceIds = await saveFlows(tx, d.flows, existing?.plannerDraft);
     const data = {
       name: d.name, podId: d.podId, startDate: d.startDate, endDate: d.endDate, personIds: d.personIds,

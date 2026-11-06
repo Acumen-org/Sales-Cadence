@@ -91,7 +91,7 @@ export async function previewEnrollment(req: EnrollRequest, client?: TwentyClien
     const c = client ?? (await getTwentyClient());
     await ensurePeopleCached(c, ids);
   } catch (err) {
-    warnings.push(`Could not fetch people from Twenty (${err instanceof Error ? err.message : String(err)}); using the local cache.`);
+    warnings.push(`Could not fetch people from the CRM (${err instanceof Error ? err.message : String(err)}); using the local cache.`);
   }
   const people = await prisma.personCache.findMany({ where: { id: { in: ids } } });
   const byId = new Map(people.map((p) => [p.id, p]));
@@ -165,13 +165,13 @@ export async function previewEnrollment(req: EnrollRequest, client?: TwentyClien
       continue;
     }
     if (p.dnd) {
-      conflicts.push({ personId: id, name, reason: 'dnd', detail: 'Do not contact is set in Twenty' });
+      conflicts.push({ personId: id, name, reason: 'dnd', detail: 'Do not contact is set in the CRM' });
       continue;
     }
     if (p.podOwner && p.podOwner !== pod.podOwnerValue) {
       // Pods follow Twenty: a person is worked by the pod Twenty says owns them. Moving them is a
       // change to make in Twenty, not something a pasted id should do quietly.
-      conflicts.push({ personId: id, name, reason: 'pod_mismatch', detail: `Belongs to ${optionLabel(p.podOwner)} in Twenty` });
+      conflicts.push({ personId: id, name, reason: 'pod_mismatch', detail: `Belongs to ${optionLabel(p.podOwner)} in the CRM` });
       continue;
     }
     if (p.badEmail && p.badPhone) warnings.push(`${name}: email and phone are flagged as bad data.`);

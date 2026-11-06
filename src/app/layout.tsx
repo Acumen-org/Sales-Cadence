@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'Cadence',
-  description: 'Sales sequencer beside Twenty CRM',
+  description: 'Sales sequencer beside the CRM',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
