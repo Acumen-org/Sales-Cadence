@@ -1,65 +1,29 @@
-import { DateWithWorkingDayHint } from '@/components/tasks/working-day-hint';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { PageFrame } from '@/components/page-frame';
-import { requireUser, toActor } from '@/lib/auth/current-user';
-import { canAssignSandbox, canEraseContact, canMoveToCrm, canWorkSandboxContact, isAdmin } from '@/lib/auth/rbac';
+import type { ReactNode } from 'react';
+import { requireUser } from '@/lib/auth/current-user';
 import { prisma } from '@/lib/db';
-import { formatInstant, formatLocalDate, toLocalDate, todayIn } from '@/lib/dates';
-import { workspaceTimezone } from '@/lib/workspace';
-import { assignableOwners } from '@/lib/outreach/ownership';
-import { workWords } from '@/lib/outreach/transfer';
-import { latestMoves } from '@/lib/sandbox/moves-query';
-import { UndoMoveButton } from '@/components/sandbox/move-undo';
-import { getSettings } from '@/lib/settings';
-import { checkReady, moveSignals } from '@/lib/sandbox/ready';
-import { callGate } from '@/lib/calls/gate';
-import { canAct, loadColdSubject } from '@/lib/outreach/guard';
-import { callOutcomes } from '@/lib/engine/outcomes';
-import { NEXT_STEP_LABELS } from '@/lib/sandbox/history-notes';
-import { PRODUCT_VALUES } from '@/lib/sandbox/bellwether-api';
-import { readExtraPhones } from '@/lib/sandbox/normalize';
-import { ActionButton, ActionForm } from '@/components/action-form';
-import { Badge, EmptyState, Notice, Surface, ViewHeader, enrollmentStatusLabel } from '@/components/ui';
+import { accentFor } from '@/lib/accent';
+import { formatInstant } from '@/lib/dates';
+import { ACTION_LABELS } from '@/lib/sequences/steps';
+import { shortDay } from '@/lib/task-cues';
+import { loadContactPage, phoneTypeWords, phoneWords, type Blocker, type ContactPage } from '@/lib/sandbox/contact-page';
+import { claimContactsAction, clearPossibleBounceAction, confirmPossibleBounceAction } from '@/lib/actions/sandbox';
+import { ActionButton } from '@/components/action-form';
+import { Flash } from '@/components/flash';
+import { ActionIcon, IconCheck, IconExternal } from '@/components/icons';
+import { Badge, Card, EventDetail, KeyValue, Notice, RecordHeader, Surface, Tabs, enrollmentStatusLabel, enrollmentTone } from '@/components/ui';
+import { SubjectBadges } from '@/components/subject-badges';
 import { CallButton } from '@/components/calls/call-button';
 import { LogCallButton } from '@/components/calls/log-call';
 import { SuggestionList } from '@/components/calls/suggestions';
-import { openSuggestions } from '@/lib/outreach/suggestions';
-import { openCallItems } from '@/lib/calls/link';
-import { pendingFormBlock } from '@/lib/calls/gate';
-import { mayHearCall } from '@/lib/calls/access';
-import { formOptOut } from '@/lib/tickets';
 import { FormOptOutControls } from '@/components/tickets/close-ticket-form';
-import { ContactActions } from '@/components/sandbox/contact-actions';
-import { addNoteAction, clearPossibleBounceAction, confirmPossibleBounceAction, setNextActionAction, setPodAction, updateContactAction } from '@/lib/actions/sandbox';
-import { ACTION_LABELS } from '@/lib/sequences/steps';
-import { labelBeyond } from '@/lib/task-cues';
-import { eraseConfirm, optOutConfirm, removeConfirm } from '@/lib/outreach/confirm-words';
-import { coldMoveHref, coldRef, COLD_CONTACT_BASE } from '@/lib/subject';
-
-const STATUS_LABEL = { ACTIVE: 'In Cold outreach', MOVED: 'In CRM', OPTED_OUT: 'Do not contact', REMOVED: 'Removed' } as const;
-
-/** Audit actions the contact's history shows (B108). */
-const HISTORY_ACTIONS = ['claimed', 'assigned', 'released', 'reassigned', 'pod_set', 'move_queued', 'sandbox_moved', 'move_failed', 'move_undone', 'opted_out', 'opt_out_lifted', 'removed'] as const;
-
-function historyWords(action: string, d: Record<string, unknown> | null, names: Map<string, string>): string {
-  const to = typeof d?.to === 'string' ? names.get(d.to) ?? 'someone' : null;
-  switch (action) {
-    case 'claimed': return 'Claimed';
-    case 'assigned': return `Given to ${to ?? 'someone'}`;
-    case 'reassigned': return `Handed to ${to ?? 'someone'}${d?.reason === 'team_access_removed' ? ' when its owner left' : d?.reason === 'pod_change' ? ' with a pod change' : ''}`;
-    case 'released': return 'Let go';
-    case 'pod_set': return 'Pod changed';
-    case 'move_queued': return 'Queued to move to the CRM';
-    case 'sandbox_moved': return 'Moved to the CRM';
-    case 'move_failed': return `Move failed${typeof d?.reason === 'string' ? `: ${d.reason}` : ''}`;
-    case 'move_undone': return 'Move to the CRM undone';
-    case 'opted_out': return 'Opted out';
-    case 'opt_out_lifted': return 'Opt-out lifted';
-    case 'removed': return 'Removed';
-    default: return action.replace(/_/g, ' ');
-  }
-}
+import { EnrollmentActions } from '@/components/campaigns/enrollment-actions';
+import { RemoveFromCampaign } from '@/components/campaigns/add-to-campaign';
+import { UndoMoveButton } from '@/components/sandbox/move-undo';
+import { AssignButton, ContactMoreMenu, MoveButton, WithReason } from '@/components/sandbox/contact-actions';
+import { AddToColdCampaign, ColdNextStepButton, EditContactButton, FillFormButton, NoteComposer, PodPicker, type EditableContact } from '@/components/sandbox/contact-page';
+import { ColdOutreachHeader } from '@/components/sandbox/section-tabs';
 
 /** "Jane Doe · Cold outreach" (B115). */
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -67,180 +31,329 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   return { title: `${(c ? `${c.firstName} ${c.lastName}`.trim() : '') || 'Contact'} · Cold outreach` };
 }
 
-/** One cold contact: what we know, what happened, and what happens next. */
-export default async function SandboxContactPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ move?: string }> }) {
+const TABS = ['overview', 'sequences', 'tasks', 'activity', 'emails', 'notes'] as const;
+type Tab = (typeof TABS)[number];
+
+type Search = { tab?: string; move?: string; flash?: string; flashTone?: string };
+
+/**
+ * One cold contact (PLAN 4.2), on the CRM person page's layout (B141): the record header with the
+ * badge and chips, the one blocker with its fix, one row of buttons, then the same six tabs. Each
+ * button a role can never use is hidden; each one that is off says why under it (B089, B202).
+ */
+export default async function ColdContactPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Search> }) {
   const user = await requireUser();
   const { id } = await params;
-  const openMove = (await searchParams).move === '1';
-  const contact = await prisma.sandboxContact.findUnique({
-    where: { id },
-    include: {
-      owner: { select: { id: true, name: true, twentyMemberId: true, active: true } }, pod: { select: { id: true, name: true } },
-      notes: { orderBy: { createdAt: 'desc' } }, emails: { orderBy: { at: 'desc' } },
-      calls: { orderBy: { startedAt: 'desc' }, include: { form: true, user: { select: { name: true } } } },
-      nextActions: { where: { state: 'OPEN' }, include: { fo: { select: { name: true } } }, take: 1 },
-      enrollments: { orderBy: { createdAt: 'desc' }, include: { campaign: { select: { id: true, name: true } }, sequence: { select: { name: true } }, tasks: { orderBy: [{ stepIndex: 'asc' }, { actionIndex: 'asc' }], select: { id: true, label: true, state: true, dueDate: true, completedAt: true } } } },
-    },
-  });
-  if (!contact) notFound();
-  // B144: a campaign that has not started holds the contact in its list, and says so here.
-  const upcoming = await prisma.campaign.findMany({ where: { audience: 'SANDBOX', status: { in: ['SCHEDULED', 'DRAFT'] }, personIds: { has: contact.id } }, orderBy: [{ status: 'desc' }, { startDate: 'asc' }], select: { id: true, name: true, status: true, startDate: true } });
-  const actor = toActor(user);
-  // B119, B208: Assign offers only the reps this reader may give the contact to.
-  const [settings, users, moves, signals, history, pods] = await Promise.all([
-    getSettings(), assignableOwners(user), latestMoves([contact.id], actor), moveSignals([contact.id]),
-    prisma.auditLog.findMany({ where: { entityType: 'sandbox_contact', entityId: contact.id, action: { in: [...HISTORY_ACTIONS] } }, orderBy: { createdAt: 'desc' }, take: 50 }),
-    prisma.pod.findMany({ where: { archived: false, ...(isAdmin(user) ? {} : { id: { in: user.podIds } }) }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
-  ]);
-  const move = moves.get(contact.id) ?? null;
-  // B050: the pod picker, for a contact with no pod or an owner in several pods: their pods, else the reader's.
-  const ownerPodIds = contact.ownerId && contact.owner?.active ? (await prisma.userPod.findMany({ where: { userId: contact.ownerId, pod: { archived: false } }, select: { podId: true } })).map((p) => p.podId) : null;
-  const podChoices = contact.status === 'ACTIVE' && canWorkSandboxContact(actor, contact) ? pods.filter((p) => !ownerPodIds || ownerPodIds.includes(p.id)) : [];
-  const signal = signals.get(contact.id) ?? null;
-  const live = contact.status === 'ACTIVE';
-  const mayWork = live && canWorkSandboxContact(actor, contact);
-  const ready = checkReady(contact, { owner: contact.owner, podName: contact.pod?.name ?? null, settings: settings.sandbox });
-  // D3: complete details are the hard rule; green "Ready to move" also needs a positive outcome (B155).
-  const readyToMove = ready.ready && Boolean(signal?.positive);
-  const runningCampaigns = contact.enrollments.filter((e) => e.status === 'ACTIVE' || e.status === 'PAUSED');
-  const work = workWords({ nextSteps: contact.nextActions.filter((n) => !n.personId).length, enrollments: runningCampaigns.length, tasks: runningCampaigns.reduce((k, e) => k + e.tasks.filter((t) => t.state === 'PENDING').length, 0) });
-  const actorNames = new Map((await prisma.user.findMany({ where: { id: { in: [...new Set(history.flatMap((h) => [h.actorId, (h.details as { to?: string } | null)?.to].filter((x): x is string => Boolean(x))))] } }, select: { id: true, name: true } })).map((u) => [u.id, u.name]));
-  const gate = contact.phone && live ? await callGate(user, contact) : null;
-  // B120: the Call button says why when this viewer may not work the contact. N027: a removed
-  // contact can still be opted out (any sales user) and erased (admins).
-  const subject = await loadColdSubject(contact.id);
-  const callVerdict = subject ? canAct(actor, subject, 'call') : null;
-  const callBlocked = callVerdict && !callVerdict.ok ? callVerdict.reason : gate?.blocked ?? null;
-  const mayOptOut = Boolean(subject && canAct(actor, subject, 'opt_out').ok);
-  const outcomes = callOutcomes(settings.rules);
-  const today = todayIn(user.timezone);
-  const name = `${contact.firstName} ${contact.lastName}`.trim() || 'Removed contact';
-  const open = contact.nextActions[0];
-  // D4: an opt-out from the post-call form can be questioned by anyone and undone by an admin.
-  const formOpt = contact.status === 'OPTED_OUT' && !contact.piiClearedAt ? await formOptOut(coldRef(contact.id)) : null;
-  // B024, B027: Log a call with the steps it could close; colleagues' suggested steps for this owner.
-  const [callSteps, logBlocked, suggestions] = await Promise.all([
-    mayWork ? openCallItems({ personId: null, sandboxContactId: contact.id }, null) : Promise.resolve([]),
-    mayWork ? pendingFormBlock(user.id, user.timezone) : Promise.resolve(null),
-    openSuggestions(user.id, { sandboxContactId: contact.id }),
-  ]);
-  const nowLocal = new Intl.DateTimeFormat('sv-SE', { timeZone: user.timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()).replace(' ', 'T');
-  // Opt out, Remove and Erase name the person and every effect (PLAN 4.0), and ask why.
-  const effects = { name, campaigns: runningCampaigns.map((e) => e.campaign?.name ?? e.sequence.name), nextStep: open && !open.personId ? `${ACTION_LABELS[open.action]} on ${formatLocalDate(open.dueDate)}` : null, fromBellwether: contact.source === 'BELLWETHER', inCrm: contact.status === 'MOVED' };
-  const confirms = { optOut: optOutConfirm(effects), remove: removeConfirm(effects), erase: eraseConfirm(effects) };
-  // N051: a call's notes and recording show only to its rep, the owner and those who see Reports.
-  const hears = (c: (typeof contact.calls)[number]) => mayHearCall(actor, { userId: c.userId, formUserId: c.formUserId, ownerId: contact.ownerId });
-  const timeline = [
-    ...contact.calls.filter((c) => !c.discardedAt).map((c) => ({ at: c.startedAt ?? c.createdAt, key: `c${c.id}`, node: <div><Link href={`/calls/${c.id}`} className="text-ink-900 hover:text-brand-700">{c.direction === 'OUTBOUND' ? 'Call' : 'Call received'}{c.talkSec ? ` · ${Math.floor(c.talkSec / 60)}m ${c.talkSec % 60}s` : ''}</Link><span className="text-ink-500"> · {c.user?.name ?? 'Unknown rep'}{c.form ? ` · ${outcomes.find((o) => o.key === c.form!.outcome)?.label ?? c.form.outcome}${c.form.rating ? ` (${c.form.rating}/5)` : ''}` : c.formDueAt ? ' · form due' : ''}</span>{c.form?.notes && hears(c) ? <p className="mt-1 whitespace-pre-wrap text-ink-700">{c.form.notes}</p> : null}{c.form ? <p className="text-ink-500">Next: {c.form.nextStepLabel ?? NEXT_STEP_LABELS[c.form.nextStep] ?? c.form.nextStep}{c.form.nextStepDate ? `, ${formatLocalDate(c.form.nextStepDate)}` : ''}</p> : null}{c.recordingSid && hears(c) ? <audio controls preload="none" className="mt-1 h-8" src={`/api/calls/${c.id}/recording`} /> : null}</div> })),
-    ...contact.emails.map((m) => ({ at: m.at, key: `m${m.id}`, node: <div><span className="text-ink-900">{m.kind === 'SENT' ? 'Email sent' : m.kind === 'REPLY' ? 'Reply' : m.kind === 'BOUNCE' ? 'Bounced' : 'Auto-reply'}</span><span className="text-ink-500"> · {m.subject ?? '(no subject)'}</span></div> })),
-    ...contact.notes.map((n) => ({ at: n.createdAt, key: `n${n.id}`, node: <div><span className="text-ink-900">Note</span><span className="text-ink-500"> · {n.authorName ?? 'Cadence'}</span><p className="mt-1 whitespace-pre-wrap text-ink-700">{n.body}</p></div> })),
-    ...contact.enrollments.flatMap((e) => e.tasks.filter((t) => t.state === 'DONE' && t.completedAt).map((t) => ({ at: t.completedAt!, key: `t${t.id}`, node: <div><span className="text-ink-900">{t.label} done</span><span className="text-ink-500"> · {e.campaign?.name ?? e.sequence.name}</span></div> }))),
-    // B108: claims, hand-overs, moves and undos are in the history too.
-    ...history.map((h) => ({ at: h.createdAt, key: `a${h.id}`, node: <div><span className="text-ink-900">{historyWords(h.action, h.details as Record<string, unknown> | null, actorNames)}</span><span className="text-ink-500"> · {h.actorLabel ?? 'Cadence'}</span></div> })),
-  ].sort((a, b) => b.at.getTime() - a.at.getTime());
-  const input = (label: string, field: string, value: string | null | undefined, type = 'text') => <label className="block text-xs text-ink-500">{label}<input name={field} type={type} defaultValue={value ?? ''} disabled={!mayWork} className="mt-1 w-full" /></label>;
+  const sp = await searchParams;
+  const m = await loadContactPage(id, user);
+  if (!m) notFound();
+  const tab: Tab = (TABS as readonly string[]).includes(sp.tab ?? '') ? (sp.tab as Tab) : 'overview';
+  const header = await ColdOutreachHeader({ user, current: 'contacts', step: m.step });
+  const c = m.contact;
+  const href = (t: Tab) => `/cold-outreach/${id}${t === 'overview' ? '' : `?tab=${t}`}`;
+  const openTasks = m.tasks.filter((t) => t.state === 'open').length;
+  const tabs = [
+    { key: 'overview', label: 'Overview' },
+    { key: 'sequences', label: 'Campaigns', count: m.memberships.length + m.holds.length },
+    { key: 'tasks', label: 'Tasks', count: openTasks },
+    { key: 'activity', label: 'Activity', count: m.history.length },
+    { key: 'emails', label: 'Emails', count: m.emails.length + m.emailSteps.length },
+    { key: 'notes', label: 'Notes', count: c.notes.length },
+  ];
+  // A result that survives the refresh, ending with what happens next (B148, PLAN 4.0).
+  const flashTone = sp.flashTone === 'error' ? 'error' : 'ok';
+  const flash = sp.flash ? `${sp.flash.slice(0, 300)}${flashTone === 'ok' && m.nextLine && !/Next:/.test(sp.flash) ? ` ${m.nextLine}` : ''}` : null;
 
-  return <PageFrame className="space-y-4 px-6 pb-8 pt-2">
-    <Surface>
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="text-[12px] text-ink-500"><Link href={COLD_CONTACT_BASE} className="hover:text-ink-700">Cold outreach</Link></div>
-          <h1 className="text-xl font-semibold tracking-tight text-ink-900">{name}</h1>
-          <div className="mt-1 text-sm text-ink-600">{[contact.jobTitle, contact.companyName].filter(Boolean).join(' · ') || 'No title or firm yet'}</div>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-[13px]">
-            <Badge tone={live ? 'green' : 'gray'}>{STATUS_LABEL[contact.status]}</Badge>
-            {live && move && (move.state === 'QUEUED' || move.state === 'RUNNING') ? <Badge tone="blue">Moving to CRM…</Badge> : null}
-            {live && !contact.crmMatchPersonId && !contact.crmAutoPersonId ? (signal?.closed ? <Badge tone="gray">{`Closed · ${signal.closed.outcome}${signal.closed.at ? ` · ${formatLocalDate(toLocalDate(signal.closed.at, workspaceTimezone()), 'year')}` : ''}`}</Badge> : <Badge tone={readyToMove ? 'green' : ready.ready ? 'blue' : 'amber'}>{readyToMove ? 'Ready to move' : ready.ready ? 'CRM details complete' : `Needs ${ready.missing.map((m) => m.text.toLowerCase()).join(', ')}`}</Badge>) : null}
-            <span className="text-ink-600">{contact.owner ? `${contact.owner.name}${contact.owner.active ? '' : ' (removed)'}` : 'Unclaimed'}{contact.pod ? ` · ${contact.pod.name}` : ''}</span>
-            {podChoices.length > 1 || (mayWork && !contact.podId && podChoices.length) ? <ActionForm action={setPodAction} className="flex items-center gap-1.5"><input type="hidden" name="id" value={contact.id} /><select name="podId" aria-label="Pod" defaultValue={contact.podId ?? ''} className="!py-0.5 text-[12px]"><option value="" disabled>Choose its pod</option>{podChoices.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select><button type="submit" className="btn-ghost btn-sm">Set pod</button></ActionForm> : null}
-            {contact.status === 'MOVED' && contact.twentyPersonId ? <Link href={`/people/${contact.twentyPersonId}`} className="text-brand-700 hover:underline">Open in People</Link> : null}
-            {contact.status !== 'MOVED' && contact.crmAutoPersonId ? <Link href={`/people/${contact.crmAutoPersonId}`} className="hover:underline"><Badge tone="amber">{`Also in CRM, created from ${contact.crmAutoSource === 'CALENDAR' ? 'calendar' : 'email'}`}</Badge></Link> : null}
-            {live && contact.crmMatchPersonId && contact.crmMatchPersonId !== contact.crmAutoPersonId ? <Link href={`/people/${contact.crmMatchPersonId}`} className="hover:underline"><Badge tone="amber">Also in CRM</Badge></Link> : null}
-            {live && contact.badEmail ? <Badge tone="amber">Email bounced</Badge> : null}
-          </div>
-          {/* N097: a notice that may be a bounce: the rep checks the address, then clears or confirms it. */}
-          {live && contact.possibleBounceAt && !contact.badEmail ? <div className="mt-2 flex flex-wrap items-center gap-2 text-[13px]">
-            <Badge tone="amber">Possible bounce</Badge>
-            <span className="text-ink-600">A notice on {formatInstant(contact.possibleBounceAt, user.timezone)} may be a bounce. Check the address.</span>
-            {mayWork ? <><ActionButton action={clearPossibleBounceAction} payload={{ id: contact.id }} className="btn-ghost btn-sm" refresh>Clear</ActionButton><ActionButton action={confirmPossibleBounceAction} payload={{ id: contact.id }} className="btn-secondary btn-sm" refresh confirm={{ title: `Mark ${name}'s email bounced?`, effects: ['The address is marked bounced.', 'Their open email steps are skipped, as "Email bounced" would.', 'Their campaign ends when "exit on bounce" is on in Settings > Rules.'], confirmLabel: 'Mark bounced' }}>Confirm bounce</ActionButton></> : <span className="text-ink-500">Whoever works this contact can clear or confirm it.</span>}
-          </div> : null}
-          {live && ready.ready && (ready.warnings.length || signal?.positive) ? <div className="mt-2 text-[12px] text-ink-600">{[signal?.positive ? `Positive outcome: ${signal.positive}` : 'No conversation yet', ...ready.warnings.map((w) => w.text)].join(' · ')}</div> : null}
-        </div>
-        <div className="flex flex-col items-end gap-2">
-          {contact.phone && live ? <CallButton phone={contact.phone} template={settings.rules.clickToCallUrl} sandboxContactId={contact.id} nextActionId={open?.id ?? null} blocked={callBlocked} warning={gate?.warning} /> : null}
-          {mayWork ? <LogCallButton sandboxContactId={contact.id} name={name} steps={callSteps.map((s) => ({ key: `${s.kind}:${s.id}`, words: s.words }))} now={nowLocal} blocked={logBlocked} /> : null}
-          {live ? <ContactActions id={contact.id} name={name} ready={readyToMove} unclaimed={!contact.ownerId || !contact.owner?.active} mayWork={mayWork} mayOptOut={mayOptOut} mayMove={canMoveToCrm(actor, contact)} mayAssign={users.length > 0 && canAssignSandbox(actor, contact, null) && (isAdmin(user) || actor.role !== 'JUNIOR_FO')} mayRelease={actor.role === 'JUNIOR_FO' && contact.ownerId === user.id && canAssignSandbox(actor, contact, null)} mayErase={canEraseContact(actor)} users={users} ownerId={contact.ownerId} work={work} pods={pods} confirms={confirms} openMove={openMove} /> : contact.status === 'REMOVED' || (contact.status === 'OPTED_OUT' && !contact.piiClearedAt) ? <ContactActions id={contact.id} ready={false} unclaimed={false} mayWork={false} mayOptOut={contact.status === 'REMOVED' && mayOptOut} mayMove={false} mayAssign={false} mayErase={canEraseContact(actor)} users={[]} confirms={confirms} /> : null}
-        </div>
-      </div>
-    </Surface>
-    {contact.status === 'MOVED' ? <Notice tone="success"><span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-      <span>Moved to the CRM{move?.moverName ? ` by ${move.moverName}` : ''}{contact.movedAt ? ` on ${formatLocalDate(toLocalDate(contact.movedAt, workspaceTimezone()), 'year')}` : ''}{move?.mode === 'attach' && move.personName ? `, as history on ${move.personName}` : ''}.</span>
-      {contact.twentyPersonId ? <Link href={`/people/${contact.twentyPersonId}`} className="underline">Open in People</Link> : null}
-      {move?.undoUntil ? <span>Undo until {move.undoUntil}</span> : null}
-      {move?.canUndo ? <UndoMoveButton itemIds={[move.itemId]} confirm={move.undoConfirm} campaigns={move.campaigns} /> : null}
-    </span></Notice> : null}
-    {formOpt ? <Notice tone="error"><span className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-      <span><span className="font-medium">Do not contact</span> since {formOpt.at ? formatInstant(formOpt.at, user.timezone) : 'the call'}: {formOpt.byName ?? 'a rep'} chose &quot;Asked not to be contacted&quot; on the post-call form{formOpt.callId ? <> (<Link href={`/calls/${formOpt.callId}`} className="underline">the call</Link>)</> : null}. Do not email, call or message this person.{formOpt.lastTicket?.outcome === 'kept' ? ` Biz Ops checked it: ${formOpt.lastTicket.resolution ?? 'it stays'}.` : ''}</span>
-      <FormOptOutControls subject={{ sandboxContactId: contact.id }} name={name} mayLift={isAdmin(user)} ticket={formOpt.ticket ? `Biz Ops are looking at it: raised by ${formOpt.ticket.raisedBy ?? 'someone'} ${formatInstant(formOpt.ticket.raisedAt, user.timezone)}.` : null} />
-    </span></Notice> : null}
-    {live && move?.state === 'FAILED' ? <Notice tone="error">Move failed: {move.error ?? 'see the move'} <Link href={coldMoveHref(move.moveId)} className="underline">{move.failure === 'permanent' ? 'See the move' : 'Retry'}</Link></Notice> : null}
-    {live && contact.owner && !contact.owner.active ? <Notice tone="warn">{contact.owner.name} has left: this contact needs a new owner before it can move or be worked by its pod&apos;s reps.</Notice> : null}
-    <div className="grid grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-4">
-      <div className="space-y-4">
-        <Surface flush>
-          <ViewHeader title="Activity" />
-          {timeline.length ? <ol className="divide-y divide-line">{timeline.map((item) => <li key={item.key} className="flex gap-4 px-4 py-3 text-[13px]"><time className="w-28 shrink-0 tabular-nums text-ink-500">{formatInstant(item.at, user.timezone)}</time><div className="min-w-0 flex-1">{item.node}</div></li>)}</ol> : <EmptyState title="Nothing has happened yet" />}
-        </Surface>
-        <Surface flush>
-          <ViewHeader title="Campaigns" />
-          {contact.enrollments.length || upcoming.length ? <ul className="divide-y divide-line text-[13px]">{upcoming.map((c) => <li key={c.id} className="px-4 py-2.5"><Link href={`/campaigns/${c.id}`} className="text-ink-900 hover:text-brand-700">{c.name}</Link><span className="text-ink-500"> · {c.status === 'DRAFT' ? 'Draft: starts when it is published' : `Scheduled: starts ${formatLocalDate(c.startDate)}`}</span></li>)}{contact.enrollments.map((e) => <li key={e.id} className="px-4 py-2.5">{e.campaign ? <Link href={`/campaigns/${e.campaign.id}`} className="text-ink-900 hover:text-brand-700">{e.campaign.name}</Link> : <span className="text-ink-900">{e.sequence.name}</span>}<span className="text-ink-500"> · {enrollmentStatusLabel(e)}</span><div className="mt-1 flex flex-wrap gap-1.5">{e.tasks.map((t) => <span key={t.id} className={t.state === 'DONE' ? 'text-brand-700' : t.state === 'PENDING' ? 'text-ink-900' : 'text-ink-400'}>{t.label}{t.state === 'PENDING' ? ` (${formatLocalDate(t.dueDate)})` : ''}</span>)}</div></li>)}</ul> : <EmptyState title="Not in a campaign" />}
-        </Surface>
-      </div>
-      <div className="space-y-4">
-        <Surface flush>
-          <ViewHeader title="Next action" />
-          <div className="space-y-3 p-4 text-[13px]">
-            {open ? <div className="text-ink-900">{[labelBeyond(open.label, open.kind === 'MEETING' ? 'Meeting' : ACTION_LABELS[open.action]), open.kind === 'MEETING' ? 'Meeting' : ACTION_LABELS[open.action]].filter(Boolean).join(' · ')} · {formatLocalDate(open.dueDate, 'long')}{open.meetingAt ? ` at ${new Intl.DateTimeFormat('en-GB', { timeZone: user.timezone, hour: '2-digit', minute: '2-digit' }).format(open.meetingAt)}` : ''} <span className="text-ink-500">· {open.fo.name}</span></div> : <div className="text-ink-500">None set</div>}
-            <SuggestionList items={live ? suggestions.map((s) => ({ id: s.id, from: s.from, words: s.words })) : []} />
-            {live && contact.crmMatchPersonId ? <p className="text-ink-600">Outreach stopped: this person was added to the CRM after the push. Move to CRM attaches this history to them.</p> : null}
-            {mayWork && !contact.crmMatchPersonId ? <ActionForm action={setNextActionAction} className="flex flex-wrap items-end gap-2">
-              <input type="hidden" name="id" value={contact.id} />
-              <label className="block text-xs text-ink-500">What<input name="label" required defaultValue={open?.label ?? ''} className="mt-1 w-40" /></label>
-              <label className="block text-xs text-ink-500">How<select name="action" defaultValue={open?.action ?? 'CALL'} className="mt-1"><option value="CALL">Call</option><option value="EMAIL">Email</option><option value="LINKEDIN_MESSAGE">LinkedIn message</option><option value="LINKEDIN_CONNECT">LinkedIn connect</option></select></label>
-              <label className="block text-xs text-ink-500">When<DateWithWorkingDayHint name="dueDate" required min={today} defaultValue={open?.dueDate ?? today} workingDays={settings.rules.workingDays} className="mt-1" /></label>
-              <button type="submit" className="btn-secondary btn-sm">Set</button>
-            </ActionForm> : null}
-          </div>
-        </Surface>
-        <Surface flush>
-          <ViewHeader title="Details" />
-          <ActionForm action={updateContactAction} className="space-y-4 p-4">
-            <input type="hidden" name="id" value={contact.id} />
-            <div className="grid grid-cols-2 gap-3">
-              {input('First name', 'firstName', contact.firstName)}{input('Last name', 'lastName', contact.lastName)}
-              {input('Job title', 'jobTitle', contact.jobTitle)}{input('Email', 'email', contact.email, 'email')}
-              {input('Phone', 'phone', contact.phone)}
-              <label className="block text-xs text-ink-500">Phone type<select name="phoneType" defaultValue={contact.phoneType ?? 'unknown'} disabled={!mayWork} className="mt-1 w-full"><option value="direct">Direct</option><option value="mobile">Mobile</option><option value="office">Office</option><option value="main">Main line</option><option value="toll_free">Toll free</option><option value="unknown">Unknown</option></select></label>
-              {input('LinkedIn', 'linkedinUrl', contact.linkedinUrl ? `https://www.${contact.linkedinUrl}` : null)}{input('City', 'city', contact.city)}
-              {input('State', 'state', contact.state)}{input('Country', 'country', contact.country)}
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              {input('Firm', 'companyName', contact.companyName)}{input('Firm website', 'companyWebsite', contact.companyWebsite ?? contact.companyDomain)}
-              {input('Firm CRD', 'companyCrd', contact.companyCrd)}{input('Individual CRD', 'individualCrd', contact.individualCrd)}
-            </div>
-            <fieldset className="text-xs text-ink-500"><legend>Product interest</legend><div className="mt-1 flex flex-wrap gap-3">{PRODUCT_VALUES.map((p) => <label key={p} className="inline-flex items-center gap-1 text-[13px] text-ink-700"><input type="checkbox" name="productInterest" value={p} defaultChecked={contact.productInterest.includes(p)} disabled={!mayWork} />{p}</label>)}</div></fieldset>
-            {readExtraPhones(contact.additionalPhones).length ? <div className="text-[13px] text-ink-600">Other phones: {readExtraPhones(contact.additionalPhones).map((p) => `${p.number} (${p.type.replace('_', ' ')})`).join(', ')}</div> : null}
-            <div className="text-[13px] text-ink-500">{contact.source === 'BELLWETHER' ? 'From Bellwether' : contact.source === 'MANUAL' ? 'Added in Cadence' : 'From a call'}{contact.sourceNote ? ` · ${contact.sourceNote}` : ''}{contact.pushedByEmail ? ` · pushed by ${contact.pushedByEmail}` : ''}{contact.bellwetherUrl ? <> · <a href={contact.bellwetherUrl} target="_blank" rel="noreferrer" className="text-brand-700 hover:underline">Bellwether</a></> : null}</div>
-            {mayWork ? <div className="flex justify-end"><button type="submit" className="btn-secondary btn-sm">Save</button></div> : null}
-          </ActionForm>
-        </Surface>
-        <Surface flush>
-          <ViewHeader title="Notes" />
-          {mayWork ? <ActionForm action={addNoteAction} resetOnSuccess className="space-y-2 p-4"><input type="hidden" name="id" value={contact.id} /><textarea name="body" rows={3} aria-label="Note" className="w-full" required /><div className="flex justify-end"><button type="submit" className="btn-secondary btn-sm">Add note</button></div></ActionForm> : null}
-        </Surface>
+  return <>
+    <div className="space-y-3 px-6 pt-2">
+      {header}
+      <RecordHeader
+        name={m.name}
+        sub={m.sub || null}
+        accent={m.live || m.contact.status === 'MOVED' ? accentFor(id) : null}
+        seed={id}
+        stackOnPhone
+        badges={<>
+          <SubjectBadges badge={m.cue.badge} chips={m.cue.chips} />
+          {m.erased ? <Badge tone="gray">Erased</Badge> : null}
+          {/* B068: what Bellwether knows that the contact does not, to check before the next step. */}
+          {m.live && m.newerNote ? <Link href={m.newerNote.href} className="inline-flex hover:opacity-80"><Badge tone="sky">Newer details from Bellwether</Badge></Link> : null}
+        </>}
+        notice={<TopNotices m={m} />}
+        actions={m.live ? <ButtonRow m={m} openMove={sp.move === '1'} timezone={user.timezone} /> : <TombstoneActions m={m} />}
+      />
+    </div>
+    <div className="px-6 pb-8 pt-3">
+      <Surface flush><Tabs inset={false} current={tab} tabs={tabs.map((t) => ({ ...t, href: href(t.key as Tab) }))} /></Surface>
+      <div className="pt-3">
+        {tab === 'overview' ? <Overview m={m} timezone={user.timezone} /> : null}
+        {tab === 'sequences' ? <Campaigns m={m} /> : null}
+        {tab === 'tasks' ? <TasksTab m={m} /> : null}
+        {tab === 'activity' ? <Activity m={m} timezone={user.timezone} /> : null}
+        {tab === 'emails' ? <Emails m={m} timezone={user.timezone} /> : null}
+        {tab === 'notes' ? <Notes m={m} timezone={user.timezone} /> : null}
       </div>
     </div>
-  </PageFrame>;
+    {flash ? <Flash message={flash} tone={flashTone} /> : null}
+  </>;
+}
+
+/** The fix button a blocker names (PLAN 4.0): one per notice. */
+function FixButton({ m, fix }: { m: ContactPage; fix: NonNullable<Blocker['fix']> }) {
+  switch (fix.kind) {
+    case 'form': return <FillFormButton />;
+    case 'claim': return <ActionButton action={claimContactsAction} payload={{ ids: m.id }} flash>{fix.label}</ActionButton>;
+    case 'assign': return <AssignButton id={m.id} name={m.name} users={m.owners} ownerId={c(m).ownerId} work={m.work} />;
+    case 'move': return <MoveButton id={m.id} ready users={m.owners} pods={m.pods} label={fix.label} />;
+    case 'next_step': return <ColdNextStepButton id={m.id} today={m.today} workingDays={m.settings.rules.workingDays} initial={{ label: '', action: 'CALL', dueDate: m.today, repeat: 'NONE', foUserId: '' }} />;
+    case 'link': return <Link href={fix.href ?? '#'} className="btn-secondary btn-sm">{fix.label}</Link>;
+  }
+}
+const c = (m: ContactPage) => m.contact;
+
+/** The top of the record: the blocker, or the tombstone, and a possible bounce to check (N097). */
+function TopNotices({ m }: { m: ContactPage }) {
+  const notices: ReactNode[] = [];
+  const b = m.banner;
+  if (b?.kind === 'moved') notices.push(<Notice key="b" tone="success"><span className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+    <span>{b.text}.</span>
+    {b.personHref ? <Link href={b.personHref} className="font-medium underline">Open in People</Link> : null}
+    {b.undoUntil ? <span>Undo until {b.undoUntil}</span> : null}
+    {b.move?.canUndo ? <UndoMoveButton itemIds={[b.move.itemId]} confirm={b.move.undoConfirm} campaigns={b.move.campaigns} /> : null}
+    <span className="text-[12.5px]">To opt them out, use their People page.</span>
+  </span></Notice>);
+  // N104: red, with who set it, when and where, and what it means for the rep.
+  if (b?.kind === 'do_not_contact') notices.push(<Notice key="b" tone="error"><div className="space-y-1.5">
+    <div><span className="font-semibold">Do not contact</span>{b.since ? ` since ${b.since}` : ''}{b.by ? `, set by ${b.by}` : ''} on {b.where}.{b.reason ? ` Why: ${b.reason}` : ''}</div>
+    <div>Do not email, call or message this person. Cadence blocks calls and campaigns.</div>
+    {m.formOpt ? <div className="flex flex-wrap items-center gap-2">{m.formOpt.lastTicket?.outcome === 'kept' ? <span className="text-[12.5px]">Biz Ops checked it: {m.formOpt.lastTicket.resolution ?? 'it stays'}.</span> : null}<FormOptOutControls subject={{ sandboxContactId: m.id }} name={m.name} mayLift={m.admin} ticket={m.formOpt.ticket ? `Biz Ops are looking at it: raised by ${m.formOpt.ticket.raisedBy ?? 'someone'}.` : null} />{m.formOpt.callId ? <Link href={`/calls/${m.formOpt.callId}`} className="text-[12.5px] underline">The call</Link> : null}</div> : null}
+  </div></Notice>);
+  // B150: who, when, and what was cleared; N027: what can still be done.
+  if (b?.kind === 'removed') notices.push(<Notice key="b" tone="warn"><div className="space-y-1">
+    <div><span className="font-semibold">Removed</span> by {b.by}{b.on ? ` on ${b.on}` : ''}.{b.reason ? ` Why: ${b.reason}` : ''}</div>
+    <div>Their name, email, phones, LinkedIn, firm and notes were cleared. Calls, emails and steps keep only their dates and outcomes. Bellwether may send this person again.</div>
+    {m.more.show ? <div>Anyone in sales can still opt them out{m.more.mayErase ? ', and you can erase them' : ''}: More, below.</div> : null}
+  </div></Notice>);
+  if (b?.kind === 'erased') notices.push(<Notice key="b" tone="error"><div className="space-y-1">
+    <div><span className="font-semibold">Erased</span> by {b.by}{b.on ? ` on ${b.on}` : ''}.</div>
+    <div>Every detail Cadence held was deleted: name, email, phones, notes, call notes and email subjects. They stay on the suppression list, so Cadence and Bellwether never contact them again.</div>
+  </div></Notice>);
+  if (m.blocker) notices.push(<Notice key="blk" tone={m.blocker.tone}><span className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5"><span>{m.blocker.text}</span>{m.blocker.fix ? <FixButton m={m} fix={m.blocker.fix} /> : null}</span></Notice>);
+  // N097: a notice that may be a bounce: the rep checks the address, then clears or confirms it.
+  if (m.possibleBounce) notices.push(<Notice key="pb" tone="warn"><span className="flex flex-wrap items-center gap-2">
+    <span>A notice on {m.possibleBounce.on} may be a bounce. Check {m.contact.email ?? 'the address'}.</span>
+    {m.possibleBounce.mayAct ? <><ActionButton action={clearPossibleBounceAction} payload={{ id: m.id }} className="btn-secondary btn-sm" flash>Clear</ActionButton><ActionButton action={confirmPossibleBounceAction} payload={{ id: m.id }} className="btn-secondary btn-sm" flash confirm={{ title: `Mark ${m.name}'s email bounced?`, effects: ['The address is marked bounced.', 'Their open email steps are skipped, as "Email bounced" would.', 'Their campaign ends when "exit on bounce" is on in Settings > Rules.'], confirmLabel: 'Mark bounced' }}>Confirm bounce</ActionButton></> : <span className="text-ink-600">Whoever works this contact can clear or confirm it.</span>}
+  </span></Notice>);
+  return notices.length ? <>{notices}</> : null;
+}
+
+/** Call, Email, LinkedIn, Log a call, Set next step, Move to CRM, More: equal buttons, each saying why when off. */
+function ButtonRow({ m, openMove, timezone }: { m: ContactPage; openMove: boolean; timezone: string }) {
+  if (!m.sales) return null;
+  // A contact this reader may not work: the buttons are off and say why once, not under each (B202).
+  const shared = m.readOnly ? m.workWhy : null;
+  const disabled = (label: ReactNode, reason: string | null) => <WithReason reason={shared ? null : reason}><button type="button" className="btn-secondary btn-sm" disabled>{label}</button></WithReason>;
+  const nowLocal = new Intl.DateTimeFormat('sv-SE', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()).replace(' ', 'T');
+  return <div className="flex w-full flex-wrap items-start gap-2">
+    {m.call.phone && !shared ? <span className="inline-flex max-w-[13rem] flex-col"><CallButton phone={m.call.phone} template={m.settings.rules.clickToCallUrl} sandboxContactId={m.id} nextActionId={m.call.nextActionId} blocked={m.call.blocked} warning={m.call.warning} className="btn-secondary btn-sm" ariaLabel={`Call ${m.name}`} claim={m.call.claim ? { action: claimContactsAction, payload: { ids: m.id } } : null} /></span> : disabled(<><ActionIcon action="CALL" size={13} /> Call</>, m.call.blocked)}
+    {/* N074: Email opens the mail app and LinkedIn the profile. */}
+    {m.email.blocked || !m.email.href ? disabled(<><ActionIcon action="EMAIL" size={13} /> Email</>, m.email.blocked) : <a href={m.email.href} className="btn-secondary btn-sm"><ActionIcon action="EMAIL" size={13} /> Email</a>}
+    {m.linkedin.blocked || !m.linkedin.href ? disabled(<><ActionIcon action="LINKEDIN_MESSAGE" size={13} /> LinkedIn</>, m.linkedin.blocked) : <a href={m.linkedin.href} target="_blank" rel="noreferrer" className="btn-secondary btn-sm"><ActionIcon action="LINKEDIN_MESSAGE" size={13} /> LinkedIn</a>}
+    {shared ? disabled('Log a call', null) : <span className="inline-flex max-w-[13rem] flex-col"><LogCallButton sandboxContactId={m.id} name={m.name} steps={m.logCall.steps} now={nowLocal} blocked={m.logCall.blocked} /></span>}
+    {m.nextStep.blocked ? disabled('Set next step', m.nextStep.blocked) : <ColdNextStepButton id={m.id} today={m.today} workingDays={m.settings.rules.workingDays} label={m.nextStep.open ? 'Change next step' : 'Set next step'} initial={m.nextStep.open ? { label: m.nextStep.open.label, action: m.nextStep.open.action, dueDate: m.nextStep.open.dueDate < m.today ? m.today : m.nextStep.open.dueDate, repeat: 'NONE', foUserId: '' } : { label: '', action: 'CALL', dueDate: m.today, repeat: 'NONE', foUserId: '' }} existing={m.nextStep.open ? { label: m.nextStep.open.label, dueDate: m.nextStep.open.dueDate } : null} />}
+    {/* Move to CRM is the main button only when the badge says Ready to move (D3). */}
+    {shared ? disabled('Move to CRM', null) : <MoveButton id={m.id} ready={m.move.ready} users={m.owners} pods={m.pods} openMove={openMove} blocked={m.move.blocked} />}
+    {m.more.show ? <ContactMoreMenu id={m.id} name={m.name} ready={m.move.ready} unclaimed={!c(m).ownerId} mayWork={m.mayWork} mayOptOut={m.more.mayOptOut} mayMove={!m.move.blocked} mayRemove={m.more.mayRemove} mayAssign={m.more.mayAssign} mayRelease={m.more.mayRelease} mayErase={m.more.mayErase} users={m.owners} ownerId={c(m).ownerId} work={m.work} confirms={m.confirms} whyNot={m.more.whyNot} /> : null}
+    {m.readOnlyLine ? <p className="w-full text-[12px] text-ink-600">{m.readOnlyLine}</p> : null}
+  </div>;
+}
+
+/** A contact no longer worked here: Open in People for a moved one; Opt out and Erase for a removed one (N027). */
+function TombstoneActions({ m }: { m: ContactPage }) {
+  const b = m.banner;
+  const items: ReactNode[] = [];
+  if (b?.kind === 'moved' && b.personHref) items.push(<Link key="p" href={b.personHref} className="btn-secondary btn-sm">Open in People</Link>);
+  if (m.more.show) items.push(<ContactMoreMenu key="more" id={m.id} name={m.name} ready={false} unclaimed={false} mayWork={false} mayOptOut={m.more.mayOptOut} mayMove={false} mayRemove={false} mayAssign={false} mayErase={m.more.mayErase} users={[]} confirms={m.confirms} />);
+  return items.length ? <div className="flex flex-wrap items-start gap-2">{items}</div> : null;
+}
+
+/** Overview: the next step, the CRM checklist, the details and where the contact came from. */
+function Overview({ m, timezone }: { m: ContactPage; timezone: string }) {
+  const ct = c(m);
+  const n = m.nextStep.open;
+  const how = n ? (n.kind === 'MEETING' ? 'Meeting' : ACTION_LABELS[n.action]) : null;
+  const campaignNext = m.cue.next?.source === 'campaign' ? m.cue.next : null;
+  const editable: EditableContact = {
+    firstName: ct.firstName, lastName: ct.lastName, jobTitle: ct.jobTitle ?? '', email: ct.email ?? '', phone: ct.phone ?? '', phoneExtension: ct.phoneExtension ?? '', phoneType: ct.phoneType ?? 'unknown',
+    linkedinUrl: ct.linkedinUrl ? `https://www.${ct.linkedinUrl}` : '', city: ct.city ?? '', state: ct.state ?? '', country: ct.country ?? 'US', companyName: ct.companyName ?? '', companyWebsite: ct.companyWebsite ?? ct.companyDomain ?? '',
+    companyCrd: ct.companyCrd ?? '', individualCrd: ct.individualCrd ?? '', productInterest: ct.productInterest,
+  };
+  const edit = (label: string, focus?: 'firstName' | 'companyName' | 'email', className?: string) => m.edit.may ? <EditContactButton id={m.id} contact={editable} version={m.edit.version} countries={m.countries} products={m.productChoices} label={label} focus={focus} className={className} /> : null;
+  const k = m.checklist;
+  return <div className="grid items-start gap-3 lg:grid-cols-2">
+    {m.live ? <Card title="Next step" actions={m.nextStep.blocked || !m.sales ? null : <ColdNextStepButton id={m.id} today={m.today} workingDays={m.settings.rules.workingDays} label={n ? 'Change' : 'Set next step'} className="btn-ghost btn-sm" initial={n ? { label: n.label, action: n.action, dueDate: n.dueDate < m.today ? m.today : n.dueDate, repeat: 'NONE', foUserId: '' } : { label: '', action: 'CALL', dueDate: m.today, repeat: 'NONE', foUserId: '' }} existing={n ? { label: n.label, dueDate: n.dueDate } : null} />}>
+      <div className="space-y-3 p-4 text-[13px]">
+        {n ? <div>
+          <div className={n.dueDate < m.today ? 'font-medium text-red-700' : 'font-medium text-ink-900'}>{how} · {shortDay(n.dueDate)}{n.meetingAt ? ` at ${new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', minute: '2-digit' }).format(n.meetingAt)}` : ''}{n.dueDate < m.today ? ' (overdue)' : ''} · {n.fo.name}</div>
+          {n.label && n.label !== how ? <div className="mt-0.5 text-ink-600">{n.label}</div> : null}
+        </div> : <p className="text-ink-600">{m.cue.state === 'closed' ? `${m.cue.badge.label}. A new next step reopens ${m.firstName}.` : campaignNext ? 'No next step of its own: the campaign holds the next touch.' : 'None set yet.'}</p>}
+        {campaignNext ? <div className="text-ink-700">Campaign: {campaignNext.label} · {shortDay(campaignNext.due)}{campaignNext.overdue ? ' (overdue)' : ''}</div> : null}
+        {m.nextStep.blocked && m.sales ? <p className="text-[12.5px] text-ink-500">{m.nextStep.blocked}</p> : null}
+        <SuggestionList items={m.suggestions.map((s) => ({ id: s.id, from: s.from, words: s.words }))} />
+      </div>
+    </Card> : null}
+
+    {k ? <Card title="CRM checklist" actions={<Badge tone={k.state === 'ready' ? 'green' : k.state === 'complete' ? 'blue' : 'amber'}>{k.state === 'ready' ? 'Ready to move' : k.state === 'complete' ? 'CRM details complete' : `${k.done} of ${k.total} done`}</Badge>}>
+      <ul className="divide-y divide-line text-[13px]">
+        {k.items.map((i) => <li key={i.key} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5">
+          <span aria-hidden className={i.done ? 'flex h-5 w-5 items-center justify-center rounded-full bg-emerald-50 text-emerald-700' : 'flex h-5 w-5 items-center justify-center rounded-full border border-amber-300 text-amber-700'}>{i.done ? <IconCheck size={12} /> : null}</span>
+          <span className={i.done ? 'text-ink-700' : 'font-medium text-ink-900'}>{i.label}<span className="sr-only">{i.done ? ': done' : ': missing'}</span></span>
+          <span className="ml-auto">{i.key === 'pod' && k.podPicker ? <PodPicker id={m.id} pods={k.podPicker} current={ct.podId} /> : i.done ? (i.key === 'pod' ? <span className="text-ink-500">{ct.pod?.name}</span> : i.key === 'owner' ? <span className="text-ink-500">{ct.owner?.name}</span> : null) : <ChecklistFix m={m} itemKey={i.key} edit={edit} />}</span>
+        </li>)}
+      </ul>
+      <div className="space-y-1.5 border-t border-line p-4 text-[12.5px]">
+        {/* D3: complete details are the rule; the green badge also needs a positive outcome (B155). */}
+        {k.positive ? <p className="text-emerald-800">Positive outcome: {k.positive}.</p> : <p className="text-ink-600">No conversation yet: {k.state === 'missing' ? 'once the details are complete, ' : ''}Move to CRM asks one more confirm.</p>}
+        {/* B104: what is worth filling in before the move. */}
+        {k.warnings.length ? <p className="text-amber-800">Worth adding before the move: {k.warnings.join(' · ')}.</p> : null}
+      </div>
+    </Card> : null}
+
+    {/* B142: phone with its type and extension, email with its verification, designations and tags. */}
+    {m.contact.piiClearedAt ? null : <Card title="Contact details" actions={m.edit.may ? edit('Edit') : m.edit.why ? <span className="text-[12px] text-ink-500">{m.edit.why}</span> : null}>
+      <div className="p-4">
+        <KeyValue items={[
+          { k: 'Email', v: ct.email ? <span className="flex flex-wrap items-center gap-1.5"><a href={`mailto:${ct.email}`} className="text-brand-700 hover:underline">{ct.email}</a>{m.details.verification.map((v) => <Badge key={v.label} tone={v.tone}>{v.label}</Badge>)}</span> : null },
+          { k: 'Other emails', v: ct.additionalEmails.join(', ') || null },
+          { k: 'Phone', v: ct.phone ? <span className="flex flex-wrap items-center gap-1.5"><span className="tabular-nums">{phoneWords(ct.phone, ct.phoneExtension)}</span><span className="text-ink-500">{phoneTypeWords(ct.phoneType)}</span>{ct.badPhone ? <Badge tone="amber">Wrong number</Badge> : null}</span> : null },
+          { k: 'Other phones', v: m.details.extraPhones.length ? m.details.extraPhones.map((p) => `${phoneWords(p.number)} (${phoneTypeWords(p.type).toLowerCase()})`).join(', ') : null },
+          { k: 'LinkedIn', v: ct.linkedinUrl ? <a href={`https://www.${ct.linkedinUrl}`} target="_blank" rel="noreferrer" className="text-brand-700 hover:underline">{ct.linkedinUrl.replace(/^linkedin\.com\//, '')}</a> : null },
+          { k: 'Title', v: ct.jobTitle },
+          { k: 'Firm', v: ct.companyName ? <span>{ct.companyName}{ct.companyWebsite || ct.companyDomain ? <> · <a href={(ct.companyWebsite ?? `https://${ct.companyDomain}`).replace(/^(?!https?:\/\/)/, 'https://')} target="_blank" rel="noreferrer" className="text-brand-700 hover:underline">{ct.companyDomain ?? ct.companyWebsite}</a></> : null}</span> : null },
+          { k: 'Firm CRD', v: ct.companyCrd },
+          { k: 'Individual CRD', v: ct.individualCrd },
+          { k: 'Location', v: [ct.city, ct.state, ct.country ? new Intl.DisplayNames(['en'], { type: 'region' }).of(ct.country) ?? ct.country : null].filter(Boolean).join(', ') || null },
+          { k: 'Designations', v: ct.designations.length ? <Chips values={ct.designations} /> : null },
+          { k: 'Tags', v: ct.tags.length ? <Chips values={ct.tags} /> : null },
+          { k: 'Product interest', v: m.details.products || null },
+        ]} />
+      </div>
+    </Card>}
+
+    {/* B205, B143, B017, B068: who sent it and when, later sends, and anyone it may be. */}
+    {m.contact.piiClearedAt ? null : <Card title="Source" actions={m.source.bellwetherUrl ? <a href={m.source.bellwetherUrl} target="_blank" rel="noreferrer" className="btn-ghost btn-sm"><IconExternal size={13} /> Open in Bellwether</a> : null}>
+      <div className="space-y-3 p-4 text-[13px]">
+        <div className="text-ink-800">
+          {m.source.kind === 'BELLWETHER' ? <>From Bellwether{m.source.by ? <>, sent by <span title={m.source.byEmail ?? undefined} className="font-medium">{m.source.by}</span></> : null} on {m.source.on}</> : m.source.kind === 'MANUAL' ? <>Added in Cadence{m.source.by ? ` by ${m.source.by}` : ''} on {m.source.on}</> : <>Added from a call{m.source.by ? ` by ${m.source.by}` : ''} on {m.source.on}</>}
+          {m.source.collected ? <span className="text-ink-500"> · found by Bellwether on {m.source.collected}</span> : null}
+        </div>
+        {m.source.note ? <p className="whitespace-pre-wrap rounded-lg bg-canvas px-3 py-2 text-ink-700">{m.source.note}</p> : null}
+        {m.source.later.length ? <ul className="space-y-1 text-ink-600">{m.source.later.map((p, i) => <li key={i}>Sent again{p.by ? <> by <span title={p.email}>{p.by}</span></> : null} on {p.on}</li>)}</ul> : null}
+        {m.source.newerNote ? <p><Link href={m.source.newerNote.href} className="text-brand-700 hover:underline">Newer details from Bellwether: check them before the next step</Link></p> : null}
+        {m.source.inCrm ? <p className="text-sky-900">Already in the CRM: <Link href={m.source.inCrm.href} className="font-medium underline">{m.source.inCrm.name}</Link>{m.source.inCrm.owner ? `, ${m.source.inCrm.owner}'s` : ''}. Move to CRM adds this history to them.</p> : null}
+        {m.source.possibleCrm ? <p className="text-sky-900">Possibly in the CRM: <Link href={m.source.possibleCrm.href} className="font-medium underline">{m.source.possibleCrm.name}</Link>{[m.source.possibleCrm.firm, m.source.possibleCrm.owner].filter(Boolean).length ? ` (${[m.source.possibleCrm.firm, m.source.possibleCrm.owner].filter(Boolean).join(', ')})` : ''}. Check before you call or move.</p> : null}
+        {m.source.possibleTwin ? <p className="text-amber-800">Possibly the same as <Link href={m.source.possibleTwin.href} className="font-medium underline">{m.source.possibleTwin.name}</Link>{m.source.possibleTwin.owner ? `, ${m.source.possibleTwin.owner}'s contact` : ''}: same firm and last name, or the same office line.</p> : null}
+      </div>
+    </Card>}
+  </div>;
+}
+
+function ChecklistFix({ m, itemKey, edit }: { m: ContactPage; itemKey: string; edit: (label: string, focus?: 'firstName' | 'companyName' | 'email', className?: string) => ReactNode }) {
+  if (itemKey === 'owner') {
+    if (m.mayClaim && !m.admin) return <ActionButton action={claimContactsAction} payload={{ ids: m.id }} className="btn-secondary btn-sm" flash>Claim</ActionButton>;
+    if (m.more.mayAssign) return <AssignButton id={m.id} name={m.name} users={m.owners} ownerId={c(m).ownerId} work={m.work} />;
+    return <span className="text-[12px] text-ink-500">{c(m).owner && !c(m).owner!.active ? 'A pod leader assigns a new owner' : c(m).owner ? 'An admin links their CRM login' : 'A rep in its pod claims it'}</span>;
+  }
+  if (itemKey === 'pod') return <span className="text-[12px] text-ink-500">A pod leader or an admin sets it</span>;
+  const focus = itemKey === 'name' ? 'firstName' : itemKey === 'companyName' ? 'companyName' : 'email';
+  return edit('Add it', focus, 'btn-secondary btn-sm') ?? <span className="text-[12px] text-ink-500">{m.edit.why}</span>;
+}
+
+function Chips({ values }: { values: string[] }) {
+  return <span className="flex flex-wrap gap-1">{values.map((t) => <span key={t} className="rounded border border-line bg-canvas px-1.5 py-0.5 text-[11.5px] text-ink-700">{t}</span>)}</span>;
+}
+
+/** Campaigns (B144, B145): holds of campaigns not started yet and every enrollment, with Pause, Resume and Exit. */
+function Campaigns({ m }: { m: ContactPage }) {
+  return <div className="space-y-3">
+    <Card title="Campaigns" actions={m.mayEnroll ? <AddToColdCampaign id={m.id} /> : null}>
+      {!m.memberships.length && !m.holds.length ? <div className="p-4 text-[13px] text-ink-500">Not in a campaign.{m.mayEnroll ? ` Add ${m.firstName} to a cold campaign, or set a next step.` : ''}</div> : null}
+      {m.holds.length ? <ul className="divide-y divide-line">{m.holds.map((h) => <li key={h.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-[13px]">
+        <span className="text-ink-700">In <Link href={`/campaigns/${h.id}`} className="font-medium text-ink-900 hover:text-brand-700">{h.name}</Link>, {h.words}</span>
+        <span className="flex items-center gap-2"><Badge tone="purple">Upcoming</Badge>{h.mayRemove ? <RemoveFromCampaign campaignId={h.id} campaignName={h.name} personIds={[m.id]} className="btn-ghost btn-sm" label="Take out" /> : null}</span>
+      </li>)}</ul> : null}
+    </Card>
+    {m.memberships.map((e) => <Card key={e.id} title={e.campaignId ? <Link href={`/campaigns/${e.campaignId}`} className="font-medium hover:underline">{e.name}</Link> : e.name} actions={<span className="flex items-center gap-2"><Badge tone={enrollmentTone(e)}>{enrollmentStatusLabel(e)}</Badge>{e.mayManage ? <EnrollmentActions enrollmentId={e.id} status={e.status} foUserId="" fos={[]} flash exitConfirm={{ title: `Take ${m.name} out of ${e.name}?`, effects: ['Their open steps in it are cancelled.', 'They stay in Cold outreach: set a next step after.'], confirmLabel: 'Take out' }} /> : null}</span>}>
+      <div className="flex flex-wrap gap-x-6 gap-y-1 border-b border-line bg-canvas/50 px-4 py-2.5 text-[12.5px] text-ink-600"><span>FO {e.fo}</span><span>Started {e.started}</span>{e.stepAt ? <span>Step {e.stepAt} of {e.stepCount}</span> : null}</div>
+      {e.steps.length ? <ul className="flex flex-wrap gap-1.5 p-4">{e.steps.map((st) => <li key={st.id}><Badge tone={st.tone}>{st.label}: {st.words}</Badge></li>)}</ul> : <div className="p-4 text-[13px] text-ink-500">No steps yet.</div>}
+    </Card>)}
+  </div>;
+}
+
+/** Tasks: open and done steps and next steps. */
+function TasksTab({ m }: { m: ContactPage }) {
+  const open = m.tasks.filter((t) => t.state === 'open').sort((a, b) => a.at - b.at);
+  const done = m.tasks.filter((t) => t.state !== 'open').sort((a, b) => b.at - a.at);
+  const row = (t: ContactPage['tasks'][number]) => <li key={t.key} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-[13px]">
+    <ActionIcon action={t.icon} size={14} className="text-ink-500" />
+    {t.href ? <Link href={t.href} className="font-medium text-ink-900 hover:text-brand-700">{t.label}</Link> : <span className="font-medium text-ink-800">{t.label}</span>}
+    <span className="text-ink-500">{t.where}{t.fo ? ` · ${t.fo}` : ''}</span>
+    <span className={t.overdue ? 'ml-auto text-red-700' : 'ml-auto text-ink-500'}>{t.when}</span>
+  </li>;
+  return <div className="space-y-3">
+    <Card title="Open">{open.length ? <ul className="divide-y divide-line">{open.map(row)}</ul> : <div className="p-4 text-[13px] text-ink-500">Nothing open.{m.live && m.cue.state === 'no_next_step' ? ` Set a next step for ${m.firstName}.` : ''}</div>}</Card>
+    <Card title="Done">{done.length ? <ul className="divide-y divide-line">{done.map(row)}</ul> : <div className="p-4 text-[13px] text-ink-500">Nothing done yet.</div>}</Card>
+  </div>;
+}
+
+/** Activity (B140): every event, newest first, in words (S8's describeAudit). */
+function Activity({ m, timezone }: { m: ContactPage; timezone: string }) {
+  return <Card title="Activity">
+    {m.history.length ? <ol className="divide-y divide-line">{m.history.map((it) => <li key={it.key} className="flex gap-3 px-4 py-2.5 text-sm">
+      <span className={it.tone === 'in' ? 'mt-0.5 text-emerald-600' : 'mt-0.5 text-ink-500'}>{it.icon === 'NOTE' || it.icon === 'STATE' ? <span className="inline-block h-3.5 w-3.5 rounded-full border border-current" /> : <ActionIcon action={it.icon} size={14} />}</span>
+      <span className="min-w-0 flex-1 space-y-1">
+        {it.href ? <Link href={it.href} className="block text-ink-800 hover:text-brand-700">{it.title}</Link> : <span className="block text-ink-800">{it.title}</span>}
+        {it.detail ? <span className="block max-w-[70ch] whitespace-pre-wrap break-words text-[13px] leading-6 text-ink-700">{it.detail}</span> : null}
+        {it.fields?.length ? <EventDetail fields={it.fields} /> : null}
+        {it.recordingHref ? <audio controls preload="none" className="h-8" src={it.recordingHref} /> : null}
+      </span>
+      <span className="shrink-0 text-xs text-ink-500">{formatInstant(it.at, timezone)}</span>
+    </li>)}</ol> : <div className="p-4 text-sm text-ink-500">Nothing has happened yet.</div>}
+  </Card>;
+}
+
+/** Emails (W10): sent, replies and bounces Outlook tracking saw, newest first. */
+function Emails({ m, timezone }: { m: ContactPage; timezone: string }) {
+  const kind = { SENT: 'Sent', REPLY: 'Reply', BOUNCE: 'Bounced', AUTO_REPLY: 'Auto-reply' } as Record<string, string>;
+  return <div className="space-y-3">
+    {!m.tracked ? <Notice tone="info">Email tracking is off. Emails show here only when a step is marked Done.</Notice> : null}
+    <Card title="Emails">
+      {m.emails.length || m.emailSteps.length ? <ol className="divide-y divide-line">
+        {m.emails.map((e) => <li key={e.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-[13px]">
+          <Badge tone={e.kind === 'REPLY' ? 'green' : e.kind === 'BOUNCE' ? 'amber' : e.kind === 'SENT' ? 'blue' : 'gray'}>{kind[e.kind] ?? e.kind}</Badge>
+          <span className="min-w-0 flex-1 truncate text-ink-800">{e.subject ?? '(no subject)'}</span>
+          <span className="text-ink-500">{e.mailbox ? `${e.mailbox}'s mailbox · ` : ''}{formatInstant(e.at, timezone)}</span>
+        </li>)}
+        {m.emailSteps.map((e) => <li key={e.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-[13px]">
+          <Badge tone="gray">Marked done</Badge>
+          <span className="min-w-0 flex-1 truncate text-ink-800">{e.label} · {e.where}</span>
+          <span className="text-ink-500">{e.by} · {formatInstant(e.at, timezone)}</span>
+        </li>)}
+      </ol> : <div className="p-4 text-[13px] text-ink-500">No emails yet.</div>}
+    </Card>
+  </div>;
+}
+
+/** Notes: the composer and every note, as on the CRM page. */
+function Notes({ m, timezone }: { m: ContactPage; timezone: string }) {
+  const notes = c(m).notes;
+  return <Card title="Notes">
+    {m.mayWork ? <div className="border-b border-line"><NoteComposer id={m.id} /></div> : m.live && m.workWhy ? <p className="border-b border-line px-4 py-3 text-[12.5px] text-ink-500">{m.workWhy === 'Claim first' ? `Claim ${m.firstName} first to add notes.` : m.workWhy}</p> : null}
+    {notes.length ? <ol className="divide-y divide-line">{notes.map((n) => <li key={n.id} id={`note-${n.id}`} className="scroll-mt-24 px-4 py-3 text-[13px]">
+      <div className="text-[12px] text-ink-500">{n.authorName ?? 'Cadence'} · {formatInstant(n.createdAt, timezone)}</div>
+      <p className="mt-1 max-w-[70ch] whitespace-pre-wrap break-words text-ink-800">{n.body}</p>
+    </li>)}</ol> : <div className="p-4 text-[13px] text-ink-500">No notes yet.</div>}
+  </Card>;
 }
 
 export const dynamic = 'force-dynamic';
