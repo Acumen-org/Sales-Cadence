@@ -42,7 +42,8 @@ function contactInput(fd: FormData): Partial<ContactInput> {
   return input;
 }
 
-export async function createContactAction(fd: FormData): Promise<ActionResult> {
+/** Add contact. A refusal for the same name at the same firm names the other contact (B139). */
+export async function createContactAction(fd: FormData): Promise<ActionResult & { possibleDuplicate?: string }> {
   const user = await requireUser();
   if (!isAdmin(user) && !needsPod(user.role)) return { ok: false, error: 'Biz Ops can view cold contacts but cannot add them.' };
   const r = await createContact(contactInput(fd) as ContactInput, { id: user.id, podIds: user.podIds, ownsContacts: needsPod(user.role) || isAdmin(user) }, userActor(user), field(fd, 'podId') || null, { addAnyway: field(fd, 'addAnyway') === '1' });
@@ -62,7 +63,7 @@ export async function updateContactAction(fd: FormData): Promise<ActionResult> {
 function summary(done: number, refused: string[], verb: string): ActionResult {
   const reasons = [...new Set(refused)];
   if (!done) return { ok: false, error: reasons[0] ?? 'Nothing was changed.' };
-  return { ok: true, message: `${verb} ${done}.${refused.length ? ` ${refused.length} not changed: ${reasons.slice(0, 2).join(' ')}` : ''}` };
+  return { ok: true, message: `${verb} ${done}.${refused.length ? ` ${refused.length} not changed: ${reasons.slice(0, 2).join(' ')}` : ''}`, data: { refused: refused.length } };
 }
 
 export async function claimContactsAction(fd: FormData): Promise<ActionResult> {
@@ -132,6 +133,30 @@ export async function setNextActionAction(fd: FormData): Promise<ActionResult> {
   const r = await setColdNextStep(id, { label, action, dueDate, foUserId: fo }, userActor(user), { guard: toActor(user), act: 'next_step', user });
   refresh(id);
   return r.ok ? { ok: true, message: 'Next action set.' } : { ok: false, error: r.reason };
+}
+
+/**
+ * Set next step for several contacts from the list (PLAN 4.1), each through the guard and the
+ * contactability check on its own, given to its owner as on the contact page.
+ */
+export async function setNextStepsAction(fd: FormData): Promise<ActionResult> {
+  const user = await requireUser();
+  const ids = fd.getAll('ids').map(String).filter(Boolean);
+  const label = String(fd.get('label') ?? '').trim();
+  const action = String(fd.get('action') ?? 'CALL') as ActionType;
+  const dueDate = String(fd.get('dueDate') ?? '');
+  if (!label) return { ok: false, error: 'Say what to do.' };
+  if (!NEXT_ACTION_CHANNELS.includes(action)) return { ok: false, error: 'Choose how.' };
+  if (!isLocalDate(dueDate) || dueDate < todayIn(user.timezone)) return { ok: false, error: 'Pick today or a later day.' };
+  const owners = new Map((await prisma.sandboxContact.findMany({ where: { id: { in: ids } }, select: { id: true, ownerId: true, owner: { select: { active: true } } } })).map((c) => [c.id, c.ownerId && c.owner?.active ? c.ownerId : user.id]));
+  let done = 0;
+  const refused: string[] = [];
+  for (const id of ids) {
+    const r = await setColdNextStep(id, { label, action, dueDate, foUserId: owners.get(id) ?? user.id }, userActor(user), { guard: toActor(user), act: 'next_step', user });
+    if (r.ok) done++; else refused.push(r.reason);
+  }
+  refresh();
+  return summary(done, refused, 'Next step set for');
 }
 
 /** Opt out: any sales user, any contact, no claim needed (PLAN 8.1); a removed one too (N027). */

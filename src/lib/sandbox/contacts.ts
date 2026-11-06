@@ -63,7 +63,8 @@ export function contactData(input: Partial<ContactInput>): { ok: true; data: Pri
   if (input.phone !== undefined) {
     const p = clean(input.phone);
     const parsed = p ? parsePhone(p, country) : null;
-    if (p && !parsed) return { ok: false, error: 'That phone number could not be read. Include the area code.' };
+    // B204: a number read with the wrong country says so, rather than asking for an area code it has.
+    if (p && !parsed) return { ok: false, error: /^\s*(\+|00)/.test(p) ? 'That phone number could not be read. Check the country code.' : `That phone number could not be read as a ${country} number. Choose its country, or start it with + and the country code.` };
     data.phone = parsed?.e164 ?? null;
     data.phoneExtension = parsed?.extension ?? null;
     data.badPhone = false;
@@ -142,7 +143,8 @@ export async function createContact(input: ContactInput, by: { id: string; podId
   const d = parsed.data as Record<string, unknown>;
   const row = {
     bellwetherContactId: null, firstName: String(d.firstName), lastName: String(d.lastName), email: (d.email as string) ?? null, additionalEmails: [],
-    phone: (d.phone as string) ?? null, phoneType: (d.phoneType as string) ?? (d.phone ? 'direct' : null), additionalPhones: [], linkedinUrl: (d.linkedinUrl as string) ?? null,
+    // B201: no phone, no phone type.
+    phone: (d.phone as string) ?? null, phoneType: d.phone ? (d.phoneType as string) ?? 'direct' : null, additionalPhones: [], linkedinUrl: (d.linkedinUrl as string) ?? null,
     individualCrd: (d.individualCrd as string) ?? null, companyName: (d.companyName as string) ?? null, companyDomain: (d.companyDomain as string) ?? null,
     companyCrd: (d.companyCrd as string) ?? null, companyPhone: null,
   };
