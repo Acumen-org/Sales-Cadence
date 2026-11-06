@@ -20,7 +20,7 @@ import { sessionOf } from './helpers/cold-campaign';
 
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }));
 const auth = vi.hoisted(() => ({ requireUser: vi.fn() }));
-vi.mock('@/lib/auth/current-user', () => ({ requireUser: auth.requireUser, requireAdmin: auth.requireUser, toActor: (u: SessionUser) => ({ id: u.id, role: u.role, podIds: u.podIds }) }));
+vi.mock('@/lib/auth/current-user', () => ({ requireUser: auth.requireUser, getCurrentUser: auth.requireUser, requireAdmin: auth.requireUser, toActor: (u: SessionUser) => ({ id: u.id, role: u.role, podIds: u.podIds }) }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {}, push: () => {} }), usePathname: () => '/cold-outreach', useSearchParams: () => new URLSearchParams(), redirect: (to: string) => { throw new Error(`redirect ${to}`); }, notFound: () => { throw new Error('not found'); } }));
 
 const { globalSearchAction } = await import('@/lib/actions/search');
@@ -228,6 +228,25 @@ describe('Cold outreach screens (S10)', () => {
   it('B211: Cold outreach pages refresh themselves, as Home, Tasks and Activity do', () => {
     for (const path of ['/cold-outreach', '/cold-outreach/abc', '/cold-outreach/tasks', '/cold-outreach/moves/m1']) expect(LIVE.test(path)).toBe(true);
     expect(LIVE.test('/reports')).toBe(false);
+  });
+
+  it('B211: the live refresh number moves when a next step is set, a contact arrives or a call is logged', async () => {
+    const { GET } = await import('@/app/api/version/route');
+    auth.requireUser.mockResolvedValue(await sessionOf(b.users.alisa.id));
+    const version = async () => ((await (await GET()).json()) as { version: number }).version;
+    const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+    const v0 = await version();
+    await new Promise((r) => setTimeout(r, 20));
+    await prisma.nextAction.create({ data: { sandboxContactId: c.id, foUserId: b.users.alisa.id, label: 'Call back', action: 'CALL', dueDate: '2099-01-05', audience: 'SANDBOX' } });
+    const v1 = await version();
+    expect(v1).toBeGreaterThan(v0);
+    await new Promise((r) => setTimeout(r, 20));
+    await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+    const v2 = await version();
+    expect(v2).toBeGreaterThan(v1);
+    await new Promise((r) => setTimeout(r, 20));
+    await prisma.callLog.create({ data: { source: 'MANUAL', direction: 'OUTBOUND', status: 'COMPLETED', userId: b.users.alisa.id, sandboxContactId: c.id, startedAt: new Date() } });
+    expect(await version()).toBeGreaterThan(v2);
   });
 
   it('N057: from 1280px the contact card sits beside the composer, in its own column, not below it', () => {

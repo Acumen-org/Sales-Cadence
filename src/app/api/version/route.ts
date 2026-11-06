@@ -10,13 +10,17 @@ import { getCurrentUser } from '@/lib/auth/current-user';
 export async function GET() {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ version: null }, { status: 401 });
-  const [task, touch, enrollment, notification] = await Promise.all([
+  const [task, touch, enrollment, notification, nextAction, contact, call] = await Promise.all([
     prisma.task.aggregate({ _max: { updatedAt: true } }),
     // When a touch arrived, not when it happened: a reply synced late still changes the screen.
     prisma.touch.aggregate({ _max: { createdAt: true } }),
     prisma.enrollment.aggregate({ _max: { updatedAt: true } }),
     prisma.user.findUnique({ where: { id: user.id }, select: { notificationsReadAt: true } }),
+    // B211: Cold outreach's pages move with next steps, contacts (a push, a claim, an opt-out) and calls.
+    prisma.nextAction.aggregate({ _max: { updatedAt: true } }),
+    prisma.sandboxContact.aggregate({ _max: { updatedAt: true } }),
+    prisma.callLog.aggregate({ _max: { updatedAt: true } }),
   ]);
-  const stamps = [task._max.updatedAt, touch._max.createdAt, enrollment._max.updatedAt, notification?.notificationsReadAt].map((d) => d?.getTime() ?? 0);
+  const stamps = [task._max.updatedAt, touch._max.createdAt, enrollment._max.updatedAt, notification?.notificationsReadAt, nextAction._max.updatedAt, contact._max.updatedAt, call._max.updatedAt].map((d) => d?.getTime() ?? 0);
   return NextResponse.json({ version: Math.max(...stamps) }, { headers: { 'cache-control': 'no-store' } });
 }
