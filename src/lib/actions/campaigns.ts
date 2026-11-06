@@ -321,8 +321,8 @@ export async function addPeopleToCampaignAction(formData: FormData): Promise<Act
   if ((campaign.audience === 'SANDBOX') !== cold) return { ok: false, error: wrongKind(campaign, cold) };
   const refused = whyNotChangeCampaignPeople(user, await campaignTeam(campaign), campaign.pod.name);
   if (refused) return { ok: false, error: refused };
-  // A cold campaign from before the studio runs to its end as it is (PLAN 9.7 step 14).
-  if (cold && !campaign.plannerDraft) return { ok: false, error: `${campaign.name} was made before the campaign studio, so it takes no new contacts. Start a new cold campaign for them.` };
+  // A cold campaign takes contacts only through its studio plan, which every cold campaign has (W14).
+  if (cold && !campaign.plannerDraft) return { ok: false, error: `${campaign.name} has no plan to add contacts to. Open it in the studio first.` };
   try {
     if (campaign.plannerDraft) {
       const r = await addPeopleToCalendarCampaign(user, campaign, ids);

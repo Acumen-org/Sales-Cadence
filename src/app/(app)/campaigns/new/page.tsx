@@ -10,7 +10,6 @@ import { ColdOutreachTabs, seesPushes } from '@/components/sandbox/section-tabs'
 import { prisma } from '@/lib/db';
 import { canManageCampaigns } from '@/lib/auth/rbac';
 import type { CampaignDraft } from '@/lib/campaign-planner';
-import { parseSteps } from '@/lib/sequences/steps';
 import { diffDays } from '@/lib/dates';
 import { workspaceTimezone } from '@/lib/workspace';
 import { COLD_CAMPAIGNS_HREF, COLD_CONTACT_BASE } from '@/lib/subject';
@@ -39,7 +38,7 @@ export default async function NewCampaignPage({ searchParams }: { searchParams: 
     </div>;
   };
   if (restart) {
-    const source = await prisma.campaign.findUnique({ where: { id: restart }, include: { sequence: true } });
+    const source = await prisma.campaign.findUnique({ where: { id: restart } });
     if (source && canManageCampaigns(user, source.podId) && ['STOPPED', 'COMPLETED'].includes(source.status)) {
       if (source.plannerDraft) {
         const saved = source.plannerDraft as CampaignDraft & { request?: CampaignDraft };
@@ -49,8 +48,6 @@ export default async function NewCampaignPage({ searchParams }: { searchParams: 
         const personIds = saved.request ? previous.personIds.filter(id => !removed.has(id)) : source.personIds;
         return studio(source.audience, { ...previous, name: `${source.name} - next run`.slice(0, 120), startDate: today, endDate: addDays(today, diffDays(previous.startDate, previous.endDate)), personIds, assignments: Object.fromEntries(Object.entries(previous.assignments).filter(([id]) => personIds.includes(id))), foAssignments: undefined, outreachEdited: previous.outreachEdited ?? true });
       }
-      // A cold campaign from before the studio runs again as a studio campaign, with its contacts and steps.
-      if (source.audience === 'SANDBOX') return studio('SANDBOX', { name: `${source.name} - next run`.slice(0, 120), podId: source.podId, startDate: today, endDate: addDays(today, 42), productInterest: source.productInterest, defaultBatchSize: source.startsPerFoPerDay ?? 20, fos: [], personIds: source.personIds, assignments: {}, flows: [{ id: 'default', name: 'Default', steps: parseSteps(source.sequence.steps) }], outreachEdited: true });
     }
     redirect('/campaigns');
   }

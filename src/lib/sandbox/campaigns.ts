@@ -2,9 +2,7 @@ import type { Prisma, SandboxContact } from '@prisma/client';
 import { prisma, type Tx } from '../db';
 import { logAudit, type AuditActor } from '../audit';
 import { addDays, formatLocalDate, todayIn, toLocalDate, type LocalDate } from '../dates';
-import { getSettings } from '../settings';
 import { needsPod, ROLE_LABELS, ROLES_NEEDING_POD } from '../auth/rbac';
-import { nextWorkingDay } from '../engine/clock';
 import { OCCUPYING_STATUSES } from '../engine/enrollment';
 import { advanceEnrollment, type EngineContext } from '../engine/tasks';
 import { workspaceTimezone } from '../workspace';
@@ -311,64 +309,6 @@ export async function activateColdCalendar(id: string, ctx: EngineContext) {
     await tx.campaign.update({ where: { id }, data: { status: 'ACTIVE', ...(shifted ? { startDate: shifted.startDate, endDate: shifted.endDate, publishedPlan: JSON.parse(JSON.stringify({ ...plan, batches: shifted.batches, days: shifted.days })) as Prisma.InputJsonValue } : {}) } });
     await logAudit({ entityType: 'campaign', entityId: id, action: 'started', actor: ctx.actor, details: { people: rows.length, batches: batches.length, calendar: true, audience: 'SANDBOX', leftOut: left, ...(shifted ? { startMoved: { from: c.startDate, to: shifted.startDate, endDate: shifted.endDate } } : {}) } }, tx);
     return tx.enrollment.findMany({ where: { campaignId: id, campaignRun: c.runNumber }, select: { id: true } });
-  }, { timeout: 60_000 });
-  if (!created) return { enrolled: 0, skipped: 0 };
-  for (const e of created) await advanceEnrollment(e.id, ctx);
-  return { enrolled: created.length, skipped: left.length };
-}
-
-/**
- * A cold campaign from before the studio (PLAN 9.7 step 14): it has no calendar, so it starts on its
- * old pacing, owner first and a few a day per rep. It takes launch's locks and re-checks all the same
- * (N002, N021, B129), never starts in the past (N019), and gives an unclaimed contact to a Junior or
- * Senior FO of the pod, a leader only when the pod has none (B135). It is deleted in W14, once no such
- * campaign is left.
- */
-export async function activateSandboxCampaign(id: string, ctx: EngineContext): Promise<{ enrolled: number; skipped: number }> {
-  const now = ctx.now ?? new Date();
-  const today = todayIn(workspaceTimezone(), now);
-  const settings = await getSettings();
-  let left: LeftAtLaunch[] = [];
-  const created = await prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`campaign:${id}`}))`;
-    const campaign = await tx.campaign.findUniqueOrThrow({ where: { id }, include: { sequence: true, pod: { include: { users: { include: { user: true } } } } } });
-    if (campaign.status !== 'SCHEDULED' || campaign.startDate > today) return null;
-    if (campaign.pod.archived || campaign.sequence.archived) throw new Error(campaign.pod.archived ? `Not started: ${campaign.pod.name} has been archived.` : `Not started: its sequence, ${campaign.sequence.name}, has been archived.`);
-    const members = campaign.pod.users.map((u) => u.user).filter((u) => u.active && needsPod(u.role));
-    const juniors = members.filter((u) => u.role === 'JUNIOR_FO' || u.role === 'SENIOR_FO');
-    const fos = juniors.length ? juniors : members;
-    if (!fos.length) throw new Error(`Not started: nobody in ${campaign.pod.name} runs outreach.`);
-    await lockContacts(tx, campaign.personIds);
-    const loaded = await launchContext(tx, campaign.personIds, id);
-    const rate = Math.max(1, campaign.startsPerFoPerDay ?? settings.rules.defaultDailyRampPerFo);
-    // Owners keep their contacts; an unclaimed one goes to whoever has the fewest open cold steps.
-    const open = await tx.task.groupBy({ by: ['foUserId'], where: { state: 'PENDING', foUserId: { in: fos.map((f) => f.id) }, enrollment: { personId: null, sandboxContactId: { not: null } } }, _count: { _all: true } });
-    const base = new Map(fos.map((f) => [f.id, open.find((o) => o.foUserId === f.id)?._count._all ?? 0]));
-    const load = new Map<string, number>();
-    const start = nextWorkingDay(campaign.startDate < today ? today : campaign.startDate, settings.rules.workingDays);
-    const rows = [];
-    left = [];
-    const ordered = [...loaded.contacts.values()].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id));
-    for (const id2 of campaign.personIds) if (!loaded.contacts.has(id2)) left.push({ id: id2, name: 'Someone', reason: 'No longer in Cold outreach' });
-    for (const c of ordered) {
-      const owned = c.ownerId && c.owner?.active ? c.ownerId : null;
-      // An owner outside the pod keeps the contact; the old launch gave its steps to someone else (B049).
-      if (owned && !members.some((m) => m.id === owned)) { left.push({ id: c.id, name: contactName(c), reason: `Owned by ${c.owner!.name}, who is not in ${campaign.pod.name}` }); continue; }
-      const fo = owned ?? [...base.entries()].sort((a, b) => a[1] + (load.get(a[0]) ?? 0) - (b[1] + (load.get(b[0]) ?? 0)) || a[0].localeCompare(b[0]))[0][0];
-      const refusal = await launchRefusal(tx, c, loaded, { since: campaign.approvedAt ?? campaign.createdAt, foId: fo, foName: '', now });
-      if (refusal) { left.push({ id: c.id, name: contactName(c), reason: refusal }); continue; }
-      const k = load.get(fo) ?? 0;
-      load.set(fo, k + 1);
-      let day = start;
-      for (let i = 0; i < Math.floor(k / rate); i++) day = nextWorkingDay(addDays(day, 1), settings.rules.workingDays);
-      await startContact(tx, c, fo, campaign.podId, ctx.actor, now);
-      rows.push({ sandboxContactId: c.id, foUserId: fo, podId: campaign.podId, campaignId: id, campaignRun: campaign.runNumber, sequenceId: campaign.sequenceId, startDate: day, status: 'ACTIVE' as const, createdById: ctx.actor.type === 'USER' ? ctx.actor.id ?? null : null, createdAt: now, audience: 'SANDBOX' as const });
-    }
-    if (!rows.length) throw new Error(`Not started: nobody in it can be contacted now: ${whoAndWhy(left)}. Nobody has been contacted.`);
-    await tx.enrollment.createMany({ data: rows });
-    await tx.campaign.update({ where: { id }, data: { status: 'ACTIVE', ...(start !== campaign.startDate ? { startDate: start } : {}) } });
-    await logAudit({ entityType: 'campaign', entityId: id, action: 'started', actor: ctx.actor, details: { run: campaign.runNumber, enrolled: rows.length, skipped: left.length, audience: 'SANDBOX', leftOut: left, ...(start !== campaign.startDate ? { startMoved: { from: campaign.startDate, to: start } } : {}) } }, tx);
-    return tx.enrollment.findMany({ where: { campaignId: id, campaignRun: campaign.runNumber }, select: { id: true } });
   }, { timeout: 60_000 });
   if (!created) return { enrolled: 0, skipped: 0 };
   for (const e of created) await advanceEnrollment(e.id, ctx);

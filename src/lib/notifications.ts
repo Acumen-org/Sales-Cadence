@@ -165,9 +165,11 @@ export function bellWords(n: Pick<Row, 'id' | 'kind' | 'personId' | 'sandboxCont
       return { kind, name: str(p.name) ?? 'A cold campaign', company: null, title: `${from} published a cold campaign${start && isLocalDate(start) ? ` starting ${formatLocalDate(start)}` : ''}`, detail: `${plural(people, 'contact')}. You can pause or stop it on its page.`, href: campaignId ? `/campaigns/${campaignId}` : null, linkLabel: 'Open the campaign' };
     }
     case 'campaign_back_to_draft': {
-      // The release: cold campaigns that waited for an approval are drafts now, for their creator to publish.
+      // The release: cold campaigns that waited for an approval, or that were made with the old form
+      // and had not started, are drafts now, for their creator to publish in the studio.
       const campaignId = str(p.campaignId);
-      return { kind, name: str(p.name) ?? 'A cold campaign', company: null, title: 'Cold campaigns no longer need approval, so this one is a draft again', detail: 'Nothing was sent. Open it, check who is in it and publish it to schedule it.', href: campaignId ? `/campaigns/${campaignId}` : null, linkLabel: 'Open the campaign' };
+      const title = p.why === 'pre_studio' ? 'Cold campaigns are now built in the campaign studio, so this one is a draft again' : 'Cold campaigns no longer need approval, so this one is a draft again';
+      return { kind, name: str(p.name) ?? 'A cold campaign', company: null, title, detail: 'Nothing was sent. Open it, check who is in it and publish it to schedule it.', href: campaignId ? `/campaigns/${campaignId}` : null, linkLabel: 'Open the campaign' };
     }
     case 'retention_warning': {
       const count = num(p.count);

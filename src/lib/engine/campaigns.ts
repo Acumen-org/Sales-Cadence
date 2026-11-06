@@ -47,9 +47,9 @@ export async function activateCampaign(id: string, ctx: EngineContext = { actor:
   const now = ctx.now ?? new Date();
   const campaign = await prisma.campaign.findUnique({ where: { id }, include: { sequence: true, pod: true } });
   if (!campaign || campaign.status !== 'SCHEDULED' || campaign.startDate > todayIn(workspaceTimezone(), now)) return { enrolled: 0, skipped: 0 };
-  if (campaign.plannerDraft) return activateCalendarCampaign(id, ctx);
-  // A cold campaign from before the studio has no calendar: its own launch, with the same re-checks (PLAN 9.7 step 14).
-  if (campaign.audience === 'SANDBOX') return (await import('../sandbox/campaigns')).activateSandboxCampaign(id, ctx);
+  // Every cold campaign is a studio campaign (W14; the release moved the old ones onto the studio), so
+  // the calendar launch is the only one it has: without a published calendar it refuses to start.
+  if (campaign.plannerDraft || campaign.audience === 'SANDBOX') return activateCalendarCampaign(id, ctx);
   if (campaign.pod.archived || campaign.sequence.archived) throw new Error(campaign.pod.archived ? `Not started: ${campaign.pod.name} has been archived.` : `Not started: its sequence, ${campaign.sequence.name}, has been archived.`);
   let ids = campaign.personIds;
   if (campaign.followupSourceId) {

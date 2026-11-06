@@ -1933,3 +1933,22 @@ that change Cadence are noted.
 - A sandbox contact's reply rings its owner's bell, like a CRM reply.
 - Calls made before the first Twilio import run are logged without a form, so the first day does
   not open a form for every call of the previous 24 hours.
+
+**Changed by the cold outreach redesign (released together, November 2026).** The owner's answers of
+5 November 2026 and the redesign plan (`Notes/cold-outreach-2026-11-04/PLAN.md`, `BUILD.md`) replace
+these decisions and defaults; where they differ from the text above, they win:
+- The section is **Cold outreach** at `/cold-outreach` (code and table names keep "sandbox"). Every
+  `/sandbox` address redirects there with a 307. The old Sandbox pages, the Work tab and its
+  `sandboxWork`, `WorkRow` and `sandboxDueCount` are gone.
+- **Decision 2 is replaced by D2 (a), with a limit.** `/tasks` lists CRM and cold work together;
+  Home, Reports (All outreach, CRM, Cold outreach), Activity, Ctrl+K and the campaign page include
+  cold work. Creating cold work stays inside Cold outreach.
+- **Cold campaigns are built in the campaign studio** and need no approval: publishing schedules
+  one. The old Start campaign form, its approval and its launcher are gone; cold campaigns made
+  with it were moved onto the studio by the release (migration `20261106300000`).
+- Every call closes its due call step within the rules of PLAN 8.7; the post-call form is the one
+  for cold and CRM calls, and the CRM's quick Log call stays as it was.
+- Retention is always on, re-hashes old opt-outs itself and never removes a contact with activity
+  in its window; Settings > Cold outreach shows what it would remove in the next 30 days.
+- A cold contact's reply rings the campaign's rep, the mailbox owner and the owner (or the pod's
+  leaders when nobody owns it). Twenty's mail sync is a second source of cold email evidence (N028).

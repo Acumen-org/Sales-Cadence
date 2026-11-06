@@ -5,12 +5,13 @@ import { logManualCall, submitCallForm } from '@/lib/calls/form';
 import { recordCallTouch } from '@/lib/calls/call-log';
 import { setColdNextStep } from '@/lib/sandbox/work';
 import { setNextActions } from '@/lib/next-actions';
-import { activateSandboxCampaign } from '@/lib/sandbox/campaigns';
+import { activateCampaign } from '@/lib/engine/campaigns';
 import { outreachMetrics, replyCount, type Period } from '@/lib/outreach/metrics';
 import { audienceOf } from '@/lib/outreach/audience';
 import { coldRef, contactState, countWhere, loadSubjects, personRef, refKey, refOf, subjectHref, workWhere } from '@/lib/subject';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 import { readyContact } from './helpers/sandbox';
+import { coldDraft, noonOf, publishColdCampaign, sessionOf } from './helpers/cold-campaign';
 
 /**
  * Stage S2: audience stamped on every insert (PLAN 8.4, B037), the subject layer (8.13) and the
@@ -38,8 +39,8 @@ describe('outreach metrics and the subject layer', () => {
     expect((await prisma.callForm.findUniqueOrThrow({ where: { callId: cold.id } })).audience).toBe('SANDBOX');
     const crm = await logManualCall({ userId: b.users.alisa.id, personId: 'person-01' });
     expect(crm).toEqual(expect.objectContaining({ audience: 'CRM', podId: b.pods.Alisa.id }));
-    const campaign = await prisma.campaign.create({ data: { name: 'Cold Q1', audience: 'SANDBOX', sequenceId: b.sequence.id, podId: b.pods.Alisa.id, personIds: [(await readyContact(b.users.alisa.id, b.pods.Alisa.id)).id], startDate: '2026-11-02', status: 'SCHEDULED' } });
-    await activateSandboxCampaign(campaign.id, { actor: userActor(b.users.alisa) });
+    const { campaign } = await publishColdCampaign(await sessionOf(b.users.alisa.id), coldDraft(b.pods.Alisa.id, [(await readyContact(b.users.alisa.id, b.pods.Alisa.id)).id], [b.users.alisa.id]));
+    await activateCampaign(campaign.id, { actor: userActor(b.users.alisa), now: noonOf(campaign.startDate), skipSync: true });
     expect((await prisma.enrollment.findFirstOrThrow({ where: { campaignId: campaign.id } })).audience).toBe('SANDBOX');
     expect(audienceOf({ sandboxContactId: 'x' }, 'MOVED')).toBe('CRM');
     expect(audienceOf({})).toBeNull();

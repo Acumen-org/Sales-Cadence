@@ -16,7 +16,7 @@ import { advanceEnrollment } from '@/lib/engine/tasks';
 import { logManualCall } from '@/lib/calls/form';
 import { bellWords } from '@/lib/notifications';
 import { optOutContact } from '@/lib/outreach/transitions';
-import { activateSandboxCampaign, coldAudienceIssues, leftAtLaunch } from '@/lib/sandbox/campaigns';
+import { coldAudienceIssues, leftAtLaunch } from '@/lib/sandbox/campaigns';
 import { listContacts } from '@/lib/sandbox/query';
 import { COLD_CAMPAIGNS_HREF, COLD_CONTACT_BASE } from '@/lib/subject';
 import { runTool } from '../scripts/local-runtime';
@@ -185,13 +185,6 @@ describe('cold campaigns on the campaign studio (S7)', () => {
     expect(saved.startDate).toBe(late);
     expect(saved.endDate! >= e.scheduleDates.at(-1)!).toBe(true);
     expect((await prisma.auditLog.findFirstOrThrow({ where: { entityId: campaign.id, action: 'started' } })).details).toEqual(expect.objectContaining({ startMoved: expect.objectContaining({ from: draft.startDate, to: late }) }));
-
-    // A cold campaign from before the studio, waiting since 3 Nov, starts today when it launches, not on 3 Nov.
-    const old = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
-    const legacy = await prisma.campaign.create({ data: { name: 'From the old form', audience: 'SANDBOX', sequenceId: b.sequence.id, podId: b.pods.Alisa.id, personIds: [old.id], startDate: '2026-11-03', status: 'SCHEDULED' } });
-    await activateSandboxCampaign(legacy.id, { actor: SYSTEM_ACTOR, now: noonOf(late), skipSync: true });
-    expect((await prisma.enrollment.findFirstOrThrow({ where: { campaignId: legacy.id } })).startDate).toBe(late);
-    expect((await prisma.campaign.findUniqueOrThrow({ where: { id: legacy.id } })).startDate).toBe(late);
   });
 
   it('N021: contacts who said Not interested or booked a meeting after it was planned are left out at launch, by name', async () => {

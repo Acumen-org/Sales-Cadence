@@ -2,9 +2,8 @@ import type { Campaign } from '@prisma/client';
 import type { CampaignDraft } from '@/lib/campaign-planner';
 import type { PublishedCalendar } from '@/lib/campaign-planning-service';
 import { whoAndWhy } from '@/lib/campaign-audience';
-import { channelOfAction, type ContactChannel } from '@/lib/outreach/contactability';
+import type { ContactChannel } from '@/lib/outreach/contactability';
 import { coldAudienceIssues, coldAudienceWarnings, draftChannels, leftAtLaunch } from '@/lib/sandbox/campaigns';
-import { parseSteps } from '@/lib/sequences/steps';
 import { formatInstant, formatLocalDate, todayIn } from '@/lib/dates';
 import { workspaceTimezone } from '@/lib/workspace';
 
@@ -32,7 +31,6 @@ export async function ColdCampaignNotes({ campaign, launched, timezone }: { camp
     const now = await coldAudienceIssues(campaign.personIds, { podId: campaign.podId, podName: campaign.pod.name, foIds, campaignId: campaign.id, anyPod: true });
     if (now.length) lines.push({ tone: 'amber', title: `${now.length === 1 ? 'One contact' : `${now.length} contacts`} would be left out if it started now`, text: `${whoAndWhy(now)}. Launch checks everyone again and contacts nobody it leaves out.` });
     const channels: Set<ContactChannel> = draft ? draftChannels(draft.flows) : new Set();
-    if (!draft) for (const s of await legacySteps(campaign)) for (const a of s.actions) { const ch = channelOfAction(a.type); if (ch) channels.add(ch); }
     for (const w of await coldAudienceWarnings(campaign.personIds, channels)) lines.push({ tone: 'amber', title: w.reason, text: `${names(w.people.map((p) => p.name))}.` });
     if (campaign.status === 'SCHEDULED' && campaign.startDate < today) lines.push({ tone: 'amber', title: 'Start date has passed', text: `It was ${formatLocalDate(campaign.startDate, 'long')}. It starts today instead, and every date moves on with it: nothing is sent late.` });
   }
@@ -40,10 +38,4 @@ export async function ColdCampaignNotes({ campaign, launched, timezone }: { camp
   return <section className="space-y-2" aria-label="Before and at launch">
     {lines.map((l) => <div key={l.title} role={l.tone === 'amber' ? 'status' : undefined} className={`rounded-xl border p-4 text-sm ${l.tone === 'amber' ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-line bg-white text-ink-700'}`}><p className="font-medium text-ink-900">{l.title}</p><p className="mt-1">{l.text}</p></div>)}
   </section>;
-}
-
-async function legacySteps(campaign: Campaign) {
-  const { prisma } = await import('@/lib/db');
-  const sequence = await prisma.sequence.findUnique({ where: { id: campaign.sequenceId }, select: { steps: true } });
-  try { return sequence ? parseSteps(sequence.steps) : []; } catch { return []; }
 }

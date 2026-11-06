@@ -52,7 +52,7 @@ export function PlannedCampaignDetail({ campaign: c, manager, editor = manager, 
       </div>
       <div className="relative mt-6 grid gap-4 sm:grid-cols-[repeat(3,minmax(0,auto))_minmax(0,1fr)] sm:items-end sm:gap-8">
         <div><span className="block text-[11px] uppercase tracking-[0.08em] text-[#c1d4ca]">Starts</span><span className="text-[15px] font-medium">{calendarDateLabel(c.startDate)}</span></div>
-        <div><span className="block text-[11px] uppercase tracking-[0.08em] text-[#c1d4ca]">Ends</span><span className="text-[15px] font-medium">{calendarDateLabel(c.endDate!)}</span></div>
+        <div><span className="block text-[11px] uppercase tracking-[0.08em] text-[#c1d4ca]">Ends</span><span className="text-[15px] font-medium">{c.endDate ? calendarDateLabel(c.endDate) : 'When the last contact finishes'}</span></div>
         <div><span className="block text-[11px] uppercase tracking-[0.08em] text-[#c1d4ca]">Outreach groups</span><span className="text-[15px] font-medium tabular-nums">{draft.flows.length}</span></div>
         {c.endDate ? <div className="min-w-0">
           <div className="flex items-baseline justify-between gap-2 text-[12px] text-[#c1d4ca]"><span>{today < c.startDate ? `Starts in ${daysLeft(today, c.startDate)}` : today > c.endDate ? 'Finished' : `Day ${diffDays(c.startDate, today) + 1} of ${span}`}</span>{today >= c.startDate && today <= c.endDate ? <span className="tabular-nums">{daysLeft(today, c.endDate)} left</span> : null}</div>

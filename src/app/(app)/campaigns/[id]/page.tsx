@@ -26,7 +26,6 @@ import { Badge, CAMPAIGN_TONE, Card, Count, enrollmentTone, Empty, RecordHeader,
 import { ActiveSection } from '@/components/active-section';
 import { ColdOutreachTabs, seesPushes } from '@/components/sandbox/section-tabs';
 import { ColdCampaignNotes } from '@/components/campaigns/cold-campaign-notes';
-import { LegacyColdCampaign } from '@/components/campaigns/legacy-cold-campaign';
 import { COLD_CAMPAIGNS_HREF, COLD_CONTACT_BASE } from '@/lib/subject';
 import { campaignTitle } from '@/lib/campaigns-query';
 
@@ -56,9 +55,9 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
   // and sidebar item, with the cold notes and its contacts' own pages.
   const cold = campaign.audience === 'SANDBOX';
   const section = cold ? <><ActiveSection href={COLD_CONTACT_BASE} /><div className="px-4 pt-4 sm:px-6"><Surface flush><ColdOutreachTabs current="campaigns" pushes={seesPushes(user)} /></Surface></div></> : null;
-  if (cold && !campaign.plannerDraft) {
-    return <>{section}<LegacyColdCampaign campaign={campaign} manager={manager} editor={editor} canDelete={canDeleteCampaign(user, { status: campaign.status, podId: campaign.podId, createdById: campaign.createdById, everLaunched: history.length > 0 })} timezone={user.timezone} /></>;
-  }
+  // Every cold campaign has a studio plan (the release moved the old ones onto the studio), so the
+  // page below, which is the CRM's campaigns from before the studio, never draws a cold one.
+  if (cold && !campaign.plannerDraft) notFound();
   if (campaign.plannerDraft) {
     const people = await campaignPeoplePage(campaign, sp.page, sp.q);
     // On the start day of a running campaign, the pod's leaders can still bring in a new FO.

@@ -104,6 +104,8 @@ const TITLES: Record<string, string> = {
   approved: 'Approved',
   rejected: 'Declined',
   approval_removed: 'Back to draft: cold campaigns need no approval',
+  back_to_draft: 'Back to draft: cold campaigns are built in the campaign studio',
+  studio_plan_added: 'Opened in the campaign studio when the release went out',
   calendar_published: 'Published',
   calendar_republished: 'Published again',
   draft_saved: 'Draft saved',
