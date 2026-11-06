@@ -119,9 +119,10 @@ test("someone new at one of our domains joins with a Junior FO's access and no t
   await signedInAs(page, ARJUN);
   await expect(page.getByText('Junior FO', { exact: true })).toHaveCount(0);
   for (const path of ['/home', '/tasks', '/people', '/accounts', '/enrichment', '/meetings', '/campaigns', '/activity', '/reports']) await sound(page, path);
-  // A Junior FO is not an admin.
-  await page.goto('/settings');
-  await expect(page).not.toHaveURL(/\/settings/);
+  // A Junior FO is not an admin: Settings opens only Cold outreach, read only (B215), never an admin tab.
+  await page.goto('/settings?tab=users');
+  await expect(page).toHaveURL(/\/settings\?tab=cold-outreach/);
+  await expect(teamRow(page, ADMIN.email)).toHaveCount(0);
 });
 
 test('an admin gives the newcomer a title, and they keep it', async ({ page }) => {
