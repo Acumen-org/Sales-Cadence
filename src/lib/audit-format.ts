@@ -162,10 +162,6 @@ const TITLES: Record<string, string> = {
   enriched: 'Details enriched',
 };
 
-/** Every action with words of its own: the titles above and the cases below. */
-const DETAILED = ['enrolled', 'step_generated', 'replied', 'meeting', 'exited', 'completed', 'finished', 'paused', 'resumed', 'moved_to_step', 'reassigned', 'flags_updated', 'product_added', 'product_removed', 'number_set', 'number_cleared', 'next_action_set', 'next_action_done', 'next_action_moved', 'next_action_stopped', 'next_action_auto_closed', 'opted_out', 'removed', 'move_failed', 'email_to_do_not_contact', 'call_form_submitted', 'closed', 'started', 'launch_failed', 'people_added', 'people_removed', 'skipped', 'snoozed', 'created', 'updated', 'deleted', 'restored', 'raised'];
-export const KNOWN_AUDIT_ACTIONS = new Set([...Object.keys(TITLES).map((k) => k.split(':').pop()!), ...DETAILED]);
-
 export function describeAudit(action: string, details: Details, actorLabel: string | null, entityType?: string | null): AuditWords {
   const r = describe(action, details, actorLabel, entityType ?? null);
   return { ...r, known: r.known ?? true };
