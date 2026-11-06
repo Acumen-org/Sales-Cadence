@@ -17,6 +17,8 @@ import { CleanupNowButton, ColdOutreachRulesForm, CrmCheckNowButton, Suppression
 const n = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 /** A message as a sentence: an error from elsewhere may come without its full stop. */
 const sentence = (t: string) => (/[.!?]$/.test(t.trim()) ? t.trim() : `${t.trim()}.`);
+/** ", for 12 minutes": how long the nightly jobs took (N087). */
+const tookWords = (ms: number | null) => (ms === null ? '' : ms < 60_000 ? ', in under a minute' : `, for ${n(Math.round(ms / 60_000), 'minute')}`);
 const line = (badge: ReactNode, words: ReactNode) => <span className="flex flex-wrap items-center gap-2">{badge}<span className="text-[12.5px] font-normal text-ink-600">{words}</span></span>;
 
 export function ColdOutreachSettings({ data, canEdit, timezone }: { data: ColdOutreachSettingsData; canEdit: boolean; timezone: string }) {
@@ -24,6 +26,11 @@ export function ColdOutreachSettings({ data, canEdit, timezone }: { data: ColdOu
   const label = (key: keyof NonNullable<ColdOutreachSettingsData['choices']>['fields'], value: string) => data.choices?.fields[key].options.find((o) => o.value === value)?.label ?? optionLabel(value);
   const ready = [s.requireFirm && 'a firm', s.requireEmailOrPhone && 'an email or a direct or mobile phone', s.requireOwnerLogin && 'an owner with a CRM login', s.requirePod && 'a pod'].filter(Boolean) as string[];
   return <div className="space-y-3">
+    {canEdit && data.health ? <Card title="Health" actions={data.health.some((h) => !h.ok) ? <Badge tone="amber">Needs a look</Badge> : <Badge tone="green">All well</Badge>}>
+      <p className="border-b border-line px-4 py-3 text-[13px] text-ink-600">What can quietly stop cold outreach. A line that turns amber rings every admin&apos;s bell once.</p>
+      <div className="p-4"><KeyValue items={data.health.map((h) => ({ k: h.label, v: h.ok ? h.words : line(<Badge tone="amber">Look</Badge>, h.href ? <Link href={h.href} className="hover:text-ink-900">{h.words}</Link> : h.words) }))} /></div>
+    </Card> : null}
+
     {canEdit ? null : <Notice>Read only. Only {data.admins.length ? `an admin (${data.admins.join(', ')})` : 'an admin'} can change Cold outreach settings, run the checks or see the suppression list. Ask them for a change.</Notice>}
 
     <Card title="Bellwether" actions={canEdit ? <Link href={COLD_FROM_BELLWETHER_HREF} className="btn-ghost btn-sm">Every push</Link> : null}>
@@ -61,7 +68,8 @@ export function ColdOutreachSettings({ data, canEdit, timezone }: { data: ColdOu
         { k: 'Last run', v: crmCheck.last ? `${formatInstant(crmCheck.last.at, timezone)} · ${crmCheck.last.by === 'nightly' ? 'nightly' : `run by ${crmCheck.last.by}`}` : 'Not run yet' },
         { k: 'Result', v: !crmCheck.last ? null : crmCheck.last.error || !crmCheck.last.stats ? line(<Badge tone="red">Failed</Badge>, `${sentence(crmCheck.last.error ?? 'No result was recorded')} It runs again tonight.`) : crmCheckWords(crmCheck.last.stats) },
         { k: 'In the CRM now', v: `${n(crmCheck.inCrmNow, 'contact')} waiting for Move to CRM` },
-        { k: 'Nightly jobs', v: crmCheck.nightly ? (crmCheck.nightly.late ? line(<Badge tone="amber">Late</Badge>, `last ran ${formatInstant(crmCheck.nightly.at, timezone)}. The worker runs them each night; check that it is running.`) : `Last ran ${formatInstant(crmCheck.nightly.at, timezone)}`) : line(<Badge tone="amber">Not run yet</Badge>, 'The worker runs them each night, after the reconcile hour.') },
+        { k: 'Nightly jobs', v: crmCheck.nightly ? (crmCheck.nightly.late ? line(<Badge tone="amber">Late</Badge>, `last ran ${formatInstant(crmCheck.nightly.at, timezone)}. The worker runs them each night; check that it is running.`) : `Last ran ${formatInstant(crmCheck.nightly.at, timezone)}${tookWords(crmCheck.nightly.durationMs)}`) : line(<Badge tone="amber">Not run yet</Badge>, 'The worker runs them each night, after the reconcile hour.') },
+        ...(crmCheck.nightly?.runningSince ? [{ k: 'Running now', v: `Since ${formatInstant(crmCheck.nightly.runningSince, timezone)}` }] : []),
       ]} /></div>
     </Card>
 

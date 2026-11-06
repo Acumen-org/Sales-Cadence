@@ -19,13 +19,14 @@ import { COLD_CONTACT_BASE, coldRef, personRef, subjectHref } from './subject';
  *   call_flag             a call leaders should look at, such as a long voicemail (S4, B025)
  *   move_finished         a Move to CRM is done, with its counts (S3, B036)
  *   retention_warning     some of the owner's cold contacts are due for removal (S2, N032)
+ *   health_alert          a line of the cold outreach health card turned amber, for admins (PLAN 4.7)
  *
  * Read and unread work as they always have: "Mark read" marks everything up to the moment the list
  * was opened (`User.notificationsReadAt`); a Notification row also keeps its own `readAt`, set then
  * or when it is answered (a suggestion accepted or dismissed).
  */
 
-export type NotificationKind = 'reply' | 'bounce' | 'possible_bounce' | 'compliance_alert' | 'next_step_suggestion' | 'call_flag' | 'move_finished' | 'retention_warning' | 'campaign_published' | 'campaign_back_to_draft';
+export type NotificationKind = 'reply' | 'bounce' | 'possible_bounce' | 'compliance_alert' | 'next_step_suggestion' | 'call_flag' | 'move_finished' | 'retention_warning' | 'campaign_published' | 'campaign_back_to_draft' | 'health_alert';
 
 type Tx = Prisma.TransactionClient | typeof prisma;
 
@@ -153,6 +154,9 @@ export function bellWords(n: Pick<Row, 'id' | 'kind' | 'personId' | 'sandboxCont
       const callId = str(p.callId);
       return { kind, name: from, company: null, title: str(p.text) ?? 'A call to look at', detail: null, href: callId ? `/calls/${callId}` : str(p.href), linkLabel: 'Open the call' };
     }
+    case 'health_alert':
+      // PLAN 4.7: one line of the health card turned amber; it rings once until it is fine again.
+      return { kind, name: str(p.label) ?? 'Cold outreach', company: null, title: str(p.text) ?? 'Something needs a look', detail: 'From the health card in Settings > Cold outreach.', href: str(p.href), linkLabel: 'Have a look' };
     case 'move_finished': {
       const moveId = str(p.moveId);
       const done = num(p.done), failed = num(p.failed);

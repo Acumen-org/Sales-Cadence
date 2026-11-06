@@ -11,6 +11,8 @@ import { lastCrmCheck, type CrmCheckRun } from './crm-check';
 import { cleanupCounts } from './crm-cleanup';
 import { retentionForecast, WARN_DAYS } from './retention';
 import { releaseReport, type ReleaseReport } from '../outreach/release';
+import { NIGHTLY_MARKER, type NightlyMarker } from '../nightly';
+import { outreachHealth, type HealthLine } from '../outreach/health';
 
 /*
  * Settings > Cold outreach (PLAN 4.7): what the page reads, in words. The CRM values Move to CRM
@@ -201,8 +203,8 @@ export type ColdOutreachSettingsData = {
   choices: CrmValueChoices | null;
   valueIssues: string[];
   bellwether: BellwetherHealth;
-  /** `late`: the nightly jobs have not run since the day before yesterday (N087). */
-  crmCheck: { last: CrmCheckRun | null; nightly: { day: string; at: string; late: boolean } | null; inCrmNow: number };
+  /** `late`: the nightly jobs have not run since the day before yesterday; `durationMs` how long the last run took, `runningSince` a run in progress (N087). */
+  crmCheck: { last: CrmCheckRun | null; nightly: NightlyView | null; inCrmNow: number };
   retention: RetentionView;
   cleanup: { total: number; week: number; kept: number };
   /** The list itself for admins; everyone else sees how long it is. */
@@ -211,23 +213,27 @@ export type ColdOutreachSettingsData = {
   admins: string[];
   /** Admins only: what the release put right and listed in the data since 3 Nov (PLAN 9.7); null until the worker has run it. */
   release: ReleaseReport | null;
+  /** Admins only: the health card, one line per thing that can quietly stop cold outreach (PLAN 4.7). */
+  health: HealthLine[] | null;
 };
 
-/** The nightly jobs' own marker (B214), and whether they are late: not run yesterday or today. */
-function nightlyRun(value: unknown, now: Date): { day: string; at: string; late: boolean } | null {
-  const v = value as { day?: string; at?: string } | null | undefined;
+export type NightlyView = { day: string; at: string; late: boolean; durationMs: number | null; runningSince: string | null };
+
+/** The nightly jobs' own marker (B214, N087): when they last finished, how long they took, whether they are late (not run yesterday or today) or running now. */
+function nightlyRun(value: unknown, now: Date): NightlyView | null {
+  const v = value as NightlyMarker | null | undefined;
   if (!v?.day || !v.at) return null;
-  return { day: v.day, at: v.at, late: v.day < addDays(todayIn(workspaceTimezone(), now), -1) };
+  return { day: v.day, at: v.at, late: v.day < addDays(todayIn(workspaceTimezone(), now), -1), durationMs: v.durationMs ?? null, runningSince: v.running?.startedAt ?? null };
 }
 
 /** Everything Settings > Cold outreach shows. `full` is for admins: the CRM's options and the suppression list. */
 export async function loadColdOutreachSettings(opts: { full: boolean }, now = new Date()): Promise<ColdOutreachSettingsData> {
   const { sandbox } = await getSettings();
-  const [choices, bellwether, last, nightly, inCrmNow, retention, cleanup, total, rows, admins, release] = await Promise.all([
+  const [choices, bellwether, last, nightly, inCrmNow, retention, cleanup, total, rows, admins, release, health] = await Promise.all([
     opts.full ? crmValueChoices({ current: sandbox }) : Promise.resolve(null),
     bellwetherHealth(sandbox.enabled, now),
     lastCrmCheck(),
-    prisma.setting.findUnique({ where: { key: 'nightlyRanOn' } }),
+    prisma.setting.findUnique({ where: { key: NIGHTLY_MARKER } }),
     prisma.sandboxContact.count({ where: { status: 'ACTIVE', OR: [{ crmMatchPersonId: { not: null } }, { crmAutoPersonId: { not: null } }] } }),
     retentionView(sandbox),
     cleanupCounts(now),
@@ -235,6 +241,7 @@ export async function loadColdOutreachSettings(opts: { full: boolean }, now = ne
     opts.full ? prisma.suppression.findMany({ orderBy: { createdAt: 'desc' }, take: SUPPRESSIONS_SHOWN }) : Promise.resolve([]),
     prisma.user.findMany({ where: { role: 'ADMIN', active: true }, orderBy: { name: 'asc' }, select: { name: true } }),
     opts.full ? releaseReport() : Promise.resolve(null),
+    opts.full ? outreachHealth(now) : Promise.resolve(null),
   ]);
   return {
     sandbox, choices, valueIssues: choices ? crmValueIssues(sandbox, choices) : [],
@@ -243,6 +250,6 @@ export async function loadColdOutreachSettings(opts: { full: boolean }, now = ne
     retention, cleanup,
     suppressions: { total, rows: rows.map((s) => ({ id: s.id, ...suppressionWords(s), label: s.label ?? KIND_WORDS[s.kind] ?? codeWords(s.kind), at: s.createdAt })) },
     admins: admins.map((a) => a.name),
-    release,
+    release, health,
   };
 }

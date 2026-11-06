@@ -15,7 +15,6 @@ import { reconcile } from '../lib/engine/reconcile';
 import { refreshPersonCache } from '../lib/person-cache';
 import { snapshotScorecard } from '../lib/enrichment-work';
 import { getTwentyClient } from '../lib/twenty';
-import { todayIn } from '../lib/dates';
 import { workspaceTimezone } from '../lib/workspace';
 import { syncNextActions } from '../lib/next-actions';
 import { runMoveQueue } from '../lib/sandbox/move';
@@ -26,6 +25,8 @@ import { purgeOldPushes, sweepStuckPushes } from '../lib/sandbox/bellwether-api'
 import { importTwilioCalls } from '../lib/calls/import';
 import { runGraphMail } from '../lib/mail/graph-mail';
 import { COLD_OUTREACH_BACKFILL, runColdOutreachBackfill } from '../lib/outreach/backfills';
+import { nightlyLoop } from '../lib/nightly';
+import { ringHealth } from '../lib/outreach/health';
 import { coldOutreachReleaseOnce } from '../lib/outreach/release';
 
 const config=env();
@@ -35,46 +36,35 @@ let running=false;let lastSync=0;let lastPurge=0;let stopping=false;
  * The nightly catch-up, which the docs have always promised and nothing ran: continuous sync
  * follows a watermark, so an event Twenty never delivered is never noticed. Once a day, in the
  * small hours of the workspace's own clock, the last few days of activity are re-scanned and the
- * person cache is refreshed in full. `lastNightly` is the calendar day it last ran, so a restart
- * does not repeat it and a missed day is picked up at the next tick after the hour.
+ * person cache is refreshed in full; then the cold outreach CRM check and retention run.
+ *
+ * N087: they run in a loop of their own (src/lib/nightly.ts), beside the tick, so imports, forms,
+ * moves and launches keep their pace while a long CRM check runs. While the nightly talks to the CRM
+ * (reconcile, cache refresh) the tick's continuous sync skips its turn rather than racing it. Each
+ * run records its start, end and how long each job took under its own marker (B214), which a restart
+ * reads, so a finished day is never repeated and a missed one runs at the next tick after the hour.
  */
-let lastNightly:string|null=null;
-/**
- * The day the nightly last finished, from its own marker (B214), so a restart does not repeat it.
- * It used to read the reconcile's audit row, which the continuous sync also writes every minute, so
- * the nightly never ran at all: no CRM check, no retention.
- */
-const NIGHTLY_MARKER='nightlyRanOn';
-async function nightlyAlreadyRan(now:Date):Promise<boolean>{
- const row=await prisma.setting.findUnique({where:{key:NIGHTLY_MARKER}});
- return (row?.value as {day?:string}|null)?.day===todayIn(workspaceTimezone(),now);
-}
-async function nightly(now:Date){
- const today=todayIn(workspaceTimezone(),now);
- if(lastNightly===today)return;
- const hour=Number(new Intl.DateTimeFormat('en-GB',{timeZone:workspaceTimezone(),hour:'2-digit',hour12:false}).format(now));
- if(hour<config.RECONCILE_HOUR)return;
- if(await nightlyAlreadyRan(now)){lastNightly=today;return;}
- lastNightly=today;
- try{const stats=await reconcile({actor:SYSTEM_ACTOR,now});log('nightly reconcile',stats);}catch(error){log('nightly reconcile failed',error);}
- try{const stats=await refreshPersonCache(await getTwentyClient());log('cache refresh',stats);}catch(error){log('cache refresh failed',error);}
- try{const stats=await snapshotScorecard(now);log('enrichment scorecard snapshot',stats);}catch(error){log('enrichment scorecard snapshot failed',error);}
- // Sandbox contacts Twenty gained after the push: flagged, outreach stopped (crm-check.ts).
- // Each run is recorded for Settings > Cold outreach (B168), failed or not; one an admin started is not run twice at once.
- try{const result=await runCrmCheck({now,by:'nightly'});log(result.error?'sandbox crm check failed':'sandbox crm check',result.error??result.stats);}catch(error){log('sandbox crm check failed',error);}
- // Cold outreach retention, always on: contacts nobody works, moved contacts past the undo window, and
- // the record of what it would remove in the next 30 days (Settings > Cold outreach).
- try{const stats=await runSandboxRetention(now);log('sandbox retention',stats);}catch(error){log('sandbox retention failed',error);}
- try{const purged=await purgeOldPushes(now);if(purged)log('bellwether push keys forgotten',purged);}catch(error){log('push retention failed',error);}
- const value={day:today,at:new Date().toISOString()};
- await prisma.setting.upsert({where:{key:NIGHTLY_MARKER},create:{key:NIGHTLY_MARKER,value},update:{value}}).catch((error)=>log('nightly marker failed',error));
-}
+const nightly=nightlyLoop({hour:config.RECONCILE_HOUR,log,jobs:()=>{
+ const now=new Date();
+ return [
+  {name:'nightly reconcile',crm:true,run:()=>reconcile({actor:SYSTEM_ACTOR,now})},
+  {name:'cache refresh',crm:true,run:async()=>refreshPersonCache(await getTwentyClient())},
+  {name:'enrichment scorecard snapshot',run:()=>snapshotScorecard(now)},
+  // Sandbox contacts Twenty gained after the push: flagged, outreach stopped (crm-check.ts).
+  // Each run is recorded for Settings > Cold outreach (B168), failed or not; one an admin started is not run twice at once.
+  {name:'sandbox crm check',run:async()=>{const result=await runCrmCheck({now,by:'nightly'});if(result.error)throw new Error(result.error);return result.stats;}},
+  // Cold outreach retention, always on: contacts nobody works, moved contacts past the undo window, and
+  // the record of what it would remove in the next 30 days (Settings > Cold outreach).
+  {name:'sandbox retention',run:()=>runSandboxRetention(now)},
+  {name:'bellwether push keys forgotten',run:()=>purgeOldPushes(now)},
+ ];
+}});
 /**
  * Every 2 minutes: calls read from Twilio (read only), and the sales mailboxes read through Graph
  * when GRAPH_MAIL_ENABLED is set. Moves to the CRM go at every tick, paced under Twenty's limit.
  * Every 5 minutes: the sandbox CRM cleanup (src/lib/sandbox/crm-cleanup.ts).
  */
-let callsAt=0;let mailAt=0;let crmCleanupAt=0;
+let callsAt=0;let mailAt=0;let crmCleanupAt=0;let healthAt=0;
 async function sandboxJobs(now:number){
  try{const moved=await runMoveQueue({pauseMs:1500});if(moved.done||moved.failed||moved.dryRun)log('moves to CRM',moved);}catch(error){log('moves to CRM failed',error);}
  if(now>=callsAt){callsAt=now+120_000;try{const stats=await importTwilioCalls();if(stats.ran&&(stats.created||stats.forms||stats.recordings||stats.error))log('twilio import',stats);}catch(error){log('twilio import failed',error);}}
@@ -82,6 +72,8 @@ async function sandboxJobs(now:number){
  // B012: a Bellwether push cut off part-way (a restart, the database gone) is marked failed; its retry runs it again.
  if(now>=crmCleanupAt){try{const swept=await sweepStuckPushes();if(swept)log('bellwether pushes swept',swept);}catch(error){log('bellwether push sweep failed',error);}}
  if(now>=crmCleanupAt){crmCleanupAt=now+CLEANUP_EVERY_MS;try{const stats=await cleanupSandboxCrmPeople();if(stats.removed||stats.kept||stats.dryRun||stats.errors)log('sandbox CRM cleanup',stats);}catch(error){log('sandbox CRM cleanup failed',error);}}
+ // Every 5 minutes: the health card (PLAN 4.7); a line that turns amber rings the admins once.
+ if(now>=healthAt){healthAt=now+300_000;try{const rang=await ringHealth(new Date(now));if(rang.length)log('health card amber',rang);}catch(error){log('health check failed',error);}}
  if(now>=mailAt){mailAt=now+120_000;try{const stats=await runGraphMail();if(stats.ran&&(stats.sent||stats.replies||stats.bounces||stats.possibleBounces||stats.alerts||stats.resets||stats.errors.length))log('graph mail',stats);}catch(error){log('graph mail failed',error);}}
 }
 /** Once: E.164 copies of the phones already cached, so calls and pushes match CRM people by number. */
@@ -189,10 +181,10 @@ async function tick(){
  if(running||stopping)return;running=true;
  try{
    const now=Date.now();
-   if(now-lastSync>=config.CRM_SYNC_SECONDS*1000){
+   if(now-lastSync>=config.CRM_SYNC_SECONDS*1000&&!nightly.crmBusy){
      try{await syncContinuously();lastSync=now;}catch(error){log('CRM sync failed',error);}
    }
-   await nightly(new Date(now));
+   await nightly.poke(new Date(now)).catch((error)=>log('nightly failed to start',error));
    await evidenceRescan(new Date(now));
    await meetingsWithTwenty(now);
    await meetingsBackfill(now);
@@ -216,7 +208,7 @@ async function tick(){
 async function main(){
  log('Continuous sync every '+config.CRM_SYNC_SECONDS+' seconds; nightly reconcile after '+config.RECONCILE_HOUR+':00 '+workspaceTimezone());
  await tick();const timer=setInterval(tick,Math.min(config.WORKER_TICK_SECONDS,config.CRM_SYNC_SECONDS,120)*1000);
- const stop=async()=>{stopping=true;clearInterval(timer);while(running)await new Promise(resolve=>setTimeout(resolve,100));await prisma.$disconnect();process.exit(0);};
+ const stop=async()=>{stopping=true;clearInterval(timer);while(running)await new Promise(resolve=>setTimeout(resolve,100));await nightly.settled();await prisma.$disconnect();process.exit(0);};
  process.on('SIGTERM',stop);process.on('SIGINT',stop);
 }
 main().catch(error=>{console.error('[worker] fatal',error);process.exit(1);});
