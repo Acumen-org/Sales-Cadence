@@ -5,9 +5,8 @@ import clsx from 'clsx';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { IconAlert, IconCheck, IconClose } from '@/components/icons';
 
-/** How a flash reads: done, done with some left out, or refused. */
+/** How a flash reads: done, done with some left out, or refused (`?flashTone=warn|error`). */
 export type FlashTone = 'ok' | 'warn' | 'error';
-export const flashTone = (v: string | string[] | undefined): FlashTone => (v === 'warn' || v === 'error' ? v : 'ok');
 
 /**
  * The confirmation after an action ("Done.", "Moved to step 3.").

@@ -18,7 +18,7 @@ import { ColdOutreachHeader } from '@/components/sandbox/section-tabs';
 import { AddContactButton } from '@/components/sandbox/add-contact';
 import { QuickViews } from '@/components/sandbox/quick-views';
 import { RememberList } from '@/components/sandbox/list-link';
-import { TaskFlash, flashTone } from '@/components/tasks/task-flash';
+import { TaskFlash } from '@/components/tasks/task-flash';
 
 export const metadata = { title: 'Cold outreach' };
 
@@ -44,6 +44,8 @@ export default async function ColdOutreachPage({ searchParams }: { searchParams:
   const { params, scope } = list;
   const myPods = list.pods.filter((p) => isAdmin(user) || user.podIds.includes(p.id));
   const flash = typeof sp.flash === 'string' && sp.flash ? sp.flash.slice(0, 300) : null;
+  // Read here, not in the client toast's module: a server page cannot call a client module's function.
+  const tone = sp.flashTone === 'warn' || sp.flashTone === 'error' ? sp.flashTone : 'ok';
 
   return <PageFrame className="space-y-4 px-6 pb-8 pt-2">
     <ColdOutreachHeader user={user} current="contacts" />
@@ -90,7 +92,7 @@ export default async function ColdOutreachPage({ searchParams }: { searchParams:
       </div> : null}
     </Surface>
     <RememberList />
-    {flash ? <TaskFlash message={flash} tone={flashTone(sp.flashTone)} /> : null}
+    {flash ? <TaskFlash message={flash} tone={tone} /> : null}
   </PageFrame>;
 }
 
