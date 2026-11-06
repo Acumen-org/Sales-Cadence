@@ -104,6 +104,31 @@ describe('cold outreach, the finish (S11a, W14)', () => {
     expect(await prisma.notification.count({ where: { kind: 'campaign_back_to_draft' } })).toBe(2);
   });
 
+  it('B050 (W14, PLAN 8.12 M3): the CHECK that an owned contact has a pod is validated, after any row that would fail is put right and audited', async () => {
+    const VALIDATE = '20261106300100_owned_contact_has_pod_validated';
+    // Rows from before the CHECK, which NOT VALID let stay: an owner in a pod, and an admin owner.
+    await prisma.$executeRawUnsafe('ALTER TABLE "SandboxContact" DROP CONSTRAINT "SandboxContact_owner_has_pod"');
+    const podless = await readyContact(b.users.karson.id, b.pods.Alisa.id, { podId: null });
+    const adminOwned = await readyContact(b.users.ria.id, b.pods.Alisa.id, { podId: null });
+    const fine = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+    await prisma.$executeRawUnsafe('ALTER TABLE "SandboxContact" ADD CONSTRAINT "SandboxContact_owner_has_pod" CHECK ("ownerId" IS NULL OR "podId" IS NOT NULL) NOT VALID');
+    const validated = async () => (await prisma.$queryRawUnsafe<{ v: boolean }[]>(`SELECT convalidated AS v FROM pg_constraint WHERE conname = 'SandboxContact_owner_has_pod'`))[0]?.v;
+    expect(await validated()).toBe(false);
+
+    rerun(VALIDATE);
+
+    expect(await validated()).toBe(true);
+    expect(await prisma.sandboxContact.findUniqueOrThrow({ where: { id: podless.id } })).toEqual(expect.objectContaining({ ownerId: b.users.karson.id, podId: b.pods.Alisa.id }));
+    expect(await prisma.sandboxContact.findUniqueOrThrow({ where: { id: adminOwned.id } })).toEqual(expect.objectContaining({ ownerId: null, podId: null, claimedAt: null }));
+    expect((await prisma.auditLog.findFirstOrThrow({ where: { entityId: podless.id, action: 'pod_set_by_migration' } })).details).toEqual(expect.objectContaining({ migration: VALIDATE, podId: b.pods.Alisa.id }));
+    expect((await prisma.auditLog.findFirstOrThrow({ where: { entityId: adminOwned.id, action: 'released_by_migration' } })).details).toEqual(expect.objectContaining({ migration: VALIDATE, from: b.users.ria.id }));
+    expect(await prisma.auditLog.count({ where: { entityId: fine.id } })).toBe(0);
+    await expect(prisma.sandboxContact.update({ where: { id: fine.id }, data: { podId: null } })).rejects.toThrow();
+
+    rerun(VALIDATE);
+    expect(await prisma.auditLog.count({ where: { action: { in: ['pod_set_by_migration', 'released_by_migration'] } } })).toBe(2);
+  });
+
   it('W14: a cold campaign is launched only from its published calendar; the old launcher is gone', async () => {
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
     // A cold campaign without a studio plan (none can be made since the release) does not start.
