@@ -22,7 +22,7 @@ const line = (badge: ReactNode, words: ReactNode) => <span className="flex flex-
 export function ColdOutreachSettings({ data, canEdit, timezone }: { data: ColdOutreachSettingsData; canEdit: boolean; timezone: string }) {
   const { sandbox: s, bellwether: bw, crmCheck, retention: r, cleanup, suppressions } = data;
   const label = (key: keyof NonNullable<ColdOutreachSettingsData['choices']>['fields'], value: string) => data.choices?.fields[key].options.find((o) => o.value === value)?.label ?? optionLabel(value);
-  const ready = [s.requireFirm && 'a firm', s.requireEmailOrPhone && 'an email, or a direct or mobile phone', s.requireOwnerLogin && 'an owner with a CRM login', s.requirePod && 'a pod'].filter(Boolean) as string[];
+  const ready = [s.requireFirm && 'a firm', s.requireEmailOrPhone && 'an email or a direct or mobile phone', s.requireOwnerLogin && 'an owner with a CRM login', s.requirePod && 'a pod'].filter(Boolean) as string[];
   return <div className="space-y-3">
     {canEdit ? null : <Notice>Read only. Only {data.admins.length ? `an admin (${data.admins.join(', ')})` : 'an admin'} can change Cold outreach settings, run the checks or see the suppression list. Ask them for a change.</Notice>}
 
