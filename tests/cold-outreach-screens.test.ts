@@ -111,6 +111,13 @@ describe('Cold outreach screens (S10)', () => {
     expect(await generateMetadata({ params: Promise.resolve({ id: c.id }) })).toEqual({ title: 'Jane Doe · Cold outreach' });
   });
 
+  it('B115: a call page is titled with who the call was with, never just "Cadence"', async () => {
+    const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { firstName: 'Jane', lastName: 'Doe' });
+    const call = await prisma.callLog.create({ data: { source: 'MANUAL', direction: 'OUTBOUND', status: 'COMPLETED', userId: b.users.alisa.id, sandboxContactId: c.id, startedAt: new Date() } });
+    const { generateMetadata } = await import('@/app/(app)/calls/[id]/page');
+    expect(await generateMetadata({ params: Promise.resolve({ id: call.id }) })).toEqual({ title: 'Call with Jane Doe · Cold outreach' });
+  });
+
   it('B057: From Bellwether lists every push with its counts, and each contact with its result and why', async () => {
     const added = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { firstName: 'Jane', lastName: 'Doe' });
     const unclaimed = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { firstName: 'Bob', lastName: 'Lee', ownerId: null, podId: null });

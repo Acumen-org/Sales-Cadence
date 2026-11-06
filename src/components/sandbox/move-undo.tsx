@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
 import clsx from 'clsx';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import { useFlash } from '@/components/flash';
 import { Notice } from '@/components/ui';
 import { undoMoveAction } from '@/lib/actions/sandbox-move';
 
@@ -29,15 +29,19 @@ export function UndoMoveButton({ itemIds, label = 'Undo', confirm, campaigns = [
   const [restore, setRestore] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
-  const router = useRouter();
+  const say = useFlash();
   const run = () => start(async () => {
     const fd = new FormData();
     for (const id of itemIds) fd.append('itemId', id);
     for (const id of restore) fd.append('restore', id);
     const r = await undoMoveAction(fd);
     setOpen(false);
-    setResult({ ok: r.ok && !(r.message ?? '').startsWith('Undo incomplete'), text: r.ok ? r.message ?? 'Undone.' : r.error });
-    if (r.ok) router.refresh();
+    const ok = r.ok && !(r.message ?? '').startsWith('Undo incomplete');
+    const text = r.ok ? r.message ?? 'Undone.' : r.error;
+    // B186: an undo that worked takes this button off the page as it re-reads, so its result goes to
+    // the page's toast (which a re-read keeps); a refusal stays beside the button too.
+    if (r.ok) say(text, ok ? 'ok' : 'error');
+    else setResult({ ok: false, text });
   });
   return <span className="inline-flex flex-wrap items-center gap-2">
     <button type="button" className="btn-secondary btn-sm" disabled={pending || !itemIds.length} onClick={() => { setResult(null); setOpen(true); }}>{finishing ? 'Finish undo' : label}</button>

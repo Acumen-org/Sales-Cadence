@@ -28,6 +28,7 @@ import { sessionOf } from './helpers/cold-campaign';
 const auth = vi.hoisted(() => ({ requireUser: vi.fn() }));
 vi.mock('@/lib/auth/current-user', () => ({ requireUser: auth.requireUser, requireAdmin: auth.requireUser, toActor: (u: SessionUser) => ({ id: u.id, role: u.role, podIds: u.podIds }) }));
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {}, push: () => {}, replace: () => {} }), usePathname: () => '/cold-outreach/moves', useSearchParams: () => new URLSearchParams(), redirect: (to: string) => { throw new Error(`redirect:${to}`); }, notFound: () => { throw new Error('not found'); } }));
 
 let b: Basics;
 const actorOf = async (id: string) => {
@@ -356,6 +357,24 @@ describe('W5: Move to CRM and Undo', () => {
     expect(page.rows[0].firm).toMatch(/^(Created|Linked to) firm Rivera Wealth Partners$/);
     expect(page).toEqual(expect.objectContaining({ progress: 100, settled: true, counts: { done: 2, waiting: 0, failed: 0, undone: 0 } }));
     expect(page.leftOut).toEqual([expect.objectContaining({ contactId: out.id, reason: 'Opted out' })]);
+  });
+
+  it('B186: the result of an Undo outlives the button: it goes to the toast of the page, which the move page shows after it re-reads', async () => {
+    // The button leaves the page once its move is undone, so the result rides on the address.
+    const src = fs.readFileSync('src/components/sandbox/move-undo.tsx', 'utf8');
+    expect(src).toContain("if (r.ok) say(text, ok ? 'ok' : 'error');");
+    expect(src).not.toContain('router.refresh()');
+    const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+    const item = await moveOne(c.id, b.users.alisa.id);
+    auth.requireUser.mockResolvedValue(await sessionOf(b.users.alisa.id));
+    const { renderToStaticMarkup } = await import('react-dom/server');
+    const { default: MovePage } = await import('@/app/(app)/cold-outreach/moves/[id]/page');
+    const words = 'Undone. Jane Doe was deleted from the CRM and is back in Cold outreach.';
+    // PageFrame paints its body only once mounted in a browser, so draw what it holds.
+    const page = await MovePage({ params: Promise.resolve({ id: item.moveId }), searchParams: Promise.resolve({ flash: words }) });
+    const { createElement } = await import('react');
+    const html = renderToStaticMarkup(createElement('div', null, (page as { props: { children: unknown } }).props.children as never));
+    expect(html.replace(/&#x27;/g, "'")).toContain(words);
   });
 
   it('B106: Undo shows only to whoever may use it, and a refusal says who can', async () => {

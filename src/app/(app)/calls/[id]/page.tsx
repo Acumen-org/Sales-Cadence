@@ -17,6 +17,15 @@ import { CloseFormButton, HandFormForm } from '@/components/calls/form-tools';
 
 const FLAG_WORDS: Record<string, string> = { long_voicemail: 'Long voicemail', no_conversation: 'Line connected, no conversation', called_opted_out: 'Called someone opted out' };
 
+/** B115: the tab names the call, and the section a cold contact's call belongs to. */
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const call = await prisma.callLog.findUnique({ where: { id }, select: { person: { select: { firstName: true, lastName: true } }, sandboxContact: { select: { firstName: true, lastName: true } } } });
+  const who = call?.person ?? call?.sandboxContact ?? null;
+  const name = who ? `${who.firstName} ${who.lastName}`.trim() : '';
+  return { title: `${name ? `Call with ${name}` : 'Call'} · ${call?.sandboxContact && !call.person ? 'Cold outreach' : 'Calls'}` };
+}
+
 /**
  * One call as Cadence holds it: Twilio's facts, who it was with, its form and its recording. Its notes,
  * numbers, cost and recording show only to the rep, the contact's owner and those who see Reports (N051).

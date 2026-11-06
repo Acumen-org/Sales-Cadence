@@ -7,6 +7,7 @@ import { loadMovePage } from '@/lib/sandbox/moves-query';
 import { ActionButton } from '@/components/action-form';
 import { AutoRefresh } from '@/components/sandbox/auto-refresh';
 import { UndoMoveButton } from '@/components/sandbox/move-undo';
+import { Flash } from '@/components/flash';
 import { Badge, EmptyState, Notice, RecordHeader, Stat, Surface, ViewHeader } from '@/components/ui';
 import { retryMoveAction } from '@/lib/actions/sandbox-move';
 import { COLD_CONTACT_BASE, COLD_MOVES_HREF } from '@/lib/subject';
@@ -19,14 +20,18 @@ export const metadata = { title: 'Move to CRM · Cold outreach' };
  * it can help and only for whoever may undo (B105, B188), "Undo until" with the year from each
  * item's own deadline (N062), Undo all (B187), and what the queue left out (B186).
  */
-export default async function MovePage({ params }: { params: Promise<{ id: string }> }) {
+export default async function MovePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<{ flash?: string; flashTone?: string }> }) {
   const user = await requireUser();
   const { id } = await params;
+  // B186: an Undo's result, carried on the address so the re-read page keeps it.
+  const sp = (await searchParams) ?? {};
+  const flash = typeof sp.flash === 'string' && sp.flash ? sp.flash.slice(0, 300) : null;
   const move = await loadMovePage(id, toActor(user));
   if (!move) notFound();
   const n = (count: number, one: string) => `${count} ${one}${count === 1 ? '' : 's'}`;
   return <PageFrame className="space-y-4 px-6 pb-8 pt-2">
     {!move.settled ? <AutoRefresh /> : null}
+    {flash ? <Flash message={flash} tone={sp.flashTone === 'error' ? 'error' : 'ok'} /> : null}
     <div className="text-[12px] text-ink-500"><Link href={COLD_CONTACT_BASE} className="hover:text-ink-700">Cold outreach</Link> › <Link href={COLD_MOVES_HREF} className="hover:text-ink-700">Moves to CRM</Link></div>
     <RecordHeader
       name={`Move to CRM · ${n(move.count, 'contact')}`}
