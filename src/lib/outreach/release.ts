@@ -134,17 +134,20 @@ async function giveDriftToOwners(): Promise<ReleaseReport['drift']> {
   return out;
 }
 
-/** N001: a contact opted out while its move was running ended MOVED, and its CRM person was never opted out. */
+/**
+ * N001: a contact opted out while its move was running ended MOVED, and its CRM person was never opted
+ * out. The race leaves an opt-out from before the move finished; one lifted since is left alone.
+ */
 async function optOutMovedWhileOptedOut(): Promise<Listed> {
   const rows = await prisma.sandboxContact.findMany({
-    where: { status: 'MOVED', optedOutAt: { not: null }, twentyPersonId: { not: null } },
+    where: { status: 'MOVED', optedOutAt: { not: null }, optOutLiftedAt: null, movedAt: { not: null }, twentyPersonId: { not: null } },
     select: { id: true, twentyPersonId: true, optOutSource: true, optedOutAt: true, movedAt: true }, orderBy: { id: 'asc' },
   });
-  const people = new Map((await prisma.personCache.findMany({ where: { id: { in: rows.map((r) => r.twentyPersonId!) } }, select: { id: true, optedOut: true } })).map((p) => [p.id, p]));
+  const people = new Map((await prisma.personCache.findMany({ where: { id: { in: rows.map((r) => r.twentyPersonId!) } }, select: { id: true, optedOut: true, optOutLiftedAt: true } })).map((p) => [p.id, p]));
   const done: string[] = [];
   for (const r of rows) {
     const p = people.get(r.twentyPersonId!);
-    if (!p || p.optedOut) continue;
+    if (!p || p.optedOut || p.optOutLiftedAt || r.optedOutAt! > r.movedAt!) continue;
     const source = (r.optOutSource ?? 'contact_page') as OptOutSource;
     const res = await optOutPerson(p.id, { source, actor: SYSTEM_ACTOR, reason: 'Asked not to be contacted while being moved to the CRM; put right when the release went out.' });
     if (res.ok && res.changed) done.push(p.id);

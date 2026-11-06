@@ -145,6 +145,8 @@ describe('cold outreach, the finish (S11a, W14)', () => {
     const far = await enroll(elsewhere.id, daniel.id, Leigh);
     // N001: opted out from the post-call form while its move ran; the CRM person was never opted out.
     const raced = await readyContact(alisa.id, Alisa, { status: 'MOVED', twentyPersonId: 'person-04', movedAt: new Date('2026-11-04T12:00:00Z'), optedOutAt: new Date('2026-11-04T11:59:00Z'), optOutSource: 'call_form' });
+    // Opted out only after the move finished: not the race, left as it is.
+    await readyContact(alisa.id, Alisa, { status: 'MOVED', twentyPersonId: 'person-05', movedAt: new Date('2026-11-04T10:00:00Z'), optedOutAt: new Date('2026-11-04T11:00:00Z'), optOutSource: 'contact_page' });
     // N002: opted out, its campaign still running.
     const out = await readyContact(alisa.id, Alisa, { status: 'OPTED_OUT', optedOutAt: new Date('2026-11-04T10:00:00Z') });
     const stale = await enroll(out.id, alisa.id, Alisa);
@@ -169,7 +171,7 @@ describe('cold outreach, the finish (S11a, W14)', () => {
     const r = (await coldOutreachReleaseOnce())!;
 
     // Step 0: the counts.
-    expect(r.counts.contacts).toEqual({ ACTIVE: 8, MOVED: 1, OPTED_OUT: 1, unclaimed: 0, withoutPod: 0 });
+    expect(r.counts.contacts).toEqual({ ACTIVE: 8, MOVED: 2, OPTED_OUT: 1, unclaimed: 0, withoutPod: 0 });
     // Step 8: given to the owner, as a transfer gives it; the campaign in Leigh's pod keeps its rep.
     expect(r.drift).toEqual(expect.objectContaining({ contacts: 1, nextSteps: 1, enrollments: 1, tasks: 1, kept: { count: 1, ids: [elsewhere.id] } }));
     expect((await prisma.nextAction.findUniqueOrThrow({ where: { id: next.id } })).foUserId).toBe(alisa.id);
@@ -181,6 +183,7 @@ describe('cold outreach, the finish (S11a, W14)', () => {
     expect(r.movedWhileOptedOut.ids).toEqual(['person-04']);
     expect(await prisma.personCache.findUniqueOrThrow({ where: { id: 'person-04' } })).toEqual(expect.objectContaining({ optedOut: true, optOutSource: 'call_form' }));
     expect(raced.status).toBe('MOVED');
+    expect((await prisma.personCache.findUniqueOrThrow({ where: { id: 'person-05' } })).optedOut).toBe(false);
     // N002: the campaign ends as Opted out, its step cancelled.
     expect(r.endedForInactive.ids).toEqual([stale.e.id]);
     expect(await prisma.enrollment.findUniqueOrThrow({ where: { id: stale.e.id } })).toEqual(expect.objectContaining({ status: 'EXITED', exitReason: 'opted_out' }));
