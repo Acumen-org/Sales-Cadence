@@ -130,10 +130,7 @@ export async function TasksScreen({ sp, audience, basePath, header }: { sp: Task
     if (who) options.fos.push({ id: who.id, name: who.name, podIds: [] });
   }
   const nextInTab = nexts.rows;
-  // On /tasks the cold view is an address parameter; mounted in the section (S10) it is the page itself.
-  const carry = basePath === '/tasks' && audience === 'cold';
   const base = new URLSearchParams({ tab, mode });
-  if (carry) base.set('audience', 'cold');
   if (filters) { base.set('pod', podId ?? ''); base.set('fo', foUserId ?? ''); } if (channel) base.set('type', channel); if (limit > 200) base.set('limit', String(limit));
   const href = (patch: Record<string, string | null>) => { const next = new URLSearchParams(base); for (const [k,v] of Object.entries(patch)) { if (v === null) next.delete(k); else next.set(k,v); } return basePath + '?' + next.toString(); };
   // A ?task= that is not in this tab used to fall through to the first row, so a link from Home
@@ -218,11 +215,10 @@ export async function TasksScreen({ sp, audience, basePath, header }: { sp: Task
   const listRows = rows.map(t => { const who = rowSubject(t.enrollment); return { id: t.id, childActions: t.childActions, personName: who.name, companyName: who.companyName, label: [...new Set(t.childActions.map(c => ACTION_LABELS[c.action]))].join(' + '), parts: [...new Set(t.childActions.map(c => c.action))].map(a => ({ label: ACTION_LABELS[a], done: t.childActions.filter(c => c.action === a).every(c => c.state !== 'PENDING') })), action: t.action, stepIndex: t.stepIndex, stepDay: t.stepDay, due: t.snoozedTo ?? t.dueDate, snoozed: Boolean(t.snoozedTo), state: t.state, foName: t.fo.name, campaignName: t.enrollment.campaign?.name ?? null, warning: t.enrollment.sandboxContact && !t.enrollment.person ? bounceWords(t.enrollment.sandboxContact) : null, chips: t.enrollment.sandboxContact && !t.enrollment.person ? cues.get(t.enrollment.sandboxContact.id)?.chips : undefined }; });
   const shownCount = rows.length + nextInTab.length;
   const tabTotal = counts[tab];
-  const allHref = (() => { const next = new URLSearchParams(base); next.delete('audience'); return '/tasks?' + next.toString(); })();
   return <PageFrame className="space-y-4 px-6 pb-8 pt-2">
     {header}
     <Surface flush><Tabs inset={false} current={tab} tabs={TASK_TABS.map(t => ({ key: t, label: TAB_LABELS[t], href: href({ tab: t, task: null }), count: counts[t] }))} />
-      <Toolbar>{carry ? <Link href={allHref} className="chip" title="Show CRM and cold work together">Cold outreach only<span aria-hidden className="ml-1">×</span><span className="sr-only">: show all tasks</span></Link> : null}<Link href={href({ type: null, task: null })} className={channel ? 'chip-muted' : 'chip'}>All types</Link>{TASK_CHANNELS.map(c => <Link key={c} href={href({ type: c, task: null })} className={channel === c ? 'chip' : 'chip-muted'}><ActionIcon action={c} size={13} />{CHANNEL_LABELS[c]}<span className="ml-1 tabular-nums">{channelCounts[c]}</span></Link>)}<span className="flex w-full flex-wrap items-center gap-2 sm:ml-auto sm:w-auto"><TaskFilters pods={options.pods} fos={options.fos} podId={podId} foUserId={foUserId} mode={mode} />{taskAccess.canSet && audience === 'all' ? <CreateTaskButton today={today} fos={taskAccess.fos} canAssign={taskAccess.canAssign} query={base.toString()} selfId={user.id} workingDays={settings.rules.workingDays} /> : null}</span></Toolbar>
+      <Toolbar><Link href={href({ type: null, task: null })} className={channel ? 'chip-muted' : 'chip'}>All types</Link>{TASK_CHANNELS.map(c => <Link key={c} href={href({ type: c, task: null })} className={channel === c ? 'chip' : 'chip-muted'}><ActionIcon action={c} size={13} />{CHANNEL_LABELS[c]}<span className="ml-1 tabular-nums">{channelCounts[c]}</span></Link>)}<span className="flex w-full flex-wrap items-center gap-2 sm:ml-auto sm:w-auto"><TaskFilters pods={options.pods} fos={options.fos} podId={podId} foUserId={foUserId} mode={mode} />{taskAccess.canSet && audience === 'all' ? <CreateTaskButton today={today} fos={taskAccess.fos} canAssign={taskAccess.canAssign} query={base.toString()} selfId={user.id} workingDays={settings.rules.workingDays} /> : null}</span></Toolbar>
     </Surface>
     {/* A campaign that starts this week has no tasks yet; it is still on the screen its work will land on. */}
     {sp.flash && <TaskFlash message={sp.flash.slice(0,300)} />}

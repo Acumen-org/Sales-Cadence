@@ -13,7 +13,7 @@ import { replyCount, meetingsHeld } from '@/lib/outreach/metrics';
 import { optOutContact } from '@/lib/outreach/transitions';
 import { coldRef, COLD_CONTACT_BASE, loadSubjects, refKey } from '@/lib/subject';
 import { channelBlock, optOutConfirm, shortDay, workingDayHint } from '@/lib/task-cues';
-import { COLD_TASKS_HREF, dueCounts, filterOptions, heldWords, listNextActionItems, listTaskGroups, nextActionListInclude, parseTaskAudience, rowSubject, type TaskAudience } from '@/lib/tasks-query';
+import { COLD_TASKS_HREF, dueCounts, filterOptions, heldWords, listNextActionItems, listTaskGroups, nextActionListInclude, rowSubject, type TaskAudience } from '@/lib/tasks-query';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 import { readyContact } from './helpers/sandbox';
 
@@ -95,8 +95,6 @@ describe('one Tasks list for CRM and cold work', () => {
     // Snooze works on a cold step as on any: it moves to its day.
     await snoozeTask({ taskId: today.task.id, toDate: '2026-11-05' }, { actor: userActor(b.users.alisa), now: NOW });
     expect((await list('cold')).counts).toEqual({ today: 0, overdue: 1, upcoming: 2, done: 0 });
-    expect(parseTaskAudience('cold')).toBe('cold');
-    expect(parseTaskAudience(undefined)).toBe('all');
   });
 
   it('B158: Cold outreach > Tasks opens with no filter carried over from Contacts', () => {

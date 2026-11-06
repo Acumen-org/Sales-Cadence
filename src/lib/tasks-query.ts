@@ -21,7 +21,6 @@ export const TASK_CHANNELS: TaskChannel[] = ['CALL', 'EMAIL', 'LINKEDIN'];
  * work only, as Cold outreach > Tasks shows it. Rows carry no tag either way.
  */
 export type TaskAudience = Extract<AudienceScope, 'all' | 'cold'>;
-export const parseTaskAudience = (v: string | undefined | null): TaskAudience => (v === 'cold' ? 'cold' : 'all');
 /** Cold outreach > Tasks: the Tasks screen, cold work only, with no filter carried over from Contacts (B158). */
 export const COLD_TASKS_HREF = `${COLD_CONTACT_BASE}/tasks`;
 
