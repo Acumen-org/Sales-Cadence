@@ -39,15 +39,20 @@ export async function nightlyDue(now: Date, hour: number): Promise<boolean> {
   return (await readNightly())?.day !== todayIn(workspaceTimezone(), now);
 }
 
+/** The marker says a run is in progress, since now; the last finished run stays as it was. */
+async function markNightlyStarted(): Promise<Date> {
+  const started = new Date();
+  await writeNightly({ ...((await readNightly()) ?? {}), running: { startedAt: started.toISOString() } });
+  return started;
+}
+
 /**
  * One nightly run: each job in order, timed, a failure recorded and the next job run all the same.
  * The marker says a run is in progress from the start, and records the day, the times and each job
  * when it ends.
  */
-export async function runNightly(now: Date, jobs: NightlyJob[], hooks: { log?: (message: string, extra?: unknown) => void; onCrm?: (busy: boolean) => void } = {}): Promise<NightlyMarker> {
-  const started = new Date();
-  const previous = (await readNightly()) ?? {};
-  await writeNightly({ ...previous, running: { startedAt: started.toISOString() } });
+export async function runNightly(now: Date, jobs: NightlyJob[], hooks: { log?: (message: string, extra?: unknown) => void; onCrm?: (busy: boolean) => void } = {}, marked?: Date): Promise<NightlyMarker> {
+  const started = marked ?? (await markNightlyStarted());
   const runs: NightlyJobRun[] = [];
   for (const job of jobs) {
     const t = Date.now();
@@ -81,7 +86,7 @@ export function nightlyLoop(opts: { hour: number; jobs: () => NightlyJob[]; log?
   let doneDay: string | null = null;
   let crmBusy = false;
   return {
-    /** Starts the run when due; true when it started one. Never waits for it. */
+    /** Starts the run when due; true when it started one. Never waits for the jobs themselves. */
     async poke(now: Date): Promise<boolean> {
       const today = todayIn(workspaceTimezone(), now);
       if (running || checking || doneDay === today) return false;
@@ -95,7 +100,9 @@ export function nightlyLoop(opts: { hour: number; jobs: () => NightlyJob[]; log?
         checking = false;
       }
       doneDay = today;
-      running = runNightly(now, opts.jobs(), { log: opts.log, onCrm: (busy) => { crmBusy = busy; } })
+      // Marked as running before the tick goes on, so the health card never reads it as not run.
+      const started = await markNightlyStarted();
+      running = runNightly(now, opts.jobs(), { log: opts.log, onCrm: (busy) => { crmBusy = busy; } }, started)
         .catch((error) => opts.log?.('nightly failed', error))
         .finally(() => { running = null; });
       return true;
