@@ -223,7 +223,7 @@ function ColdToolbar({ q, view, owner, pod, source, owners, pods, myPodIds, offe
 
   return (
     <div className="flex flex-1 flex-wrap items-center gap-2">
-      <div className="relative w-full max-w-xs">
+      <div className="relative w-full max-w-[15rem]">
         <IconSearch size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
         <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search name, firm, email, phone" aria-label="Search contacts" className="!pl-9 !text-[12.5px]" />
       </div>

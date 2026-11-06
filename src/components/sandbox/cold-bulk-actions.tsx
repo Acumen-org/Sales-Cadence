@@ -43,7 +43,7 @@ function labelFor(act: BulkAct, k: number, n: number): string {
  * the list's address, so it survives the refresh (B148), and the list keeps its view and filters
  * (B192). Assign is a picker and an explicit Assign button that says the work moves too (N078).
  */
-export function ColdBulkActions({ rows, owners, pods, today, workingDays, onDone }: ColdBulkOptions & { rows: ColdTableRow[]; onDone: () => void }) {
+export function ColdBulkActions({ rows, owners, pods, today, workingDays, onDone, onClear }: ColdBulkOptions & { rows: ColdTableRow[]; onDone: () => void; /** Clear sits with the buttons, before the lines saying who is left out. */ onClear?: () => void }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -76,10 +76,18 @@ export function ColdBulkActions({ rows, owners, pods, today, workingDays, onDone
   const move = fit('move');
   const remove = fit('remove');
   const shown: [BulkAct, ColdTableRow[]][] = ([['claim', claim], ['assign', assign], ['enroll', enroll], ['next_step', next], ['move', move], ['remove', remove]] as [BulkAct, ColdTableRow[]][]).filter(([, list]) => list.length > 0);
-  // Every action shown that leaves some selected contacts out says why, in words (B151).
-  const notes = shown.filter(([, list]) => list.length < n).map(([act, list]) => {
+  // Every action shown that leaves some selected contacts out says why, in words (B151); actions
+  // that leave out the same for the same reasons share one line.
+  const leftOut = new Map<string, BulkAct[]>();
+  for (const [act, list] of shown.filter(([, l]) => l.length < n)) {
     const why = [...new Set(rows.filter((r) => !list.includes(r)).map((r) => r.allows[act] as string))];
-    return `${ACTION_NAMES[act]} leaves out ${n - list.length}: ${why.slice(0, 2).join('; ')}${why.length > 2 ? '; and more' : ''}.`;
+    const tail = `${n - list.length}: ${why.slice(0, 2).join('; ')}${why.length > 2 ? '; and more' : ''}.`;
+    leftOut.set(tail, [...(leftOut.get(tail) ?? []), act]);
+  }
+  const notes = [...leftOut].map(([tail, acts]) => {
+    const names = acts.map((a) => ACTION_NAMES[a]);
+    const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+    return `${list} ${names.length === 1 ? 'leaves' : 'leave'} out ${tail}`;
   });
   const target = owners.find((o) => o.id === assignTo);
   const withWork = assign.filter((r) => r.hasWork).length;
@@ -98,6 +106,7 @@ export function ColdBulkActions({ rows, owners, pods, today, workingDays, onDone
       </div>
     </details> : null}
     {!shown.length ? <span className="text-brand-800/80">Nothing you can do to {n === 1 ? 'this contact' : 'these contacts'} from here.</span> : null}
+    {onClear ? <button type="button" className="btn-ghost btn-sm" onClick={onClear}>Clear</button> : null}
     {notes.length ? <ul className="w-full space-y-0.5 text-[12px] text-ink-600">{notes.map((t) => <li key={t}>{t}</li>)}</ul> : null}
 
     {dialog === 'move' ? <MoveDialog ids={move.map((r) => r.id)} owners={owners} pods={pods} onClose={() => setDialog(null)} /> : null}

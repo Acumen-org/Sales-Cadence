@@ -165,7 +165,7 @@ describe('Cold outreach: the contacts list (S10)', () => {
     for (const r of pick.filter((x) => x.id !== live.id)) expect(Object.values(r.allows).every((v) => v !== true)).toBe(true);
     const html = draw(ColdBulkActions, { rows: pick, ...bulk, onDone: () => {} });
     expect(html).toContain('Move 1 of 3 to CRM');
-    expect(html).toContain('Move to CRM leaves out 2: In the CRM already; Removed.');
+    expect(html).toContain('Add to campaign, Set next step, Move to CRM and Remove leave out 2: In the CRM already; Removed.');
     expect(html).not.toContain('>Claim');
     // One live contact of hers: every action fits, with plain labels.
     const one = draw(ColdBulkActions, { rows: pick.filter((r) => r.id === live.id), ...bulk, onDone: () => {} });
@@ -192,9 +192,9 @@ describe('Cold outreach: the contacts list (S10)', () => {
     expect(html).toContain('Senior Vice President, Private Wealth · Rivera Wealth Partners of Greater Chicago');
     expect(html).toMatch(new RegExp(`title="Sent from Bellwether by Andrew on \\d+ \\w+ \\d{4}">Bellwether<`));
     // Nobody has a next step or a call yet: those columns hide; Name, Owner, Status and Source stay.
-    expect(html).not.toContain('<th>Next</th>');
-    expect(html).not.toContain('<th>Last call</th>');
-    expect(html).toContain('<th>Owner</th>');
+    expect(html).not.toContain('>Next</th>');
+    expect(html).not.toContain('>Last call</th>');
+    expect(html).toContain('>Owner</th>');
     expect(rows.find((r) => r.id === c.id)!.sub).toBe('Senior Vice President, Private Wealth · Rivera Wealth Partners of Greater Chicago');
     // An empty view has words and a way on.
     const empty = await listContacts(alisa, { view: 'closed' });
@@ -285,7 +285,7 @@ describe('Cold outreach: the contacts list (S10)', () => {
     const row = (await listContacts(alisa, { view: 'all' })).rows.find((r) => r.id === c.id)!;
     expect(row.next).toEqual({ label: 'Email · Q4 Harbor', day: 'Tue 3 Nov', overdue: true });
     const html = draw(PeopleTable, { variant: 'cold', rows: [row], canSelect: true, bulk });
-    expect(html).toContain('<th>Next</th>');
+    expect(html).toContain('>Next</th>');
     expect(html).toContain('<div class="font-medium text-red-600">Overdue · Tue 3 Nov</div>');
   });
 

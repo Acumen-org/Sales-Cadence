@@ -86,15 +86,17 @@ function useRowSelection(rows: { id: string }[]) {
   return { selected, setSelected, toggle };
 }
 
-/** The bar over a selection: how many, the actions that fit, and Clear. */
-function SelectionBar({ count, onClear, children }: { count: number; onClear: () => void; children: ReactNode }) {
+/** The bar over a selection: how many, the actions that fit, and Clear (unless the actions place it themselves). */
+function SelectionBar({ count, onClear, children }: { count: number; onClear?: () => void; children: ReactNode }) {
   return (
     <div className="flex flex-wrap items-center gap-3 border-y border-brand-100 bg-brand-50/70 px-4 py-2 text-[12.5px] text-brand-800">
       <span className="font-medium">{count} selected</span>
       {children}
-      <button type="button" className="btn-ghost btn-sm" onClick={onClear}>
-        Clear
-      </button>
+      {onClear ? (
+        <button type="button" className="btn-ghost btn-sm" onClick={onClear}>
+          Clear
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -226,7 +228,11 @@ type ColdProps = {
 };
 
 /** Each column's share of the row, so the table never scrolls sideways at 1024px; hidden columns give theirs back. */
-const COLD_SHARES = { name: 29, owner: 12, status: 24, next: 14, lastCall: 12, source: 9 } as const;
+const COLD_SHARES = { name: 23, owner: 14, status: 24, next: 13, lastCall: 14, source: 12 } as const;
+/** Cells a little tighter than People's, so every column keeps its words whole at 1024px. */
+const COLD_CELL = '!px-2';
+/** Badges wrap in this table rather than end in "…" (B153). */
+const WRAP_BADGES = '[&_.badge]:whitespace-normal [&_.truncate]:overflow-visible [&_.truncate]:whitespace-normal';
 type ColdColumn = keyof typeof COLD_SHARES;
 
 /**
@@ -251,12 +257,12 @@ function ColdPeopleTable({ rows, canSelect, bulk }: ColdProps) {
   return (
     <div>
       {chosen.length ? (
-        <SelectionBar count={chosen.length} onClear={() => setSelected(new Set())}>
-          <ColdBulkActions rows={chosen} {...bulk} onDone={() => setSelected(new Set())} />
+        <SelectionBar count={chosen.length}>
+          <ColdBulkActions rows={chosen} {...bulk} onDone={() => setSelected(new Set())} onClear={() => setSelected(new Set())} />
         </SelectionBar>
       ) : null}
       <div className="overflow-x-auto scroll-thin">
-        <table className="table table-people w-full min-w-[680px] table-fixed">
+        <table className="table table-people w-full min-w-[720px] table-fixed">
           <colgroup>
             <col className="w-10" />
             {columns.map((c) => <col key={c} style={{ width: share(c) }} />)}
@@ -266,12 +272,12 @@ function ColdPeopleTable({ rows, canSelect, bulk }: ColdProps) {
               <th className="w-9 pl-4 pr-0">
                 {canSelect ? <input type="checkbox" checked={allSelected} onChange={() => setSelected(allSelected ? new Set() : new Set(selectable.map((r) => r.id)))} disabled={!selectable.length} aria-label="Select contacts" /> : null}
               </th>
-              <th>Name</th>
-              {has('owner') ? <th>Owner</th> : null}
-              <th>Status</th>
-              {has('next') ? <th>Next</th> : null}
-              {has('lastCall') ? <th>Last call</th> : null}
-              <th>Source</th>
+              <th className={COLD_CELL}>Name</th>
+              {has('owner') ? <th className={COLD_CELL}>Owner</th> : null}
+              <th className={COLD_CELL}>Status</th>
+              {has('next') ? <th className={COLD_CELL}>Next</th> : null}
+              {has('lastCall') ? <th className={COLD_CELL}>Last call</th> : null}
+              <th className={COLD_CELL}>Source</th>
             </tr>
           </thead>
           <tbody>
@@ -280,18 +286,18 @@ function ColdPeopleTable({ rows, canSelect, bulk }: ColdProps) {
                 <td className="pl-4 pr-0">
                   {canSelect ? <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggle(r.id)} disabled={!actionable(r)} title={actionable(r) ? undefined : 'Nothing you can do to this contact from the list'} aria-label={`Select ${r.name}`} /> : null}
                 </td>
-                <td>
+                <td className={COLD_CELL}>
                   <IdentityCell name={r.name} href={r.href} shape="circle" size={28} sub={r.sub} wrap />
                 </td>
-                {has('owner') ? <td className="break-words text-[12.5px]">
+                {has('owner') ? <td className={`${COLD_CELL} ${WRAP_BADGES} break-words text-[12.5px]`}>
                   {r.unclaimed ? <><Badge tone="amber">Unclaimed</Badge>{r.ownerLeft && r.owner ? <div className="mt-1 text-[12px] text-ink-500">{r.owner} left</div> : null}</> : r.owner ? <span className="text-ink-700">{r.owner}</span> : <span className="text-ink-300">-</span>}
                 </td> : null}
-                <td>
+                <td className={`${COLD_CELL} ${WRAP_BADGES}`}>
                   <SubjectBadges badge={r.badge} chips={r.chips} limit={2} />
                   {r.move?.undo ? <div className="mt-1"><UndoMoveButton itemIds={[r.move.undo.itemId]} confirm={r.move.undo.confirm} campaigns={r.move.undo.campaigns} /></div> : null}
                   {r.move?.failed ? <div className="mt-1 break-words text-[12px] text-red-700">Move failed: {r.move.failed.error} <Link href={r.move.failed.href} className="underline">{r.move.failed.label}</Link></div> : null}
                 </td>
-                {has('next') ? <td className="break-words text-[12px]">
+                {has('next') ? <td className={`${COLD_CELL} break-words text-[12px]`}>
                   {r.next ? (
                     <>
                       <div className="text-ink-700">{r.next.label}</div>
@@ -301,7 +307,7 @@ function ColdPeopleTable({ rows, canSelect, bulk }: ColdProps) {
                     <span className="text-ink-300">-</span>
                   )}
                 </td> : null}
-                {has('lastCall') ? <td className="break-words text-[12px]">
+                {has('lastCall') ? <td className={`${COLD_CELL} break-words text-[12px]`}>
                   {r.lastCall ? (
                     <>
                       <div className="text-ink-700">{r.lastCall.outcome}</div>
@@ -311,7 +317,7 @@ function ColdPeopleTable({ rows, canSelect, bulk }: ColdProps) {
                     <span className="text-ink-300">-</span>
                   )}
                 </td> : null}
-                <td className="break-words text-[12.5px] text-ink-600">
+                <td className={`${COLD_CELL} break-words text-[12px] text-ink-600`}>
                   <span title={r.source.title}>{r.source.label}</span>
                 </td>
               </tr>
