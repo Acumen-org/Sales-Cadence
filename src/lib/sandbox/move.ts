@@ -405,7 +405,10 @@ function optionFilter(schema: TwentyIntrospection | null) {
 }
 
 export function personInput(c: MoveContact, companyId: string | null, settings: SandboxSettings, allowed: (field: string, values: string[]) => string[], fields: { leadSource: string; productInterest: string; tags: string; contactType: string; listCategory: string; pipelineStageField: string }): CreatePersonInput {
-  const extra = readExtraPhones(c.additionalPhones);
+  // B018: the CRM person gets their own lines only, never the firm's switchboard or a toll-free number.
+  const ownLine = (number: string | null | undefined, type: string | null | undefined) => Boolean(number) && type !== 'main' && type !== 'toll_free' && number !== c.companyPhone;
+  const extra = readExtraPhones(c.additionalPhones).filter((p) => ownLine(p.number, p.type));
+  const phone = ownLine(c.phone, c.phoneType) ? c.phone : extra.shift()?.number ?? null;
   const lead = allowed(fields.leadSource, [settings.leadSource]);
   const pusher = c.pushedByName ?? c.pushedByEmail;
   // B189: each lead-source line on its own line, the year on every date, "Cold outreach" in words.
@@ -418,7 +421,7 @@ export function personInput(c: MoveContact, companyId: string | null, settings: 
     ...(c.badEmail ? [`Email bounced: ${c.email ?? 'the address'} is flagged in Cadence`] : []),
   ];
   return {
-    firstName: c.firstName, lastName: c.lastName, email: c.email, additionalEmails: c.additionalEmails, phone: c.phone,
+    firstName: c.firstName, lastName: c.lastName, email: c.email, additionalEmails: c.additionalEmails, phone,
     additionalPhone: extra[0]?.number ?? null, linkedinUrl: linkedinHref(c.linkedinUrl), jobTitle: c.jobTitle, city: cityLine(c.city, c.state),
     companyId, assignedToMemberId: c.owner?.twentyMemberId ?? null, podOwner: c.pod?.podOwnerValue ?? null,
     leadSource: lead.length ? lead : allowed(fields.leadSource, [settings.leadSourceFallback]), leadSourceNotes: notes.join('\n'),

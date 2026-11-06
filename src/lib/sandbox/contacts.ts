@@ -3,7 +3,7 @@ import { prisma } from '../db';
 import { logAudit, type AuditActor } from '../audit';
 import { getSettings } from '../settings';
 import { crmDoNotContactTwin, crmMatch, internalOrBlocked, optedOutTwin, sandboxMatch, suppressionKeysOf } from './dedupe';
-import { isRoleEmail, normalizeCrd, normalizeDomain, normalizeEmail, normalizeFirmName, normalizeLinkedin, parsePhone, PHONE_TYPES, sandboxSortName } from './normalize';
+import { isRoleEmail, normalizeCountry, normalizeCrd, normalizeDomain, normalizeEmail, normalizeFirmName, normalizeLinkedin, parsePhone, PHONE_TYPES, sandboxSortName } from './normalize';
 import { findSuppressed } from './suppression';
 import { coldRef } from '../subject';
 import { refuse, withSubjectLock, RefusedError, type GuardActor } from '../outreach/guard';
@@ -47,7 +47,10 @@ export function contactData(input: Partial<ContactInput>): { ok: true; data: Pri
   if (input.firstName !== undefined) { if (!input.firstName.trim()) return { ok: false, error: 'Enter a first name.' }; data.firstName = input.firstName.trim().slice(0, 100); }
   if (input.lastName !== undefined) { if (!input.lastName.trim()) return { ok: false, error: 'Enter a last name.' }; data.lastName = input.lastName.trim().slice(0, 100); }
   if (input.jobTitle !== undefined) data.jobTitle = clean(input.jobTitle)?.slice(0, 200) ?? null;
-  const country = (clean(input.country) ?? 'US').toUpperCase().slice(0, 2);
+  // B072: "UK" and "United Kingdom" are GB; a country Cadence does not know is asked again, never cut to "UN".
+  const givenCountry = clean(input.country);
+  const country = givenCountry ? normalizeCountry(givenCountry) : 'US';
+  if (!country) return { ok: false, error: 'Enter the country as a two-letter code, like US or GB.' };
   if (input.country !== undefined) data.country = country;
   if (input.email !== undefined) {
     const e = clean(input.email);

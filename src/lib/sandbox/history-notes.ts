@@ -9,6 +9,7 @@ import type { TwentyClient } from '../twenty';
 import type { CreateNoteInput } from '../twenty/types';
 import { enrollmentStatusLabel } from '../enrollment-labels';
 import { optionLabels } from '../twenty/labels';
+import { plainText } from './normalize';
 
 /**
  * The Twenty notes a sandbox contact's history becomes when it moves (plan 8.3), and the one note
@@ -94,8 +95,11 @@ export async function historyDrafts(contactId: string, ctx: HistoryContext = {})
 /**
  * Write a note to Twenty through the outbox: logged when it lands, kept as FAILED (and retried with
  * backoff) when it does not. `meta` travels in the outbox payload so undo can find a retried note.
+ * Notes carry text from outside Cadence (Bellwether's notes, a rep's pasted words, call notes): HTML
+ * and markdown links are made plain first, so neither reaches the CRM as markup (B114).
  */
-export async function writeNote(client: TwentyClient, input: CreateNoteInput, meta: { taskId?: string | null; moveItemId?: string | null; callId?: string | null; noteKey?: string | null } = {}): Promise<string | null> {
+export async function writeNote(client: TwentyClient, raw: CreateNoteInput, meta: { taskId?: string | null; moveItemId?: string | null; callId?: string | null; noteKey?: string | null } = {}): Promise<string | null> {
+  const input: CreateNoteInput = { ...raw, title: plainText(raw.title).replace(/\s+/g, ' '), bodyMarkdown: plainText(raw.bodyMarkdown) };
   const payload = { ...input, ...(meta.moveItemId ? { cadenceMoveItemId: meta.moveItemId } : {}), ...(meta.callId ? { cadenceCallId: meta.callId } : {}), ...(meta.noteKey ? { cadenceNoteKey: meta.noteKey } : {}) };
   try {
     const { id } = await client.createNote(input);

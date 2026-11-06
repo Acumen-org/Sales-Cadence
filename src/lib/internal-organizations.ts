@@ -8,9 +8,17 @@ function hostname(value: string): string | null {
   catch { return null; }
 }
 
+/**
+ * A firm name as the internal list compares it: any alphabet, no punctuation, spaces or case, and no
+ * legal suffix, so "Acumen Strategy LLC" and "Acumen Strategy Group" are both "acumenstrategy" (B170).
+ */
+const nameKey = (name: string) => name.normalize('NFC').toLowerCase()
+  .replace(/(?<![\p{L}\p{N}])(llc|l\.l\.c\.?|inc|incorporated|ltd|limited|group|corp|corporation|co|company|lp|llp|plc|pllc|the)\.?(?![\p{L}\p{N}])/gu, ' ')
+  .replace(/[^\p{L}\p{N}]/gu, '');
+
 export function isInternalCompany(company: { name: string; domain: string | null }, rules: { internalDomains: string[]; internalCompanyNames: string[] }): boolean {
-  const nameKey = (name: string) => name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
-  if (rules.internalCompanyNames.some((name) => nameKey(name) === nameKey(company.name))) return true;
+  const firm = nameKey(company.name);
+  if (firm && rules.internalCompanyNames.some((name) => nameKey(name) === firm)) return true;
   const host = company.domain ? hostname(company.domain) : null;
   return Boolean(host && rules.internalDomains.some((domain) => {
     const own = hostname(domain);
