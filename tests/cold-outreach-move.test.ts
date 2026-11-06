@@ -18,6 +18,7 @@ import { updateContact } from '@/lib/sandbox/contacts';
 import { undoMoveAction } from '@/lib/actions/sandbox-move';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 import { readyContact } from './helpers/sandbox';
+import { sessionOf } from './helpers/cold-campaign';
 
 /**
  * W5 (cold outreach PLAN 4.5 and 8.6): Move to CRM and Undo, in the order of work that is the fix.
@@ -536,15 +537,18 @@ describe('W5: Move to CRM and Undo', () => {
     expect(actions).toEqual(expect.arrayContaining(['move_queued', 'sandbox_moved', 'move_done', 'move_undone']));
   });
 
-  it('B155 B051: the list says "CRM details complete" until a positive outcome makes it "Ready to move"; Closed after Not interested; an unchanged save is never refused as a duplicate', async () => {
+  it('B155 B051: complete details alone are never "Ready to move" in the list; a positive outcome makes it so; Closed after Not interested; an unchanged save is never refused as a duplicate', async () => {
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
-    const row = async () => (await listContacts({ q: '', owner: 'all', status: 'active', ready: '', podId: '', source: '' }, b.users.alisa.id, 1)).rows.find((r) => r.id === c.id)!;
-    expect(await row()).toEqual(expect.objectContaining({ ready: false, readyText: 'CRM details complete' }));
+    // S10: the list shows one status badge per contact (PLAN 4.0); complete details alone read as the state they are in.
+    const alisa = await sessionOf(b.users.alisa.id);
+    const row = async () => (await listContacts(alisa, { view: 'all' })).rows.find((r) => r.id === c.id)!;
+    expect((await row()).badge).toEqual(expect.objectContaining({ label: 'No next step' }));
+    expect((await listContacts(alisa, { view: 'ready' })).total).toBe(0);
     await meetingBooked(c.id, b.users.alisa.id);
-    expect(await row()).toEqual(expect.objectContaining({ ready: true, readyText: 'Ready to move' }));
+    expect((await row()).badge).toEqual(expect.objectContaining({ label: 'Ready to move', tone: 'green' }));
     const call = await prisma.callLog.create({ data: { source: 'MANUAL', direction: 'OUTBOUND', status: 'COMPLETED', userId: b.users.alisa.id, sandboxContactId: c.id, startedAt: new Date(), formDoneAt: new Date() } });
     await prisma.callForm.create({ data: { callId: call.id, userId: b.users.alisa.id, outcome: 'not_interested', nextStep: 'none', submittedAt: new Date(Date.now() + 1000) } });
-    expect(await row()).toEqual(expect.objectContaining({ ready: false, readyText: expect.stringMatching(/^Closed · Not interested/) }));
+    expect((await row()).badge).toEqual(expect.objectContaining({ label: expect.stringMatching(/^Closed · Not interested/), tone: 'gray' }));
     // B051: a contact the CRM has too saves its unchanged details without a duplicate refusal.
     const p = await prisma.personCache.findFirstOrThrow({ where: { email: { not: null }, deletedAt: null } });
     const also = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { email: p.email, crmMatchPersonId: p.id });

@@ -343,8 +343,9 @@ describe('cold campaigns on the campaign studio (S7)', () => {
     const twin = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { firstName: 'Ann', lastName: 'Twin' });
     const draft = coldDraft(b.pods.Alisa.id, [c.id, twin.id], [b.users.alisa.id], { startDate: addDays(firstWorkingDay(), 7) });
     const { campaign } = await publishColdCampaign(alisa, draft);
-    const rows = (await listContacts({ q: '', owner: 'all', status: 'active', ready: '', podId: '', source: '' }, b.users.alisa.id, 1)).rows;
-    expect(rows.find((r) => r.id === c.id)?.campaign).toEqual(expect.objectContaining({ id: campaign.id, name: 'Cold Q4 Harbor', startsOn: expect.any(String) }));
+    // S10: the list's badge and Next say which campaign holds the contact, and when it starts.
+    const rows = (await listContacts(alisa, { view: 'all' })).rows;
+    expect(rows.find((r) => r.id === c.id)).toEqual(expect.objectContaining({ badge: expect.objectContaining({ label: expect.stringMatching(/^Cold Q4 Harbor · starts /), tone: 'blue' }), next: expect.objectContaining({ label: 'Campaign starts · Cold Q4 Harbor', overdue: false }) }));
     await prisma.personCache.update({ where: { id: 'person-01' }, data: { dnd: false, optedOut: false } });
     await prisma.sandboxContact.update({ where: { id: twin.id }, data: { crmMatchPersonId: 'person-01' } });
     const stored = await prisma.campaign.findUniqueOrThrow({ where: { id: campaign.id }, include: { pod: { select: { name: true } } } });

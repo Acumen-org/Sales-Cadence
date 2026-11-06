@@ -1,13 +1,16 @@
 'use client';
 import { SortControl } from '@/components/sort-control';
 
+import Link from 'next/link';
 import { useFilterNavigation } from '@/components/filter-navigation';
 import { useId, useState } from 'react';
 import { useSearchBox } from '@/components/search-box';
 import { IconFilter, IconSearch } from '@/components/icons';
 import { optionLabel } from '@/lib/twenty/labels';
+import { CONTACT_SOURCES, SOURCE_LABELS, ownerPatch, type ListView } from '@/lib/sandbox/list-view';
 
 type Props = {
+  variant?: 'crm';
   /** Only most-important people (Twenty's MIP tag). */
   mip?: boolean;
   pods: { podOwnerValue: string; name: string }[];
@@ -56,7 +59,15 @@ const SORTS = [
 /** Filters whose "All" is a choice worth keeping in the URL, because the section has a default. */
 const EXPLICIT = new Set(['pod', 'fo']);
 
-export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, product, sort, status, tier, type, dir, tag, tags, listCategory, campaigns, campaign, mip = false }: Props) {
+/**
+ * The directory's filter row: CRM people, or with `variant: 'cold'` Cold outreach's contacts (PLAN 4.1).
+ * Both are one row that applies as it changes, with the filters in force as removable chips.
+ */
+export function PeopleToolbar(props: Props | ColdToolbarProps) {
+  return props.variant === 'cold' ? <ColdToolbar {...props} /> : <CrmToolbar {...props} />;
+}
+
+function CrmToolbar({ pods, fos, products, tiers, types, q, pod, fo, product, sort, status, tier, type, dir, tag, tags, listCategory, campaigns, campaign, mip = false }: Props) {
   const navigate = useFilterNavigation();
   const panelId = useId();
   /** Open on arrival when the URL already carries one of these, so nothing filters invisibly. */
@@ -166,6 +177,85 @@ export function PeopleToolbar({ pods, fos, products, tiers, types, q, pod, fo, p
           ))}
         </select>
       </div>
+    </div>
+  );
+}
+
+type ColdToolbarProps = {
+  variant: 'cold';
+  q: string;
+  /** The open quick view: choosing Mine or Unclaimed as the owner opens that view (N082). */
+  view: ListView;
+  /** The owner shown: the view's own when it fixes one. */
+  owner: string;
+  pod: string;
+  source: string;
+  /** Active sales reps only (B208). */
+  owners: { id: string; name: string }[];
+  pods: { id: string; name: string }[];
+  /** The reader's pods: "Your pods" is a choice when there are several. */
+  myPodIds: string[];
+  /** The reader owns contacts (Mine), and looks after leavers' contacts (Needs a new owner). */
+  offersMine: boolean;
+  offersNeedsOwner: boolean;
+  /** The filters in force, the role's defaults included, each a link that removes it (N081). */
+  chips: { key: string; label: string; isDefault: boolean; href: string }[];
+};
+
+/**
+ * Cold outreach's filter row: search, Owner, Pod and Source, applied as they change (B152). Search
+ * looks at every status from the list's default view (N079); "Unclaimed" is an owner (N082).
+ */
+function ColdToolbar({ q, view, owner, pod, source, owners, pods, myPodIds, offersMine, offersNeedsOwner, chips }: ColdToolbarProps) {
+  const navigate = useFilterNavigation();
+  const update = (patch: Record<string, string | null>) =>
+    navigate((next) => {
+      for (const [k, v] of Object.entries(patch)) {
+        if (v === null) next.delete(k);
+        else next.set(k, v);
+      }
+      // The old /sandbox filters are views now; the page, a flash and the old keys never outlive a change.
+      for (const k of ['page', 'flash', 'flashTone', 'status', 'ready']) next.delete(k);
+    });
+  const { text, setText } = useSearchBox(q, (value) => update({ q: value }));
+  const podValue = pod === 'mine' && myPodIds.length === 1 ? myPodIds[0] : pod;
+  const select = '!w-auto !max-w-[200px] !py-2 !text-[12.5px]';
+
+  return (
+    <div className="flex flex-1 flex-wrap items-center gap-2">
+      <div className="relative w-full max-w-xs">
+        <IconSearch size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Search name, firm, email, phone" aria-label="Search contacts" className="!pl-9 !text-[12.5px]" />
+      </div>
+      <select value={owner} onChange={(e) => update(ownerPatch(e.target.value, view))} aria-label="Filter by owner" className={select}>
+        <option value="">Every owner</option>
+        {offersMine ? <option value="mine">Mine</option> : null}
+        <option value="unclaimed">Unclaimed</option>
+        {offersNeedsOwner ? <option value="needs_owner">Needs a new owner</option> : null}
+        {owners.length ? <optgroup label="Sales reps">{owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</optgroup> : null}
+      </select>
+      <select value={podValue} onChange={(e) => update({ pod: e.target.value })} aria-label="Filter by pod" className={select}>
+        <option value="">All pods</option>
+        {myPodIds.length > 1 ? <option value="mine">Your pods</option> : null}
+        {pods.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
+      <select value={source} onChange={(e) => update({ source: e.target.value || null })} aria-label="Filter by source" className={select}>
+        <option value="">Any source</option>
+        {CONTACT_SOURCES.map((s) => <option key={s} value={s}>{SOURCE_LABELS[s]}</option>)}
+      </select>
+
+      {chips.length ? (
+        <div className="flex w-full flex-wrap items-center gap-2">
+          {chips.map((c) => (
+            <Link key={c.key} href={c.href} scroll={false} className="chip" title={c.isDefault ? 'Shown first for your role. Remove it to see more.' : 'Remove this filter'}>
+              {c.label}
+              <span aria-hidden className="text-brand-500">
+                ✕
+              </span>
+            </Link>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
