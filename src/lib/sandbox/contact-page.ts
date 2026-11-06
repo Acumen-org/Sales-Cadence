@@ -218,7 +218,7 @@ export async function loadContactPage(id: string, user: SessionUser, now = new D
   const open = contact.nextActions.find((n) => n.state === 'OPEN') ?? null;
   const nextStep = {
     show: live && sales,
-    blocked: workWhy ?? (outreach && !outreach.ok ? outreach.reason : null),
+    blocked: workWhy ?? outreachWhy,
     open,
   };
   const moveV = verdict('move');
@@ -286,7 +286,9 @@ export async function loadContactPage(id: string, user: SessionUser, now = new D
     const a = lastAudit('opted_out');
     banner = { kind: 'do_not_contact', since: contact.optedOutAt ? dayYear(contact.optedOutAt) : null, by: a ? actorWords(a) : null, where: optOutSourceWords(contact.optOutSource), reason: contact.optOutReason && contact.optOutReason !== contact.optOutSource ? contact.optOutReason : null };
   } else if (removed) {
-    banner = { kind: 'removed', by: contact.removedById ? userName.get(contact.removedById) ?? 'Someone' : 'Retention (no activity for a long time)', on: contact.piiClearedAt ? dayYear(contact.piiClearedAt) : dayYear(contact.statusChangedAt), reason: contact.removedReason };
+    const a = lastAudit('removed');
+    const byUser = contact.removedById ? userName.get(contact.removedById) ?? 'Someone' : a && (a.details as { by?: string } | null)?.by === 'user' ? actorWords(a) : null;
+    banner = { kind: 'removed', by: byUser ?? 'Cadence (no activity for a long time)', on: contact.piiClearedAt ? dayYear(contact.piiClearedAt) : dayYear(contact.statusChangedAt), reason: contact.removedReason };
   }
   const formOpt = contact.status === 'OPTED_OUT' && !contact.piiClearedAt ? await formOptOut(coldRef(id)) : null;
 

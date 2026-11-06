@@ -167,7 +167,8 @@ export function ContactMoreMenu({ id, name = 'this contact', mayOptOut, mayAssig
   };
   return <span ref={box} className="relative inline-flex">
     <button type="button" className="btn-secondary btn-sm" aria-haspopup="menu" aria-expanded={open} disabled={pending} onClick={() => { const r = box.current?.getBoundingClientRect(); setToLeft(Boolean(r && r.left + 320 > window.innerWidth)); setOpen((v) => !v); }}><IconDots size={14} />More</button>
-    {open ? <div role="menu" aria-label={`More for ${name}`} className={clsx('absolute top-full z-30 mt-1 w-[19rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-line bg-white py-1 shadow-pop', toLeft ? 'right-0' : 'left-0')}>
+    {/* Drawn closed too (hidden), so what More holds is in the page from the first paint. */}
+    {<div role="menu" hidden={!open} aria-label={`More for ${name}`} className={clsx('absolute top-full z-30 mt-1 w-[19rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-line bg-white py-1 shadow-pop', toLeft ? 'right-0' : 'left-0')}>
       {items.map((k) => {
         const off = !allowed[k];
         const danger = k === 'opt_out' || k === 'remove' || k === 'erase';
@@ -176,7 +177,7 @@ export function ContactMoreMenu({ id, name = 'this contact', mayOptOut, mayAssig
           <span className="block text-[12px] leading-4 text-ink-500">{off ? whyNot[k] : MORE_WORDS[k].line(name)}</span>
         </button>;
       })}
-    </div> : null}
+    </div>}
     {assigning ? <AssignButton id={id} name={name} users={users} ownerId={ownerId} work={work} release={assigning === 'release'} open onClose={() => setAssigning(null)} /> : null}
     {dialog}
   </span>;
