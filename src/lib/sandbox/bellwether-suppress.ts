@@ -88,7 +88,7 @@ export async function suppressContacts(req: SuppressRequest, now = new Date()): 
     const personId = people[0]?.id ?? answering?.twentyPersonId ?? null;
     const found = contacts.length > 0 || people.length > 0 || Boolean(refusal);
     // An id no cold contact answers for still reads opted_out from now on (contract 14.12).
-    if (found && !contacts.some((c) => c.bellwetherContactId === id || c.bellwetherAliases.includes(id))) await recordRefusal(id, 'opted_out', personId, now, 'bellwether_id');
+    if (found && !contacts.some((c) => c.bellwetherContactId === id || c.bellwetherAliases.includes(id))) await recordRefusal(id, 'opted_out', personId, { matchedOn: 'bellwether_id' });
     results.push({ bellwetherContactId: id, result: !found ? 'not_found' : changed || (refusal && refusal.status !== 'opted_out') ? 'opted_out' : 'already_opted_out', cadenceContactId: answering?.id ?? null, crmPersonId: personId });
   }
   await logAudit({ entityType: 'bellwether', entityId: 'suppress', action: 'suppress_received', actor, details: { contacts: req.contacts.length, optedOut: results.filter((r) => r.result === 'opted_out').length, notFound: results.filter((r) => r.result === 'not_found').length, reason: req.reason } });

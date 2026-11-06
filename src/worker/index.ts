@@ -22,7 +22,7 @@ import { runMoveQueue } from '../lib/sandbox/move';
 import { CLEANUP_EVERY_MS, cleanupSandboxCrmPeople } from '../lib/sandbox/crm-cleanup';
 import { checkSandboxAgainstCrm } from '../lib/sandbox/crm-check';
 import { backfillPhoneE164, runSandboxRetention } from '../lib/sandbox/retention';
-import { purgeOldPushes } from '../lib/sandbox/bellwether-api';
+import { purgeOldPushes, sweepStuckPushes } from '../lib/sandbox/bellwether-api';
 import { importTwilioCalls } from '../lib/calls/import';
 import { runGraphMail } from '../lib/mail/graph-mail';
 import { COLD_OUTREACH_BACKFILL, runColdOutreachBackfill } from '../lib/outreach/backfills';
@@ -77,6 +77,8 @@ async function sandboxJobs(now:number){
  try{const moved=await runMoveQueue({pauseMs:1500});if(moved.done||moved.failed||moved.dryRun)log('moves to CRM',moved);}catch(error){log('moves to CRM failed',error);}
  if(now>=callsAt){callsAt=now+120_000;try{const stats=await importTwilioCalls();if(stats.ran&&(stats.created||stats.forms||stats.recordings||stats.error))log('twilio import',stats);}catch(error){log('twilio import failed',error);}}
  // Every 5 minutes: people Twenty's mail or calendar sync created for sandbox contacts, removed when nobody worked them.
+ // B012: a Bellwether push cut off part-way (a restart, the database gone) is marked failed; its retry runs it again.
+ if(now>=crmCleanupAt){try{const swept=await sweepStuckPushes();if(swept)log('bellwether pushes swept',swept);}catch(error){log('bellwether push sweep failed',error);}}
  if(now>=crmCleanupAt){crmCleanupAt=now+CLEANUP_EVERY_MS;try{const stats=await cleanupSandboxCrmPeople();if(stats.removed||stats.kept||stats.dryRun||stats.errors)log('sandbox CRM cleanup',stats);}catch(error){log('sandbox CRM cleanup failed',error);}}
  if(now>=mailAt){mailAt=now+120_000;try{const stats=await runGraphMail();if(stats.ran&&(stats.sent||stats.replies||stats.bounces||stats.possibleBounces||stats.alerts||stats.resets||stats.errors.length))log('graph mail',stats);}catch(error){log('graph mail failed',error);}}
 }

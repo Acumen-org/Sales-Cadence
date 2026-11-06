@@ -275,7 +275,7 @@ export async function eraseContact(contactId: string, opts: TransitionOptions): 
     await tx.sandboxContact.update({
       where: { id: c.id },
       data: {
-        ...PII_CLEARED, status: 'OPTED_OUT', piiClearedAt: now, statusChangedAt: stamp,
+        ...PII_CLEARED, status: 'OPTED_OUT', piiClearedAt: now, erasedAt: now, statusChangedAt: stamp,
         ...(c.optedOutAt ? {} : { optedOutAt: now, optOutSource: 'erase' }),
         keptKeys: (keys.length ? keepKeys(keys) : readKeptKeys(c.keptKeys)) as unknown as Prisma.InputJsonValue,
       },
@@ -321,6 +321,10 @@ export async function liftOptOut(ref: { kind: 'cold' | 'person'; id: string }, o
     await tx.suppression.deleteMany({ where: { personId: p.id, source: 'call_form' } });
     await tx.personCache.update({ where: { id: p.id }, data: { optedOut: false, optedOutAt: null, optOutSource: null, optOutLiftedAt: now } });
     await tx.sandboxContact.updateMany({ where: { twentyPersonId: p.id, optOutSource: 'call_form' }, data: { optedOutAt: null, optOutReason: null, optOutSource: null, optOutLiftedAt: now, statusChangedAt: stamp } });
+    // A push refused because this person had opted out reads already_in_crm again, with the lift
+    // (optOutLiftedAt), so Bellwether lifts only the opt-out it was sent (contract 1.1, D4). One that
+    // matched by name and firm stays: the CRM's own Do not contact may still stand.
+    await tx.bellwetherRefusal.updateMany({ where: { crmPersonId: p.id, status: 'opted_out', matchedOn: { in: OWN_DETAIL_MATCHES.filter((m) => m !== 'name_firm') } }, data: { status: 'already_in_crm', statusChangedAt: stamp } });
     await logAudit({ entityType: 'person', entityId: p.id, action: 'opt_out_lifted', actor: opts.actor, details: { viaTicket: Boolean(opts.viaTicket), optedOutAt: p.optedOutAt?.toISOString() ?? null } }, tx);
     return true;
   }, { audit: opts.actor, now, viaTicket: opts.viaTicket });

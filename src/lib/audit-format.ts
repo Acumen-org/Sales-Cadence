@@ -60,6 +60,7 @@ const TITLES: Record<string, string> = {
   released_by_migration: 'Let go when the release went out: its owner cannot own contacts',
   opt_out_lifted: 'Opt-out lifted',
   erased: 'Details erased at their request',
+  erased_at_backfill: 'When it was erased recorded for Bellwether',
   move_queued: 'Queued to move to the CRM',
   sandbox_moved: 'Moved to the CRM',
   move_done: 'Move to the CRM finished',
@@ -158,6 +159,7 @@ const TITLES: Record<string, string> = {
   ingest_failed: 'A CRM event could not be read',
   reviewed: 'CRM event reviewed',
   push_received: 'Push received from Bellwether',
+  push_swept: 'A push from Bellwether stopped part-way and was marked failed',
   suppress_received: 'Do not contact received from Bellwether',
   enriched: 'Details enriched',
 };

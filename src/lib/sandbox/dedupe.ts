@@ -7,6 +7,7 @@ import { isRoleEmail, normalizeDomain, normalizeFirmName, normalizeLinkedin, per
 import { findSuppressed, type SuppressionKey } from './suppression';
 import { markPersonDeleted, upsertPersonCache } from '../person-cache';
 import type { TwentyClient } from '../twenty/client';
+import type { TwentyPerson } from '../twenty/types';
 
 /**
  * The dedupe rules of the Bellwether contract (plan 14.6), in order; the first hit decides. Also
@@ -193,8 +194,10 @@ export async function crmMatches(c: DedupeInput, tx: Tx = prisma, opts: { first?
     for (const p of people.filter(live)) if (add('email', p)) return found;
   }
   if (c.linkedinUrl) {
+    // B169: the CRM may keep the profile percent-encoded; both spellings find it, and the normalised URL decides.
     const slug = c.linkedinUrl.replace('linkedin.com/in/', '');
-    const people = await tx.personCache.findMany({ where: { deletedAt: null, linkedinUrl: { contains: slug, mode: 'insensitive' } }, select: { ...select, linkedinUrl: true }, orderBy: { id: 'asc' }, take: 10 });
+    const encoded = encodeURIComponent(slug);
+    const people = await tx.personCache.findMany({ where: { deletedAt: null, OR: [{ linkedinUrl: { contains: slug, mode: 'insensitive' } }, ...(encoded !== slug ? [{ linkedinUrl: { contains: encoded, mode: 'insensitive' as const } }] : [])] }, select: { ...select, linkedinUrl: true }, orderBy: { id: 'asc' }, take: 10 });
     for (const p of people.filter((x) => live(x) && normalizeLinkedin(x.linkedinUrl) === c.linkedinUrl)) if (add('linkedin_url', p)) return found;
   }
   const candidates = pushedPhones(c).filter((p) => p.type === 'direct' || p.type === 'mobile' || p.type === 'office' || p.type === 'unknown');
@@ -228,7 +231,8 @@ export async function sandboxMatch(c: DedupeInput, tx: Tx = prisma, excludeId?: 
     const hit = await tx.sandboxContact.findFirst({ where: { ...active, individualCrd: c.individualCrd } });
     if (hit) return { matchedOn: 'individual_crd', contact: hit };
   }
-  const emails = emailsOf(c);
+  // A shared inbox (info@) is not one person's: two people at a firm may both have it (PLAN 8.3, B177).
+  const emails = emailsOf(c).filter((e) => !isRoleEmail(e));
   if (emails.length) {
     const hit = await tx.sandboxContact.findFirst({ where: { ...active, OR: [{ email: { in: emails } }, { additionalEmails: { hasSome: emails } }] } });
     if (hit) return { matchedOn: 'email', contact: hit };
@@ -321,6 +325,72 @@ export async function refreshCrmCopyFor(contacts: DedupeInput[], client: TwentyC
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** What Twenty itself said for a check (B073): the people it has, and copy hits it no longer has. */
+export type TwentyAnswer = { found: TwentyPerson[]; gone: { id: string; at: Date }[] };
+
+/**
+ * Ask Twenty about these contacts without writing anything (the check before a push, B069, B073):
+ * the people it has for their emails, phones and LinkedIn profiles, and every person Cadence's copy
+ * matches that Twenty no longer has. The check applies the answer inside the transaction it rolls
+ * back (applyTwentyAnswer), so it judges exactly as the push would and leaves the copy as it was.
+ * Null when Twenty cannot be reached: the copy decides on its own, as for a push.
+ */
+export async function askTwentyFor(contacts: DedupeInput[], client: TwentyClient, budgetMs = LIVE_BUDGET_MS): Promise<TwentyAnswer | null> {
+  const answer: TwentyAnswer = { found: [], gone: [] };
+  const deadline = Date.now() + budgetMs;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`no answer within ${budgetMs} ms`)), budgetMs); });
+  late.catch(() => undefined);
+  const inTime = <T>(p: Promise<T>) => Promise.race([p, late]);
+  try {
+    for (let i = 0; i < contacts.length && Date.now() < deadline; i += LIVE_CHUNK) {
+      const chunk = contacts.slice(i, i + LIVE_CHUNK);
+      const found = await inTime(client.findPeople({ emails: chunk.flatMap(emailsOf), phones: chunk.flatMap((c) => pushedPhones(c).map((p) => p.number)), linkedinUrls: chunk.flatMap((c) => (c.linkedinUrl ? [c.linkedinUrl] : [])) }));
+      answer.found.push(...found);
+      const live = new Set(found.map((p) => p.id));
+      const hits = [...new Set((await Promise.all(chunk.map((c) => crmMatches(c)))).flat().map((m) => m.person.id).filter((id) => !live.has(id)))];
+      if (!hits.length) continue;
+      const kept = new Map((await inTime(client.getPeopleByIds(hits))).map((p) => [p.id, p]));
+      for (const id of hits) {
+        const p = kept.get(id);
+        if (p && !p.deletedAt) continue;
+        answer.gone.push({ id, at: p?.deletedAt ? new Date(p.deletedAt) : new Date() });
+      }
+    }
+    return answer;
+  } catch (err) {
+    console.warn('[bellwether] Twenty could not be asked for the check; Cadence\'s copy decides', err);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Twenty's answer into Cadence's copy, inside the caller's transaction (no opt-out runs from it). */
+export async function applyTwentyAnswer(answer: TwentyAnswer, tx: Prisma.TransactionClient): Promise<void> {
+  for (const p of answer.found) await upsertPersonCache(p, tx);
+  for (const g of answer.gone) await markPersonDeleted(g.id, g.at, tx);
+}
+
+/**
+ * B017: an active cold contact who may be the same person as a pushed one: at the same firm (by name,
+ * domain or CRD) with the same last name, or sharing an office or unknown line that is not the firm's
+ * main one. Never a refusal: the push creates the contact and warns.
+ */
+export async function possibleSandboxTwin(c: DedupeInput, tx: Tx = prisma): Promise<{ id: string; name: string } | null> {
+  const firm = normalizeFirmName(c.companyName);
+  const sameFirm = (r: Pick<SandboxContact, 'companyName' | 'companyDomain' | 'companyCrd'>) => Boolean((firm && normalizeFirmName(r.companyName) === firm) || (c.companyDomain && r.companyDomain === c.companyDomain) || (c.companyCrd && r.companyCrd === c.companyCrd));
+  const select = { id: true, firstName: true, lastName: true, companyName: true, companyDomain: true, companyCrd: true } as const;
+  const byName = await tx.sandboxContact.findMany({ where: { status: 'ACTIVE', lastName: { equals: c.lastName.trim(), mode: 'insensitive' } }, select, orderBy: { createdAt: 'asc' }, take: 20 });
+  let hit = byName.find(sameFirm);
+  const lines = pushedPhones(c).filter((p) => !personalPhone(p.type) && p.number !== c.companyPhone).map((p) => p.number);
+  if (!hit && lines.length) {
+    const byLine = await tx.sandboxContact.findMany({ where: { status: 'ACTIVE', OR: [{ phone: { in: lines } }, ...lines.map((n) => ({ additionalPhones: { array_contains: [{ number: n }] } }))] }, select, orderBy: { createdAt: 'asc' }, take: 20 });
+    hit = byLine.find(sameFirm);
+  }
+  return hit ? { id: hit.id, name: `${hit.firstName} ${hit.lastName}`.trim() } : null;
 }
 
 /** A Twenty person with the same first and last name at a company with the same domain or CRD. */

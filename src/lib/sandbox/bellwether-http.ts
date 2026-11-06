@@ -1,9 +1,14 @@
 import { NextResponse } from 'next/server';
-import { apiError, authorize, checkContacts, errorBody, MAX_BATCH, pushWithIdempotency, rateLimit, readJson, validateEnvelope, type ApiError } from './bellwether-api';
+import { databaseNow } from '../db';
+import { apiError, authorize, checkContacts, contractOf, CONTRACTS, databaseDown, errorBody, MAX_BATCH, ownersList, pushAnswerFor, pushWithIdempotency, rateLimit, readJson, validateEnvelope, type ApiError } from './bellwether-api';
 import { decodeCursor, iso, statusByIds, statusChangedSince } from './status';
 import { suppressContacts, validateSuppress } from './bellwether-suppress';
 
-/** HTTP for the Bellwether endpoints: one place that turns every refusal into the contract's error body. */
+/**
+ * HTTP for the Bellwether endpoints: one place that turns every refusal into the contract's error
+ * body, and gives each caller the contract version it asked for (X-Cadence-Contract: 1.1; without
+ * it, exactly v1).
+ */
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 
@@ -15,23 +20,29 @@ export function errorResponse(e: ApiError): NextResponse {
 
 const ok = (body: unknown) => NextResponse.json(body, { status: 200, headers: JSON_HEADERS });
 const isError = (v: unknown): v is ApiError => Boolean(v && typeof v === 'object' && 'code' in v && 'status' in v);
+const contractOfRequest = (req: Request) => contractOf(req.headers.get('x-cadence-contract'));
 
+/**
+ * B012: 503 only when Cadence's database is really unreachable (Prisma's connection codes, a refused
+ * connection); any other failure is a 500, which Bellwether retries once with the same key.
+ */
 async function guarded(work: () => Promise<NextResponse>): Promise<NextResponse> {
   try {
     return await work();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[bellwether] request failed', message);
-    if (/connect|ECONNREFUSED|database|timed out|P1001|P1008|P2024/i.test(message)) return errorResponse(apiError(503, 'unavailable', 'Cadence cannot reach its database right now. Retry later.'));
+    if (databaseDown(err)) return errorResponse(apiError(503, 'unavailable', 'Cadence cannot reach its database right now. Retry later.'));
     return errorResponse(apiError(500, 'internal', 'Something went wrong in Cadence. Retry once with the same key, then stop and report it.'));
   }
 }
 
+/** Every caller learns the contract versions here, before it sends X-Cadence-Contract (PLAN 7.3). */
 export async function handlePing(req: Request): Promise<NextResponse> {
   return guarded(async () => {
     const denied = await authorize(req.headers.get('x-cadence-api-key'));
     if (denied) return errorResponse(denied);
-    return ok({ ok: true, version: '1', sandboxEnabled: true, maxBatch: MAX_BATCH, serverTime: iso(new Date()) });
+    return ok({ ok: true, version: '1', sandboxEnabled: true, maxBatch: MAX_BATCH, serverTime: iso(await databaseNow()), contracts: [...CONTRACTS] });
   });
 }
 
@@ -46,7 +57,7 @@ export async function handlePush(req: Request): Promise<NextResponse> {
     const envelope = validateEnvelope(read.body, { idempotencyKey, requireKey: true });
     if (isError(envelope)) return errorResponse(envelope);
     const outcome = await pushWithIdempotency(envelope, read.raw, idempotencyKey!);
-    return isError(outcome) ? errorResponse(outcome) : ok(outcome.body);
+    return isError(outcome) ? errorResponse(outcome) : ok(pushAnswerFor(outcome.body, contractOfRequest(req)));
   });
 }
 
@@ -60,7 +71,7 @@ export async function handleCheck(req: Request): Promise<NextResponse> {
     if (isError(read)) return errorResponse(read);
     const envelope = validateEnvelope(read.body, { idempotencyKey: null, requireKey: false });
     if (isError(envelope)) return errorResponse(envelope);
-    return ok(await checkContacts(envelope));
+    return ok(pushAnswerFor(await checkContacts(envelope), contractOfRequest(req)));
   });
 }
 
@@ -78,6 +89,16 @@ export async function handleSuppress(req: Request): Promise<NextResponse> {
   });
 }
 
+/** Contract v1.1 (B022): who can own contacts pushed from Bellwether, with their pods. Counts against the status limit. */
+export async function handleOwners(req: Request): Promise<NextResponse> {
+  return guarded(async () => {
+    const key = req.headers.get('x-cadence-api-key');
+    const denied = (await authorize(key)) ?? rateLimit('status', key ?? '');
+    if (denied) return errorResponse(denied);
+    return ok(await ownersList());
+  });
+}
+
 export async function handleStatus(req: Request): Promise<NextResponse> {
   return guarded(async () => {
     const key = req.headers.get('x-cadence-api-key');
@@ -85,15 +106,19 @@ export async function handleStatus(req: Request): Promise<NextResponse> {
     if (denied) return errorResponse(denied);
     const read = await readJson(req);
     if (isError(read)) return errorResponse(read);
+    const contract = contractOfRequest(req);
     const b = (read.body && typeof read.body === 'object' ? read.body : {}) as Record<string, unknown>;
     const hasIds = b.bellwetherContactIds !== undefined;
     const hasSince = b.changedSince !== undefined;
     if (hasIds === hasSince) return errorResponse(apiError(422, 'invalid_request', 'Send exactly one of bellwetherContactIds or changedSince.', { fields: [{ path: 'body', problem: 'Send exactly one of bellwetherContactIds or changedSince.' }] }));
+    // B062: serverTime is the database's clock, the one every statusChangedAt is stamped with; taken
+    // before the read, so a change committed while it runs is at or after it.
+    const serverTime = iso(await databaseNow());
     if (hasIds) {
       const ids = b.bellwetherContactIds;
       if (!Array.isArray(ids) || !ids.length || ids.some((id) => typeof id !== 'string' || !id || id.length > 200)) return errorResponse(apiError(422, 'invalid_request', 'bellwetherContactIds must be 1 to 500 ids.', { fields: [{ path: 'bellwetherContactIds', problem: 'Give 1 to 500 ids, each 1 to 200 characters.' }] }));
       if (ids.length > MAX_BATCH) return errorResponse(apiError(413, 'payload_too_large', `More than ${MAX_BATCH} ids in one status request.`));
-      return ok({ serverTime: iso(new Date()), nextCursor: null, results: await statusByIds(ids as string[]) });
+      return ok({ serverTime, nextCursor: null, results: await statusByIds(ids as string[], contract) });
     }
     const since = typeof b.changedSince === 'string' ? new Date(b.changedSince) : null;
     if (!since || Number.isNaN(since.getTime())) return errorResponse(apiError(422, 'invalid_request', 'changedSince must be an ISO 8601 time.', { fields: [{ path: 'changedSince', problem: 'Give an ISO 8601 UTC time.' }] }));
@@ -101,7 +126,7 @@ export async function handleStatus(req: Request): Promise<NextResponse> {
     if (!Number.isInteger(limit) || limit < 1 || limit > MAX_BATCH) return errorResponse(apiError(422, 'invalid_request', 'limit must be 1 to 500.', { fields: [{ path: 'limit', problem: 'Give a whole number from 1 to 500.' }] }));
     const cursor = decodeCursor(typeof b.cursor === 'string' ? b.cursor : null);
     if (cursor === 'invalid') return errorResponse(apiError(422, 'invalid_request', 'cursor is not one Cadence gave.', { fields: [{ path: 'cursor', problem: 'Send the nextCursor from the previous answer, or null.' }] }));
-    const page = await statusChangedSince(since, cursor, limit);
-    return ok({ serverTime: iso(new Date()), nextCursor: page.nextCursor, results: page.results });
+    const page = await statusChangedSince(since, cursor, limit, contract);
+    return ok({ serverTime, nextCursor: page.nextCursor, results: page.results });
   });
 }

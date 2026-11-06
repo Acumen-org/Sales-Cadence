@@ -1,5 +1,5 @@
 import type { ActionType, NextActionKind, Role } from '@prisma/client';
-import { prisma } from '../db';
+import { databaseNow, prisma } from '../db';
 import { logAudit, type AuditActor } from '../audit';
 import { addDays, formatLocalDate, isLocalDate, todayIn, type LocalDate } from '../dates';
 import { getSettings, type RulesSettings } from '../settings';
@@ -342,7 +342,8 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
     const nextActionId = (await prisma.nextAction.findFirst({ where: { state: 'OPEN', ...openWhere }, select: { id: true } }))?.id ?? null;
     if (nextActionId) await prisma.callForm.update({ where: { id: form.id }, data: { nextActionId } });
   }
-  if (subject.sandboxContactId) await prisma.sandboxContact.updateMany({ where: { id: subject.sandboxContactId }, data: { lastActivityAt: now, lastOutcome: v.outcome, lastOutcomeAt: now } });
+  // Bellwether shows the last outcome (contract 1.1): its 10-minute read finds the contact by statusChangedAt (B061, B062).
+  if (subject.sandboxContactId) await prisma.sandboxContact.updateMany({ where: { id: subject.sandboxContactId }, data: { lastActivityAt: now, lastOutcome: v.outcome, lastOutcomeAt: now, statusChangedAt: await databaseNow() } });
   await logAudit({ entityType: 'call', entityId: callId, action: 'call_form_submitted', actor, details: { outcome: v.outcome, nextStep: v.nextStep, nextStepDate: v.nextStepDate, closes: closes ? `${closes.kind}:${closes.id}` : null, flags } });
 
   // The result says what happens next (B182): "Saved. Next: Email 2 of Q4 Harbor on Thu, 5 Nov 2026."

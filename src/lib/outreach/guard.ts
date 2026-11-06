@@ -244,6 +244,22 @@ export async function withSubjectLock<T>(ref: SubjectRef, actor: GuardActor | nu
   }
 }
 
+/**
+ * The guard's lock for Cadence itself when the caller already holds a transaction (the Bellwether
+ * push writes to a contact it found inside its own): lock the row, load the contact, and judge the
+ * act on its status, and refuse while a move is in flight. The caller writes after, in the same
+ * transaction; nothing here talks to Twenty.
+ */
+export async function lockColdIn(tx: Prisma.TransactionClient, id: string, act: Act): Promise<{ ok: true; subject: ColdSubject } | Refusal> {
+  const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM "SandboxContact" WHERE id = ${id} FOR UPDATE`;
+  if (!locked.length) return refuse('not_found', 'This contact is no longer in Cold outreach.');
+  const subject = (await loadColdSubject(id, tx))!;
+  const status = statusAllows(subject, act);
+  if (status) return status;
+  if (subject.moving && act !== 'opt_out' && act !== 'erase') return refuse('moving', 'This contact is being moved to the CRM. Try again in a minute.');
+  return { ok: true, subject };
+}
+
 /** The guard for many contacts, each in its own lock: one refused never stops the rest. */
 export async function forEachLocked<T>(ids: string[], actor: GuardActor | null, act: Act, work: (tx: Prisma.TransactionClient, subject: GuardSubject) => Promise<T>, opts: LockOptions = {}): Promise<{ done: { id: string; value: T }[]; refused: { id: string; refusal: Refusal }[] }> {
   const done: { id: string; value: T }[] = [];

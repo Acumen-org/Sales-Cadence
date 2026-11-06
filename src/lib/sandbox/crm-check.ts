@@ -1,5 +1,5 @@
 import type { SandboxContact } from '@prisma/client';
-import { prisma } from '../db';
+import { databaseNow, prisma } from '../db';
 import { logAudit, SYSTEM_ACTOR, type AuditActor } from '../audit';
 import { getTwentyClient, type TwentyClient } from '../twenty';
 import { exitEnrollment, OCCUPYING_STATUSES } from '../engine/enrollment';
@@ -60,13 +60,14 @@ export async function checkSandboxAgainstCrm(opts: { now?: Date; client?: Twenty
     const sources = new Map((await prisma.personCache.findMany({ where: { id: { in: matches.map((m) => m.person.id) } }, select: { id: true, createdBySource: true } })).map((p) => [p.id, p.createdBySource]));
     const match = matches.find((m) => !isAutoSource(sources.get(m.person.id)) || c.crmAutoPersonId === m.person.id) ?? null;
     if (match && c.crmMatchPersonId !== match.person.id) {
-      await prisma.sandboxContact.update({ where: { id: c.id }, data: { crmMatchPersonId: match.person.id, crmMatchedOn: match.matchedOn, crmMatchedAt: now, statusChangedAt: now } });
+      // B062: stamped with the database clock at the write, never the nightly run's start.
+      await prisma.sandboxContact.update({ where: { id: c.id }, data: { crmMatchPersonId: match.person.id, crmMatchedOn: match.matchedOn, crmMatchedAt: now, statusChangedAt: await databaseNow() } });
       const stopped = await stopOutreach(c.id, actor, now);
       await logAudit({ entityType: 'sandbox_contact', entityId: c.id, action: FLAGGED_ACTION, actor, details: { personId: match.person.id, matchedOn: match.matchedOn, campaignsEnded: stopped.ended, nextActionsClosed: stopped.closed } });
       stats.flagged++;
     } else if (!match && c.crmMatchPersonId) {
       // The person left Twenty (deleted, merged). The flag goes; stopped outreach is not restarted.
-      await prisma.sandboxContact.update({ where: { id: c.id }, data: { crmMatchPersonId: null, crmMatchedOn: null, crmMatchedAt: null, statusChangedAt: now } });
+      await prisma.sandboxContact.update({ where: { id: c.id }, data: { crmMatchPersonId: null, crmMatchedOn: null, crmMatchedAt: null, statusChangedAt: await databaseNow() } });
       await logAudit({ entityType: 'sandbox_contact', entityId: c.id, action: CLEARED_ACTION, actor, details: { personId: c.crmMatchPersonId } });
       stats.cleared++;
     }

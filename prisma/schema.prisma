@@ -1101,12 +1101,17 @@ model SandboxContact {
   /// A CRM person Bellwether's push or the nightly check thought might be this contact, not
   /// certain enough to stop outreach: "Possibly in the CRM: Jane Doe" (B143).
   possibleCrmPersonId String?
+  /// An active cold contact Bellwether's push thought might be the same person: the same firm and
+  /// last name, or a shared office line. Never a refusal: "Possibly the same as Jane Doe" (B017).
+  possibleDuplicateId String?
+  /// When an admin erased the contact (N039); Bellwether reads it as `erasedAt` and blanks the person.
+  erasedAt            DateTime?
   /// legitimate_interest | consent; set for EEA/UK contacts.
   lawfulBasis         String?
   /// Last call, email, note or task: drives retention.
   lastActivityAt      DateTime?
-  /// When the status Bellwether reads last changed: every opt-out, move, undo and removal sets it
-  /// in the same write that changes the status.
+  /// When the status Bellwether reads last changed: every opt-out, move, undo, removal, owner change,
+  /// call outcome and bounce sets it in the same write, from the database clock (B061, B062).
   statusChangedAt     DateTime      @default(now())
   movedAt             DateTime?
   movedById           String?
@@ -1463,8 +1468,11 @@ model BellwetherPushItem {
 /// Bellwether reads: already in the CRM, or refused as suppressed (opted out).
 model BellwetherRefusal {
   bellwetherContactId String   @id
-  /// already_in_crm | opted_out
+  /// already_in_crm | opted_out | refused (contract 1.1: any other refusal, with its reason; B015)
   status              String
+  /// The push's rejected reason for a refused one (invalid_field, do_not_contact, blocked_account,
+  /// internal_contact, duplicate_in_request). Contract 1.1 reports it; v1 never sees a refused one.
+  reason              String?
   crmPersonId         String?
   /// The key the refusal matched on: email | linkedin | phone_personal (direct or mobile) |
   /// phone_shared (office, main, unknown) | bellwether_id | individual_crd | name_firm. Opting a CRM

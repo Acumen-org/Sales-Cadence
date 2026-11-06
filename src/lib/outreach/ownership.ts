@@ -176,6 +176,8 @@ export async function handOverLeaverWork(tx: Prisma.TransactionClient, leaverId:
     done.contacts++;
     done.coldNextSteps += moved.nextSteps;
   }
+  // B061: the contacts left with the leaver read unclaimed in Bellwether now (N017), so their change time moves.
+  if (done.leftForLeaders) await tx.$executeRaw`UPDATE "SandboxContact" SET "statusChangedAt" = now() WHERE "ownerId" = ${leaverId} AND status = 'ACTIVE'`;
   // Cold next steps the leaver works on someone else's contact, in a pod the replacement is in.
   const coldLeft = await tx.nextAction.findMany({ where: { foUserId: leaverId, state: 'OPEN', personId: null, sandboxContact: { status: 'ACTIVE' } }, select: { id: true, sandboxContact: { select: { podId: true } } } });
   const coldIds = coldLeft.filter((n) => !n.sandboxContact?.podId || replacement.podIds.includes(n.sandboxContact.podId)).map((n) => n.id);

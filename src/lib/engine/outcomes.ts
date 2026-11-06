@@ -1,4 +1,4 @@
-import { prisma } from '../db';
+import { databaseNow, prisma } from '../db';
 import { logAudit, type AuditActor } from '../audit';
 import { getSettings, type RulesSettings } from '../settings';
 import { exitEnrollment, finishEnrollment, markReplied, setPersonFlags } from './enrollment';
@@ -89,7 +89,8 @@ export async function setSubjectFlags(subject: SubjectRef, flags: { optedOut?: b
   const data: Record<string, boolean> = {};
   for (const [k, v] of Object.entries(rest)) if (typeof v === 'boolean') data[k] = v;
   if (!Object.keys(data).length) return;
-  await prisma.sandboxContact.update({ where: { id: subject.sandboxContactId }, data });
+  // A bounce reaches Bellwether (contract 1.1 emailBounced, N040) at its next read of changes.
+  await prisma.sandboxContact.update({ where: { id: subject.sandboxContactId }, data: { ...data, ...(data.badEmail ? { statusChangedAt: await databaseNow() } : {}) } });
   await logAudit({ entityType: 'sandbox_contact', entityId: subject.sandboxContactId, action: 'flags_updated', actor, details: data });
 }
 
