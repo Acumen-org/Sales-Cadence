@@ -187,7 +187,7 @@ describe('Cold outreach: the contacts list (S10)', () => {
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { firstName: 'Alexandra', lastName: 'Montgomery-Wolstenholme', jobTitle: 'Senior Vice President, Private Wealth', companyName: 'Rivera Wealth Partners of Greater Chicago', pushedByName: 'Andrew' });
     const rows = (await listContacts(alisa, { view: 'all' })).rows;
     const html = draw(PeopleTable, { variant: 'cold', rows, canSelect: true, bulk });
-    expect(html).toContain('class="block text-[13px] font-semibold leading-5 text-ink-900 hover:text-brand-700 break-words"');
+    expect(html).toContain('class="block break-words text-[13px] font-semibold leading-5 text-ink-900 hover:text-brand-700"');
     expect(html).not.toContain('max-w-[22rem] truncate');
     expect(html).toContain('Senior Vice President, Private Wealth · Rivera Wealth Partners of Greater Chicago');
     expect(html).toMatch(new RegExp(`title="Sent from Bellwether by Andrew on \\d+ \\w+ \\d{4}">Bellwether<`));

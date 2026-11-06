@@ -165,13 +165,13 @@ export function IdentityCell({ name, sub, href, shape = 'square', size = 32, wra
       <Avatar name={name} shape={shape} size={size} />
       <div className="min-w-0">
         {href ? (
-          <Link href={href} title={name} className={clsx('block text-[13px] font-semibold leading-5 text-ink-900 hover:text-brand-700', line)}>
+          <Link href={href} title={name} className={clsx('block', line, 'text-[13px] font-semibold leading-5 text-ink-900 hover:text-brand-700')}>
             {name}
           </Link>
         ) : (
-          <div title={name} className={clsx('text-[13px] font-semibold leading-5 text-ink-900', line)}>{name}</div>
+          <div title={name} className={clsx(line, 'text-[13px] font-semibold leading-5 text-ink-900')}>{name}</div>
         )}
-        {sub ? <div title={typeof sub === 'string' ? sub : undefined} className={clsx('mt-0.5 text-[12px] leading-5 text-ink-500', line)}>{sub}</div> : null}
+        {sub ? <div title={typeof sub === 'string' ? sub : undefined} className={clsx('mt-0.5', line, 'text-[12px] leading-5 text-ink-500')}>{sub}</div> : null}
       </div>
     </div>
   );
