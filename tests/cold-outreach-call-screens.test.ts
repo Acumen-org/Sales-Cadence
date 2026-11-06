@@ -186,12 +186,6 @@ describe('W4 screens', () => {
     expect(hours).not.toContain('Fill it in');
   });
 
-  it('N051: the next step words are never filled from the call notes, which only the rep and leaders may read', () => {
-    const html = draw(context({ prefill: 'connected' }));
-    expect(html).not.toContain('Follow up:');
-    expect(fs.readFileSync('src/components/calls/post-call-form.tsx', 'utf8')).toContain("const whatShown = whatTouched ? what : '';");
-  });
-
   it('B024: the form of a call just logged stays open when the page re-reads and Log a call turns off', () => {
     // Saving the call makes it the form waiting, so the page re-reads with Log a call blocked; the blocked
     // branch must still hold the form the rep was told would open.

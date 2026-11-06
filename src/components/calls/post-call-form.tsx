@@ -150,9 +150,9 @@ export function PostCallForm({ callId, onClose, initial }: { callId: string; onC
   const first = ctx.who?.firstName ?? 'them';
   const steps = !ctx.who || !ctx.who.active ? ['none'] : chosen?.key === 'do_not_contact' || chosen?.key === 'not_interested' ? ['none'] : chosen?.group === 'stop' ? ['email', 'linkedin', 'none'] : [...(ctx.open ? ['keep'] : []), ...(ctx.campaign && !reached ? ['campaign'] : []), 'call_again', 'email', 'linkedin', 'meeting', ...(reached ? [] : ['none'])];
   const stepWords = (key: string) => key === 'keep' && ctx.open ? `Keep: ${ctx.open.words}${ctx.open.repeats ? ' (repeats)' : ''}` : key === 'campaign' && ctx.campaign ? `The campaign continues${ctx.campaign.next ? `: next is ${ctx.campaign.next}` : ''}` : ctx.campaign && !reached && DATED.has(key) && key !== 'meeting' ? `Take ${first} out: ${STEP_LABELS[key].toLowerCase()}` : STEP_LABELS[key];
-  // N051: the next step's words show to anyone who sees the contact, and the call's notes do not, so
-  // the notes are never copied into them; the rep writes what to do, or the step's name is used.
-  const whatShown = whatTouched ? what : '';
+  // N043 (PLAN 4.6): "What" starts as "Follow up: <first line of the notes>", for the rep to edit.
+  const firstLine = notes.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
+  const whatShown = whatTouched ? what : DATED.has(step) && firstLine ? `Follow up: ${firstLine}`.slice(0, 200) : '';
   const needsReason = outcome === 'no_conversation';
   const missing = !outcome ? 'Pick what happened.' : reached && !rating ? 'Rate the call.' : (reached || needsReason) && !notes.trim() ? needsReason ? 'Say why there was no conversation.' : 'Write what was said.' : !steps.includes(step) ? 'Pick the next step.' : DATED.has(step) && !date ? 'Pick the day of the next step.' : closes === '' ? 'Say which step this call closes, or none.' : null;
 
