@@ -3,6 +3,7 @@ import { prisma } from '../db';
 import { logAudit, type AuditActor } from '../audit';
 import { getSettings } from '../settings';
 import { crmDoNotContactTwin, crmMatch, internalOrBlocked, optedOutTwin, sandboxMatch, suppressionKeysOf } from './dedupe';
+import { formatLocalDate, toLocalDate } from '../dates';
 import { isRoleEmail, normalizeCountry, normalizeCrd, normalizeDomain, normalizeEmail, normalizeFirmName, normalizeLinkedin, parsePhone, PHONE_TYPES, sandboxSortName } from './normalize';
 import { findSuppressed } from './suppression';
 import { coldRef } from '../subject';
@@ -35,6 +36,8 @@ export type ContactInput = {
   companyCrd?: string | null;
   individualCrd?: string | null;
   productInterest?: string[];
+  /** Typed on its own in the Edit dialog; otherwise read from the phone ("x 7"). */
+  phoneExtension?: string | null;
 };
 
 export type ContactResult = { ok: true; id: string } | { ok: false; error: string };
@@ -170,27 +173,111 @@ export async function createContact(input: ContactInput, by: { id: string; podId
   }, { timeout: 20_000 });
 }
 
+/** What an edit may change: the fields a person types. Flags, verification and the extension follow them (B052). */
+const EDITABLE = ['firstName', 'lastName', 'jobTitle', 'email', 'phone', 'phoneType', 'linkedinUrl', 'city', 'state', 'country', 'companyName', 'companyWebsite', 'companyCrd', 'individualCrd', 'productInterest'] as const;
+/** Identity fields: a change re-checks duplicates and Do not contact (B051, N003). */
+const IDENTITY = ['email', 'phone', 'linkedinUrl', 'companyDomain', 'companyName', 'firstName', 'lastName', 'individualCrd'];
+/** Saves that change a contact's details: the version an Edit dialog loaded is the last of these (N024). */
+export const DETAIL_SAVES = ['edited', 'filled_from_push'];
+
+export type UpdateOptions = {
+  /**
+   * The version the Edit dialog loaded (N024): when the contact's details were last saved (an
+   * `edited` or `filled_from_push` audit row), or "none". A save made by anyone since refuses this
+   * one. `updatedAt` is not used: notes, claims and activity stamps move it too, and would refuse
+   * saves nobody else made.
+   */
+  version?: string | null;
+  /** The reader's zone, for "Alisa changed this contact at 10:42". */
+  timezone?: string;
+  /** B139: save even though a live contact with the same name is at the same firm. */
+  saveAnyway?: boolean;
+};
+
+/** The version an Edit dialog loads: the time of the contact's last details save, or "none". */
+export async function detailsVersion(id: string, tx: Tx = prisma): Promise<string> {
+  const last = await tx.auditLog.findFirst({ where: { entityType: 'sandbox_contact', entityId: id, action: { in: DETAIL_SAVES } }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } });
+  return last ? last.createdAt.toISOString() : 'none';
+}
+
+const sameValue = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
 /**
- * Edit a contact. Duplicate and Do not contact checks run only when an identity field's value really
- * changed (N003, B051): a form that sends every field unchanged is never refused as a duplicate.
+ * Only what really changed (B052): a value equal to the stored one is dropped, and the email's
+ * verification, the bounce flags and the phone's extension change only with the email or the phone.
  */
-export async function updateContact(id: string, input: Partial<ContactInput>, actor: AuditActor, guard: GuardActor | null = null): Promise<ContactResult> {
-  const parsed = contactData(input);
-  if (!parsed.ok) return parsed;
+function changedData(was: SandboxContact, data: Record<string, unknown>, input: Partial<ContactInput>): Record<string, unknown> {
+  const stored = was as unknown as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const k of EDITABLE) if (k in data && !sameValue(data[k], stored[k])) out[k] = data[k];
+  if ('email' in out) Object.assign(out, { emailVerification: data.emailVerification, emailIsRole: data.emailIsRole, badEmail: false, possibleBounceAt: null });
+  if ('phone' in out) Object.assign(out, { badPhone: false, phoneExtension: data.phoneExtension ?? null });
+  if ('companyWebsite' in out) out.companyDomain = data.companyDomain;
+  if (input.phoneExtension !== undefined) {
+    // The Ext box wins over an extension read from the number; an empty box keeps what the number said.
+    const typed = (input.phoneExtension ?? '').replace(/\D/g, '').slice(0, 10) || null;
+    const ext = typed ?? ('phone' in out ? (out.phoneExtension as string | null) : null);
+    if (!sameValue(ext, stored.phoneExtension)) out.phoneExtension = ext;
+    else delete out.phoneExtension;
+  }
+  return out;
+}
+
+/** The time of a save in the reader's zone: "at 10:42", or "on 5 Nov at 10:42" on another day. */
+function savedAtWords(at: Date, timezone: string, now = new Date()): string {
+  const time = new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hour12: false }).format(at);
+  const day = toLocalDate(at, timezone);
+  return day === toLocalDate(now, timezone) ? `at ${time}` : `on ${formatLocalDate(day)} at ${time}`;
+}
+
+/**
+ * Edit a contact from its Edit dialog. Only fields whose value really changed are written (B052);
+ * duplicate and Do not contact checks run only when an identity field changed (N003, B051); the
+ * same name at the same firm asks first (B139); and a dialog opened before someone else saved is
+ * refused with who and when (N024), so nobody's edit is silently undone.
+ */
+export async function updateContact(id: string, input: Partial<ContactInput>, actor: AuditActor, guard: GuardActor | null = null, opts: UpdateOptions = {}): Promise<ContactResult & { possibleDuplicate?: string; /** Nothing differed from what is stored: nothing was written. */ unchanged?: boolean }> {
+  // B138: the country is picked from a list; anything Cadence does not know is asked again.
+  if (input.country !== undefined && clean(input.country) && !normalizeCountry(clean(input.country))) return { ok: false, error: 'Pick a country.' };
+  const seen: { twin: string | null } = { twin: null };
   const r = await withSubjectLock(coldRef(id), guard, 'edit', async (tx) => {
     const contact = (await tx.sandboxContact.findUnique({ where: { id } }))!;
-    const next = { ...contact, ...(parsed.data as Partial<SandboxContact>) };
-    const data0 = parsed.data as Record<string, unknown>;
-    const was = contact as unknown as Record<string, unknown>;
-    if (['email', 'phone', 'linkedinUrl', 'companyDomain', 'companyName', 'firstName', 'lastName', 'individualCrd'].some((k) => data0[k] !== undefined && data0[k] !== was[k])) {
+    if (opts.version) {
+      const since = opts.version === 'none' ? null : new Date(opts.version);
+      const later = await tx.auditLog.findFirst({ where: { entityType: 'sandbox_contact', entityId: id, action: { in: DETAIL_SAVES }, ...(since && !Number.isNaN(since.getTime()) ? { createdAt: { gt: since } } : {}) }, orderBy: { createdAt: 'desc' } });
+      if (later) {
+        const who = later.actorType === 'USER' && later.actorId
+          ? (later.actorId === actor.id ? 'You' : (await tx.user.findUnique({ where: { id: later.actorId }, select: { name: true } }))?.name ?? later.actorLabel ?? 'Someone')
+          : later.actorLabel?.startsWith('bellwether:') ? 'Bellwether' : 'Someone';
+        throw new RefusedError(refuse('not_allowed', `${who} changed this contact ${savedAtWords(later.createdAt, opts.timezone ?? 'UTC')}; reload to see it.`));
+      }
+    }
+    // A phone is read in the contact's own country unless the country changes too.
+    const storedCountry = contact.country && normalizeCountry(contact.country) ? contact.country : undefined;
+    const parsed = contactData({ ...input, country: input.country !== undefined ? input.country : storedCountry });
+    if (!parsed.ok) throw new RefusedError(refuse('not_allowed', parsed.error));
+    const data = changedData(contact, parsed.data as Record<string, unknown>, input);
+    const fields = Object.keys(data);
+    if (!fields.length) return fields;
+    const next = { ...contact, ...(data as Partial<SandboxContact>) };
+    if (IDENTITY.some((k) => k in data)) {
       const refused = await refusalFor(next, id, tx, { crmMatch: false });
       if (refused) throw new RefusedError(refuse('not_allowed', refused));
     }
-    const data = { ...parsed.data, ...(parsed.data.sortName === null ? { sortName: sandboxSortName(next.firstName, next.lastName) } : {}) };
-    await tx.sandboxContact.update({ where: { id }, data });
-    await logAudit({ entityType: 'sandbox_contact', entityId: id, action: 'edited', actor, details: { fields: Object.keys(parsed.data) } }, tx);
+    if (!opts.saveAnyway && ['firstName', 'lastName', 'companyName', 'companyDomain'].some((k) => k in data)) {
+      const twin = await sameNameAtFirm(next, tx, id);
+      if (twin) {
+        seen.twin = twin.id;
+        throw new RefusedError(refuse('not_allowed', `${twin.name} at the same firm is already in Cold outreach${twin.owner ? `, owned by ${twin.owner}` : ', unclaimed'}. Open that contact, or save anyway if it is someone else.`));
+      }
+    }
+    if ('firstName' in data || 'lastName' in data) data.sortName = sandboxSortName(next.firstName, next.lastName);
+    await tx.sandboxContact.update({ where: { id }, data: data as Prisma.SandboxContactUpdateInput });
+    await logAudit({ entityType: 'sandbox_contact', entityId: id, action: 'edited', actor, details: { fields } }, tx);
+    return fields;
   }, { audit: actor });
-  return r.ok ? { ok: true, id } : { ok: false, error: r.reason };
+  if (!r.ok) return { ok: false, error: r.reason, ...(seen.twin ? { possibleDuplicate: seen.twin } : {}) };
+  return r.value.length ? { ok: true, id } : { ok: true, id, unchanged: true };
 }
 
 /**

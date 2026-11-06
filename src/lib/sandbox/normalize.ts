@@ -178,6 +178,20 @@ export function normalizeCountry(raw: string | null | undefined): string | null 
   return regionsByName().get(key) ?? null;
 }
 
+/** Countries a person picks from first: where nearly every contact is. */
+const USUAL_COUNTRIES = ['US', 'CA', 'GB'];
+
+/**
+ * Every country Cadence knows, for a country select (B138): the usual ones first, then the rest by
+ * name. The same codes `normalizeCountry` accepts, so nothing picked here is ever refused.
+ */
+export function countryChoices(): { code: string; name: string }[] {
+  const names = new Intl.DisplayNames(['en'], { type: 'region' });
+  const all = [...new Set(regionsByName().values())].map((code) => ({ code, name: names.of(code) ?? code }));
+  const usual = USUAL_COUNTRIES.flatMap((code) => all.filter((c) => c.code === code));
+  return [...usual, ...all.filter((c) => !USUAL_COUNTRIES.includes(c.code)).sort((a, b) => a.name.localeCompare(b.name))];
+}
+
 /** Control characters other than tab and newline: never stored (a NUL breaks Postgres text, B012). */
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
 export const stripControl = (s: string) => s.replace(CONTROL, '');

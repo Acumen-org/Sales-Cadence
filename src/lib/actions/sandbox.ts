@@ -34,7 +34,7 @@ const field = (fd: FormData, k: string) => (fd.has(k) ? String(fd.get(k) ?? '') 
 
 function contactInput(fd: FormData): Partial<ContactInput> {
   const input: Partial<ContactInput> = {};
-  for (const k of ['firstName', 'lastName', 'jobTitle', 'email', 'phone', 'phoneType', 'linkedinUrl', 'city', 'state', 'country', 'companyName', 'companyWebsite', 'companyCrd', 'individualCrd'] as const) {
+  for (const k of ['firstName', 'lastName', 'jobTitle', 'email', 'phone', 'phoneExtension', 'phoneType', 'linkedinUrl', 'city', 'state', 'country', 'companyName', 'companyWebsite', 'companyCrd', 'individualCrd'] as const) {
     const v = field(fd, k);
     if (v !== undefined) (input as Record<string, unknown>)[k] = v;
   }
@@ -51,12 +51,17 @@ export async function createContactAction(fd: FormData): Promise<ActionResult & 
   return r.ok ? { ok: true, message: 'Added to Cold outreach.', redirectTo: subjectHref(coldRef(r.id)) } : r;
 }
 
+/**
+ * The contact page's Edit dialog: only the fields that changed, and the version it loaded (B052,
+ * N024). A same-name twin at the firm comes back with its id, for "Open that contact" (B139).
+ */
 export async function updateContactAction(fd: FormData): Promise<ActionResult> {
   const user = await requireUser();
   const id = String(fd.get('id') ?? '');
-  const r = await updateContact(id, contactInput(fd), userActor(user), toActor(user));
+  const r = await updateContact(id, contactInput(fd), userActor(user), toActor(user), { version: field(fd, 'version') ?? null, timezone: user.timezone, saveAnyway: field(fd, 'saveAnyway') === '1' });
   refresh(id);
-  return r.ok ? { ok: true, message: 'Saved.' } : r;
+  if (!r.ok) return r.possibleDuplicate ? { ok: false, error: r.error, data: { possibleDuplicate: r.possibleDuplicate } } as ActionResult : { ok: false, error: r.error };
+  return { ok: true, message: r.unchanged ? 'Nothing had changed.' : 'Saved.' };
 }
 
 /** Many contacts, each through the guard on its own; the refusals are named, not swallowed. */
@@ -132,7 +137,7 @@ export async function setNextActionAction(fd: FormData): Promise<ActionResult> {
   const fo = contact?.ownerId && contact.owner?.active ? contact.ownerId : user.id;
   const r = await setColdNextStep(id, { label, action, dueDate, foUserId: fo }, userActor(user), { guard: toActor(user), act: 'next_step', user });
   refresh(id);
-  return r.ok ? { ok: true, message: 'Next action set.' } : { ok: false, error: r.reason };
+  return r.ok ? { ok: true, message: 'Next step set.' } : { ok: false, error: r.reason };
 }
 
 /**
@@ -166,7 +171,8 @@ export async function optOutContactAction(fd: FormData): Promise<ActionResult> {
   const r = await optOutContact(id, { source: 'contact_page', actor: userActor(user), guard: toActor(user), reason: String(fd.get('reason') ?? '') || null, createdById: user.id });
   refresh(id);
   if (!r.ok) return { ok: false, error: r.reason };
-  return { ok: true, message: r.changed ? 'Opted out. Cadence will not contact this person again, and Bellwether shows them as opted out.' : 'This contact is already opted out.' };
+  // N104: reps email from Outlook and dial from their phones, so the words say what to do, not what Cadence does.
+  return { ok: true, message: r.changed ? 'Opted out. Do not email, call or message this person. Cadence blocks calls and campaigns. Bellwether shows them as Do not contact.' : 'This contact is already opted out.' };
 }
 
 export async function removeContactsAction(fd: FormData): Promise<ActionResult> {

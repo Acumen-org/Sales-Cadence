@@ -31,12 +31,13 @@ export function checkReady(c: ReadyContact, ctx: { owner: { twentyMemberId: stri
   if (!realName(c.firstName)) missing.push({ key: 'firstName', text: 'First name' });
   if (!realName(c.lastName)) missing.push({ key: 'lastName', text: 'Last name' });
   if (ctx.settings.requireFirm && !c.companyName?.trim()) missing.push({ key: 'companyName', text: 'Firm' });
-  if (ctx.settings.requireEmailOrPhone && !hasUsableEmail(c) && !hasReachablePhone(c)) missing.push({ key: 'email', text: 'An email or a direct or mobile phone' });
-  if (!c.ownerId) missing.push({ key: 'owner', text: 'An owner' });
+  // B154: each item is a plain noun, said the same in the checklist, the Move dialog and the list.
+  if (ctx.settings.requireEmailOrPhone && !hasUsableEmail(c) && !hasReachablePhone(c)) missing.push({ key: 'email', text: 'Email or direct phone' });
+  if (!c.ownerId) missing.push({ key: 'owner', text: 'Owner (claim it)' });
   // N017: an owner whose access was removed counts as missing.
   else if (ctx.owner?.active === false) missing.push({ key: 'owner', text: `${ctx.owner.name} has left: assign a new owner` });
-  else if (ctx.settings.requireOwnerLogin && !ctx.owner?.twentyMemberId) missing.push({ key: 'owner', text: `${ctx.owner?.name ?? 'The owner'} has no CRM login` });
-  if (ctx.settings.requirePod && !c.podId) missing.push({ key: 'pod', text: 'A pod' });
+  else if (ctx.settings.requireOwnerLogin && !ctx.owner?.twentyMemberId) missing.push({ key: 'owner', text: `CRM login for ${ctx.owner?.name ?? 'the owner'}` });
+  if (ctx.settings.requirePod && !c.podId) missing.push({ key: 'pod', text: 'Pod' });
   if (c.status !== 'ACTIVE') missing.push({ key: 'status', text: c.status === 'OPTED_OUT' ? 'Opted out' : c.status === 'MOVED' ? 'Already moved' : 'Removed' });
   if (!c.jobTitle?.trim()) warnings.push({ key: 'jobTitle', text: 'No job title' });
   if (!c.linkedinUrl) warnings.push({ key: 'linkedinUrl', text: 'No LinkedIn' });
@@ -44,6 +45,27 @@ export function checkReady(c: ReadyContact, ctx: { owner: { twentyMemberId: stri
   if (c.email && c.emailVerification === 'risky') warnings.push({ key: 'email', text: 'Email is only risky' });
   if (!c.productInterest.length) warnings.push({ key: 'productInterest', text: 'No product interest' });
   return { ready: missing.length === 0, missing, warnings };
+}
+
+export type ChecklistKey = 'name' | 'companyName' | 'email' | 'owner' | 'pod';
+export type ChecklistItem = { key: ChecklistKey; label: string; done: boolean };
+
+/**
+ * The CRM checklist on the contact page (PLAN 4.2, B104, B154): every detail a move needs, done or
+ * not, in plain nouns ("Owner (claim it)", "Pod", "Email or direct phone"), so "4 of 5 done" counts
+ * what the rep can see. Built from `checkReady`, so the two never disagree.
+ */
+export function crmChecklist(r: Readiness, settings: SandboxSettings): { items: ChecklistItem[]; done: number; total: number } {
+  const missing = new Map(r.missing.map((m) => [m.key, m.text]));
+  const items: ChecklistItem[] = [];
+  const nameGap = [missing.get('firstName'), missing.get('lastName')].filter(Boolean);
+  items.push({ key: 'name', label: nameGap.length === 2 ? 'First and last name' : nameGap[0] ?? 'Name', done: !nameGap.length });
+  if (settings.requireFirm) items.push({ key: 'companyName', label: 'Firm', done: !missing.has('companyName') });
+  if (settings.requireEmailOrPhone) items.push({ key: 'email', label: 'Email or direct phone', done: !missing.has('email') });
+  items.push({ key: 'owner', label: missing.get('owner') ?? 'Owner', done: !missing.has('owner') });
+  if (settings.requirePod) items.push({ key: 'pod', label: 'Pod', done: !missing.has('pod') });
+  const done = items.filter((i) => i.done).length;
+  return { items, done, total: items.length };
 }
 
 /** "Ready", or the first missing item and how many more. */
