@@ -144,7 +144,7 @@ test('people Twenty creates from email for sandbox contacts are cleaned up unles
   await page.getByRole('button', { name: 'Clean up now' }).click();
   await expect(page.getByText('Cleanup: 1 removed, 1 kept and flagged.')).toBeVisible();
   await page.reload();
-  await expect(page.getByText(/^1 people · 1 in the last 7 days$/)).toBeVisible();
+  await expect(page.getByText(/^1 person · 1 in the last 7 days$/)).toBeVisible();
 
   // Nora is gone from People; Owen stays, and his sandbox contact says so.
   await page.goto(`/people?q=${encodeURIComponent(untouched.first)}`);

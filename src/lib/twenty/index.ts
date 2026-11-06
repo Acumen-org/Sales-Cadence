@@ -149,7 +149,7 @@ export async function getTwentyClient(): Promise<TwentyClient> {
     base = mockStoreEnabled() ? sharedMock(getMockTwentyClient()) : getMockTwentyClient();
   } else {
     if (!conn.baseUrl || !conn.apiKey) {
-      throw new Error('TWENTY_MODE=graphql but TWENTY_API_URL / TWENTY_API_KEY are not configured (env or Settings > Twenty).');
+      throw new Error('TWENTY_MODE=graphql but TWENTY_API_URL / TWENTY_API_KEY are not configured (env or Settings > CRM).');
     }
     const schema = await getTwentySchema();
     const key = `${conn.baseUrl}|${conn.apiKey}|${JSON.stringify(schema)}`;

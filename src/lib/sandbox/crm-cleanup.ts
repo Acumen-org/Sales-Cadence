@@ -97,11 +97,11 @@ export async function keepReasons(client: TwentyClient, person: TwentyPerson): P
   return reasons;
 }
 
-/** One run. Does nothing while the switch in Settings > Sandbox is off; in dry run it only logs. */
+/** One run. Does nothing while the switch in Settings > Cold outreach is off; in dry run it only logs. */
 export async function cleanupSandboxCrmPeople(opts: { actor?: AuditActor; limit?: number; client?: TwentyClient } = {}): Promise<CleanupStats> {
   const stats: CleanupStats = { ran: false, checked: 0, removed: 0, kept: 0, dryRun: 0, skipped: 0, errors: 0 };
   const settings = await getSettings();
-  if (!settings.sandbox.cleanupAutoCreated) return { ...stats, reason: 'The cleanup is switched off in Settings > Sandbox.' };
+  if (!settings.sandbox.cleanupAutoCreated) return { ...stats, reason: 'The cleanup is switched off in Settings > Cold outreach.' };
   const client = opts.client ?? (await getTwentyClient());
   const actor = opts.actor ?? SYSTEM_ACTOR;
   const dryRun = client.kind === 'dry-run';

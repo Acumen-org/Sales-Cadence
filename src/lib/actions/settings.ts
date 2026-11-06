@@ -4,6 +4,8 @@ import { revalidatePath } from 'next/cache';
 import { requireAdmin } from '../auth/current-user';
 import { logAudit, userActor } from '../audit';
 import { cleanupSandboxCrmPeople } from '../sandbox/crm-cleanup';
+import { crmCheckWords, CRM_CHECK_RUNNING, RUN_NOW_BUDGET_MS, runCrmCheck } from '../sandbox/crm-check';
+import { crmValueChoices, crmValueRefusal } from '../sandbox/cold-settings';
 import { CallingSettingsSchema, getSettings, MatchingSettingsSchema, RulesSettingsSchema, SandboxSettingsSchema, saveSettingsSection, SyncSettingsSchema, TwentySettingsSchema } from '../settings';
 import { applyNeverProspectRule } from '../non-prospects';
 import type { ActionResult } from './users';
@@ -54,7 +56,7 @@ export async function saveTwentySettingsAction(formData: FormData): Promise<Acti
   await saveSettingsSection('twenty', parsed.data);
   await logAudit({ entityType: 'settings', entityId: 'twenty', action: 'updated', actor: userActor(admin), details: { baseUrl: parsed.data.baseUrl ?? null, apiKeySet: Boolean(parsed.data.apiKey), schemaOverrides: schema ? Object.keys(schema) : [] } });
   revalidatePath('/settings');
-  return { ok: true, message: 'Twenty settings saved.' };
+  return { ok: true, message: 'CRM settings saved.' };
 }
 
 export async function saveMatchingSettingsAction(formData: FormData): Promise<ActionResult> {
@@ -152,9 +154,13 @@ export async function applyNeverProspectRuleAction(): Promise<ActionResult> {
   return { ok: true, message: applied.blocked.length ? `${applied.blocked.length} account${applied.blocked.length === 1 ? '' : 's'} blocked.` : 'Nothing new to block.' };
 }
 
-/** Settings > Sandbox: the CRM-ready rules, what Move to CRM writes, the bulk limit (at most 50), undo and retention. */
+/**
+ * Settings > Cold outreach: the CRM-ready rules, what Move to CRM writes, the bulk limit (at most 50),
+ * undo and retention. The CRM values must be options the CRM has, never a typo (B060).
+ */
 export async function saveSandboxSettingsAction(formData: FormData): Promise<ActionResult> {
   const admin = await requireAdmin();
+  const current = await getSettings();
   const num = (k: string) => (formData.get(k) ? Number(formData.get(k)) : undefined);
   const parsed = SandboxSettingsSchema.safeParse({
     enabled: bool(formData.get('enabled')),
@@ -164,7 +170,8 @@ export async function saveSandboxSettingsAction(formData: FormData): Promise<Act
     retentionUnworkedDays: num('retentionUnworkedDays'),
     leadSource: String(formData.get('leadSource') ?? '').trim() || undefined,
     leadSourceFallback: String(formData.get('leadSourceFallback') ?? '').trim() || undefined,
-    contactType: list(formData.get('contactType')),
+    // One box per option; a comma list still reads, for a caller that posts it that way.
+    contactType: formData.getAll('contactType').flatMap((v) => list(v)),
     listCategory: String(formData.get('listCategory') ?? '').trim() || undefined,
     pipelineStage: String(formData.get('pipelineStage') ?? '').trim() || undefined,
     requireFirm: bool(formData.get('requireFirm')),
@@ -174,10 +181,12 @@ export async function saveSandboxSettingsAction(formData: FormData): Promise<Act
     cleanupAutoCreated: bool(formData.get('cleanupAutoCreated')),
   });
   if (!parsed.success) return { ok: false, error: issues(parsed.error) };
+  const refusal = crmValueRefusal(parsed.data, await crmValueChoices({ current: current.sandbox }));
+  if (refusal) return { ok: false, error: refusal };
   await saveSettingsSection('sandbox', parsed.data);
   await logAudit({ entityType: 'settings', entityId: 'sandbox', action: 'updated', actor: userActor(admin), details: parsed.data });
   revalidatePath('/settings');
-  return { ok: true, message: 'Sandbox settings saved.' };
+  return { ok: true, message: 'Cold outreach settings saved.' };
 }
 
 /** Settings > Calling: calling hours on Cadence's own Call button, and what counts as a connect. */
@@ -193,7 +202,7 @@ export async function saveCallingSettingsAction(formData: FormData): Promise<Act
   return { ok: true, message: 'Calling settings saved.' };
 }
 
-/** Settings > Sandbox: run the sandbox CRM cleanup now instead of waiting for the worker's next five minutes. */
+/** Settings > Cold outreach: run the CRM cleanup now instead of waiting for the worker's next five minutes. */
 export async function cleanupSandboxCrmNowAction(): Promise<ActionResult> {
   const admin = await requireAdmin();
   const stats = await cleanupSandboxCrmPeople({ actor: userActor(admin) });
@@ -203,4 +212,17 @@ export async function cleanupSandboxCrmNowAction(): Promise<ActionResult> {
   if (stats.dryRun) parts.push(`${stats.dryRun} would be removed (dry run)`);
   if (stats.errors) parts.push(`${stats.errors} failed`);
   return { ok: true, message: `Cleanup: ${parts.join(', ')}.` };
+}
+
+/**
+ * Settings > Cold outreach: the nightly CRM check, run now (B168). It asks the CRM for a shorter while
+ * than the night does, and is recorded like a nightly run, with who started it.
+ */
+export async function runCrmCheckNowAction(): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  const result = await runCrmCheck({ by: admin.name, budgetMs: RUN_NOW_BUDGET_MS });
+  revalidatePath('/settings');
+  if (result.busy) return { ok: false, error: CRM_CHECK_RUNNING };
+  if (result.error || !result.stats) return { ok: false, error: `The CRM check failed: ${result.error ?? 'no result'}. It runs again tonight.` };
+  return { ok: true, message: crmCheckWords(result.stats) };
 }

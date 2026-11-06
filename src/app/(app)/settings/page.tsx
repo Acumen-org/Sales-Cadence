@@ -38,17 +38,20 @@ import { graphMailState } from '@/lib/mail/graph-mail';
 import { getTwilioReader, twilioStatus } from '@/lib/calls/twilio';
 import { importStatus } from '@/lib/calls/import';
 import { toE164 } from '@/lib/sandbox/normalize';
-import { CallerNumberRow, CallingSettingsForm, CleanupNowButton, ImportNowButton, SandboxSettingsForm, SuppressionForm } from '@/components/settings/sandbox-settings';
-import { cleanupCounts } from '@/lib/sandbox/crm-cleanup';
+import { CallerNumberRow, CallingSettingsForm, ImportNowButton } from '@/components/settings/sandbox-settings';
+import { ColdOutreachSettings } from '@/components/settings/cold-outreach-settings';
+import { loadColdOutreachSettings } from '@/lib/sandbox/cold-settings';
+import { COLD_OUTREACH_SETTINGS_TAB, settingsRoute } from '@/lib/settings-tabs';
 
 const TABS = [
-  { key: 'twenty', label: 'Twenty' },
+  // Keys stay as they were (links and bookmarks hold them); the labels say what a user calls each one.
+  { key: 'twenty', label: 'CRM' },
   { key: 'rules', label: 'Rules and matching' },
   { key: 'sync', label: 'Sync out' },
   { key: 'users', label: 'Team & pods' },
   { key: 'signin', label: 'Sign-in' },
   { key: 'calling', label: 'Calling' },
-  { key: 'sandbox', label: 'Sandbox' },
+  { key: COLD_OUTREACH_SETTINGS_TAB, label: 'Cold outreach' },
   { key: 'blocked', label: 'Blocked accounts' },
   { key: ASSISTANT_SETTINGS_TAB, label: ASSISTANT_NAME },
   { key: 'activity', label: 'Activity log' },
@@ -56,10 +59,20 @@ const TABS = [
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const user = await requireUser();
-  if (!isAdmin(user)) redirect('/tasks');
-  const asked = (await searchParams).tab;
-  // An unknown or empty tab opens the first one rather than a page with nothing on it.
-  const tab = TABS.some((t) => t.key === asked) ? asked! : 'twenty';
+  const admin = isAdmin(user);
+  // B215: anyone else reads Settings > Cold outreach, told who can change it; the old `sandbox` key redirects.
+  const route = settingsRoute((await searchParams).tab, admin, TABS.map((t) => t.key));
+  if ('redirect' in route) redirect(route.redirect);
+  const { tab } = route;
+  const loading = <Surface><p className="text-[13px] text-ink-500">Loading…</p></Surface>;
+  if (!admin) {
+    return (
+      <PageFrame className="space-y-3 px-6 pb-8 pt-2">
+        <Surface flush><ViewHeader title="Cold outreach settings" /></Surface>
+        <Suspense fallback={loading}><ColdOutreachTab admin={false} timezone={user.timezone} /></Suspense>
+      </PageFrame>
+    );
+  }
   const settings = await getSettings();
   const e = env();
   const reviewCount = await prisma.activityEvent.count({ where: { needsReview: true } });
@@ -71,8 +84,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <Tabs inset={false} current={tab} tabs={TABS.map((t) => ({ ...t, href: `/settings?tab=${t.key}`, count: t.key === 'activity' && reviewCount ? reviewCount : undefined }))} />
       </Surface>
 
-      {/* The Twenty tab asks Twenty itself how it is; the page opens first and the answer follows. */}
-      {tab === 'twenty' ? <Suspense fallback={<Surface><p className="text-[13px] text-ink-500">Loading…</p></Surface>}><TwentyTab mode={e.TWENTY_MODE} dryRun={e.CADENCE_DRY_RUN} hasEnvKey={Boolean(e.TWENTY_API_KEY)} /></Suspense> : null}
+      {/* The CRM tab asks the CRM itself how it is; the page opens first and the answer follows. */}
+      {tab === 'twenty' ? <Suspense fallback={loading}><TwentyTab mode={e.TWENTY_MODE} dryRun={e.CADENCE_DRY_RUN} hasEnvKey={Boolean(e.TWENTY_API_KEY)} /></Suspense> : null}
       {tab === 'rules' ? (
         <div className="space-y-3">
           <RulesForm rules={settings.rules} />
@@ -83,7 +96,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       {tab === 'users' ? <UsersTab selfId={user.id} /> : null}
       {tab === 'signin' ? <SignInTab /> : null}
       {tab === 'calling' ? <CallingTab timezone={user.timezone} /> : null}
-      {tab === 'sandbox' ? <SandboxTab timezone={user.timezone} /> : null}
+      {/* Cold outreach asks the CRM for its options, so it follows the page in the same way. */}
+      {tab === COLD_OUTREACH_SETTINGS_TAB ? <Suspense fallback={loading}><ColdOutreachTab admin timezone={user.timezone} /></Suspense> : null}
       {tab === 'blocked' ? <BlockedTab timezone={user.timezone} /> : null}
       {tab === ASSISTANT_SETTINGS_TAB ? <AssistantTab /> : null}
       {tab === 'activity' ? <ActivityTab /> : null}
@@ -251,9 +265,9 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
     ['Meeting Number', meetings.fields.meetingNumber], ['First Meeting', meetings.fields.firstMeeting], ['Meeting contacts', meetings.contact],
   ] as const) : [];
   const meetingsMissing = meetingParts.filter(([, found]) => !found).map(([name]) => name);
-  // Names Twenty has no tag for and Cadence could not add one: an admin adds them in Twenty.
+  // Names the CRM has no tag for and Cadence could not add one: an admin adds them in the CRM.
   const missingTags = meetings ? await missingMeetingTags() : [];
-  // Records someone added in Twenty itself: Cadence neither numbers nor changes them.
+  // Records someone added in the CRM itself: Cadence neither numbers nor changes them.
   const notFromCadence = meetings ? await meetingsNotFromCadence() : { count: 0, items: [] };
   const [settings, schema, lastReconcile, continuous, cachedPeople, cachedCompanies, webhooks24h] = await Promise.all([
     getSettings(),
@@ -277,7 +291,7 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
         <div className="p-4">
           <KeyValue
             items={[
-              { k: 'Mode', v: mode === 'mock' ? 'Demo workspace' : 'Twenty (GraphQL)' },
+              { k: 'Mode', v: mode === 'mock' ? 'Demo workspace' : 'Live CRM (GraphQL)' },
               { k: 'Dry run', v: dryRun ? <span className="flex flex-wrap items-center gap-2"><Badge tone="amber">On</Badge><code className="text-[12px]">CADENCE_DRY_RUN=true</code></span> : <Badge tone="green">Off</Badge> },
               // Webhooks are the instant path; zero here means only the minute-by-minute pass is syncing.
               { k: 'Webhooks (24h)', v: webhooks24h ? <span className="flex items-center gap-2"><Badge tone="green">{webhooks24h}</Badge><span className="text-[12px] text-ink-500">inbound events</span></span> : <Badge tone="amber">None received</Badge> },
@@ -294,7 +308,7 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
               },
               ...stageErrors.map(([stage, message]) => ({ k: `Stage ${stage}`, v: <span className="text-[12px] text-red-700">{message}</span> })),
               {
-                k: 'Meetings in Twenty',
+                k: 'Meetings in the CRM',
                 v: meetings === undefined
                   ? <Badge tone="gray">Not checked</Badge>
                   : meetings === null
@@ -306,11 +320,11 @@ async function TwentyTab({ mode, dryRun, hasEnvKey }: { mode: string; dryRun: bo
               { k: 'Full refresh', v: sync?.lastFullRefresh ? formatInstant(new Date(sync.lastFullRefresh), workspaceTimezone()) : <Badge tone="gray">Not yet</Badge> },
               {
                 k: 'People',
-                v: <span className="flex flex-wrap items-center gap-3"><span><Count value={cachedPeople} /> cached</span>{counts.people !== undefined ? <span><Count value={counts.people} /> in Twenty</span> : null}{peopleShort ? <Badge tone="red">{counts.people! - cachedPeople} missing</Badge> : null}</span>,
+                v: <span className="flex flex-wrap items-center gap-3"><span><Count value={cachedPeople} /> cached</span>{counts.people !== undefined ? <span><Count value={counts.people} /> in the CRM</span> : null}{peopleShort ? <Badge tone="red">{counts.people! - cachedPeople} missing</Badge> : null}</span>,
               },
               {
                 k: 'Companies',
-                v: <span className="flex flex-wrap items-center gap-3"><span><Count value={cachedCompanies} /> cached</span>{counts.companies !== undefined ? <span><Count value={counts.companies} /> in Twenty</span> : null}{companiesShort ? <Badge tone="red">{counts.companies! - cachedCompanies} missing</Badge> : null}</span>,
+                v: <span className="flex flex-wrap items-center gap-3"><span><Count value={cachedCompanies} /> cached</span>{counts.companies !== undefined ? <span><Count value={counts.companies} /> in the CRM</span> : null}{companiesShort ? <Badge tone="red">{counts.companies! - cachedCompanies} missing</Badge> : null}</span>,
               },
               ...(sync?.needsReview ? [{ k: 'Needs review', v: <Link href="/settings?tab=activity" className="text-[12px] text-brand-700 hover:underline"><Count value={sync.needsReview} /> CRM events</Link> }] : []),
               ...(last?.stats?.cacheFailed ? [{ k: 'Could not cache', v: <span className="text-[12px] text-red-700">{last.stats.cacheFailed} record{last.stats.cacheFailed === 1 ? '' : 's'}: {last.stats.cacheError}</span> }] : []),
@@ -354,9 +368,9 @@ async function ActivityTab() {
   ]);
   return (
     <div className="space-y-3">
-      <Card title={<span className="flex items-center gap-2">Waiting to reach Twenty {failed.length ? <Badge tone="red">{failed.length}</Badge> : <Badge tone="gray">0</Badge>}</span>} actions={failed.length ? <RetryWriteButton>Retry all now</RetryWriteButton> : undefined}>
+      <Card title={<span className="flex items-center gap-2">Waiting to reach the CRM {failed.length ? <Badge tone="red">{failed.length}</Badge> : <Badge tone="gray">0</Badge>}</span>} actions={failed.length ? <RetryWriteButton>Retry all now</RetryWriteButton> : undefined}>
         {failed.length === 0 ? (
-          <div className="p-4 text-[13px] text-ink-500">Every note and mirrored task has reached Twenty.</div>
+          <div className="p-4 text-[13px] text-ink-500">Every note and mirrored task has reached the CRM.</div>
         ) : (
           <div className="max-h-[26rem] overflow-auto scroll-thin">
             <table className="table table-tight">
@@ -423,7 +437,7 @@ async function ActivityTab() {
           </div>
         )}
       </Card>
-      <Card title="Writes to Twenty (notes, mirrored tasks)">
+      <Card title="Writes to the CRM (notes, mirrored tasks)">
         {writes.length === 0 ? (
           <div className="p-4 text-[13px] text-ink-500">Nothing written yet.</div>
         ) : (
@@ -434,7 +448,7 @@ async function ActivityTab() {
                   <th>When</th>
                   <th>Operation</th>
                   <th>Object</th>
-                  <th>Twenty id</th>
+                  <th>CRM id</th>
                   <th>Payload</th>
                 </tr>
               </thead>
@@ -514,39 +528,8 @@ async function CallingTab({ timezone }: { timezone: string }) {
   </div>;
 }
 
-async function SandboxTab({ timezone }: { timezone: string }) {
-  const e = env();
-  const settings = await getSettings();
-  const week = new Date(Date.now() - 7 * 86_400_000);
-  const [lastPush, pushes, created, suppressions, suppressionCount, cleanup] = await Promise.all([
-    prisma.bellwetherPush.findFirst({ orderBy: { createdAt: 'desc' }, select: { createdAt: true, pushedByEmail: true } }),
-    prisma.bellwetherPush.count({ where: { createdAt: { gte: week } } }),
-    prisma.sandboxContact.count({ where: { createdAt: { gte: week }, source: 'BELLWETHER' } }),
-    prisma.suppression.findMany({ orderBy: { createdAt: 'desc' }, take: 50 }),
-    prisma.suppression.count(),
-    cleanupCounts(),
-  ]);
-  return <div className="space-y-3">
-    <Card title="Bellwether">
-      <div className="p-4"><KeyValue items={[
-        { k: 'Key', v: e.BELLWETHER_API_KEY ? <Badge tone="green">Set</Badge> : <Badge>Not set</Badge> },
-        { k: 'Previous key', v: e.BELLWETHER_API_KEY_PREVIOUS ? 'Accepted during the rotation' : <Empty /> },
-        { k: 'Last push', v: lastPush ? `${formatInstant(lastPush.createdAt, timezone)} · ${lastPush.pushedByEmail}` : <Empty /> },
-        { k: 'Last 7 days', v: <span className="tabular-nums">{pushes} pushes · {created} contacts</span> },
-      ]} /></div>
-    </Card>
-    <Card title="Sandbox rules"><SandboxSettingsForm s={settings.sandbox} /></Card>
-    <Card title="CRM cleanup" actions={<CleanupNowButton />}>
-      <div className="p-4"><KeyValue items={[
-        { k: 'Status', v: settings.sandbox.cleanupAutoCreated ? <Badge tone="green">On, every 5 minutes</Badge> : <Badge>Off</Badge> },
-        { k: 'Removed', v: <span className="tabular-nums">{cleanup.total} people · {cleanup.week} in the last 7 days</span> },
-        { k: 'Kept and flagged', v: <span className="tabular-nums">{cleanup.kept} contacts</span> },
-      ]} /></div>
-      <p className="px-4 pb-4 text-[12px] text-ink-500">People Twenty created from email or calendar for a sandbox contact, that nobody has edited, noted, tasked or put in a campaign. They go to Twenty&apos;s trash and can be restored there.</p>
-    </Card>
-    <Card title="Suppression list" actions={<Count value={suppressionCount} />}>
-      <SuppressionForm />
-      <table className="w-full text-[13px]"><tbody className="divide-y divide-line">{suppressions.map((s) => <tr key={s.id}><td className="px-4 py-2 tabular-nums">{s.label ?? s.kind}</td><td className="px-4 py-2 text-ink-600">{s.kind.replace('_', ' ')}</td><td className="px-4 py-2 text-ink-600">{s.reason.replace('_', ' ')}</td><td className="px-4 py-2 tabular-nums text-ink-500">{formatInstant(s.createdAt, timezone)}</td></tr>)}</tbody></table>
-    </Card>
-  </div>;
+/** Settings > Cold outreach (PLAN 4.7): admins change it; anyone else reads it (B215). */
+async function ColdOutreachTab({ admin, timezone }: { admin: boolean; timezone: string }) {
+  const data = await loadColdOutreachSettings({ full: admin });
+  return <ColdOutreachSettings data={data} canEdit={admin} timezone={timezone} />;
 }

@@ -167,7 +167,7 @@ export async function eraseContactAction(fd: FormData): Promise<ActionResult> {
   return { ok: true, message: r.recordings.length ? `Erased. Delete these recordings in the Twilio console too: ${r.recordings.join(', ')}.` : 'Erased.' };
 }
 
-/** Settings > Sandbox: add an email, phone, LinkedIn URL or individual CRD to the suppression list. */
+/** Settings > Cold outreach: add an email, phone, LinkedIn URL or individual CRD to the suppression list. */
 export async function addSuppressionAction(fd: FormData): Promise<ActionResult> {
   const user = await requireUser();
   if (!canManageSettings(toActor(user))) return { ok: false, error: 'Only admins can change the suppression list.' };

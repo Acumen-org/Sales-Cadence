@@ -20,7 +20,7 @@ import { workspaceTimezone } from '../lib/workspace';
 import { syncNextActions } from '../lib/next-actions';
 import { runMoveQueue } from '../lib/sandbox/move';
 import { CLEANUP_EVERY_MS, cleanupSandboxCrmPeople } from '../lib/sandbox/crm-cleanup';
-import { checkSandboxAgainstCrm } from '../lib/sandbox/crm-check';
+import { runCrmCheck } from '../lib/sandbox/crm-check';
 import { backfillPhoneE164, runSandboxRetention } from '../lib/sandbox/retention';
 import { purgeOldPushes, sweepStuckPushes } from '../lib/sandbox/bellwether-api';
 import { importTwilioCalls } from '../lib/calls/import';
@@ -59,7 +59,8 @@ async function nightly(now:Date){
  try{const stats=await refreshPersonCache(await getTwentyClient());log('cache refresh',stats);}catch(error){log('cache refresh failed',error);}
  try{const stats=await snapshotScorecard(now);log('enrichment scorecard snapshot',stats);}catch(error){log('enrichment scorecard snapshot failed',error);}
  // Sandbox contacts Twenty gained after the push: flagged, outreach stopped (crm-check.ts).
- try{const stats=await checkSandboxAgainstCrm({now});log('sandbox crm check',stats);}catch(error){log('sandbox crm check failed',error);}
+ // Each run is recorded for Settings > Cold outreach (B168), failed or not; one an admin started is not run twice at once.
+ try{const result=await runCrmCheck({now,by:'nightly'});log(result.error?'sandbox crm check failed':'sandbox crm check',result.error??result.stats);}catch(error){log('sandbox crm check failed',error);}
  // Cold outreach retention, always on: contacts nobody works, moved contacts past the undo window, and
  // the record of what it would remove in the next 30 days (Settings > Cold outreach).
  try{const stats=await runSandboxRetention(now);log('sandbox retention',stats);}catch(error){log('sandbox retention failed',error);}
