@@ -78,7 +78,8 @@ async function ActivityContent({ searchParams }: { searchParams: Promise<Search>
         <ViewHeader title="Workspace timeline" meta={<><span className="font-medium text-ink-900">{page.items.length}{page.hasMore ? '+' : ''}</span> <span className="text-ink-500">events</span></>} />
         <Toolbar><ActivityToolbar key={`${podId}:${actorId}:${range.from}:${range.to}:${channel}:${audience}:${kinds.join(',')}:${q}`} audience={audience === 'all' ? '' : audience} users={users.map((item) => ({ id: item.id, name: item.name, podIds: item.pods.map((pod) => pod.podId) }))} pods={pods} actorId={actorId} podId={podId} channel={channel} defaultRange={{ from: defaultRange.from, to: defaultRange.to }} kinds={kinds} q={q} from={range.from} to={range.to} /></Toolbar>
         {range.error ? <div className="px-4 pb-4"><Notice tone="error">{range.error}</Notice></div> : null}
-        {page.items.length === 0 ? <EmptyState title="No activity in this view" action={<Link href="/activity" className="btn-secondary">Reset filters</Link>} /> : (
+        {page.lookedTo ? <div className="px-4 pb-3"><Notice>Looked back to {formatInstant(page.lookedTo, reportingTimezone())} for this view. Load older activity to look further.</Notice></div> : null}
+        {page.items.length === 0 ? <EmptyState title={page.lookedTo ? 'Nothing in this view among the newest events' : 'No activity in this view'} action={<Link href="/activity" className="btn-secondary">Reset filters</Link>} /> : (
           <div>{groups.map((group) => (
             <section key={group.day}>
               <h2 className="flex flex-wrap items-center justify-between gap-2 border-y border-line bg-canvas/80 px-5 py-3">

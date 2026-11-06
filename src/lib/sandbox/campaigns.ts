@@ -9,7 +9,7 @@ import { workspaceTimezone } from '../workspace';
 import { calendarDays, workingDay, type CampaignDraft, type PlannerPerson } from '../campaign-planner';
 import { campaignMembers, podLabel, whoAndWhy, type AudienceIssue, type AudienceIssueKind } from '../campaign-audience';
 import type { PublishedCalendar } from '../campaign-planning-service';
-import { contactability, channelOfAction, type ContactCheck, type ContactChannel } from '../outreach/contactability';
+import { clearColdLookups, contactability, channelOfAction, type ColdLookup, type ContactCheck, type ContactChannel } from '../outreach/contactability';
 import { canAct, type ColdSubject, type GuardActor } from '../outreach/guard';
 import { applyTransfer } from '../outreach/transfer';
 import { notify, podLeaders } from '../notifications';
@@ -84,6 +84,8 @@ export async function coldAudienceIssues(ids: string[], context?: ColdAudienceCo
     db.enrollment.findMany({ where: { sandboxContactId: { in: ids }, personId: null, status: { in: OCCUPYING_STATUSES }, ...(context?.campaignId ? { OR: [{ campaignId: null }, { campaignId: { not: context.campaignId } }] } : {}) }, select: { sandboxContactId: true, campaign: { select: { name: true } }, sequence: { select: { name: true } } } }),
     context?.campaignId && !context.anyPod ? campaignMembers(context.campaignId, db) : Promise.resolve(new Set<string>()),
   ]);
+  // The lookups each contact's check would make, read for all of them at once (W13 volume test).
+  const clear = await clearColdLookups(contacts, db);
   const occupied = new Map<string, string>();
   for (const c of campaigns) for (const id of c.personIds) occupied.set(id, c.name);
   for (const e of enrollments) if (e.sandboxContactId) occupied.set(e.sandboxContactId, e.campaign?.name ?? `the ${e.sequence.name} sequence`);
@@ -93,7 +95,7 @@ export async function coldAudienceIssues(ids: string[], context?: ColdAudienceCo
     const c = byId.get(id);
     const issue = (kind: AudienceIssueKind, reason: string, ownerId?: string) => { out.push({ id, name: c ? contactName(c) : 'Unknown contact', company: c?.companyName ?? null, kind, reason, ...(ownerId ? { ownerId } : {}) }); };
     if (!c) { issue('deleted', 'No longer in Cold outreach'); continue; }
-    const check = await contactability({ kind: 'cold', row: c }, { act: 'enroll', tx: db });
+    const check = await contactability({ kind: 'cold', row: c }, { act: 'enroll', tx: db, clear: clear.get(c.id) });
     if (!check.ok) { issue(KIND[check.block] ?? 'blocked', leftOutReason(check, c)); continue; }
     // N069: a removed rep's contact says so, and what to do, rather than "outside this pod".
     if (c.ownerId && c.owner && !c.owner.active) { issue('owner', `${c.owner.name} no longer has access: assign these contacts first`); continue; }
@@ -196,6 +198,7 @@ async function launchContext(tx: Tx, ids: string[], campaignId: string) {
   ]);
   return {
     contacts: new Map(contacts.map((c) => [c.id, c as LoadedContact])),
+    clear: await clearColdLookups(contacts, tx) as Map<string, ReadonlySet<ColdLookup>>,
     meetings: new Set(meetings.map((m) => m.sandboxContactId)),
     busy: new Map(busy.map((e) => [e.sandboxContactId!, e.campaign?.name ?? `the ${e.sequence.name} sequence`])),
   };
@@ -207,7 +210,7 @@ async function launchContext(tx: Tx, ids: string[], campaignId: string) {
  * an owner who is not the rep the plan gives it to.
  */
 async function launchRefusal(tx: Tx, c: LoadedContact, ctx: Awaited<ReturnType<typeof launchContext>>, opts: { since: Date; foId: string; foName: string; now: Date }): Promise<string | null> {
-  const check = await contactability({ kind: 'cold', row: c }, { act: 'enroll', tx, now: opts.now });
+  const check = await contactability({ kind: 'cold', row: c }, { act: 'enroll', tx, now: opts.now, clear: ctx.clear.get(c.id) });
   if (!check.ok && check.effect === 'leave_out') return leftOutReason(check, c);
   if (c.lastOutcomeAt && c.lastOutcomeAt >= opts.since && (c.lastOutcome === 'not_interested' || c.lastOutcome === 'meeting_booked')) {
     const day = formatLocalDate(toLocalDate(c.lastOutcomeAt, workspaceTimezone()));

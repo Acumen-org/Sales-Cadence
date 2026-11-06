@@ -5,7 +5,7 @@ import { callingHours } from '../calls/hours';
 import { pendingFormBlock } from '../calls/gate';
 import { hasUsableEmail } from '../sandbox/ready';
 import { crmDoNotContactTwin, optedOutTwin } from '../sandbox/dedupe';
-import { checkKeysOf, findSuppressed, personCheckKeys } from '../sandbox/suppression';
+import { checkKeysOf, findSuppressed, personCheckKeys, suppressionHash } from '../sandbox/suppression';
 import { readExtraPhones, toE164 } from '../sandbox/normalize';
 import type { SubjectRef } from '../subject';
 import type { Fix, RefusalCode } from './guard';
@@ -63,7 +63,12 @@ export type ContactOptions = {
   /** The rep acting, for the pending-form block. */
   user?: { id: string; timezone: string } | null;
   tx?: Prisma.TransactionClient | typeof prisma;
+  /** Lookups a batched pre-check (`clearColdLookups`) proved find nothing for this contact, so they are skipped. */
+  clear?: ReadonlySet<ColdLookup> | null;
 };
+
+/** The database lookups a cold contact's check makes: a move in flight, the suppression list, an opted-out twin, a CRM Do not contact. */
+export type ColdLookup = 'moving' | 'suppressed' | 'twin' | 'dnc';
 
 type ColdRow = SandboxContact;
 type PersonRow = PersonCache;
@@ -105,19 +110,19 @@ async function coldCheck(c: ColdRow, opts: ContactOptions): Promise<ContactCheck
   return firstBlock(opts, [
     async () => {
       if (c.status !== 'ACTIVE') return blocked('inactive', opts, STATUS_WORDS[c.status] ?? 'This contact is not active.', c.status === 'MOVED' && c.twentyPersonId ? { label: 'Open in People', href: `/people/${c.twentyPersonId}` } : null);
-      if (opts.act !== 'move' && await tx.sandboxMoveItem.count({ where: { sandboxContactId: c.id, state: { in: ['QUEUED', 'RUNNING'] } } })) return blocked('inactive', opts, 'This contact is being moved to the CRM.');
+      if (opts.act !== 'move' && !opts.clear?.has('moving') && await tx.sandboxMoveItem.count({ where: { sandboxContactId: c.id, state: { in: ['QUEUED', 'RUNNING'] } } })) return blocked('inactive', opts, 'This contact is being moved to the CRM.');
       return null;
     },
     async () => {
-      const hit = await findSuppressed(checkKeysOf(c, c.id, opts.number), tx);
+      const hit = opts.clear?.has('suppressed') && !opts.number ? null : await findSuppressed(checkKeysOf(c, c.id, opts.number), tx);
       if (hit) return blocked('suppressed', opts, `This contact's ${hit.kind === 'bellwether_id' ? 'Bellwether record' : hit.kind === 'individual_crd' ? 'CRD' : hit.kind === 'phone_subject' ? 'phone' : hit.kind} is on the suppression list.`);
-      const twin = await optedOutTwin({ email: c.email, additionalEmails: c.additionalEmails, linkedinUrl: c.linkedinUrl, individualCrd: c.individualCrd, phone: c.phone, phoneType: c.phoneType ?? 'unknown', additionalPhones: readExtraPhones(c.additionalPhones) }, tx, c.id);
+      const twin = opts.clear?.has('twin') ? null : await optedOutTwin({ email: c.email, additionalEmails: c.additionalEmails, linkedinUrl: c.linkedinUrl, individualCrd: c.individualCrd, phone: c.phone, phoneType: c.phoneType ?? 'unknown', additionalPhones: readExtraPhones(c.additionalPhones) }, tx, c.id);
       return twin ? blocked('suppressed', opts, 'Another record of this person asked not to be contacted.') : null;
     },
     async () => {
       const linked = [c.crmMatchPersonId, c.crmAutoPersonId].filter((id): id is string => Boolean(id));
-      const flagged = linked.length ? await tx.personCache.findFirst({ where: { id: { in: linked }, OR: [{ dnd: true }, { optedOut: true }] }, select: { firstName: true, lastName: true } }) : null;
-      const twin = flagged ? { name: `${flagged.firstName} ${flagged.lastName}`.trim() } : await crmDoNotContactTwin(c, tx);
+      const flagged = linked.length && !opts.clear?.has('dnc') ? await tx.personCache.findFirst({ where: { id: { in: linked }, OR: [{ dnd: true }, { optedOut: true }] }, select: { firstName: true, lastName: true } }) : null;
+      const twin = flagged ? { name: `${flagged.firstName} ${flagged.lastName}`.trim() } : opts.clear?.has('dnc') ? null : await crmDoNotContactTwin(c, tx);
       return twin ? blocked('do_not_contact', opts, `${twin.name || 'This person'} is marked Do not contact in the CRM.`) : null;
     },
     () => (c.crmMatchPersonId || c.crmAutoPersonId ? blocked('in_crm', opts, 'This person is in the CRM now, so their outreach has stopped. Move to CRM to work them there.', { label: 'Move to CRM' }) : null),
@@ -178,4 +183,47 @@ export function channelOfAction(action: string | null | undefined): ContactChann
   if (action === 'CALL') return 'CALL';
   if (action === 'LINKEDIN_MESSAGE' || action === 'LINKEDIN_CONNECT') return 'LINKEDIN';
   return null;
+}
+
+const HASHES_PER_READ = 5000;
+const lowerName = (first: string, last: string) => `${first.trim().toLowerCase()}|${last.trim().toLowerCase()}`;
+
+/**
+ * For many cold contacts at once (a cold audience, a launch): which of a contact's lookups a handful
+ * of batched reads prove find nothing, so `contactability` can skip them (`opts.clear`). It errs one
+ * way only: a lookup is cleared only when nothing in the database could make it hit, so the check
+ * still runs in full, query by query, for any contact a batched read could not clear. A cold audience
+ * of 3,000 contacts made some 15,000 queries without it (W13 volume test).
+ */
+export async function clearColdLookups(rows: ColdRow[], tx: Prisma.TransactionClient | typeof prisma = prisma): Promise<Map<string, Set<ColdLookup>>> {
+  const out = new Map<string, Set<ColdLookup>>();
+  if (!rows.length) return out;
+  const hashesOf = new Map(rows.map((c) => [c.id, checkKeysOf(c, c.id, null).map((k) => suppressionHash(k.kind, k.value))]));
+  const allHashes = [...new Set([...hashesOf.values()].flat())];
+  const linked = [...new Set(rows.flatMap((c) => [c.crmMatchPersonId, c.crmAutoPersonId].filter((id): id is string => Boolean(id))))];
+  const [moving, flagged, optedOut, dnc, ...hit] = await Promise.all([
+    tx.sandboxMoveItem.findMany({ where: { sandboxContactId: { in: rows.map((c) => c.id) }, state: { in: ['QUEUED', 'RUNNING'] } }, select: { sandboxContactId: true } }),
+    linked.length ? tx.personCache.findMany({ where: { id: { in: linked }, OR: [{ dnd: true }, { optedOut: true }] }, select: { id: true } }) : Promise.resolve([]),
+    // Every opted-out record whose details are still there: what an opted-out twin is matched against.
+    tx.sandboxContact.findMany({ where: { optedOutAt: { not: null }, piiClearedAt: null }, select: { id: true, email: true, additionalEmails: true, individualCrd: true, linkedinUrl: true, phone: true, additionalPhones: true } }),
+    tx.personCache.findMany({ where: { deletedAt: null, OR: [{ dnd: true }, { optedOut: true }] }, select: { firstName: true, lastName: true } }),
+    ...Array.from({ length: Math.ceil(allHashes.length / HASHES_PER_READ) }, (_, i) => tx.suppression.findMany({ where: { valueHash: { in: allHashes.slice(i * HASHES_PER_READ, (i + 1) * HASHES_PER_READ) } }, select: { valueHash: true } })),
+  ]);
+  const movingIds = new Set(moving.map((m) => m.sandboxContactId));
+  const flaggedIds = new Set(flagged.map((p) => p.id));
+  const hitHashes = new Set(hit.flat().map((r) => r.valueHash));
+  const dncNames = new Set(dnc.map((p) => lowerName(p.firstName, p.lastName)));
+  // Each opted-out record's details, with who holds them, so a contact never counts as its own twin.
+  const heldBy = new Map<string, Set<string>>();
+  const valuesOf = (c: Pick<ColdRow, 'email' | 'additionalEmails' | 'individualCrd' | 'linkedinUrl' | 'phone' | 'additionalPhones'>) => [c.email, ...c.additionalEmails, c.individualCrd, c.linkedinUrl, c.phone, ...readExtraPhones(c.additionalPhones).map((p) => p.number)].filter((v): v is string => Boolean(v)).map((v) => v.toLowerCase());
+  for (const o of optedOut) for (const v of valuesOf(o)) heldBy.set(v, (heldBy.get(v) ?? new Set()).add(o.id));
+  for (const c of rows) {
+    const clear = new Set<ColdLookup>();
+    if (!movingIds.has(c.id)) clear.add('moving');
+    if (!hashesOf.get(c.id)!.some((h) => hitHashes.has(h))) clear.add('suppressed');
+    if (!valuesOf(c).some((v) => [...(heldBy.get(v) ?? [])].some((id) => id !== c.id))) clear.add('twin');
+    if (![c.crmMatchPersonId, c.crmAutoPersonId].some((id) => id && flaggedIds.has(id)) && !dncNames.has(lowerName(c.firstName, c.lastName))) clear.add('dnc');
+    out.set(c.id, clear);
+  }
+  return out;
 }

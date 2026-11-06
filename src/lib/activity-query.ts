@@ -93,7 +93,16 @@ export function parseActivityCursor(cursor: Date | string | null | undefined): {
   return { at: Number.isNaN(at.getTime()) ? null : at, afterId: id || null };
 }
 
-export type ActivityPage = { items: ActivityItem[]; nextCursor: string | null; hasMore: boolean };
+/** `lookedTo`: a filtered view stopped reading before it filled the page; older events may still match, from here on. */
+export type ActivityPage = { items: ActivityItem[]; nextCursor: string | null; hasMore: boolean; lookedTo?: Date | null };
+
+/**
+ * How many pages of 200 events a filtered view (CRM or Cold outreach, or a search) reads for one page
+ * of its own. Without a limit, a Cold outreach view whose newest cold event lies behind weeks of the
+ * CRM's step events read all of them on every load (W13 volume test); with it, the page stops there
+ * and "Load older activity" carries on from where it stopped.
+ */
+const MAX_PAGES_READ = 15;
 
 const AUDIT_KIND: Record<string, ActivityKind> = {
   task: 'task',
@@ -185,11 +194,18 @@ export async function listActivity(f: ActivityFilters = {}): Promise<ActivityPag
   const limit = Math.min(Math.max(f.limit ?? 60, 1), 200);
   const matches: ActivityItem[] = [];
   let before = f.before;
+  let read = 0;
+  let lookedTo: Date | null = null;
   do {
     const page = await activityPage({ ...f, q: null, before, limit: 200 }, scope);
     matches.push(...page.items.filter(keep));
     before = page.nextCursor;
+    lookedTo = page.items.at(-1)?.at ?? lookedTo;
     if (!before || matches.length > limit) break;
+    if (++read >= MAX_PAGES_READ) {
+      // Every event newer than the cursor has been read: the next page starts exactly there.
+      return { items: matches, hasMore: true, nextCursor: page.nextCursor, lookedTo };
+    }
   } while (true);
   const items = matches.slice(0, limit);
   const last = items.at(-1);
