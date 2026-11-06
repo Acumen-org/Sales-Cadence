@@ -81,13 +81,16 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
   let result: AdvanceResult;
   try {
     result = await prisma.$transaction(async (tx) => {
-      const identity = await tx.enrollment.findUnique({ where: { id: enrollmentId }, select: { sequenceId: true, campaignId: true, companyId: true, person: { select: { companyId: true } } } });
+      const identity = await tx.enrollment.findUnique({ where: { id: enrollmentId }, select: { sequenceId: true, campaignId: true, companyId: true, personId: true, sandboxContactId: true, person: { select: { companyId: true } } } });
       if (!identity) return { outcome: 'inactive' as const };
       const accountIds = [identity.companyId, identity.person?.companyId].filter((id): id is string => Boolean(id));
       await lockAccounts(tx, accountIds);
       if (await tx.blockedAccount.count({ where: { companyId: { in: accountIds } } })) return { outcome: 'inactive' as const, reason: 'Account is blocked' };
       if (identity.campaignId) await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`campaign:${identity.campaignId}`}))`;
       await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${identity.sequenceId}))`;
+      // N002: the contact's row, as an opt-out takes it, so an opt-out landing now waits for this step or
+      // this step sees the opt-out; never a step made for someone who just opted out.
+      if (identity.sandboxContactId && !identity.personId) await tx.$queryRaw`SELECT 1 FROM "SandboxContact" WHERE id = ${identity.sandboxContactId} FOR UPDATE`;
       const e = await tx.enrollment.findUnique({
         where: { id: enrollmentId },
         include: { fo: true, campaign: true, sequence: true, tasks: true, person: true, sandboxContact: true },

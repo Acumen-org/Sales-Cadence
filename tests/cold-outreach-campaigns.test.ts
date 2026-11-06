@@ -172,6 +172,29 @@ describe('cold campaigns on the campaign studio (S7)', () => {
     expect(await prisma.task.count({ where: { enrollmentId: e.id, state: 'PENDING' } })).toBe(0);
   });
 
+  it('N002: an opt-out landing while the engine makes the next step: the engine waits for the contact, and no step is made for them', async () => {
+    const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+    const draft = coldDraft(b.pods.Alisa.id, [c.id], [b.users.alisa.id]);
+    const { campaign } = await publishColdCampaign(alisa, draft);
+    await launch(campaign.id, draft.startDate);
+    const e = await prisma.enrollment.findFirstOrThrow({ where: { campaignId: campaign.id } });
+    // Step 1 done, so the engine would make step 2 now.
+    await prisma.task.updateMany({ where: { enrollmentId: e.id }, data: { state: 'DONE', completedAt: new Date() } });
+    const before = await prisma.task.count({ where: { enrollmentId: e.id } });
+    // The opt-out holds the contact's row (as the guard does) while the engine starts.
+    const optOut = prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT 1 FROM "SandboxContact" WHERE id = ${c.id} FOR UPDATE`;
+      await new Promise((r) => setTimeout(r, 400));
+      await tx.sandboxContact.update({ where: { id: c.id }, data: { status: 'OPTED_OUT', optedOutAt: new Date() } });
+      await tx.enrollment.update({ where: { id: e.id }, data: { status: 'EXITED', exitReason: 'opted_out', exitedAt: new Date() } });
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    const advanced = advanceEnrollment(e.id, { actor: SYSTEM_ACTOR, now: noonOf(e.scheduleDates[1]), skipSync: true });
+    await optOut;
+    expect((await advanced).outcome).toBe('inactive');
+    expect(await prisma.task.count({ where: { enrollmentId: e.id } })).toBe(before);
+  });
+
   it('N019: a launch after the start date never backdates the plan: everything starts from the launch day, and the dates are saved', async () => {
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
     const draft = coldDraft(b.pods.Alisa.id, [c.id], [b.users.alisa.id]);
