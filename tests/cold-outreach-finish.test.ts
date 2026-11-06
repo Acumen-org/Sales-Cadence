@@ -129,6 +129,93 @@ describe('cold outreach, the finish (S11a, W14)', () => {
     expect(await prisma.auditLog.count({ where: { action: { in: ['pod_set_by_migration', 'released_by_migration'] } } })).toBe(2);
   });
 
+  it('PLAN 9.7 steps 0 and 7-13: the release clean-up runs once by itself, puts right what is safe and lists the rest', async () => {
+    const { alisa, karson, daniel } = b.users;
+    const Alisa = b.pods.Alisa.id, Leigh = b.pods.Leigh.id;
+    const enroll = async (contactId: string, foUserId: string, podId: string, status: 'ACTIVE' | 'PAUSED' = 'ACTIVE') => {
+      const e = await prisma.enrollment.create({ data: { sandboxContactId: contactId, foUserId, podId, sequenceId: b.sequence.id, startDate: '2026-11-04', currentStep: 0, status, audience: 'SANDBOX' } });
+      const t = await prisma.task.create({ data: { enrollmentId: e.id, foUserId, stepIndex: 0, stepId: 's1', stepDay: 1, actionIndex: 0, actionId: 'a1', action: 'EMAIL', label: 'Email 1', dueDate: '2026-11-04', dueAt: new Date('2026-11-04T09:00:00Z'), plannedDate: '2026-11-04' } });
+      return { e, t };
+    };
+    // Step 8: Alisa's contact whose next step and campaign stayed with Karson; one whose campaign runs in another pod.
+    const drifted = await readyContact(alisa.id, Alisa);
+    const next = await prisma.nextAction.create({ data: { sandboxContactId: drifted.id, foUserId: karson.id, label: 'Call', action: 'CALL', dueDate: '2026-11-10', audience: 'SANDBOX' } });
+    const run = await enroll(drifted.id, karson.id, Alisa);
+    const elsewhere = await readyContact(alisa.id, Alisa);
+    const far = await enroll(elsewhere.id, daniel.id, Leigh);
+    // N001: opted out from the post-call form while its move ran; the CRM person was never opted out.
+    const raced = await readyContact(alisa.id, Alisa, { status: 'MOVED', twentyPersonId: 'person-04', movedAt: new Date('2026-11-04T12:00:00Z'), optedOutAt: new Date('2026-11-04T11:59:00Z'), optOutSource: 'call_form' });
+    // N002: opted out, its campaign still running.
+    const out = await readyContact(alisa.id, Alisa, { status: 'OPTED_OUT', optedOutAt: new Date('2026-11-04T10:00:00Z') });
+    const stale = await enroll(out.id, alisa.id, Alisa);
+    // N025: two live contacts with one personal email.
+    const first = await readyContact(alisa.id, Alisa, { email: 'jo.lee@lee-wealth.com', createdAt: new Date('2026-11-03T10:00:00Z') });
+    const second = await readyContact(karson.id, Alisa, { email: 'Jo.Lee@lee-wealth.com' });
+    // N058, N059: bounced by a delay notice; bounced for real.
+    const delayed = await readyContact(alisa.id, Alisa, { badEmail: true });
+    await prisma.sandboxEmail.create({ data: { sandboxContactId: delayed.id, kind: 'BOUNCE', internetMessageId: 'ndr-1', subject: 'Delivery Status Notification (Delay)', at: new Date('2026-11-04T09:00:00Z') } });
+    const bounced = await readyContact(alisa.id, Alisa, { badEmail: true });
+    await prisma.sandboxEmail.create({ data: { sandboxContactId: bounced.id, kind: 'SENT', internetMessageId: 'sent-2', conversationId: 'conv-2', subject: 'Hello', at: new Date('2026-11-04T08:00:00Z') } });
+    await prisma.sandboxEmail.create({ data: { sandboxContactId: bounced.id, kind: 'BOUNCE', internetMessageId: 'ndr-2', conversationId: 'conv-2', subject: 'Undeliverable: Hello', at: new Date('2026-11-04T09:00:00Z') } });
+    // N003, listed: the CRM marks this person Do not contact; the cold contact has the same name and firm.
+    const crm = await prisma.personCache.update({ where: { id: 'person-02' }, data: { dnd: true } });
+    const twin = await readyContact(alisa.id, Alisa, { firstName: crm.firstName, lastName: crm.lastName, companyName: crm.companyName });
+    // N016, listed: emailed after the opt-out.
+    await prisma.sandboxEmail.create({ data: { sandboxContactId: out.id, kind: 'SENT', internetMessageId: 'sent-3', subject: 'Checking in', at: new Date('2026-11-05T09:00:00Z') } });
+    // Step 13, listed and never deleted.
+    const test = await readyContact(alisa.id, Alisa, { firstName: 'WRD probe' });
+
+    const { coldOutreachReleaseOnce, runColdOutreachRelease, releaseReport } = await import('@/lib/outreach/release');
+    const r = (await coldOutreachReleaseOnce())!;
+
+    // Step 0: the counts.
+    expect(r.counts.contacts).toEqual({ ACTIVE: 8, MOVED: 1, OPTED_OUT: 1, unclaimed: 0, withoutPod: 0 });
+    // Step 8: given to the owner, as a transfer gives it; the campaign in Leigh's pod keeps its rep.
+    expect(r.drift).toEqual(expect.objectContaining({ contacts: 1, nextSteps: 1, enrollments: 1, tasks: 1, kept: { count: 1, ids: [elsewhere.id] } }));
+    expect((await prisma.nextAction.findUniqueOrThrow({ where: { id: next.id } })).foUserId).toBe(alisa.id);
+    expect((await prisma.enrollment.findUniqueOrThrow({ where: { id: run.e.id } })).foUserId).toBe(alisa.id);
+    expect((await prisma.task.findUniqueOrThrow({ where: { id: run.t.id } })).foUserId).toBe(alisa.id);
+    expect((await prisma.enrollment.findUniqueOrThrow({ where: { id: far.e.id } })).foUserId).toBe(daniel.id);
+    expect((await prisma.auditLog.findFirstOrThrow({ where: { entityId: drifted.id, action: 'work_given_to_owner' } })).details).toEqual(expect.objectContaining({ to: alisa.id, nextSteps: 1, enrollments: 1 }));
+    // N001: the CRM person is opted out too, from the contact's own source, so a form opt-out stays liftable.
+    expect(r.movedWhileOptedOut.ids).toEqual(['person-04']);
+    expect(await prisma.personCache.findUniqueOrThrow({ where: { id: 'person-04' } })).toEqual(expect.objectContaining({ optedOut: true, optOutSource: 'call_form' }));
+    expect(raced.status).toBe('MOVED');
+    // N002: the campaign ends as Opted out, its step cancelled.
+    expect(r.endedForInactive.ids).toEqual([stale.e.id]);
+    expect(await prisma.enrollment.findUniqueOrThrow({ where: { id: stale.e.id } })).toEqual(expect.objectContaining({ status: 'EXITED', exitReason: 'opted_out' }));
+    expect((await prisma.task.findUniqueOrThrow({ where: { id: stale.t.id } })).state).toBe('CANCELLED');
+    // N025: the later one shows "Possibly the same as" the first.
+    expect(r.duplicates.ids).toEqual([second.id]);
+    expect((await prisma.sandboxContact.findUniqueOrThrow({ where: { id: second.id } })).possibleDuplicateId).toBe(first.id);
+    // N058, N059: a delay notice is no bounce: a possible one, to clear or confirm. A real bounce stays.
+    expect(r.doubtedBounces.ids).toEqual([delayed.id]);
+    expect(await prisma.sandboxContact.findUniqueOrThrow({ where: { id: delayed.id } })).toEqual(expect.objectContaining({ badEmail: false, possibleBounceAt: new Date('2026-11-04T09:00:00Z') }));
+    expect((await prisma.sandboxContact.findUniqueOrThrow({ where: { id: bounced.id } })).badEmail).toBe(true);
+    // Listed only.
+    expect(r.dncByNameAndFirm.ids).toEqual([twin.id]);
+    expect(r.emailsAfterOptOut.ids).toEqual([out.id]);
+    expect(r.testData.ids).toEqual([test.id]);
+    expect(await prisma.sandboxContact.count({ where: { id: test.id } })).toBe(1);
+    expect(await releaseReport()).toEqual(expect.objectContaining({ at: r.at }));
+    expect(describeAudit('release_checks', {}, null, 'settings').known).toBe(true);
+    expect(describeAudit('work_given_to_owner', {}, null, 'sandbox_contact').known).toBe(true);
+    expect(describeAudit('possible_duplicate_marked', {}, null, 'sandbox_contact').known).toBe(true);
+    // Admins read it in Settings > Cold outreach; nobody else does.
+    const { loadColdOutreachSettings } = await import('@/lib/sandbox/cold-settings');
+    const { ColdOutreachSettings } = await import('@/components/settings/cold-outreach-settings');
+    const settings = (canEdit: boolean) => loadColdOutreachSettings({ full: canEdit }).then((data) => renderToStaticMarkup(createElement(ColdOutreachSettings, { data, canEdit, timezone: 'Europe/London' })));
+    const admin = await settings(true);
+    expect(admin).toContain('Release clean-up');
+    expect(admin).toContain('Given back to the owner');
+    expect(await settings(false)).not.toContain('Release clean-up');
+
+    // Once: the worker never runs it again, and a run by hand finds nothing left to put right.
+    expect(await coldOutreachReleaseOnce()).toBeNull();
+    const again = await runColdOutreachRelease();
+    expect([again.drift.contacts, again.movedWhileOptedOut.count, again.endedForInactive.count, again.duplicates.count, again.doubtedBounces.count]).toEqual([0, 0, 0, 0, 0]);
+  });
+
   it('W14: a cold campaign is launched only from its published calendar; the old launcher is gone', async () => {
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
     // A cold campaign without a studio plan (none can be made since the release) does not start.

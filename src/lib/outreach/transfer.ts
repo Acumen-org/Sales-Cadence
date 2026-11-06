@@ -88,19 +88,30 @@ export async function applyTransfer(tx: Tx, c: { id: string; ownerId: string | n
   await tx.sandboxContact.update({ where: { id: c.id }, data: { ownerId: to?.id ?? null, podId, claimedAt: to ? opts.now : null, statusChangedAt: stamp } });
   if (to) {
     await tx.sandboxContact.updateMany({ where: { id: c.id, firstClaimedAt: null }, data: { firstClaimedAt: opts.now } });
-    done.nextSteps = (await tx.nextAction.updateMany({ where: { sandboxContactId: c.id, personId: null, state: 'OPEN', foUserId: { not: to.id } }, data: { foUserId: to.id } })).count;
-    const running = await tx.enrollment.findMany({ where: { sandboxContactId: c.id, personId: null, status: { in: [...RUNNING] }, foUserId: { not: to.id } }, select: { id: true, foUserId: true } });
-    for (const e of running) {
-      // As reassignEnrollment does, inside this transaction: the steps follow the enrollment (B049).
-      const pending = await tx.task.findMany({ where: { enrollmentId: e.id, state: 'PENDING' }, select: { id: true, dueDate: true, snoozedTo: true } });
-      for (const t of pending) await tx.task.update({ where: { id: t.id }, data: { foUserId: to.id, dueAt: localDateToInstant(t.snoozedTo ?? t.dueDate, workspaceTimezone(), 9), twentyTaskId: null } });
-      await tx.enrollment.update({ where: { id: e.id }, data: { foUserId: to.id } });
-      await logAudit({ entityType: 'enrollment', entityId: e.id, action: 'reassigned', actor: opts.actor, details: { from: e.foUserId, to: to.id, tasks: pending.length, reason: `contact_${opts.action}` } }, tx);
-      done.enrollments++;
-      done.tasks += pending.length;
-    }
+    Object.assign(done, await moveWorkTo(tx, c.id, to.id, opts.actor, `contact_${opts.action}`));
   }
   await logAudit({ entityType: 'sandbox_contact', entityId: c.id, action: opts.action, actor: opts.actor, details: { from: c.ownerId, to: to?.id ?? null, podId, nextSteps: done.nextSteps, enrollments: done.enrollments, tasks: done.tasks, ...(opts.reason ? { reason: opts.reason } : {}) } }, tx);
+  return done;
+}
+
+/**
+ * The contact's open next step and its running campaigns, with their pending steps, given to `toId`
+ * (B049, B147), inside the caller's transaction under the contact's row lock. A transfer does it, and
+ * the release put right the work that had drifted from its contact's owner before (PLAN 9.7 step 8).
+ */
+export async function moveWorkTo(tx: Tx, contactId: string, toId: string, actor: AuditActor, reason: string): Promise<TransferDone> {
+  const done: TransferDone = { nextSteps: 0, enrollments: 0, tasks: 0 };
+  done.nextSteps = (await tx.nextAction.updateMany({ where: { sandboxContactId: contactId, personId: null, state: 'OPEN', foUserId: { not: toId } }, data: { foUserId: toId } })).count;
+  const running = await tx.enrollment.findMany({ where: { sandboxContactId: contactId, personId: null, status: { in: [...RUNNING] }, foUserId: { not: toId } }, select: { id: true, foUserId: true } });
+  for (const e of running) {
+    // As reassignEnrollment does, inside this transaction: the steps follow the enrollment (B049).
+    const pending = await tx.task.findMany({ where: { enrollmentId: e.id, state: 'PENDING' }, select: { id: true, dueDate: true, snoozedTo: true } });
+    for (const t of pending) await tx.task.update({ where: { id: t.id }, data: { foUserId: toId, dueAt: localDateToInstant(t.snoozedTo ?? t.dueDate, workspaceTimezone(), 9), twentyTaskId: null } });
+    await tx.enrollment.update({ where: { id: e.id }, data: { foUserId: toId } });
+    await logAudit({ entityType: 'enrollment', entityId: e.id, action: 'reassigned', actor, details: { from: e.foUserId, to: toId, tasks: pending.length, reason } }, tx);
+    done.enrollments++;
+    done.tasks += pending.length;
+  }
   return done;
 }
 

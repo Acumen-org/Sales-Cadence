@@ -10,6 +10,7 @@ import { STUCK_MS } from './bellwether-api';
 import { lastCrmCheck, type CrmCheckRun } from './crm-check';
 import { cleanupCounts } from './crm-cleanup';
 import { retentionForecast, WARN_DAYS } from './retention';
+import { releaseReport, type ReleaseReport } from '../outreach/release';
 
 /*
  * Settings > Cold outreach (PLAN 4.7): what the page reads, in words. The CRM values Move to CRM
@@ -208,6 +209,8 @@ export type ColdOutreachSettingsData = {
   suppressions: { total: number; rows: SuppressionRow[] };
   /** Who can change these settings (B215). */
   admins: string[];
+  /** Admins only: what the release put right and listed in the data since 3 Nov (PLAN 9.7); null until the worker has run it. */
+  release: ReleaseReport | null;
 };
 
 /** The nightly jobs' own marker (B214), and whether they are late: not run yesterday or today. */
@@ -220,7 +223,7 @@ function nightlyRun(value: unknown, now: Date): { day: string; at: string; late:
 /** Everything Settings > Cold outreach shows. `full` is for admins: the CRM's options and the suppression list. */
 export async function loadColdOutreachSettings(opts: { full: boolean }, now = new Date()): Promise<ColdOutreachSettingsData> {
   const { sandbox } = await getSettings();
-  const [choices, bellwether, last, nightly, inCrmNow, retention, cleanup, total, rows, admins] = await Promise.all([
+  const [choices, bellwether, last, nightly, inCrmNow, retention, cleanup, total, rows, admins, release] = await Promise.all([
     opts.full ? crmValueChoices({ current: sandbox }) : Promise.resolve(null),
     bellwetherHealth(sandbox.enabled, now),
     lastCrmCheck(),
@@ -231,6 +234,7 @@ export async function loadColdOutreachSettings(opts: { full: boolean }, now = ne
     prisma.suppression.count(),
     opts.full ? prisma.suppression.findMany({ orderBy: { createdAt: 'desc' }, take: SUPPRESSIONS_SHOWN }) : Promise.resolve([]),
     prisma.user.findMany({ where: { role: 'ADMIN', active: true }, orderBy: { name: 'asc' }, select: { name: true } }),
+    opts.full ? releaseReport() : Promise.resolve(null),
   ]);
   return {
     sandbox, choices, valueIssues: choices ? crmValueIssues(sandbox, choices) : [],
@@ -239,5 +243,6 @@ export async function loadColdOutreachSettings(opts: { full: boolean }, now = ne
     retention, cleanup,
     suppressions: { total, rows: rows.map((s) => ({ id: s.id, ...suppressionWords(s), label: s.label ?? KIND_WORDS[s.kind] ?? codeWords(s.kind), at: s.createdAt })) },
     admins: admins.map((a) => a.name),
+    release,
   };
 }

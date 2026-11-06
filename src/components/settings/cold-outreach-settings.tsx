@@ -90,6 +90,8 @@ export function ColdOutreachSettings({ data, canEdit, timezone }: { data: ColdOu
       <p className="px-4 pb-4 text-[12px] text-ink-500">People the CRM made from an email or a calendar invite for a cold contact, that nobody has edited, noted, given a task or put in a campaign. They go to the CRM&apos;s trash and can be restored there.</p>
     </Card>
 
+    {canEdit && data.release ? <ReleaseCard r={data.release} timezone={timezone} /> : null}
+
     <Card title="Suppression list" actions={<Count value={suppressions.total} />}>
       {canEdit ? <>
         <SuppressionForm />
@@ -103,4 +105,31 @@ export function ColdOutreachSettings({ data, canEdit, timezone }: { data: ColdOu
       </> : <p className="p-4 text-[13px] text-ink-600">{n(suppressions.total, 'entry', 'entries')}. Nobody on it is ever contacted.</p>}
     </Card>
   </div>;
+}
+
+/**
+ * What the release did to the cold outreach data written since 3 Nov (PLAN 9.7), read only: what it
+ * put right by itself, each change in the activity log with what it was, and what only a person could
+ * judge, listed (the ids are in the "checked when the release went out" activity row).
+ */
+function ReleaseCard({ r, timezone }: { r: NonNullable<ColdOutreachSettingsData['release']>; timezone: string }) {
+  const done = (count: number, words: string) => (count ? line(<Badge tone="green">{count}</Badge>, words) : 'None');
+  const look = (count: number, words: string) => (count ? line(<Badge tone="amber">{count}</Badge>, words) : 'None');
+  return <Card title="Release clean-up">
+    <p className="border-b border-line px-4 py-3 text-[13px] text-ink-600">When the release went out ({formatInstant(r.at, timezone)}) Cadence checked the cold outreach data written since 3 November. It put right what it safely could, each change recorded in the activity log with what it was, and lists here what needs a person.</p>
+    <div className="p-4"><KeyValue items={[
+      { k: 'Given back to the owner', v: r.drift.contacts ? line(<Badge tone="green">{r.drift.contacts}</Badge>, `${n(r.drift.contacts, 'contact')}: ${n(r.drift.nextSteps, 'next step')} and ${n(r.drift.enrollments, 'campaign')} were with another rep.${r.drift.kept.count ? ` ${n(r.drift.kept.count, 'contact')} kept their rep: the campaign is in a pod the owner does not work.` : ''}`) : 'None' },
+      { k: 'Opted out in the CRM too', v: done(r.movedWhileOptedOut.count, `${r.movedWhileOptedOut.count === 1 ? 'person' : 'people'} moved to the CRM while asking not to be contacted.`) },
+      { k: 'Campaigns ended', v: done(r.endedForInactive.count, 'still running for contacts opted out, removed or moved.') },
+      { k: 'Possible duplicates', v: done(r.duplicates.count, 'live contacts share a personal email with another: each shows "Possibly the same as".') },
+      { k: 'Bounces doubted', v: done(r.doubtedBounces.count, 'addresses were marked bounced by a delay notice or a subject match only: now "Possible bounce", to clear or confirm.') },
+      { k: 'Reps who left', v: r.leavers.reps ? look(r.leavers.reps, `still hold ${n(r.leavers.contacts, 'contact')}, ${n(r.leavers.nextSteps, 'next step')} and ${n(r.leavers.forms, 'form')}: under "Needs a new owner" for their pod's leaders.`) : 'None' },
+      { k: 'Do not contact by name and firm', v: look(r.dncByNameAndFirm.count, 'live contacts match someone the CRM marks Do not contact. Their outreach is blocked.') },
+      { k: 'Emails after an opt-out', v: look(r.emailsAfterOptOut.count, 'contacts were emailed after they opted out, before the release.') },
+      { k: 'Refusals to check', v: look(r.sharedLineRefusals.count, 'Bellwether refusals turned to opted out without a record of what matched: some may be a colleague on a shared line.') },
+      { k: 'Moves to check', v: look(r.attachMoves.count + r.movedTwice.count, `${n(r.attachMoves.count, 'move')} added history to someone already in the CRM, and ${n(r.movedTwice.count, 'contact')} moved more than once.`) },
+      { k: 'Removed without keys', v: look(r.removedWithoutKeys.count, 'removed contacts had their details cleared before Cadence kept their keys, so Bellwether may send them again.') },
+      { k: 'Test data', v: look(r.testData.count, 'contacts carry a name the audit used for test data. Nothing was deleted.') },
+    ]} /></div>
+  </Card>;
 }
