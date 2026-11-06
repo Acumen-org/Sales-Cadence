@@ -2,7 +2,6 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { logAudit, SYSTEM_ACTOR } from '../audit';
 import { exitEnrollment } from '../engine/enrollment';
-import { isRoleEmail } from '../sandbox/normalize';
 import { crmDoNotContactTwin } from '../sandbox/dedupe';
 import { needsNewOwner } from './ownership';
 import { moveWorkTo } from './transfer';
