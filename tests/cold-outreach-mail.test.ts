@@ -10,7 +10,7 @@ import { bounceWords, clearPossibleBounce, confirmPossibleBounce, emailsToDoNotC
 import { optOutContact, removeContact } from '@/lib/outreach/transitions';
 import { addSuppressions } from '@/lib/sandbox/suppression';
 import { ingestEvent } from '@/lib/engine/ingest';
-import { rawFromMessage } from '@/lib/engine/reconcile';
+import { rawFromMessage, reconcile } from '@/lib/engine/reconcile';
 import { getMockTwentyClient } from '@/lib/twenty/mock-client';
 import { replyCount } from '@/lib/outreach/metrics';
 import { saveSettingsSection, DEFAULT_SETTINGS } from '@/lib/settings';
@@ -403,6 +403,20 @@ describe('W10: Outlook tracking and notifications', () => {
       expect((await prisma.enrollment.findUniqueOrThrow({ where: { id: enrollment.id } })).status).toBe('REPLIED');
       expect(await prisma.notification.findFirstOrThrow({ where: { kind: 'reply', userId: b.users.alisa.id } })).toEqual(expect.objectContaining({ sandboxContactId: c.id }));
       expect(await prisma.touch.count({ where: { personId: 'person-auto-1' } })).toBe(0);
+    });
+
+    it('N028: an email and its reply read in one sync run: the email closes its step first, then the reply ends the campaign', async () => {
+      const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { createdAt: new Date('2026-11-01T09:00:00Z') });
+      const { enrollment, task } = await inCampaign({ sandboxContactId: c.id }, b.users.alisa.id);
+      await prisma.personCache.create({ data: { id: 'person-auto-2', firstName: c.firstName, lastName: c.lastName, email: c.email, emailNorm: c.email, createdBySource: 'EMAIL', raw: { createdAt: '2026-11-04T15:00:30.000Z' } } });
+      const mock = getMockTwentyClient();
+      // The CRM lists its mail newest first: the reply comes before the email in the listing.
+      mock.addMessage({ subject: 'A quick idea for your team', receivedAt: T0.toISOString(), from: { handle: 'alisa@cadence.local', workspaceMemberId: 'wm-alisa' }, to: [{ handle: c.email!, personId: 'person-auto-2' }] });
+      mock.addMessage({ subject: 'Re: A quick idea for your team', receivedAt: at(60).toISOString(), from: { handle: c.email!, personId: 'person-auto-2' }, to: [{ handle: 'alisa@cadence.local', workspaceMemberId: 'wm-alisa' }] });
+      await reconcile({ only: ['messages'], since: '2026-11-01T00:00:00Z', now: at(61) }, mock);
+      expect((await prisma.task.findUniqueOrThrow({ where: { id: task.id } })).state).toBe('DONE');
+      expect((await prisma.enrollment.findUniqueOrThrow({ where: { id: enrollment.id } })).status).toBe('REPLIED');
+      expect(await prisma.sandboxEmail.count({ where: { sandboxContactId: c.id, kind: 'SENT' } })).toBe(1);
     });
 
     it('N028: a real CRM person with the address keeps the CRM\'s behaviour', async () => {

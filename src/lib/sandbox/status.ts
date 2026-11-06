@@ -133,6 +133,14 @@ export async function statusByIds(ids: string[], contract: Contract = '1'): Prom
   const callsBy = new Map(calls.map((c) => [c.sandboxContactId, c._count._all]));
   const campaignBy = new Map(enrollments.map((e) => [e.sandboxContactId, e.campaign?.name ?? null]));
   const bounceBy = new Map(bounces.map((b) => [b.sandboxContactId, b._max.at]));
+  // N040: a bounce confirmed from a possible bounce (or marked by a skip) has no bounce email of its
+  // own: its time is when it was confirmed or recorded.
+  const unbounced = contacts.filter((c) => c.badEmail && !bounceBy.get(c.id)).map((c) => c.id);
+  if (unbounced.length) {
+    const marked = await prisma.auditLog.groupBy({ by: ['entityId'], where: { entityType: 'sandbox_contact', entityId: { in: unbounced }, action: { in: ['possible_bounce_confirmed', 'email_bounced'] } }, _max: { createdAt: true } });
+    for (const m of marked) if (m._max.createdAt) bounceBy.set(m.entityId, m._max.createdAt);
+    for (const c of contacts) if (unbounced.includes(c.id) && !bounceBy.get(c.id)) bounceBy.set(c.id, c.statusChangedAt);
+  }
   const removerBy = new Map(removers.map((u) => [u.id, u.name]));
   const refusalBy = new Map(refusals.map((r) => [r.bellwetherContactId, r]));
   const personIds = [...new Set([...contacts.flatMap((c) => [c.twentyPersonId, c.crmMatchPersonId]), ...refusals.map((r) => r.crmPersonId)].filter((id): id is string => Boolean(id)))];

@@ -94,7 +94,13 @@ export async function reconcile(opts: { days?: number; since?: string; sinceBySt
   });
 
   await stage('messages', async () => {
-    for await (const message of paginate((after) => c.listMessages({ updatedSince: stageSince('messages'), after, limit: 100 }))) {
+    // N028: the CRM lists mail newest first, but an email must be recorded before the reply to it
+    // (or the reply ends the campaign and the sent email finds no step to close). Read the run's mail,
+    // then take it oldest first.
+    const mail = [];
+    for await (const message of paginate((after) => c.listMessages({ updatedSince: stageSince('messages'), after, limit: 100 }))) mail.push(message);
+    mail.sort((a, b) => (a.receivedAt ?? a.updatedAt ?? '').localeCompare(b.receivedAt ?? b.updatedAt ?? ''));
+    for (const message of mail) {
       stats.messages += 1;
       tally(stats, await ingestEvent({ ...common, objectType: 'message', eventName: 'message.updated', record: rawFromMessage(message), recordId: message.id, updatedAt: message.updatedAt }, c));
     }

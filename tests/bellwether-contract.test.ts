@@ -416,6 +416,15 @@ describe('contract v1.1 and the push intake (W11)', () => {
       expect(changed).toEqual([expect.objectContaining({ bellwetherContactId: c.bellwetherContactId, emailBounced: c.email, emailBouncedAt: '2026-11-05T09:00:00Z' })]);
     });
 
+    it('N040: a possible bounce a rep confirmed reaches Bellwether with when it was confirmed, never a null time', async () => {
+      const c = bwContact();
+      const id = (await push(envelope([c]))).body.results[0].cadenceContactId;
+      await prisma.sandboxContact.update({ where: { id }, data: { statusChangedAt: new Date('2026-11-01T00:00:00Z'), badEmail: true } });
+      await prisma.auditLog.create({ data: { entityType: 'sandbox_contact', entityId: id, action: 'possible_bounce_confirmed', actorType: 'USER', createdAt: new Date('2026-11-05T10:30:00Z') } });
+      const rows = (await status({ bellwetherContactIds: [c.bellwetherContactId] }, V11)).body.results;
+      expect(rows).toEqual([expect.objectContaining({ emailBounced: c.email, emailBouncedAt: '2026-11-05T10:30:00Z' })]);
+    });
+
     it('contract 1.1 lastOutcome: the latest post-call outcome reaches Bellwether at its next read of changes', async () => {
       const c = bwContact({ phone: '+1 312 555 0161', phoneType: 'direct' });
       const id = (await push(envelope([c]))).body.results[0].cadenceContactId;
