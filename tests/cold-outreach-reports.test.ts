@@ -251,7 +251,7 @@ describe('Reports: All outreach, CRM and Cold outreach', () => {
     expect(html).toContain('>Out<');
     const all = renderToStaticMarkup(createElement(CallsDocument, { data: r, timezone: 'America/Chicago', compared: null }));
     expect(all).toContain('Not answered');
-    expect(all).toContain('Showing 50 of 56');
+    expect(all).toContain('Showing 1 to 50 of 56');
     expect(all).not.toMatch(/no-answer|NO_ANSWER/);
   });
 

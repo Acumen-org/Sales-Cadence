@@ -9,7 +9,8 @@ export const REPORT_DOCUMENT_STYLES = `
   .rp-strong { font-weight: 500; color: #1f2a26; }
   .rp-card { background: #fff; border: 1px solid #e3e8e2; border-radius: 14px; min-width: 0; }
   .rp-tiles { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .rp-tile { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 20px; }
+  .rp-tile { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 0 12px; padding: 18px 20px; }
+  .rp-tile-parts { flex-basis: 100%; }
   .rp-label { font-size: 12px; font-weight: 500; color: #6b7a74; }
   .rp-value { margin-top: 8px; font-size: 30px; font-weight: 600; line-height: 1.1; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
   .rp-zero { color: #98a59f; }

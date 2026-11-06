@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type { CallListRow, CallReport, CallTotals } from '@/lib/calls/analytics';
-import { callStatusWords } from '@/lib/calls/analytics';
+import { CALLS_PAGE, callStatusWords } from '@/lib/calls/analytics';
 import { formatInstant, formatLocalDate } from '@/lib/dates';
 import { Fact, ACTIVITY_TIP } from './report-document';
 import { Figure, pct } from './charts';
@@ -44,9 +44,10 @@ export type CallsDocumentProps = {
 
 function Pager({ page, pages, total, shown, href }: { page: number; pages: number; total: number; shown: number; href: ((n: number) => string) | null }) {
   if (total <= shown && page === 1) return null;
+  const first = (page - 1) * CALLS_PAGE + 1;
   return (
     <div className="rp-pager">
-      <span>Showing {fmt(shown)} of {fmt(total)}</span>
+      <span>Showing {fmt(first)} to {fmt(first + shown - 1)} of {fmt(total)}</span>
       {href ? <span>{page > 1 ? <a href={href(page - 1)}>Previous</a> : null}{page < pages ? <a href={href(page + 1)}>Next</a> : null}</span> : null}
     </div>
   );

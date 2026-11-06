@@ -62,16 +62,17 @@ export function peopleParts(p: People): string {
 function Tile({ label, value, shown, previous, series, sub, rate, parts, tip }: { label: string; value: number; shown?: string; previous: number | null; series: number[]; sub?: ReactNode; rate?: boolean; parts?: string | null; tip: string }) {
   return (
     <div className="rp-card rp-tile" title={tip}>
-      <div style={{ minWidth: 0 }}>
+      <div style={{ minWidth: 0, flex: '1 1 0' }}>
         <div className="rp-label">{label}</div>
         <div className={`rp-value${value === 0 ? ' rp-zero' : ''}`}>{shown ?? fmt(value)}</div>
         <div className="rp-sub">
           {previous !== null ? <Delta current={value} previous={previous} rate={rate} /> : null}
           {sub}
         </div>
-        {parts ? <div className="rp-parts">{parts}</div> : null}
       </div>
       <Sparkline values={series} label={`${label}, over the period`} />
+      {/* All outreach's sub-line takes the tile's whole width, under the figure and its chart. */}
+      {parts ? <div className="rp-parts rp-tile-parts">{parts}</div> : null}
     </div>
   );
 }
@@ -184,7 +185,7 @@ function ColdFunnelFigure({ cold }: { cold: NonNullable<Reports['cold']> }) {
   ];
   const max = Math.max(1, ...stages.map((s) => s.value));
   return (
-    <div className="rp-row">
+    <>
       <Figure title="Cold outreach funnel" aside="contacts, each once per stage">
         <table className="rp-table">
           <tbody>
@@ -202,7 +203,7 @@ function ColdFunnelFigure({ cold }: { cold: NonNullable<Reports['cold']> }) {
           </table></div>
         ) : none}
       </Figure>
-    </div>
+    </>
   );
 }
 
