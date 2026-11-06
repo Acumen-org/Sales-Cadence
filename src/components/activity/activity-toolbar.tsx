@@ -10,7 +10,14 @@ const EVENT_TYPES: { value: ActivityKind; label: string }[] = [
   { value: 'touch', label: 'Outreach' }, { value: 'task', label: 'Task updates' },
   { value: 'enrollment', label: 'Enrollment updates' }, { value: 'meeting', label: 'Meetings' },
   { value: 'campaign', label: 'Campaign updates' }, { value: 'sequence', label: 'Sequence edits' },
-  { value: 'person', label: 'Contact updates' },
+  { value: 'person', label: 'Contact updates' }, { value: 'contact', label: 'Cold contacts' },
+  { value: 'call', label: 'Calls and forms' }, { value: 'ticket', label: 'Tickets' },
+];
+/** N005: CRM work, cold work, or both in one feed. */
+const AUDIENCES = [
+  { value: '', label: 'All' },
+  { value: 'crm', label: 'CRM' },
+  { value: 'cold', label: 'Cold outreach' },
 ];
 const CHANNELS = [
   { value: '', label: 'All activity' },
@@ -26,6 +33,8 @@ type Props = {
   podId: string | null;
   kinds: ActivityKind[];
   channel: string | null;
+  /** '' for all, 'crm' or 'cold'. */
+  audience: string;
   q: string;
   from: string;
   to: string;
@@ -38,7 +47,7 @@ type Props = {
  * event type. Every change applies at once, as one request; an empty pod or member is kept in the
  * URL as the reader's choice of All, not the default.
  */
-export function ActivityToolbar({ users, pods, actorId, podId, kinds, channel, q, from, to, defaultRange }: Props) {
+export function ActivityToolbar({ users, pods, actorId, podId, kinds, channel, audience, q, from, to, defaultRange }: Props) {
   const panelId = useId();
   // A full navigation, not a client-side push: this page renders inside its own Suspense boundary
   // (see activity/page.tsx) and a pushed navigation into it hangs on a slow machine. The feed
@@ -58,7 +67,7 @@ export function ActivityToolbar({ users, pods, actorId, podId, kinds, channel, q
   });
   const { text, setText, reset } = useSearchBox(q, (value) => set({ q: value || null }));
   const availableUsers = podId ? users.filter((user) => user.podIds.includes(podId)) : users;
-  const active = Boolean(q || actorId || podId || channel || more);
+  const active = Boolean(q || actorId || podId || channel || audience || more);
 
   return (
     <div className="w-full">
@@ -68,6 +77,11 @@ export function ActivityToolbar({ users, pods, actorId, podId, kinds, channel, q
             <button key={item.value} type="button" onClick={() => set({ channel: item.value || null })} aria-pressed={(channel ?? '') === item.value} className={(channel ?? '') === item.value ? 'chip' : 'chip-muted'}>
               {item.value ? <ActionIcon action={item.value} size={16} /> : null}{item.label}
             </button>
+          ))}
+        </nav>
+        <nav aria-label="CRM or Cold outreach" className="flex flex-wrap gap-1">
+          {AUDIENCES.map((item) => (
+            <button key={item.value} type="button" onClick={() => set({ audience: item.value || null })} aria-pressed={audience === item.value} className={audience === item.value ? 'chip' : 'chip-muted'}>{item.label}</button>
           ))}
         </nav>
         <div className="relative w-full max-w-[220px]">
