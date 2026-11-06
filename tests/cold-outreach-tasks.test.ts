@@ -192,6 +192,17 @@ describe('one Tasks list for CRM and cold work', () => {
     expect(await skipTaskAction(form({ taskId: second.task.id, reasonKey: 'other' }))).toEqual({ ok: false, error: 'This contact asked not to be contacted; nothing was changed.' });
   });
 
+  it('B212: a Done or Skip refused in a second tab leaves the page as it was, so its message stays on screen', async () => {
+    const { revalidatePath } = await import('next/cache');
+    const { task } = await coldStep();
+    expect(await completeTaskAction(form({ taskId: task.id }))).toEqual(expect.objectContaining({ ok: true }));
+    vi.mocked(revalidatePath).mockClear();
+    expect(await completeTaskAction(form({ taskId: task.id }))).toEqual(expect.objectContaining({ ok: false }));
+    expect(await skipTaskAction(form({ taskId: task.id, reasonKey: 'other' }))).toEqual(expect.objectContaining({ ok: false }));
+    // Re-reading the page would draw the step done, without the buttons that hold the message.
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
   it('N031: "They replied" ends a cold sequence as replied, counts one reply, and asks what comes next', async () => {
     const { task, enrollment } = await coldStep({ action: 'LINKEDIN_CONNECT' });
     const r = await finishFromTaskAction(form({ taskId: task.id, kind: 'replied' }));

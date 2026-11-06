@@ -80,13 +80,15 @@ export async function completeTaskAction(formData: FormData): Promise<ActionResu
   if (chosen === 'CALL') {
     if (!parsed.data.disposition) return { ok: false, error: 'Pick a call outcome first.' };
     const r = await completeCall({ taskId: task.id, disposition: parsed.data.disposition, note: parsed.data.note, chosenAction: 'CALL' }, ctx);
-    revalidate();
+    // B212: a refusal (the step closed in another tab) changes nothing, and re-reading the page would
+    // take the buttons and their message away; only a done call re-reads it.
     if (!r.ok) return { ok: false, error: describeFailure(r.reason, r.detail) };
+    revalidate();
     return { ok: true, message: r.replied ? 'Call logged. The person answered, so the sequence is finished as replied.' : r.advance.outcome === 'completed' ? 'Call logged. Sequence finished for this person.' : 'Call logged.' };
   }
   const r = await completeTask({ taskId: task.id, source: 'MANUAL', chosenAction: chosen, note: parsed.data.note ?? null }, ctx);
-  revalidate();
   if (!r.ok) return { ok: false, error: describeFailure(r.reason, r.detail) };
+  revalidate();
   return { ok: true, message: r.advance.outcome === 'completed' ? 'Done. Sequence finished for this person.' : 'Done.' };
 }
 
@@ -103,8 +105,8 @@ export async function skipTaskAction(formData: FormData): Promise<ActionResult> 
   const r = known
     ? await skipWithReason({ taskId: task.id, reasonKey: parsed.data.reasonKey, note: parsed.data.note }, { actor: userActor(user) })
     : await skipTask({ taskId: task.id, reason: parsed.data.reasonKey, note: parsed.data.note }, { actor: userActor(user) });
-  revalidate();
   if (!r.ok) return { ok: false, error: describeFailure(r.reason, r.detail) };
+  revalidate();
   const exited = (r as { exited?: string | null }).exited ?? null;
   return { ok: true, message: exited ? `Skipped and removed from the sequence (${exited.replace(/_/g, ' ')}).` : 'Skipped.' };
 }
