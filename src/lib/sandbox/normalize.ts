@@ -221,6 +221,31 @@ export function cutAtWord(text: string, max: number): string {
 
 export const PHONE_TYPES = ['direct', 'mobile', 'office', 'main', 'toll_free', 'unknown'] as const;
 export type PhoneType = (typeof PHONE_TYPES)[number];
+/** The phone types in words: one list for Add contact and Edit (B201). */
+export const PHONE_TYPE_LABELS: Record<PhoneType, string> = { direct: 'Direct', mobile: 'Mobile', office: 'Office', main: 'Main line', toll_free: 'Toll free', unknown: 'Unknown' };
+
+/** The countries whose national numbers Cadence reads, for Add contact's Country (B204). */
+export const PHONE_COUNTRIES: string[] = Object.keys(CALLING_CODES);
+
+/** The country of a number written with + and its calling code ("+44 20…" is GB), or null (B204). */
+export function countryOfPhone(raw: string | null | undefined): string | null {
+  if (!/^\s*(\+|00)/.test(raw ?? '')) return null;
+  const parsed = parsePhone(raw, 'US');
+  return parsed ? splitE164(parsed.e164)?.country || null : null;
+}
+
+const CJK = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+$/u;
+
+/**
+ * A name as people write it (N085): a Chinese, Japanese or Korean name family name first with no
+ * space, as Bellwether shows it ("王小明"); any other name first name first.
+ */
+export function displayName(firstName: string, lastName: string): string {
+  const first = firstName.trim();
+  const last = lastName.trim();
+  if (first && last && CJK.test(first) && CJK.test(last)) return `${last}${first}`;
+  return `${first} ${last}`.trim();
+}
 
 /** Numbers that belong to one person: the only ones that may match a call or a sandbox contact. */
 export const personalPhone = (type: string | null | undefined) => type === 'direct' || type === 'mobile';

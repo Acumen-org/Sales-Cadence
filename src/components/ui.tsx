@@ -154,20 +154,24 @@ export function Avatar({ name, size = 32, shape = 'square', className, style }: 
   );
 }
 
-/** Two-line cell: avatar, primary name (optionally a link), and a muted second line. */
-export function IdentityCell({ name, sub, href, shape = 'square', size = 32 }: { name: string; sub?: ReactNode; href?: string; shape?: 'square' | 'circle'; size?: number }) {
+/**
+ * Two-line cell: avatar, primary name (optionally a link), and a muted second line. `wrap` lets both
+ * lines wrap instead of being cut off, for a column too narrow for a long name or firm.
+ */
+export function IdentityCell({ name, sub, href, shape = 'square', size = 32, wrap = false }: { name: string; sub?: ReactNode; href?: string; shape?: 'square' | 'circle'; size?: number; wrap?: boolean }) {
+  const line = wrap ? 'break-words' : 'max-w-[22rem] truncate';
   return (
     <div className="flex min-w-0 items-center gap-3">
       <Avatar name={name} shape={shape} size={size} />
       <div className="min-w-0">
         {href ? (
-          <Link href={href} title={name} className="block max-w-[22rem] truncate text-[13px] font-semibold leading-5 text-ink-900 hover:text-brand-700">
+          <Link href={href} title={name} className={clsx('block text-[13px] font-semibold leading-5 text-ink-900 hover:text-brand-700', line)}>
             {name}
           </Link>
         ) : (
-          <div title={name} className="max-w-[22rem] truncate text-[13px] font-semibold leading-5 text-ink-900">{name}</div>
+          <div title={name} className={clsx('text-[13px] font-semibold leading-5 text-ink-900', line)}>{name}</div>
         )}
-        {sub ? <div title={typeof sub === 'string' ? sub : undefined} className="mt-0.5 max-w-[22rem] truncate text-[12px] leading-5 text-ink-500">{sub}</div> : null}
+        {sub ? <div title={typeof sub === 'string' ? sub : undefined} className={clsx('mt-0.5 text-[12px] leading-5 text-ink-500', line)}>{sub}</div> : null}
       </div>
     </div>
   );

@@ -55,7 +55,7 @@ export async function coldCues(ids: string[], opts: { today?: LocalDate } = {}):
   const unique = [...new Set(ids)];
   if (!unique.length) return out;
   const today = opts.today ?? todayIn(DATE_TZ());
-  const [settings, contacts, moving, running, nexts, forms, calls, signals] = await Promise.all([
+  const [settings, contacts, moving, running, nexts, forms, calls, signals, scheduled] = await Promise.all([
     getSettings(),
     prisma.sandboxContact.findMany({ where: { id: { in: unique } }, include: { owner: { select: { name: true, twentyMemberId: true, active: true } }, pod: { select: { name: true } } } }),
     prisma.sandboxMoveItem.findMany({ where: { sandboxContactId: { in: unique }, state: { in: ['QUEUED', 'RUNNING'] } }, select: { sandboxContactId: true } }),
@@ -64,6 +64,8 @@ export async function coldCues(ids: string[], opts: { today?: LocalDate } = {}):
     prisma.callLog.findMany({ where: { sandboxContactId: { in: unique }, formDueAt: { not: null }, formDoneAt: null, discardedAt: null }, select: { sandboxContactId: true } }),
     prisma.callLog.findMany({ where: { sandboxContactId: { in: unique } }, select: { sandboxContactId: true }, distinct: ['sandboxContactId'] }),
     moveSignals(unique),
+    // B144, B163: a scheduled campaign holds its contacts before it starts; they are in a campaign, not without a next step.
+    prisma.campaign.findMany({ where: { audience: 'SANDBOX', status: 'SCHEDULED', personIds: { hasSome: unique } }, orderBy: [{ startDate: 'asc' }, { id: 'asc' }], select: { name: true, startDate: true, personIds: true } }),
   ]);
   const movingIds = new Set(moving.map((m) => m.sandboxContactId));
   const formDue = new Set(forms.map((f) => f.sandboxContactId));
@@ -82,9 +84,10 @@ export async function coldCues(ids: string[], opts: { today?: LocalDate } = {}):
     const readiness = checkReady(c, { owner: c.owner, podName: c.pod?.name ?? null, settings: settings.sandbox });
     const enrollment = running.find((e) => e.sandboxContactId === c.id) ?? null;
     const own = nexts.find((n) => n.sandboxContactId === c.id) ?? null;
+    const held = enrollment ? null : scheduled.find((k) => k.personIds.includes(c.id)) ?? null;
     const state = contactState({
       status: c.status, optedOutAt: c.optedOutAt, ownerId: c.ownerId, ownerActive: c.owner?.active ?? true, moving: movingIds.has(c.id),
-      crmMatchPersonId: c.crmMatchPersonId, crmAutoPersonId: c.crmAutoPersonId, inCampaign: Boolean(enrollment), hasNextStep: Boolean(own),
+      crmMatchPersonId: c.crmMatchPersonId, crmAutoPersonId: c.crmAutoPersonId, inCampaign: Boolean(enrollment || held), hasNextStep: Boolean(own),
       lastOutcome: signal.closed ? 'not_interested' : null, detailsComplete: readiness.ready, positiveOutcome: Boolean(signal.positive),
     });
     // N083: the earlier of the contact's own next step and its campaign's next step, labelled.
@@ -92,9 +95,10 @@ export async function coldCues(ids: string[], opts: { today?: LocalDate } = {}):
     const candidates: NextCue[] = [];
     if (own) candidates.push({ label: own.kind === 'MEETING' ? 'Meeting' : ACTION_LABELS[own.action], due: own.dueDate, overdue: own.dueDate < today, source: 'next_step' });
     if (step) { const due = step.snoozedTo ?? step.dueDate; candidates.push({ label: `${ACTION_LABELS[step.action]} · ${enrollment!.campaign?.name ?? enrollment!.sequence.name}`, due, overdue: due < today, source: 'campaign' }); }
+    else if (held) candidates.push({ label: `Campaign starts · ${held.name}`, due: held.startDate, overdue: false, source: 'campaign' });
     const next = candidates.sort((a, b) => a.due.localeCompare(b.due))[0] ?? null;
     const crmName = personName.get(c.crmMatchPersonId ?? c.crmAutoPersonId ?? '') || null;
-    const badge = badgeFor(state, { contact: c, signal, enrollment, own, today, crmName });
+    const badge = badgeFor(state, { contact: c, signal, enrollment, held, own, today, crmName });
     const chips: Cue[] = [];
     const live = c.status === 'ACTIVE';
     if (live && c.badEmail) chips.push({ label: 'Email bounced', tone: 'amber', title: 'Mail to this address came back. Find a new one before emailing.' });
@@ -115,6 +119,8 @@ type BadgeContext = {
   contact: CueContact & { owner: { name: string; active: boolean } | null };
   signal: { positive: string | null; closed: { outcome: string; at: Date | null } | null };
   enrollment: { status: string; currentStep: number; campaign: { name: string } | null; sequence: { name: string; steps: unknown }; tasks: { stepIndex: number }[] } | null;
+  /** A scheduled campaign that holds the contact before it starts. */
+  held?: { name: string; startDate: LocalDate } | null;
   own: { label: string; action: keyof typeof ACTION_LABELS; kind: string; dueDate: LocalDate } | null;
   today: LocalDate;
   crmName: string | null;
@@ -135,6 +141,7 @@ export function badgeFor(state: ContactState, x: BadgeContext): Cue {
     case 'unclaimed': return { label: c.ownerId && c.owner && !c.owner.active ? `Unclaimed: ${c.owner.name} left` : 'Unclaimed', tone: 'amber' };
     case 'ready_to_move': return { label: 'Ready to move', tone: 'green', title: x.signal.positive ? `Complete CRM details and a positive outcome: ${x.signal.positive}` : undefined };
     case 'in_campaign': {
+      if (!x.enrollment && x.held) return { label: `${x.held.name} · starts ${shortDay(x.held.startDate)}`, tone: 'blue', title: 'A scheduled campaign holds this contact. Its first step comes when it starts.' };
       const e = x.enrollment!;
       const steps = parseStepsSafe(e.sequence.steps);
       const at = e.tasks[0]?.stepIndex ?? Math.max(0, e.currentStep);

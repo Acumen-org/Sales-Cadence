@@ -46,7 +46,8 @@ export async function repPath(user: SessionUser): Promise<RepPath> {
     prisma.sandboxContact.count({ where: claimWhere }),
     dueCounts(user.id, 'cold', today),
     pendingFormCount(user.id),
-    prisma.sandboxContact.findMany({ where: { ...scope, status: 'ACTIVE', ownerId: { not: null }, owner: { active: true } }, select: { id: true }, take: 2000 }),
+    // AND, not a spread: a rep's scope is `ownerId`, which the owned-contacts filter must not overwrite.
+    prisma.sandboxContact.findMany({ where: { AND: [scope, { status: 'ACTIVE', ownerId: { not: null }, owner: { active: true } }] }, select: { id: true }, take: 2000 }),
   ]);
   const cues = await coldCues(mine.map((c) => c.id), { today });
   const count = (s: ContactState) => [...cues.values()].filter((c) => c.state === s).length;
