@@ -155,6 +155,27 @@ Two things worth setting up on the repository itself, which cannot live in the c
 what is missing, and the Docker entrypoint runs it on start - so deploying a schema change is the
 same as deploying anything else. Never edit a migration that has run somewhere; add another.
 
+## Read API for scripts and tools
+
+`/api/v1` lets a script or tool (Power BI, Excel, n8n, an agent) read Cadence. It only reads.
+An admin makes a key in **Settings > API keys**, picks what it may read (team, CRM, campaigns,
+tasks, activity, cold outreach, reports), an expiry and optionally the IPs it may come from, and
+copies the key once: only its hash is kept. Each key's recent requests show on the same tab, and
+revoking one stops it at once.
+
+```
+curl -H "Authorization: Bearer cad_xxxxxxxx_..." https://<host>/api/v1          # what this key may read
+curl -H "Authorization: Bearer cad_xxxxxxxx_..." "https://<host>/api/v1/people?limit=500"
+curl -H "Authorization: Bearer cad_xxxxxxxx_..." "https://<host>/api/v1/tasks?updatedSince=2026-11-01T00:00:00Z"
+curl -H "Authorization: Bearer cad_xxxxxxxx_..." "https://<host>/api/v1/reports?from=2026-10-01&to=2026-10-31"
+```
+
+Lists answer `{ data, nextCursor, serverTime }`: pass `cursor=<nextCursor>` until it is null. For an
+incremental sync, keep the `serverTime` of the last full read and send it as `updatedSince` next
+time. 120 requests a minute per key. Set `API_TRUSTED_PROXY_HOPS=1` behind one reverse proxy before
+using IP allowlists. Bellwether speaks the same contract with `bw_` keys; the contract is in
+`Notes/public-api-2026-11-08/CONTRACT.md`, the code in `src/lib/public-api/`.
+
 ## Workspace design and review
 
 Cadence uses a warm canvas, evergreen navigation, lime accents, a custom mark, and a consistent set of cards, tables, controls, and record headers. Home combines personal priorities, a focused task-flow entry point, upcoming touches, and weekly team performance. Sequences have a searchable visual library with real touch plans. Search (`Ctrl+K` / `Cmd+K`) and help are available from every section; the sidebar becomes a keyboard-accessible drawer on mobile.

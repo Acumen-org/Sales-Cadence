@@ -7,6 +7,7 @@ import { retryFailedWrites } from '../lib/engine/sync-retry';
 import { prisma } from '../lib/db';
 import { env } from '../lib/env';
 import { SYSTEM_ACTOR } from '../lib/audit';
+import { pruneReadApiLog } from '../lib/public-api/keys';
 import { purgeExpiredSessions } from '../lib/auth/session-purge';
 import { runSchedulerTick } from '../lib/engine/tasks';
 import { launchScheduledCampaigns } from '../lib/engine/campaigns';
@@ -57,6 +58,7 @@ const nightly=nightlyLoop({hour:config.RECONCILE_HOUR,log,jobs:()=>{
   // the record of what it would remove in the next 30 days (Settings > Cold outreach).
   {name:'sandbox retention',run:()=>runSandboxRetention(now)},
   {name:'bellwether push keys forgotten',run:()=>purgeOldPushes(now)},
+  {name:'read api log pruned',run:()=>pruneReadApiLog(now)},
  ];
 }});
 /**

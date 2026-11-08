@@ -65,6 +65,15 @@ export function blockAccountConfirm(name: string): ConfirmOptions {
   };
 }
 
+export function revokeApiKeyConfirm(name: string): ConfirmOptions {
+  return {
+    title: `Revoke ${name}?`,
+    effects: ['Every script or tool using this key gets 401 from its next request.', 'A revoked key cannot be turned back on: make a new one instead.'],
+    confirmLabel: 'Revoke',
+    tone: 'danger',
+  };
+}
+
 export function unblockAccountConfirm(name: string): ConfirmOptions {
   return {
     title: `Put ${name} back in Cadence?`,

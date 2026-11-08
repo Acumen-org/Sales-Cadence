@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { coldOutreachRedirect } from './lib/cold-outreach-paths';
 
 const SESSION_COOKIE = 'cadence_session';
-const PUBLIC_PREFIXES = ['/login', '/api/auth', '/api/health', '/api/webhooks', '/api/integrations', '/_next', '/fonts', '/favicon.ico', '/icon.svg'];
+const PUBLIC_PREFIXES = ['/login', '/api/auth', '/api/health', '/api/webhooks', '/api/integrations', '/api/v1', '/_next', '/fonts', '/favicon.ico', '/icon.svg'];
 
 /**
  * Cheap gate: redirect anonymous visitors to /login. The cookie is only checked for

@@ -20,7 +20,7 @@ export function webhookActor(eventName: string, externalId?: string): AuditActor
 }
 
 export type AuditInput = {
-  entityType: 'enrollment' | 'task' | 'campaign' | 'sequence' | 'user' | 'settings' | 'pod' | 'person' | 'event' | 'meeting' | 'account' | 'numberCheck' | 'signin' | 'sandbox_contact' | 'sandbox_move' | 'call' | 'bellwether' | 'ticket' | 'suppression';
+  entityType: 'enrollment' | 'task' | 'campaign' | 'sequence' | 'user' | 'settings' | 'pod' | 'person' | 'event' | 'meeting' | 'account' | 'numberCheck' | 'signin' | 'sandbox_contact' | 'sandbox_move' | 'call' | 'bellwether' | 'ticket' | 'suppression' | 'api_key';
   entityId: string;
   action: string;
   actor: AuditActor;
