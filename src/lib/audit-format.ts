@@ -155,6 +155,8 @@ const TITLES: Record<string, string> = {
   reconcile_ran: 'Checked against the CRM',
   webhook_registered: 'CRM webhook registered',
   'settings:updated': 'Settings changed',
+  api_key_created: 'Read API key created',
+  api_key_revoked: 'Read API key revoked',
   suppression_added: 'Added to the suppression list',
   suppression_widened: 'Old opt-outs covered on every key',
   suppression_rerun_crm: 'Suppression list checked against the CRM',

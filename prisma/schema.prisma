@@ -1640,3 +1640,43 @@ model Notification {
   @@index([userId, createdAt])
   @@index([userId, readAt])
 }
+
+/// A key an admin made in Settings > API keys for a script or tool to read Cadence through /api/v1
+/// (read only). Only the SHA-256 of the whole key is kept; the key itself is shown once.
+model ApiKey {
+  /// The 8 characters after `cad_` in the key: how a request finds its row.
+  id            String          @id
+  name          String
+  keyHash       String
+  /// team | crm | campaigns | tasks | activity | cold-outreach | reports
+  scopes        String[]
+  /// Exact IPs or CIDRs; empty means any address.
+  allowedIps    String[]
+  /// Null only when the admin chose "never expires".
+  expiresAt     DateTime?
+  createdById   String?
+  createdByName String?
+  createdAt     DateTime        @default(now())
+  lastUsedAt    DateTime?
+  lastUsedIp    String?
+  revokedAt     DateTime?
+  revokedByName String?
+  requests      ApiRequestLog[]
+}
+
+/// One request a key made, kept 90 days (the nightly job prunes it).
+model ApiRequestLog {
+  id        String   @id @default(uuid())
+  keyId     String
+  key       ApiKey   @relation(fields: [keyId], references: [id], onDelete: Cascade)
+  method    String
+  path      String
+  status    Int
+  rows      Int?
+  ip        String?
+  ms        Int
+  createdAt DateTime @default(now())
+
+  @@index([keyId, createdAt])
+  @@index([createdAt])
+}

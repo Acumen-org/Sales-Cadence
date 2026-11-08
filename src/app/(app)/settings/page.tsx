@@ -42,6 +42,8 @@ import { CallerNumberRow, CallingSettingsForm, ImportNowButton } from '@/compone
 import { ColdOutreachSettings } from '@/components/settings/cold-outreach-settings';
 import { loadColdOutreachSettings } from '@/lib/sandbox/cold-settings';
 import { COLD_OUTREACH_SETTINGS_TAB, settingsRoute } from '@/lib/settings-tabs';
+import { ApiKeysPanel } from '@/components/settings/api-keys-panel';
+import { DEFAULT_EXPIRY_DAYS, MAX_EXPIRY_DAYS, SCOPES } from '@/lib/public-api/keys';
 
 const TABS = [
   // Keys stay as they were (links and bookmarks hold them); the labels say what a user calls each one.
@@ -54,6 +56,7 @@ const TABS = [
   { key: COLD_OUTREACH_SETTINGS_TAB, label: 'Cold outreach' },
   { key: 'blocked', label: 'Blocked accounts' },
   { key: ASSISTANT_SETTINGS_TAB, label: ASSISTANT_NAME },
+  { key: 'api', label: 'API keys' },
   { key: 'activity', label: 'Activity log' },
 ];
 
@@ -100,6 +103,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       {tab === COLD_OUTREACH_SETTINGS_TAB ? <Suspense fallback={loading}><ColdOutreachTab admin timezone={user.timezone} /></Suspense> : null}
       {tab === 'blocked' ? <BlockedTab timezone={user.timezone} /> : null}
       {tab === ASSISTANT_SETTINGS_TAB ? <AssistantTab /> : null}
+      {tab === 'api' ? <ApiKeysTab timezone={user.timezone} /> : null}
       {tab === 'activity' ? <ActivityTab /> : null}
     </PageFrame>
   );
@@ -116,6 +120,33 @@ function AssistantTab() {
       { k: 'Talk time', v: <Badge tone="green">Local</Badge> },
     ]} /></div>
   </Card>;
+}
+
+/** Read API keys (Notes/public-api-2026-11-08/CONTRACT.md): each with its last 25 requests. */
+async function ApiKeysTab({ timezone }: { timezone: string }) {
+  const now = new Date();
+  const keys = await prisma.apiKey.findMany({ orderBy: [{ revokedAt: { sort: 'desc', nulls: 'first' } }, { createdAt: 'desc' }], include: { requests: { orderBy: { createdAt: 'desc' }, take: 25 } } });
+  return (
+    <ApiKeysPanel
+      scopes={SCOPES}
+      defaultDays={DEFAULT_EXPIRY_DAYS}
+      maxDays={MAX_EXPIRY_DAYS}
+      appUrl={env().APP_URL}
+      rows={keys.map((k) => ({
+        id: k.id,
+        name: k.name,
+        scopes: k.scopes,
+        allowedIps: k.allowedIps,
+        state: k.revokedAt ? 'revoked' : k.expiresAt && k.expiresAt <= now ? 'expired' : 'live',
+        expires: k.revokedAt ? `Revoked ${formatInstant(k.revokedAt, timezone)}${k.revokedByName ? ` by ${k.revokedByName}` : ''}` : k.expiresAt ? formatInstant(k.expiresAt, timezone) : 'Never',
+        createdBy: k.createdByName ?? '',
+        created: formatInstant(k.createdAt, timezone),
+        lastUsed: k.lastUsedAt ? formatInstant(k.lastUsedAt, timezone) : 'Never',
+        lastUsedIp: k.lastUsedIp,
+        requests: k.requests.map((r) => ({ at: formatInstant(r.createdAt, timezone), path: r.path, status: r.status, rows: r.rows, ms: r.ms })),
+      }))}
+    />
+  );
 }
 
 async function BlockedTab({ timezone }: { timezone: string }) {

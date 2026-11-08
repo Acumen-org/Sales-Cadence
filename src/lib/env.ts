@@ -37,6 +37,12 @@ const EnvSchema = z.object({
   BELLWETHER_API_KEY: z.string().optional(),
   /** The previous key, accepted too while a rotation is under way. */
   BELLWETHER_API_KEY_PREVIOUS: z.string().optional(),
+  /**
+   * The read API (/api/v1) learns the caller's address from X-Forwarded-For: how many proxies in
+   * front of Cadence append to it (1 behind one Caddy or nginx). 0: the address is unknown, so a key
+   * with an IP allowlist is refused rather than trusting a header anyone can send.
+   */
+  API_TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
   /** Twilio, read only: the account behind the hosted dialpad and a Restricted API key made for Cadence. */
   TWILIO_ACCOUNT_SID: z.string().optional(),
   TWILIO_API_KEY_SID: z.string().optional(),
