@@ -156,6 +156,7 @@ export default async function PeoplePage({ searchParams }: { searchParams: Promi
       name: cachedPersonName(p),
       jobTitle: p.jobTitle,
       companyName: p.companyName,
+      companyId: p.companyId,
       podName: cadencePod?.name ?? null,
       podId: cadencePod?.id ?? null,
       standing: crmStanding(p),

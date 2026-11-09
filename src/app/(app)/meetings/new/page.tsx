@@ -5,12 +5,13 @@ import { prisma } from '@/lib/db';
 import { MeetingForm } from '@/components/meetings/meeting-form';
 import { PageHeader, Surface } from '@/components/ui';
 import { meetingDay } from '@/lib/meetings/day';
-import { prospectOptions, teamOptions } from '@/lib/meetings/people-search';
+import { prospectOptions, startingTeam, teamOptions } from '@/lib/meetings/people-search';
 
 /**
  * `personId` pre-fills this form from a recording Twenty already holds: the link and the prospect
  * come from the person record, so adding one is a single click from the person's panel. Whoever
- * adds it starts on the team list, and as the FO who booked it when they are one.
+ * adds it starts on the team list with their pod's Sales Leader, and as the FO who booked it when
+ * they are one.
  */
 export default async function NewMeetingPage({ searchParams }: { searchParams: Promise<{ personId?: string; url?: string }> }) {
   const user = await requireUser();
@@ -19,7 +20,7 @@ export default async function NewMeetingPage({ searchParams }: { searchParams: P
   const [person, fos, team, prospects] = await Promise.all([
     personId ? prisma.personCache.findUnique({ where: { id: personId } }) : Promise.resolve(null),
     prisma.user.findMany({ where: { active: true, role: { in: ROLES_NEEDING_POD } }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
-    teamOptions([user.id]),
+    startingTeam(user).then(teamOptions),
     personId ? prospectOptions([personId]) : Promise.resolve([]),
   ]);
   const personName = person ? [person.firstName, person.lastName].filter(Boolean).join(' ').trim() : '';

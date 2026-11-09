@@ -26,7 +26,6 @@ import { mailTrackedFor } from '../mail/graph-mail';
 import { coldRef, COLD_CONTACT_BASE, coldMoveHref, personRef, subjectHref } from '../subject';
 import { COLD_TASKS_HREF } from '../tasks-query';
 import { coldCues, type ColdCue } from './cues';
-import { contactPathStep, type PathStepKey } from './path';
 import { latestMoves, type ContactMove } from './moves-query';
 import { crmChecklist, type ChecklistItem } from './ready';
 import { countryChoices, linkedinHref, readExtraPhones } from './normalize';
@@ -406,7 +405,7 @@ export async function loadContactPage(id: string, user: SessionUser, now = new D
   const running = contact.enrollments.filter((e) => e.status === 'ACTIVE' || e.status === 'PAUSED');
 
   return {
-    contact, id, name, firstName, live, erased, removed, sub, cue, step: contactPathStep(cue) as PathStepKey | null, today, settings,
+    contact, id, name, firstName, live, erased, removed, sub, cue, today, settings,
     newerNote: source.newerNote, possibleBounce: live && contact.possibleBounceAt && !contact.badEmail ? { at: contact.possibleBounceAt, on: dayYear(contact.possibleBounceAt), mayAct: work.ok } : null,
     banner, formOpt, blocker, mayWork, mayClaim, claimFirst, claimPods: claimPodIds ? pods.filter((p) => claimPodIds.includes(p.id)) : null, workWhy, admin, bizOps, sales,
     readOnly: live && !work.ok ? work.reason : null,

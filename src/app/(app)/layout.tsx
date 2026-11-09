@@ -26,8 +26,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const e = env();
   const today = todayIn(user.timezone);
   // The badges count exactly what the lists they open hold (B117): Tasks holds CRM and cold work
-  // together (D2); the Cold outreach entry, its cold work, which its Tasks view lists.
-  const [unread, due, needsReview, ticketsCount, pending, pendingTotal, coldDue, calling] = await Promise.all([
+  // together (D2), so Cold outreach carries no count of its own (owner, 9 Nov 2026: no Tasks tab there).
+  const [unread, due, needsReview, ticketsCount, pending, pendingTotal, calling] = await Promise.all([
     unreadNotifications(user),
     dueCounts(user.id, 'all', today),
     isAdmin(user) ? prisma.activityEvent.count({ where: { needsReview: true } }) : Promise.resolve(0),
@@ -36,7 +36,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     // Calls of mine waiting for their form: the notice above every page, and Call buttons wait for it (B088).
     pendingForms(user.id),
     pendingFormCount(user.id),
-    dueCounts(user.id, 'cold', today),
     // A press of Call the import has not read back yet: "Calling Jane Doe… the form opens here" (PLAN 4.6).
     prisma.callIntent.findFirst({ where: { userId: user.id, callId: null, createdAt: { gte: new Date(Date.now() - 15 * 60_000) } }, orderBy: { createdAt: 'desc' }, select: { toNumber: true, personId: true, sandboxContactId: true } }),
   ]);
@@ -49,7 +48,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <FilterNavigationProvider><div className="flex min-h-screen bg-canvas">
       <a href="#main-content" className="skip-link">Skip to content</a>
-      <Sidebar user={user} mode={e.TWENTY_MODE} dryRun={e.CADENCE_DRY_RUN} todayCount={due.today} overdueCount={due.overdue} ticketsCount={ticketsCount} sandboxCount={coldDue.today + coldDue.overdue} />
+      <Sidebar user={user} mode={e.TWENTY_MODE} dryRun={e.CADENCE_DRY_RUN} todayCount={due.today} overdueCount={due.overdue} ticketsCount={ticketsCount} />
       <main id="main-content" tabIndex={-1} className="flex min-w-0 flex-1 flex-col outline-none">
         <LiveRefresh />
         <TopBar role={user.role} unread={unread} needsReview={needsReview} timezone={workspaceTimezone()} />

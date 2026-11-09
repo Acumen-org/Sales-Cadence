@@ -1,10 +1,14 @@
 import { prisma } from '../db';
 import { meetingDay, meetingDayInstant, parseMeetingDay } from './day';
+import { isCountedDay } from './numbering-start';
+
+export { NUMBERING_STARTS, NUMBERING_STARTS_WORDS, isCountedDay } from './numbering-start';
 
 /**
  * How many times we have met each prospect (owner, 29 October 2026). A prospect's earliest meeting
  * in Cadence is their 1st, the next their 2nd, by date and then by when it was added; a meeting
- * removed or moved renumbers the rest. A meeting as a whole is the highest of its prospects'
+ * removed or moved renumbers the rest. Counting starts on 1 October 2026 (owner, 9 Nov 2026):
+ * meetings before it carry no number, so a prospect's first meeting from then on is their 1st. A meeting as a whole is the highest of its prospects'
  * numbers, so it counts as a first meeting only when everyone on it is new: Grant at 2 with
  * Alex at 1 is a 2nd meeting. The FO who booked it is credited once per meeting, however many
  * prospects were on it; the bonus counts first meetings and the 5th, 10th, 15th...
@@ -31,7 +35,7 @@ export function numberRows(rows: Row[]): Map<string, number | null> {
   const out = new Map<string, number | null>();
   const byPerson = new Map<string, Row[]>();
   for (const r of rows) {
-    if (!r.approved) { out.set(r.id, null); continue; }
+    if (!r.approved || !isCountedDay(meetingDay(r.occurredAt))) { out.set(r.id, null); continue; }
     byPerson.set(r.personId, [...(byPerson.get(r.personId) ?? []), r]);
   }
   for (const list of byPerson.values()) {
@@ -93,7 +97,8 @@ export type ProspectNumber = {
 export async function upcomingNumbers(personIds: string[], day: string, exceptMeetingId: string | null): Promise<ProspectNumber[]> {
   const ids = [...new Set(personIds.filter(Boolean))].slice(0, 100);
   const parsed = parseMeetingDay(day);
-  if (!ids.length || !parsed) return [];
+  // A meeting before counting starts gets no number, and moves no one else's.
+  if (!ids.length || !parsed || !isCountedDay(parsed)) return [];
   const at = meetingDayInstant(parsed);
   const self = exceptMeetingId ? await prisma.meeting.findUnique({ where: { id: exceptMeetingId }, select: { createdAt: true } }) : null;
   const addedAt = self?.createdAt ?? new Date();

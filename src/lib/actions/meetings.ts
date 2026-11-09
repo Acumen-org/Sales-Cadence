@@ -13,6 +13,7 @@ import { inspectLink } from '../meetings/resolve-media';
 import { resolveAttendees, type AttendeeSelection } from '../meetings/attendees';
 import { findProspects, findTeam, type ProspectOption, type TeamOption } from '../meetings/people-search';
 import { renumberProspects, upcomingNumbers, type ProspectNumber } from '../meetings/numbering';
+import { meetingCompany } from '../meetings/account';
 import { fetchMeetingTranscript, transcriptForRecording, mayReadTranscripts } from '../meetings/teams-transcript';
 import { linkKey, linkNeedle } from '../meetings/link-key';
 import { pushMeetingToCrm, removeMeetingFromCrm } from '../meetings/crm';
@@ -146,18 +147,6 @@ async function meetingPeople(formData: FormData, hostUserId: string | null, keep
   const prospects = attendees.filter((a) => a.prospect).map((a) => a.personId!);
   if (!prospects.length) return { error: 'Everyone chosen as a prospect is on our team. Choose the people the meeting was with.' };
   return { attendees, prospectIds: prospects };
-}
-
-/** The account a meeting is with: the one most of its prospects work at. */
-async function meetingCompany(prospectIds: string[]): Promise<{ id: string | null; name: string | null }> {
-  const people = await prisma.personCache.findMany({ where: { id: { in: prospectIds } }, select: { id: true, companyId: true, companyName: true } });
-  const ordered = prospectIds.map((id) => people.find((p) => p.id === id)).filter((p): p is (typeof people)[number] => Boolean(p?.companyId));
-  if (!ordered.length) return { id: null, name: people.find((p) => p.companyName)?.companyName ?? null };
-  const counts = new Map<string, number>();
-  for (const p of ordered) counts.set(p.companyId!, (counts.get(p.companyId!) ?? 0) + 1);
-  const top = ordered.reduce((best, p) => ((counts.get(p.companyId!) ?? 0) > (counts.get(best.companyId!) ?? 0) ? p : best), ordered[0]);
-  const company = await prisma.companyCache.findFirst({ where: { id: top.companyId!, deletedAt: null }, select: { id: true, name: true } });
-  return company ? { id: company.id, name: company.name } : { id: null, name: top.companyName };
 }
 
 /**

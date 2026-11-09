@@ -48,6 +48,15 @@ async function closeColdWork(tx: Tx, contactId: string, now: Date) {
   await tx.$executeRaw`UPDATE "Campaign" SET "personIds" = array_remove("personIds", ${contactId}), "updatedAt" = now() WHERE audience::text = 'SANDBOX' AND status::text IN ('DRAFT', 'PENDING_APPROVAL', 'SCHEDULED') AND ${contactId} = ANY("personIds")`;
 }
 
+/**
+ * A removed or erased contact's calls still waiting for their form are discarded (owner, 9 Nov 2026):
+ * there is no one left to write it about, so the notice and the Call button's wait end with them.
+ */
+export const GONE_CONTACT_DISCARD = 'The contact was removed, so the call needs no form.';
+async function discardWaitingForms(tx: Tx, contactId: string, now: Date) {
+  return tx.callLog.updateMany({ where: { sandboxContactId: contactId, personId: null, formDueAt: { not: null }, formDoneAt: null, discardedAt: null }, data: { discardedAt: now, discardReason: GONE_CONTACT_DISCARD } });
+}
+
 /** End the subject's running enrollments with a labelled reason ("opted_out", "removed"), after the transaction. */
 async function endEnrollments(where: Prisma.EnrollmentWhereInput, reason: string, actor: AuditActor, now: Date) {
   const running = await prisma.enrollment.findMany({ where: { ...where, status: { in: OCCUPYING_STATUSES } }, select: { id: true } });
@@ -244,7 +253,8 @@ export async function removeContact(contactId: string, opts: TransitionOptions &
     if (!changed.count) return false;
     await scrub(tx, c);
     await closeColdWork(tx, c.id, now);
-    await logAudit({ entityType: 'sandbox_contact', entityId: c.id, action: 'removed', actor: opts.actor, details: { by: opts.actor.type === 'USER' ? 'user' : 'retention', hasReason: Boolean(opts.reason?.trim()) } }, tx);
+    const discarded = await discardWaitingForms(tx, c.id, now);
+    await logAudit({ entityType: 'sandbox_contact', entityId: c.id, action: 'removed', actor: opts.actor, details: { by: opts.actor.type === 'USER' ? 'user' : 'retention', hasReason: Boolean(opts.reason?.trim()), formsDiscarded: discarded.count } }, tx);
     return true;
   }, { audit: opts.actor, now });
   if (!r.ok) return r;
@@ -281,7 +291,8 @@ export async function eraseContact(contactId: string, opts: TransitionOptions): 
       },
     });
     await closeColdWork(tx, c.id, now);
-    await logAudit({ entityType: 'sandbox_contact', entityId: c.id, action: 'erased', actor: opts.actor, details: { recordings: recordings.length, from: c.status } }, tx);
+    const discarded = await discardWaitingForms(tx, c.id, now);
+    await logAudit({ entityType: 'sandbox_contact', entityId: c.id, action: 'erased', actor: opts.actor, details: { recordings: recordings.length, from: c.status, formsDiscarded: discarded.count } }, tx);
     return recordings;
   }, { audit: opts.actor, now });
   if (!r.ok) return r;

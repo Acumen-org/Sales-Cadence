@@ -80,7 +80,8 @@ export async function closeNumberCheckAction(formData: FormData): Promise<Action
   if (!count) return { ok: false, error: 'This check is already closed.' };
   await logAudit({ entityType: 'numberCheck', entityId: id, action: 'closed', actor: userActor(user), details: { resolution: resolution || null } });
   revalidatePath('/meetings/checks', 'layout');
-  return { ok: true, message: 'Closed.', redirectTo: '/meetings/checks' };
+  revalidatePath('/tickets', 'layout');
+  return { ok: true, message: 'Closed.', redirectTo: '/tickets' };
 }
 
 /** Open a closed check again, when the number turns out to be wrong after all. */

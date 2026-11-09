@@ -16,7 +16,7 @@ export const LIST_VIEWS = ['mine', 'no_next_step', 'unclaimed', 'ready', 'in_crm
 export type ListView = (typeof LIST_VIEWS)[number];
 
 export const VIEW_LABELS: Record<ListView, string> = {
-  mine: 'Mine', no_next_step: 'No next step', unclaimed: 'Unclaimed', ready: 'Ready to move', in_crm: 'Already in CRM', closed: 'Closed',
+  mine: 'My contacts', no_next_step: 'Needs a next step', unclaimed: 'To claim', ready: 'Ready to move', in_crm: 'Already in CRM', closed: 'Closed',
   all: 'All', moved: 'Moved', dnc_removed: 'Do not contact and removed', form_due: 'Forms due', any: 'Every status',
 };
 
@@ -121,7 +121,7 @@ export function scopeFor(view: ListView, p: Pick<ListParams, 'owner' | 'pod'>, c
 
 /** The quick views a role is offered, in the order of PLAN 4.1. Admins and Biz Ops own nothing, so they get no Mine. */
 export function viewsFor(role: ListRole, current: ListView): ListView[] {
-  const views: ListView[] = ['mine', 'no_next_step', 'unclaimed', 'ready', 'in_crm', 'closed', 'all', 'moved', 'dnc_removed'];
+  const views: ListView[] = ['mine', 'unclaimed', 'no_next_step', 'ready', 'all', 'in_crm', 'closed', 'moved', 'dnc_removed'];
   const shown = role === 'rep' || role === 'leader' ? views : views.filter((v) => v !== 'mine');
   if (current === 'form_due') shown.splice(1, 0, 'form_due');
   if (current === 'any') shown.unshift('any');

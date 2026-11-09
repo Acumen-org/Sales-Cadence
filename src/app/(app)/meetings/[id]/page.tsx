@@ -18,7 +18,7 @@ import { MeetingAnalysisPanel } from '@/components/meetings/meeting-analysis';
 import { AttendeeEditor } from '@/components/meetings/attendee-editor';
 import { MeetingStage } from '@/components/meetings/meeting-stage';
 import { IconExternal } from '@/components/icons';
-import { ordinal } from '@/lib/meetings/numbering';
+import { NUMBERING_STARTS_WORDS, ordinal } from '@/lib/meetings/numbering';
 import { deleteMeetingConfirm } from '@/lib/confirms';
 import { prospectOptions, teamOptions } from '@/lib/meetings/people-search';
 import { Avatar, Badge, Card, EmptyState, Field, KeyValue, RecordFields, RecordHeader } from '@/components/ui';
@@ -58,7 +58,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
           shape="square"
           badges={
             <>
-              {n ? <Badge tone={n === 1 ? 'green' : 'gray'}>{n === 1 ? 'First meeting' : `Follow-up · ${ordinal(n)} meeting`}</Badge> : <Badge tone="amber">No prospect, no number</Badge>}
+              {n ? <Badge tone={n === 1 ? 'green' : 'gray'}>{n === 1 ? 'First meeting' : `Follow-up · ${ordinal(n)} meeting`}</Badge> : prospects.length ? <Badge tone="gray">Before {NUMBERING_STARTS_WORDS}, not counted</Badge> : <Badge tone="amber">No prospect, no number</Badge>}
               {externals.length ? <Badge tone="green">{externals.length} external</Badge> : <Badge tone="gray">{meeting.attendees.length ? 'Internal only' : 'No attendees'}</Badge>}
               {meeting.transcript ? <Badge tone="blue">Transcript</Badge> : null}
             </>

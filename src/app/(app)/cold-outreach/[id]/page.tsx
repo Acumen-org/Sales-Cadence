@@ -50,7 +50,7 @@ export default async function ColdContactPage({ params, searchParams }: { params
   const m = await loadContactPage(id, user);
   if (!m) notFound();
   const tab: Tab = (TABS as readonly string[]).includes(sp.tab ?? '') ? (sp.tab as Tab) : 'overview';
-  const header = await ColdOutreachHeader({ user, current: 'contacts', step: m.step });
+  const header = <ColdOutreachHeader user={user} current="contacts" />;
   const c = m.contact;
   const href = (t: Tab) => `${subjectHref(coldRef(id))}${t === 'overview' ? '' : `?tab=${t}`}`;
   const openTasks = m.tasks.filter((t) => t.state === 'open').length;

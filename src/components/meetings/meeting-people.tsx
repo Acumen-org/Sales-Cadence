@@ -5,6 +5,7 @@ import clsx from 'clsx';
 import { prospectNumbersAction, searchProspectsAction, searchTeamAction, type ProspectNumber, type ProspectOption, type TeamOption } from '@/lib/actions/meetings';
 import { raiseNumberCheckAction } from '@/lib/actions/number-checks';
 import { formatLocalDate } from '@/lib/dates';
+import { isCountedDay, NUMBERING_STARTS_WORDS } from '@/lib/meetings/numbering-start';
 import { Avatar, Badge } from '@/components/ui';
 import { IconCheck, IconClose, IconSearch } from '@/components/icons';
 
@@ -305,6 +306,11 @@ export function MeetingPeople({ fos, value, onChange, day, meetingId, showBooked
             <span>This meeting</span>
             <Badge tone={overall === 1 ? 'green' : 'gray'}>{overall === 1 ? 'First meeting' : `Follow-up · ${ordinal(overall)} meeting`}</Badge>
             {booker ? <span>for {booker}</span> : null}
+          </div>
+        ) : value.prospects.length && day && !isCountedDay(day.slice(0, 10)) ? (
+          <div className="flex flex-wrap items-center gap-2 pt-1 text-[13px] text-ink-600" aria-live="polite">
+            <span>This meeting</span>
+            <Badge tone="gray">Before {NUMBERING_STARTS_WORDS}, not counted</Badge>
           </div>
         ) : null}
       </div>

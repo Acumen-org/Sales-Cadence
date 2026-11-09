@@ -10,7 +10,7 @@ async function signIn(page: Page, email: string, password: string) {
 
 /**
  * "Think this is wrong?" (owner, 30 October 2026): whoever adds a meeting can say a prospect's
- * meeting number looks wrong; Biz Ops (or an admin) sees it under Meetings > Number checks, sets
+ * meeting number looks wrong; Biz Ops (or an admin) sees it under Tickets, sets
  * the number on the right meeting, and closes it with what they found.
  */
 test('a doubted meeting number reaches Biz Ops, who sets it and closes the check', async ({ page }) => {
@@ -42,13 +42,14 @@ test('a doubted meeting number reaches Biz Ops, who sets it and closes the check
   // The open check counts on Tickets in the sidebar (D4: every kind of open ticket is listed there),
   // and the Tickets list shows it beside the other kinds.
   await expect(page.locator('aside').getByRole('link', { name: /Tickets/ })).toContainText(/\d/);
-  await page.goto('/tickets');
-  await expect(page.getByText('Dummy Three').first()).toBeVisible();
+  // Meetings no longer has its own Number checks list (owner, 9 Nov 2026): Tickets is the one place.
+  await page.goto('/meetings');
+  await expect(page.getByRole('link', { name: /Number checks/ })).toHaveCount(0);
   await page.goto('/meetings/checks');
-  const row = page.getByRole('row').filter({ hasText: 'Dummy Three' }).filter({ hasText: 'E2E number check' }).first();
-  await expect(row).toContainText('Two calls before Cadence');
-  await expect(row).toContainText('3rd meeting');
-  await row.getByRole('link', { name: 'Check', exact: true }).click();
+  await expect(page).toHaveURL(/\/tickets$/);
+  const row = page.getByRole('row').filter({ hasText: 'Dummy Three' }).filter({ hasText: 'Two calls before Cadence' }).first();
+  await expect(row).toContainText('Meeting number');
+  await row.getByRole('link', { name: 'Look into it', exact: true }).click();
   await expect(page).toHaveURL(/\/meetings\/checks\/[0-9a-f-]+$/);
 
   // Set on the meeting it was raised about; the meetings after it count on from there.
@@ -60,7 +61,7 @@ test('a doubted meeting number reaches Biz Ops, who sets it and closes the check
 
   await page.getByLabel('What you found').fill('Confirmed two calls in September.');
   await page.getByRole('button', { name: 'Close check' }).click();
-  await expect(page).toHaveURL(/\/meetings\/checks$/);
-  await page.goto('/meetings/checks?tab=closed');
+  await expect(page).toHaveURL(/\/tickets$/);
+  await page.goto('/tickets?tab=closed');
   await expect(page.getByRole('row').filter({ hasText: 'Dummy Three' }).first()).toContainText('Confirmed two calls in September.');
 });
