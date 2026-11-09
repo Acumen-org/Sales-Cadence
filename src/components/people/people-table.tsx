@@ -20,6 +20,8 @@ export type PeopleTableRow = {
   name: string;
   jobTitle: string | null;
   companyName: string | null;
+  /** The CRM account they work at, for the Account column's link. */
+  companyId: string | null;
   podName: string | null;
   /** The Cadence pod this person's podOwner maps to, for the row's "add to sequence". */
   podId: string | null;
@@ -139,12 +141,13 @@ function CrmPeopleTable({ rows, canMove = true, nextActions }: Props) {
           {/* Fixed shares that add up to the table, so the list never scrolls sideways; the select column takes the remaining 4%. */}
           <colgroup>
             <col className="w-10" />
-            <col style={{ width: showNext ? '24%' : '27%' }} />
-            <col style={{ width: showNext ? '20%' : '23%' }} />
+            <col style={{ width: showNext ? '19%' : '21%' }} />
+            <col style={{ width: showNext ? '14%' : '15%' }} />
+            <col style={{ width: showNext ? '16%' : '18%' }} />
             {showNext ? <col style={{ width: '11%' }} /> : null}
-            <col style={{ width: showNext ? '15%' : '17%' }} />
+            <col style={{ width: showNext ? '13%' : '15%' }} />
+            <col style={{ width: showNext ? '9%' : '11%' }} />
             <col style={{ width: showNext ? '10%' : '12%' }} />
-            <col style={{ width: '12%' }} />
           </colgroup>
           <thead>
             <tr>
@@ -152,6 +155,7 @@ function CrmPeopleTable({ rows, canMove = true, nextActions }: Props) {
                 {canSelect ? <input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={!selectable.length} aria-label="Select people" /> : null}
               </th>
               <th>Name</th>
+              <th>Account</th>
               <th>Tags in the CRM</th>
               {showNext ? <th>Next in the CRM</th> : null}
               <th>Campaign</th>
@@ -166,7 +170,10 @@ function CrmPeopleTable({ rows, canMove = true, nextActions }: Props) {
                   {canSelect ? <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)} disabled={p.dnd || p.optedOut} aria-label={`Select ${p.name}`} /> : null}
                 </td>
                 <td>
-                  <IdentityCell name={p.name} href={`/people/${p.id}`} shape="circle" sub={[p.jobTitle, p.companyName].filter(Boolean).join(' · ') || null} />
+                  <IdentityCell name={p.name} href={`/people/${p.id}`} shape="circle" sub={p.jobTitle || null} />
+                </td>
+                <td data-label="Account" className="break-words text-[12.5px]">
+                  {p.companyId && p.companyName ? <Link href={`/accounts/${p.companyId}`} className="text-brand-700 hover:underline">{p.companyName}</Link> : p.companyName ? <span className="text-ink-700">{p.companyName}</span> : <span className="text-ink-300">-</span>}
                 </td>
                 <td title={p.leadSource.length ? `Lead source: ${optionLabels(p.leadSource)}` : undefined}>
                   <PillList

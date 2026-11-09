@@ -5,8 +5,8 @@ import { redirect } from 'next/navigation';
 import { optionLabel } from '@/lib/twenty/labels';
 import type { Prisma } from '@prisma/client';
 import { requireUser } from '@/lib/auth/current-user';
-import { ordinal } from '@/lib/meetings/numbering';
-import { canCheckMeetingNumbers, canCreateMeeting, ROLES_NEEDING_POD } from '@/lib/auth/rbac';
+import { NUMBERING_STARTS_WORDS, ordinal } from '@/lib/meetings/numbering';
+import { canCreateMeeting, ROLES_NEEDING_POD } from '@/lib/auth/rbac';
 import { attendeeIsExternal, meetingReadWhere } from '@/lib/meetings-query';
 import { getSettings } from '@/lib/settings';
 import { prisma } from '@/lib/db';
@@ -79,19 +79,12 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
         analysis: true,
         analysisModel: true,
         _count: { select: { attendees: true } },
-        attendees: { select: { email: true, external: true, userId: true } },
+        attendees: { select: { email: true, external: true, userId: true, prospect: true } },
         favourites: { where: { userId: user.id }, select: { userId: true } },
       },
     }),
     prisma.meeting.count({ where }),
   ]);
-  // Biz Ops and admins check doubted numbers; anyone else sees the checks they raised.
-  const checker = canCheckMeetingNumbers(user);
-  const [openChecks, mine] = await Promise.all([
-    prisma.meetingNumberTicket.count({ where: { open: true, ...(checker ? {} : { raisedById: user.id }) } }),
-    checker ? Promise.resolve(0) : prisma.meetingNumberTicket.count({ where: { raisedById: user.id } }),
-  ]);
-  const checks = { show: checker || mine > 0, open: openChecks };
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const pageHref = (n: number) => {
     const p = new URLSearchParams();
@@ -116,7 +109,6 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
           meta={`${total} meeting${total === 1 ? '' : 's'}`}
           actions={
             <>
-              {checks.show ? <Link href="/meetings/checks" className="btn-secondary">Number checks{checks.open ? <Badge tone="amber">{checks.open}</Badge> : null}</Link> : null}
               {canCreateMeeting(user) && <Link href="/meetings/new" className="btn-primary">
                 <IconPlus size={14} /> Add meeting
               </Link>}
@@ -160,7 +152,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                     <td data-label="Meeting">
                       <IdentityCell name={m.title} href={`/meetings/${m.id}`} sub={platformLabel(m.provider, m.sourceUrl)} />
                     </td>
-                    <td data-label="When" className="text-[12.5px]"><time className="block font-medium text-ink-900">{formatLocalDate(meetingDay(m.occurredAt), 'long')}</time>{m.meetingNumber ? <Badge tone={m.meetingNumber === 1 ? 'green' : 'gray'} className="mt-1">{m.meetingNumber === 1 ? 'First meeting' : `${ordinal(m.meetingNumber)} meeting`}</Badge> : <Badge tone="amber" className="mt-1">No prospect, no number</Badge>}</td>
+                    <td data-label="When" className="text-[12.5px]"><time className="block font-medium text-ink-900">{formatLocalDate(meetingDay(m.occurredAt), 'long')}</time>{m.meetingNumber ? <Badge tone={m.meetingNumber === 1 ? 'green' : 'gray'} className="mt-1">{m.meetingNumber === 1 ? 'First meeting' : `${ordinal(m.meetingNumber)} meeting`}</Badge> : m.attendees.some((a) => a.prospect) ? <Badge tone="gray" className="mt-1">Before {NUMBERING_STARTS_WORDS}, not counted</Badge> : <Badge tone="amber" className="mt-1">No prospect, no number</Badge>}</td>
                     <td data-label="Account" className="break-words text-[12.5px]">
                       {m.companyId ? (
                         <Link href={`/accounts/${m.companyId}`} className="text-brand-700 hover:underline">

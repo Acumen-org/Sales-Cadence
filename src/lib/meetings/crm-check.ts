@@ -8,6 +8,7 @@ import type { TwentyMeetingRecord } from '../twenty/types';
 import { meetingFacts, pushMeetingToCrm, type MeetingFacts } from './crm';
 import { meetingDay } from './day';
 import { renumberProspects } from './numbering';
+import { refreshMeetingAccounts } from './account';
 
 /**
  * Twenty keeps the record and Cadence writes it (owner, 2 November 2026: "Cadence is not a record
@@ -18,6 +19,7 @@ import { renumberProspects } from './numbering';
  * - an older meeting with no prospect (its people typed in before the form had a prospects list)
  *   has them linked to their Twenty person, by address or by a name only one person there has;
  * - every prospect's meetings are counted again by date, so a number is never left stale;
+ * - every meeting's account is worked out again from its prospects (src/lib/meetings/account.ts);
  * - the Meetings object is read back, and every meeting whose record is missing, whose number,
  *   First Meeting box or contacts are not Cadence's, or whose record someone changed in Twenty, is
  *   written again as Cadence has it;
@@ -112,6 +114,8 @@ export async function checkMeetingsInCrm(options: { client?: TwentyClient } = {}
   // Every prospect counted again, not only the ones touched here.
   const everyone = await prisma.meetingAttendee.findMany({ where: { prospect: true, personId: { not: null } }, select: { personId: true }, distinct: ['personId'] });
   const moved = await renumberProspects(everyone.map((a) => a.personId));
+  // Every meeting's account from its prospects, older meetings included (owner, 9 Nov 2026).
+  moved.push(...(await refreshMeetingAccounts()));
 
   // What Twenty holds against what Cadence wrote.
   const meetings = await prisma.meeting.findMany({ select: { id: true, review: true, meetingNumber: true, twentyMeetingId: true, twentySnapshot: true, attendees: { where: { prospect: true }, select: { personId: true } } } });

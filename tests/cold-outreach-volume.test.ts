@@ -6,7 +6,6 @@ import type { SessionUser } from '@/lib/auth/current-user';
 import { coldAudienceIssues } from '@/lib/sandbox/campaigns';
 import { buildReports, reportingRange } from '@/lib/reports-query';
 import { listActivity, type ActivityPage } from '@/lib/activity-query';
-import { repPath } from '@/lib/sandbox/path';
 import { listContacts } from '@/lib/sandbox/query';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 import { sessionOf } from './helpers/cold-campaign';
@@ -32,7 +31,6 @@ const report = (name: string, took: number, budget: number) => process.stdout.wr
 describe('cold outreach at production volume (W13)', () => {
   let b: Basics;
   let admin: SessionUser;
-  let leader: SessionUser;
   let rep: SessionUser;
   const today = todayIn(workspaceTimezone());
 
@@ -92,7 +90,6 @@ describe('cold outreach at production volume (W13)', () => {
     await prisma.auditLog.createMany({ data: live.slice(0, 300).map((c, i) => ({ entityType: 'sandbox_contact', entityId: c.id, action: 'claimed', actorType: 'USER' as const, actorId: c.ownerId, createdAt: day(i * 97) })) });
 
     admin = await sessionOf(b.users.ria.id);
-    leader = await sessionOf(repIds[0]);
     rep = await sessionOf(repIds[1]);
   }, 600_000);
 
@@ -135,12 +132,7 @@ describe('cold outreach at production volume (W13)', () => {
     expect(slowest).toBeLessThan(2000);
   });
 
-  it('S10 speed note: the step strip and the list\'s worked-out views, for an admin, a leader and a rep', async () => {
-    for (const [who, user, budget] of [['admin', admin, 800], ['leader', leader, 400], ['rep', rep, 400]] as const) {
-      const strip = await ms(() => repPath(user));
-      report(`step strip, ${who}`, strip.ms, budget);
-      expect(strip.ms).toBeLessThan(budget);
-    }
+  it('S10 speed note: the contacts list views, for an admin and a rep', async () => {
     for (const [who, user, budget] of [['admin', admin, 800], ['rep', rep, 400]] as const) {
       for (const view of ['all', 'no_next_step', 'ready']) {
         const list = await ms(() => listContacts(user, { view, owner: '' }));

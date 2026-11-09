@@ -10,9 +10,7 @@ import { COLD_CAMPAIGNS_HREF, COLD_CONTACT_BASE, COLD_FROM_BELLWETHER_HREF, COLD
 import { COLD_TASKS_HREF } from '@/lib/tasks-query';
 import { campaignTitle } from '@/lib/campaigns-query';
 import { coldCues } from '@/lib/sandbox/cues';
-import { contactPathStep, pathFrom, repPath } from '@/lib/sandbox/path';
 import { listPushes } from '@/lib/sandbox/pushes-query';
-import { StepStrip } from '@/components/sandbox/step-strip';
 import { SubjectBadges } from '@/components/subject-badges';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 import { readyContact } from './helpers/sandbox';
@@ -81,10 +79,11 @@ describe('Cold outreach: the address and the rename (S10)', () => {
     expect(found).toEqual([]);
   });
 
-  it('every cold link is built under /cold-outreach: contacts, Tasks, Campaigns, Moves, From Bellwether', () => {
+  it('every cold link is built under /cold-outreach: contacts, Campaigns, Moves, From Bellwether', () => {
     expect(COLD_CONTACT_BASE).toBe('/cold-outreach');
     expect(subjectHref(coldRef('c1'))).toBe('/cold-outreach/c1');
-    expect(COLD_TASKS_HREF).toBe('/cold-outreach/tasks');
+    // Cold work is done from Tasks with everything else (owner, 9 Nov 2026).
+    expect(COLD_TASKS_HREF).toBe('/tasks');
     expect(COLD_CAMPAIGNS_HREF).toBe('/cold-outreach/campaigns');
     expect(COLD_MOVES_HREF).toBe('/cold-outreach/moves');
     expect(coldMoveHref('m1')).toBe('/cold-outreach/moves/m1');
@@ -185,27 +184,6 @@ describe('Cold outreach screens (S10)', () => {
     const html = renderToStaticMarkup(createElement(SubjectBadges, { badge: cues.get(bare.id)!.badge, chips: cues.get(bare.id)!.chips }));
     expect(html).toContain('No next step');
     expect(html).toContain('Wrong number');
-  });
-
-  it('the step strip counts the rep\'s path for me, highlights where I am most behind, and greys out when nothing waits', async () => {
-    await readyContact(b.users.alisa.id, b.pods.Alisa.id, { ownerId: null });
-    await readyContact(b.users.alisa.id, b.pods.Alisa.id, { ownerId: null });
-    await readyContact(b.users.alisa.id, b.pods.Alisa.id);
-    const path = await repPath(alisa);
-    expect(path.steps.map((s) => [s.key, s.count])).toEqual([['claim', 2], ['work', 0], ['form', 0], ['next', 1], ['move', 0]]);
-    expect(path.behind).toBe('claim');
-    const html = renderToStaticMarkup(createElement(StepStrip, { path }));
-    expect(html).toContain('2 to claim');
-    expect(html).toContain('1 with no next step');
-    expect(html).toContain('href="/cold-outreach?view=unclaimed"');
-    // A form waiting blocks every call, so it is the step to catch up on first.
-    expect(pathFrom({ claim: 5, work: 9, form: 1, next: 3, move: 0 }).behind).toBe('form');
-    const idle = renderToStaticMarkup(createElement(StepStrip, { path: pathFrom({ claim: 0, work: 0, form: 0, next: 0, move: 0 }) }));
-    expect(idle).toContain('Nothing waiting. New contacts arrive from Bellwether.');
-    expect(contactPathStep({ state: 'unclaimed', formDue: false, worked: false })).toBe('claim');
-    expect(contactPathStep({ state: 'no_next_step', formDue: false, worked: false })).toBe('work');
-    expect(contactPathStep({ state: 'no_next_step', formDue: false, worked: true })).toBe('next');
-    expect(contactPathStep({ state: 'ready_to_move', formDue: true, worked: true })).toBe('form');
   });
 
   it('B116: Ctrl K finds cold contacts and cold campaigns, each marked with what it is, a contact with its status badge', async () => {

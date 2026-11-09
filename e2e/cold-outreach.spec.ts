@@ -5,7 +5,7 @@ import { PrismaClient } from '@prisma/client';
 /**
  * Cold outreach end to end (PLAN 9.4, the rep's path), on the new pages. A fake Bellwether pushes a
  * contact nobody owns and Alisa claims it; she builds a cold campaign in the studio with a call on its
- * first day; the step shows in Tasks and in Cold outreach > Tasks; a call from her line, made outside
+ * first day; the step shows in Tasks; a call from her line, made outside
  * Cadence (no Call-button intent), is imported and closes that step; the form ends the campaign; the
  * contact moves to the CRM and the move is undone; Reports shows all three views. Twilio and Twenty are
  * the built-in stand-ins, and the worker (which launches the campaign) is the launcher's own.
@@ -115,11 +115,22 @@ test('the rep\'s path: push and claim, a studio campaign, its step in both task 
   const callStep = enrollment.tasks.find((t) => t.action === 'CALL')!;
   expect(callStep).toEqual(expect.objectContaining({ state: 'PENDING', dueDate: today }));
 
-  // 3. The step is in Tasks, with CRM work, and in Cold outreach > Tasks.
-  for (const path of ['/tasks', '/cold-outreach/tasks']) {
-    await page.goto(path);
-    await expect(page.getByText(FULL).first()).toBeVisible();
-  }
+  // 3. The step is in Tasks, with CRM work. Cold outreach has no Tasks tab of its own any more
+  // (owner, 9 Nov 2026): its old address opens Tasks.
+  await page.goto('/tasks');
+  await expect(page.getByText(FULL).first()).toBeVisible();
+  await page.goto('/cold-outreach/tasks');
+  await expect(page).toHaveURL(/\/tasks$/);
+  // The contacts list: four pills, every other view in one menu, no step strip.
+  await page.goto('/cold-outreach');
+  await expect(page.getByRole('main').getByRole('link', { name: 'Tasks', exact: true })).toHaveCount(0);
+  const views = page.getByRole('navigation', { name: 'Quick views' });
+  await expect(views.getByRole('link')).toHaveText([/^My contacts/, /^To claim/, /^Needs a next step/, /^Ready to move/]);
+  await expect(page.getByRole('navigation', { name: "The rep's path" })).toHaveCount(0);
+  const other = views.getByLabel('Other views');
+  await other.selectOption((await other.locator('option', { hasText: /^All \(/ }).getAttribute('value'))!);
+  await expect(page).toHaveURL(/view=all/);
+  await expect(page.getByText(FULL).first()).toBeVisible();
 
   // 4. A call from Alisa's line to the contact, made outside Cadence, is imported: no intent, and it
   // closes the one call step due today (PLAN 8.7).

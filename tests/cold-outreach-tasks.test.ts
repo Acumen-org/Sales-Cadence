@@ -97,9 +97,9 @@ describe('one Tasks list for CRM and cold work', () => {
     expect((await list('cold')).counts).toEqual({ today: 0, overdue: 1, upcoming: 2, done: 0 });
   });
 
-  it('B158: Cold outreach > Tasks opens with no filter carried over from Contacts', () => {
+  it('B158: cold work opens Tasks with no filter carried over from Contacts (no Cold outreach > Tasks since 9 Nov 2026)', () => {
     const url = new URL(COLD_TASKS_HREF, 'http://x');
-    expect(url.pathname).toBe('/cold-outreach/tasks');
+    expect(url.pathname).toBe('/tasks');
     expect([...url.searchParams.keys()]).toEqual([]);
   });
 

@@ -1,4 +1,4 @@
-import { COLD_CONTACT_BASE, workTaskWhere, workWhere, type AudienceScope } from './subject';
+import { workTaskWhere, workWhere, type AudienceScope } from './subject';
 import { needsPod, ROLES_NEEDING_POD } from '@/lib/auth/rbac';
 import type { Prisma } from '@prisma/client';
 import { prisma } from './db';
@@ -21,8 +21,8 @@ export const TASK_CHANNELS: TaskChannel[] = ['CALL', 'EMAIL', 'LINKEDIN'];
  * work only, as Cold outreach > Tasks shows it. Rows carry no tag either way.
  */
 export type TaskAudience = Extract<AudienceScope, 'all' | 'cold'>;
-/** Cold outreach > Tasks: the Tasks screen, cold work only, with no filter carried over from Contacts (B158). */
-export const COLD_TASKS_HREF = `${COLD_CONTACT_BASE}/tasks`;
+/** Where cold work is done: Tasks, with everything else (owner, 9 Nov 2026: no Tasks tab in Cold outreach). */
+export const COLD_TASKS_HREF = '/tasks';
 
 export type TaskFilters = {
   tab: TaskTab;

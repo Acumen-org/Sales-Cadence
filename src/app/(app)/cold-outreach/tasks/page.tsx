@@ -1,15 +1,12 @@
-import { requireUser } from '@/lib/auth/current-user';
-import { COLD_TASKS_HREF } from '@/lib/tasks-query';
-import { TasksScreen, type TasksSearch } from '@/components/tasks/tasks-screen';
-import { ColdOutreachHeader } from '@/components/sandbox/section-tabs';
+import { redirect } from 'next/navigation';
+import type { TasksSearch } from '@/components/tasks/tasks-screen';
 
-export const metadata = { title: 'Tasks · Cold outreach' };
-
-/** Cold outreach > Tasks: the Tasks screen, filtered to cold work (D2). Its rows and counts are /tasks's cold rows. */
+/**
+ * Cold outreach had its own Tasks tab: the Tasks screen with only cold work. Tasks lists cold work
+ * with everything else, so the tab is gone (owner, 9 Nov 2026) and old links open Tasks.
+ */
 export default async function ColdTasksPage({ searchParams }: { searchParams: Promise<TasksSearch> }) {
-  const user = await requireUser();
   const sp = await searchParams;
-  return <TasksScreen sp={sp} audience="cold" basePath={COLD_TASKS_HREF} header={<ColdOutreachHeader user={user} current="work" />} />;
+  const rest = new URLSearchParams(Object.entries(sp).filter(([k, v]) => k !== 'audience' && typeof v === 'string') as [string, string][]).toString();
+  redirect(rest ? `/tasks?${rest}` : '/tasks');
 }
-
-export const dynamic = 'force-dynamic';

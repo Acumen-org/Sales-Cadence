@@ -18,11 +18,11 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {}, push:
 
 const { listContacts, LIST_PAGE, phoneDigits } = await import('@/lib/sandbox/query');
 const { flashHref, listHref, ownerPatch, resolveListParams, scopeFor, viewHref } = await import('@/lib/sandbox/list-view');
-const { repPath } = await import('@/lib/sandbox/path');
 const { createContact } = await import('@/lib/sandbox/contacts');
 const { countryOfPhone, displayName } = await import('@/lib/sandbox/normalize');
 const { assignContactsAction, claimContactsAction, createContactAction, setNextStepsAction } = await import('@/lib/actions/sandbox');
 const { PeopleTable, shownSelection } = await import('@/components/people/people-table');
+const { splitViews } = await import('@/components/sandbox/quick-views');
 const { PeopleToolbar } = await import('@/components/people/people-toolbar');
 const { ColdBulkActions } = await import('@/components/sandbox/cold-bulk-actions');
 const { AddContactButton, AddContactDialog, refusalWords } = await import('@/components/sandbox/add-contact');
@@ -214,7 +214,7 @@ describe('Cold outreach: the contacts list (S10)', () => {
     expect(empty.empty).toEqual(expect.objectContaining({ title: 'No closed contacts', hint: expect.stringContaining('Not interested') }));
   });
 
-  it('B163: the No next step view lists the reader\'s live contacts with no campaign and no next step, as the step strip counts them', async () => {
+  it('B163: the No next step view lists the reader\'s live contacts with no campaign and no next step, as its quick view counts them', async () => {
     const bare = await readyContact(b.users.karson.id, b.pods.Alisa.id, { lastName: 'Bare' });
     const stepped = await readyContact(b.users.karson.id, b.pods.Alisa.id, { lastName: 'Stepped' });
     await prisma.nextAction.create({ data: { sandboxContactId: stepped.id, foUserId: b.users.karson.id, label: 'Call back', action: 'CALL', dueDate: '2026-11-20', audience: 'SANDBOX' } });
@@ -226,14 +226,12 @@ describe('Cold outreach: the contacts list (S10)', () => {
     expect(ids(list.rows)).toEqual([bare.id]);
     expect(list.rows[0].badge).toEqual(expect.objectContaining({ label: 'No next step', tone: 'amber' }));
     expect(list.chips).toEqual([expect.objectContaining({ key: 'owner', label: 'Owner: you', isDefault: true })]);
-    // The step strip's "with no next step" and its link agree with the view.
-    const path = await repPath(karson);
-    expect(path.steps.find((s) => s.key === 'next')!.count).toBe(list.total);
+    // The quick view's count agrees with the view.
     expect(list.tabs.find((t) => t.view === 'no_next_step')!.count).toBe(1);
     expect((await listContacts(karson, { view: 'closed' })).rows.map((r) => r.id)).toEqual([closed.id]);
   });
 
-  it('PLAN 4.1: the quick views count what each holds and agree with the step strip', async () => {
+  it('PLAN 4.1: the quick views count what each holds', async () => {
     await readyContact(b.users.alisa.id, b.pods.Alisa.id, { ownerId: null });
     await readyContact(b.users.alisa.id, b.pods.Alisa.id, { ownerId: null });
     await readyContact(b.users.leigh.id, b.pods.Leigh.id, { ownerId: null });
@@ -245,16 +243,19 @@ describe('Cold outreach: the contacts list (S10)', () => {
     expect(list.params.view).toBe('mine');
     const count = Object.fromEntries(list.tabs.map((t) => [t.view, t.count]));
     expect(count).toEqual({ mine: 2, no_next_step: 1, unclaimed: 2, ready: 0, in_crm: 1, closed: 0, all: 5, moved: 1, dnc_removed: 1 });
-    const path = await repPath(karson);
-    expect(path.steps.find((s) => s.key === 'claim')!.count).toBe(count.unclaimed);
-    expect(path.steps.find((s) => s.key === 'move')!.count).toBe(count.ready);
-    // The strip's link opens the same view, with the reader's pods as a chip they can remove.
+    // Owner, 9 Nov 2026: four pills a rep acts on, every other view in one "Other views" menu.
+    const split = splitViews(list.tabs);
+    expect(split.pills.map((t) => t.label)).toEqual(['My contacts', 'To claim', 'Needs a next step', 'Ready to move']);
+    expect(split.other.map((t) => t.view)).toEqual(['all', 'in_crm', 'closed', 'moved', 'dnc_removed']);
+    // The To claim view opens with the reader's pods as a chip they can remove.
     const unclaimed = await listContacts(karson, { view: 'unclaimed' });
     expect(unclaimed.total).toBe(2);
     expect(unclaimed.chips).toEqual([expect.objectContaining({ key: 'pod', label: 'Pod: Pod Alisa', isDefault: true, href: '/cold-outreach?view=unclaimed&pod=' })]);
     expect((await listContacts(karson, { view: 'unclaimed', pod: '' })).total).toBe(3);
     // Admins own nothing: no Mine view.
-    expect((await listContacts(ria, {})).tabs.map((t) => t.view)).not.toContain('mine');
+    const admin = await listContacts(ria, {});
+    expect(admin.tabs.map((t) => t.view)).not.toContain('mine');
+    expect(splitViews(admin.tabs).pills.map((t) => t.label)).toEqual(['All', 'To claim', 'Needs a next step', 'Ready to move']);
   });
 
   it('N081: reps open on Mine, Sales Leaders on their pod, admins on everyone, and the defaults show as chips that can be removed', async () => {

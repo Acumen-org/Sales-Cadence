@@ -219,10 +219,10 @@ describe('cold outreach, the finish (S11a, W14)', () => {
     expect([again.drift.contacts, again.movedWhileOptedOut.count, again.endedForInactive.count, again.duplicates.count, again.doubtedBounces.count]).toEqual([0, 0, 0, 0, 0]);
   });
 
-  it('W14: the old /tasks?audience=cold goes to Cold outreach > Tasks with its other filters; /tasks is the one list', async () => {
-    const { default: TasksPage } = await import('@/app/(app)/tasks/page');
-    await expect(TasksPage({ searchParams: Promise.resolve({ audience: 'cold', tab: 'overdue', type: 'CALL' }) })).rejects.toThrow('redirect:/cold-outreach/tasks?tab=overdue&type=CALL');
-    await expect(TasksPage({ searchParams: Promise.resolve({ audience: 'cold' }) })).rejects.toThrow('redirect:/cold-outreach/tasks');
+  it('owner, 9 Nov 2026: Cold outreach > Tasks is gone; its old address opens /tasks with its other filters', async () => {
+    const { default: ColdTasksPage } = await import('@/app/(app)/cold-outreach/tasks/page');
+    await expect(ColdTasksPage({ searchParams: Promise.resolve({ audience: 'cold', tab: 'overdue', type: 'CALL' }) })).rejects.toThrow('redirect:/tasks?tab=overdue&type=CALL');
+    await expect(ColdTasksPage({ searchParams: Promise.resolve({}) })).rejects.toThrow('redirect:/tasks');
   });
 
   it('W14: a cold campaign is launched only from its published calendar; the old launcher is gone', async () => {

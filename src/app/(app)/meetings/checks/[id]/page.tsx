@@ -28,7 +28,7 @@ export default async function NumberCheckPage({ params }: { params: Promise<{ id
   });
   if (!check) notFound();
   const checker = canCheckMeetingNumbers(user);
-  if (!checker && check.raisedById !== user.id) redirect('/meetings/checks');
+  if (!checker && check.raisedById !== user.id) redirect('/meetings');
   const rows = await prisma.meetingAttendee.findMany({
     where: { personId: check.personId, prospect: true, meeting: { review: 'APPROVED' } },
     select: { id: true, meetingNumber: true, numberSetTo: true, meeting: { select: { id: true, title: true, occurredAt: true, createdAt: true, meetingNumber: true, bookedBy: { select: { name: true } } } } },
@@ -44,7 +44,7 @@ export default async function NumberCheckPage({ params }: { params: Promise<{ id
         sub={`Meeting number check${check.person.companyName ? ` · ${check.person.companyName}` : ''}`}
         shape="circle"
         badges={<Badge tone={check.open ? 'amber' : 'green'}>{check.open ? 'Open' : 'Closed'}</Badge>}
-        actions={<><Link href={`/people/${check.person.id}`} className="btn-secondary btn-sm">Open {name}</Link><Link href="/meetings/checks" className="btn-ghost btn-sm">All checks</Link></>}
+        actions={<><Link href={`/people/${check.person.id}`} className="btn-secondary btn-sm">Open {name}</Link>{checker ? <Link href="/tickets" className="btn-ghost btn-sm">All tickets</Link> : null}</>}
       />
 
       <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_380px]">

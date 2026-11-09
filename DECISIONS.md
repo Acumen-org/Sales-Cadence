@@ -1345,3 +1345,19 @@ Built on the local branch `outreach-sandbox` from Rahul's brief of 2 November an
   campaign ends, its next action closes and Bellwether reads it as already_in_crm; the owner moves
   it to the CRM. Chosen over moving it automatically, which would skip the next step the move asks
   for, and over a flag alone, which would let both sides contact the person.
+- **Owner's changes of 9 Nov 2026.**
+  - Removing or erasing a cold contact discards their calls still waiting for a form ("The contact
+    was removed, so the call needs no form."); a migration does the same for removals made before.
+  - Meetings has no Number checks list any more: Tickets (admins and Biz Ops only) lists them with
+    the other tickets. /meetings/checks opens Tickets; one check still opens at /meetings/checks/[id].
+  - Cold outreach has no Tasks tab: cold work is done from Tasks with everything else. The old
+    address opens /tasks, and the sidebar's Cold outreach count is gone (Tasks counts it).
+  - Cold outreach's step strip is gone. The contacts list shows four pills (My contacts, or All for
+    admins and Biz Ops; To claim; Needs a next step; Ready to move) and an "Other views" menu for
+    the rest.
+  - Meetings are counted from 1 Oct 2026: earlier meetings carry no number ("Before Oct 2026, not
+    counted"), and a prospect's first meeting from then on is their 1st.
+  - A new meeting's team starts with whoever adds it and the Sales Leader of each of their pods.
+  - A meeting's account is the one all its prospects work at (prospects with no account do not
+    count); prospects at different accounts leave it blank. The worker fills it in for every
+    meeting, older ones included. People has an Account column; the name cell keeps the job title.

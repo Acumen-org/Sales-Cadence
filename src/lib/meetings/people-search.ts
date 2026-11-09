@@ -113,6 +113,16 @@ export async function teamOptions(userIds: string[]): Promise<TeamOption[]> {
   return userIds.flatMap((id) => users.filter((u) => u.id === id)).map((u) => ({ userId: u.id, name: u.name, email: u.email, title: u.roleAssigned ? ROLE_LABELS[u.role] : null }));
 }
 
+/**
+ * Who a new meeting's team starts with (owner, 9 Nov 2026): whoever adds it, and the Sales Leader of
+ * each of their pods, who is on the call with the pod's FOs. A pod with no active Sales Leader adds
+ * no one; an admin in no pod starts alone.
+ */
+export async function startingTeam(user: { id: string; podIds: string[] }): Promise<string[]> {
+  const leaders = user.podIds.length ? await prisma.user.findMany({ where: { active: true, role: 'SALES_LEADER', id: { not: user.id }, pods: { some: { podId: { in: user.podIds } } } }, select: { id: true }, orderBy: { name: 'asc' } }) : [];
+  return [user.id, ...leaders.map((l) => l.id)];
+}
+
 /** The prospects with these ids, as the form shows them, in the order given. */
 export async function prospectOptions(personIds: string[]): Promise<ProspectOption[]> {
   const people = await prisma.personCache.findMany({ where: { id: { in: personIds } }, select: { id: true, firstName: true, lastName: true, email: true, companyName: true, jobTitle: true } });

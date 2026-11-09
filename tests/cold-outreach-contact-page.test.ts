@@ -88,8 +88,8 @@ describe('Cold contact page: layout and cues (S10, PLAN 4.2)', () => {
     expect(html).toContain('>Edit<');
     // No next step yet: the blocker says so and offers the fix (4.0).
     expect(text(html)).toContain('Jane has no next step. Set one, or add Jane to a campaign.');
-    // The step strip marks this contact's step.
-    expect(html).toContain('This contact is here');
+    // The step strip is gone (owner, 9 Nov 2026).
+    expect(html).not.toContain('This contact is here');
     expect(html).toContain('No next step');
   });
 
@@ -396,14 +396,15 @@ describe('Cold contact page: tabs (S10)', () => {
     expect(html).toContain(`${A}'s mailbox`);
   });
 
-  it('Tasks: open and done steps and next steps, each linked to Cold outreach > Tasks', async () => {
+  it('Tasks: open and done steps and next steps, each linked to Tasks', async () => {
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
     const { task } = await runningCampaign(c.id, b.users.alisa.id, b.pods.Alisa.id);
     const next = await prisma.nextAction.create({ data: { sandboxContactId: c.id, foUserId: b.users.alisa.id, label: 'Send the deck', action: 'EMAIL', dueDate: '2099-11-09', audience: 'SANDBOX' } });
     await prisma.nextAction.create({ data: { sandboxContactId: c.id, foUserId: b.users.alisa.id, label: 'Intro call', action: 'CALL', dueDate: '2026-11-02', state: 'DONE', closedAt: new Date('2026-11-02T15:00:00Z'), audience: 'SANDBOX' } });
     const html = await draw(c.id, alisa, { tab: 'tasks' });
-    expect(html).toContain(`/cold-outreach/tasks?task=${task.id}`);
-    expect(html).toContain(`/cold-outreach/tasks?next=${next.id}`);
+    expect(html).toContain(`/tasks?task=${task.id}`);
+    expect(html).toContain(`/tasks?next=${next.id}`);
+    expect(html).not.toContain('/cold-outreach/tasks');
     expect(text(html)).toContain('Email: Send the deck');
     expect(text(html)).toContain('Call: Intro call');
     expect(text(html)).toMatch(/Done\s+Call: Intro call/);
