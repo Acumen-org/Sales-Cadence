@@ -12,8 +12,13 @@ export function accountOf(people: { companyId: string | null; companyName: strin
   if (ids.length > 1) return { companyId: null, name: null };
   if (ids.length === 1) return { companyId: ids[0], name: people.find((p) => p.companyId === ids[0])?.companyName ?? null };
   // No prospect has an account in the CRM: the name they give, when they all give the same one.
-  const names = [...new Map(people.flatMap((p) => (p.companyName?.trim() ? [[p.companyName.trim().toLowerCase(), p.companyName.trim()] as const] : []))).values()];
-  return { companyId: null, name: names.length === 1 ? names[0] : null };
+  const names = new Map<string, string>();
+  for (const p of people) {
+    const name = p.companyName?.trim();
+    if (name && !names.has(name.toLowerCase())) names.set(name.toLowerCase(), name);
+  }
+  const [only] = names.values();
+  return { companyId: null, name: names.size === 1 ? only : null };
 }
 
 /** The account for a meeting with these prospects, named as the CRM's account record names it. */

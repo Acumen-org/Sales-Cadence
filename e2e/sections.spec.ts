@@ -120,7 +120,7 @@ test('a meeting plays in the app with its transcript and no analysis until a mod
   await expect(page.getByText(/Media file/)).toBeVisible();
   await expect(page.locator('form video')).toHaveCount(1);
   await page.getByLabel('Title').fill('E2E discovery call');
-  await page.getByLabel('Date', { exact: true }).fill('2026-09-08');
+  await page.getByLabel('Date', { exact: true }).fill('2026-10-08');
 
   // Whoever adds it is on the team already; the rest of the team is found by name.
   const team = page.getByRole('list', { name: 'Our team on the call' });
