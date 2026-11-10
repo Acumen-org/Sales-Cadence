@@ -11,6 +11,7 @@ import { audienceFor, callPodFor } from '../outreach/audience';
 import { formHolderOf } from './form-holder';
 import { callStepChoices, ownerOfSubject, runningEnrollment } from './link';
 import { recordCallTouch } from './call-log';
+import { formOwnerChoices } from './form-owner';
 import { defaultNextStepDate, outcomeGroup, SILENT_OUTCOMES, type OutcomeGroup } from './form';
 import { callTimeWords, talkWords } from './words';
 
@@ -44,6 +45,8 @@ export type CallFormContext = {
   colleague: string | null;
   /** B092: "Saving claims Jane for you." */
   claim: string | null;
+  /** An owned cold contact: who owns it now and who in its pod the form can give it to (owner, 10 Nov 2026). */
+  owner?: { currentId: string; currentName: string; choices: { id: string; name: string }[] } | null;
   outcomes: FormOutcomeView[];
   products: { key: string; label: string }[];
   /** The outcome the call's Twilio status suggests. */
@@ -107,6 +110,8 @@ export async function callFormContext(callId: string, user: Viewer, now = new Da
   const colleague = who?.active && ownerId && ownerId !== user.id && (!openRow || openRow.foUserId !== user.id) ? `${first} is ${ownerName ?? 'someone else'}'s contact. ${openRow ? 'Their next step stays; yours goes to them as a suggestion.' : 'Your next step goes to them as a suggestion.'}` : null;
   const claim = who?.kind === 'cold' && who.active && !ownerId ? `Saving claims ${first} for you.` : null;
   const task = running?.tasks[0];
+  const ownerChoices = who?.kind === 'cold' && who.active && ownerId ? (await formOwnerChoices(who.id)).choices : [];
+  const owner = ownerId && ownerChoices.length ? { currentId: ownerId, currentName: ownerName ?? 'Someone else', choices: ownerChoices.some((c) => c.id === ownerId) ? ownerChoices : [{ id: ownerId, name: ownerName ?? 'Someone else' }, ...ownerChoices] } : null;
 
   const outcomes = callOutcomes(settings.rules).map((o) => {
     const talked = (call.talkSec ?? 0) >= settings.calling.connectSeconds;
@@ -131,6 +136,7 @@ export async function callFormContext(callId: string, user: Viewer, now = new Da
       campaign: running ? { name: running.campaign?.name ?? running.sequence.name, next: task ? `${task.label} on ${formatLocalDate(task.snoozedTo ?? task.dueDate)}` : null } : null,
       colleague,
       claim,
+      owner,
       outcomes,
       products: PRODUCTS.map((p) => ({ key: p, label: optionLabel(p) })),
       prefill,

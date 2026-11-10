@@ -194,10 +194,7 @@ export const SandboxSettingsSchema = z.object({
 
 /** Calls read from Twilio and the post-call form. Cadence changes nothing in Twilio. */
 export const CallingSettingsSchema = z.object({
-  /** Cadence's own Call button outside 8:00-21:00 in the contact's local time (decision 14). */
-  callingHours: z.enum(['block', 'warn', 'off']).default('block'),
-  startHour: z.number().int().min(0).max(23).default(8),
-  endHour: z.number().int().min(1).max(24).default(21),
+  // No calling hours (owner, 10 Nov 2026): where a contact is cannot be known, so Call is never held for the time.
   /** A call counts as a connect before its form is in when the talk lasted this long. */
   connectSeconds: z.number().int().min(1).max(600).default(30),
   /** A connect with at least this much talk is a conversation. */

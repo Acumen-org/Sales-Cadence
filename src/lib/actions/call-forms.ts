@@ -30,9 +30,9 @@ function refresh() {
 /**
  * Cadence's Call button was pressed (N008). The check runs again here, at the click, on the server:
  * a form waiting, the contact's status and owner, an opt-out or the suppression list on any key or
- * on this exact number, "Also in CRM", calling hours. Only then is the intent recorded and the
+ * on this exact number, "Also in CRM". Only then is the intent recorded and the
  * dialpad opened; otherwise the reason comes back for the button to show. `confirmed` answers a
- * question asked once (a number marked wrong, calling hours set to warn). The step it names counts
+ * question asked once (a number marked wrong). The step it names counts
  * only when it is a call step (N013).
  */
 export async function recordCallIntentAction(input: { phone: string; taskId?: string | null; nextActionId?: string | null; personId?: string | null; sandboxContactId?: string | null; confirmed?: boolean }): Promise<ActionResult> {
@@ -79,6 +79,7 @@ export async function submitCallFormAction(formData: FormData): Promise<ActionRe
     meetingTime: String(formData.get('meetingTime') ?? '') || null,
     closes: formData.has('closes') ? String(formData.get('closes') ?? '') || 'none' : null,
     claim: formData.has('claimShown') ? formData.get('claim') === '1' : null,
+    newOwnerId: String(formData.get('newOwnerId') ?? '') || null,
   };
   const r = await submitCallForm(callId, input, { id: user.id, name: user.name, timezone: user.timezone, role: user.role, podIds: user.podIds });
   // B184: a refused save changes nothing, so the page keeps the form and what was typed.

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { filterParam, sectionDefaults } from '@/lib/default-filters';
 import { barColour } from '@/lib/bar-colour';
 import { formatLocalDate, todayIn, diffDays } from '@/lib/dates';
 import type { SessionUser } from '@/lib/auth/current-user';
@@ -37,16 +38,22 @@ export type CampaignsScreenProps = {
   /** The parameter for Upcoming / Active / Finished: `tab` on Campaigns, `view` inside Cold outreach. */
   tabParam?: 'tab' | 'view';
   newHref: string;
+  /** Open on the reader's own pod (and a junior's own name), as Tasks does (owner, 10 Nov 2026). */
+  defaultScope?: boolean;
 };
 
-export async function CampaignsScreen({ user, sp, audience, title, base, fixed = {}, tabParam = 'tab', newHref }: CampaignsScreenProps) {
+export async function CampaignsScreen({ user, sp, audience, title, base, fixed = {}, tabParam = 'tab', newHref, defaultScope = false }: CampaignsScreenProps) {
+  // Absent pod and FO mean the reader's own; an empty one means All (src/lib/default-filters.ts).
+  const defaults = defaultScope ? await sectionDefaults(user) : null;
+  const podId = defaults ? filterParam(sp.pod, defaults.podId) : sp.pod || null;
+  const foId = defaults ? filterParam(sp.fo, defaults.foUserId) : sp.fo || null;
   const today = todayIn(user.timezone);
   const visible = visiblePodIds(user);
   const values = defaultTwentySchema.personValues;
   const product = sp.product && (values.productInterest as readonly string[]).includes(sp.product) ? sp.product : '';
   const cold = audience === 'SANDBOX';
   const [all, pods, sequences] = await Promise.all([
-    listCampaigns(user, { audience, q: sp.q ?? '', podId: sp.pod || null, sequenceId: sp.sequence || null, product: product || null, foUserId: sp.fo || null, from: sp.from || null, to: sp.to || null }),
+    listCampaigns(user, { audience, q: sp.q ?? '', podId, sequenceId: sp.sequence || null, product: product || null, foUserId: foId, from: sp.from || null, to: sp.to || null }),
     prisma.pod.findMany({ where: { archived: false, ...(visible === null ? {} : { id: { in: visible } }) }, orderBy: { name: 'asc' }, include: { users: { include: { user: { select: { id: true, name: true, active: true, role: true } } } } } }),
     prisma.sequence.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } }),
   ]);
@@ -58,9 +65,10 @@ export async function CampaignsScreen({ user, sp, audience, title, base, fixed =
   const tab: Tab = requested ?? (byTab.active.length ? 'active' : 'upcoming');
   const rows = byTab[tab];
   const query = new URLSearchParams(fixed);
-  for (const [k, v] of Object.entries({ q: sp.q, pod: sp.pod, sequence: sp.sequence, product, fo: sp.fo, from: sp.from, to: sp.to })) if (v) query.set(k, v);
+  for (const [k, v] of Object.entries({ q: sp.q, pod: podId, sequence: sp.sequence, product, fo: foId, from: sp.from, to: sp.to })) if (v) query.set(k, v);
+  if (defaults) { query.set('pod', podId ?? ''); query.set('fo', foId ?? ''); }
   const tabHref = (t: Tab) => { const p = new URLSearchParams(query); p.set(tabParam, t); return `${base}?${p.toString()}`; };
-  const filtered = Boolean(sp.q || sp.pod || sp.sequence || product || sp.fo || sp.from || sp.to);
+  const filtered = Boolean(sp.q || podId || sp.sequence || product || foId || sp.from || sp.to);
   const newButton = canCreateCampaign(user) ? <Link href={newHref} className="btn-primary"><IconPlus size={14} />New campaign</Link> : null;
 
   return (
@@ -72,7 +80,7 @@ export async function CampaignsScreen({ user, sp, audience, title, base, fixed =
         { key: 'finished', label: 'Finished', href: tabHref('finished'), count: byTab.finished.length },
       ]} />
       <Toolbar className="pt-3">
-        <CampaignsToolbar q={sp.q ?? ''} pods={pods.map((p) => ({ id: p.id, name: p.name }))} sequences={sequences} fos={fos} products={[...values.productInterest]} pod={sp.pod ?? ''} sequence={sp.sequence ?? ''} fo={sp.fo ?? ''} product={product} from={sp.from ?? ''} to={sp.to ?? ''} />
+        <CampaignsToolbar q={sp.q ?? ''} pods={pods.map((p) => ({ id: p.id, name: p.name }))} sequences={sequences} fos={fos} products={[...values.productInterest]} pod={podId ?? ''} sequence={sp.sequence ?? ''} fo={foId ?? ''} product={product} from={sp.from ?? ''} to={sp.to ?? ''} explicitAll={Boolean(defaults)} />
       </Toolbar>
       {!rows.length ? (
         <EmptyState icon={<IconCampaigns size={22} />} title={filtered ? 'No campaigns match' : !byTab.upcoming.length && !byTab.active.length && !byTab.finished.length ? (cold ? 'No cold campaigns yet' : 'No campaigns yet') : tab === 'upcoming' ? 'Nothing scheduled' : tab === 'active' ? 'Nothing running' : 'Nothing finished yet'} action={!filtered && newButton ? newButton : undefined} />

@@ -19,6 +19,8 @@ type Props = {
   product: string;
   from: string;
   to: string;
+  /** Pod and FO open on the reader's own (Cold outreach): "All" is kept as an empty value so it survives. */
+  explicitAll?: boolean;
 };
 
 /**
@@ -26,7 +28,7 @@ type Props = {
  * it, and whatever is applied from there shows as chips in a row of their own. The tab stays
  * where it is.
  */
-export function CampaignsToolbar({ q, pods, sequences, fos, products, pod, sequence, fo, product, from, to }: Props) {
+export function CampaignsToolbar({ q, pods, sequences, fos, products, pod, sequence, fo, product, from, to, explicitAll = false }: Props) {
   const navigate = useFilterNavigation();
   const [showMore, setShowMore] = useState(false);
   const panelId = useId();
@@ -34,6 +36,7 @@ export function CampaignsToolbar({ q, pods, sequences, fos, products, pod, seque
     navigate((next) => {
       for (const [k, v] of Object.entries(patch)) {
         if (v) next.set(k, v);
+        else if (explicitAll && (k === 'pod' || k === 'fo')) next.set(k, '');
         else next.delete(k);
       }
       next.delete('page');

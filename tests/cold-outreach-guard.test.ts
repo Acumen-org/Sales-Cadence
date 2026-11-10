@@ -235,12 +235,13 @@ describe('the guard (PLAN 8.1)', () => {
       expect(issues).toEqual([expect.objectContaining({ id: hers.id, reason: `Owned by ${b.users.alisa.name}. Junior FOs add only their own contacts` })]);
     });
 
-    it('N008: the Call check at the click refuses a pending form, an opt-out and calling hours', async () => {
+    it('N008: the Call check at the click refuses a pending form and an opt-out, never the time of day', async () => {
       const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { state: 'IL' });
       const user = { id: b.users.alisa.id, timezone: 'Europe/London' };
       const noon = new Date('2026-11-04T18:00:00Z'); // 12:00 in Chicago
       expect((await contactability(coldRef(c.id), { act: 'call', number: c.phone, user, now: noon })).ok).toBe(true);
-      expect(await contactability(coldRef(c.id), { act: 'call', number: c.phone, user, now: new Date('2026-11-05T04:00:00Z') })).toEqual(expect.objectContaining({ ok: false, block: 'calling_hours' }));
+      // 22:00 in Chicago: no calling hours any more (owner, 10 Nov 2026).
+      expect((await contactability(coldRef(c.id), { act: 'call', number: c.phone, user, now: new Date('2026-11-05T04:00:00Z') })).ok).toBe(true);
       const other = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
       await logManualCall({ userId: b.users.alisa.id, sandboxContactId: other.id });
       expect(await contactability(coldRef(c.id), { act: 'call', number: c.phone, user, now: noon })).toEqual(expect.objectContaining({ ok: false, block: 'form_pending', reason: expect.stringContaining('Fill in the form for your call with') }));

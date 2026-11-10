@@ -149,10 +149,16 @@ export async function loadMovePage(moveId: string, viewer: Actor, now = new Date
 export type MoveListRow = { id: string; createdAt: Date; moverId: string; moverName: string; count: number; done: number; failed: number; waiting: number; undone: number; names: string[] };
 
 /** The Moves tab (4.5): every move, failed ones stay visible, newest first; by state and by mover. */
-export async function listMoves(filters: { state?: string | null; moverId?: string | null }, take = 100): Promise<MoveListRow[]> {
+export async function listMoves(filters: { state?: string | null; moverId?: string | null; podId?: string | null }, take = 100): Promise<MoveListRow[]> {
+  // A pod's moves: those of contacts in that pod (owner, 10 Nov 2026: Cold outreach opens on the reader's pod).
+  const inPod = filters.podId ? (await prisma.sandboxContact.findMany({ where: { podId: filters.podId }, select: { id: true } })).map((c) => c.id) : null;
   const where = {
     ...(filters.moverId ? { createdById: filters.moverId } : {}),
-    ...(filters.state === 'failed' ? { items: { some: { state: 'FAILED' } } } : filters.state === 'running' ? { state: { in: ['QUEUED', 'RUNNING'] } } : filters.state === 'undone' ? { items: { some: { state: { in: ['UNDONE', 'UNDO_PARTIAL'] } } } } : {}),
+    ...(filters.state === 'running' ? { state: { in: ['QUEUED', 'RUNNING'] } } : {}),
+    AND: [
+      ...(inPod ? [{ items: { some: { sandboxContactId: { in: inPod } } } }] : []),
+      ...(filters.state === 'failed' ? [{ items: { some: { state: 'FAILED' } } }] : filters.state === 'undone' ? [{ items: { some: { state: { in: ['UNDONE', 'UNDO_PARTIAL'] } } } }] : []),
+    ],
   };
   const moves = await prisma.sandboxMove.findMany({ where, orderBy: { createdAt: 'desc' }, take, include: { items: { select: { state: true, sandboxContactId: true, snapshot: true } } } });
   const movers = new Map((await prisma.user.findMany({ where: { id: { in: [...new Set(moves.map((m) => m.createdById))] } }, select: { id: true, name: true } })).map((u) => [u.id, u.name]));

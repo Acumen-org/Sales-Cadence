@@ -189,13 +189,12 @@ export async function saveSandboxSettingsAction(formData: FormData): Promise<Act
   return { ok: true, message: 'Cold outreach settings saved.' };
 }
 
-/** Settings > Calling: calling hours on Cadence's own Call button, and what counts as a connect. */
+/** Settings > Calling: what counts as a connect and a conversation. */
 export async function saveCallingSettingsAction(formData: FormData): Promise<ActionResult> {
   const admin = await requireAdmin();
   const num = (k: string) => (formData.get(k) ? Number(formData.get(k)) : undefined);
-  const parsed = CallingSettingsSchema.safeParse({ callingHours: String(formData.get('callingHours') ?? 'block'), startHour: num('startHour'), endHour: num('endHour'), connectSeconds: num('connectSeconds'), conversationSeconds: num('conversationSeconds') });
+  const parsed = CallingSettingsSchema.safeParse({ connectSeconds: num('connectSeconds'), conversationSeconds: num('conversationSeconds') });
   if (!parsed.success) return { ok: false, error: issues(parsed.error) };
-  if (parsed.data.endHour <= parsed.data.startHour) return { ok: false, error: 'Calling hours must end after they start.' };
   await saveSettingsSection('calling', parsed.data);
   await logAudit({ entityType: 'settings', entityId: 'calling', action: 'updated', actor: userActor(admin), details: parsed.data });
   revalidatePath('/settings');
