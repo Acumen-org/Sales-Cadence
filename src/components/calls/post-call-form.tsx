@@ -91,6 +91,8 @@ export function PostCallForm({ callId, onClose, initial }: { callId: string; onC
   const [whatTouched, setWhatTouched] = useState(false);
   const [closes, setCloses] = useState<string | null>(start0?.closes ?? null);
   const [claim, setClaim] = useState(true);
+  // Owner, 10 Nov 2026: the form can give an owned cold contact to someone in its pod; '' keeps the owner.
+  const [newOwner, setNewOwner] = useState('');
   const [interest, setInterest] = useState('');
   const [decisionMaker, setDecisionMaker] = useState('');
   const [products, setProducts] = useState<string[]>([]);
@@ -174,6 +176,7 @@ export function PostCallForm({ callId, onClose, initial }: { callId: string; onC
     fd.set('what', whatShown);
     if (closes !== null) fd.set('closes', closes);
     if (ctx.claim) { fd.set('claimShown', '1'); fd.set('claim', claim ? '1' : '0'); }
+    if (ctx.owner && newOwner && newOwner !== ctx.owner.currentId) fd.set('newOwnerId', newOwner);
     start(async () => {
       const r = await submitCallFormAction(fd);
       if (!r.ok) { setError(r.error); return; }
@@ -191,7 +194,7 @@ export function PostCallForm({ callId, onClose, initial }: { callId: string; onC
     </div>
     {ctx.who?.standing ? <Notice tone="warn">{ctx.who.standing}</Notice> : null}
     {!ctx.who ? <WhoWasIt ctx={ctx} onChosen={() => { setLoaded(null); void load(); }} /> : null}
-    {ctx.colleague ? <Notice tone="info">{ctx.colleague}</Notice> : null}
+    {ctx.colleague && !(newOwner && newOwner !== ctx.owner?.currentId) ? <Notice tone="info">{ctx.colleague}</Notice> : null}
 
     <div className="space-y-3">
       <h3 className="text-[13px] font-semibold text-ink-900">What happened</h3>
@@ -235,6 +238,8 @@ export function PostCallForm({ callId, onClose, initial }: { callId: string; onC
       {step === 'none' && ctx.open ? <p className="text-[12.5px] text-ink-600">No further action cancels the open next step ({ctx.open.words}).</p> : null}
       {step === 'keep' && ctx.open?.repeats ? <p className="text-[12.5px] text-ink-600">This call counts as done for the repeating step; it rolls on to its next date.</p> : null}
       {DATED.has(step) && ctx.open?.repeats ? <p className="text-[12.5px] text-amber-800">{ctx.open.words} repeats. This one-off step replaces it, and it stops repeating. Pick Keep to keep it.</p> : null}
+      {ctx.owner ? <label className="block text-xs text-ink-500">Owner after this call<select name="newOwnerChoice" value={newOwner || ctx.owner.currentId} onChange={(e) => setNewOwner(e.target.value === ctx.owner!.currentId ? '' : e.target.value)} className="mt-1 max-w-full">{ctx.owner.choices.map((c) => <option key={c.id} value={c.id}>{c.id === ctx.owner!.currentId ? `${c.name} (keeps it)` : c.name}</option>)}</select></label> : null}
+      {ctx.owner && newOwner && newOwner !== ctx.owner.currentId ? <p className="text-[12.5px] text-ink-600">{first} goes to {ctx.owner.choices.find((c) => c.id === newOwner)?.name ?? 'them'} with their open work, and the next step is theirs.</p> : null}
       {ctx.claim && DATED.has(step) ? <label className="flex items-center gap-2 text-[13px] text-ink-800"><input type="checkbox" checked={claim} onChange={(e) => setClaim(e.target.checked)} />{ctx.claim}</label> : null}
     </fieldset>
 

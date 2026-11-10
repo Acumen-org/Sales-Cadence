@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeCrd, normalizeDomain, normalizeEmail, normalizeFirmName, normalizeLinkedin, parsePhone, splitE164 } from '@/lib/sandbox/normalize';
-import { callingHours, zoneFor } from '@/lib/calls/hours';
-import { DEFAULT_SETTINGS } from '@/lib/settings';
 
 /** Contract 14.5: one normalisation for push, manual add, dedupe, calls and mail. */
 describe('sandbox normalisation', () => {
@@ -34,14 +32,4 @@ describe('sandbox normalisation', () => {
     expect(normalizeFirmName('The Example Advisors, LLC')).toBe(normalizeFirmName('example advisors inc.'));
   });
 
-  it('reads a contact\'s calling hours from the state, else the area code', () => {
-    expect(zoneFor({ state: 'IL' }).zone).toBe('America/Chicago');
-    expect(zoneFor({ state: 'California' }).zone).toBe('America/Los_Angeles');
-    expect(zoneFor({ phone: '+12125550142' })).toEqual(expect.objectContaining({ zone: 'America/New_York', from: 'area code', guessed: false }));
-    const calling = DEFAULT_SETTINGS.calling;
-    // 03:00 UTC is 22:00 in Chicago the evening before: outside 8:00-21:00.
-    expect(callingHours({ state: 'IL' }, calling, new Date('2026-11-04T03:00:00Z')).allowed).toBe(false);
-    expect(callingHours({ state: 'IL' }, { ...calling, callingHours: 'warn' }, new Date('2026-11-04T03:00:00Z'))).toEqual(expect.objectContaining({ allowed: true, warning: expect.stringContaining('outside 8:00 to 21:00') }));
-    expect(callingHours({ state: 'IL' }, calling, new Date('2026-11-03T17:00:00Z')).allowed).toBe(true);
-  });
 });

@@ -73,17 +73,13 @@ export function SuppressionForm() {
   </ActionForm>;
 }
 
-/** B167: calling hours and the talk times, in plain words with their units. */
+/** B167: the talk times, in plain words with their units. */
 export function CallingSettingsForm({ c }: { c: CallingSettings }) {
   return <ActionForm action={saveCallingSettingsAction} className="space-y-4 p-4">
     <div className="flex flex-wrap items-end gap-4">
-      <label className="block text-xs text-ink-500">Outside calling hours<select name="callingHours" defaultValue={c.callingHours} className="mt-1 !w-44"><option value="block">Call is off</option><option value="warn">Ask first</option><option value="off">No check</option></select></label>
-      {num('startHour', 'Calls from (hour, the contact\'s time)', c.startHour, 0, 23)}{num('endHour', 'Calls until (hour, the contact\'s time)', c.endHour, 1, 24)}
-    </div>
-    <div className="flex flex-wrap items-end gap-4">
       {num('connectSeconds', 'Talk time that counts as a connect (seconds)', c.connectSeconds, 1, 600)}{num('conversationSeconds', 'Talk time that counts as a conversation (seconds)', c.conversationSeconds, 1, 3600)}
     </div>
-    <p className="text-[12.5px] text-ink-600">Calling hours are checked on Cadence&apos;s Call button, in the contact&apos;s own time zone. From the connect time on, the post-call form does not accept No answer or Busy.</p>
+    <p className="text-[12.5px] text-ink-600">From the connect time on, the post-call form does not accept No answer or Busy.</p>
     <div className="flex justify-end"><button type="submit" className="btn-primary btn-sm">Save</button></div>
   </ActionForm>;
 }

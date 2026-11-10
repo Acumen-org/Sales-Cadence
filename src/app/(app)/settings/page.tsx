@@ -555,7 +555,7 @@ async function CallingTab({ timezone }: { timezone: string }) {
         })() : null}
       </div>
     </Card>
-    <Card title="Calling hours and connects"><CallingSettingsForm c={settings.calling} /></Card>
+    <Card title="Connects and conversations"><CallingSettingsForm c={settings.calling} /></Card>
   </div>;
 }
 

@@ -18,9 +18,9 @@ type Props = {
   nextActionId?: string | null;
   personId?: string | null;
   sandboxContactId?: string | null;
-  /** Why Cadence will not open the dialpad now (a form waiting, an opt-out, calling hours). */
+  /** Why Cadence will not open the dialpad now (a form waiting, an opt-out). */
   blocked?: string | null;
-  /** Calling hours set to warn: asked once before the dialpad opens. */
+  /** A warning asked once before the dialpad opens. */
   warning?: string | null;
   className?: string;
   label?: string;
@@ -37,7 +37,7 @@ type Props = {
  * The one Call button: it opens the hosted dialpad with the number, as Call always has, and tells
  * Cadence which task or contact the call is for, so the call read back from Twilio lands there.
  * What was true when the page was drawn may not be at the click (a form came due, the contact was
- * opted out, calling hours ended), so the server checks again first (N008). The dialpad's tab opens
+ * opted out), so the server checks again first (N008). The dialpad's tab opens
  * at the click, to keep the browser's permission, and closes again when the server says no.
  */
 export function CallButton({ phone, template, taskId, nextActionId, personId, sandboxContactId, blocked, warning, className = 'btn-primary', label: given, ariaLabel, claim = null }: Props) {
@@ -82,7 +82,7 @@ export function CallButton({ phone, template, taskId, nextActionId, personId, sa
             }
             // A warning the page already asked about is not asked twice.
             let r = await recordCallIntentAction({ ...input, confirmed: Boolean(warning) });
-            // A question asked once (a number marked wrong, calling hours set to warn).
+            // A question asked once (a number marked wrong).
             if (r.ok && (r.data as { confirm?: boolean } | undefined)?.confirm) {
               if (!(await ask({ title: 'Call anyway?', body: r.message ?? '', confirmLabel: 'Call' }))) { tab?.close(); return; }
               r = await recordCallIntentAction({ ...input, confirmed: true });

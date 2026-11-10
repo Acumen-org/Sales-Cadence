@@ -20,6 +20,8 @@ import { formHolderOf, formsHeldBy } from './form-holder';
 import { callStepChoices, linkData, ownerOfSubject, runningEnrollment, type CallItem } from './link';
 import { talkWords, zonedInstant } from './words';
 import { recordCallTouch } from './call-log';
+import { formOwnerChoices } from './form-owner';
+import { assignContact } from '../sandbox/contacts';
 
 /**
  * The post-call form (plan section 10, cold outreach PLAN 4.6): after every call, and a call is
@@ -87,6 +89,8 @@ export type CallFormInput = {
   closes?: string | null;
   /** B092: an unclaimed contact is claimed by the form's next step unless the rep unticks it. */
   claim?: boolean | null;
+  /** An owned cold contact given to someone else in its pod from the form (owner, 10 Nov 2026). */
+  newOwnerId?: string | null;
 };
 export type CallFormValue = {
   outcome: string; rating: number | null; notes: string | null; nextStep: NextStepKey; nextStepDate: string | null; interest: string | null;
@@ -244,6 +248,13 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
   const step = NEXT_STEPS.find((s) => s.key === v.nextStep)!;
   const stop = v.outcome === OPT_OUT_OUTCOME;
 
+  // Owner, 10 Nov 2026: whoever fills the form may give an owned cold contact to someone in its pod.
+  const giveTo = subject.sandboxContactId && input.newOwnerId ? input.newOwnerId : null;
+  if (giveTo) {
+    const { choices } = await formOwnerChoices(subject.sandboxContactId!);
+    if (!choices.some((c) => c.id === giveTo)) return { ok: false, error: 'Pick an owner from the pod this contact is in.', field: 'newOwnerId' };
+  }
+
   // N077: a next step the contact cannot be reached by is refused before anything is saved, so the rep picks another.
   if (step.action && step.kind !== 'MEETING' && !stop && hasSubject) {
     const check = await contactability(subject.personId ? personRef(subject.personId) : coldRef(subject.sandboxContactId!), { act: 'form_next_step', channel: channelOfAction(step.action), now });
@@ -312,10 +323,18 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
     await optOutSubject(subject, { source: 'call_form', actor, now, createdById: user.id, guard });
     if (subject.personId) reminder = 'Do not contact is set on this person in the CRM too.';
   } else if (hasSubject) {
+    // The new owner first, with the contact's work (B049), so the next step below is theirs.
+    let handedTo: string | null = null;
+    if (giveTo && subjectRow?.ownerId && giveTo !== subjectRow.ownerId && subjectRow.status === 'ACTIVE') {
+      const given = await assignContact(subject.sandboxContactId!, giveTo, actor, undefined, null, subjectRow.ownerId);
+      if (given.ok) handedTo = giveTo;
+      else reminder = `The owner did not change: ${given.error}`;
+    }
     const current = await openStepAfter(subject, null);
     const owner = await ownerOfSubject(subject);
     // B027: a colleague's form never replaces the owner's next step; it goes to them as a suggestion.
-    const colleague = Boolean(current && current.foUserId !== user.id && owner !== user.id);
+    // Giving the contact to someone in this form is the rep deciding, so their next step stands.
+    const colleague = !handedTo && Boolean(current && current.foUserId !== user.id && owner !== user.id);
     const label = v.what ?? step.label;
     const meetingAt = step.kind === 'MEETING' && v.nextStepDate && v.meetingTime ? zonedInstant(v.nextStepDate, v.meetingTime, user.timezone) : null;
     const nextInput = step.action ? { label, action: step.action, dueDate: v.nextStepDate!, kind: step.kind ?? 'ACTION', meetingAt } : null;
@@ -340,7 +359,7 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
       } else {
         // B004, B008, B053: a contact opted out, removed, moved or in the CRM since the call gets no
         // next step, and neither does one this rep may not work. The call and its form are saved.
-        const r = await setColdNextStep(subject.sandboxContactId!, { ...nextInput, foUserId: owner && owner !== user.id ? owner : user.id }, actor, { guard, act: 'form_next_step', user });
+        const r = await setColdNextStep(subject.sandboxContactId!, { ...nextInput, foUserId: owner && owner !== user.id ? owner : user.id }, actor, { guard: handedTo ? null : guard, act: 'form_next_step', user });
         if (!r.ok && r.code === 'not_yours' && owner) {
           await suggestNextStep({ to: owner, from: user, subject, callId, what: label, how: step.action, kind: step.kind, when: v.nextStepDate });
           reminder = `No next step was set: ${r.reason} Your suggestion went to them.`;
@@ -349,6 +368,7 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
     }
     const nextActionId = (await prisma.nextAction.findFirst({ where: { state: 'OPEN', ...openWhere }, select: { id: true } }))?.id ?? null;
     if (nextActionId) await prisma.callForm.update({ where: { id: form.id }, data: { nextActionId } });
+    if (handedTo) reminder = [reminder, `${name} is ${handedTo === user.id ? 'yours' : `${await nameOf(handedTo)}'s`} now.`].filter(Boolean).join(' ');
   }
   // Bellwether shows the last outcome (contract 1.1): its 10-minute read finds the contact by statusChangedAt (B061, B062).
   if (subject.sandboxContactId) await prisma.sandboxContact.updateMany({ where: { id: subject.sandboxContactId }, data: { lastActivityAt: now, lastOutcome: v.outcome, lastOutcomeAt: now, statusChangedAt: await databaseNow() } });

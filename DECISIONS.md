@@ -1361,3 +1361,13 @@ Built on the local branch `outreach-sandbox` from Rahul's brief of 2 November an
   - A meeting's account is the one all its prospects work at (prospects with no account do not
     count); prospects at different accounts leave it blank. The worker fills it in for every
     meeting, older ones included. People has an Account column; the name cell keeps the job title.
+- **Owner's changes of 10 Nov 2026.**
+  - No calling hours: where a contact is cannot be known, so Call is never held or warned for the
+    time of day. The setting and its check are gone.
+  - The post-call form has "Owner after this call" for an owned cold contact: whoever fills the
+    form may give the contact to anyone active in its pod, themselves included. The contact moves
+    with its open work, and the form's next step is the new owner's. Without that choice, a
+    colleague's next step still goes to the owner as a suggestion.
+  - Cold outreach > Campaigns and Moves to CRM open on the reader's pod (and a junior's own name
+    on Campaigns), as Tasks does; "All pods" stays chosen once picked. Contacts already opened on
+    the reader's own contacts, or a leader's pods.

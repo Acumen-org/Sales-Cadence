@@ -9,14 +9,13 @@ import { logManualCall, pendingForms, submitCallForm, validateCallForm } from '@
 import { callFormContext, discardCall } from '@/lib/calls/form-context';
 import { matchContact, matchRep } from '@/lib/calls/match';
 import { stepByRule } from '@/lib/calls/link';
-import { callingHours, zoneFor } from '@/lib/calls/hours';
 import { pendingFormBlock } from '@/lib/calls/gate';
 import { callTimeWords } from '@/lib/calls/words';
 import { completeCall } from '@/lib/engine/outcomes';
 import { acceptSuggestion, openSuggestions } from '@/lib/outreach/suggestions';
 import { optOutContact } from '@/lib/outreach/transitions';
 import { setColdNextStep } from '@/lib/sandbox/work';
-import { DEFAULT_SETTINGS, saveSettingsSection } from '@/lib/settings';
+import { DEFAULT_SETTINGS } from '@/lib/settings';
 import { resetEnvCache } from '@/lib/env';
 import { MOCK_PEOPLE } from '@/lib/twenty/fixtures';
 import { toE164 } from '@/lib/sandbox/normalize';
@@ -523,30 +522,6 @@ describe('W4: calls and the post-call form', () => {
     });
   });
 
-  describe('calling hours (B090, N047)', () => {
-    const calling = DEFAULT_SETTINGS.calling;
-    it('B090: a split state takes the area code\'s zone; a non-US number its own country; a multi-zone place the strictest window', () => {
-      expect(zoneFor({ state: 'TN', phone: '+18655550100' })).toEqual(expect.objectContaining({ zone: 'America/New_York', guessed: false }));
-      expect(zoneFor({ state: 'TX', phone: '+19155550100' })).toEqual(expect.objectContaining({ zone: 'America/Denver' }));
-      expect(zoneFor({ phone: '+442071234567', state: 'IL' })).toEqual(expect.objectContaining({ zone: 'Europe/London', from: 'number' }));
-      expect(zoneFor({ state: 'TN' })).toEqual(expect.objectContaining({ zones: ['America/Chicago', 'America/New_York'], guessed: true }));
-      // 01:30 UTC: 20:30 in Nashville (Central), 21:30 in Knoxville (Eastern): a guessed Tennessee contact is outside hours.
-      const now = new Date('2026-11-05T02:30:00Z');
-      expect(callingHours({ state: 'TN', phone: '+16155550100' }, calling, now).allowed).toBe(true);
-      expect(callingHours({ state: 'TN' }, calling, now)).toEqual(expect.objectContaining({ allowed: false, guessed: true, warning: expect.stringContaining('zone guessed') }));
-    });
-
-    it('N047: Puerto Rico, the Virgin Islands, Guam and 686 are known; 364 is Central; "N.Y." reads as New York', () => {
-      expect(zoneFor({ phone: '+17875550100' }).zone).toBe('America/Puerto_Rico');
-      expect(zoneFor({ phone: '+19395550100' }).zone).toBe('America/Puerto_Rico');
-      expect(zoneFor({ phone: '+13405550100' }).zone).toBe('America/St_Thomas');
-      expect(zoneFor({ phone: '+16715550100' }).zone).toBe('Pacific/Guam');
-      expect(zoneFor({ phone: '+16865550100' }).zone).toBe('America/New_York');
-      expect(zoneFor({ phone: '+13645550100' }).zone).toBe('America/Chicago');
-      expect(zoneFor({ state: 'N.Y.' })).toEqual(expect.objectContaining({ zone: 'America/New_York', from: 'state' }));
-      expect(zoneFor({})).toEqual(expect.objectContaining({ from: 'workspace', guessed: true }));
-    });
-  });
 
   it('N046: forms waiting are counted now, whatever the report period, by whoever holds them, with the oldest', async () => {
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
@@ -603,8 +578,6 @@ describe('W4: calls and the post-call form', () => {
 
   it('N008: the Call button checks again at the click: a form that came due since the page was drawn blocks it', async () => {
     const { recordCallIntentAction } = await import('@/lib/actions/call-forms');
-    // Calling hours are another test's; this one is about the form.
-    await saveSettingsSection('calling', { ...DEFAULT_SETTINGS.calling, callingHours: 'off' });
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
     expect(await recordCallIntentAction({ phone: c.phone!, sandboxContactId: c.id, confirmed: true })).toEqual(expect.objectContaining({ ok: true }));
     await logManualCall({ userId: b.users.alisa.id, sandboxContactId: c.id });
