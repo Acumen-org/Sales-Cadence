@@ -1371,3 +1371,6 @@ Built on the local branch `outreach-sandbox` from Rahul's brief of 2 November an
   - Cold outreach > Campaigns and Moves to CRM open on the reader's pod (and a junior's own name
     on Campaigns), as Tasks does; "All pods" stays chosen once picked. Contacts already opened on
     the reader's own contacts, or a leader's pods.
+- **Owner's change of 12 Nov 2026.** Cold outreach > Campaigns opens on the reader's pod with no
+  name filter: a junior sees every campaign of their pod. Moves to CRM opens on the reader's pod
+  too, listing the moves of that pod's contacts.
