@@ -38,15 +38,15 @@ export type CampaignsScreenProps = {
   /** The parameter for Upcoming / Active / Finished: `tab` on Campaigns, `view` inside Cold outreach. */
   tabParam?: 'tab' | 'view';
   newHref: string;
-  /** Open on the reader's own pod (and a junior's own name), as Tasks does (owner, 10 Nov 2026). */
+  /** Open on the reader's own pod, as Tasks does (owner, 10 Nov 2026); everyone, juniors too, sees all of the pod's campaigns (owner, 12 Nov 2026). */
   defaultScope?: boolean;
 };
 
 export async function CampaignsScreen({ user, sp, audience, title, base, fixed = {}, tabParam = 'tab', newHref, defaultScope = false }: CampaignsScreenProps) {
-  // Absent pod and FO mean the reader's own; an empty one means All (src/lib/default-filters.ts).
+  // An absent pod means the reader's own; an empty one means All (src/lib/default-filters.ts). The FO filter starts empty.
   const defaults = defaultScope ? await sectionDefaults(user) : null;
   const podId = defaults ? filterParam(sp.pod, defaults.podId) : sp.pod || null;
-  const foId = defaults ? filterParam(sp.fo, defaults.foUserId) : sp.fo || null;
+  const foId = sp.fo || null;
   const today = todayIn(user.timezone);
   const visible = visiblePodIds(user);
   const values = defaultTwentySchema.personValues;
@@ -66,7 +66,7 @@ export async function CampaignsScreen({ user, sp, audience, title, base, fixed =
   const rows = byTab[tab];
   const query = new URLSearchParams(fixed);
   for (const [k, v] of Object.entries({ q: sp.q, pod: podId, sequence: sp.sequence, product, fo: foId, from: sp.from, to: sp.to })) if (v) query.set(k, v);
-  if (defaults) { query.set('pod', podId ?? ''); query.set('fo', foId ?? ''); }
+  if (defaults) query.set('pod', podId ?? '');
   const tabHref = (t: Tab) => { const p = new URLSearchParams(query); p.set(tabParam, t); return `${base}?${p.toString()}`; };
   const filtered = Boolean(sp.q || podId || sp.sequence || product || foId || sp.from || sp.to);
   const newButton = canCreateCampaign(user) ? <Link href={newHref} className="btn-primary"><IconPlus size={14} />New campaign</Link> : null;
