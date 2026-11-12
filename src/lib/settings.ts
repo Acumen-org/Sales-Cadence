@@ -201,6 +201,25 @@ export const CallingSettingsSchema = z.object({
   conversationSeconds: z.number().int().min(1).max(3600).default(120),
 });
 
+/**
+ * LinkedIn, as the LinkedIn Console reports it (Notes/linkedin-2026-11-12/PLAN.md). Cadence never acts
+ * on LinkedIn; these only say when it asks a teammate to.
+ */
+export const LinkedInSettingsSchema = z.object({
+  /** Off: events from the Console are kept but nothing is closed or created from them. */
+  enabled: z.boolean().default(true),
+  /** A request still waiting after this many days gets a "Withdraw request" task (owner, 12 Nov 2026: 14). */
+  withdrawAfterDays: z.number().int().min(7).max(90).default(14),
+  /** LinkedIn's cool-off after a withdrawal: the request is sent again this many days later (owner: 3 weeks). */
+  resendAfterDays: z.number().int().min(21).max(90).default(21),
+  /** How many times a withdrawn request is sent again (owner: once, then stop). */
+  maxResends: z.number().int().min(0).max(3).default(1),
+  /** An accepted request is followed by a message this many working days later (owner: 2). */
+  messageAfterAcceptDays: z.number().int().min(0).max(10).default(2),
+  /** Requests per account per 7 days before Cadence warns (LinkedIn's own limit is about 100). */
+  inviteWeeklyLimit: z.number().int().min(10).max(200).default(80),
+});
+
 // .prefault, not .default: Zod 4 returns a default as given, so only a parsed {} fills in each
 // section's own defaults (what .default({}) did in Zod 3).
 export const SettingsSchema = z.object({
@@ -211,6 +230,7 @@ export const SettingsSchema = z.object({
   signIn: SignInSettingsSchema.prefault({}),
   sandbox: SandboxSettingsSchema.prefault({}),
   calling: CallingSettingsSchema.prefault({}),
+  linkedin: LinkedInSettingsSchema.prefault({}),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;
@@ -220,6 +240,7 @@ export type RulesSettings = Settings['rules'];
 export type SyncSettings = Settings['sync'];
 export type SandboxSettings = Settings['sandbox'];
 export type CallingSettings = Settings['calling'];
+export type LinkedInSettings = Settings['linkedin'];
 
 export const DEFAULT_SETTINGS: Settings = SettingsSchema.parse({});
 

@@ -53,6 +53,14 @@ const EnvSchema = z.object({
   CADENCE_FAKE_TWILIO: z.string().optional(),
   /** true turns on reading the sales mailboxes through Microsoft Graph (application Mail.Read). Off when unset. */
   GRAPH_MAIL_ENABLED: BoolString,
+  /**
+   * The LinkedIn Console (read only). Its address (also used for "Open in Console" links), the API key
+   * it issued for Cadence's event feed, and the secret its signed webhooks carry. Unset: no feed is read
+   * and the webhook answers 503.
+   */
+  LINKEDIN_CONSOLE_URL: z.string().optional(),
+  LINKEDIN_CONSOLE_API_KEY: z.string().optional(),
+  LINKEDIN_CONSOLE_WEBHOOK_SECRET: z.string().optional(),
   WORKER_TICK_SECONDS: z.coerce.number().int().positive().default(300),
   CRM_SYNC_SECONDS: z.coerce.number().int().min(15).max(300).default(60),
   RECONCILE_HOUR: z.coerce.number().int().min(0).max(23).default(2),

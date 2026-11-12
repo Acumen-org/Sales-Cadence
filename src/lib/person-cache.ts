@@ -35,6 +35,7 @@ export function personToCacheData(p: TwentyPerson): Prisma.PersonCacheUncheckedC
     phoneE164: toE164(p.phone),
     additionalPhoneE164: toE164(p.additionalPhone),
     linkedinUrl: p.linkedinUrl,
+    linkedinKey: normalizeLinkedin(p.linkedinUrl),
     jobTitle: p.jobTitle,
     city: p.city,
     companyId: p.companyId,
