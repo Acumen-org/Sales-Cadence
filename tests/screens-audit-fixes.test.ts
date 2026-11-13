@@ -66,6 +66,21 @@ describe('screens audit: pure helpers', () => {
   });
 });
 
+describe('integration audit: routes that skip sign-in', () => {
+  it('V10: every route under /api/v1 and /api/integrations goes through a handler that checks a key', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const files = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? files(path.join(dir, d.name)) : d.name === 'route.ts' ? [path.join(dir, d.name)] : []));
+    const routes = [...files(path.join(process.cwd(), 'src/app/api/v1')), ...files(path.join(process.cwd(), 'src/app/api/integrations'))];
+    expect(routes.length).toBeGreaterThan(5);
+    for (const file of routes) expect(fs.readFileSync(file, 'utf8'), file).toMatch(/from '@\/lib\/(public-api\/http|sandbox\/bellwether-http)'/);
+    const { middleware } = await import('@/middleware');
+    const { NextRequest } = await import('next/server');
+    expect(middleware(new NextRequest('http://x/api/integrations/other/thing')).status).toBe(307);
+    expect(middleware(new NextRequest('http://x/api/integrations/bellwether/v1/ping')).status).toBe(200);
+  });
+});
+
 describe('screens audit: queries and actions', () => {
   let b: Basics;
   beforeEach(async () => {

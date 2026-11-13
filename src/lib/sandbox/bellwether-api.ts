@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { Prisma, type SandboxContact } from '@prisma/client';
 import { databaseNow, prisma } from '../db';
 import { env } from '../env';
+import { bucketId, resetWindows, takeFromWindow, WRONG_KEY_LIMIT } from '../rate-window';
 import { logAudit, type AuditActor } from '../audit';
 import { getSettings, getTwentyConnection } from '../settings';
 import { twentyPersonUrl } from '../twenty/urls';
@@ -55,34 +56,37 @@ function sameKey(given: string, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-/** 503 when Cadence has no key or the sandbox is off; 401 when the key is missing or wrong. */
-export async function authorize(header: string | null): Promise<ApiError | null> {
+/**
+ * 503 when Cadence has no key; 401 when the key is missing or wrong; 503 when the integration is
+ * switched off. U19: the key is checked before the switch, so only a caller with the key learns
+ * whether it is on, and a caller sending wrong keys is slowed (429) after WRONG_KEY_LIMIT a minute.
+ */
+export async function authorize(header: string | null, caller: string | null = null): Promise<ApiError | null> {
   const e = env();
   const current = e.BELLWETHER_API_KEY?.trim();
   if (!current) return apiError(503, 'integration_disabled', 'The Bellwether integration is not configured in Cadence.');
-  if (!(await getSettings()).sandbox.enabled) return apiError(503, 'integration_disabled', 'Cold outreach is switched off in Cadence.');
   const given = (header ?? '').trim();
   const previous = e.BELLWETHER_API_KEY_PREVIOUS?.trim();
   const ok = Boolean(given) && (sameKey(given, current) || (previous ? sameKey(given, previous) : false));
-  return ok ? null : apiError(401, 'unauthorized', 'The X-Cadence-Api-Key header is missing or wrong.');
-}
-
-/** 30 push (and check, and suppress) requests and 60 status (and owners) requests a minute per key, per process. */
-const LIMITS = { push: 30, status: 60 } as const;
-const g = globalThis as unknown as { __bellwetherWindows?: Map<string, number[]> };
-export function rateLimit(kind: keyof typeof LIMITS, key: string, now = Date.now()): ApiError | null {
-  const windows = (g.__bellwetherWindows ??= new Map<string, number[]>());
-  const id = `${kind}:${createHash('sha256').update(key).digest('hex').slice(0, 16)}`;
-  const recent = (windows.get(id) ?? []).filter((t: number) => now - t < 60_000);
-  if (recent.length >= LIMITS[kind]) {
-    windows.set(id, recent);
-    return apiError(429, 'rate_limited', `More than ${LIMITS[kind]} ${kind} requests in a minute.`, { retryAfter: Math.max(1, Math.ceil((60_000 - (now - recent[0])) / 1000)) });
+  if (!ok) {
+    const slowed = await takeFromWindow(`bw-fail:${bucketId(caller ?? 'unknown')}`, WRONG_KEY_LIMIT);
+    return slowed.ok ? apiError(401, 'unauthorized', 'The X-Cadence-Api-Key header is missing or wrong.') : apiError(429, 'rate_limited', 'Too many requests with a wrong key in a minute.', { retryAfter: slowed.retryAfter });
   }
-  recent.push(now);
-  windows.set(id, recent);
+  // U30: in the words Bellwether uses for this side.
+  if (!(await getSettings()).sandbox.enabled) return apiError(503, 'integration_disabled', 'The Bellwether integration is switched off in Cadence.');
   return null;
 }
-export function resetRateLimits() { g.__bellwetherWindows = new Map(); }
+
+/**
+ * 30 push (and check, and suppress) requests and 60 status (and owners) requests a minute per key.
+ * U27: counted in the database, so the limit holds across every server process and restarts.
+ */
+const LIMITS = { push: 30, status: 60 } as const;
+export async function rateLimit(kind: keyof typeof LIMITS, key: string, now = new Date()): Promise<ApiError | null> {
+  const taken = await takeFromWindow(`bw-${kind}:${bucketId(key)}`, LIMITS[kind], now);
+  return taken.ok ? null : apiError(429, 'rate_limited', `More than ${LIMITS[kind]} ${kind} requests in a minute.`, { retryAfter: taken.retryAfter });
+}
+export function resetRateLimits(): Promise<void> { return resetWindows(); }
 
 /** The raw body, refused when it is not JSON, too large or does not parse. */
 export async function readJson(req: Request): Promise<{ raw: string; body: unknown } | ApiError> {
@@ -382,12 +386,15 @@ export async function resolveOwner(env: Envelope): Promise<Ownership> {
  * GET /v1/owners (contract 1.1, B022): who can own contacts pushed from Bellwether, by the same rules
  * as resolveOwner, with the pods each works as Bellwether sends them in `pod` (the CRM's pod value).
  */
-export async function ownersList(): Promise<{ owners: { email: string; name: string; pods: string[] }[] }> {
+export async function ownersList(): Promise<{ owners: { email: string; name: string; pods: string[]; aliases: string[] }[] }> {
   const users = await prisma.user.findMany({ where: { active: true }, include: { pods: { where: { pod: { archived: false } }, include: { pod: true } } }, orderBy: { name: 'asc' } });
   const owners = users.flatMap((u) => {
     const pods = u.pods.map((p) => p.pod).sort((a, b) => a.name.localeCompare(b.name));
     if (!pods.length || ownerRefusal(null, { id: u.id, name: u.name, role: u.role, active: u.active, podIds: pods.map((p) => p.id) }, null)) return [];
-    return [{ email: u.email.toLowerCase(), name: u.name, pods: pods.map((p) => p.podOwnerValue) }];
+    // U16: the other addresses Cadence accepts for this person (resolveOwner reads them too), so a
+    // rep who signs in to Bellwether with an alias is found in the list.
+    const aliases = [...new Set(u.aliases.map((a) => a.trim().toLowerCase()).filter((a) => a.includes('@') && a !== u.email.toLowerCase()))].sort();
+    return [{ email: u.email.toLowerCase(), name: u.name, pods: pods.map((p) => p.podOwnerValue), aliases }];
   });
   return { owners };
 }
@@ -774,6 +781,8 @@ async function duplicate(c: PushContact, existing: SandboxContact, matchedOn: Ma
     const data: Record<string, unknown> = { ...(plan.data as Record<string, unknown>) };
     if (newer.additionalEmails.length) data.additionalEmails = newer.additionalEmails;
     if (newer.additionalPhones.length) data.additionalPhones = newer.additionalPhones as unknown as Prisma.InputJsonValue;
+    // U21: the person's Bellwether link is Bellwether's to change: a newer one replaces the one kept.
+    if (c.bellwetherUrl && row.bellwetherUrl && row.bellwetherUrl !== c.bellwetherUrl) data.bellwetherUrl = c.bellwetherUrl;
     if (Object.keys(data).length) {
       await tx.sandboxContact.update({ where: { id: row.id }, data: data as Prisma.SandboxContactUpdateInput });
       await logAudit({ entityType: 'sandbox_contact', entityId: row.id, action: 'filled_from_push', actor: ctx.actor, details: { fields: plan.fields, added: newer.words } }, tx);
@@ -824,9 +833,14 @@ export function summarize(results: ContactResult[]): PushResponse['summary'] {
 // ---------------------------------------------------------------------------
 
 const IDEMPOTENCY_DAYS = 7;
-const STALE_MS = 120_000;
 /** A push still PROCESSING this long was cut off (a restart, the database gone): the sweeper marks it failed (B012). */
 export const STUCK_MS = 10 * 60_000;
+/**
+ * U18: a push still PROCESSING is never run a second time beside itself. It answers "in progress"
+ * until it is as old as a stuck one (the sweeper's limit), not after 2 minutes: Bellwether polls a
+ * minute and then retries over about 2.5 more, so a slow push used to run twice.
+ */
+const STALE_MS = STUCK_MS;
 
 export type PushOutcome = { status: 200; body: PushResponse } | ApiError;
 

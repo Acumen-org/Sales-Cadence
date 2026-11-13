@@ -2,7 +2,9 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { coldOutreachRedirect } from './lib/cold-outreach-paths';
 
 const SESSION_COOKIE = 'cadence_session';
-const PUBLIC_PREFIXES = ['/login', '/api/auth', '/api/health', '/api/webhooks', '/api/integrations', '/api/v1', '/_next', '/fonts', '/favicon.ico', '/icon.svg'];
+// V10: only the Bellwether contract's own path skips the sign-in check, not all of /api/integrations;
+// every route under it and under /api/v1 must check a key itself (tests/screens-audit-fixes.test.ts checks this).
+const PUBLIC_PREFIXES = ['/login', '/api/auth', '/api/health', '/api/webhooks', '/api/integrations/bellwether/v1', '/api/v1', '/_next', '/fonts', '/favicon.ico', '/icon.svg'];
 
 /**
  * Cheap gate: redirect anonymous visitors to /login. The cookie is only checked for

@@ -1268,7 +1268,7 @@ Contact:
 | `productInterest` | string[] | no | Twenty `productInterest` values: `PHH`, `TOLLBOOTH`, `ACUBOOTH`, `GLYNAC`. |
 | `tags` | string[] | no | ≤ 20, each ≤ 50. Kept in the sandbox only. |
 | `notes` | string or null | no | ≤ 5000. Becomes the contact's first sandbox note. A longer one is cut at a word, with a warning. |
-| `bellwetherUrl` | string or null | no | HTTPS link to the contact in Bellwether. |
+| `bellwetherUrl` | string or null | no | HTTPS link to the contact in Bellwether. A push of someone already in Cold outreach replaces the link Cadence kept with this one. |
 | `source` | string or null | no | ≤ 200. Where Bellwether found the person, e.g. `"SEC IAPD"` or `"firm website"`. |
 | `collectedAt` | string (date) or null | no | When Bellwether collected the data. |
 | `doNotContact` | boolean | no | Default `false`. `true` (also `"true"`, `"yes"` or `1`) means the contact is rejected (`do_not_contact`). |
@@ -1478,14 +1478,14 @@ Body: `{ "error": { "code": string, "message": string, "fields": [ { "path": str
 | HTTP | `code` | When |
 |---|---|---|
 | 400 | `invalid_json` | The body is not JSON. |
-| 401 | `unauthorized` | The key is missing or wrong. |
+| 401 | `unauthorized` | The key is missing or wrong. Checked before whether the integration is switched on; after 20 wrong keys in a minute from one caller, 429 instead. |
 | 409 | `idempotency_conflict` | The same `Idempotency-Key` was used with a different body. |
 | 409 | `idempotency_in_progress` | The same key is still being processed. Has `Retry-After: 5`. |
 | 413 | `payload_too_large` | More than 500 contacts, more than 500 status ids, or a body over 2 MB. |
 | 415 | `unsupported_media_type` | Not JSON. |
 | 422 | `invalid_request` | Envelope validation (14.4). |
 | 429 | `rate_limited` | Over the limit. Has `Retry-After` in seconds. |
-| 503 | `integration_disabled` | The key is not configured in Cadence, or the sandbox is switched off. |
+| 503 | `integration_disabled` | The key is not configured in Cadence, or (for a caller with the right key) the integration is switched off: "The Bellwether integration is switched off in Cadence." |
 | 503 | `unavailable` | Cadence's database cannot be reached. Retry later. Nothing else is a 503: one contact Cadence fails on is that contact's `internal_error`, and the push still finishes. |
 | 500 | `internal` | A bug. Retry once with the same key, then stop and report. |
 
@@ -1502,7 +1502,8 @@ Body: `{ "error": { "code": string, "message": string, "fields": [ { "path": str
   is 5 s, 30 s, then 2 min, at most 3 retries, and Bellwether honours `Retry-After`.
 - A push that stopped part-way (Cadence restarted, its database went away) is marked failed after
   10 minutes; a retry with its key runs it again, and what it created already is then
-  `duplicate_in_sandbox`.
+  `duplicate_in_sandbox`. Until then the same key answers 409 `idempotency_in_progress`, so a slow
+  push is never run twice side by side.
 - Apart from the key, the dedupe rules alone mean a contact pushed again never makes a second
   sandbox contact.
 
@@ -1510,7 +1511,9 @@ Body: `{ "error": { "code": string, "message": string, "fields": [ { "path": str
 
 - 500 contacts per push. 500 ids per status request. 2 MB body.
 - 30 push requests and 60 status requests per minute per key. Check (14.14) and suppress (14.15)
-  requests count as push requests; owners (14.16) requests count as status requests.
+  requests count as push requests; owners (14.16) requests count as status requests. The counts
+  are kept in Cadence's database over a sliding minute, the same for every server process and
+  across restarts.
 - Cadence answers a 500-contact push within 30 seconds. Bellwether's client timeout is 60
   seconds.
 
@@ -1715,11 +1718,13 @@ person stays live there; Bellwether then shows "Still live in Cadence with <owne
 `GET /api/integrations/bellwether/v1/owners`. Who can own contacts pushed from Bellwether, by the
 rules of 14.7 (active sales reps in at least one pod; never admins or Biz Ops), by name, each with
 the pods they work as Bellwether sends them in `pod`. Bellwether's owner picker lists only these,
-and asks for the pod when the owner has more than one.
+and asks for the pod when the owner has more than one. `aliases` lists the other addresses Cadence
+accepts for the same person (lower case; often empty), so Bellwether can pre-select a rep whose
+sign-in address is one of them.
 ```json
 {
   "owners": [
-    { "email": "alyssa@acumen-strategy.com", "name": "Alyssa Example", "pods": ["ALISA"] }
+    { "email": "alyssa@acumen-strategy.com", "name": "Alyssa Example", "pods": ["ALISA"], "aliases": ["alyssa.example@acumen-strategy.com"] }
   ]
 }
 ```

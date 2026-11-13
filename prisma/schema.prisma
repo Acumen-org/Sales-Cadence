@@ -845,6 +845,15 @@ model CrmRequestBudget {
   used   Int      @default(0)
 }
 
+/// U19, U27, V09: requests per minute for the Bellwether integration and the read API, shared by every process.
+model ApiRateHit {
+  id     BigInt   @id @default(autoincrement())
+  bucket String
+  at     DateTime
+
+  @@index([bucket, at])
+}
+
 model Setting {
   key       String   @id
   value     Json

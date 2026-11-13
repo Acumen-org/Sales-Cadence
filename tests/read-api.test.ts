@@ -27,7 +27,7 @@ describe('read API', () => {
   beforeEach(async () => {
     await resetDb();
     b = await seedBasics();
-    resetReadApiLimits();
+    await resetReadApiLimits();
   });
   afterEach(() => {
     delete process.env.API_TRUSTED_PROXY_HOPS;
@@ -201,6 +201,17 @@ describe('read API', () => {
       expect(Number(over.headers.get('retry-after'))).toBeGreaterThan(0);
       expect(over.headers.get('x-ratelimit-remaining')).toBe('0');
       expect((await call('', { key: other.key })).status).toBe(200);
+    });
+
+    it('V09: the limit is shared through the database, and a caller sending wrong keys is slowed', async () => {
+      const { id, key } = await makeKey(['crm']);
+      const now = new Date();
+      await prisma.apiRateHit.createMany({ data: Array.from({ length: RATE_LIMIT }, () => ({ bucket: `read:${id}`, at: now })) });
+      expect((await call('', { key })).status).toBe(429);
+      for (let i = 0; i < 20; i++) expect((await call('', { key: 'cad_wrong' })).status).toBe(401);
+      const slowed = await call('', { key: 'cad_wrong' });
+      expect(slowed.status).toBe(429);
+      expect(Number(slowed.headers.get('retry-after'))).toBeGreaterThan(0);
     });
 
     it('logs each request by path without its query, stamps last used, and prunes after 90 days', async () => {

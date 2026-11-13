@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { databaseNow, prisma } from '../db';
 import { env } from '../env';
+import { bucketId, resetWindows, takeFromWindow, WRONG_KEY_LIMIT } from '../rate-window';
 import { todayIn } from '../dates';
 import { databaseDown } from '../sandbox/bellwether-api';
 import { buildReports, parseReportAudience, reportingRange, reportingTimezone } from '../reports-query';
@@ -25,22 +26,14 @@ const isFailure = (v: unknown): v is Failure => Boolean(v && typeof v === 'objec
 const invalid = (path: string, problem: string) => fail(422, 'invalid_request', `${path}: ${problem}`, { fields: [{ path, problem }] });
 
 // ---------------------------------------------------------------------------
-// Rate limit: 120 a minute per key, per process
+// Rate limit: 120 a minute per key, in the database (V09: every process shares it)
 // ---------------------------------------------------------------------------
 
-const g = globalThis as unknown as { __readApiWindows?: Map<string, number[]> };
-function take(keyId: string, now = Date.now()): { remaining: number; retryAfter?: number } {
-  const windows = (g.__readApiWindows ??= new Map<string, number[]>());
-  const recent = (windows.get(keyId) ?? []).filter((t) => now - t < 60_000);
-  if (recent.length >= RATE_LIMIT) {
-    windows.set(keyId, recent);
-    return { remaining: 0, retryAfter: Math.max(1, Math.ceil((60_000 - (now - recent[0])) / 1000)) };
-  }
-  recent.push(now);
-  windows.set(keyId, recent);
-  return { remaining: RATE_LIMIT - recent.length };
+async function take(keyId: string, now = new Date()): Promise<{ remaining: number; retryAfter?: number }> {
+  const taken = await takeFromWindow(`read:${keyId}`, RATE_LIMIT, now);
+  return taken.ok ? { remaining: RATE_LIMIT - taken.used } : { remaining: 0, retryAfter: taken.retryAfter };
 }
-export function resetReadApiLimits() { g.__readApiWindows = new Map(); }
+export function resetReadApiLimits(): Promise<void> { return resetWindows(); }
 
 // ---------------------------------------------------------------------------
 // Cursors: base64url JSON of the last row's sort values
@@ -208,8 +201,12 @@ export async function handleReadApi(req: Request): Promise<NextResponse> {
     const auth = req.headers.get('authorization') ?? '';
     const token = /^Bearer\s+(\S+)$/i.exec(auth)?.[1] ?? null;
     key = await findKey(token);
-    if (!key) return respond(failure(fail(401, 'unauthorized', 'Send Authorization: Bearer <key>, with a key that is live (not revoked or expired).')), requestId);
-    limit = take(key.id);
+    if (!key) {
+      // V09: a caller sending wrong keys is slowed too, by its address.
+      const slowed = await takeFromWindow(`read-fail:${bucketId(ip ?? 'unknown')}`, WRONG_KEY_LIMIT);
+      return respond(slowed.ok ? failure(fail(401, 'unauthorized', 'Send Authorization: Bearer <key>, with a key that is live (not revoked or expired).')) : failure(fail(429, 'rate_limited', 'Too many requests with a wrong key in a minute.')), requestId, slowed.ok ? undefined : { remaining: 0, retryAfter: slowed.retryAfter });
+    }
+    limit = await take(key.id);
     a = limit.retryAfter ? failure(fail(429, 'rate_limited', `More than ${RATE_LIMIT} requests in a minute.`)) : await answer(req, key, ip);
   } catch (err) {
     console.error('[read-api] request failed', { requestId, error: err instanceof Error ? err.message : String(err) });
