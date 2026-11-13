@@ -30,7 +30,9 @@ async function seedCore() {
     // account whose password everybody knows.
     if (!e.ADMIN_PASSWORD) throw new Error('Set ADMIN_PASSWORD in .env before seeding: it is the password for the first account.');
     if (e.ADMIN_PASSWORD === 'change-me-before-first-run') throw new Error('ADMIN_PASSWORD is still the placeholder from .env.example. Choose a real one.');
-    const weak = validatePasswordStrength(e.ADMIN_PASSWORD);
+    // Q25: a real deployment's admin (reachable through /login/admin) gets the admin rule, which
+    // refuses the launcher's and the demo's known passwords; the test and local set-ups run in mock mode.
+    const weak = validatePasswordStrength(e.ADMIN_PASSWORD, { admin: !(e.TWENTY_MODE === 'mock' && e.CADENCE_ALLOW_MOCK === '1') });
     if (weak) throw new Error(`ADMIN_PASSWORD: ${weak}`);
     await prisma.user.create({ data: { email: adminEmail, name: 'Admin', role: 'ADMIN', passwordHash: await hashPassword(e.ADMIN_PASSWORD), timezone: WORKSPACE_TIMEZONE } });
     console.log(`  + admin user ${adminEmail}`);

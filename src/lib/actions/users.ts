@@ -63,7 +63,7 @@ export async function createUserAction(formData: FormData): Promise<ActionResult
   const d = parsed.data;
   // With Microsoft sign-in the new member signs in with their work account: no password to set.
   const password = !d.password && (await signInMethods()).microsoft ? null : d.password ?? '';
-  const weak = password === null ? null : validatePasswordStrength(password);
+  const weak = password === null ? null : validatePasswordStrength(password, { admin: d.role === 'ADMIN' });
   if (weak) return { ok: false, error: weak };
   if (needsPod(d.role) && !d.podIds.length) return { ok: false, error: 'This role works in a pod: choose at least one.' };
   const existing = await prisma.user.findUnique({ where: { email: d.email } });
@@ -75,7 +75,7 @@ export async function createUserAction(formData: FormData): Promise<ActionResult
     // sets everything an enabled account needs rather than sending the admin to Restore and Edit.
     await prisma.user.update({
       where: { id: existing.id },
-      data: { name: d.name, role: d.role, roleAssigned: true, passwordHash, active: true, timezone: workspaceTimezone(), dailyCap: null, twentyMemberId: existing.twentyMemberId ?? await resolveMember(d.email), pods: { deleteMany: {}, create: d.podIds.map((podId) => ({ podId })) } },
+      data: { name: d.name, role: d.role, roleAssigned: true, passwordHash, active: true, accessRemovedAt: null, timezone: workspaceTimezone(), dailyCap: null, twentyMemberId: existing.twentyMemberId ?? await resolveMember(d.email), pods: { deleteMany: {}, create: d.podIds.map((podId) => ({ podId })) } },
     });
     await logAudit({ entityType: 'user', entityId: existing.id, action: 'enabled', actor: userActor(admin), details: { role: d.role, pods: d.podIds } });
     refresh();
@@ -107,7 +107,7 @@ export async function updateUserAction(formData: FormData): Promise<ActionResult
   if (linked && linked.id !== userId) return { ok: false, error: 'That CRM email is already linked to another team member.' };
   let passwordHash: string | undefined;
   if (d.password) {
-    const weak = validatePasswordStrength(d.password); if (weak) return { ok: false, error: weak };
+    const weak = validatePasswordStrength(d.password, { admin: d.role === 'ADMIN' }); if (weak) return { ok: false, error: weak };
     passwordHash = await hashPassword(d.password);
   }
   const result = await prisma.$transaction(async (tx): Promise<ActionResult> => {
@@ -195,7 +195,7 @@ export async function setUserAccessAction(formData: FormData): Promise<ActionRes
       }
       pending.push(...delegatedIn);
     }
-    await tx.user.update({ where: { id: userId }, data: { active: restore, timezone: workspaceTimezone() } });
+    await tx.user.update({ where: { id: userId }, data: { active: restore, accessRemovedAt: restore ? null : new Date(), timezone: workspaceTimezone() } });
     if (!restore) await tx.session.deleteMany({ where: { userId } });
     await logAudit({ entityType: 'user', entityId: userId, action: restore ? 'restored' : 'removed', actor: userActor(admin), details: { replacementId: replacementId || null, transferredEnrollments: restore ? 0 : open.length, ...(handed ? { coldContacts: handed.contacts, leftForLeaders: handed.leftForLeaders, nextSteps: handed.coldNextSteps + handed.crmNextActionIds.length, forms: handed.forms, number: handed.number } : {}) } }, tx);
     return { error: null, tasks: pending, handed, to: replacement?.name ?? null };

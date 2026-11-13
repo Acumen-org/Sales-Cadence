@@ -302,6 +302,11 @@ export async function bulkTasksAction(formData: FormData): Promise<ActionResult>
           problems.push(`${task.label}: cannot reassign`);
           continue;
         }
+        // Q-X3: as one at a time (enrollments.ts): a cold contact's campaign goes with the contact's owner.
+        if (e.sandboxContactId && !e.personId) {
+          problems.push(`${task.label}: a cold contact's campaign is worked by its owner; give the contact to someone else from Cold outreach`);
+          continue;
+        }
         await reassignEnrollment(e.id, d.foUserId, ctx);
         touchedEnrollments.add(e.id);
         steps.add(`${task.enrollment.id}:${task.stepId}`);

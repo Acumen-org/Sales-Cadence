@@ -13,6 +13,7 @@ const TABLES = [
   'LinkedInAccount',
   'ApiRequestLog',
   'ApiKey',
+  'SignInAttempt',
   'Ticket',
   'Notification',
   'SandboxMoveItem',

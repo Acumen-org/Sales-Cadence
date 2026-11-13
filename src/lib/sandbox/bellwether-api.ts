@@ -11,6 +11,7 @@ import { ownerRefusal, podForOwner } from '../outreach/transfer';
 import { applyTwentyAnswer, askTwentyFor, dedupeContact, possibleCrmMatch, possibleSandboxTwin, pushedPhones, refreshCrmCopyFor, type DedupeInput, type MatchedOn, type TwentyAnswer } from './dedupe';
 import { cutAtWord, hasControl, isRoleEmail, normalizeCountry, normalizeCrd, normalizeDomain, normalizeEmail, normalizeFirmName, normalizeLinkedin, parsePhone, personalPhone, PHONE_TYPES, plainName, plainText, readExtraPhones, sandboxSortName, stripControl, toE164, type ExtraPhone } from './normalize';
 import { hasUsableEmail } from './ready';
+import { boundedText } from '../http-body';
 import { cadenceUrlOf, recordRefusal, type RefusalMatch } from './status';
 
 /**
@@ -88,10 +89,9 @@ export function resetRateLimits() { g.__bellwetherWindows = new Map(); }
 export async function readJson(req: Request): Promise<{ raw: string; body: unknown } | ApiError> {
   const type = req.headers.get('content-type') ?? '';
   if (!/application\/json/i.test(type)) return apiError(415, 'unsupported_media_type', 'Send Content-Type: application/json.');
-  const length = Number(req.headers.get('content-length') ?? 0);
-  if (length > MAX_BODY_BYTES) return apiError(413, 'payload_too_large', 'The body is over 2 MB.');
-  const raw = await req.text();
-  if (Buffer.byteLength(raw, 'utf8') > MAX_BODY_BYTES) return apiError(413, 'payload_too_large', 'The body is over 2 MB.');
+  // Q21: never read whole first, length header or not.
+  const raw = await boundedText(req, MAX_BODY_BYTES);
+  if (raw === null) return apiError(413, 'payload_too_large', 'The body is over 2 MB.');
   try { return { raw, body: JSON.parse(raw) }; } catch { return apiError(400, 'invalid_json', 'The body is not JSON.'); }
 }
 

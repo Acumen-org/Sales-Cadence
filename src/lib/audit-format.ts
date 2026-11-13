@@ -150,6 +150,7 @@ const TITLES: Record<string, string> = {
   login: 'Signed in',
   logout: 'Signed out',
   admin_login_failed: 'Admin sign-in failed',
+  admin_login_locked: 'Admin sign-in locked after too many wrong passwords',
   caller_number_set: 'Calling number set',
   caller_number_released: 'Calling number released',
   caller_number_synced: 'Calling number copied from h00ks',

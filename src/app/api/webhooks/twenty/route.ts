@@ -4,6 +4,7 @@ import { ingestEvent, type IngestResult } from '@/lib/engine/ingest';
 import { parseWebhookEvent, verifyWebhook } from '@/lib/twenty/webhook-auth';
 import { noteMeetingsChangedInTwenty, ownMeetingEcho } from '@/lib/meetings/crm-check';
 import { afterResponse } from '@/lib/engine/sync-out';
+import { boundedText } from '@/lib/http-body';
 
 export const runtime = 'nodejs';
 
@@ -12,8 +13,12 @@ export const runtime = 'nodejs';
  * opportunity and person (create/update/delete). Events are stored and deduped before
  * processing, so Twenty retries are harmless.
  */
+/** Q05: the most a webhook body may be. Twenty sends one event (or a few) at a time. */
+const MAX_BODY_BYTES = 2 * 1024 * 1024;
+
 export async function POST(req: NextRequest) {
-  const rawBody = await req.text();
+  const rawBody = await boundedText(req, MAX_BODY_BYTES);
+  if (rawBody === null) return NextResponse.json({ ok: false, error: 'payload too large' }, { status: 413 });
   const e = env();
   const auth = verifyWebhook({
     rawBody,
@@ -24,7 +29,8 @@ export async function POST(req: NextRequest) {
   });
   if (!auth.ok) {
     console.warn(`[webhook] rejected: ${auth.reason}`);
-    return NextResponse.json({ ok: false, error: auth.reason }, { status: 401 });
+    // Q22: the reason goes to the server log, not to whoever sent the request.
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
 
   let payload: unknown;
@@ -67,11 +73,12 @@ export async function POST(req: NextRequest) {
       results.push(stored);
     } catch (err) {
       console.error('[webhook] ingest failed', err);
-      results.push({ status: 'error', result: err instanceof Error ? err.message : String(err) });
+      // Q22: the error itself is in the server log; the sender learns only that this event failed.
+      results.push({ status: 'error', result: 'failed' });
     }
   }
   if (runs.length) await afterResponse(async () => { for (const run of runs) await run(); });
-  return NextResponse.json({ ok: true, auth: auth.method, results });
+  return NextResponse.json({ ok: true, results });
 }
 
 export async function GET() {

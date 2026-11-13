@@ -91,8 +91,26 @@ export function readIdToken(idToken: string, c: Pick<MicrosoftConfig, 'clientId'
   return { oid, addresses, name: text('name') || null };
 }
 
+const MICROSOFT_LOGIN_HOSTS = new Set(['login.microsoftonline.com', 'login.microsoftonline.us', 'login.partner.microsoftonline.cn', 'login.chinacloudapi.cn']);
+
+/**
+ * Audit Q15: the id token's signature is not checked because it comes straight from Microsoft over
+ * TLS. That holds only while MICROSOFT_LOGIN_URL is Microsoft: anywhere else (a test's stand-in) is
+ * allowed only in mock mode, so no live deployment sends its secret to, or believes, another server.
+ */
+export function trustedLoginUrl(loginUrl: string): boolean {
+  if (env().CADENCE_ALLOW_MOCK === '1') return true;
+  try {
+    const u = new URL(loginUrl);
+    return u.protocol === 'https:' && MICROSOFT_LOGIN_HOSTS.has(u.hostname.toLowerCase()) && !u.port;
+  } catch {
+    return false;
+  }
+}
+
 /** Trade the code Microsoft sent back for the id token, and read it. */
 export async function redeemCode(c: MicrosoftConfig, code: string, verifier: string, nonce: string): Promise<MicrosoftIdentity> {
+  if (!trustedLoginUrl(c.loginUrl)) throw new SignInError('microsoft', `MICROSOFT_LOGIN_URL (${c.loginUrl}) is not Microsoft's sign-in service`);
   const res = await fetch(`${c.loginUrl}/${c.tenantId}/oauth2/v2.0/token`, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -111,9 +129,14 @@ export async function redeemCode(c: MicrosoftConfig, code: string, verifier: str
  * who has never had access (they join), or someone new at one of our domains (they join).
  */
 export async function microsoftUser(identity: MicrosoftIdentity): Promise<{ id: string; name: string; email: string; joined: boolean }> {
-  const users = await prisma.user.findMany({ select: { id: true, email: true, name: true, aliases: true, active: true, microsoftId: true } });
-  const owns = (u: (typeof users)[number]) => [u.email, ...u.aliases].some((a) => identity.addresses.includes(a.trim().toLowerCase()));
+  const users = await prisma.user.findMany({ select: { id: true, email: true, name: true, aliases: true, active: true, microsoftId: true, accessRemovedAt: true } });
+  // Q04: an address finds only an account not yet tied to another Microsoft account; an address
+  // claim never moves a tie from one Microsoft account to another.
+  const owns = (u: (typeof users)[number]) => (!u.microsoftId || u.microsoftId === identity.oid) && [u.email, ...u.aliases].some((a) => identity.addresses.includes(a.trim().toLowerCase()));
   const user = users.find((u) => u.microsoftId === identity.oid) ?? users.find((u) => u.active && owns(u)) ?? users.find(owns);
+  if (!user && users.some((u) => u.microsoftId && [u.email, ...u.aliases].some((a) => identity.addresses.includes(a.trim().toLowerCase())))) {
+    throw new SignInError('microsoft', `${identity.addresses.join(', ')} belongs to a team member who signs in with another Microsoft account`);
+  }
   const linkable = !users.some((u) => u.id !== user?.id && u.microsoftId === identity.oid);
   if (user?.active) {
     if (user.microsoftId !== identity.oid && linkable) await prisma.user.update({ where: { id: user.id }, data: { microsoftId: identity.oid } });
@@ -121,7 +144,9 @@ export async function microsoftUser(identity: MicrosoftIdentity): Promise<{ id: 
   }
   if (user) {
     // An inactive account is either someone the CRM sync found, who never had access, or someone
-    // an admin removed. Only the first may come in this way.
+    // an admin removed. Only the first may come in this way. Q14: the row's own mark first; the
+    // audit log too, for a removal from before the mark existed.
+    if (user.accessRemovedAt) throw new SignInError('removed');
     const last = await prisma.auditLog.findFirst({ where: { entityType: 'user', entityId: user.id, action: { in: ['created', 'enabled', 'removed', 'restored'] } }, orderBy: { createdAt: 'desc' }, select: { action: true } });
     if (last?.action === 'removed') throw new SignInError('removed');
   }
