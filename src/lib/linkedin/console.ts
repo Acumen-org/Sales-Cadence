@@ -42,11 +42,13 @@ export async function pollFeed(now = new Date(), maxPages = 5): Promise<{ ran: b
   let stored = 0;
   try {
     for (let page = 0; page < maxPages; page++) {
-      const body = await get<{ events?: unknown[]; next?: string | number | null }>(`/api/ext/v1/events?after=${encodeURIComponent(cursor)}&limit=500`);
+      const body = await get<{ events?: unknown[]; next?: string | number | null; nextCursor?: string | number | null }>(`/api/ext/v1/events?after=${encodeURIComponent(cursor)}&limit=500`);
       const events = Array.isArray(body.events) ? body.events : [];
       const r = await storeEvents(events, 'feed');
       stored += r.stored;
-      const next = body.next != null ? String(body.next) : r.lastSeq != null ? r.lastSeq.toString() : null;
+      // The Console answers `nextCursor` (docs/event-feed.md); `next` was the spec's word.
+      const cursorField = body.nextCursor ?? body.next;
+      const next = cursorField != null ? String(cursorField) : r.lastSeq != null ? r.lastSeq.toString() : null;
       if (!events.length || !next || next === cursor) break;
       cursor = next;
     }

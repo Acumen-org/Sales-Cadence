@@ -27,12 +27,22 @@ export const ConsoleEventSchema = z.object({
   seq: z.union([z.number().int().nonnegative(), z.string().regex(/^\d{1,18}$/)]),
   type: z.enum(LINKEDIN_EVENT_TYPES),
   at: z.string().refine((s) => !Number.isNaN(Date.parse(s)), 'not a time'),
-  account: z.object({ id: z.string().min(1), linkedinName: nullishText }).nullish(),
+  // The Console sends the account's name as `name` (docs/event-feed.md); the spec's `linkedinName` is read too.
+  account: z.object({ id: z.string().min(1), name: nullishText, linkedinName: nullishText }).nullish(),
   user: z.object({ email: nullishText, name: nullishText }).nullish(),
   person: z.object({ memberUrn: nullishText, publicId: nullishText, profileUrl: nullishText, name: nullishText }).nullish(),
   data: z.record(z.string(), z.unknown()).nullish(),
 });
 export type ConsoleEvent = z.infer<typeof ConsoleEventSchema>;
+
+/**
+ * A per-type field (invitedByUs, note, source, conversationId). The Console puts them beside the envelope's own
+ * fields (docs/event-feed.md); the spec had them under `data`. Both are read.
+ */
+export function eventField(payload: unknown, key: string): unknown {
+  const p = (payload ?? {}) as Record<string, unknown> & { data?: Record<string, unknown> | null };
+  return p.data && key in p.data ? p.data[key] : p[key];
+}
 
 /** A person whose profile link never arrives is given up on after this long. */
 const WAIT_FOR_PROFILE_MS = 30 * 86_400_000;
@@ -55,7 +65,8 @@ export async function storeEvents(raw: unknown[], via: 'webhook' | 'feed' | 'tes
       memberUrn: e.person?.memberUrn || null,
       profileKey: profileKeyOf(e.person?.profileUrl, e.person?.publicId),
       name: e.person?.name?.trim() || null,
-      payload: e as unknown as Prisma.InputJsonValue,
+      // Kept as the Console sent it, so its per-type fields stay (see eventField).
+      payload: item as Prisma.InputJsonValue,
     });
   }
   const { count } = rows.length ? await prisma.linkedInEvent.createMany({ data: rows, skipDuplicates: true }) : { count: 0 };
@@ -178,7 +189,7 @@ async function handle(e: LinkedInEvent, profileKey: string, userId: string | nul
   // for people we contacted first). A stranger who wrote to us, or asked to connect, stays out.
   let subject: LinkedInSubject | null = resolved.kind === 'subject' ? resolved.subject : null;
   if (!subject) {
-    const accepted = e.type === 'connection.accepted' ? ((e.payload as { data?: { invitedByUs?: unknown } }).data?.invitedByUs !== false) : false;
+    const accepted = e.type === 'connection.accepted' ? eventField(e.payload, 'invitedByUs') !== false : false;
     const ours = e.type === 'invitation.sent' || e.type === 'message.sent' || accepted
       || (e.type === 'message.received' && (await prisma.linkedInEvent.count({ where: { profileKey, type: { in: ['invitation.sent', 'message.sent'] }, seq: { lt: e.seq } } })) > 0);
     if (!ours) return { result: 'not_ours' };
@@ -213,7 +224,7 @@ async function handle(e: LinkedInEvent, profileKey: string, userId: string | nul
       return { result: opened ? 'withdrawn_resend_opened' : 'withdrawn', subject };
     }
     case 'connection.accepted': {
-      const data = (e.payload as { data?: { invitedByUs?: unknown } }).data ?? {};
+      const data = { invitedByUs: eventField(e.payload, 'invitedByUs') };
       const prior = await prisma.linkedInLink.findUnique({ where: { accountId_profileKey: { accountId: e.accountId ?? 'unknown', profileKey } } });
       const ours = data.invitedByUs === true || (data.invitedByUs !== false && Boolean(prior?.invitedAt)) || (data.invitedByUs === undefined && !prior);
       const link = await upsertLink(e, profileKey, subject, { status: 'ACCEPTED', acceptedAt: e.at, invitedByUs: ours });
@@ -256,7 +267,7 @@ async function handle(e: LinkedInEvent, profileKey: string, userId: string | nul
 export async function processEvent(e: LinkedInEvent, now = new Date()): Promise<string> {
   if (e.processedAt) return e.result ?? 'processed';
   const p = e.payload as ConsoleEvent;
-  let accountName = p.account?.linkedinName?.trim() || null;
+  let accountName = p.account?.name?.trim() || p.account?.linkedinName?.trim() || null;
   if (e.accountId) {
     const acc = await prisma.linkedInAccount.upsert({ where: { id: e.accountId }, create: { id: e.accountId, name: accountName ?? e.accountId }, update: { ...(accountName ? { name: accountName } : {}), seenAt: now } });
     accountName = acc.name;
