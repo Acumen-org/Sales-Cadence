@@ -109,7 +109,8 @@ function emailHost(email: string | null): string | null {
   return host || null;
 }
 
-export async function enrichmentQueue(user: SessionUser, includeComplete = false): Promise<EnrichmentQueueItem[]> {
+/** `only`: just these records (S29: marking a few gaps no longer reads every person and company in scope). */
+export async function enrichmentQueue(user: SessionUser, includeComplete = false, only?: { entity: EnrichmentEntity; ids: string[] }): Promise<EnrichmentQueueItem[]> {
   const [{ rules }, blocked, schema, connection, members, marks, inCampaign] = await Promise.all([
     getSettings(),
     blockedCompanyIds(),
@@ -120,9 +121,9 @@ export async function enrichmentQueue(user: SessionUser, includeComplete = false
     liveCampaignMemberIds(),
   ]);
   const [people, companies, allCompanies] = await Promise.all([
-    prisma.personCache.findMany({ where: await enrichmentPeopleScope(user), select: { id: true, firstName: true, lastName: true, companyId: true, companyName: true, email: true, phone: true, jobTitle: true, linkedinUrl: true, city: true, tags: true, badEmail: true, badPhone: true, emailMissing: true, phoneMissing: true, ownerMemberId: true, podOwner: true, tier: true, contactType: true, productInterest: true, syncedAt: true }, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }, { email: { sort: 'asc', nulls: 'last' } }] }),
-    prisma.companyCache.findMany({ where: await enrichmentCompanyScope(user), select: { id: true, name: true, domain: true, industry: true, employees: true, city: true, raw: true, aum: true, linkedinUrl: true, ownerMemberId: true, syncedAt: true }, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }, { domain: { sort: 'asc', nulls: 'last' } }] }),
-    prisma.companyCache.findMany({ where: { deletedAt: null, domain: { not: null } }, select: { id: true, name: true, domain: true } }),
+    only?.entity === 'company' ? [] : prisma.personCache.findMany({ where: only ? { AND: [await enrichmentPeopleScope(user), { id: { in: only.ids } }] } : await enrichmentPeopleScope(user), select: { id: true, firstName: true, lastName: true, companyId: true, companyName: true, email: true, phone: true, jobTitle: true, linkedinUrl: true, city: true, tags: true, badEmail: true, badPhone: true, emailMissing: true, phoneMissing: true, ownerMemberId: true, podOwner: true, tier: true, contactType: true, productInterest: true, syncedAt: true }, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }, { email: { sort: 'asc', nulls: 'last' } }] }),
+    only?.entity === 'person' ? [] : prisma.companyCache.findMany({ where: only ? { AND: [await enrichmentCompanyScope(user), { id: { in: only.ids } }] } : await enrichmentCompanyScope(user), select: { id: true, name: true, domain: true, industry: true, employees: true, city: true, raw: true, aum: true, linkedinUrl: true, ownerMemberId: true, syncedAt: true }, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }, { domain: { sort: 'asc', nulls: 'last' } }] }),
+    only?.entity === 'company' ? [] : prisma.companyCache.findMany({ where: { deletedAt: null, domain: { not: null } }, select: { id: true, name: true, domain: true } }),
   ]);
   const byUsers = marks.some((m) => m.byId) ? await prisma.user.findMany({ where: { id: { in: [...new Set(marks.map((m) => m.byId).filter((id): id is string => !!id))] } }, select: { id: true, name: true } }) : [];
   const byIds = new Map(byUsers.map((u) => [u.id, u.name]));
@@ -326,7 +327,7 @@ export async function markEnrichmentGaps(user: SessionUser, req: MarkRequest, ma
   if (mark.kind === 'assigned') assertAllowed(Boolean(await prisma.user.findFirst({ where: { id: mark.assigneeId!, active: true }, select: { id: true } })), 'Choose an active team member.');
   const ids = await markableIds(user, req.entity, req.ids);
   if (!ids.length) throw new Error('None of the chosen records is in your pods.');
-  const queue = new Map((await enrichmentQueue(user)).filter((i) => i.entity === req.entity).map((i) => [i.id, i]));
+  const queue = new Map((await enrichmentQueue(user, false, { entity: req.entity, ids })).filter((i) => i.entity === req.entity).map((i) => [i.id, i]));
   const writes: Prisma.EnrichmentMarkUpsertArgs[] = [];
   for (const id of ids) {
     const item = queue.get(id);

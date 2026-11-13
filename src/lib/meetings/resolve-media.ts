@@ -38,7 +38,10 @@ async function probe(url: string, fetchImpl: typeof fetch): Promise<{ finalUrl: 
     const res = await fetchPublicRedirects(url, { method: 'GET', headers: { range: 'bytes=0-0', accept: 'video/*,audio/*,*/*;q=0.5' }, signal: controller.signal }, fetchImpl);
     const type = (res.headers.get('content-type') ?? '').toLowerCase();
     if (!res.ok && res.status !== 206) return null;
-    return { finalUrl: res.url || url, type };
+    // S15: the address that was asked, not where it redirected: the redirect often carries a
+    // short-lived access token, which would be stored, shown to everyone and then stop playing.
+    // The browser follows the same redirect each time the recording plays.
+    return { finalUrl: url, type };
   } catch {
     return null;
   } finally {
@@ -79,8 +82,10 @@ export function dateInText(text: string): string | null {
   if (mdy) return `${mdy[3]}-${MONTHS[mdy[1].toLowerCase().slice(0, 4).replace(/\.$/, '')] ?? MONTHS[mdy[1].toLowerCase().slice(0, 3)]}-${mdy[2].padStart(2, '0')}`;
   const numeric = /\b(\d{1,2})[/.](\d{1,2})[/.](20\d{2})\b/.exec(text);
   if (numeric) {
-    // Day first when the first number cannot be a month, otherwise the workspace's US habit.
+    // Day first when the first number cannot be a month, month first when the second cannot be.
+    // S25: 03/04/2026 is March in the US and April in the UK: no guess, the person picks the day.
     const [a, b] = [Number(numeric[1]), Number(numeric[2])];
+    if (a <= 12 && b <= 12 && a !== b) return null;
     const [month, day] = a > 12 ? [b, a] : [a, b];
     return `${numeric[3]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   }
@@ -111,7 +116,7 @@ export async function inspectLink(raw: string, fetchImpl: typeof fetch = publicL
   try {
     const res = await fetchPublicRedirects(url.toString(), { headers: { accept: 'text/html,*/*;q=0.5' }, signal: controller.signal }, fetchImpl);
     const type = (res.headers.get('content-type') ?? '').toLowerCase();
-    if (type.startsWith('video/') || type.startsWith('audio/')) { out.mediaUrl = res.url || url.toString(); return out; }
+    if (type.startsWith('video/') || type.startsWith('audio/')) { out.mediaUrl = url.toString(); return out; }
     if (res.ok && type.includes('html')) {
       const html = (await res.text()).slice(0, 300_000);
       out.title = meta(html, 'og:title') ?? (/<title[^>]*>([^<]*)<\/title>/i.exec(html)?.[1] ? decode(/<title[^>]*>([^<]*)<\/title>/i.exec(html)![1]) : null);

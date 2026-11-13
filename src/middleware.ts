@@ -11,8 +11,23 @@ const PUBLIC_PREFIXES = ['/login', '/api/auth', '/api/health', '/api/webhooks', 
  * presence here (Edge runtime, no database); the real session lookup happens in the
  * app layout via requireUser().
  */
+/**
+ * Audit Q28: the sign-in pages are the only server actions anyone can call without a session, so a
+ * post to them is refused above 16 KB (an email and a password are a few hundred bytes) rather than
+ * taken in up to the 5 MB every other action may send. A browser always says how long its post is.
+ */
+const SIGN_IN_POST_MAX = 16 * 1024;
+export function signInPostTooBig(req: Pick<NextRequest, 'method' | 'headers'>, pathname: string): boolean {
+  if (req.method !== 'POST' || !(pathname === '/login' || pathname.startsWith('/login/'))) return false;
+  const length = req.headers.get('content-length');
+  if (length === null) return true;
+  const n = Number(length);
+  return !Number.isFinite(n) || n > SIGN_IN_POST_MAX;
+}
+
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  if (signInPostTooBig(req, pathname)) return new NextResponse('Request too large.', { status: 413 });
   // The section moved from /sandbox to /cold-outreach (PLAN 3): old links land on the new page, 307.
   const moved = coldOutreachRedirect(pathname, req.nextUrl.search);
   if (moved) {

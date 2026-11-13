@@ -42,13 +42,29 @@ function safeUrl(raw: string): URL | null {
 }
 
 /**
+ * The src of the first `<iframe ...>` tag, read one tag at a time (S14): a single pattern over the
+ * whole paste took time growing with the square of its length on "<iframe <iframe <iframe ...".
+ */
+function iframeSrc(text: string): string | null {
+  const lower = text.toLowerCase();
+  for (let at = lower.indexOf('<iframe'); at !== -1; ) {
+    const end = text.indexOf('>', at);
+    if (end === -1) return null;
+    const src = /\ssrc\s*=\s*["']([^"']+)["']/i.exec(text.slice(at, end))?.[1];
+    if (src) return src;
+    at = lower.indexOf('<iframe', end);
+  }
+  return null;
+}
+
+/**
  * What somebody pasted, reduced to the link inside it. SharePoint's Share > Embed hands out a whole
  * `<iframe src="...">` tag, not a URL, and the form is the wrong place to make anyone dig the address
  * out of it: the src is taken, HTML entities are undone, and everything else is dropped.
  */
 export function extractRecordingUrl(raw: string): string {
   const text = raw.trim();
-  const src = /<iframe[^>]*\ssrc\s*=\s*["']([^"']+)["']/i.exec(text)?.[1] ?? (text.includes('<') ? /https?:\/\/[^\s"'<>]+/i.exec(text)?.[0] : null);
+  const src = iframeSrc(text) ?? (text.includes('<') ? /https?:\/\/[^\s"'<>]+/i.exec(text)?.[0] : null);
   const chosen = src ?? text;
   return chosen.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
 }

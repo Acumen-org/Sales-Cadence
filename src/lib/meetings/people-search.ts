@@ -86,7 +86,10 @@ async function fromTwenty(q: string): Promise<string[]> {
 export async function findProspects(query: string, limit = 12): Promise<ProspectOption[]> {
   const q = query.trim().slice(0, 120);
   if (!q) return [];
-  const [cached, live, notTeam] = await Promise.all([fromCache(q, 60), fromTwenty(q), externalPeopleWhere({ keepBlocked: true })]);
+  // S24: Twenty itself is asked only when Cadence's copy has too few matches, and never for one or
+  // two letters, so people typing in the picker do not share the sync's 100 requests a minute.
+  const [cached, notTeam] = await Promise.all([fromCache(q, 60), externalPeopleWhere({ keepBlocked: true })]);
+  const live = cached.length >= limit || q.length < 3 ? [] : await fromTwenty(q);
   const ids = [...new Set([...cached, ...live])];
   if (!ids.length) return [];
   const people = await prisma.personCache.findMany({

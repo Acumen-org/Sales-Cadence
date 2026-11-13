@@ -6,6 +6,7 @@ import { canManageMeetingAction } from '@/lib/actions/meetings';
 import { MeetingForm } from '@/components/meetings/meeting-form';
 import { PageHeader, Surface } from '@/components/ui';
 import { meetingDay } from '@/lib/meetings/day';
+import { transcriptKey } from '@/lib/meetings/transcript-key';
 import { prospectOptions, teamOptions } from '@/lib/meetings/people-search';
 
 export default async function EditMeetingPage({ params }: { params: Promise<{ id: string }> }) {
@@ -42,6 +43,7 @@ export default async function EditMeetingPage({ params }: { params: Promise<{ id
               prospects,
               products: meeting.products,
               transcript: meeting.transcript ?? '',
+              transcriptKey: transcriptKey(meeting.transcript),
             }}
           />
         </Surface>

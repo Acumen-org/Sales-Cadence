@@ -148,6 +148,9 @@ model User {
   /// False for someone who joined by signing in with Microsoft: they work as a Junior FO and show
   /// no title until an admin gives them one.
   roleAssigned   Boolean   @default(true)
+  /// Q14: when an admin removed this person's access (null once restored or re-added). A removed
+  /// person never comes back through a Microsoft sign-in.
+  accessRemovedAt DateTime?
   /// The Microsoft account (its object id) this user signs in with.
   microsoftId    String?   @unique
   /// The rep's Twilio number (E.164), confirmed by an admin in Settings > Calling from Twilio's
@@ -190,6 +193,8 @@ model Session {
   createdAt DateTime @default(now())
 
   @@index([userId])
+  /// T32: the hourly purge of expired sessions.
+  @@index([expiresAt])
 }
 
 /// A pod is the set of people whose Twenty `podOwner` equals `podOwnerValue`,
@@ -295,8 +300,15 @@ model Campaign {
   enrollments Enrollment[]
 
   @@index([audience, status])
+  /// T32: a pod's and a sequence's campaigns.
+  @@index([podId])
+  @@index([sequenceId])
 }
 
+/// T30: also guarded by partial unique indexes Prisma cannot describe, written only in the migrations:
+/// Enrollment_one_active_per_person (20260906000000_init) and Enrollment_one_active_per_sandbox_contact
+/// (20261103000000_outreach_sandbox), and NextAction_one_open_per_person (20261003000001_next_actions).
+/// Build a database with `prisma migrate deploy`, never `db push`, or they are lost.
 model Enrollment {
   id                String           @id @default(uuid())
   /// Null while the subject is a sandbox contact; set when that contact moves to the CRM.
@@ -355,6 +367,9 @@ model Enrollment {
   /// Weekly reply/meeting counts per FO (Home, Reports).
   @@index([foUserId, repliedAt])
   @@index([foUserId, meetingAt])
+  /// T32: a sequence's and a pod's enrollments.
+  @@index([sequenceId])
+  @@index([podId])
 }
 
 model Task {
@@ -663,6 +678,8 @@ model Meeting {
   @@index([review, occurredAt])
   @@index([analysisStatus])
   @@index([twentyMeetingId])
+  /// T34: made by the migration 20260929000000_meeting_booked_by; named here so the two agree.
+  @@index([bookedById])
 }
 
 /// "Think this is wrong?": someone doubts which meeting with a prospect this is, and Biz Ops
@@ -819,6 +836,19 @@ model TwentyWrite {
   @@index([taskId])
   @@index([twentyId])
   @@index([status, nextAttemptAt])
+}
+
+/// Q02/Q03/Q08/Q09: one password sign-in attempt (either form), counted to slow guessing. Kept a day.
+/// The key is the address tried; ip is the caller's address when the proxy tells it, else "unknown".
+model SignInAttempt {
+  id        String   @id @default(uuid())
+  form      String
+  email     String
+  ip        String
+  createdAt DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@index([ip, createdAt])
 }
 
 model AuditLog {
@@ -983,6 +1013,9 @@ model NextAction {
   /// LocalDate (YYYY-MM-DD): the day it is due, written to Twenty's Next Action Due Date.
   dueDate       String
   repeat        NextActionRepeat @default(NONE)
+  /// The day of the month a monthly or quarterly one was set for (P20): a weekend or a short month
+  /// moves one due date, never the ones after it. Null on older rows: the due date's own day.
+  repeatDay     Int?
   state         NextActionState  @default(OPEN)
   createdById   String?
   completedById String?

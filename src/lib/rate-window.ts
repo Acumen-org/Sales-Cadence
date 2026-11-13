@@ -20,6 +20,14 @@ export async function takeFromWindow(bucket: string, limit: number, now = new Da
   return { ok: false, used: used - 1, retryAfter: Math.max(1, Math.ceil((60_000 - (now.getTime() - oldest)) / 1000)) };
 }
 
+/** How long until a bucket that has used its limit in the last minute may go on; null while under it. Counts nothing. */
+export async function windowWait(bucket: string, limit: number, now = new Date()): Promise<number | null> {
+  const row = await prisma.apiRateHit.aggregate({ where: { bucket, at: { gt: new Date(now.getTime() - 60_000), lte: now } }, _count: { _all: true }, _min: { at: true } });
+  if (row._count._all < limit) return null;
+  const oldest = row._min.at ? row._min.at.getTime() : now.getTime();
+  return Math.max(1, Math.ceil((60_000 - (now.getTime() - oldest)) / 1000));
+}
+
 /** Forget every count (tests). */
 export async function resetWindows(): Promise<void> {
   await prisma.apiRateHit.deleteMany({});

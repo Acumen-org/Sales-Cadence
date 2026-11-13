@@ -13,12 +13,20 @@ export function isPrivateHost(host: string): boolean {
   return Boolean(family && blocked.check(h, family === 6 ? 'ipv6' : 'ipv4'));
 }
 
+/** S26: only the web's own ports; a link on any other port is not a recording page to read. */
+export const isWebPort = (url: URL) => url.port === '' || url.port === '80' || url.port === '443';
+const DNS_TIMEOUT_MS = 3000;
+
 /** Pinned DNS address, no automatic redirects, bounded body. Used only for public link metadata. */
 export async function publicLinkFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = new URL(String(input));
   const host = url.hostname.replace(/^\[|\]$/g, '');
-  if (!/^https?:$/.test(url.protocol) || url.username || url.password || isPrivateHost(host)) throw new Error('Only public web links can be inspected.');
-  const addresses = await lookup(host, { all: true });
+  if (!/^https?:$/.test(url.protocol) || url.username || url.password || !isWebPort(url) || isPrivateHost(host)) throw new Error('Only public web links can be inspected.');
+  let timer: NodeJS.Timeout | undefined;
+  const addresses = await Promise.race([
+    lookup(host, { all: true }),
+    new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('The link’s address could not be looked up in time.')), DNS_TIMEOUT_MS); }),
+  ]).finally(() => clearTimeout(timer));
   if (!addresses.length || addresses.some(row => isPrivateHost(row.address))) throw new Error('Private network links cannot be inspected.');
   init?.signal?.throwIfAborted();
   const headers = Object.fromEntries(new Headers(init?.headers));
@@ -51,7 +59,7 @@ export async function publicLinkFetch(input: RequestInfo | URL, init?: RequestIn
 export async function fetchPublicRedirects(url: string, init: RequestInit, fetchImpl: typeof fetch): Promise<Response> {
   for (let hop = 0; hop < 6; hop++) {
     const target = new URL(url);
-    if (!/^https?:$/.test(target.protocol) || target.username || target.password || isPrivateHost(target.hostname)) throw new Error('Only public web links can be inspected.');
+    if (!/^https?:$/.test(target.protocol) || target.username || target.password || !isWebPort(target) || isPrivateHost(target.hostname)) throw new Error('Only public web links can be inspected.');
     const response = await fetchImpl(url, { ...init, redirect: 'manual' });
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
     const location = response.headers.get('location');
