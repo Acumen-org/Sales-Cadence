@@ -27,7 +27,8 @@ import { purgeOldPushes, sweepStuckPushes } from '../lib/sandbox/bellwether-api'
 import { importTwilioCalls } from '../lib/calls/import';
 import { runGraphMail } from '../lib/mail/graph-mail';
 import { COLD_OUTREACH_BACKFILL, runColdOutreachBackfill } from '../lib/outreach/backfills';
-import { nightlyLoop } from '../lib/nightly';
+import { nightlyLookbackDays, nightlyLoop } from '../lib/nightly';
+import { getSettings } from '../lib/settings';
 import { ringHealth } from '../lib/outreach/health';
 import { coldOutreachReleaseOnce } from '../lib/outreach/release';
 import { runLinkedInPass } from '../lib/linkedin/pass';
@@ -51,7 +52,8 @@ let running=false;let lastSync=0;let lastPurge=0;let stopping=false;
 const nightly=nightlyLoop({hour:config.RECONCILE_HOUR,log,jobs:()=>{
  const now=new Date();
  return [
-  {name:'nightly reconcile',crm:true,run:()=>reconcile({actor:SYSTEM_ACTOR,now})},
+  // P31: back over every day since the last finished run, not only the fixed look-back, so a worker down for a week leaves no gap.
+  {name:'nightly reconcile',crm:true,run:async()=>reconcile({actor:SYSTEM_ACTOR,now,days:await nightlyLookbackDays(now,(await getSettings()).rules.reconcileLookbackDays)})},
   {name:'cache refresh',crm:true,run:async()=>refreshPersonCache(await getTwentyClient())},
   {name:'enrichment scorecard snapshot',run:()=>snapshotScorecard(now)},
   // Sandbox contacts Twenty gained after the push: flagged, outreach stopped (crm-check.ts).
@@ -204,9 +206,6 @@ async function tick(){
    await coldOutreachBackfill();
    await coldOutreachRelease();
    await sandboxJobs(now);
-   try{await launchScheduledCampaigns({actor:SYSTEM_ACTOR});}catch(error){log('campaign launch failed',error);}
-   // P02: a scheduler failure is logged and the rest of the pass (write retry, next actions, clean-up) still runs.
-   try{const stats=await runSchedulerTick({actor:SYSTEM_ACTOR});if(stats.generated||stats.completed)log('scheduler',stats);}catch(error){log('scheduler failed',error);}
    try{const retried=await retryFailedWrites();if(retried.retried)log('twenty write retry',retried);}catch(error){log('twenty write retry failed',error);}
    // LinkedIn, as the LinkedIn Console saw it: events in, tasks closed and opened (src/lib/linkedin).
    try{const li=await runLinkedInPass();if(Object.keys(li).length)log('linkedin',li);}catch(error){log('linkedin failed',error);}
@@ -215,10 +214,36 @@ async function tick(){
    if(now-lastPurge>=3600000){await purgeExpiredSessions();lastPurge=now;}
  }catch(error){log('tick failed',error);}finally{running=false;}
 }
+/**
+ * P03: campaign launch and step generation in a loop of their own, beside the tick, so a long CRM
+ * sync, mailbox read, Twilio import or meetings rewrite never holds back a campaign start or a step.
+ */
+let engineRunning=false;
+async function engineTick(){
+ if(engineRunning||stopping)return;engineRunning=true;
+ try{
+   try{await launchScheduledCampaigns({actor:SYSTEM_ACTOR});}catch(error){log('campaign launch failed',error);}
+   // P02: a scheduler failure is logged and the rest of the pass still runs.
+   try{const stats=await runSchedulerTick({actor:SYSTEM_ACTOR});if(stats.generated||stats.completed)log('scheduler',stats);}catch(error){log('scheduler failed',error);}
+ }finally{engineRunning=false;}
+}
+/** P14: how long a stop waits for the passes in progress; Nomad's kill_timeout (nomad/cadence.hcl) is longer. */
+const STOP_WAIT_MS=20_000;
 async function main(){
  log('Continuous sync every '+config.CRM_SYNC_SECONDS+' seconds; nightly reconcile after '+config.RECONCILE_HOUR+':00 '+workspaceTimezone());
- await tick();const timer=setInterval(tick,Math.min(config.WORKER_TICK_SECONDS,config.CRM_SYNC_SECONDS,120)*1000);
- const stop=async()=>{stopping=true;clearInterval(timer);while(running)await new Promise(resolve=>setTimeout(resolve,100));await nightly.settled();await prisma.$disconnect();process.exit(0);};
+ const every=Math.min(config.WORKER_TICK_SECONDS,config.CRM_SYNC_SECONDS,120)*1000;
+ let timers:NodeJS.Timeout[]=[];
+ // P14: the stop is heard from the start, also during a long first pass. It waits a bounded time for the
+ // passes in progress and gives a nightly run back rather than wait for it; the next worker picks both up.
+ const stop=async()=>{
+  if(stopping)return;stopping=true;for(const t of timers)clearInterval(t);
+  const until=Date.now()+STOP_WAIT_MS;
+  while((running||engineRunning)&&Date.now()<until)await new Promise(resolve=>setTimeout(resolve,100));
+  await nightly.release().catch(error=>log('nightly release failed',error));
+  await prisma.$disconnect().catch(()=>undefined);process.exit(0);
+ };
  process.on('SIGTERM',stop);process.on('SIGINT',stop);
+ timers=[setInterval(tick,every),setInterval(engineTick,every)];
+ void engineTick();await tick();
 }
 main().catch(error=>{console.error('[worker] fatal',error);process.exit(1);});
