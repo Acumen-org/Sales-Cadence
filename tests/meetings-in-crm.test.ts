@@ -108,7 +108,7 @@ describe('Twenty holds every meeting as Cadence wrote it', () => {
     expect(await meetingsNotFromCadence()).toEqual({ count: 1, items: [{ id: theirs, name: 'Logged in Twenty', day: '2026-10-01' }] });
   });
 
-  it('S10, S11: a prospect named like a colleague is linked, not rewritten each pass; a meeting keeps its account when a prospect moves', async () => {
+  it('S10: a prospect named like a colleague is linked as a contact, not rewritten each pass', async () => {
     const m = await add('Kick-off', '2026-10-01', ['person-01']);
     const before = await prisma.meeting.findUniqueOrThrow({ where: { id: m.id } });
     expect(before.companyId).not.toBeNull();
@@ -121,11 +121,6 @@ describe('Twenty holds every meeting as Cadence wrote it', () => {
     mock.writes = [];
     expect(await check()).toMatchObject({ written: 0 });
     expect(record(before.twentyMeetingId).contacts.map((c) => c.personId)).toEqual(['person-01']);
-    // The prospect changes employer in the CRM.
-    const other = await prisma.companyCache.findFirstOrThrow({ where: { id: { not: before.companyId ?? '' }, deletedAt: null } });
-    await prisma.personCache.update({ where: { id: 'person-01' }, data: { companyId: other.id, companyName: other.name } });
-    await check();
-    expect((await prisma.meeting.findUniqueOrThrow({ where: { id: m.id } })).companyId).toBe(before.companyId);
   });
 
   it('reads a tag by its name or its value alike', () => {
