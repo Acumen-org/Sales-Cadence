@@ -97,7 +97,9 @@ describe('next actions', () => {
     mock.failNext = new Error('Twenty is down');
     const [id] = (await setNextActions([p.id], input, userActor(b.users.alisa), b.users.alisa.id)).set;
     expect((await prisma.nextAction.findUniqueOrThrow({ where: { id } })).crmPending).toBe(true);
-    expect(await syncNextActions()).toEqual(expect.objectContaining({ pushed: 1 }));
+    // P21: a failed write waits half an hour before the worker tries it again.
+    expect(await syncNextActions()).toEqual(expect.objectContaining({ pushed: 0, failed: 0 }));
+    expect(await syncNextActions(new Date(Date.now() + 31 * 60_000))).toEqual(expect.objectContaining({ pushed: 1 }));
     expect((await prisma.nextAction.findUniqueOrThrow({ where: { id } })).crmPending).toBe(false);
   });
 
