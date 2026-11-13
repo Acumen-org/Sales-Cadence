@@ -225,16 +225,10 @@ export async function recordCallTouch(call: CallLog): Promise<void> {
   const externalId = call.twilioCallSid ? `twilio:${call.twilioCallSid}` : `call:${call.id}`;
   const user = call.userId ? await prisma.user.findUnique({ where: { id: call.userId }, select: { name: true } }) : null;
   const audience = call.audience ?? await audienceFor(call);
-  const upsert = () => prisma.touch.upsert({
+  const touch = await prisma.touch.upsert({
     where: { externalId },
     create: { personId: call.personId, sandboxContactId: call.sandboxContactId, channel: 'CALL', direction: call.direction, occurredAt: at, summary: `${call.direction === 'OUTBOUND' ? 'Call made' : 'Call received'} (${talk(call.talkSec)})`, externalId, actorUserId: call.userId, actorLabel: user?.name ?? null, audience },
     update: {},
-  });
-  // B184: two saves of one call's form at once both reach here; the upsert is not atomic, so the one
-  // that loses the insert takes the touch the other wrote (one call, one touch).
-  const touch = await upsert().catch((err) => {
-    if (!isUniqueViolation(err)) throw err;
-    return prisma.touch.findUniqueOrThrow({ where: { externalId } });
   });
   await prisma.callLog.update({ where: { id: call.id }, data: { touchId: touch.id } });
   if (call.sandboxContactId) await prisma.sandboxContact.updateMany({ where: { id: call.sandboxContactId, OR: [{ lastActivityAt: null }, { lastActivityAt: { lt: at } }] }, data: { lastActivityAt: at } });

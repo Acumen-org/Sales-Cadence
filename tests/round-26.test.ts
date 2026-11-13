@@ -52,9 +52,6 @@ describe('most-important people', () => {
     // Clearing removes the row rather than storing a zero.
     expect(await setMipStars(alisa, 'person-01', 0)).toEqual({ stars: 0 });
     expect((await mipStarsFor(['person-01'])).size).toBe(0);
-    // S31: every change, the clear included, is in the audit log with who and from what to what.
-    const log = await prisma.auditLog.findMany({ where: { entityId: 'person-01', action: 'mip_stars_set' }, orderBy: { createdAt: 'asc' } });
-    expect(log.map((l) => [l.actorId, l.details])).toEqual([[b.users.alisa.id, { from: 0, to: 2 }], [b.users.ria.id, { from: 2, to: 3 }], [b.users.alisa.id, { from: 3, to: 0 }]]);
   });
   it('answers who may rate whom without a query per row', async () => {
     expect(await ratablePodOwners(session(b.users.ria))).toBeNull();

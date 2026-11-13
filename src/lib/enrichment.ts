@@ -313,16 +313,10 @@ export async function applyEnrichmentChunk(user: SessionUser, batchId: string, c
             await prisma.enrichmentRow.update({ where: { id: row.id }, data: { status: 'DRY_RUN', error: 'Write simulated. The CRM was not changed.' } });
             return;
           }
-          const differs = Object.keys(changes).filter((field) => !equal(fieldValue(updated as unknown as Record<string, unknown>, field), changes[field]));
-          // S28: the CRM was changed either way, so the cache, the write record and the audit entry
-          // are kept; a value it stored in another form is named, and the row is left for review.
+          const verified = Object.keys(changes).every((field) => equal(fieldValue(updated as unknown as Record<string, unknown>, field), changes[field]));
+          if (!verified) throw new Error('The CRM returned a different value. Review the record before retrying.');
           if (batch.entity === 'person') await upsertPersonCache(updated as TwentyPerson); else await upsertCompanyCache(updated as TwentyCompany);
           await prisma.twentyWrite.create({ data: { operation: batch.entity === 'person' ? 'enrichPerson' : 'enrichCompany', objectType: batch.entity, twentyId: row.recordId, payload: { batchId, rowNumber: row.rowNumber, original, changes }, dryRun: false } });
-          if (differs.length) {
-            const stored = Object.fromEntries(differs.map((field) => [field, fieldValue(updated as unknown as Record<string, unknown>, field)])) as Prisma.InputJsonValue;
-            await prisma.auditLog.create({ data: { entityType: batch.entity, entityId: row.recordId, action: 'enriched', actorType: 'USER', actorId: user.id, actorLabel: user.name, details: { batchId, fields: Object.keys(changes), storedDifferently: stored } } });
-            throw new Error(`The CRM was updated but stored ${differs.join(', ')} in a different form. Review the record before retrying.`);
-          }
         }
         await prisma.enrichmentRow.update({ where: { id: row.id }, data: { status: 'APPLIED', appliedAt: new Date(), error: null } });
         await prisma.auditLog.create({ data: { entityType: batch.entity, entityId: row.recordId, action: 'enriched', actorType: 'USER', actorId: user.id, actorLabel: user.name, details: { batchId, fields: Object.keys(changes) } } });

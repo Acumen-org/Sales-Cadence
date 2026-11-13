@@ -9,6 +9,7 @@ import { defaultTwentySchema } from '@/lib/twenty/twenty-schema';
 import { foPeopleWhere, peopleScopeWhere } from '@/lib/people-scope';
 import { prisma } from '@/lib/db';
 import type { Prisma } from '@prisma/client';
+import { externalPeopleWhere } from '@/lib/internal-organizations';
 import { visiblePodIds } from '@/lib/auth/rbac';
 import { SyncNowButton } from '@/components/settings/sync-now-button';
 import Link from 'next/link';
@@ -36,14 +37,13 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
   const visible = visiblePodIds(user);
   // A pod or FO filter narrows the people figures to that pod's or FO's people, as People does.
   const whose: Prisma.PersonCacheWhereInput[] = [...(pod ? [{ podOwner: pod }] : []), ...(foUserId ? [foPeopleWhere(foUserId, (await prisma.user.findUnique({ where: { id: foUserId }, select: { twentyMemberId: true } }))?.twentyMemberId)] : [])];
-  // R17: with a pod or FO filter, "with an account" counts those people at the accounts in view, so
-  // narrowing the list can only lower it.
-  const [list, podRows, withoutAccount] = await Promise.all([
-    listAccounts(user, { q, pod, foUserId, product, campaign, sort, dir, page, ...(whose.length ? { peopleWhere: [await peopleScopeWhere(user), ...whose] } : {}) }),
+  const [list, podRows, withoutAccount, withAccount] = await Promise.all([
+    listAccounts(user, { q, pod, foUserId, product, campaign, sort, dir, page }),
     prisma.pod.findMany({ where: { archived: false, ...(visible === null ? {} : { id: { in: visible } }) }, orderBy: { name: 'asc' }, include: { users: { include: { user: { select: { id: true, name: true, active: true, role: true } } } } } }),
     // The other half of the CRM: people under no account here. Counted here so the two people
     // figures on Accounts and People add up in the open.
     prisma.personCache.count({ where: { AND: [await peopleScopeWhere(user), await peopleWithoutAccountWhere(), ...whose] } }),
+    whose.length && !q && !product && !campaign ? prisma.personCache.count({ where: { AND: [await peopleScopeWhere(user), await externalPeopleWhere(), { NOT: await peopleWithoutAccountWhere() }, { deletedAt: null }, ...whose] } }) : Promise.resolve(null),
   ]);
   const fos = [...new Map(podRows.flatMap((x) => x.users.filter((up) => up.user.active && needsPod(up.user.role)).map((up) => [up.user.id, { id: up.user.id, name: up.user.name }] as const))).values()].sort((a, b) => a.name.localeCompare(b.name));
   const rows = list.rows;
@@ -65,7 +65,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
     <PageFrame className="space-y-5 px-6 pb-8 pt-2">
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
         <Stat label="Accounts in view" value={list.total} />
-        <Stat label={list.peopleInFilter === undefined ? 'People with an account' : pod ? 'Pod people with an account' : 'FO people with an account'} value={list.peopleInFilter ?? list.people} />
+        <Stat label="People with an account" value={withAccount ?? list.people} />
         <Link href={`/people?pod=${encodeURIComponent(pod ?? '')}&fo=${encodeURIComponent(foUserId ?? '')}&account=none`} className="block rounded-[14px] focus-visible:ring-4 focus-visible:ring-brand-100"><Stat label="People without an account" value={withoutAccount} /></Link>
         <Stat label="Accounts with someone in a campaign" value={list.inCampaign} />
         <Stat label="Engaged accounts" value={list.engaged} tone="good" />

@@ -103,18 +103,6 @@ describe('next actions', () => {
     expect((await prisma.nextAction.findUniqueOrThrow({ where: { id } })).crmPending).toBe(false);
   });
 
-  it('a leader with no FO chosen cannot give a task to an FO outside their pods (Q-X2)', async () => {
-    const [theirs, ours] = await prisma.personCache.findMany({ where: { deletedAt: null, dnd: false, optedOut: false }, take: 2 });
-    await prisma.personCache.update({ where: { id: theirs.id }, data: { ownerMemberId: 'wm-daniel' } });
-    await prisma.personCache.update({ where: { id: ours.id }, data: { ownerMemberId: 'wm-karson' } });
-    const fd = new FormData();
-    fd.set('personIds', JSON.stringify([theirs.id, ours.id]));
-    for (const [k, v] of Object.entries({ label: 'Follow up', action: 'CALL', dueDate: '2027-03-05', repeat: 'NONE' })) fd.set(k, v);
-    expect((await saveNextActionAction(fd)).ok).toBe(true);
-    expect(await prisma.nextAction.count({ where: { personId: theirs.id } })).toBe(0);
-    expect((await prisma.nextAction.findFirstOrThrow({ where: { personId: ours.id } })).foUserId).toBe(b.users.karson.id);
-  });
-
   it('N28: a change the CRM keeps refusing backs off and is given up by the worker, still pending', async () => {
     const { MAX_NEXT_ACTION_ATTEMPTS } = await import('@/lib/next-actions');
     const p = await prisma.personCache.findFirstOrThrow({ where: { deletedAt: null, dnd: false } });

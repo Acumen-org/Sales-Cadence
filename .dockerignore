@@ -14,12 +14,3 @@ playwright-report
 .test-db-url
 coverage
 *.log
-# T45: tests, browser tests, plans and review documents are not part of the running app.
-tests
-e2e
-docs
-AUDIT.md
-CURRENT-REQUIREMENTS-AUDIT.md
-*-REVIEW.md
-PLAN.md
-CAMPAIGN-MODEL-PROPOSAL.md

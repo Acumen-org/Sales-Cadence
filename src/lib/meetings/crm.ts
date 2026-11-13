@@ -96,7 +96,7 @@ export async function missingMeetingTags(): Promise<{ field: string; name: strin
 }
 
 /**
- * N14 (also audit S09): whether any tag on the missing list is now in Twenty (an admin added it by hand), so writing
+ * N14: whether any tag on the missing list is now in Twenty (an admin added it by hand), so writing
  * the meetings again would fill it in. While none is, rewriting every meeting each hour changes nothing.
  */
 export function missingTagsNowInCrm(schema: TwentyMeetingSchema, missing: { field: string; name: string }[]): boolean {
@@ -140,10 +140,8 @@ export async function meetingRecord(m: MeetingForCrm, schema: TwentyMeetingSchem
   const team: string[] = [];
   const external: MeetingForCrm['attendees'] = [];
   for (const a of m.attendees) {
-    // S10: someone chosen as a prospect is linked as one, even when they share a colleague's name;
-    // the meetings check compares Twenty's contacts with the prospects, so the two must agree.
-    const user = a.prospect ? undefined : userOf(a);
-    if (!a.prospect && (user || (a.email && !isExternalEmail(a.email, rules.internalDomains)))) { const n = user?.name ?? personName(a); if (n && !team.includes(n)) team.push(n); }
+    const user = userOf(a);
+    if (user || (a.email && !isExternalEmail(a.email, rules.internalDomains))) { const n = user?.name ?? personName(a); if (n && !team.includes(n)) team.push(n); }
     else external.push(a);
   }
   if (f.team) data[f.team.name] = await named(f.team, team, 'Team on the call');
@@ -245,14 +243,8 @@ export async function syncMeetingToCrm(meetingId: string): Promise<string | null
   return id;
 }
 
-async function keepForRetry(operation: string, payload: Record<string, unknown>, err: unknown, twentyId: string | null = null) {
+function keepForRetry(operation: string, payload: Record<string, unknown>, err: unknown, twentyId: string | null = null) {
   const message = err instanceof Error ? err.message : String(err);
-  // S23: one waiting write per meeting (or record): a later failure updates it rather than adding another.
-  const waiting = await prisma.twentyWrite.findFirst({
-    where: { operation, objectType: 'meeting', dryRun: false, status: { in: ['FAILED', 'RETRYING'] }, ...(operation === 'syncMeeting' ? { payload: { path: ['meetingId'], equals: String(payload.meetingId) } } : { twentyId }) },
-    select: { id: true },
-  }).catch(() => null);
-  if (waiting) return prisma.twentyWrite.update({ where: { id: waiting.id }, data: { error: message } }).catch(() => undefined);
   const data = { operation, objectType: 'meeting', twentyId, payload: payload as object, status: 'FAILED', error: message, attempts: 1, nextAttemptAt: new Date(Date.now() + retryDelayMs(1)) };
   // N31: tried once more, then reported as an error; the ten-minute check (crm-check.ts) rewrites a
   // meeting Twenty does not hold all the same.
@@ -298,14 +290,10 @@ export function meetingSchemaShape(schema: TwentyMeetingSchema): string {
  * Once the workspace has a Meetings object, every meeting already in Cadence goes into it. Returns
  * null when there is no Meetings object yet (try again later), else how many were written.
  */
-export async function backfillMeetingsToCrm(options: { all?: boolean; pauseMs?: number } = {}): Promise<number | null> {
+export async function backfillMeetingsToCrm(options: { all?: boolean } = {}): Promise<number | null> {
   const client = await getTwentyClient();
   if (!(await client.meetingSchema())) return null;
   const pending = await prisma.meeting.findMany({ where: { review: 'APPROVED', ...(options.all ? {} : { twentyMeetingId: null }) }, orderBy: { occurredAt: 'asc' }, select: { id: true } });
-  for (const [i, m] of pending.entries()) {
-    // S09: paced, so a rewrite of every meeting stays under Twenty's 100 requests a minute.
-    if (i && options.pauseMs) await new Promise((resolve) => setTimeout(resolve, options.pauseMs));
-    await pushMeetingToCrm(m.id);
-  }
+  for (const m of pending) await pushMeetingToCrm(m.id);
   return pending.length;
 }

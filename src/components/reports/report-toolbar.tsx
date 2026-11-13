@@ -17,17 +17,6 @@ export type ReportAudienceChoice = { key: ReportParams['audience']; label: strin
 /** The breakdown tab open right now: it switches in place, so the address is the truth, not the render. */
 const openTab = (fallback: string) => (typeof window === 'undefined' ? fallback : new URLSearchParams(window.location.search).get('tab') ?? fallback);
 
-/** R20: dates typed but not yet applied travel with a pod or FO pick instead of being wiped. */
-export function typedDates(form: HTMLFormElement | null): { from?: string; to?: string } {
-  if (!form) return {};
-  const data = new FormData(form);
-  const out: { from?: string; to?: string } = {};
-  const from = String(data.get('from') ?? ''), to = String(data.get('to') ?? '');
-  if (/^\d{4}-\d{2}-\d{2}$/.test(from)) out.from = from;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(to)) out.to = to;
-  return out;
-}
-
 /** A row of chips, one of them current: the period presets, and the audience. */
 function Chips({ label, items, current, onPick, stale }: { label: string; items: { key: string; label: string; href: string }[]; current: (key: string) => boolean; onPick: (key: string) => void; /** The server-built links are out of date (a breakdown tab switched in place): navigate from the address instead. */ stale: () => boolean }) {
   return (
@@ -88,8 +77,8 @@ export function ReportToolbar({ presets, audiences, params, pods, users, exportH
       >
         <label className="grid gap-1 text-[11.5px] font-medium text-ink-500">From<input type="date" name="from" defaultValue={from} required className="min-w-[140px]" /></label>
         <label className="grid gap-1 text-[11.5px] font-medium text-ink-500">Through<input type="date" name="to" defaultValue={to} required className="min-w-[140px]" /></label>
-        <label className="grid gap-1 text-[11.5px] font-medium text-ink-500">Pod<select name="pod" value={pod} onChange={(e) => go({ ...typedDates(e.currentTarget.form), pod: e.target.value, fo: '' })} className="min-w-[150px]"><option value="">All pods</option>{pods.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-        <label className="grid gap-1 text-[11.5px] font-medium text-ink-500">FO<select name="fo" value={fo} onChange={(e) => go({ ...typedDates(e.currentTarget.form), fo: e.target.value })} className="min-w-[150px]"><option value="">All FOs</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
+        <label className="grid gap-1 text-[11.5px] font-medium text-ink-500">Pod<select name="pod" value={pod} onChange={(e) => go({ pod: e.target.value, fo: '' })} className="min-w-[150px]"><option value="">All pods</option>{pods.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+        <label className="grid gap-1 text-[11.5px] font-medium text-ink-500">FO<select name="fo" value={fo} onChange={(e) => go({ fo: e.target.value })} className="min-w-[150px]"><option value="">All FOs</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
         <button type="submit" className="btn-secondary">Apply</button>
       </form>
       <a href={exportHref} target="_blank" rel="noreferrer" className="btn-secondary ml-auto">Export report</a>

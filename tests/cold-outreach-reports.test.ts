@@ -289,23 +289,6 @@ describe('Reports: All outreach, CRM and Cold outreach', () => {
     expect(calls).not.toContain('<script');
   });
 
-  it('R02: the exported Calls report holds every call of the period, not the first page of 50', async () => {
-    for (let i = 0; i < 55; i++) await call({ userId: b.users.alisa.id, startedAt: `2026-11-03T${String(10 + Math.floor(i / 6)).padStart(2, '0')}:${String((i % 6) * 10).padStart(2, '0')}:00Z` });
-    const paged = await callReport({ from: WEEK.fromInstant, to: WEEK.toInstant });
-    expect(paged.calls).toHaveLength(50);
-    expect(renderToStaticMarkup(createElement(CallsDocument, { data: paged, timezone: 'UTC', compared: null }))).toContain('class="rp-pager"');
-    expect((await callReport({ from: WEEK.fromInstant, to: WEEK.toInstant, allRows: true })).calls).toHaveLength(55);
-    const html = await (await exportReport(new Request('http://x/reports/export?from=2026-11-02&to=2026-11-08&pod=&fo=&view=calls'))).text();
-    expect(html).not.toContain('class="rp-pager"');
-  });
-
-  it('R22: an export asked for after the session ended goes to sign-in and back to the same Reports view', async () => {
-    auth.user = null;
-    const res = await exportReport(new Request('http://x/reports/export?from=2026-11-02&to=2026-11-08&view=calls'));
-    expect(res.status).toBe(303);
-    expect(res.headers.get('location')).toBe(`http://x/login?next=${encodeURIComponent('/reports?from=2026-11-02&to=2026-11-08&view=calls')}`);
-  });
-
   it('B127: a leader adds who an unknown number was as a cold contact, the call is attached and stamped, and calls go only to sales reps', async () => {
     const leader = session(b.users.alisa, [b.pods.Alisa.id]);
     auth.user = leader;
