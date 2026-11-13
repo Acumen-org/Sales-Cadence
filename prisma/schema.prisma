@@ -986,6 +986,9 @@ model NextAction {
   /// When Twenty last matched this next action, by Cadence's write or by following Twenty.
   crmSyncedAt   DateTime?
   crmError      String?
+  /// N28: failed sends in a row, and when the worker may send it again (backs off, then gives up).
+  crmAttempts   Int              @default(0)
+  crmRetryAt    DateTime?
   /// CRM or cold outreach (SANDBOX), set once when the row is created and never changed (PLAN 8.4,
   /// B037). A move closes the cold row and opens a CRM one; it never restamps. Null only on rows
   /// written before the stamping code; NOT NULL in W14.

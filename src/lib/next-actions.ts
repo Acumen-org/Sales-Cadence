@@ -7,7 +7,10 @@ import { nextWorkingDay } from './engine/clock';
 import { getSettings } from './settings';
 import { getTwentyClient } from './twenty';
 import { logOwnPersonWrite } from './twenty/own-writes';
-import { afterResponse } from './engine/sync-out';
+import { afterResponse, retryDelayMs } from './engine/sync-out';
+
+/** N28: sends the worker makes of one Next Action the CRM keeps refusing before it gives up. */
+export const MAX_NEXT_ACTION_ATTEMPTS = 25;
 import { CRM_SUBJECT } from './subject';
 
 /** The audit row for a next action: on its person, or on its sandbox contact while it has none. */
@@ -220,13 +223,23 @@ export async function pushNextAction(id: string): Promise<boolean> {
     // B033: a moved person's updatedAt after Cadence's own write, so Undo does not mistake it for an edit.
     await logOwnPersonWrite(client, personId, 'setPersonNextAction', { id: personId, ...patch });
     // Only if nothing changed meanwhile: a newer change is still pending and goes on the next pass.
-    await prisma.nextAction.updateMany({ where: { id, updatedAt: na.updatedAt }, data: { crmPending: false, crmSyncedAt: new Date(), crmError: null } });
+    await prisma.nextAction.updateMany({ where: { id, updatedAt: na.updatedAt }, data: { crmPending: false, crmSyncedAt: new Date(), crmError: null, crmAttempts: 0, crmRetryAt: null } });
     await prisma.personCache.updateMany({ where: { id: personId }, data: patch });
     return true;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[next-action] could not update Twenty for ${personId}: ${message}`);
-    await prisma.nextAction.updateMany({ where: { id, updatedAt: na.updatedAt }, data: { crmError: message.slice(0, 500) } });
+    // N28: the next try backs off (a minute, doubling, six hours at most); after 25 the worker gives up
+    // and says so. It stays pending (so the CRM's value is never followed over it) and a new change
+    // in Cadence still sends it at once.
+    const attempts = na.crmAttempts + 1;
+    const giveUp = attempts >= MAX_NEXT_ACTION_ATTEMPTS;
+    await prisma.nextAction.updateMany({
+      where: { id, updatedAt: na.updatedAt },
+      data: giveUp
+        ? { crmAttempts: attempts, crmRetryAt: null, crmError: `Gave up after ${attempts} attempts: ${message}`.slice(0, 500) }
+        : { crmError: message.slice(0, 500), crmAttempts: attempts, crmRetryAt: new Date(Date.now() + retryDelayMs(attempts)) },
+    });
     return false;
   }
 }
@@ -237,7 +250,7 @@ export async function pushNextAction(id: string): Promise<boolean> {
  */
 export async function syncNextActions(now = new Date()): Promise<{ pushed: number; failed: number; followed: number; closed: number }> {
   const stats = { pushed: 0, failed: 0, followed: 0, closed: 0 };
-  const pending = await prisma.nextAction.findMany({ where: { crmPending: true }, orderBy: { updatedAt: 'asc' }, take: 25, select: { id: true } });
+  const pending = await prisma.nextAction.findMany({ where: { crmPending: true, crmAttempts: { lt: MAX_NEXT_ACTION_ATTEMPTS }, OR: [{ crmRetryAt: null }, { crmRetryAt: { lte: now } }] }, orderBy: { updatedAt: 'asc' }, take: 25, select: { id: true } });
   for (const p of pending) { if (await pushNextAction(p.id)) stats.pushed++; else stats.failed++; }
 
   const open = await prisma.nextAction.findMany({
