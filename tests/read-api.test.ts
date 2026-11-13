@@ -96,6 +96,20 @@ describe('read API', () => {
       expect((await call('/reports', { key })).status).toBe(403);
       expect((await call('/nothing-here', { key })).status).toBe(404);
     });
+
+    it('S03: meetings and their transcripts need the meetings scope, and only approved ones are served', async () => {
+      const at = new Date('2026-10-01T12:00:00Z');
+      const shown = await prisma.meeting.create({ data: { title: 'Approved', sourceUrl: '', occurredAt: at, transcript: 'WEBVTT', review: 'APPROVED' } });
+      const hidden = await prisma.meeting.create({ data: { title: 'Dismissed', sourceUrl: '', occurredAt: at, transcript: 'secret', review: 'DISMISSED' } });
+      const activity = await makeKey(['activity']);
+      expect((await call('/meetings', { key: activity.key })).status).toBe(403);
+      expect((await call(`/meetings/${shown.id}`, { key: activity.key })).status).toBe(403);
+      const { key } = await makeKey(['meetings']);
+      const list = await call('/meetings', { key });
+      expect(list.body.data.map((m: { id: string }) => m.id)).toEqual([shown.id]);
+      expect((await call(`/meetings/${shown.id}`, { key })).body.data.transcript).toBe('WEBVTT');
+      expect((await call(`/meetings/${hidden.id}`, { key })).status).toBe(404);
+    });
   });
 
   describe('lists', () => {
