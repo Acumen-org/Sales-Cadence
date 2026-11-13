@@ -20,6 +20,7 @@ import { workspaceTimezone } from '../lib/workspace';
 import { syncNextActions } from '../lib/next-actions';
 import { runMoveQueue } from '../lib/sandbox/move';
 import { CLEANUP_EVERY_MS, cleanupSandboxCrmPeople } from '../lib/sandbox/crm-cleanup';
+import { syncH00ksNumbers } from '../lib/calls/h00ks';
 import { runCrmCheck } from '../lib/sandbox/crm-check';
 import { backfillPhoneE164, runSandboxRetention } from '../lib/sandbox/retention';
 import { purgeOldPushes, sweepStuckPushes } from '../lib/sandbox/bellwether-api';
@@ -63,14 +64,14 @@ const nightly=nightlyLoop({hour:config.RECONCILE_HOUR,log,jobs:()=>{
  ];
 }});
 /**
- * Every 2 minutes: calls read from Twilio (read only), and the sales mailboxes read through Graph
+ * Every 2 minutes: reps' numbers copied from h00ks, then calls read from Twilio (read only), and the sales mailboxes read through Graph
  * when GRAPH_MAIL_ENABLED is set. Moves to the CRM go at every tick, paced under Twenty's limit.
  * Every 5 minutes: the sandbox CRM cleanup (src/lib/sandbox/crm-cleanup.ts).
  */
 let callsAt=0;let mailAt=0;let crmCleanupAt=0;let healthAt=0;
 async function sandboxJobs(now:number){
  try{const moved=await runMoveQueue({pauseMs:1500,autoRetry:true});if(moved.done||moved.failed||moved.dryRun)log('moves to CRM',moved);}catch(error){log('moves to CRM failed',error);}
- if(now>=callsAt){callsAt=now+120_000;try{const stats=await importTwilioCalls();if(stats.ran&&(stats.created||stats.forms||stats.recordings||stats.error))log('twilio import',stats);}catch(error){log('twilio import failed',error);}}
+ if(now>=callsAt){callsAt=now+120_000;try{const synced=await syncH00ksNumbers();if(synced.ran&&(synced.changed.length||synced.identitiesAdded||synced.error))log('h00ks numbers',{changed:synced.changed.map((c)=>`${c.name}: ${c.from??'none'} -> ${c.to??'none'}`),identitiesAdded:synced.identitiesAdded,unmatched:synced.unmatched.length,error:synced.error});}catch(error){log('h00ks numbers failed',error);}try{const stats=await importTwilioCalls();if(stats.ran&&(stats.created||stats.forms||stats.recordings||stats.error))log('twilio import',stats);}catch(error){log('twilio import failed',error);}}
  // Every 5 minutes: people Twenty's mail or calendar sync created for sandbox contacts, removed when nobody worked them.
  // B012: a Bellwether push cut off part-way (a restart, the database gone) is marked failed; its retry runs it again.
  if(now>=crmCleanupAt){try{const swept=await sweepStuckPushes();if(swept)log('bellwether pushes swept',swept);}catch(error){log('bellwether push sweep failed',error);}}

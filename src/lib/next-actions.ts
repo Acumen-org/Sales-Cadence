@@ -1,3 +1,4 @@
+import { closeEmailReplyTasks } from './linkedin/follow-ups';
 import type { ActionType, NextActionKind, NextActionRepeat } from '@prisma/client';
 import { prisma } from './db';
 import { logAudit, SYSTEM_ACTOR, type AuditActor } from './audit';
@@ -150,6 +151,8 @@ export async function completeNextAction(id: string, actor: AuditActor & { id?: 
  * A repeating one moves on, as Done would. Returns the next action closed, if any.
  */
 export async function closeEmailNextAction(subject: { personId: string } | { sandboxContactId: string }, at: Date, evidence: string): Promise<string | null> {
+  // The same email answers a reply waiting for one ("Reply to their email", src/lib/linkedin/follow-ups.ts).
+  await closeEmailReplyTasks(subject, at, evidence);
   const where = 'personId' in subject ? { personId: subject.personId } : { sandboxContactId: subject.sandboxContactId, personId: null };
   const open = await prisma.nextAction.findMany({ where: { ...where, state: 'OPEN', action: 'EMAIL', kind: 'ACTION' }, include: { fo: { select: { timezone: true } } }, orderBy: { dueDate: 'asc' } });
   for (const na of open) {

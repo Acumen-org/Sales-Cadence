@@ -1,3 +1,4 @@
+import { openEmailReplyTask } from '../linkedin/follow-ups';
 import { createHash } from 'node:crypto';
 import { Prisma, type SandboxContact, type SandboxEmailKind } from '@prisma/client';
 import { prisma } from '../db';
@@ -309,6 +310,9 @@ export async function recordColdReply(from: string, mail: SeenMail, automatic: b
     // An out-of-office answers nobody: it never stops a campaign and never rings (N064).
     if (automatic) { out.autoReplies++; continue; }
     out.replies++;
+    // Answer them within 2 working days, in a campaign or not (owner, 13 Nov 2026): the CRM person's task when
+    // the contact is also in the CRM, else the contact's, in Needs an owner while nobody owns them.
+    await openEmailReplyTask(c.crmMatchPersonId ? { personId: c.crmMatchPersonId } : { sandboxContactId: c.id }, mail.at, externalId);
     // The rep may have marked this reply in Tasks already: it counts once.
     await joinMarkedReply(touch);
     const running = await prisma.enrollment.findMany({ where: { sandboxContactId: c.id, personId: null, status: { in: OCCUPYING_STATUSES } }, select: { id: true, foUserId: true } });

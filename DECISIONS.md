@@ -1382,8 +1382,8 @@ Plan: `Notes/linkedin-2026-11-12/PLAN.md`. Console developer's spec: https://cla
 - **Cadence never acts on LinkedIn** (owner: "we cannot have anything that can cause reason for ban. Not at all allowed"). Teammates do every LinkedIn action by hand in the Console. Cadence reads the Console's events and closes and opens tasks. Its links into the Console only open a page.
 - **Events in.** `POST /api/webhooks/linkedin` (HMAC `X-LinkedIn-Console-Signature` with `LINKEDIN_CONSOLE_WEBHOOK_SECRET`) and the Console's read-only feed (`LINKEDIN_CONSOLE_URL`, `LINKEDIN_CONSOLE_API_KEY`), read every 2 minutes. Both keep each event once, by the Console's `seq`. The worker processes them in order each tick.
 - **Who.** People are matched by profile link (`linkedin.com/in/<slug>`, `PersonCache.linkedinKey`): a CRM person first, then an active cold contact. A moved contact is its CRM person. Two CRM people with one link are listed for review, never guessed. Teammates are matched by work email. An event with no profile link waits up to 30 days for one.
-- **A LinkedIn account is not a rep.** Several teammates work one account, often a sales leader's. Tasks go to the contact's owner: the CRM assignee or the cold contact's owner. Without one, a withdrawal or resend goes to the teammate who sent the request.
-- **Owner only after a response.** Someone unknown whom a teammate reaches (a request or a message) becomes a cold contact with no owner (source LinkedIn), in the sender's pod. Once they accept or write back, their task waits in "LinkedIn: needs an owner" (Tasks and Cold outreach). Anyone in the pod can take it; a leader can give it. Strangers who write first, or ask to connect, are not brought in.
+- **A LinkedIn account is not a rep.** Several teammates work one account, often a sales leader's. Tasks go to the contact's owner: the CRM assignee or the cold contact's owner. A CRM person with no owner: the rep of their latest campaign, else the teammate who sent the request, else a leader of their pod (anything left over is shown to admins on Tasks). A withdrawal or resend with no owner goes to the sender.
+- **Owner only after a response.** Someone unknown whom a teammate reaches (a request or a message) becomes a cold contact with no owner (source LinkedIn), in the sender's pod. Once they accept or write back, their task waits in Cold outreach > "They answered: needs an owner" (owner, 13 Nov 2026: Cold outreach only). Anyone in the pod can take it; a leader can give it. If their LinkedIn is on a CRM person, the CRM person's task lands in the normal Tasks list instead. Strangers who write first, or ask to connect, are not brought in.
 - **Steps close.** A "LinkedIn connect" step closes when a request is seen sent from the step's day on. If the person is already connected, or a request is already waiting, it closes saying so. A "LinkedIn message" step closes on a message seen sent. Any account and any teammate counts. Done stays.
 - **Follow-ups** (`LinkedInFollowUp`, not next actions, which hold one per person and write Twenty's Next Action):
   - Accepted, then "Message on LinkedIn", due 2 working days after acceptance, or after someone takes the contact on if that is later. Not opened if they were messaged after accepting.
@@ -1394,3 +1394,20 @@ Plan: `Notes/linkedin-2026-11-12/PLAN.md`. Console developer's spec: https://cla
   - The numbers live in Settings > LinkedIn.
 - **Touches.** Request sent and message sent are outbound LinkedIn touches. A message received is an inbound one and counts as a reply. Acceptances and withdrawals are state on `LinkedInLink`, never touches, so reply figures are unchanged by them.
 - **Weekly limit.** The Console's count of requests per account in the last 7 days shows in Settings and on resend tasks (default warning at 80). Nothing is blocked.
+- **Twilio numbers from h00ks (13 Nov 2026).** Numbers are assigned in one place, the h00ks dialpad
+  admin. Before each 2-minute call import the worker reads h00ks's partner API (`GET /staff`, a Live
+  key with `staff:read` only, `H00KS_API_TOKEN`) and gives each active Cadence user the number of
+  the h00ks staff member with the same email; resigned, unassigned, removed or unknown people hold
+  none. A changed number counts from then, so earlier calls keep their rep. The dialpad identity is
+  added to the user's aliases. A failed read, a test key or an empty list changes nothing. Settings >
+  Calling then lists the numbers read only, with anyone h00ks numbers but Cadence cannot match by
+  email; assigning by hand is refused, and Remove access no longer asks about the number. Without
+  the key, numbers are assigned in Settings > Calling as before.
+
+## Reply to their email (13 November 2026)
+
+- **Every email answer gets a task** (owner: "We should actually do this for email replies too, even if not part of campaign"). When a CRM person or a cold contact answers an email, in a campaign or not, their owner gets "Reply to their email", due 2 working days later. CRM replies come through the CRM's mail sync; cold replies through Outlook tracking.
+- **What counts.** An out-of-office never opens one. Neither does a reply already answered, or one Cadence first sees over a week late (a catch-up). One reply opens one task (`sourceId`), and a second reply while one is open adds nothing.
+- **Who.** Who gets it follows the LinkedIn follow-up rules. A cold contact nobody owns waits in Cold outreach > Needs an owner. An "Also in CRM" contact's reply is the CRM person's.
+- **Done.** The next email seen going to them closes it (wherever `closeEmailNextAction` runs), or Done, Snooze or Not needed by hand.
+- **Where it lives.** The same table as the LinkedIn follow-ups (`LinkedInFollowUp`, kind `EMAIL_REPLY`), counted under Emails in Tasks. LinkedIn figures in Reports leave it out.

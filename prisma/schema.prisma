@@ -1784,6 +1784,8 @@ enum LinkedInFollowUpKind {
   WITHDRAW
   /// The request was withdrawn: send it again after LinkedIn's cool-off.
   RESEND
+  /// They answered an email (not an auto-reply), in a campaign or not: answer them (owner, 13 Nov 2026).
+  EMAIL_REPLY
 }
 
 enum LinkedInFollowUpState {
@@ -1792,22 +1794,24 @@ enum LinkedInFollowUpState {
   CANCELLED
 }
 
-/// A LinkedIn task Cadence made from what it saw, outside any campaign. No FO yet = Needs owner.
+/// A task Cadence made from what it saw, outside any campaign: LinkedIn ones from the Console, and
+/// "Reply to their email" from an email reply. No FO yet = Needs an owner.
 model LinkedInFollowUp {
   id               String                @id @default(uuid())
   kind             LinkedInFollowUpKind
   state            LinkedInFollowUpState @default(OPEN)
-  linkId           String
-  link             LinkedInLink          @relation(fields: [linkId], references: [id], onDelete: Cascade)
-  /// The firm account to act from.
-  accountId        String
+  /// Null for an email reply.
+  linkId           String?
+  link             LinkedInLink?         @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  /// The firm LinkedIn account to act from; null for an email reply.
+  accountId        String?
   personId         String?
   person           PersonCache?          @relation(fields: [personId], references: [id], onDelete: Cascade)
   sandboxContactId String?
   sandboxContact   SandboxContact?       @relation(fields: [sandboxContactId], references: [id], onDelete: Cascade)
   foUserId         String?
   fo               User?                 @relation("LinkedInFollowUpFo", fields: [foUserId], references: [id], onDelete: SetNull)
-  /// What started it: accepted | replied | pending | withdrawn.
+  /// What started it: accepted | replied | pending | withdrawn | email_reply.
   trigger          String
   /// When that happened.
   triggeredAt      DateTime
@@ -1817,8 +1821,10 @@ model LinkedInFollowUp {
   completedAt      DateTime?
   completedById    String?
   completionSource CompletionSource?
-  /// linkedin:<seq> of the event that closed it.
+  /// What closed it: linkedin:<seq>, or the email seen going to them.
   evidenceId       String?
+  /// What opened it, for an email reply: the reply's touch (so one reply opens one task).
+  sourceId         String?           @unique
   closeReason      String?
   audience         CampaignAudience?
   createdAt        DateTime              @default(now())

@@ -151,6 +151,7 @@ const TITLES: Record<string, string> = {
   admin_login_failed: 'Admin sign-in failed',
   caller_number_set: 'Calling number set',
   caller_number_released: 'Calling number released',
+  caller_number_synced: 'Calling number copied from h00ks',
   caller_number_moved: 'Calling number moved to the replacement',
   reconcile_ran: 'Checked against the CRM',
   webhook_registered: 'CRM webhook registered',
