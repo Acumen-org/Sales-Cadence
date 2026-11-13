@@ -99,3 +99,28 @@ describe('continuous sync survives a failing stage', () => {
     expect(stats.removed).toBe(0); // no company was marked deleted on the strength of a failed listing
   });
 });
+
+describe('N13: a one-minute pass reads each listing once', () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+  it('people and deleted people are listed once, and the data model is not read', async () => {
+    const client = new PartlyBrokenTwenty();
+    client.reset('demo');
+    await syncContinuously(new Date('2026-09-11T10:00:00Z'), client);
+    const calls = { people: 0, deleted: 0, introspect: 0 };
+    const listPeople = client.listPeople;
+    client.listPeople = async (o) => {
+      if (o?.deletedSince) calls.deleted += 1;
+      else if (o?.updatedSince) calls.people += 1;
+      return listPeople(o);
+    };
+    const introspect = client.introspect.bind(client);
+    client.introspect = async () => {
+      calls.introspect += 1;
+      return introspect();
+    };
+    await syncContinuously(new Date('2026-09-11T10:01:00Z'), client);
+    expect(calls).toEqual({ people: 1, deleted: 1, introspect: 0 });
+  });
+});

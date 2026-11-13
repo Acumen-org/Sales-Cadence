@@ -65,15 +65,20 @@ export async function reconcile(opts: { days?: number; since?: string; sinceBySt
   };
 
   // People first so dnd flips and new people are known before activity is matched.
+  // N13: the people the cache scan listed are the ones the people stages below read, when both
+  // scans start at the same point: one listing serves both instead of two.
+  const listed = { people: [] as TwentyPerson[], deletedPeople: [] as TwentyPerson[] };
+  const reuse = { people: false, deletedPeople: false };
   if (!opts.only) {
-    const cache = await refreshPersonCache(c, { since, sinceByStage: Object.fromEntries(['people', 'companies', 'deletedPeople', 'deletedCompanies'].map((name) => [name, stageSince(`cache.${name}`)])) });
+    const cache = await refreshPersonCache(c, { since, collect: listed, sinceByStage: Object.fromEntries(['people', 'companies', 'deletedPeople', 'deletedCompanies'].map((name) => [name, stageSince(`cache.${name}`)])) });
+    for (const name of ['people', 'deletedPeople'] as const) reuse[name] = !cache.stageErrors[name] && stageSince(`cache.${name}`) === stageSince(name);
     stats.people = cache.people;
     stats.cacheFailed = cache.failed;
     stats.cacheError = cache.firstError;
     for (const [name, message] of Object.entries(cache.stageErrors)) if (message) stats.stageErrors[`cache.${name}`] = message;
   }
   await stage('people', async () => {
-    for await (const person of paginate((after) => c.listPeople({ updatedSince: stageSince('people'), after, limit: 100, includeDeleted: true }))) {
+    for await (const person of reuse.people ? listed.people : paginate((after) => c.listPeople({ updatedSince: stageSince('people'), after, limit: 100, includeDeleted: true }))) {
       tally(stats, await ingestEvent({ ...common, objectType: 'person', eventName: person.deletedAt ? 'person.deleted' : 'person.updated', record: (person.raw as Record<string, unknown> | undefined) ?? rawFromPerson(person), recordId: person.id, updatedAt: person.updatedAt }, c));
     }
   });
@@ -81,7 +86,7 @@ export async function reconcile(opts: { days?: number; since?: string; sinceBySt
   // Soft deletes do not touch updatedAt, so they need their own pass: a deleted person exits
   // their sequence the same way a webhook would have made them.
   await stage('deletedPeople', async () => {
-    for await (const person of paginate((after) => c.listPeople({ deletedSince: stageSince('deletedPeople'), after, limit: 100 }))) {
+    for await (const person of reuse.deletedPeople ? listed.deletedPeople : paginate((after) => c.listPeople({ deletedSince: stageSince('deletedPeople'), after, limit: 100 }))) {
       tally(stats, await ingestEvent({ ...common, objectType: 'person', eventName: 'person.deleted', record: (person.raw as Record<string, unknown> | undefined) ?? rawFromPerson(person), recordId: person.id, updatedAt: person.deletedAt ?? person.updatedAt }, c));
     }
   });

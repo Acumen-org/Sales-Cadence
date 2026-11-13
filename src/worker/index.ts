@@ -14,7 +14,6 @@ import { runSchedulerTick } from '../lib/engine/tasks';
 import { launchScheduledCampaigns } from '../lib/engine/campaigns';
 import { syncContinuously } from '../lib/continuous-sync';
 import { reconcile } from '../lib/engine/reconcile';
-import { refreshPersonCache } from '../lib/person-cache';
 import { snapshotScorecard } from '../lib/enrichment-work';
 import { getTwentyClient } from '../lib/twenty';
 import { workspaceTimezone } from '../lib/workspace';
@@ -53,7 +52,7 @@ const nightly=nightlyLoop({hour:config.RECONCILE_HOUR,log,jobs:()=>{
  const now=new Date();
  return [
   {name:'nightly reconcile',crm:true,run:()=>reconcile({actor:SYSTEM_ACTOR,now})},
-  {name:'cache refresh',crm:true,run:async()=>refreshPersonCache(await getTwentyClient())},
+  // N13: no full cache listing here: the continuous sync makes its own once a day, resumably (N01).
   {name:'enrichment scorecard snapshot',run:()=>snapshotScorecard(now)},
   // Sandbox contacts Twenty gained after the push: flagged, outreach stopped (crm-check.ts).
   // Each run is recorded for Settings > Cold outreach (B168), failed or not; one an admin started is not run twice at once.

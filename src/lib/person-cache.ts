@@ -252,7 +252,7 @@ const errorText = (err: unknown) => (err instanceof Error ? err.message : String
  * scan never sees them. Without `since` the pass is complete, so anything cached that Twenty did
  * not return no longer exists there and is marked deleted here.
  */
-export async function refreshPersonCache(client: TwentyClient, opts: { since?: string; sinceByStage?: Partial<Record<RefreshStage, string>>; resume?: FullRefreshProgress; pageBudget?: number } = {}): Promise<RefreshStats> {
+export async function refreshPersonCache(client: TwentyClient, opts: { since?: string; sinceByStage?: Partial<Record<RefreshStage, string>>; resume?: FullRefreshProgress; pageBudget?: number; /** N13: the people a change scan listed, kept for the caller so it need not list them again. */ collect?: { people: TwentyPerson[]; deletedPeople: TwentyPerson[] } } = {}): Promise<RefreshStats> {
   const stats: RefreshStats = { people: 0, companies: 0, deleted: 0, removed: 0, failed: 0, firstError: null, stageErrors: {} };
   const startedAt = new Date();
   const attempt = async (label: string, fn: () => Promise<unknown>) => {
@@ -277,14 +277,19 @@ export async function refreshPersonCache(client: TwentyClient, opts: { since?: s
       return false;
     }
   };
-  try {
-    await syncPodsFromTwenty(client);
-  } catch (err) {
-    console.warn('[cache] pod sync skipped:', errorText(err));
+  // N13: the whole data model is read for new pods once a day with the full listing, not every
+  // minute; a person arriving with an unknown pod creates it on the spot all the same (ensurePod).
+  if (!opts.since) {
+    try {
+      await syncPodsFromTwenty(client);
+    } catch (err) {
+      console.warn('[cache] pod sync skipped:', errorText(err));
+    }
   }
   if (opts.since) {
     await stage('people', async () => {
       for await (const person of paginate((after) => client.listPeople({ updatedSince: opts.sinceByStage?.people ?? opts.since, after, limit: 100, includeDeleted: true }))) {
+        opts.collect?.people.push(person);
         if (await attempt(`person ${person.id}`, () => upsertPersonCache(person, prisma, { fresh: true }))) stats.people += 1;
       }
     });
@@ -295,6 +300,7 @@ export async function refreshPersonCache(client: TwentyClient, opts: { since?: s
     });
     await stage('deletedPeople', async () => {
       for await (const person of paginate((after) => client.listPeople({ deletedSince: opts.sinceByStage?.deletedPeople ?? opts.since, after, limit: 100 }))) {
+        opts.collect?.deletedPeople.push(person);
         if (await attempt(`deleted person ${person.id}`, () => upsertPersonCache(person, prisma, { fresh: true }))) stats.deleted += 1;
       }
     });
