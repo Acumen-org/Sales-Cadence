@@ -97,3 +97,14 @@ describe('message direction', () => {
     expect(r.direction).toBe('unknown');
   });
 });
+
+describe('N35: a tool note credited by first name', () => {
+  it('names a rep only when no one else has that first name', () => {
+    const alex1 = { id: 'u1', name: 'Alex Hart', email: 'ahart@acumen.example', twentyMemberId: null, aliases: [] };
+    const alex2 = { id: 'u2', name: 'Alex Moore', email: 'amoore@acumen.example', twentyMemberId: null, aliases: [] };
+    const note = { createdByMemberId: null, createdByName: null };
+    expect(resolveNoteActor(note, 'tw_alex', [alex1])?.id).toBe('u1');
+    expect(resolveNoteActor(note, 'tw_alex', [alex1, alex2])).toBeNull();
+    expect(resolveNoteActor(note, 'tw_alex', [alex1, { ...alex2, aliases: ['tw_alex'] }])?.id).toBe('u2');
+  });
+});
