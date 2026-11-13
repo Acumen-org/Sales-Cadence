@@ -4,6 +4,7 @@ import { backfillTeamsTranscripts } from '../lib/meetings/teams-transcript';
 import { MEETINGS_CHANGED_KEY, checkMeetingsInCrm } from '../lib/meetings/crm-check';
 import { backfillSharePointPlayers } from '../lib/meetings/sharepoint-player';
 import { retryFailedWrites } from '../lib/engine/sync-retry';
+import { sweepUnprocessedEvents } from '../lib/engine/ingest';
 import { prisma } from '../lib/db';
 import { env } from '../lib/env';
 import { SYSTEM_ACTOR } from '../lib/audit';
@@ -30,6 +31,7 @@ import { nightlyLoop } from '../lib/nightly';
 import { ringHealth } from '../lib/outreach/health';
 import { coldOutreachReleaseOnce } from '../lib/outreach/release';
 import { runLinkedInPass } from '../lib/linkedin/pass';
+import { beatWorker } from '../lib/worker-heartbeat';
 
 const config=env();
 const log=(message:string,extra?:unknown)=>console.log('[worker '+new Date().toISOString()+'] '+message,extra??'');
@@ -184,9 +186,13 @@ async function tick(){
  if(running||stopping)return;running=true;
  try{
    const now=Date.now();
+   // P01: the heartbeat Nomad checks (/api/health/worker). Stamped as each pass starts, so a pass that hangs goes stale.
+   try{await beatWorker(new Date(now));}catch(error){log('heartbeat failed',error);}
    if(now-lastSync>=config.CRM_SYNC_SECONDS*1000&&!nightly.crmBusy){
      try{await syncContinuously();lastSync=now;}catch(error){log('CRM sync failed',error);}
    }
+   // N03: CRM events saved but cut off before processing (a restart, a deploy) are processed now.
+   try{const swept=await sweepUnprocessedEvents();if(swept)log('unprocessed CRM events swept',swept);}catch(error){log('event sweep failed',error);}
    await nightly.poke(new Date(now)).catch((error)=>log('nightly failed to start',error));
    await evidenceRescan(new Date(now));
    await meetingsWithTwenty(now);
@@ -199,10 +205,9 @@ async function tick(){
    await coldOutreachRelease();
    await sandboxJobs(now);
    try{await launchScheduledCampaigns({actor:SYSTEM_ACTOR});}catch(error){log('campaign launch failed',error);}
-   const stats=await runSchedulerTick({actor:SYSTEM_ACTOR});
-   if(stats.generated||stats.completed)log('scheduler',stats);
-   const retried=await retryFailedWrites();
-   if(retried.retried)log('twenty write retry',retried);
+   // P02: a scheduler failure is logged and the rest of the pass (write retry, next actions, clean-up) still runs.
+   try{const stats=await runSchedulerTick({actor:SYSTEM_ACTOR});if(stats.generated||stats.completed)log('scheduler',stats);}catch(error){log('scheduler failed',error);}
+   try{const retried=await retryFailedWrites();if(retried.retried)log('twenty write retry',retried);}catch(error){log('twenty write retry failed',error);}
    // LinkedIn, as the LinkedIn Console saw it: events in, tasks closed and opened (src/lib/linkedin).
    try{const li=await runLinkedInPass();if(Object.keys(li).length)log('linkedin',li);}catch(error){log('linkedin failed',error);}
    // Next actions: what has not reached Twenty yet, and what people changed there.

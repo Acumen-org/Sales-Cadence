@@ -117,9 +117,11 @@ export function normalizePerson(raw: Raw, s: TwentySchema): TwentyPerson {
 
   // dnd is a select here, not a boolean: any set value means do not contact. A workspace that
   // made it a boolean still works, and so does a DNC tag, which is how some of the pod records it.
+  // N02: an option the field mapping does not know (a CRM admin added "Unsubscribed") still means
+  // do not contact - failing safe - and the person page says the option is not mapped.
   const dndValue = options(raw[f.dnd]).find((x) => x !== 'false') ?? null;
   const dndTag = has(v.doNotContactTags);
-  const dndSelect = dndValue && (v.dnd.length === 0 || v.dnd.includes(dndValue)) ? dndValue : null;
+  const dndSelect = dndValue;
 
   return {
     id: String(raw.id),
@@ -339,4 +341,11 @@ export function canonicalObjectType(name: string, s: TwentySchema): CanonicalObj
     if (def.singular === n || def.plural === n || def.singular.toLowerCase() === n.toLowerCase()) return key;
   }
   return null;
+}
+
+/** N02: a Do not contact value set in the CRM that the field mapping does not list (still honoured). */
+export function isUnmappedDndValue(value: string | null | undefined, s: { personValues: { dnd: readonly string[]; doNotContactTags: readonly string[] } }): boolean {
+  if (!value || value === 'true') return false;
+  const known: readonly string[] = [...s.personValues.dnd, ...s.personValues.doNotContactTags];
+  return !known.includes(value);
 }

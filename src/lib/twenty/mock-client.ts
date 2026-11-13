@@ -473,8 +473,10 @@ export class MockTwentyClient implements TwentyClient {
 
   async createNote(input: CreateNoteInput) {
     this.maybeFail();
+    // As the GraphQL client: a note already made under this id is not made again (N05).
+    if (input.id && this.notes.some((n) => n.id === input.id)) return { id: input.id };
     const now = new Date().toISOString();
-    const id = this.nextId('cadence-note');
+    const id = input.id ?? this.nextId('cadence-note');
     this.notes.push({
       id,
       title: input.title,
@@ -562,8 +564,9 @@ export class MockTwentyClient implements TwentyClient {
 
   async createTask(input: CreateTaskInput) {
     this.maybeFail();
+    if (input.id && this.tasks.some((t) => t.id === input.id)) return { id: input.id };
     const now = new Date().toISOString();
-    const id = this.nextId('cadence-task');
+    const id = input.id ?? this.nextId('cadence-task');
     this.tasks.push({
       id,
       title: input.title,

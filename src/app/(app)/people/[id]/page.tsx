@@ -35,6 +35,8 @@ import { twentyPersonUrl } from '@/lib/twenty/urls';
 import { CrmHistory } from '@/components/people/crm-history';
 import { ActionIcon, IconExternal } from '@/components/icons';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
+import { isUnmappedDndValue } from '@/lib/twenty/normalize';
+import { defaultTwentySchema } from '@/lib/twenty/twenty-schema';
 import { Avatar, Badge, Card, contactWarnings, crmStanding, enrollmentTone, enrollmentStatusLabel, KeyValue, Notice, RecordFields, RecordHeader, Surface, Tabs, TierBadge } from '@/components/ui';
 import { campaignStatusLabel } from '@/lib/campaign-status';
 import { linkedinSubjectView } from '@/lib/linkedin/subject-view';
@@ -345,6 +347,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                     {person.dnd ? (
                       <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-[12.5px] font-medium text-red-700">
                         {optionLabel(person.dndReason ?? 'DO_NOT_CONTACT')} - set in the CRM.
+                        {isUnmappedDndValue(person.dndReason, defaultTwentySchema) ? " This option is not in Cadence's field mapping; it is treated as do not contact. An admin should add it to the mapping or correct it in the CRM." : null}
                       </p>
                     ) : null}
                     <KeyValue

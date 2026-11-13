@@ -3,6 +3,9 @@ variable "image_tag" {
   default = "prod-v1.0.0-initial"
 }
 
+# T04 (held back): the registry login stays a job variable until worker-5 pulls with its own
+# pull-only Harbor robot account (DEPLOY.md, "Registry credentials"); then delete these two
+# variables and both auth blocks.
 variable "harbor_username" {
   type    = string
   default = "admin"
@@ -74,7 +77,6 @@ job "cadence" {
         # reap them.
         init        = true
         dns_servers = ["172.17.0.1", "8.8.8.8"]
-
         auth {
           server_address = local.registry
           username       = var.harbor_username
@@ -82,6 +84,8 @@ job "cadence" {
         }
       }
 
+      # T06: CADENCE_DRY_RUN comes from the Nomad variable (default false): setting it to true there
+      # restarts both tasks with every CRM write stopped, no redeploy (DEPLOY.md, "Stop all CRM writes").
       template {
         destination = "secrets/cadence.env"
         env         = true
@@ -104,6 +108,14 @@ TWILIO_ACCOUNT_SID={{ .TWILIO_ACCOUNT_SID }}
 TWILIO_API_KEY_SID={{ .TWILIO_API_KEY_SID }}
 TWILIO_API_KEY_SECRET={{ .TWILIO_API_KEY_SECRET }}
 {{- end }}
+{{- if .CADENCE_DRY_RUN }}
+CADENCE_DRY_RUN={{ .CADENCE_DRY_RUN }}
+{{- else }}
+CADENCE_DRY_RUN=false
+{{- end }}
+{{- if .PASSWORD_SIGN_IN }}
+PASSWORD_SIGN_IN={{ .PASSWORD_SIGN_IN }}
+{{- end }}
 {{- end }}
 NODE_ENV=production
 NODE_OPTIONS=--max-old-space-size=512
@@ -113,7 +125,6 @@ APP_URL=https://cadence.pmx.acumen-strategy.com
 COOKIE_SECURE=true
 SEED_ON_START=true
 SEED_PROFILE=core
-CADENCE_DRY_RUN=false
 GRAPH_MAIL_ENABLED=false
 EOH
       }
@@ -160,7 +171,6 @@ EOH
         args        = ["docker/entrypoint.sh", "worker"]
         init        = true
         dns_servers = ["172.17.0.1", "8.8.8.8"]
-
         auth {
           server_address = local.registry
           username       = var.harbor_username
@@ -182,6 +192,11 @@ TWILIO_ACCOUNT_SID={{ .TWILIO_ACCOUNT_SID }}
 TWILIO_API_KEY_SID={{ .TWILIO_API_KEY_SID }}
 TWILIO_API_KEY_SECRET={{ .TWILIO_API_KEY_SECRET }}
 {{- end }}
+{{- if .CADENCE_DRY_RUN }}
+CADENCE_DRY_RUN={{ .CADENCE_DRY_RUN }}
+{{- else }}
+CADENCE_DRY_RUN=false
+{{- end }}
 {{- end }}
 NODE_ENV=production
 NODE_OPTIONS=--max-old-space-size=320
@@ -189,7 +204,6 @@ TWENTY_MODE=graphql
 TWENTY_API_URL=https://app.tw3ntycrm.acm.acumen-strategy.com
 APP_URL=https://cadence.pmx.acumen-strategy.com
 SEED_ON_START=false
-CADENCE_DRY_RUN=false
 GRAPH_MAIL_ENABLED=false
 CRM_SYNC_SECONDS=300
 WORKER_TICK_SECONDS=60
@@ -201,6 +215,28 @@ EOH
         cpu        = 500
         memory     = 640
         memory_max = 1024
+      }
+
+      # P01: the worker has no port of its own. Each pass stamps a heartbeat in the database and
+      # the web answers /api/health/worker with 503 once it is 20 minutes old (dead, hung or never
+      # started), so Nomad restarts the worker and a deploy whose worker never runs is not healthy.
+      service {
+        name = "cadence-worker"
+        port = "http"
+        tags = ["cadence", "worker"]
+
+        check {
+          name     = "cadence-worker-heartbeat"
+          type     = "http"
+          path     = "/api/health/worker"
+          interval = "60s"
+          timeout  = "10s"
+
+          check_restart {
+            limit = 3
+            grace = "600s"
+          }
+        }
       }
     }
   }

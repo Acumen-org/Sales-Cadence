@@ -1,21 +1,22 @@
-# Security Policy
+# Security policy
 
-## Supported Versions
+## Supported versions
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
+Cadence is an internal application with one production deployment: whatever is on `main` and
+deployed by CI to the Nomad job `cadence`. Only that version receives fixes; there are no
+maintained release branches.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
+## Reporting a vulnerability
 
-## Reporting a Vulnerability
+Do not open a public issue or pull request for a security problem, and do not test against the
+production instance or the production CRM.
 
-Use this section to tell people how to report a vulnerability.
+Report it privately through GitHub's private vulnerability reporting for this repository
+(Security > Report a vulnerability), or directly to the repository's maintainers. Include what you
+found, how to reproduce it, and what it exposes. Expect an acknowledgement within two working days.
 
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+## If a secret may have leaked
+
+Rotate it first, investigate second. Every key Cadence uses, where it lives and how to rotate it is
+in [DEPLOY.md](DEPLOY.md), "Rotate a key"; to stop every write to the CRM at once, see
+"Stop all CRM writes" in the same file.

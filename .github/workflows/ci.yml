@@ -1,7 +1,11 @@
 # ---------------------------------------------------------------------------
 # CI for Sales-Cadence.
 #
-#   lint / test / e2e  — on GitHub's runners, in parallel. The gate.
+#   lint / test / e2e  — in parallel. The gate. On a pull request (Dependabot's
+#                        too) they run on GitHub's hosted runners, never on the
+#                        self-hosted one: unreviewed code must not run inside the
+#                        network that reaches Harbor and Nomad (T05). Pushes to
+#                        main run them on the self-hosted runner.
 #   build              — self-hosted: Harbor is not routable from outside, so a
 #                        hosted runner can only sit on docker login until it
 #                        times out.
@@ -43,7 +47,7 @@ jobs:
   # -------------------------------------------------------------------- lint
   lint:
     name: lint + typecheck
-    runs-on: self-hosted
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'self-hosted' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -70,7 +74,7 @@ jobs:
   # --------------------------------------------------------------------- test
   test:
     name: vitest
-    runs-on: self-hosted
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'self-hosted' }}
 
     services:
       postgres:
@@ -119,7 +123,7 @@ jobs:
   # ---------------------------------------------------------------------- e2e
   e2e:
     name: playwright
-    runs-on: self-hosted
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'self-hosted' }}
     # A build plus a browser run costs minutes; not worth spending on a tree
     # that does not typecheck.
     needs: [lint]

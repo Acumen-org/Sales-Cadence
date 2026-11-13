@@ -95,6 +95,9 @@ export class TwentyGraphqlClient implements TwentyClient {
     const url = `${this.opts.baseUrl.replace(/\/+$/, '')}/${endpoint}`;
     let lastErr: unknown;
     let rateLimited = 0;
+    // N05: a create that timed out or got a 5xx may have been carried out; sending it again blindly
+    // makes a second record. Creates go once (a 429 is still waited out: Twenty did nothing then).
+    const once = /^\s*mutation\s+Create/.test(query);
     for (let attempt = 0; attempt < 2; attempt++) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -117,7 +120,7 @@ export class TwentyGraphqlClient implements TwentyClient {
         }
         if (!res.ok) {
           const err = new TwentyApiError(`The CRM's ${endpoint} responded ${res.status}: ${text.slice(0, 300)}`, res.status);
-          if (res.status >= 500 && attempt === 0) {
+          if (res.status >= 500 && attempt === 0 && !once) {
             lastErr = err;
             continue;
           }
@@ -137,12 +140,28 @@ export class TwentyGraphqlClient implements TwentyClient {
       } catch (err) {
         if (err instanceof TwentyApiError) throw err;
         lastErr = err;
-        if (attempt === 1) break;
+        if (attempt === 1 || once) break;
       } finally {
         clearTimeout(timer);
       }
     }
     throw new TwentyApiError(`The CRM is unreachable at ${url}: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
+  }
+
+  private createInputCache = new Map<string, Promise<boolean>>();
+  /**
+   * N05: whether `<Type>CreateInput` takes a caller-chosen id. That id is the idempotency marker:
+   * after a lost answer, the record is looked up by it instead of being created again.
+   */
+  private createTakesId(typeName: string): Promise<boolean> {
+    let cached = this.createInputCache.get(typeName);
+    if (!cached) {
+      cached = this.request<{ __type: { inputFields?: Array<{ name: string }> | null } | null }>(`query CreateInputFields($name: String!) { __type(name: $name) { inputFields { name } } }`, { name: `${typeName}CreateInput` })
+        .then((d) => Boolean(d.__type?.inputFields?.some((f) => f.name === 'id')))
+        .catch(() => false);
+      this.createInputCache.set(typeName, cached);
+    }
+    return cached;
   }
 
   /** Injectable so a test can run a rate-limit retry without waiting. */
@@ -731,16 +750,26 @@ export class TwentyGraphqlClient implements TwentyClient {
 
   async createNote(input: CreateNoteInput): Promise<{ id: string }> {
     const n = this.s.objects.note;
-    const created = await this.request<Record<string, { id: string }>>(
-      `mutation CreateNote($data: ${n.typeName}CreateInput!) { create${n.typeName}(data: $data) { id } }`,
-      { data: { [this.s.note.title]: input.title, ...this.richText(this.s.note.body, input.bodyMarkdown) } },
-    );
-    const id = created[`create${n.typeName}`].id;
+    const marker = input.id && (await this.createTakesId(n.typeName)) ? input.id : null;
+    let id: string;
+    let existing: TwentyNote | null = null;
+    try {
+      const created = await this.request<Record<string, { id: string }>>(
+        `mutation CreateNote($data: ${n.typeName}CreateInput!) { create${n.typeName}(data: $data) { id } }`,
+        { data: { ...(marker ? { id: marker } : {}), [this.s.note.title]: input.title, ...this.richText(this.s.note.body, input.bodyMarkdown) } },
+      );
+      id = created[`create${n.typeName}`].id;
+    } catch (err) {
+      // N05: the CRM may have made it already (an answer lost, or an earlier attempt): look first.
+      existing = marker ? await this.getNote(marker).catch(() => null) : null;
+      if (!existing) throw err;
+      id = existing.id;
+    }
     const nt = this.s.objects.noteTarget;
     const fields = await this.targetFields('noteTarget');
     const targets = [
-      ...[...new Set([input.personId, ...(input.personIds ?? [])].filter((p): p is string => Boolean(p)))].map((personId) => ({ [fields.personId]: personId })),
-      ...(input.companyId ? [{ [fields.companyId]: input.companyId }] : []),
+      ...[...new Set([input.personId, ...(input.personIds ?? [])].filter((p): p is string => Boolean(p)))].filter((personId) => !existing?.personIds.includes(personId)).map((personId) => ({ [fields.personId]: personId })),
+      ...(input.companyId && !existing?.companyIds.includes(input.companyId) ? [{ [fields.companyId]: input.companyId }] : []),
     ];
     for (const target of targets) {
       await this.request(`mutation CreateNoteTarget($data: ${nt.typeName}CreateInput!) { create${nt.typeName}(data: $data) { id } }`, {
@@ -771,8 +800,19 @@ export class TwentyGraphqlClient implements TwentyClient {
       ...(input.assigneeMemberId ? { [this.s.task.assigneeId]: input.assigneeMemberId } : {}),
       ...(input.cadenceTaskId ? { [this.s.task.cadenceTaskId]: input.cadenceTaskId } : {}),
     };
-    const created = await this.request<Record<string, { id: string }>>(`mutation CreateTask($data: ${t.typeName}CreateInput!) { create${t.typeName}(data: $data) { id } }`, { data });
-    const id = created[`create${t.typeName}`].id;
+    const marker = input.id && (await this.createTakesId(t.typeName)) ? input.id : null;
+    let id: string;
+    let existing: TwentyTask | null = null;
+    try {
+      const created = await this.request<Record<string, { id: string }>>(`mutation CreateTask($data: ${t.typeName}CreateInput!) { create${t.typeName}(data: $data) { id } }`, { data: { ...(marker ? { id: marker } : {}), ...data } });
+      id = created[`create${t.typeName}`].id;
+    } catch (err) {
+      // N05: the CRM may have made it already (an answer lost, or an earlier attempt): look first.
+      existing = marker ? await this.getTask(marker).catch(() => null) : null;
+      if (!existing) throw err;
+      id = existing.id;
+    }
+    if (existing?.personIds.includes(input.personId)) return { id };
     const tt = this.s.objects.taskTarget;
     await this.request(`mutation CreateTaskTarget($data: ${tt.typeName}CreateInput!) { create${tt.typeName}(data: $data) { id } }`, {
       data: { [this.s.taskTarget.taskId]: id, [(await this.targetFields('taskTarget')).personId]: input.personId },
@@ -911,17 +951,28 @@ export class TwentyGraphqlClient implements TwentyClient {
       return out;
     };
     const found = await all(or);
-    const extra: Raw[] = [
-      ...emails.map((email) => ({ [p.emails]: { additionalEmails: { like: `%${likeSafe(email)}%` } } })),
+    // N06: additional emails are matched without regard to case (ilike). A workspace whose filter
+    // refuses ilike is asked with like, for the address as given and in lower case. Only a refused
+    // filter is tolerated; a timeout or an outage fails the lookup, so no duplicate is created on it.
+    const asGiven = [...new Set((q.emails ?? []).map((e) => e?.trim()).filter((e): e is string => Boolean(e)))];
+    const extra = (op: 'ilike' | 'like'): Raw[] => [
+      ...(op === 'ilike' ? emails : [...new Set([...emails, ...asGiven])]).map((email) => ({ [p.emails]: { additionalEmails: { [op]: `%${likeSafe(email)}%` } } })),
       ...(!available || available.has(p.additionalNumber) ? phones.map((n) => ({ [p.additionalNumber]: { primaryPhoneNumber: { ilike: `%${n.slice(-7)}%` } } })) : []),
     ];
-    if (extra.length) {
-      try {
-        const seen = new Set(found.map((x) => x.id));
-        for (const x of await all(extra)) if (!seen.has(x.id)) found.push(x);
-      } catch (err) {
-        console.warn('[twenty] additional emails and numbers could not be searched; primary ones were', err instanceof Error ? err.message : err);
+    if (extra('ilike').length) {
+      const seen = new Set(found.map((x) => x.id));
+      let refused: unknown = null;
+      for (const op of ['ilike', 'like'] as const) {
+        try {
+          for (const x of await all(extra(op))) if (!seen.has(x.id)) { seen.add(x.id); found.push(x); }
+          refused = null;
+          break;
+        } catch (err) {
+          if (!(err instanceof TwentyApiError && err.graphqlErrors?.length)) throw err;
+          refused = err;
+        }
       }
+      if (refused) console.warn('[twenty] this workspace refuses the additional emails and numbers filter; primary ones were searched', refused instanceof Error ? refused.message : refused);
     }
     const emailSet = new Set(emails), phoneSet = new Set(phones), linkSet = new Set(links);
     return found.filter((person) => !person.deletedAt && (

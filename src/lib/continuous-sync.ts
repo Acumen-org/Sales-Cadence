@@ -4,7 +4,7 @@ import { applyNeverProspectRule } from './non-prospects';
 import { hashPassword } from './auth/password';
 import { workspaceTimezone } from './workspace';
 import { getTwentyClient } from './twenty';
-import { refreshPersonCache } from './person-cache';
+import { refreshPersonCache, type FullRefreshProgress } from './person-cache';
 import { reconcile } from './engine/reconcile';
 import { SYSTEM_ACTOR } from './audit';
 import type { TwentyClient } from './twenty/client';
@@ -33,6 +33,11 @@ export type ContinuousSyncState = {
   attemptedAt?: string;
   /** When the cache was last rebuilt from a complete listing of Twenty. */
   lastFullRefresh?: string | null;
+  /** A full listing in progress: the next pass carries on from here rather than page one (N01). */
+  fullRefreshProgress?: FullRefreshProgress | null;
+  /** Full listings that stopped in a row, and when the next one may try again (backs off, N01). */
+  fullRefreshFailures?: number;
+  fullRefreshRetryAt?: string | null;
   /** Stages of the last pass that stopped part-way. The pass still counts as run. */
   stageErrors?: Record<string, string>;
   /** CRM events the last pass could not apply, waiting in Settings > Activity log. */
@@ -42,6 +47,15 @@ export type ContinuousSyncState = {
 
 /** A full listing of Twenty once a day, on top of the change scans, so the cache cannot drift. */
 const FULL_REFRESH_EVERY_MS = 24 * 3600_000;
+/**
+ * Pages of the full listing read per pass. Twenty allows 100 requests a minute and the pass runs
+ * every minute with its own change scans, so ~8,400 people take a few passes instead of one burst.
+ */
+const FULL_REFRESH_PAGES_PER_PASS = 40;
+/** After a failed full listing: 5 min, 10, 20 ... up to 6 h before the next try. */
+export function fullRefreshBackoffMs(failures: number) {
+  return Math.min(5 * 60_000 * 2 ** Math.max(0, failures - 1), 6 * 3600_000);
+}
 const CURSOR_STAGES = ['cache.people', 'cache.companies', 'cache.deletedPeople', 'cache.deletedCompanies', 'people', 'deletedPeople', 'notes', 'messages', 'opportunities', 'tasks'];
 
 /**
@@ -59,20 +73,39 @@ export async function syncContinuously(now = new Date(), injected?: TwentyClient
   const save = async (value: ContinuousSyncState) => {
     await prisma.setting.upsert({ where: { key: 'continuousSync' }, create: { key: 'continuousSync', value }, update: { value } });
   };
+  // The full listing's own state, kept on every outcome so a failed pass never loses its place.
+  let lastFullRefresh = state?.lastFullRefresh ?? null;
+  let fullRefreshProgress = state?.fullRefreshProgress ?? null;
+  let fullRefreshFailures = state?.fullRefreshFailures ?? 0;
+  let fullRefreshRetryAt = state?.fullRefreshRetryAt ?? null;
   try {
     const client = injected ?? (await getTwentyClient());
     const lastFull = state?.lastFullRefresh ? new Date(state.lastFullRefresh).getTime() : 0;
-    const fullDue = !state?.watermark || now.getTime() - lastFull >= FULL_REFRESH_EVERY_MS;
+    const waiting = fullRefreshRetryAt ? now.getTime() < new Date(fullRefreshRetryAt).getTime() : false;
+    const fullDue = !state?.watermark || (!waiting && (Boolean(fullRefreshProgress) || now.getTime() - lastFull >= FULL_REFRESH_EVERY_MS));
     let removed = 0;
     let companies = 0;
-    let lastFullRefresh = state?.lastFullRefresh ?? null;
     const stageErrors: Record<string, string> = {};
     if (fullDue) {
-      const full = await refreshPersonCache(client);
+      const full = await refreshPersonCache(client, { resume: fullRefreshProgress ?? undefined, pageBudget: FULL_REFRESH_PAGES_PER_PASS });
       removed = full.removed;
       companies = full.companies;
       for (const [name, message] of Object.entries(full.stageErrors)) if (message) stageErrors[`full.${name}`] = message;
-      if (!Object.keys(full.stageErrors).length && !full.failed) lastFullRefresh = now.toISOString();
+      // One record that cannot be stored is reported, not a reason to read everything again.
+      if (full.failed) stageErrors['full.records'] = `${full.failed} record(s) could not be stored; first: ${full.firstError}`;
+      if (full.removalSkipped) stageErrors['full.removal'] = full.removalSkipped;
+      const progress = full.progress ?? null;
+      if (Object.keys(full.stageErrors).length) {
+        fullRefreshFailures += 1;
+        fullRefreshRetryAt = new Date(now.getTime() + fullRefreshBackoffMs(fullRefreshFailures)).toISOString();
+        fullRefreshProgress = progress;
+      } else {
+        fullRefreshFailures = 0;
+        fullRefreshRetryAt = null;
+        const complete = Boolean(progress?.peopleDone && progress?.companiesDone);
+        fullRefreshProgress = complete ? null : progress;
+        if (complete) lastFullRefresh = now.toISOString();
+      }
       if (full.stageErrors.people && !state?.watermark) throw new Error(`People could not be listed from the CRM: ${full.stageErrors.people}`);
     }
     try {
@@ -101,6 +134,9 @@ export async function syncContinuously(now = new Date(), injected?: TwentyClient
       lastSuccess: now.toISOString(),
       lastError: failing.length ? `${failing.join(', ')} did not finish` : null,
       lastFullRefresh,
+      fullRefreshProgress,
+      fullRefreshFailures,
+      fullRefreshRetryAt,
       stageErrors,
       needsReview: result.needsReview,
       lastRun: { people: result.people, companies, notes: result.notes, messages: result.messages, opportunities: result.opportunities, tasks: result.tasks, removed },
@@ -111,7 +147,10 @@ export async function syncContinuously(now = new Date(), injected?: TwentyClient
       ...(state ?? {}),
       watermark: state?.watermark ?? null,
       lastSuccess: state?.lastSuccess ?? null,
-      lastFullRefresh: state?.lastFullRefresh ?? null,
+      lastFullRefresh,
+      fullRefreshProgress,
+      fullRefreshFailures,
+      fullRefreshRetryAt,
       lastError: error instanceof Error ? error.message : 'CRM sync failed',
       attemptedAt: now.toISOString(),
     });
