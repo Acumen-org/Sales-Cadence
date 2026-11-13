@@ -31,6 +31,7 @@ import { nightlyLoop } from '../lib/nightly';
 import { ringHealth } from '../lib/outreach/health';
 import { coldOutreachReleaseOnce } from '../lib/outreach/release';
 import { runLinkedInPass } from '../lib/linkedin/pass';
+import { beatWorker } from '../lib/worker-heartbeat';
 
 const config=env();
 const log=(message:string,extra?:unknown)=>console.log('[worker '+new Date().toISOString()+'] '+message,extra??'');
@@ -185,6 +186,8 @@ async function tick(){
  if(running||stopping)return;running=true;
  try{
    const now=Date.now();
+   // P01: the heartbeat Nomad checks (/api/health/worker). Stamped as each pass starts, so a pass that hangs goes stale.
+   try{await beatWorker(new Date(now));}catch(error){log('heartbeat failed',error);}
    if(now-lastSync>=config.CRM_SYNC_SECONDS*1000&&!nightly.crmBusy){
      try{await syncContinuously();lastSync=now;}catch(error){log('CRM sync failed',error);}
    }

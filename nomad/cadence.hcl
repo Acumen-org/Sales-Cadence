@@ -202,6 +202,28 @@ EOH
         memory     = 640
         memory_max = 1024
       }
+
+      # P01: the worker has no port of its own. Each pass stamps a heartbeat in the database and
+      # the web answers /api/health/worker with 503 once it is 20 minutes old (dead, hung or never
+      # started), so Nomad restarts the worker and a deploy whose worker never runs is not healthy.
+      service {
+        name = "cadence-worker"
+        port = "http"
+        tags = ["cadence", "worker"]
+
+        check {
+          name     = "cadence-worker-heartbeat"
+          type     = "http"
+          path     = "/api/health/worker"
+          interval = "60s"
+          timeout  = "10s"
+
+          check_restart {
+            limit = 3
+            grace = "600s"
+          }
+        }
+      }
     }
   }
 }
