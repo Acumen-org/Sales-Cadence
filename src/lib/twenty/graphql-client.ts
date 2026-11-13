@@ -65,6 +65,27 @@ const PAGE_SIZE = 60;
 const FIND_PAGES = 5;
 /** Twenty allows 100 API requests a minute. A 429 is waited out, not treated as a failure. */
 const MAX_RATE_LIMIT_WAIT_MS = 30_000;
+/**
+ * N11: what the workspace's data model says is read again after this long, so a field added,
+ * renamed or removed in the CRM is noticed without a restart; a read that failed is tried again
+ * after a minute instead of being kept as "unknown" for good.
+ */
+const MODEL_CACHE_MS = 10 * 60_000;
+const MODEL_RETRY_MS = 60_000;
+
+type Cached<T> = { at: number; ttl: number; value: Promise<T> };
+/** A read of the data model, kept for MODEL_CACHE_MS, or MODEL_RETRY_MS when it failed (`fallback`). */
+function cachedRead<T>(cache: Map<string, Cached<T>>, key: string, read: () => Promise<T>, fallback: T): Promise<T> {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < hit.ttl) return hit.value;
+  const entry: Cached<T> = { at: Date.now(), ttl: MODEL_CACHE_MS, value: Promise.resolve(fallback) };
+  entry.value = read().catch(() => {
+    entry.ttl = MODEL_RETRY_MS;
+    return fallback;
+  });
+  cache.set(key, entry);
+  return entry.value;
+}
 
 /**
  * Twenty CRM over GraphQL. Every query and mutation Cadence uses lives in this file.
@@ -78,8 +99,8 @@ export class TwentyGraphqlClient implements TwentyClient {
   private readonly s: TwentySchema;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
-  private readonly fieldCache = new Map<string, Promise<Set<string> | null>>();
-  private aumTypePromise?: Promise<'number' | 'currency' | null>;
+  private readonly fieldCache = new Map<string, Cached<Set<string> | null>>();
+  private readonly aumTypeCache = new Map<string, Cached<'number' | 'currency' | null>>();
 
   constructor(private readonly opts: TwentyGraphqlClientOptions) {
     this.s = opts.schema;
@@ -148,20 +169,15 @@ export class TwentyGraphqlClient implements TwentyClient {
     throw new TwentyApiError(`The CRM is unreachable at ${url}: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
   }
 
-  private createInputCache = new Map<string, Promise<boolean>>();
+  private createInputCache = new Map<string, Cached<boolean>>();
   /**
    * N05: whether `<Type>CreateInput` takes a caller-chosen id. That id is the idempotency marker:
    * after a lost answer, the record is looked up by it instead of being created again.
    */
   private createTakesId(typeName: string): Promise<boolean> {
-    let cached = this.createInputCache.get(typeName);
-    if (!cached) {
-      cached = this.request<{ __type: { inputFields?: Array<{ name: string }> | null } | null }>(`query CreateInputFields($name: String!) { __type(name: $name) { inputFields { name } } }`, { name: `${typeName}CreateInput` })
-        .then((d) => Boolean(d.__type?.inputFields?.some((f) => f.name === 'id')))
-        .catch(() => false);
-      this.createInputCache.set(typeName, cached);
-    }
-    return cached;
+    return cachedRead(this.createInputCache, typeName, () =>
+      this.request<{ __type: { inputFields?: Array<{ name: string }> | null } | null }>(`query CreateInputFields($name: String!) { __type(name: $name) { inputFields { name } } }`, { name: `${typeName}CreateInput` })
+        .then((d) => Boolean(d.__type?.inputFields?.some((f) => f.name === 'id'))), false);
   }
 
   /** Injectable so a test can run a rate-limit retry without waiting. */
@@ -169,14 +185,9 @@ export class TwentyGraphqlClient implements TwentyClient {
 
   /** Fields that exist on a GraphQL type, or null when introspection is unavailable. */
   private availableFields(typeName: string): Promise<Set<string> | null> {
-    let cached = this.fieldCache.get(typeName);
-    if (!cached) {
-      cached = this.request<{ __type: { fields: Array<{ name: string }> } | null }>(`query Fields($name: String!) { __type(name: $name) { fields { name } } }`, { name: typeName })
-        .then((d) => (d.__type ? new Set(d.__type.fields.map((f) => f.name)) : null))
-        .catch(() => null);
-      this.fieldCache.set(typeName, cached);
-    }
-    return cached;
+    return cachedRead(this.fieldCache, typeName, () =>
+      this.request<{ __type: { fields: Array<{ name: string }> } | null }>(`query Fields($name: String!) { __type(name: $name) { fields { name } } }`, { name: typeName })
+        .then((d) => (d.__type ? new Set(d.__type.fields.map((f) => f.name)) : null)), null);
   }
 
   /**
@@ -186,18 +197,13 @@ export class TwentyGraphqlClient implements TwentyClient {
    * any personId field", and selecting it silently returns nothing, so no note ever reaches the
    * person it is about. The workspace says which it has, once, and everything below uses that.
    */
-  private targetFieldsCache = new Map<'noteTarget' | 'taskTarget', Promise<{ personId: string; companyId: string; opportunityId: string }>>();
   private targetFields(kind: 'noteTarget' | 'taskTarget') {
-    let cached = this.targetFieldsCache.get(kind);
-    if (!cached) {
-      const mapped = this.s[kind];
-      cached = this.availableFields(this.s.objects[kind].typeName).then((available) => {
-        const pick = (name: string, alias: string) => (available && !available.has(name) && available.has(alias) ? alias : name);
-        return { personId: pick(mapped.personId, 'targetPersonId'), companyId: pick(mapped.companyId, 'targetCompanyId'), opportunityId: pick(mapped.opportunityId, 'targetOpportunityId') };
-      });
-      this.targetFieldsCache.set(kind, cached);
-    }
-    return cached;
+    // Derived from availableFields each time, so it follows that cache's refresh (N11).
+    const mapped = this.s[kind];
+    return this.availableFields(this.s.objects[kind].typeName).then((available) => {
+      const pick = (name: string, alias: string) => (available && !available.has(name) && available.has(alias) ? alias : name);
+      return { personId: pick(mapped.personId, 'targetPersonId'), companyId: pick(mapped.companyId, 'targetCompanyId'), opportunityId: pick(mapped.opportunityId, 'targetOpportunityId') };
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -471,8 +477,7 @@ export class TwentyGraphqlClient implements TwentyClient {
   }
 
   private companyAumType() {
-    if (!this.aumTypePromise) {
-      this.aumTypePromise = this.request<{ __type: { fields: Array<{ name: string; type: { kind: string; name: string | null; ofType?: { kind: string; name: string | null } } }> } | null }>(
+    return cachedRead(this.aumTypeCache, 'aum', () => this.request<{ __type: { fields: Array<{ name: string; type: { kind: string; name: string | null; ofType?: { kind: string; name: string | null } } }> } | null }>(
         'query CompanyFieldTypes($name: String!) { __type(name: $name) { fields { name type { kind name ofType { kind name } } } } }',
         { name: this.s.objects.company.typeName },
       ).then((result) => {
@@ -482,9 +487,7 @@ export class TwentyGraphqlClient implements TwentyClient {
         if (named.kind === 'OBJECT' && /Currency/i.test(named.name ?? '')) return 'currency';
         if (named.kind === 'SCALAR' && /Float|Int|Numeric|Decimal|BigInt|Number/i.test(named.name ?? '')) return 'number';
         return null;
-      }).catch(() => null);
-    }
-    return this.aumTypePromise;
+      }), null);
   }
 
   private async companySelection() {

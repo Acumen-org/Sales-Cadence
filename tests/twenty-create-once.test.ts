@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { TwentyGraphqlClient } from '@/lib/twenty/graphql-client';
 import { mergeTwentySchema } from '@/lib/twenty/twenty-schema';
 
@@ -79,5 +79,31 @@ describe('N08: a note or task whose link to the person fails is not left attache
     });
     await expect(twenty.createTask({ id: '6f1c1d2e-0000-4000-8000-000000000002', title: 'T', personId: 'p-1' })).rejects.toThrow(/400/);
     expect(calls.some((c) => c.query.includes('mutation DeleteTask('))).toBe(false);
+  });
+});
+
+describe('N11: the data model read is not kept for ever', () => {
+  it('a failed first read is tried again a minute later, so Do not contact writes recover without a restart', async () => {
+    let down = true;
+    const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const call = JSON.parse(String(init?.body)) as Call;
+      if (call.query.includes('query Fields(')) {
+        if (down) return new Response('timeout', { status: 504 });
+        return new Response(JSON.stringify({ data: { __type: { fields: [{ name: 'id' }, { name: 'dnd' }] } } }));
+      }
+      return new Response(JSON.stringify({ data: { updatePerson: { id: 'p-1' } } }));
+    }) as typeof fetch;
+    const twenty = new TwentyGraphqlClient({ baseUrl: 'https://twenty.example', apiKey: 'k', schema: mergeTwentySchema(), fetchImpl });
+    twenty.sleep = async () => {};
+    const t0 = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(t0);
+    try {
+      await expect(twenty.setPersonDnd('p-1', { dnd: true })).rejects.toThrow(/could not be verified/);
+      down = false;
+      clock.mockReturnValue(t0 + 61_000);
+      await expect(twenty.setPersonDnd('p-1', { dnd: true })).resolves.toBeUndefined();
+    } finally {
+      clock.mockRestore();
+    }
   });
 });
