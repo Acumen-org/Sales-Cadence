@@ -243,6 +243,8 @@ export type TwentyIntrospection = {
 };
 
 export type CreateNoteInput = {
+  /** A caller-chosen UUID, kept with a failed write so a replay finds the note instead of making a second (N05). */
+  id?: string;
   title: string;
   bodyMarkdown: string;
   personId?: string | null;
@@ -312,6 +314,8 @@ export type TwentyMeetingRecordInput = {
 };
 
 export type CreateTaskInput = {
+  /** A caller-chosen UUID, kept with a failed write so a replay finds the task instead of making a second (N05). */
+  id?: string;
   title: string;
   bodyMarkdown?: string;
   dueAt?: string | null;

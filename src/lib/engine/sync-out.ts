@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { logAudit, SYSTEM_ACTOR } from '../audit';
@@ -107,6 +108,8 @@ export async function syncTasksCreated(tasks: SyncTask[]): Promise<void> {
     // A sandbox contact has no Twenty record to hang a task on: its steps stay in Cadence.
     if (task.twentyTaskId || task.state !== 'PENDING' || !task.enrollment.personId) continue;
     const input = {
+      // N05: the id the CRM record will carry, kept in a failed write so its replay finds it.
+      id: randomUUID(),
       title: mirroredTaskTitle(task),
       bodyMarkdown: `Sequence "${task.enrollment.sequence.name}", step ${task.stepIndex + 1} (day ${task.stepDay}).\nDue ${task.dueDate}. Managed by Cadence.`,
       dueAt: task.dueAt.toISOString(),
@@ -146,6 +149,7 @@ export async function syncTaskCompleted(task: SyncTask): Promise<void> {
     // N055: the one outcome list, so "Not interested" never reaches the CRM as not_interested.
     const dispositionLabel = callOutcomes(settings.rules).find((d) => d.key === task.disposition)?.label ?? task.disposition ?? null;
     const input = {
+      id: randomUUID(),
       title: completionNoteTitle(task, settings.matching.cadencePrefix, dispositionLabel),
       bodyMarkdown: [
         `${task.label} (${action.toLowerCase().replace('_', ' ')}) completed by ${task.fo.name} in Cadence.`,
