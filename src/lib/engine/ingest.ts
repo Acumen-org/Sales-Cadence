@@ -209,6 +209,8 @@ async function process(type: CanonicalObject, input: IngestInput, ctx: EngineCon
       return handleTwentyTask(normalizeTask(input.record, schema), ctx, settings);
     case 'opportunity':
       if (deleted) return { result: 'ignored_deleted' };
+      // N10: the rule is "a meeting when an opportunity is created": a later edit of an old one is not.
+      if (!input.eventName.endsWith('.created')) return { result: 'ignored_opportunity_not_created' };
       return handleOpportunity(normalizeOpportunity(input.record, schema), ctx, settings);
     default:
       return { result: `ignored_object_${type}` };

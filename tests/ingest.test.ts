@@ -193,6 +193,13 @@ describe('webhook ingestion', () => {
     expect(await pendingTasks('person-11')).toHaveLength(0);
   });
 
+  it('N10: an edit of an old opportunity does not end the sequence as a meeting', async () => {
+    const opp = { ...(await mock.listOpportunities()).items[0], id: 'opp-old', pointOfContactId: 'person-01', updatedAt: iso('2026-09-08') };
+    const r = await ingestEvent({ source: 'WEBHOOK', objectType: 'opportunity', eventName: 'opportunity.updated', record: rawFromOpportunity(opp), now: at('2026-09-08') });
+    expect(r.result).toBe('ignored_opportunity_not_created');
+    expect((await prisma.enrollment.findFirstOrThrow({ where: { personId: 'person-01' } })).status).not.toBe('MEETING');
+  });
+
   it('a person update on its own is only a cache refresh: an opportunity is the meeting signal', async () => {
     const person = mock.updatePerson('person-32', { tier: 'LEVEL_1', updatedAt: iso('2026-09-08', '12:00:00') });
     const r = await ingestEvent({ source: 'WEBHOOK', objectType: 'person', eventName: 'person.updated', record: rawFromPerson(person), now: at('2026-09-08') });

@@ -109,7 +109,9 @@ export async function reconcile(opts: { days?: number; since?: string; sinceBySt
   await stage('opportunities', async () => {
     for await (const opp of paginate((after) => c.listOpportunities({ updatedSince: stageSince('opportunities'), after, limit: 100 }))) {
       stats.opportunities += 1;
-      tally(stats, await ingestEvent({ ...common, objectType: 'opportunity', eventName: 'opportunity.updated', record: rawFromOpportunity(opp), recordId: opp.id, updatedAt: opp.updatedAt }, c));
+      // N10: only one created inside the window counts as created; an old one someone edited does not.
+      const created = Date.parse(opp.createdAt) >= Date.parse(stageSince('opportunities'));
+      tally(stats, await ingestEvent({ ...common, objectType: 'opportunity', eventName: created ? 'opportunity.created' : 'opportunity.updated', record: rawFromOpportunity(opp), recordId: opp.id, updatedAt: opp.updatedAt }, c));
     }
   });
 
