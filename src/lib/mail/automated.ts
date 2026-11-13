@@ -3,7 +3,7 @@
  * senders (owner, 13 Nov 2026: these made "Reply to their email" tasks). Never an answer to us,
  * whoever it came from. An out-of-office is `isAutomaticReply`'s; this is the rest.
  */
-const SENDER = /^(no[-_.]?reply|do[-_.]?not[-_.]?reply|donotreply|notifications?|notify|alerts?|news(letters?)?|marketing|mailer|mailer-daemon|postmaster|bounces?|updates?|digest|announce(ments)?|promo(tions)?|offers?|deals|events?|webinars?|community|automated|system|account(s)?|billing|receipts?|invoices?|security|verify|confirm(ation)?)([-_.+].*)?@/i;
+const SENDER = /^(no[-_.]?reply|do[-_.]?not[-_.]?reply|donotreply|notifications?|notify|alerts?|news(letters?)?|marketing|mailer|mailer-daemon|postmaster|bounces?|updates?|digest|announce(ments)?|promo(tions)?|offers?|deals|events?|webinars?|community|automated|system|account(s)?|billing|receipts?|invoices?|security|verify|confirmation|confirm)([-_.+].*)?@/i;
 /** Bulk senders' own domains, and the subdomains firms use for them ("mail.", "news.", "email."...). */
 const BULK_DOMAIN = /(^|\.)(mailchimp|mcsv|mcdlv|list-manage|sendgrid|sendinblue|brevo|hubspot(email)?|hs-?send|mailgun|mandrill|mandrillapp|amazonses|sparkpost(mail)?|postmarkapp|constantcontact|campaign-?monitor|createsend|klaviyo|mailjet|memberclicks(-mail)?|exacttarget|marketo|mktomail|pardot|intercom(-mail)?|customeriomail|substack|beehiiv|convertkit|ccsend)\./i;
 const BULK_SUBDOMAIN = /@(e|em|email|mail|mailer|mailing|news|newsletter|info|updates?|marketing|notify|notifications?|go|engage|reply)\.[a-z0-9-]+\.[a-z.]+$/i;
