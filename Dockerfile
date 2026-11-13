@@ -4,7 +4,11 @@
 FROM node:22-bookworm-slim AS base
 ARG SKIP_TYPE_CHECK=false
 ARG NEXT_BUILD_CPUS=1
+# T03: corepack keeps pnpm in COREPACK_HOME, outside /root/.cache (which the build deletes), so a
+# container starts with no network: it never has to download pnpm before it can migrate.
 ENV NEXT_TELEMETRY_DISABLED=1 \
+    COREPACK_HOME=/corepack \
+    COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH \
     SKIP_TYPE_CHECK=$SKIP_TYPE_CHECK \
@@ -32,6 +36,7 @@ RUN NODE_OPTIONS=--max-old-space-size=1536 pnpm build \
 # The entrypoint runs migrations, the seed and the worker, so prune must not have taken those
 # away. Fail the build here rather than at container start.
 RUN node -e "require.resolve('next'); require.resolve('@prisma/client')" \
+ && COREPACK_ENABLE_NETWORK=0 pnpm --version \
  && test -x node_modules/.bin/prisma \
  && test -f node_modules/tsx/dist/cli.mjs \
  && test -f .next/BUILD_ID
