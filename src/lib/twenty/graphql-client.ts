@@ -233,11 +233,20 @@ export class TwentyGraphqlClient implements TwentyClient {
   }
 
   async listWebhooks(): Promise<TwentyWebhook[]> {
-    const res = await this.rest<Raw>('GET', 'webhooks?limit=60');
-    if (res.status >= 400) throw new TwentyApiError(`The CRM's webhooks responded ${res.status}: ${res.text.slice(0, 300)}`, res.status);
-    const data = (res.json?.data ?? res.json ?? {}) as Raw;
-    const list = (Array.isArray(data.webhooks) ? data.webhooks : Array.isArray(data) ? data : []) as Raw[];
-    return list.map(TwentyGraphqlClient.webhookOf);
+    // N33: every page the CRM says there is, not the first 60 only.
+    const out: TwentyWebhook[] = [];
+    let cursor: string | null = null;
+    for (let i = 0; i < 20; i++) {
+      const res = await this.rest<Raw>('GET', `webhooks?limit=60${cursor ? `&starting_after=${encodeURIComponent(cursor)}` : ''}`);
+      if (res.status >= 400) throw new TwentyApiError(`The CRM's webhooks responded ${res.status}: ${res.text.slice(0, 300)}`, res.status);
+      const data = (res.json?.data ?? res.json ?? {}) as Raw;
+      const list = (Array.isArray(data.webhooks) ? data.webhooks : Array.isArray(data) ? data : []) as Raw[];
+      out.push(...list.map(TwentyGraphqlClient.webhookOf));
+      const info = (res.json?.pageInfo ?? (data as Raw).pageInfo) as { hasNextPage?: boolean; endCursor?: string | null } | undefined;
+      if (!info?.hasNextPage || !info.endCursor || info.endCursor === cursor) return out;
+      cursor = info.endCursor;
+    }
+    return out;
   }
 
   /**
@@ -547,11 +556,20 @@ export class TwentyGraphqlClient implements TwentyClient {
   async listWorkspaceMembers(): Promise<TwentyWorkspaceMember[]> {
     const w = this.s.workspaceMember;
     const sel = await this.selection(this.s.objects.workspaceMember.typeName, ['id', { field: w.name, sub: '{ firstName lastName }' }, w.userEmail, w.timeZone]);
-    const data = await this.request<Record<string, Connection>>(
-      `query Members($first: Int) { ${this.s.objects.workspaceMember.plural}(first: $first) { edges { node { ${sel} } } pageInfo { hasNextPage endCursor } } }`,
-      { first: 200 },
-    );
-    return this.page(data[this.s.objects.workspaceMember.plural], (n) => normalizeWorkspaceMember(n, this.s)).items;
+    // N33: Twenty serves 60 a page whatever is asked: every page is read.
+    const out: TwentyWorkspaceMember[] = [];
+    let after: string | null = null;
+    for (let i = 0; i < 50; i++) {
+      const data: Record<string, Connection> = await this.request<Record<string, Connection>>(
+        `query Members($first: Int, $after: String) { ${this.s.objects.workspaceMember.plural}(first: $first, after: $after) { edges { node { ${sel} } } pageInfo { hasNextPage endCursor } } }`,
+        { first: PAGE_SIZE, after },
+      );
+      const page = this.page(data[this.s.objects.workspaceMember.plural], (n) => normalizeWorkspaceMember(n, this.s));
+      out.push(...page.items);
+      if (!page.hasNextPage || !page.endCursor) return out;
+      after = page.endCursor;
+    }
+    throw new TwentyApiError(`Workspace members: more than ${50 * PAGE_SIZE} to read`);
   }
 
   // ---------------------------------------------------------------------------
@@ -583,7 +601,9 @@ export class TwentyGraphqlClient implements TwentyClient {
     const sel = await this.personSelection();
     const people: TwentyPerson[] = [];
     let after: string | null = null;
-    for (let i = 0; i < 200; i++) {
+    for (let i = 0; ; i++) {
+      // N33: a view larger than this is refused, never silently cut short.
+      if (i >= 200) throw new TwentyApiError(`That view holds more than ${200 * PAGE_SIZE} people. Narrow it in the CRM, or paste person ids instead.`);
       const page: Record<string, Connection> = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.person.plural, this.s.objects.person.typeName, sel), {
         filter: filters.length ? { and: filters } : undefined,
         first: PAGE_SIZE,
@@ -1021,8 +1041,17 @@ export class TwentyGraphqlClient implements TwentyClient {
     ];
     if (!or.length) return [];
     const sel = await this.companySelection();
-    const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.company.plural, this.s.objects.company.typeName, sel), { filter: { or }, first: PAGE_SIZE, after: null });
-    return this.page(data[this.s.objects.company.plural], (n) => normalizeCompany(n, this.s)).items
+    // N33: past the first page (a domain many accounts share), so an existing account is not missed.
+    const found: TwentyCompany[] = [];
+    let after: string | null = null;
+    for (let i = 0; i < FIND_PAGES; i++) {
+      const data: Record<string, Connection> = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.company.plural, this.s.objects.company.typeName, sel), { filter: { or }, first: PAGE_SIZE, after });
+      const page = this.page(data[this.s.objects.company.plural], (n) => normalizeCompany(n, this.s));
+      found.push(...page.items);
+      if (!page.hasNextPage || !page.endCursor) break;
+      after = page.endCursor;
+    }
+    return found
       .filter((company) => !company.deletedAt && ((domain && normalizeDomain(company.domain) === domain) || (q.name && company.name.trim().toLowerCase() === q.name.trim().toLowerCase())));
   }
 
@@ -1251,11 +1280,20 @@ export class TwentyGraphqlClient implements TwentyClient {
 
   /** The meeting's contact rows follow its attendees: missing ones added, removed ones deleted. */
   private async syncMeetingContacts(c: NonNullable<TwentyMeetingSchema['contact']>, meetingId: string, wanted: { personId: string; name: string }[]) {
-    const rows = await this.request<Record<string, Connection>>(
-      `query MeetingContacts($filter: ${c.typeName}FilterInput) { ${c.plural}(filter: $filter, first: 200) { edges { node { id name ${c.personId} } } } }`,
-      { filter: { [c.meetingId]: { eq: meetingId } } },
-    );
-    const have = connectionToArray(rows[c.plural]).map((r) => ({ id: String(r.id), name: String(r.name ?? ''), personId: String(r[c.personId] ?? '') }));
+    // N33: every page of the meeting's contact rows (Twenty serves 60 a page).
+    const nodes: Raw[] = [];
+    let after: string | null = null;
+    for (let i = 0; i < 20; i++) {
+      const rows: Record<string, Connection> = await this.request<Record<string, Connection>>(
+        `query MeetingContacts($filter: ${c.typeName}FilterInput, $first: Int, $after: String) { ${c.plural}(filter: $filter, first: $first, after: $after) { edges { node { id name ${c.personId} } } pageInfo { hasNextPage endCursor } } }`,
+        { filter: { [c.meetingId]: { eq: meetingId } }, first: PAGE_SIZE, after },
+      );
+      nodes.push(...connectionToArray(rows[c.plural]));
+      const info = rows[c.plural]?.pageInfo;
+      if (!info?.hasNextPage || !info.endCursor) break;
+      after = info.endCursor;
+    }
+    const have = nodes.map((r) => ({ id: String(r.id), name: String(r.name ?? ''), personId: String(r[c.personId] ?? '') }));
     for (const row of have) {
       if (!wanted.some((w) => w.personId === row.personId)) await this.request(`mutation DeleteMeetingContact($id: UUID!) { delete${c.typeName}(id: $id) { id } }`, { id: row.id });
     }

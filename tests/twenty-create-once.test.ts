@@ -144,3 +144,15 @@ describe('N19: listings of all notes, mail, tasks and opportunities', () => {
     for (const c of listings) expect(c.variables.orderBy).toBeUndefined();
   });
 });
+
+describe('N33: reads that asked for one page', () => {
+  it('workspace members and companies by domain are read past the first page', async () => {
+    const page = (plural: string, nodes: unknown[], next: string | null) => ({ data: { [plural]: { edges: nodes.map((node) => ({ node })), pageInfo: { hasNextPage: Boolean(next), endCursor: next } } } });
+    const { twenty } = client((c) => {
+      if (c.query.includes('query Members(')) return c.variables.after ? page('workspaceMembers', [{ id: 'wm-61', name: { firstName: 'Late', lastName: 'Joiner' }, userEmail: 'late@acumen.example' }], null) : page('workspaceMembers', [{ id: 'wm-1', name: { firstName: 'A', lastName: 'B' }, userEmail: 'a@acumen.example' }], 'c1');
+      return c.variables.after ? page('companies', [{ id: 'co-2', name: 'Acme', domainName: { primaryLinkUrl: 'acme.example' } }], null) : page('companies', [{ id: 'co-1', name: 'Other', domainName: { primaryLinkUrl: 'acme.example.org' } }], 'c1');
+    });
+    expect((await twenty.listWorkspaceMembers()).map((m) => m.id)).toEqual(['wm-1', 'wm-61']);
+    expect((await twenty.findCompanies({ domain: 'acme.example' })).map((c) => c.id)).toEqual(['co-2']);
+  });
+});
