@@ -147,7 +147,7 @@ async function meetingsBackfill(now:number){
   const shape=`${MEETINGS_RELEASE}|${meetingSchemaShape(schema)}`;
   const row=await prisma.setting.findUnique({where:{key}});
   if((row?.value as {shape?:string}|null)?.shape===shape)return;
-  const written=await backfillMeetingsToCrm({all:true});if(written===null)return;
+  const written=await backfillMeetingsToCrm({all:true,pauseMs:1000});if(written===null)return;
   log('meetings written to Twenty',written);
   const value={at:new Date().toISOString(),written,shape};
   await prisma.setting.upsert({where:{key},create:{key,value},update:{value}});
@@ -163,6 +163,9 @@ async function meetingsWithTwenty(now:number){
  const flagged=await prisma.setting.findUnique({where:{key:MEETINGS_CHANGED_KEY}});
  const changedAt=Date.parse(String((flagged?.value as {at?:string}|null)?.at??''));
  if(now<meetingsTwentyAt&&!(changedAt>=meetingsTwentyRan))return;
+ // S22: a change reported by Twenty (often Cadence's own write coming back) or writes still waiting
+ // bring the full check forward, but never closer than two minutes after the last one.
+ if(now-meetingsTwentyRan<120_000)return;
  meetingsTwentyRan=now;meetingsTwentyAt=now+600_000;
  try{const stats=await checkMeetingsInCrm();if(stats&&(stats.linked||stats.written))log('meetings checked in Twenty',stats);if(stats?.waiting)meetingsTwentyAt=0;}catch(error){log('meetings check in Twenty failed',error);}
 }
@@ -181,7 +184,8 @@ async function meetingTagsRetry(now:number){
  try{
   const schema=await (await getTwentyClient()).meetingSchema();
   if(!schema||!missingTagsNowInCrm(schema,missing))return;
-  const written=await backfillMeetingsToCrm({all:true});if(written!==null)log('meetings written again for missing tags',written);
+  // S09: paced under Twenty's 100 requests a minute.
+  const written=await backfillMeetingsToCrm({all:true,pauseMs:1000});if(written!==null)log('meetings written again for missing tags',written);
  }catch(error){log('meetings tag retry failed',error);}
 }
 /**

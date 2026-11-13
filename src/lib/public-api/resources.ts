@@ -195,10 +195,11 @@ export const RESOURCES: Resource[] = [
     one: (id) => prisma.callLog.findUnique(byId(CALL)(id)),
   },
   {
-    path: 'meetings', scope: 'activity', changed: 'updatedAt', oneOnly: 'transcript',
+    // S03: a scope of its own, and only approved meetings, as the screens show them.
+    path: 'meetings', scope: 'meetings', changed: 'updatedAt', oneOnly: 'transcript',
     filters: { companyId: eq('companyId', 'Company id'), from: instant('occurredAt', 'gte', 'Held at or after'), to: instant('occurredAt', 'lt', 'Held before') },
-    find: (a) => prisma.meeting.findMany(args(a, MEETING)),
-    one: (id) => prisma.meeting.findUnique(byId({ ...MEETING, transcript: true, transcriptFormat: true })(id)),
+    find: (a) => prisma.meeting.findMany(args({ ...a, where: { ...a.where, review: 'APPROVED' } }, MEETING)),
+    one: (id) => prisma.meeting.findFirst({ where: { id, review: 'APPROVED' }, select: { ...MEETING, transcript: true, transcriptFormat: true } }),
   },
   {
     path: 'cold-outreach/contacts', scope: 'cold-outreach', changed: 'updatedAt',

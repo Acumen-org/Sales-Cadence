@@ -14,7 +14,9 @@ export const SCOPES = [
   { key: 'crm', label: 'CRM', what: 'People and companies (Cadence’s copy of Twenty)' },
   { key: 'campaigns', label: 'Campaigns', what: 'Sequences, campaigns and enrollments' },
   { key: 'tasks', label: 'Tasks', what: 'Tasks and next actions' },
-  { key: 'activity', label: 'Activity', what: 'Touches, calls and meetings' },
+  { key: 'activity', label: 'Activity', what: 'Touches and calls' },
+  // S03: meetings carry transcripts of calls with outside people, so they need their own scope.
+  { key: 'meetings', label: 'Meetings', what: 'Approved meetings, with their notes, analysis and full transcripts' },
   { key: 'cold-outreach', label: 'Cold outreach', what: 'Cold contacts, their notes, and do-not-contact entries' },
   { key: 'reports', label: 'Reports', what: 'The Reports section’s numbers' },
 ] as const;
