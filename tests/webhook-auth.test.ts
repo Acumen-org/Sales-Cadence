@@ -8,9 +8,18 @@ const body = JSON.stringify({ eventName: 'note.created', record: { id: 'n1' } })
 describe('webhook verification', () => {
   it('accepts a valid timestamped signature and rejects a bad one', () => {
     const sig = signWebhook('s3cret', '1700000000', body);
-    expect(verifyWebhook({ rawBody: body, headers: headers({ 'x-twenty-webhook-signature': sig, 'x-twenty-webhook-timestamp': '1700000000' }), queryToken: null, secret: 's3cret', token: null })).toEqual({ ok: true, method: 'signature' });
+    // Q06: signed at 1700000000, checked a minute later (the timestamp is now compared with the clock).
+    expect(verifyWebhook({ rawBody: body, headers: headers({ 'x-twenty-webhook-signature': sig, 'x-twenty-webhook-timestamp': '1700000000' }), queryToken: null, secret: 's3cret', token: null, now: 1700000060_000 })).toEqual({ ok: true, method: 'signature' });
     expect(verifyWebhook({ rawBody: body, headers: headers({ 'x-twenty-webhook-signature': 'deadbeef', 'x-twenty-webhook-timestamp': '1700000000' }), queryToken: null, secret: 's3cret', token: null })).toEqual({ ok: false, reason: 'invalid signature' });
     expect(verifyWebhook({ rawBody: body, headers: headers({}), queryToken: null, secret: 's3cret', token: null })).toEqual({ ok: false, reason: 'missing signature' });
+  });
+
+  it('refuses a correctly signed request replayed later (Q06)', () => {
+    const ts = String(Date.now() - 60 * 60_000);
+    const sig = signWebhook('s3cret', ts, body);
+    expect(verifyWebhook({ rawBody: body, headers: headers({ 'x-twenty-webhook-signature': sig, 'x-twenty-webhook-timestamp': ts }), queryToken: null, secret: 's3cret', token: null })).toEqual({ ok: false, reason: 'stale timestamp' });
+    const fresh = String(Date.now());
+    expect(verifyWebhook({ rawBody: body, headers: headers({ 'x-twenty-webhook-signature': signWebhook('s3cret', fresh, body), 'x-twenty-webhook-timestamp': fresh }), queryToken: null, secret: 's3cret', token: null }).ok).toBe(true);
   });
 
   it('accepts a plain body HMAC as a fallback', () => {

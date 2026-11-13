@@ -7,7 +7,12 @@ export type WebhookAuthInput = {
   queryToken: string | null;
   secret: string | null | undefined;
   token: string | null | undefined;
+  /** The clock, for tests. */
+  now?: number;
 };
+
+/** How far a signed timestamp may be from the server's clock. Anything missed is caught by the nightly reconcile. */
+export const WEBHOOK_MAX_AGE_MS = 10 * 60_000;
 
 export type WebhookAuthResult = { ok: true; method: 'signature' | 'token' | 'open' } | { ok: false; reason: string };
 
@@ -41,6 +46,13 @@ export function verifyWebhook(input: WebhookAuthInput): WebhookAuthResult {
     ].filter((c): c is string => Boolean(c));
     const provided = signature.replace(/^sha256=/, '');
     if (!candidates.some((c) => safeEqual(c, provided))) return { ok: false, reason: 'invalid signature' };
+    // Q06: a signed timestamp must be recent, so a captured request cannot be sent again later.
+    // Twenty sends milliseconds; seconds are read too.
+    if (timestamp && safeEqual(candidates[0], provided)) {
+      const n = Number(timestamp);
+      const at = n < 1e12 ? n * 1000 : n;
+      if (!Number.isFinite(at) || Math.abs((input.now ?? Date.now()) - at) > WEBHOOK_MAX_AGE_MS) return { ok: false, reason: 'stale timestamp' };
+    }
     if (token && !(input.queryToken && safeEqual(token, input.queryToken))) return { ok: false, reason: 'invalid token' };
     return { ok: true, method: 'signature' };
   }
