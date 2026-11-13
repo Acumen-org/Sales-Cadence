@@ -74,12 +74,164 @@ docker compose exec web pnpm reconcile 7    # replay 7 days of Twenty activity (
 docker compose up -d --build                # deploy an update
 ```
 
-- **Health check:** `GET /api/health` returns `{"ok":true,"db":"up"}`.
-- **Backup:** only Postgres holds state. `docker compose exec db pg_dump -U cadence cadence | gzip > backup.sql.gz`, nightly. Everything else is rebuildable from git.
+- **Health check:** `GET /api/health` returns `{"ok":true,"db":"up","worker":"up"}`; `GET /api/health/worker` fails when the worker is stale.
+- **Backup:** only Postgres holds state. With Compose: `docker compose exec db pg_dump -U cadence cadence | gzip > backup.sql.gz`, nightly. Production: the Nomad job in "Backups" below. Everything else is rebuildable from git.
 - **Restart safety:** both processes are stateless; the worker's jobs are idempotent, so a restart mid-job is harmless.
 - **Secrets:** `.env` only. `TWENTY_API_KEY` grants full CRM access, so keep the file `chmod 600`. Sessions are database tokens; there is no signing secret.
 - **Lost admin password:** `docker compose exec web pnpm admin:password -- <email> <new password>` sets a new one and signs that account out everywhere.
 - **Scaling:** one web container handles this workload comfortably. If it ever needs more, run several `web` containers behind the proxy; the worker must stay a **single** instance (it is the scheduler).
+
+## Production on Nomad: emergency steps
+
+Everything above under "Deploy" and "Running it" describes Docker Compose, which is how Cadence runs
+on a single box. **Production does not run that way.** It runs as the Nomad job `cadence`
+(`nomad/cadence.hcl`: a `web` and a `worker` task, pinned to `worker-5`), deployed by CI on every
+push to `main`, with its secrets in the Nomad variable `nomad/jobs/cadence`. The database is
+Postgres 18 on `db-acumen`. Every step below is written for that setup.
+
+Commands assume `NOMAD_ADDR` and a `NOMAD_TOKEN` with rights on the job. To run a command inside
+the app:
+
+```bash
+ALLOC=$(nomad job allocs -t '{{range .}}{{if eq .ClientStatus "running"}}{{.ID}}{{end}}{{end}}' cadence)
+nomad alloc exec -task web "$ALLOC" pnpm sync:diagnose
+nomad alloc logs -f -task worker "$ALLOC"          # or -task web; -stderr for errors
+```
+
+**Changing a Nomad variable item** (any key below): Nomad UI > Variables > `nomad/jobs/cadence` >
+Edit, change the item, Save. Both tasks re-render their environment and restart within a minute.
+From the CLI, `nomad var get -out=json nomad/jobs/cadence > v.json`, edit, then
+`nomad var put -force @v.json` and delete `v.json`: it holds every secret. `nomad var put` with
+only `KEY=value` arguments replaces the whole variable, dropping every other item.
+
+### Health
+
+- `GET /api/health`: 200 while the database answers; the body also says `"worker":"up"` or `"stale"`.
+- `GET /api/health/worker`: 503 when the worker has not started a pass for 20 minutes. Nomad checks
+  it on the worker task and restarts the worker after three failures (service `cadence-worker`).
+
+### Stop all CRM writes
+
+1. Set the item `CADENCE_DRY_RUN` to `true` in `nomad/jobs/cadence`. Both tasks restart in dry run:
+   reads, webhooks and the screens work; every write to Twenty (notes, tasks, opt-out flags, moves,
+   meetings) is only logged. Settings shows "Dry run".
+2. Faster and blunter, when Twenty must stop hearing from Cadence at once: delete Cadence's API key
+   in Twenty (Settings > APIs & Webhooks). Reads stop too; the sync shows errors until a new key is set.
+3. To resume: set `CADENCE_DRY_RUN` to `false` (or remove it). Writes refused while Twenty was
+   unreachable wait in Settings > Activity log > Writes to Twenty, to retry or discard.
+
+### Roll back a release
+
+Migrations are additive, so the previous image runs on the newer schema. Never undo a migration
+by hand.
+
+1. A release that never passes its health checks rolls itself back (`auto_revert`). Check with
+   `nomad job status cadence` and `nomad job history -p cadence`.
+2. To go back by hand: `nomad job history cadence` lists versions with their `image_tag`, then
+   `nomad job revert cadence <version>`. Or, from a checkout of the commit to return to:
+   `nomad job run -var="image_tag=prod-v1.0.0-<7-char sha>" nomad/cadence.hcl`.
+3. Push a revert commit to `main` as well, or the next CI run deploys the bad release again.
+
+### A failed migration
+
+Each start runs `prisma migrate deploy`. If a migration fails or is cut off part-way (killed, out of
+memory, two deploys at once), Prisma records it as failed and applies nothing more until someone
+resolves it. The web log then says `FATAL: migration <name> failed`. The previous image (auto_revert)
+still starts: it does not carry that migration and starts without migrating. Nothing newer can
+deploy until the migration is resolved.
+
+1. Find the migration: the web task's log, or
+   `nomad alloc exec -task web "$ALLOC" pnpm exec prisma migrate status`.
+2. Read `prisma/migrations/<name>/migration.sql` and check in `psql` which of its objects exist.
+3. Resolve it, from the running (older) web task or any machine with `DATABASE_URL` and a checkout
+   of the release that carries the migration:
+   - nothing or part of it applied (our migrations use `IF NOT EXISTS`, so they can run again):
+     `pnpm exec prisma migrate resolve --rolled-back <name>`, fix the cause, deploy again. The
+     deploy runs it again.
+   - all of it applied (the process died after the SQL finished):
+     `pnpm exec prisma migrate resolve --applied <name>`.
+4. Redeploy: re-run the CI deploy, or `nomad job run -var="image_tag=<tag>" nomad/cadence.hcl`.
+
+### Backups
+
+`nomad/cadence-backup.hcl` is a periodic Nomad job (03:30 New York time) that runs
+`scripts/backup-db.sh`: a `pg_dump` in custom format, kept only if `pg_restore` can list its table
+data, written to `cadence-<UTC time>.dump` in the directory given as `backup_host_path`, with dumps
+older than `retention_days` (14) deleted. Set up once, from the repository root:
+
+```bash
+nomad var put nomad/jobs/cadence-db-backup DATABASE_URL='postgresql://<read-only role>:<pw>@<host>:5432/<db>'
+nomad job run -var="backup_host_path=/srv/backups/cadence" nomad/cadence-backup.hcl
+nomad job periodic force cadence-db-backup     # one now, then check the directory and the log
+```
+
+The directory must be storage that does not die with the database server (a backup share, NFS),
+and the Nomad client must allow docker volume mounts. A failed run shows as a failed allocation of
+`cadence-db-backup` in Nomad.
+
+### Restore the database
+
+Test a restore once a month into a scratch database (steps 2 and 3 only, with a new database name)
+and note the date and the dump used here: a backup that has never been restored is a hope.
+
+1. Stop everything that writes: `nomad job stop cadence`. Do not force a backup while restoring.
+2. Pick the dump (`ls -lt <backup dir>`), and restore from a Postgres 18 container that can reach
+   the server:
+   ```bash
+   docker run --rm -it -v /srv/backups/cadence:/backups postgres:18-alpine \
+     pg_restore --clean --if-exists --no-owner --no-privileges \
+       --dbname='postgresql://<owner role>:<pw>@<host>:5432/<db>' /backups/cadence-<stamp>.dump
+   ```
+   Safer when the old database may still be needed: create a new database, restore into it, then
+   point `DATABASE_URL` in `nomad/jobs/cadence` at it.
+3. Check: `psql ... -c 'select count(*) from "Enrollment"'` and the newest `"AuditLog"."createdAt"`.
+4. Start: `nomad job run -var="image_tag=<the tag that was running>" nomad/cadence.hcl`. The
+   entrypoint applies any migration newer than the dump.
+5. Catch up with the CRM for the time since the dump:
+   `nomad alloc exec -task web "$ALLOC" pnpm reconcile <days since the dump + 1>`, then
+   Settings > Twenty > Full refresh. Work done in Cadence after the dump (completed steps, notes,
+   meetings) is lost; what reached Twenty comes back through the reconcile.
+
+### Rotate a key
+
+Change one key at a time, check, then revoke the old one.
+
+| Key | Where it lives | Rotate |
+|---|---|---|
+| Twenty API key | `TWENTY_API_KEY` in `nomad/jobs/cadence` | Twenty > Settings > APIs & Webhooks: create a key with the same role. Set it, wait for the restart, check Settings > Twenty shows connected and the next sync passes. Delete the old key in Twenty. |
+| Twenty webhook secret | `TWENTY_WEBHOOK_SECRET`, and the webhook in Twenty | Change both within a minute. Events in between are refused; run `pnpm reconcile 1` afterwards to pick them up. |
+| Twilio | `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET` | Twilio console > API keys: create a Restricted key with the same read permissions. Set both items, check Settings > Calling, delete the old key. |
+| Microsoft app secret | Settings > Sign-in (database), or `MICROSOFT_CLIENT_SECRET` where set | Entra admin center > App registrations > Cadence > Certificates & secrets: new secret. Save it in Settings > Sign-in, sign in from a private window, delete the old secret. If it already expired and nobody can sign in, see "Admin locked out". |
+| Bellwether key | `BELLWETHER_API_KEY` (+ `_PREVIOUS`) | As in the Bellwether table below: new key in, old one in `BELLWETHER_API_KEY_PREVIOUS`, Bellwether moved over, then the previous one removed. |
+| Database password | `DATABASE_URL` in `nomad/jobs/cadence` (and `nomad/jobs/cadence-db-backup` for its role) | `ALTER ROLE <role> PASSWORD '<new>'` and update the variable immediately after: connections fail between the two. |
+| Registry (Harbor) | the Nomad client's Docker auth on worker-5; GitHub secrets `HARBOR_USERNAME`/`HARBOR_PASSWORD` (CI push) | Harbor > project `sales-cadence` > Robot accounts: refresh the secret of the pull robot, update the client's Docker auth file; refresh the push robot, update the GitHub secrets. The job itself holds no registry credentials. |
+| Nomad deploy token | GitHub secret `NOMAD_TOKEN` | `nomad acl token create -name=github-cadence-deploy -policy=<the deploy policy>`, put the secret ID in GitHub, run a deploy, then `nomad acl token delete <old accessor ID>`. |
+
+### Registry credentials
+
+The job does not carry registry credentials (anyone who can read a Nomad job, or its old versions,
+could read them). Images are pulled with the Nomad client's own Docker auth on `worker-5`: a Harbor
+**robot account** with pull rights on `sales-cadence` only, in the client configuration:
+
+```hcl
+plugin "docker" {
+  config {
+    auth { config = "/etc/nomad.d/docker-auth.json" }   # {"auths":{"h4rb0r.pmx.acumen-strategy.com":{"auth":"<base64 robot:secret>"}}}
+  }
+}
+```
+
+Restart the Nomad client after changing it. CI's push to Harbor uses the GitHub secrets.
+
+### Admin locked out
+
+- Lost password: `nomad alloc exec -task web "$ALLOC" pnpm admin:password -- <email> '<new password>'`.
+  It signs that account out everywhere.
+- No admin account left (removed, or nobody knows which): set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in
+  `nomad/jobs/cadence` to a new address and a strong password. The web restarts and the seed creates
+  that account as an admin (it only ever creates an account that does not exist).
+- Microsoft sign-in broken (an expired secret, usually): set `PASSWORD_SIGN_IN=true` in
+  `nomad/jobs/cadence`, sign in with a password, fix Settings > Sign-in, then remove the item.
 
 ## Gotchas
 

@@ -71,6 +71,8 @@ job "cadence" {
         dns_servers = ["172.17.0.1", "8.8.8.8"]
       }
 
+      # T06: CADENCE_DRY_RUN comes from the Nomad variable (default false): setting it to true there
+      # restarts both tasks with every CRM write stopped, no redeploy (DEPLOY.md, "Stop all CRM writes").
       template {
         destination = "secrets/cadence.env"
         env         = true
@@ -93,6 +95,14 @@ TWILIO_ACCOUNT_SID={{ .TWILIO_ACCOUNT_SID }}
 TWILIO_API_KEY_SID={{ .TWILIO_API_KEY_SID }}
 TWILIO_API_KEY_SECRET={{ .TWILIO_API_KEY_SECRET }}
 {{- end }}
+{{- if .CADENCE_DRY_RUN }}
+CADENCE_DRY_RUN={{ .CADENCE_DRY_RUN }}
+{{- else }}
+CADENCE_DRY_RUN=false
+{{- end }}
+{{- if .PASSWORD_SIGN_IN }}
+PASSWORD_SIGN_IN={{ .PASSWORD_SIGN_IN }}
+{{- end }}
 {{- end }}
 NODE_ENV=production
 NODE_OPTIONS=--max-old-space-size=512
@@ -102,7 +112,6 @@ APP_URL=https://cadence.pmx.acumen-strategy.com
 COOKIE_SECURE=true
 SEED_ON_START=true
 SEED_PROFILE=core
-CADENCE_DRY_RUN=false
 GRAPH_MAIL_ENABLED=false
 EOH
       }
@@ -165,6 +174,11 @@ TWILIO_ACCOUNT_SID={{ .TWILIO_ACCOUNT_SID }}
 TWILIO_API_KEY_SID={{ .TWILIO_API_KEY_SID }}
 TWILIO_API_KEY_SECRET={{ .TWILIO_API_KEY_SECRET }}
 {{- end }}
+{{- if .CADENCE_DRY_RUN }}
+CADENCE_DRY_RUN={{ .CADENCE_DRY_RUN }}
+{{- else }}
+CADENCE_DRY_RUN=false
+{{- end }}
 {{- end }}
 NODE_ENV=production
 NODE_OPTIONS=--max-old-space-size=320
@@ -172,7 +186,6 @@ TWENTY_MODE=graphql
 TWENTY_API_URL=https://app.tw3ntycrm.acm.acumen-strategy.com
 APP_URL=https://cadence.pmx.acumen-strategy.com
 SEED_ON_START=false
-CADENCE_DRY_RUN=false
 GRAPH_MAIL_ENABLED=false
 CRM_SYNC_SECONDS=300
 WORKER_TICK_SECONDS=60
