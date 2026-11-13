@@ -1,3 +1,4 @@
+import { openEmailReplyTask } from '../linkedin/follow-ups';
 import type { ActivityEvent, EventSource, Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { logAudit, webhookActor, RECONCILE_ACTOR, type AuditActor } from '../audit';
@@ -532,6 +533,8 @@ async function handleMessage(message: TwentyMessage, ctx: EngineContext, setting
       const r = await optOutPerson(personId, { source: 'email_reply', actor: ctx.actor, reason: `Replied asking not to be contacted: ${subject}`.slice(0, 300), now: occurredAt });
       return { result: 'inbound_opt_out', details: { personId, changed: r.changed } };
     }
+    // Answer them within 2 working days, in a campaign or not (owner, 13 Nov 2026).
+    await openEmailReplyTask({ personId }, occurredAt, `message:${message.id}:person:${personId}`);
     const enrollment = await prisma.enrollment.findFirst({
       where: { personId, status: { in: [...OCCUPYING_STATUSES, 'REPLIED', 'MEETING'] } },
       orderBy: { createdAt: 'desc' },

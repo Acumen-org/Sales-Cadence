@@ -56,6 +56,9 @@ const EnvSchema = z.object({
   TWILIO_API_KEY_SECRET: z.string().optional(),
   /** Where Twilio's REST API lives. Only a test points it elsewhere. */
   TWILIO_API_URL: z.string().default(TEST_ONLY_URLS.TWILIO_API_URL),
+  /** h00ks partner API key with staff:read: which rep has which Twilio number. Empty: numbers are assigned in Settings > Calling. */
+  H00KS_API_TOKEN: z.string().optional(),
+  H00KS_API_URL: z.string().default('https://h00ks.acm.acumen-strategy.com/api/partner/v1'),
   /** 1 uses the in-memory Twilio stand-in (tests and the local launcher); refused in production unless mock mode is allowed. */
   CADENCE_FAKE_TWILIO: z.string().optional(),
   /** true turns on reading the sales mailboxes through Microsoft Graph (application Mail.Read). Off when unset. */

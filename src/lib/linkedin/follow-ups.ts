@@ -28,11 +28,18 @@ export const FOLLOW_UP_LABELS: Record<LinkedInFollowUpKind, string> = {
   MESSAGE: 'Message on LinkedIn',
   WITHDRAW: 'Withdraw the connection request',
   RESEND: 'Send the connection request again',
+  EMAIL_REPLY: 'Reply to their email',
 };
+
+/** A reply, by email or on LinkedIn, is answered within this many working days (owner, 13 Nov 2026: "The deadline is 2 days"; LinkedIn too). */
+export const EMAIL_REPLY_DAYS = 2;
+/** A reply older than this when Cadence first sees it (a catch-up, a backfill) opens no task. */
+const EMAIL_REPLY_FRESH_MS = 7 * 86_400_000;
 
 /** What the task asks, with why. */
 export function followUpLabel(f: Pick<LinkedInFollowUp, 'kind' | 'trigger'>): string {
   if (f.kind === 'MESSAGE') return f.trigger === 'replied' ? 'Reply on LinkedIn' : 'Message on LinkedIn: they accepted';
+  if (f.kind === 'EMAIL_REPLY') return 'Reply to their email';
   return FOLLOW_UP_LABELS[f.kind];
 }
 
@@ -45,14 +52,15 @@ export function workingDaysAfter(date: LocalDate, n: number, workingDays: number
 
 /**
  * The day it is due, in the FO's own calendar. A MESSAGE after an acceptance is due 2 working days after
- * the acceptance, or after someone took the contact on if that was later; a reply is answered the same
- * working day. A withdrawal is due at once (the 14 days already passed). A resend is due when LinkedIn's
+ * the acceptance, or after someone took the contact on if that was later; a reply is answered within 2
+ * working days, as an email reply is. A withdrawal is due at once (the 14 days already passed). A resend is due when LinkedIn's
  * cool-off ends.
  */
 export function dueDateFor(f: { kind: LinkedInFollowUpKind; trigger: string; triggeredAt: Date }, assignedAt: Date | null, timezone: string, linkedin: LinkedInSettings, workingDays: number[]): LocalDate {
   const tz = safeTimezone(timezone);
   const from = maxLocalDate(toLocalDate(f.triggeredAt, tz), assignedAt ? toLocalDate(assignedAt, tz) : toLocalDate(f.triggeredAt, tz));
-  if (f.kind === 'MESSAGE') return workingDaysAfter(from, f.trigger === 'accepted' ? linkedin.messageAfterAcceptDays : 0, workingDays);
+  if (f.kind === 'MESSAGE') return workingDaysAfter(from, f.trigger === 'accepted' ? linkedin.messageAfterAcceptDays : EMAIL_REPLY_DAYS, workingDays);
+  if (f.kind === 'EMAIL_REPLY') return workingDaysAfter(from, EMAIL_REPLY_DAYS, workingDays);
   if (f.kind === 'RESEND') return nextWorkingDay(maxLocalDate(addDays(toLocalDate(f.triggeredAt, tz), linkedin.resendAfterDays), from), workingDays);
   return nextWorkingDay(from, workingDays);
 }
@@ -70,17 +78,32 @@ export async function ownerOf(subject: LinkedInSubject): Promise<string | null> 
 }
 
 /**
- * Who works it. The owner always. Without one: a CRM person's task goes to the teammate who sent the
- * request; a cold contact's MESSAGE waits for an owner (the owner's rule: no owner until they respond, and
- * then someone must own them); a withdrawal or resend goes to the sender, who did the outreach.
+ * Who works it. The owner always. Without one: a cold contact's message or reply waits in Cold outreach >
+ * Needs an owner (the owner's rule: no owner until they respond, and then someone must own them); a CRM
+ * person's goes to the rep of their latest campaign, else the teammate who sent the request, else a leader
+ * of their pod, so it lands in the normal Tasks list (owner, 13 Nov 2026); a withdrawal or resend goes to
+ * the sender.
  */
-async function foFor(kind: LinkedInFollowUpKind, subject: LinkedInSubject, link: Pick<LinkedInLink, 'invitedByUserId'>): Promise<string | null> {
+async function foFor(kind: LinkedInFollowUpKind, subject: LinkedInSubject, link: Pick<LinkedInLink, 'invitedByUserId'> | null): Promise<string | null> {
   const owner = await ownerOf(subject);
   if (owner) return owner;
-  if (kind === 'MESSAGE' && 'sandboxContactId' in subject) return null;
-  if (!link.invitedByUserId) return null;
-  const sender = await prisma.user.findFirst({ where: { id: link.invitedByUserId, active: true }, select: { id: true } });
-  return sender?.id ?? null;
+  const answer = kind === 'MESSAGE' || kind === 'EMAIL_REPLY';
+  if (answer && 'sandboxContactId' in subject) return null;
+  if ('personId' in subject) {
+    const e = await prisma.enrollment.findFirst({ where: { personId: subject.personId, fo: { active: true } }, orderBy: { createdAt: 'desc' }, select: { foUserId: true } });
+    if (e) return e.foUserId;
+  }
+  if (link?.invitedByUserId) {
+    const sender = await prisma.user.findFirst({ where: { id: link.invitedByUserId, active: true }, select: { id: true } });
+    if (sender) return sender.id;
+  }
+  if ('personId' in subject) {
+    // Nobody else: a leader of the person's pod, so it is still in someone's Tasks.
+    const p = await prisma.personCache.findUnique({ where: { id: subject.personId }, select: { podOwner: true } });
+    const leader = p?.podOwner ? await prisma.user.findFirst({ where: { active: true, role: { in: ['SALES_LEADER', 'POD_MANAGER'] }, pods: { some: { pod: { podOwnerValue: p.podOwner } } } }, orderBy: { createdAt: 'asc' }, select: { id: true } }) : null;
+    return leader?.id ?? null;
+  }
+  return null;
 }
 
 /** Someone who must not be contacted gets no LinkedIn task. */
@@ -125,6 +148,44 @@ export async function openFollowUp(input: { kind: LinkedInFollowUpKind; trigger:
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') return null;
     throw err;
   }
+}
+
+/**
+ * They answered an email, in a campaign or not (owner, 13 Nov 2026): "Reply to their email", due 2 working
+ * days later, for a CRM person or a live cold contact. An auto-reply is not an answer and never gets here.
+ * One task per reply (`sourceId`, the reply's touch); none for a reply already answered, or one first seen
+ * long after it came (a catch-up). Returns its id, or null.
+ */
+export async function openEmailReplyTask(subject: LinkedInSubject, at: Date, sourceId: string, now = new Date()): Promise<string | null> {
+  if (now.getTime() - at.getTime() > EMAIL_REPLY_FRESH_MS) return null;
+  if (!(await mayContact(subject))) return null;
+  if (await prisma.linkedInFollowUp.count({ where: { sourceId } })) return null;
+  // Answered already (we wrote after it), or a task for an earlier reply is still open: that one stands.
+  if (await prisma.touch.count({ where: { ...subjectWhere(subject), channel: 'EMAIL', direction: 'OUTBOUND', occurredAt: { gt: at } } })) return null;
+  if (await prisma.linkedInFollowUp.count({ where: { ...subjectWhere(subject), kind: 'EMAIL_REPLY', state: 'OPEN' } })) return null;
+  const { linkedin, rules } = await getSettings();
+  const foUserId = await foFor('EMAIL_REPLY', subject, null);
+  const dueDate = foUserId ? dueDateFor({ kind: 'EMAIL_REPLY', trigger: 'email_reply', triggeredAt: at }, null, await timezoneOf(foUserId), linkedin, rules.workingDays) : null;
+  const status = 'sandboxContactId' in subject ? (await prisma.sandboxContact.findUnique({ where: { id: subject.sandboxContactId }, select: { status: true } }))?.status : null;
+  try {
+    const row = await prisma.linkedInFollowUp.create({
+      data: {
+        kind: 'EMAIL_REPLY', trigger: 'email_reply', triggeredAt: at, sourceId, foUserId, dueDate, assignedAt: foUserId ? now : null,
+        ...('personId' in subject ? { personId: subject.personId } : { sandboxContactId: subject.sandboxContactId }),
+        audience: audienceOf('personId' in subject ? { personId: subject.personId } : { sandboxContactId: subject.sandboxContactId }, status),
+      },
+    });
+    await logAudit({ ...auditOf(subject), action: 'linkedin_follow_up_opened', actor: SYSTEM_ACTOR, details: { followUpId: row.id, kind: 'EMAIL_REPLY', foUserId, dueDate } });
+    return row.id;
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') return null;
+    throw err;
+  }
+}
+
+/** An email seen going to them closes their open "Reply to their email". Returns how many closed. */
+export function closeEmailReplyTasks(subject: LinkedInSubject, at: Date, evidence: string): Promise<number> {
+  return closeFollowUps({ ...subjectWhere(subject), kind: 'EMAIL_REPLY', triggeredAt: { lte: at } }, { state: 'DONE', at, evidenceId: evidence });
 }
 
 export const auditOf = (s: LinkedInSubject) => ('personId' in s ? { entityType: 'person' as const, entityId: s.personId } : { entityType: 'sandbox_contact' as const, entityId: s.sandboxContactId });

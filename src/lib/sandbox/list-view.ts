@@ -218,7 +218,7 @@ export type ColdTableRow = {
   lastCall: { outcome: string; day: string } | null;
   source: { label: string; title: string };
   /** A moved contact's Undo, while the reader may; a failed move with its fix (B036, B106). */
-  move: { undo: { itemId: string; confirm: string; campaigns: { enrollmentId: string; name: string }[] } | null; failed: { error: string; href: string; label: string } | null } | null;
+  move: { undo: { itemId: string; confirm: string; campaigns: { enrollmentId: string; name: string }[] } | null; failed: { error: string; href: string; label: string; retrying?: boolean } | null } | null;
   /** What the reader may do to this contact from the list: true, or why not, in words (B118, B151). */
   allows: Record<BulkAct, true | string>;
   /** Has an open next step or a running campaign: Assign hands it over too. */

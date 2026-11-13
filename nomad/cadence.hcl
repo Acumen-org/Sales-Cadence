@@ -125,6 +125,9 @@ CADENCE_DRY_RUN=false
 {{- if .PASSWORD_SIGN_IN }}
 PASSWORD_SIGN_IN={{ .PASSWORD_SIGN_IN }}
 {{- end }}
+{{- if .H00KS_API_TOKEN }}
+H00KS_API_TOKEN={{ .H00KS_API_TOKEN }}
+{{- end }}
 {{- end }}
 NODE_ENV=production
 DATABASE_CONNECTION_LIMIT=6
@@ -214,6 +217,9 @@ TWILIO_API_KEY_SECRET={{ .TWILIO_API_KEY_SECRET }}
 CADENCE_DRY_RUN={{ .CADENCE_DRY_RUN }}
 {{- else }}
 CADENCE_DRY_RUN=false
+{{- end }}
+{{- if .H00KS_API_TOKEN }}
+H00KS_API_TOKEN={{ .H00KS_API_TOKEN }}
 {{- end }}
 {{- end }}
 NODE_ENV=production
