@@ -378,8 +378,16 @@ async function sweepUnseen(kind: 'person' | 'company', client: TwentyClient, sin
     return;
   }
   const stale = { where: { deletedAt: null, syncedAt: { lt: since } }, data: { deletedAt: since, syncedAt: since } };
+  // N07: a person gone from the CRM leaves their sequences too, as the deletion webhook would have.
+  const goneIds = kind === 'person' ? (await prisma.personCache.findMany({ where: stale.where, select: { id: true } })).map((p) => p.id) : [];
   const gone = kind === 'person' ? await prisma.personCache.updateMany(stale) : await prisma.companyCache.updateMany(stale);
   stats.removed += gone.count;
+  if (!goneIds.length) return;
+  const { applyPersonFlags } = await import('./engine/enrollment');
+  const marked = await prisma.personCache.findMany({ where: { id: { in: goneIds }, deletedAt: since }, select: { id: true } });
+  for (const { id } of marked) {
+    await applyPersonFlags({ id, dnd: false, deletedAt: since.toISOString() }, { actor: SYSTEM_ACTOR }).catch((err) => console.warn(`[cache] person ${id} removed but not taken out of their sequence: ${errorText(err)}`));
+  }
 }
 
 /** Make sure the given person ids are cached, fetching missing ones from Twenty. */

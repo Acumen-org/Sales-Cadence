@@ -3,7 +3,9 @@ import { prisma } from '@/lib/db';
 import { syncContinuously, type ContinuousSyncState } from '@/lib/continuous-sync';
 import { refreshPersonCache } from '@/lib/person-cache';
 import { MockTwentyClient } from '@/lib/twenty/mock-client';
-import { resetDb } from './helpers/db';
+import { resetDb, seedBasics } from './helpers/db';
+import { SYSTEM_ACTOR } from '@/lib/audit';
+import { OCCUPYING_STATUSES, enrollPeople } from '@/lib/engine/enrollment';
 
 /** Full listings of people come two to a page, can fail once at a cursor, or end early. */
 class PagedTwenty extends MockTwentyClient {
@@ -95,5 +97,18 @@ describe('the full re-read of the CRM (N01, N04)', () => {
     client.people.push(hidden);
     await refreshPersonCache(client);
     expect((await prisma.personCache.findUniqueOrThrow({ where: { id: hidden.id } })).deletedAt).toBeNull();
+  });
+
+  it('N07: a person a complete listing no longer returns leaves their sequence', async () => {
+    const b = await seedBasics();
+    const client = new PagedTwenty();
+    client.reset();
+    await refreshPersonCache(client);
+    await enrollPeople({ personIds: ['person-01'], sequenceId: b.sequence.id, podId: b.pods.Alisa.id, startDate: '2026-09-07', assignment: { mode: 'FIXED', foUserId: b.users.alisa.id }, actor: SYSTEM_ACTOR }, { now: new Date('2026-09-06T10:00:00Z') });
+    client.people = client.people.filter((p) => p.id !== 'person-01');
+    expect((await refreshPersonCache(client)).removed).toBe(1);
+    const e = await prisma.enrollment.findFirstOrThrow({ where: { personId: 'person-01' } });
+    expect(OCCUPYING_STATUSES).not.toContain(e.status);
+    expect(await prisma.task.count({ where: { enrollmentId: e.id, state: 'PENDING' } })).toBe(0);
   });
 });
