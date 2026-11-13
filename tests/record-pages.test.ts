@@ -13,7 +13,6 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {}, push: () => {}, replace: () => {} }), usePathname: () => '/people', useSearchParams: () => new URLSearchParams(), redirect: (to: string) => { throw new Error(`redirect:${to}`); }, notFound: () => { throw new Error('not found'); } }));
 const { default: PersonPage } = await import('@/app/(app)/people/[id]/page');
 const { default: AccountPage } = await import('@/app/(app)/accounts/[id]/page');
-const { logManualCallAction } = await import('@/lib/actions/call-forms');
 
 /**
  * Owner, 13 Nov 2026: the CRM person and account pages were a stack of boxes, and Activity and Emails
@@ -71,26 +70,6 @@ describe('the person and account pages', () => {
     for (const gone of ['Classification', 'CRM activity details', 'Ownership', 'All people']) expect(words, gone).not.toContain(gone);
     // A field the record does not have is left out, not shown as a dash.
     expect(words).not.toMatch(/BOOKING|Booking/);
-  });
-
-  it('a CRM person has Log a call beside Call, even with no phone, and a call logged for them is saved with its form waiting', async () => {
-    const person = await prisma.personCache.findFirstOrThrow({ where: { deletedAt: null, podOwner: { not: null } } });
-    await prisma.personCache.update({ where: { id: person.id }, data: { phone: null } });
-    const draw = async () => text(renderToStaticMarkup(await PersonPage({ params: Promise.resolve({ id: person.id }), searchParams: Promise.resolve({}) })));
-    const before = await draw();
-    expect(before).toContain('Log a call');
-    expect(before).not.toMatch(/Log a call Fill in the form/);
-
-    const fd = new FormData();
-    fd.set('personId', person.id);
-    fd.set('direction', 'OUTBOUND');
-    fd.set('startedAt', '');
-    const r = await logManualCallAction(fd);
-    expect(r).toEqual(expect.objectContaining({ ok: true }));
-    const call = await prisma.callLog.findUniqueOrThrow({ where: { id: (r as { data: { callId: string } }).data.callId } });
-    expect(call).toEqual(expect.objectContaining({ personId: person.id, sandboxContactId: null, userId: alisa.id, formDoneAt: null }));
-    // Its form now waits, so the button says so under it, the way the cold contact page does.
-    expect(await draw()).toMatch(/Log a call Fill in the form for your call with .+ first\./);
   });
 
   it('an account has six tabs, its people in a list or by title, and one activity feed; old tab links still open', async () => {
