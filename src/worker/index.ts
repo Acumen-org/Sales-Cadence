@@ -247,10 +247,10 @@ async function main(){
  // N12: the worker's CRM requests are background work: they leave room in the minute for reps' clicks.
  setCrmRequestPriority('background');
  log('Continuous sync every '+config.CRM_SYNC_SECONDS+' seconds; nightly reconcile after '+config.RECONCILE_HOUR+':00 '+workspaceTimezone());
- let timer:ReturnType<typeof setInterval>|undefined;let renew:ReturnType<typeof setInterval>|undefined;
+ const timers:{tick?:ReturnType<typeof setInterval>;renew?:ReturnType<typeof setInterval>}={};
  // T35: listening for the stop signal before the first pass, so a stop during it waits for it too.
  const stop=async()=>{
-  if(stopping)return;stopping=true;if(timer)clearInterval(timer);if(renew)clearInterval(renew);
+  if(stopping)return;stopping=true;clearInterval(timers.tick);clearInterval(timers.renew);
   log('stopping: waiting for the current pass to finish');
   while(running||crmRunning)await new Promise(resolve=>setTimeout(resolve,100));
   await nightly.settled();
@@ -266,7 +266,7 @@ async function main(){
   await new Promise(resolve=>setTimeout(resolve,15_000));
  }
  if(stopping)return;
- renew=setInterval(()=>{void takeWorkerLease(leaseHolder).then((held)=>{if(!held){log('another worker took the lease; stopping');void stop();}}).catch((error)=>log('worker lease renewal failed',error));},LEASE_RENEW_MS);
- await tick();if(!stopping)timer=setInterval(tick,Math.min(config.WORKER_TICK_SECONDS,config.CRM_SYNC_SECONDS,120)*1000);
+ timers.renew=setInterval(()=>{void takeWorkerLease(leaseHolder).then((held)=>{if(!held){log('another worker took the lease; stopping');void stop();}}).catch((error)=>log('worker lease renewal failed',error));},LEASE_RENEW_MS);
+ await tick();if(!stopping)timers.tick=setInterval(tick,Math.min(config.WORKER_TICK_SECONDS,config.CRM_SYNC_SECONDS,120)*1000);
 }
 main().catch(error=>{console.error('[worker] fatal',error);process.exit(1);});
