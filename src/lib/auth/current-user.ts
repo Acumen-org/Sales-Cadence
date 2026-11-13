@@ -2,7 +2,7 @@ import { cache } from 'react';
 import { redirect } from 'next/navigation';
 import type { Role } from '@prisma/client';
 import { prisma } from '../db';
-import { mayBeLegacyToken, readSessionToken, rekeySession, storedToken } from './session';
+import { readSessionToken } from './session';
 import { ForbiddenError, isAdmin, type Actor } from './rbac';
 import { workspaceTimezone } from '../workspace';
 
@@ -24,13 +24,10 @@ export type SessionUser = {
 export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
   const token = await readSessionToken();
   if (!token) return null;
-  const include = { user: { include: { pods: { where: { pod: { archived: false } }, include: { pod: { select: { id: true, name: true } } } } } } } as const;
-  // Q12: rows hold the token's hash; a token from before that is found once and re-keyed.
-  let session = await prisma.session.findUnique({ where: { token: storedToken(token) }, include });
-  if (!session && mayBeLegacyToken(token)) {
-    session = await prisma.session.findUnique({ where: { token }, include });
-    if (session) await rekeySession(session.id, token);
-  }
+  const session = await prisma.session.findUnique({
+    where: { token },
+    include: { user: { include: { pods: { where: { pod: { archived: false } }, include: { pod: { select: { id: true, name: true } } } } } } },
+  });
   if (!session || session.expiresAt < new Date() || !session.user.active) return null;
   const u = session.user;
   return {

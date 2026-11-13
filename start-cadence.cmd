@@ -10,8 +10,8 @@ if exist node_modules\tsx\dist\cli.mjs goto :run
 
 echo Installing dependencies - first run only, this takes a few minutes...
 where pnpm >nul 2>&1
-if errorlevel 1 call npm install -g pnpm@9.15.9
-call pnpm install --frozen-lockfile
+if errorlevel 1 call npm install -g pnpm@9
+call pnpm install
 if errorlevel 1 goto :installfailed
 
 :run
@@ -23,7 +23,7 @@ pause
 exit /b 0
 
 :nonode
-echo Node.js 22.12 or newer is required. Install it from https://nodejs.org and run this again.
+echo Node.js 20 or newer is required. Install it from https://nodejs.org and run this again.
 pause
 exit /b 1
 

@@ -22,10 +22,9 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   const user = await getCurrentUser();
-  const url = new URL(request.url);
-  // R22: an ended session goes to sign-in and back to the same Reports view, never a bare line of text.
-  if (!user) return NextResponse.redirect(new URL(`/login?next=${encodeURIComponent(`/reports${url.search}`)}`, url), 303);
+  if (!user) return new NextResponse('Sign in to export a report.', { status: 401 });
   if (!canViewReports(toActor(user))) return new NextResponse('Reports are not available to this role.', { status: 403 });
+  const url = new URL(request.url);
   const get = (k: string) => url.searchParams.get(k) ?? undefined;
   const sp = { from: get('from'), to: get('to'), pod: get('pod'), fo: get('fo'), audience: get('audience') };
   const calls = get('view') === 'calls';
@@ -35,7 +34,7 @@ export async function GET(request: Request) {
   // Static markup, no client runtime: the document is server-only, so nothing needs hydrating.
   const { prelude } = await prerender(calls
     ? createElement(CallsDocument, {
-      data: await callReport({ from: instant(bundle.range.from), to: instant(addDays(bundle.range.to, 1)), podId: bundle.podId, foUserId: bundle.foUserId, audience: bundle.audience, allRows: true, previous: { from: instant(bundle.previousRange.from), to: instant(addDays(bundle.previousRange.to, 1)) } }),
+      data: await callReport({ from: instant(bundle.range.from), to: instant(addDays(bundle.range.to, 1)), podId: bundle.podId, foUserId: bundle.foUserId, audience: bundle.audience, previous: { from: instant(bundle.previousRange.from), to: instant(addDays(bundle.previousRange.to, 1)) } }),
       timezone: workspaceTimezone(), compared: bundle.previousRange,
     })
     : createElement(ReportDocument, { reports: bundle.reports, previous: bundle.previous, range: { from: bundle.range.from, to: bundle.range.to }, compared: bundle.previousRange, scope: bundle.scope, campaigns: bundle.campaigns, generatedBy: user.name, generatedAt: new Date(), timezone: workspaceTimezone() }),

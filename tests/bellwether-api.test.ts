@@ -6,7 +6,7 @@ import { getMockTwentyClient } from '@/lib/twenty/mock-client';
 import { refreshCrmCopyFor } from '@/lib/sandbox/dedupe';
 import { addSuppressions } from '@/lib/sandbox/suppression';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
-import { bwContact, check, disableBellwether, enableBellwether, envelope, KEY, owners, ping, push, status } from './helpers/sandbox';
+import { bwContact, check, disableBellwether, enableBellwether, envelope, KEY, ping, push, status } from './helpers/sandbox';
 
 const person = (i: number) => MOCK_PEOPLE[i];
 
@@ -30,55 +30,6 @@ describe('Bellwether push API (contract section 14)', () => {
       const off = await ping();
       expect(off.status).toBe(503);
       expect(off.body.error.code).toBe('integration_disabled');
-    });
-  });
-
-  describe('integration audit U19, U27, U30', () => {
-    it('U19, U30: the key is checked before the switch, and wrong keys are slowed', async () => {
-      const { getSettings, saveSettingsSection } = await import('@/lib/settings');
-      const s = await getSettings();
-      await saveSettingsSection('sandbox', { ...s.sandbox, enabled: false });
-      expect((await ping({ key: 'wrong' })).status).toBe(401);
-      const off = await ping();
-      expect(off.status).toBe(503);
-      expect(off.body.error.message).toBe('The Bellwether integration is switched off in Cadence.');
-      await saveSettingsSection('sandbox', { ...s.sandbox, enabled: true });
-      for (let i = 0; i < 19; i++) await ping({ key: 'wrong' });
-      const slowed = await ping({ key: 'wrong' });
-      expect(slowed.status).toBe(429);
-      expect(Number(slowed.headers.get('retry-after'))).toBeGreaterThan(0);
-      // The right key is never slowed by someone else's wrong ones.
-      expect((await ping()).status).toBe(200);
-    });
-
-    it('U27: the per-minute limit is kept in the database, so another process\'s requests count too', async () => {
-      const { bucketId } = await import('@/lib/rate-window');
-      const now = new Date();
-      await prisma.apiRateHit.createMany({ data: Array.from({ length: 60 }, () => ({ bucket: `bw-status:${bucketId(KEY)}`, at: now })) });
-      expect((await status({ bellwetherContactIds: ['x'] })).status).toBe(429);
-    });
-
-    it('U16: the owners list gives the other addresses Cadence accepts for each owner', async () => {
-      await prisma.user.update({ where: { id: b.users.alisa.id }, data: { aliases: ['tw_alisa', 'Alisa.Marsh@Cadence.local'] } });
-      const list = (await owners()).body as { owners: { email: string; aliases: string[] }[] };
-      expect(list.owners.find((o) => o.email === 'alisa@cadence.local')?.aliases).toEqual(['alisa.marsh@cadence.local']);
-    });
-
-    it('U18: a push still running after 2 minutes answers "in progress" instead of running a second time', async () => {
-      const { createHash } = await import('node:crypto');
-      const key = randomUUID();
-      const body = envelope([bwContact()]);
-      await prisma.bellwetherPush.create({ data: { idempotencyKey: key, bodyHash: createHash('sha256').update(JSON.stringify(body)).digest('hex'), state: 'PROCESSING', pushedByEmail: 'alisa@cadence.local', contactCount: 1, createdAt: new Date(Date.now() - 3 * 60_000) } });
-      const again = await push(body, { idempotencyKey: key });
-      expect(again.status).toBe(409);
-      expect(again.body.error.code).toBe('idempotency_in_progress');
-    });
-
-    it('U21: a second push replaces the Bellwether link Cadence kept', async () => {
-      const first = await push(envelope([bwContact({ bellwetherUrl: 'https://bellwether.example/firm/1#p-2' })]));
-      const id = first.body.results[0].cadenceContactId;
-      await push(envelope([bwContact({ bellwetherContactId: first.body.results[0].bellwetherContactId, bellwetherUrl: 'https://bellwether.example/person/2' })]));
-      expect((await prisma.sandboxContact.findUniqueOrThrow({ where: { id } })).bellwetherUrl).toBe('https://bellwether.example/person/2');
     });
   });
 

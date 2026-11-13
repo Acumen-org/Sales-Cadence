@@ -6,8 +6,6 @@ export const dynamic = 'force-dynamic';
 export const metadata: Metadata = {
   title: 'Cadence',
   description: 'Sales sequencer beside the CRM',
-  // S-X2: an internal tool: no page of it (sign-in included) belongs in a search engine.
-  robots: { index: false, follow: false },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

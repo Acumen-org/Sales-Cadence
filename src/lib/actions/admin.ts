@@ -14,36 +14,17 @@ import { resolveReview } from '../engine/ingest';
 import { getTwentyClient } from '../twenty';
 import type { ActionResult } from './users';
 
-/**
- * Q17: "Sync now" stays on everyone's People and Accounts pages, but one pass runs at a time for
- * the whole server (a second click joins the pass already running), and none starts within 30
- * seconds of the last; only an admin sees the raw error of a failure.
- */
-const SYNC_NOW_GAP_MS = 30_000;
-const syncNow = globalThis as unknown as { __cadenceSyncNow?: { running: ReturnType<typeof syncContinuously> | null; finishedAt: number } };
-function sharedSyncPass(now = Date.now()): ReturnType<typeof syncContinuously> | null {
-  const s = (syncNow.__cadenceSyncNow ??= { running: null, finishedAt: 0 });
-  if (s.running) return s.running;
-  if (now - s.finishedAt < SYNC_NOW_GAP_MS) return null;
-  s.running = syncContinuously().finally(() => { s.running = null; s.finishedAt = Date.now(); });
-  return s.running;
-}
-
 /** The same pass the worker runs every minute, now. */
 export async function syncNowAction(): Promise<ActionResult> {
-  const user = await requireUser();
+  await requireUser();
   try {
-    const pass = sharedSyncPass();
-    if (!pass) return { ok: true, message: 'Synced a moment ago.' };
-    const stats = await pass;
+    const stats = await syncContinuously();
     for (const path of ['/settings', '/people', '/accounts', '/tasks', '/home']) revalidatePath(path);
     // One word is the answer wanted here: did it update. Detail lives in Settings > CRM.
     const stages = Object.keys(stats.stageErrors);
     if (stages.length) return { ok: false, error: `Synced, except ${stages.join(', ')}.` };
     return { ok: true, message: 'Synced.' };
   } catch (err) {
-    console.error('[sync-now] failed', err instanceof Error ? err.message : String(err));
-    if (user.role !== 'ADMIN') return { ok: false, error: 'Sync failed. Please try again.' };
     return { ok: false, error: `Sync failed: ${err instanceof Error ? err.message : String(err)}` };
   }
 }
@@ -141,7 +122,7 @@ export async function registerWebhookAction(): Promise<ActionResult> {
   const user = await requireAdmin();
   try {
     const e = env();
-    if (!e.TWENTY_WEBHOOK_SECRET && !e.CADENCE_WEBHOOK_TOKEN && e.CADENCE_WEBHOOK_OPEN !== '1') return { ok: false, error: 'The server has no webhook secret: set TWENTY_WEBHOOK_SECRET in its environment first.' };
+    if (!e.TWENTY_WEBHOOK_SECRET && !e.CADENCE_WEBHOOK_TOKEN && !e.CADENCE_WEBHOOK_OPEN) return { ok: false, error: 'The server has no webhook secret: set TWENTY_WEBHOOK_SECRET in its environment first.' };
     const targetUrl = `${e.APP_URL.replace(/\/+$/, '')}/api/webhooks/twenty${!e.TWENTY_WEBHOOK_SECRET && e.CADENCE_WEBHOOK_TOKEN ? `?token=${encodeURIComponent(e.CADENCE_WEBHOOK_TOKEN)}` : ''}`;
     const client = await getTwentyClient();
     const existing = (await client.listWebhooks()).filter((w) => w.targetUrl.split('?')[0] === targetUrl.split('?')[0]);

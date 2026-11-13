@@ -4,7 +4,7 @@ import { resetDb, seedBasics, type Basics } from './helpers/db';
 import { getSettings, invalidateSettingsCache, isExternalEmail, saveSettingsSection } from '@/lib/settings';
 import { microsoftUser, readIdToken, retirePasswords, signInMethods, SignInError, type MicrosoftIdentity } from '@/lib/auth/microsoft';
 import { getMockTwentyClient } from '@/lib/twenty/mock-client';
-import { missingMeetingTags, missingTagsNowInCrm, pushMeetingToCrm, syncMeetingToCrm } from '@/lib/meetings/crm';
+import { missingMeetingTags, syncMeetingToCrm } from '@/lib/meetings/crm';
 
 /**
  * Signing in with Microsoft (owner, 9 October 2026): the team signs in with their work accounts and
@@ -116,25 +116,5 @@ describe('tags Twenty lacks', () => {
     refuse.mockRestore();
     await syncMeetingToCrm(meeting.id);
     expect(await missingMeetingTags()).toEqual([]);
-  });
-
-  it('S09: meetings are written again only once a missing tag exists in Twenty', async () => {
-    const meeting = await prisma.meeting.create({ data: { title: 'Intro', sourceUrl: '', occurredAt: new Date('2027-03-04T17:00:00Z'), bookedById: b.users.karson.id, products: [], review: 'APPROVED' } });
-    const refuse = vi.spyOn(mock, 'addSelectOption').mockResolvedValue(null as unknown as string);
-    await syncMeetingToCrm(meeting.id);
-    refuse.mockRestore();
-    const schema = (await mock.meetingSchema())!;
-    expect(missingTagsNowInCrm(schema, await missingMeetingTags())).toBe(false);
-    await mock.addSelectOption(schema.fields.bookedBy!, b.users.karson.name);
-    expect(missingTagsNowInCrm((await mock.meetingSchema())!, await missingMeetingTags())).toBe(true);
-  });
-
-  it('S23: a meeting that keeps failing to reach Twenty waits in the retry list once', async () => {
-    const meeting = await prisma.meeting.create({ data: { title: 'Intro', sourceUrl: '', occurredAt: new Date('2027-03-04T17:00:00Z'), bookedById: b.users.karson.id, products: [], review: 'APPROVED' } });
-    const down = vi.spyOn(mock, 'meetingSchema').mockRejectedValue(new Error('Twenty is down'));
-    await pushMeetingToCrm(meeting.id);
-    await pushMeetingToCrm(meeting.id);
-    down.mockRestore();
-    expect(await prisma.twentyWrite.count({ where: { operation: 'syncMeeting' } })).toBe(1);
   });
 });

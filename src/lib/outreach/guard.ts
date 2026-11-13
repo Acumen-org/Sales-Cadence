@@ -117,9 +117,7 @@ function ownershipRefusal(a: GuardActor, s: ColdSubject, act: Act, opts: CanActO
     case 'assign':
       if (isAdmin(a)) return null;
       if (isJuniorFo(a)) return owner === a.id && (!opts.toUserId || opts.toUserId === a.id) ? null : refuse('not_allowed', 'Junior FOs can let go of their own contacts but cannot give contacts to someone else.');
-      // Q-X1: an unclaimed contact is the leader's to give only in their own pods (or with no pod),
-      // as with a claim; otherwise a leader could pull another pod's contact into theirs.
-      if (leaderHere || owner === a.id || (!owner && (!s.podId || inPod))) return null;
+      if (leaderHere || owner === a.id || !owner) return null;
       return refuse('not_allowed', `Only ${leadersOf(s.podName)}, and admins, can give this contact to someone else.`);
     case 'release':
       if (isAdmin(a) || owner === a.id || leaderHere) return null;

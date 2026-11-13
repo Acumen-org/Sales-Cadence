@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { getCurrentUser } from '@/lib/auth/current-user';
 import { getFakeTwilio } from '@/lib/calls/fake-twilio';
-import { getTwentyClient } from '@/lib/twenty';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,9 +12,7 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(req: Request) {
   const e = env();
-  // Q24: and only in a workspace running on the fake CRM too, as the fake-Twenty route is: a live
-  // server (TWENTY_MODE=graphql) never answers here, whatever else is switched on.
-  if (e.CADENCE_FAKE_TWILIO !== '1' || e.CADENCE_ALLOW_MOCK !== '1' || (await getTwentyClient().catch(() => null))?.kind !== 'mock') return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (e.CADENCE_FAKE_TWILIO !== '1' || e.CADENCE_ALLOW_MOCK !== '1') return NextResponse.json({ error: 'Not found' }, { status: 404 });
   if (!(await getCurrentUser())) return NextResponse.json({ error: 'Sign in first.' }, { status: 401 });
   const fake = getFakeTwilio();
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;

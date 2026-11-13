@@ -17,22 +17,6 @@ function plainOf(html: string, fallback: string): string {
   return (doc.body.textContent ?? fallback).replace(/\n{3,}/g, '\n\n').trim();
 }
 
-/**
- * R04: the unsaved copy this browser kept for a task, when it differs from the saved message; a copy
- * equal to what is saved is dropped. Null when there is none or storage is unavailable.
- */
-export function readRecoveryCopy(taskId: string, current: { subject: string; html: string }): { subject: string; html: string; text: string } | null {
-  try {
-    const raw = localStorage.getItem('cadence:recovery:' + taskId);
-    if (!raw) return null;
-    const copy = JSON.parse(raw) as { subject?: unknown; html?: unknown; text?: unknown };
-    if (typeof copy.html !== 'string') return null;
-    const found = { subject: typeof copy.subject === 'string' ? copy.subject : current.subject, html: copy.html, text: typeof copy.text === 'string' ? copy.text : '' };
-    if (found.subject === current.subject && found.html === current.html) { localStorage.removeItem('cadence:recovery:' + taskId); return null; }
-    return found;
-  } catch { return null; }
-}
-
 /** An Outlook on the web draft to this address, with this subject and message. */
 export const outlookComposeHref = (to: string, subject: string, body: string) => `https://outlook.office.com/mail/deeplink/compose?${new URLSearchParams({ to, subject, body }).toString()}`;
 
@@ -78,18 +62,6 @@ export function TaskComposer({ taskId, subject, body, html, label, channel, revi
     window.addEventListener('beforeunload', unload);
     return () => { alive.current = false; unregister(); window.removeEventListener('beforeunload', unload); void flush(); };
   }, [flush]);
-  // R04: a copy kept in this browser while a save failed is offered back when the task opens again.
-  const [recovery, setRecovery] = useState<typeof draft | null>(null);
-  useEffect(() => {
-    if (readOnly) return;
-    setRecovery(readRecoveryCopy(taskId, { subject: subject ?? '', html: initialHtml }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the task changes
-  }, [taskId, readOnly]);
-  const restore = () => {
-    if (!recovery) return;
-    touched.current = true; setRecovery(null); change(recovery);
-  };
-  const discard = () => { setRecovery(null); try { localStorage.removeItem('cadence:recovery:' + taskId); } catch {} };
   const change = (patch: Partial<typeof draft>) => {
     const next = { ...latest.current, ...patch }; latest.current = next; setDraft(next);
     if (!touched.current) { saved.current = { subject: next.subject, html: next.html }; return; }
@@ -110,7 +82,6 @@ export function TaskComposer({ taskId, subject, body, html, label, channel, revi
   };
   return <section className="space-y-3" onFocusCapture={() => { touched.current = true; }}>
     <header className="flex flex-wrap items-center gap-2"><span className="rounded-lg bg-brand-50 p-2 text-brand-700"><ActionIcon action={channel} size={19} /></span><h3 className="text-base font-semibold">{channel === 'CALL' ? 'Call preparation' : label}</h3><span className="ml-auto flex items-center gap-2">{!readOnly && <button type="button" onClick={() => { void flush(); }} aria-live="polite" className={state === 'Saved' ? 'btn-ghost btn-sm' : state === 'Saving' ? 'btn-ghost btn-sm' : 'btn-sm rounded-lg border border-amber-300 bg-amber-50 px-2.5 font-medium text-amber-800 hover:bg-amber-100'} disabled={state === 'Saved' || state === 'Saving'}>{state === 'Saved' ? <IconCheck size={12} /> : null}<strong>{state === 'Unsaved' ? 'Unsaved - save now' : state}</strong></button>}<button type="button" className="btn-secondary btn-sm" onClick={copy}><IconCopy size={13} />{copied ? 'Copied' : channel === 'CALL' ? 'Copy script' : 'Copy message'}</button></span></header>
-    {recovery ? <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[13px] text-amber-800"><span className="min-w-0 flex-1">This browser kept an edit of this message that was never saved.</span><button type="button" className="btn-secondary btn-sm" onClick={restore}>Restore it</button><button type="button" className="btn-ghost btn-sm" onClick={discard}>Discard</button></div> : null}
     {channel === 'CALL' && <div className="space-y-3 rounded-xl border border-brand-200 bg-brand-50/40 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><div className="text-xs text-ink-500">Phone</div><strong className="mt-1 block text-lg text-ink-900">{phone || 'No phone number'}</strong></div>

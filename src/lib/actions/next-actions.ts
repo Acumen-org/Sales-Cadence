@@ -54,16 +54,6 @@ export async function saveNextActionAction(formData: FormData): Promise<ActionRe
   const refused: { personId: string; reason: string }[] = [];
   const open = await prisma.nextAction.findMany({ where: { personId: { in: personIds }, state: 'OPEN' }, select: { personId: true, foUserId: true, fo: { select: { name: true } } } });
   for (const o of open) if (!(await mayWork(user, o.foUserId))) refused.push({ personId: o.personId!, reason: `already has a task with ${o.fo.name}` });
-  // Q-X2: with no FO chosen, a new task goes to each person's CRM owner (as setNextActions does),
-  // and that FO must be one the caller may assign to, as when the FO is chosen.
-  if (!input.foUserId) {
-    const people = await prisma.personCache.findMany({ where: { id: { in: personIds } }, select: { id: true, ownerMemberId: true } });
-    const owners = await prisma.user.findMany({ where: { active: true, twentyMemberId: { in: people.flatMap((p) => (p.ownerMemberId ? [p.ownerMemberId] : [])) } }, select: { id: true, name: true, twentyMemberId: true } });
-    for (const p of people) {
-      const owner = owners.find((u) => u.twentyMemberId === p.ownerMemberId);
-      if (owner && owner.id !== user.id && !refused.some((x) => x.personId === p.id) &&!(await mayWork(user, owner.id))) refused.push({ personId: p.id, reason: `belongs to ${owner.name}, who is not in your pods` });
-    }
-  }
   if (isJuniorFo(actor)) {
     const podOwners = (await prisma.pod.findMany({ where: { id: { in: user.podIds } }, select: { podOwnerValue: true } })).map((p) => p.podOwnerValue);
     const mine = new Set((await prisma.personCache.findMany({

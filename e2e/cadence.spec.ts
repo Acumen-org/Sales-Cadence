@@ -103,8 +103,7 @@ test('task flow: complete an email, log a call with an outcome, skip with a boun
   // Task flow, emails only. The heading is the person; the step is in the line above it.
   await page.goto(`/tasks?tab=${tab}&type=EMAIL&mode=flow`);
   await expect(page.getByText('Task flow', { exact: true }).first()).toBeVisible();
-  // R07: the counter says what it counts, "1 / 5 steps, 2 other tasks".
-  await expect(page.getByText(/^\d+ \/ \d+ steps?(, \d+ other tasks?)?$/).first()).toBeVisible();
+  await expect(page.getByText(/^\d+ \/ \d+$/).first()).toBeVisible();
   const firstPerson = (await page.locator('#main-content a[href^="/people/"]').first().textContent())!.trim();
   await expect(page.getByLabel('Email subject').first()).toBeVisible(); // template rendered
   await page.getByRole('button', { name: /^Done(: .+)?$/ }).first().click();

@@ -28,14 +28,12 @@ import { purgeOldPushes, sweepStuckPushes } from '../lib/sandbox/bellwether-api'
 import { importTwilioCalls } from '../lib/calls/import';
 import { runGraphMail } from '../lib/mail/graph-mail';
 import { COLD_OUTREACH_BACKFILL, runColdOutreachBackfill } from '../lib/outreach/backfills';
-import { nightlyLookbackDays, nightlyLoop } from '../lib/nightly';
-import { getSettings } from '../lib/settings';
+import { nightlyLoop } from '../lib/nightly';
 import { ringHealth } from '../lib/outreach/health';
 import { coldOutreachReleaseOnce } from '../lib/outreach/release';
 import { runLinkedInPass } from '../lib/linkedin/pass';
 import { beatWorker } from '../lib/worker-heartbeat';
 import { setCrmRequestPriority } from '../lib/twenty/pace';
-import { LEASE_RENEW_MS, newLeaseHolder, releaseWorkerLease, takeWorkerLease } from '../lib/worker-lease';
 
 const config=env();
 const log=(message:string,extra?:unknown)=>console.log('[worker '+new Date().toISOString()+'] '+message,extra??'');
@@ -55,8 +53,7 @@ let running=false;let lastSync=0;let lastPurge=0;let stopping=false;let unwritte
 const nightly=nightlyLoop({hour:config.RECONCILE_HOUR,log,jobs:()=>{
  const now=new Date();
  return [
-  // P31: back over every day since the last finished run, not only the fixed look-back, so a worker down for a week leaves no gap.
-  {name:'nightly reconcile',crm:true,run:async()=>reconcile({actor:SYSTEM_ACTOR,now,days:await nightlyLookbackDays(now,(await getSettings()).rules.reconcileLookbackDays)})},
+  {name:'nightly reconcile',crm:true,run:()=>reconcile({actor:SYSTEM_ACTOR,now})},
   // N13: no full cache listing here: the continuous sync makes its own once a day, resumably (N01).
   {name:'enrichment scorecard snapshot',run:()=>snapshotScorecard(now)},
   // Sandbox contacts Twenty gained after the push: flagged, outreach stopped (crm-check.ts).
@@ -150,7 +147,7 @@ async function meetingsBackfill(now:number){
   const shape=`${MEETINGS_RELEASE}|${meetingSchemaShape(schema)}`;
   const row=await prisma.setting.findUnique({where:{key}});
   if((row?.value as {shape?:string}|null)?.shape===shape)return;
-  const written=await backfillMeetingsToCrm({all:true,pauseMs:1000});if(written===null)return;
+  const written=await backfillMeetingsToCrm({all:true});if(written===null)return;
   log('meetings written to Twenty',written);
   const value={at:new Date().toISOString(),written,shape};
   await prisma.setting.upsert({where:{key},create:{key,value},update:{value}});
@@ -166,9 +163,6 @@ async function meetingsWithTwenty(now:number){
  const flagged=await prisma.setting.findUnique({where:{key:MEETINGS_CHANGED_KEY}});
  const changedAt=Date.parse(String((flagged?.value as {at?:string}|null)?.at??''));
  if(now<meetingsTwentyAt&&!(changedAt>=meetingsTwentyRan))return;
- // S22: a change reported by Twenty (often Cadence's own write coming back) or writes still waiting
- // bring the full check forward, but never closer than two minutes after the last one.
- if(now-meetingsTwentyRan<120_000)return;
  meetingsTwentyRan=now;meetingsTwentyAt=now+600_000;
  try{const stats=await checkMeetingsInCrm();if(stats&&(stats.linked||stats.written))log('meetings checked in Twenty',stats);if(stats?.waiting)meetingsTwentyAt=0;}catch(error){log('meetings check in Twenty failed',error);}
 }
@@ -187,8 +181,7 @@ async function meetingTagsRetry(now:number){
  try{
   const schema=await (await getTwentyClient()).meetingSchema();
   if(!schema||!missingTagsNowInCrm(schema,missing))return;
-  // S09: paced under Twenty's 100 requests a minute.
-  const written=await backfillMeetingsToCrm({all:true,pauseMs:1000});if(written!==null)log('meetings written again for missing tags',written);
+  const written=await backfillMeetingsToCrm({all:true});if(written!==null)log('meetings written again for missing tags',written);
  }catch(error){log('meetings tag retry failed',error);}
 }
 /**
@@ -238,6 +231,9 @@ async function tick(){
    await coldOutreachBackfill();
    await coldOutreachRelease();
    await sandboxJobs(now);
+   try{await launchScheduledCampaigns({actor:SYSTEM_ACTOR});}catch(error){log('campaign launch failed',error);}
+   // P02: a scheduler failure is logged and the rest of the pass (write retry, next actions, clean-up) still runs.
+   try{const stats=await runSchedulerTick({actor:SYSTEM_ACTOR});if(stats.generated||stats.completed)log('scheduler',stats);}catch(error){log('scheduler failed',error);}
    try{const retried=await retryFailedWrites();if(retried.retried)log('twenty write retry',retried);}catch(error){log('twenty write retry failed',error);}
    // N09: CRM writes a click caused that a restart cut off (neither done nor queued) are made now.
    if(now>=unwrittenAt){unwrittenAt=now+300_000;try{const swept=await sweepUnwrittenSyncs(new Date(now));if(swept.tasks||swept.optOuts)log('unwritten CRM writes swept',swept);}catch(error){log('unwritten CRM writes sweep failed',error);}}
@@ -248,51 +244,12 @@ async function tick(){
    if(now-lastPurge>=3600000){await purgeExpiredSessions();lastPurge=now;}
  }catch(error){log('tick failed',error);}finally{running=false;}
 }
-/**
- * P03: campaign launch and step generation in a loop of their own, beside the tick, so a long CRM
- * sync, mailbox read, Twilio import or meetings rewrite never holds back a campaign start or a step.
- */
-let engineRunning=false;
-async function engineTick(){
- if(engineRunning||stopping)return;engineRunning=true;
- try{
-   try{await launchScheduledCampaigns({actor:SYSTEM_ACTOR});}catch(error){log('campaign launch failed',error);}
-   // P02: a scheduler failure is logged and the rest of the pass still runs.
-   try{const stats=await runSchedulerTick({actor:SYSTEM_ACTOR});if(stats.generated||stats.completed)log('scheduler',stats);}catch(error){log('scheduler failed',error);}
- }finally{engineRunning=false;}
-}
-/** P14: how long a stop waits for the passes in progress; Nomad's kill_timeout (nomad/cadence.hcl) is longer. */
-const STOP_WAIT_MS=20_000;
-const leaseHolder=newLeaseHolder();
 async function main(){
  // N12: the worker's CRM requests are background work: they leave room in the minute for reps' clicks.
  setCrmRequestPriority('background');
  log('Continuous sync every '+config.CRM_SYNC_SECONDS+' seconds; nightly reconcile after '+config.RECONCILE_HOUR+':00 '+workspaceTimezone());
- const every=Math.min(config.WORKER_TICK_SECONDS,config.CRM_SYNC_SECONDS,120)*1000;
- const timers:{list:NodeJS.Timeout[];renew?:NodeJS.Timeout}={list:[]};
- // P14, T35: the stop is heard from the start, also while waiting for the lease or during a long first
- // pass. It waits a bounded time for the passes in progress, gives a nightly run back rather than wait
- // for it, and hands the lease on; the next worker picks everything up.
- const stop=async()=>{
-  if(stopping)return;stopping=true;for(const t of timers.list)clearInterval(t);clearInterval(timers.renew);
-  log('stopping: waiting for the current pass to finish');
-  const until=Date.now()+STOP_WAIT_MS;
-  while((running||engineRunning||crmRunning)&&Date.now()<until)await new Promise(resolve=>setTimeout(resolve,100));
-  await nightly.release().catch(error=>log('nightly release failed',error));
-  await releaseWorkerLease(leaseHolder).catch((error)=>log('worker lease release failed',error));
-  await prisma.$disconnect().catch(()=>undefined);process.exit(0);
- };
+ await tick();const timer=setInterval(tick,Math.min(config.WORKER_TICK_SECONDS,config.CRM_SYNC_SECONDS,120)*1000);
+ const stop=async()=>{stopping=true;clearInterval(timer);while(running||crmRunning)await new Promise(resolve=>setTimeout(resolve,100));await nightly.settled();await prisma.$disconnect();process.exit(0);};
  process.on('SIGTERM',stop);process.on('SIGINT',stop);
- // T19: one worker only. A second copy waits here until the first stops (or its lease runs out).
- let waiting=false;
- while(!stopping){
-  try{if(await takeWorkerLease(leaseHolder))break;}catch(error){log('worker lease check failed',error);}
-  if(!waiting){log('another worker holds the lease; waiting until it stops');waiting=true;}
-  await new Promise(resolve=>setTimeout(resolve,15_000));
- }
- if(stopping)return;
- timers.renew=setInterval(()=>{void takeWorkerLease(leaseHolder).then((held)=>{if(!held){log('another worker took the lease; stopping');void stop();}}).catch((error)=>log('worker lease renewal failed',error));},LEASE_RENEW_MS);
- timers.list=[setInterval(tick,every),setInterval(engineTick,every)];
- void engineTick();await tick();
 }
 main().catch(error=>{console.error('[worker] fatal',error);process.exit(1);});

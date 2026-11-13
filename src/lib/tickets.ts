@@ -98,15 +98,9 @@ export async function raiseOptOutTicket(ref: SubjectRef, note: string, user: { i
   if (!opt) return { ok: false, error: 'Only an opt-out from the post-call form can be checked. This person is not opted out that way.' };
   if (opt.ticket) return { ok: false, error: `${opt.ticket.raisedBy ?? 'Someone'} raised this already. Biz Ops are looking at it.` };
   const moved = ref.kind === 'cold' ? await prisma.sandboxContact.findUnique({ where: { id: ref.id }, select: { twentyPersonId: true } }) : null;
-  // S32: checked again under a lock on this person, so two people raising it at once open one ticket.
-  const ticket = await prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`ticket:opt-out:${ref.kind}:${ref.id}`}))`;
-    if (await tx.ticket.count({ where: { kind: 'OPT_OUT', open: true, ...subjectWhere(ref) } })) return null;
-    return tx.ticket.create({
-      data: { kind: 'OPT_OUT', ...subjectWhere(ref), ...(moved?.twentyPersonId ? { personId: moved.twentyPersonId } : {}), note: what, raisedById: user.id, details: { optedOutAt: opt.at?.toISOString() ?? null, source: 'call_form', callId: opt.callId, by: opt.byName } as Prisma.InputJsonValue },
-    });
+  const ticket = await prisma.ticket.create({
+    data: { kind: 'OPT_OUT', ...subjectWhere(ref), ...(moved?.twentyPersonId ? { personId: moved.twentyPersonId } : {}), note: what, raisedById: user.id, details: { optedOutAt: opt.at?.toISOString() ?? null, source: 'call_form', callId: opt.callId, by: opt.byName } as Prisma.InputJsonValue },
   });
-  if (!ticket) return { ok: false, error: 'Someone raised this already. Biz Ops are looking at it.' };
   await logAudit({ entityType: 'ticket', entityId: ticket.id, action: 'raised', actor, details: { kind: 'OPT_OUT', subject: `${ref.kind}:${ref.id}` } });
   return { ok: true, id: ticket.id, message: 'Raised. Biz Ops will look at it and answer here.' };
 }

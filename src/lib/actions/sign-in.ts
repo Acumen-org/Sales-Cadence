@@ -5,7 +5,6 @@ import { z } from 'zod';
 import { requireAdmin } from '../auth/current-user';
 import { logAudit, userActor } from '../audit';
 import { env } from '../env';
-import { trustedLoginUrl } from '../auth/microsoft';
 import { getSettings, saveSettingsSection } from '../settings';
 import type { ActionResult } from './users';
 
@@ -14,8 +13,6 @@ const guid = z.guid();
 
 /** Microsoft accepts the app, tenant and secret together only when they belong together. */
 async function microsoftAccepts(clientId: string, tenantId: string, secret: string): Promise<string | null> {
-  // Q15: the secret goes to Microsoft only.
-  if (!trustedLoginUrl(env().MICROSOFT_LOGIN_URL)) return `MICROSOFT_LOGIN_URL (${env().MICROSOFT_LOGIN_URL}) is not Microsoft's sign-in service: remove it from the server's environment.`;
   try {
     const res = await fetch(`${env().MICROSOFT_LOGIN_URL.replace(/\/+$/, '')}/${tenantId}/oauth2/v2.0/token`, {
       method: 'POST',

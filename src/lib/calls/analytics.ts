@@ -139,7 +139,7 @@ async function withSubjects(calls: CallRow[]): Promise<CallListRow[]> {
  * Reports > Calls for one audience. `previous` is the period Outreach compares with, named the same
  * way (B195). The list and the Unmatched list are paged (B124, B196).
  */
-export async function callReport(f: CallFilters & { audience?: AudienceScope; previous?: { from: Date; to: Date } | null; page?: number; unmatchedPage?: number; /** R02: the exported file holds every call, not one page. */ allRows?: boolean }) {
+export async function callReport(f: CallFilters & { audience?: AudienceScope; previous?: { from: Date; to: Date } | null; page?: number; unmatchedPage?: number }) {
   const audience = f.audience ?? 'all';
   const settings = await getSettings();
   const outcomes = callOutcomes(settings.rules);
@@ -163,9 +163,9 @@ export async function callReport(f: CallFilters & { audience?: AudienceScope; pr
     prisma.user.findMany({ select: { id: true, name: true, active: true } }),
     formsWaiting({ ...waitingScope, part: audience === 'all' ? null : audience }),
     prisma.callLog.count({ where: listWhere }),
-    prisma.callLog.findMany({ where: listWhere, include: callInclude, orderBy: [{ startedAt: 'desc' }, { id: 'desc' }], ...(f.allRows ? {} : { skip: (page - 1) * CALLS_PAGE, take: CALLS_PAGE }) }),
+    prisma.callLog.findMany({ where: listWhere, include: callInclude, orderBy: [{ startedAt: 'desc' }, { id: 'desc' }], skip: (page - 1) * CALLS_PAGE, take: CALLS_PAGE }),
     prisma.callLog.count({ where: unmatchedWhere }),
-    prisma.callLog.findMany({ where: unmatchedWhere, include: callInclude, orderBy: [{ startedAt: 'desc' }, { id: 'desc' }], ...(f.allRows ? {} : { skip: (unmatchedPage - 1) * CALLS_PAGE, take: CALLS_PAGE }) }),
+    prisma.callLog.findMany({ where: unmatchedWhere, include: callInclude, orderBy: [{ startedAt: 'desc' }, { id: 'desc' }], skip: (unmatchedPage - 1) * CALLS_PAGE, take: CALLS_PAGE }),
   ]);
   const t = (list: StatRow[]) => totals(list, connected, settings.calling.conversationSeconds);
   const split: Record<CallPart | 'all', CallTotals> = { crm: t(calls.filter((c) => partOf(c) === 'crm')), cold: t(calls.filter((c) => partOf(c) === 'cold')), unmatched: t(calls.filter((c) => partOf(c) === 'unmatched')), all: t(calls) };
