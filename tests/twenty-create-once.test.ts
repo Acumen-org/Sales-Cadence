@@ -40,3 +40,22 @@ describe('N05: a create is never sent twice blindly', () => {
     expect(creates(calls, 'CreateNoteTarget')).toBe(1);
   });
 });
+
+describe('N06: additional emails when looking for an existing CRM person', () => {
+  const person = { id: 'p-9', name: { firstName: 'John', lastName: 'Smith' }, emails: { primaryEmail: 'js@other.example', additionalEmails: ['John.Smith@Firm.com'] }, deletedAt: null };
+  const empty = { data: { people: { edges: [], pageInfo: { hasNextPage: false, endCursor: null } } } };
+
+  it('are compared without regard to case', async () => {
+    const { twenty, calls } = client((c) => {
+      const filter = JSON.stringify(c.variables.filter ?? {});
+      return filter.includes('additionalEmails') && filter.includes('ilike') ? { data: { people: { edges: [{ node: person }], pageInfo: { hasNextPage: false, endCursor: null } } } } : empty;
+    });
+    expect((await twenty.findPeople({ emails: ['John.Smith@Firm.com'] })).map((p) => p.id)).toEqual(['p-9']);
+    expect(JSON.stringify(calls.find((c) => JSON.stringify(c.variables.filter ?? {}).includes('additionalEmails'))!.variables.filter)).toContain('john.smith@firm.com');
+  });
+
+  it('a failure of that second look fails the lookup instead of being swallowed', async () => {
+    const { twenty } = client((c) => (JSON.stringify(c.variables.filter ?? {}).includes('additionalEmails') ? new Response('down', { status: 503 }) : empty));
+    await expect(twenty.findPeople({ emails: ['john.smith@firm.com'] })).rejects.toThrow(/503/);
+  });
+});

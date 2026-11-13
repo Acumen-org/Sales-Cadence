@@ -951,17 +951,28 @@ export class TwentyGraphqlClient implements TwentyClient {
       return out;
     };
     const found = await all(or);
-    const extra: Raw[] = [
-      ...emails.map((email) => ({ [p.emails]: { additionalEmails: { like: `%${likeSafe(email)}%` } } })),
+    // N06: additional emails are matched without regard to case (ilike). A workspace whose filter
+    // refuses ilike is asked with like, for the address as given and in lower case. Only a refused
+    // filter is tolerated; a timeout or an outage fails the lookup, so no duplicate is created on it.
+    const asGiven = [...new Set((q.emails ?? []).map((e) => e?.trim()).filter((e): e is string => Boolean(e)))];
+    const extra = (op: 'ilike' | 'like'): Raw[] => [
+      ...(op === 'ilike' ? emails : [...new Set([...emails, ...asGiven])]).map((email) => ({ [p.emails]: { additionalEmails: { [op]: `%${likeSafe(email)}%` } } })),
       ...(!available || available.has(p.additionalNumber) ? phones.map((n) => ({ [p.additionalNumber]: { primaryPhoneNumber: { ilike: `%${n.slice(-7)}%` } } })) : []),
     ];
-    if (extra.length) {
-      try {
-        const seen = new Set(found.map((x) => x.id));
-        for (const x of await all(extra)) if (!seen.has(x.id)) found.push(x);
-      } catch (err) {
-        console.warn('[twenty] additional emails and numbers could not be searched; primary ones were', err instanceof Error ? err.message : err);
+    if (extra('ilike').length) {
+      const seen = new Set(found.map((x) => x.id));
+      let refused: unknown = null;
+      for (const op of ['ilike', 'like'] as const) {
+        try {
+          for (const x of await all(extra(op))) if (!seen.has(x.id)) { seen.add(x.id); found.push(x); }
+          refused = null;
+          break;
+        } catch (err) {
+          if (!(err instanceof TwentyApiError && err.graphqlErrors?.length)) throw err;
+          refused = err;
+        }
       }
+      if (refused) console.warn('[twenty] this workspace refuses the additional emails and numbers filter; primary ones were searched', refused instanceof Error ? refused.message : refused);
     }
     const emailSet = new Set(emails), phoneSet = new Set(phones), linkSet = new Set(links);
     return found.filter((person) => !person.deletedAt && (
