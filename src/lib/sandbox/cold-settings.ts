@@ -117,7 +117,7 @@ const KIND_WORDS: Record<string, string> = {
 };
 const REASON_WORDS: Record<string, string> = { opted_out: 'Opted out', erased: 'Erased at their request', do_not_contact: 'Do not contact' };
 const SOURCE_WORDS: Record<string, string> = {
-  call_form: 'Post-call form', contact_page: 'Contact page', person_page: 'Person page', suppression_list: 'Added to this list', skip_reason: 'Step skipped: asked not to be contacted', erase: 'Erase', bellwether: 'Bellwether',
+  call_form: 'Post-call form', contact_page: 'Contact page', person_page: 'Person page', suppression_list: 'Added to this list', skip_reason: 'Step skipped: asked not to be contacted', erase: 'Erase', bellwether: 'Bellwether', email_reply: 'Email reply asking to stop',
 };
 
 export function suppressionWords(s: { kind: string; reason: string; source: string | null }): { kind: string; reason: string; source: string | null } {

@@ -22,6 +22,8 @@ import { completeTask, type EngineContext } from './tasks';
 import { closeFromTouch } from './observed-evidence';
 import { closeEmailNextAction } from '../next-actions';
 import { coldOnlyAddresses, coldTouchOf, recordColdReply, recordColdSent } from '../mail/cold-email';
+import { asksToStop } from '../mail/stop-request';
+import { optOutPerson } from '../sandbox/opt-out';
 
 export type IngestInput = {
   source: EventSource;
@@ -414,8 +416,9 @@ async function handleMessage(message: TwentyMessage, ctx: EngineContext, setting
     const cold = from ? await coldOnlyAddresses([{ handle: from, personId: cls.fromPersonId }]) : new Map<string, string[]>();
     if (cold.size) {
       const automatic = isAutomaticReply(subject);
-      const r = await recordColdReply(from, { key: `message:${message.id}`, conversationId: message.threadId, subject: message.subject, at: occurredAt, mailboxUserId: cls.recipientUsers[0]?.id ?? null, via: 'crm' }, automatic);
-      return { result: automatic ? 'inbound_cold_automatic_reply' : 'inbound_cold_reply', details: { coldContacts: r.contacts.length } };
+      // L02: a reply through the CRM carries its text too: a request to stop opts them out everywhere.
+      const r = await recordColdReply(from, { key: `message:${message.id}`, conversationId: message.threadId, subject: message.subject, at: occurredAt, mailboxUserId: cls.recipientUsers[0]?.id ?? null, via: 'crm' }, automatic, !automatic && asksToStop(message.subject, message.text));
+      return { result: automatic ? 'inbound_cold_automatic_reply' : r.optedOut ? 'inbound_cold_opt_out' : 'inbound_cold_reply', details: { coldContacts: r.contacts.length } };
     }
     let personId = cls.fromPersonId;
     if (!personId && cls.fromHandle) {
@@ -436,6 +439,11 @@ async function handleMessage(message: TwentyMessage, ctx: EngineContext, setting
       actorLabel: cls.fromHandle,
     });
     if (automatic) return { result: 'inbound_automatic_reply' };
+    // L02: "stop emailing me" is an opt-out across every campaign (and the CRM's Do not contact), not one reply.
+    if (asksToStop(message.subject, message.text)) {
+      const r = await optOutPerson(personId, { source: 'email_reply', actor: ctx.actor, reason: `Replied asking not to be contacted: ${subject}`.slice(0, 300), now: occurredAt });
+      return { result: 'inbound_opt_out', details: { personId, changed: r.changed } };
+    }
     const enrollment = await prisma.enrollment.findFirst({
       where: { personId, status: { in: [...OCCUPYING_STATUSES, 'REPLIED', 'MEETING'] } },
       orderBy: { createdAt: 'desc' },

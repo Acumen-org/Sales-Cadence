@@ -16,6 +16,7 @@ import { replyCount } from '@/lib/outreach/metrics';
 import { saveSettingsSection, DEFAULT_SETTINGS } from '@/lib/settings';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 import { readyContact } from './helpers/sandbox';
+import { asksToStop } from '@/lib/mail/stop-request';
 
 /**
  * W10 (cold outreach PLAN 8.11): Outlook email tracking and its alerts. Each test is named after its bug.
@@ -429,5 +430,31 @@ describe('W10: Outlook tracking and notifications', () => {
       expect(await prisma.touch.count({ where: { personId: 'person-real-1' } })).toBe(1);
       expect(await prisma.sandboxEmail.count()).toBe(0);
     });
+  });
+});
+
+describe('L02: a reply asking to stop is an opt-out across every campaign', () => {
+  beforeEach(async () => { await resetDb(); b = await seedBasics(); });
+
+  it('reads the reply\'s own words, never our quoted footer or a rep\'s subject', () => {
+    expect(asksToStop('Re: STOP')).toBe(true);
+    expect(asksToStop('Unsubscribe')).toBe(true);
+    expect(asksToStop('Re: A quick idea', 'Please remove me from your list.\n\nOn Tue, Alisa wrote:\n> hello')).toBe(true);
+    expect(asksToStop('Re: Stop overpaying for custody')).toBe(false);
+    expect(asksToStop('Re: Opt out of high fees?')).toBe(false);
+    expect(asksToStop('Re: A quick idea', 'Sounds good, call me Tuesday.\n\nOn Tue, Alisa wrote:\n> To unsubscribe, reply STOP.')).toBe(false);
+  });
+
+  it('a subject asking to stop opts the contact out and ends their campaign as Opted out, not Replied', async () => {
+    const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+    const { enrollment } = await inCampaign({ sandboxContactId: c.id }, b.users.alisa.id);
+    const s = stats();
+    await processInbox(inbox(c.email!, 'Re: STOP', at(5)), b.users.alisa.id, s);
+    expect(await prisma.sandboxContact.findUniqueOrThrow({ where: { id: c.id } })).toEqual(expect.objectContaining({ status: 'OPTED_OUT', optOutSource: 'email_reply' }));
+    expect((await prisma.enrollment.findUniqueOrThrow({ where: { id: enrollment.id } })).status).not.toBe('REPLIED');
+    // An ordinary reply still only ends the one campaign as a reply.
+    const d = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+    await processInbox(inbox(d.email!, 'Re: A quick idea', at(6)), b.users.alisa.id, stats());
+    expect((await prisma.sandboxContact.findUniqueOrThrow({ where: { id: d.id } })).status).toBe('ACTIVE');
   });
 });

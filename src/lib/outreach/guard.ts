@@ -59,7 +59,7 @@ export const WORK_ACTS = new Set<Act>(['note', 'edit', 'next_action', 'call', 'l
 /** Acts that count as activity on the contact, for retention (N032). */
 export const ACTIVITY_ACTS = new Set<Act>(['note', 'edit', 'next_action', 'call', 'log_call', 'form_next_step', 'claim', 'assign', 'enroll', 'undo']);
 
-const SOURCE_WORDS: Record<string, string> = { call_form: 'the post-call form', contact_page: 'the contact page', suppression_list: 'the suppression list', bellwether: 'Bellwether', erase: 'an erasure', skip_reason: 'a skipped step', person_page: 'the person page' };
+const SOURCE_WORDS: Record<string, string> = { call_form: 'the post-call form', contact_page: 'the contact page', suppression_list: 'the suppression list', bellwether: 'Bellwether', erase: 'an erasure', skip_reason: 'a skipped step', person_page: 'the person page', email_reply: 'an email reply asking to stop' };
 export const optOutSourceWords = (source: string | null | undefined) => SOURCE_WORDS[source ?? ''] ?? 'Cadence';
 
 const leadersOf = (pod: string | null) => (pod ? `the Senior FOs, Sales Leaders and Pod Managers of ${pod}` : 'the leaders of its pod');
