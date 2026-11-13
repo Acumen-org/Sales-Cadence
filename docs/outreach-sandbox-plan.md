@@ -1901,7 +1901,11 @@ that change Cadence are noted.
     after the push if never worked; a suppression hash is kept.
 14. **Compliance: changed.** Calling hours 8:00 to 21:00 local stay, as a check on Cadence's own
     Call button only, because that needs no Twilio change. No recording announcement (it would need
-    a Twilio change). No counsel sign-off step.
+    a Twilio change). No counsel sign-off step. Changed 13 Nov 2026 (audit M02, M03): Cadence's Call
+    button and its server check refuse calls outside 8:00 to 21:00 in the contact's zone (the firm's
+    state, else US Eastern, when unknown; said on screen) and after 2 calls to the person that day,
+    and show the rep a recording notice to read in two-party-consent states. The national Do Not
+    Call registry and Twilio's own recording settings are still to be set up.
 15. **Unclaimed contacts: default.** Everyone sees every sandbox contact, and the first rep to claim
     an unclaimed one owns it. Changed 13 Nov 2026 (agreed owner contract): a push whose owner
     cannot own contacts is refused contact by contact (`owner_not_found`), never created unclaimed.
