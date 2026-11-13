@@ -6,6 +6,7 @@ import { getMockTwentyClient } from '@/lib/twenty/mock-client';
 import { DEFAULT_SEQUENCE_STEPS } from '@/lib/sequences/default-sequence';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 import { readyContact } from './helpers/sandbox';
+import { findSuppressed } from '@/lib/sandbox/suppression';
 
 const rules = DEFAULT_SETTINGS.rules;
 
@@ -88,6 +89,22 @@ describe('the post-call form (plan section 10)', () => {
       expect(await prisma.task.findUniqueOrThrow({ where: { id: task.id } })).toEqual(expect.objectContaining({ state: 'DONE', disposition: 'voicemail' }));
       const next = await prisma.nextAction.findFirstOrThrow({ where: { personId, state: 'OPEN' } });
       expect(next.label).toBe('Call again');
+    });
+
+    it('M01: "Asked not to be contacted" on a call matched to nobody, or one whose opt-out is refused, suppresses the number and says so', async () => {
+      const lone = await logManualCall({ userId: b.users.alisa.id });
+      await prisma.callLog.update({ where: { id: lone.id }, data: { toNumber: '+13125550142' } });
+      const r = await submitCallForm(lone.id, { outcome: 'do_not_contact', rating: 3, notes: 'Stop calling', nextStep: 'none' }, alisa());
+      expect(r).toEqual(expect.objectContaining({ ok: true, message: expect.stringContaining('nobody was opted out') }));
+      expect(r.ok && r.message).toContain('suppression list');
+      expect(await findSuppressed([{ kind: 'phone', value: '+13125550142' }])).not.toBeNull();
+
+      await prisma.personCache.update({ where: { id: 'person-02' }, data: { deletedAt: new Date() } });
+      const gone = await logManualCall({ userId: b.users.alisa.id, personId: 'person-02' });
+      await prisma.callLog.update({ where: { id: gone.id }, data: { toNumber: '+13125550143' } });
+      const r2 = await submitCallForm(gone.id, { outcome: 'do_not_contact', rating: 3, notes: 'Stop calling', nextStep: 'none' }, { ...alisa(), role: b.users.alisa.role, podIds: [b.pods.Alisa.id] });
+      expect(r2.ok && r2.message).toContain('could not be opted out');
+      expect(await findSuppressed([{ kind: 'phone', value: '+13125550143' }])).not.toBeNull();
     });
   });
 });
