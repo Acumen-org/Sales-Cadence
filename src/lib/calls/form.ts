@@ -250,11 +250,12 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
   const step = NEXT_STEPS.find((s) => s.key === v.nextStep)!;
   const stop = v.outcome === OPT_OUT_OUTCOME;
 
-  // Owner, 10 Nov 2026: whoever fills the form may give an owned cold contact to someone in its pod.
+  // Owner, 10 Nov 2026: whoever fills the form may give an owned cold contact to someone in its pod,
+  // within the same rules as Assign (V01): the choices are only those this user may give it to.
   const giveTo = subject.sandboxContactId && input.newOwnerId ? input.newOwnerId : null;
   if (giveTo) {
-    const { choices } = await formOwnerChoices(subject.sandboxContactId!);
-    if (!choices.some((c) => c.id === giveTo)) return { ok: false, error: 'Pick an owner from the pod this contact is in.', field: 'newOwnerId' };
+    const { choices } = await formOwnerChoices(subject.sandboxContactId!, guard);
+    if (!choices.some((c) => c.id === giveTo)) return { ok: false, error: guard ? 'You cannot give this contact to that person: pick an owner from the list, or ask a leader of its pod.' : 'Pick an owner from the pod this contact is in.', field: 'newOwnerId' };
   }
 
   // N077: a next step the contact cannot be reached by is refused before anything is saved, so the rep picks another.
@@ -342,7 +343,7 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
     // The new owner first, with the contact's work (B049), so the next step below is theirs.
     let handedTo: string | null = null;
     if (giveTo && subjectRow?.ownerId && giveTo !== subjectRow.ownerId && subjectRow.status === 'ACTIVE') {
-      const given = await assignContact(subject.sandboxContactId!, giveTo, actor, undefined, null, subjectRow.ownerId);
+      const given = await assignContact(subject.sandboxContactId!, giveTo, actor, undefined, guard, subjectRow.ownerId);
       if (given.ok) handedTo = giveTo;
       else reminder = `The owner did not change: ${given.error}`;
     }
