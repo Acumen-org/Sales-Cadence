@@ -59,7 +59,7 @@ describe('finding the transcript that goes with a recording', () => {
         ? { status: 403, body: { error: { message: 'No speakers', innerError: { code: 'SpeakerAttributionNotAllowed' } } } }
         : { body: null, text: '0:00:01 Thanks for joining.' },
     });
-    expect(await transcriptForFile(FILE, [], 'tok', ms.impl, 'https://graph.example')).toEqual({ text: '0:00:01 Thanks for joining.' });
+    expect(await transcriptForFile(FILE, [], 'tok', [{ microsoftId: 'owner-1', name: 'Alisa Senior' }], ms.impl, 'https://graph.example')).toEqual({ text: '0:00:01 Thanks for joining.' });
     const list = ms.asked.find((a) => a.url.includes('getAllTranscripts'))!.url;
     expect(list).toBe("https://graph.example/v1.0/users/owner-1/onlineMeetings/getAllTranscripts(meetingOrganizerUserId='owner-1',startDateTime=2026-08-11T13:01:00Z,endDateTime=2026-08-11T17:31:00Z)");
     expect(ms.asked.filter((a) => a.url.includes('/content')).map((a) => a.accept)).toEqual(['text/vtt', 'application/vnd.microsoft.graph.transcript+text']);
@@ -72,7 +72,23 @@ describe('finding the transcript that goes with a recording', () => {
       "users/team-9/onlineMeetings/getAllTranscripts": { body: { value: [listed('2026-08-11T15:01:30Z', '2026-08-11T15:30:40Z', 'this-call')] } },
       '/this-call/content': { body: null, text: VTT },
     });
-    expect(await transcriptForFile(FILE, ['team-9'], 'tok', ms.impl, 'https://graph.example')).toEqual({ text: VTT.trim() });
+    expect(await transcriptForFile(FILE, ['team-9'], 'tok', [{ microsoftId: 'team-9', name: 'Team Nine' }], ms.impl, 'https://graph.example')).toEqual({ text: VTT.trim() });
+  });
+
+  it('S01: hands a transcript only to someone on the meeting: organizer, invitee Graph lists, or a named speaker', async () => {
+    const routes = {
+      '/drives/': { body: { owner: { user: { id: 'owner-1' } } } },
+      'getAllTranscripts': { body: { value: [listed('2026-08-11T15:01:30Z', '2026-08-11T15:30:40Z', 'this-call')] } },
+      'onlineMeetings/m?': { body: { participants: { organizer: { identity: { user: { id: 'owner-1' } } }, attendees: [{ identity: { user: { id: 'invitee-2' } } }] } } },
+      '/this-call/content': { body: null, text: VTT },
+    };
+    const ask = (viewer: { microsoftId: string | null; name: string }) => transcriptForFile(FILE, ['stranger-7'], 'tok', [viewer], microsoft(routes).impl, 'https://graph.example');
+    // Naming yourself among the possible organizers does not make you one: the owner's meeting answered.
+    expect(await ask({ microsoftId: 'stranger-7', name: 'Eve Stranger' })).toEqual({ denied: expect.any(String) });
+    expect(await ask({ microsoftId: 'owner-1', name: 'Alisa Senior' })).toEqual({ text: VTT.trim() });
+    expect(await ask({ microsoftId: 'invitee-2', name: 'Ivy Invitee' })).toEqual({ text: VTT.trim() });
+    expect(await ask({ microsoftId: null, name: 'Alisa Senior' })).toEqual({ text: VTT.trim() });
+    expect(await ask({ microsoftId: 'outsider-3', name: 'Oscar Outsider' })).toEqual({ denied: expect.any(String) });
   });
 });
 
@@ -106,8 +122,11 @@ describe('a saved meeting gets its Teams transcript once Microsoft allows it', (
 
   it('stores the transcript, and shows a refusal in Settings until the app is granted something else', async () => {
     vi.stubGlobal('fetch', graph(['Files.Read.All', 'OnlineMeetingTranscript.Read.All']).impl);
+    // The recording is in Alisa's own OneDrive: she organized it (S01).
+    await prisma.user.update({ where: { id: b.users.alisa.id }, data: { microsoftId: 'owner-1' } });
     const m = await meeting();
     expect(await fetchMeetingTranscript(m.id)).toBe(true);
+    expect(await prisma.auditLog.count({ where: { entityId: m.id, action: 'teams_transcript_fetch' } })).toBe(1);
     expect(await prisma.meeting.findUniqueOrThrow({ where: { id: m.id } })).toMatchObject({ transcript: VTT.trim(), transcriptFormat: 'vtt' });
     expect(await teamsTranscriptStatus()).toEqual({ fetches: true });
 
@@ -115,6 +134,14 @@ describe('a saved meeting gets its Teams transcript once Microsoft allows it', (
     const other = await prisma.meeting.create({ data: { title: 'Another', provider: 'SHAREPOINT', sourceUrl: `${SHARING}&x=2`, occurredAt: new Date('2026-08-12T17:00:00Z'), bookedById: b.users.alisa.id } });
     expect(await fetchMeetingTranscript(other.id)).toBe(false);
     expect(await teamsTranscriptStatus()).toEqual({ fetches: false, why: 'Microsoft refused: Microsoft Graph access to transcripts is off in the Teams admin center' });
+  });
+
+  it('S01: a meeting whose recording belongs to a meeting of someone else gets no transcript, and the refusal is logged', async () => {
+    vi.stubGlobal('fetch', graph(['Files.Read.All', 'OnlineMeetingTranscript.Read.All']).impl);
+    const m = await meeting();
+    expect(await fetchMeetingTranscript(m.id, { id: b.users.karson.id, name: 'Karson' })).toBe(false);
+    expect((await prisma.meeting.findUniqueOrThrow({ where: { id: m.id } })).transcript).toBeNull();
+    expect(await prisma.auditLog.findFirst({ where: { entityId: m.id, action: 'teams_transcript_fetch' } })).toEqual(expect.objectContaining({ details: expect.objectContaining({ outcome: 'denied' }) }));
   });
 
   it('never replaces a transcript someone already added', async () => {

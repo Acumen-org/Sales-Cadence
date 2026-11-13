@@ -154,10 +154,10 @@ async function meetingPeople(formData: FormData, hostUserId: string | null, keep
  * write to Twenty this meeting and every other one whose numbers moved. A SharePoint recording
  * without a transcript gets its Teams transcript first, so Twenty hears about that too.
  */
-async function afterMeetingChange(meetingId: string | null, personIds: Iterable<string>, fetchTranscript = false) {
+async function afterMeetingChange(meetingId: string | null, personIds: Iterable<string>, fetchTranscript = false, by: { id: string; name?: string | null } | null = null) {
   const changed = await renumberProspects(personIds);
   await afterResponse(async () => {
-    if (meetingId && fetchTranscript) await fetchMeetingTranscript(meetingId).catch(() => false);
+    if (meetingId && fetchTranscript) await fetchMeetingTranscript(meetingId, by).catch(() => false);
     for (const id of new Set([...(meetingId ? [meetingId] : []), ...changed])) await pushMeetingToCrm(id);
   });
 }
@@ -243,7 +243,7 @@ export async function createMeetingAction(formData: FormData): Promise<ActionRes
   if (checks.length) await prisma.meetingNumberTicket.updateMany({ where: { id: { in: checks }, raisedById: user.id, meetingId: null }, data: { meetingId: meeting.id } });
   await logAudit({ entityType: 'meeting', entityId: meeting.id, action: 'created', actor: userActor(user), details: { title: meeting.title, provider: meeting.provider, attendees: attendees.length, prospects: prospectIds.length } });
   // Numbered, then written to Twenty with the meetings whose numbers it moved.
-  await afterMeetingChange(meeting.id, prospectIds, !transcript && needsPlayer(meeting.sourceUrl));
+  await afterMeetingChange(meeting.id, prospectIds, !transcript && needsPlayer(meeting.sourceUrl), user);
   revalidatePath('/meetings');
   revalidatePath('/home');
   if (company.id) revalidatePath(`/accounts/${company.id}`);
@@ -306,7 +306,7 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
   });
   await logAudit({ entityType: 'meeting', entityId: id, action: 'updated', actor: userActor(user) });
   // Everyone it was with before and after: a prospect taken off moves their later meetings down.
-  await afterMeetingChange(id, [...prospectIds, ...prospectsOf(existing.attendees)], !transcript && needsPlayer(d.sourceUrl));
+  await afterMeetingChange(id, [...prospectIds, ...prospectsOf(existing.attendees)], !transcript && needsPlayer(d.sourceUrl), user);
   revalidatePath('/meetings');
   revalidatePath(`/meetings/${id}`);
   revalidatePath('/accounts');
@@ -486,6 +486,9 @@ export async function inspectMeetingLinkAction(raw: string, exceptMeetingId?: st
   // file after the meeting and its day.
   const [page, found] = await Promise.all([inspectLink(url), link.embedUrl ? null : sharePointRecording(url)]);
   const recording = found?.recording ?? null;
+  // S01: every recording Cadence looks up with its own Microsoft permission is logged with who asked.
+  // (Its player still plays only with the viewer's own access to the file.)
+  if (recording) await logAudit({ entityType: 'meeting', entityId: exceptMeetingId ?? 'pasted-link', action: 'recording_looked_up', actor: userActor(user), details: { driveId: recording.file?.driveId ?? null, title: recording.title } });
   const embedUrl = link.embedUrl ?? recording?.embedUrl ?? null;
   const cleaned = page.title?.replace(/\s*[|·-]\s*(Microsoft Stream|SharePoint|Google Drive|Zoom|OneDrive|Google Meet|Microsoft Teams).*$/i, '').trim() || null;
   const named = cleaned && !link.isJoinLink && !SIGN_IN.test(cleaned) && !GENERIC.test(cleaned) ? cleaned : null;
@@ -505,7 +508,8 @@ export async function linkTranscriptAction(raw: string, teamUserIds: string[] = 
   if (!canCreateMeeting(user)) return { ok: false, error: 'Biz Ops has read-only access to meetings.' };
   const ids = IdList.safeParse(teamUserIds);
   const found = await sharePointRecording(extractRecordingUrl(String(raw ?? '')));
-  return { ok: true, transcript: await transcriptForRecording(found?.recording.file ?? null, ids.success ? ids.data : []) };
+  // S01: the transcript is for the user asking, and only when they were on that meeting; logged.
+  return { ok: true, transcript: await transcriptForRecording(found?.recording.file ?? null, ids.success ? ids.data : [], { actor: userActor(user), viewerIds: [user.id] }) };
 }
 
 /**
