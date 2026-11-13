@@ -974,6 +974,9 @@ model NextAction {
   /// LocalDate (YYYY-MM-DD): the day it is due, written to Twenty's Next Action Due Date.
   dueDate       String
   repeat        NextActionRepeat @default(NONE)
+  /// The day of the month a monthly or quarterly one was set for (P20): a weekend or a short month
+  /// moves one due date, never the ones after it. Null on older rows: the due date's own day.
+  repeatDay     Int?
   state         NextActionState  @default(OPEN)
   createdById   String?
   completedById String?

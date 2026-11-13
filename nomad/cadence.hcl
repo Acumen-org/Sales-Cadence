@@ -167,6 +167,8 @@ EOH
     task "worker" {
       driver = "docker"
       consul {}
+      # P14: the worker waits up to 20 s for the pass in progress before it exits; the default 5 s kill cut it mid-pass.
+      kill_timeout = "30s"
 
       config {
         image       = local.image

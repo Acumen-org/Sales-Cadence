@@ -26,7 +26,7 @@ import { COLD_CONTACT_BASE, coldRef, personRef, subjectHref } from './subject';
  * or when it is answered (a suggestion accepted or dismissed).
  */
 
-export type NotificationKind = 'reply' | 'bounce' | 'possible_bounce' | 'compliance_alert' | 'next_step_suggestion' | 'call_flag' | 'move_finished' | 'retention_warning' | 'campaign_published' | 'campaign_back_to_draft' | 'health_alert';
+export type NotificationKind = 'reply' | 'bounce' | 'possible_bounce' | 'compliance_alert' | 'next_step_suggestion' | 'call_flag' | 'move_finished' | 'retention_warning' | 'campaign_published' | 'campaign_back_to_draft' | 'health_alert' | 'campaign_launch_failed';
 
 type Tx = Prisma.TransactionClient | typeof prisma;
 
@@ -46,8 +46,11 @@ const AUTO_REPLY: Prisma.TouchWhereInput = { summary: { startsWith: 'Auto-reply'
  * Notification rows, written for the campaign's rep, the mailbox owner and the owner (or the pod's
  * leaders when nobody owns the contact).
  */
-export function notificationScope(user: Pick<SessionUser, 'id' | 'twentyMemberId'>): Prisma.TouchWhereInput {
-  const owned: Prisma.PersonCacheWhereInput[] = [{ enrollments: { some: { foUserId: user.id } } }];
+export function notificationScope(user: Pick<SessionUser, 'id' | 'twentyMemberId'>, now = new Date()): Prisma.TouchWhereInput {
+  // P22: the FO of a sequence that is running, or that ended in the last 30 days (a reply ends it, and
+  // its FO must hear of it); not every rep who was ever the FO on any enrollment of the person.
+  const recent = new Date(now.getTime() - FO_REPLY_DAYS * 86_400_000);
+  const owned: Prisma.PersonCacheWhereInput[] = [{ enrollments: { some: { foUserId: user.id, OR: [{ status: { in: ['ACTIVE', 'PAUSED'] } }, { updatedAt: { gte: recent } }] } } }];
   if (user.twentyMemberId) owned.push({ ownerMemberId: user.twentyMemberId });
   return { channel: 'EMAIL', direction: 'INBOUND', NOT: AUTO_REPLY, person: { deletedAt: null, OR: owned } };
 }
@@ -73,11 +76,17 @@ function unreadRows(userId: string, readAt: Date | null): Prisma.NotificationWhe
   return { userId, readAt: null, ...(readAt ? { createdAt: { gt: readAt } } : {}) };
 }
 
-export async function unreadNotifications(user: Pick<SessionUser, 'id' | 'twentyMemberId'>): Promise<number> {
+/** P22: how long after a sequence ends its FO still hears of the person's replies. */
+export const FO_REPLY_DAYS = 30;
+/** P23: the unread count of someone who never pressed "Mark read" looks back this far, not over every email ever. */
+export const UNREAD_LOOKBACK_DAYS = 30;
+
+export async function unreadNotifications(user: Pick<SessionUser, 'id' | 'twentyMemberId'>, now = new Date()): Promise<number> {
   const current = await prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: { notificationsReadAt: true } });
   const read = current.notificationsReadAt;
+  const floor = new Date(now.getTime() - UNREAD_LOOKBACK_DAYS * 86_400_000);
   const [touches, rows] = await Promise.all([
-    prisma.touch.count({ where: { ...notificationScope(user), ...(read ? { createdAt: { gt: read } } : {}) } }),
+    prisma.touch.count({ where: { ...notificationScope(user, now), createdAt: { gt: read && read > floor ? read : floor } } }),
     prisma.notification.count({ where: unreadRows(user.id, read) }),
   ]);
   return touches + rows;
@@ -175,6 +184,11 @@ export function bellWords(n: Pick<Row, 'id' | 'kind' | 'personId' | 'sandboxCont
       const title = p.why === 'pre_studio' ? 'Cold campaigns are now built in the campaign studio, so this one is a draft again' : 'Cold campaigns no longer need approval, so this one is a draft again';
       return { kind, name: str(p.name) ?? 'A cold campaign', company: null, title, detail: 'Nothing was sent. Open it, check who is in it and publish it to schedule it.', href: campaignId ? `/campaigns/${campaignId}` : null, linkLabel: 'Open the campaign' };
     }
+    case 'campaign_launch_failed': {
+      // P11: a scheduled campaign could not start; it is tried again each hour, and at once after an edit.
+      const campaignId = str(p.campaignId);
+      return { kind, name: str(p.name) ?? 'A campaign', company: null, title: 'This scheduled campaign could not start', detail: str(p.text), href: campaignId ? `/campaigns/${campaignId}` : null, linkLabel: 'Open the campaign' };
+    }
     case 'retention_warning': {
       const count = num(p.count);
       const due = str(p.firstDueOn);
@@ -225,7 +239,7 @@ export async function listNotifications(user: Pick<SessionUser, 'id' | 'twentyMe
   const current = await prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: { notificationsReadAt: true } });
   const read = current.notificationsReadAt;
   const [touches, rows] = await Promise.all([
-    prisma.touch.findMany({ where: { AND: [notificationScope(user), before(after)] }, include: { person: { select: { id: true, firstName: true, lastName: true, email: true, companyName: true } } }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: PAGE + 1 }),
+    prisma.touch.findMany({ where: { AND: [notificationScope(user, now), before(after)] }, include: { person: { select: { id: true, firstName: true, lastName: true, email: true, companyName: true } } }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: PAGE + 1 }),
     prisma.notification.findMany({ where: { AND: [{ userId: user.id }, before(after)] }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: PAGE + 1 }),
   ]);
   const names = await namesFor(rows);
