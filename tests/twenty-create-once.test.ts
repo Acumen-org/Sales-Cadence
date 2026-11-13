@@ -131,3 +131,16 @@ describe('N16, N14: meeting records in the CRM', () => {
     expect(calls.length).toBe(before);
   });
 });
+
+describe('N19: listings of all notes, mail, tasks and opportunities', () => {
+  it('are not ordered by a timestamp, which Twenty cuts short on ties', async () => {
+    const { twenty, calls } = client(() => ({ data: { notes: { edges: [] }, messages: { edges: [] }, tasks: { edges: [] }, opportunities: { edges: [] } } }));
+    await twenty.listNotes({ updatedSince: '2026-11-01T00:00:00Z' });
+    await twenty.listMessages({ updatedSince: '2026-11-01T00:00:00Z' });
+    await twenty.listTasks({ updatedSince: '2026-11-01T00:00:00Z' });
+    await twenty.listOpportunities({ updatedSince: '2026-11-01T00:00:00Z' });
+    const listings = calls.filter((c) => c.query.startsWith('query List('));
+    expect(listings).toHaveLength(4);
+    for (const c of listings) expect(c.variables.orderBy).toBeUndefined();
+  });
+});

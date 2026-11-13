@@ -620,7 +620,8 @@ export class TwentyGraphqlClient implements TwentyClient {
     }
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.note.plural, this.s.objects.note.typeName, sel), {
       filter: this.sinceFilter(this.s.note.updatedAt, opts.updatedSince) ?? undefined,
-      orderBy: [{ [this.s.note.createdAt]: 'DescNullsLast' }],
+      // N19: no timestamp order. Twenty cuts a listing ordered by a timestamp many rows share short
+      // and says there are no more pages (see listPeople); id order pages through all of them.
       first: Math.min(opts.limit ?? PAGE_SIZE, PAGE_SIZE),
       after: opts.after ?? null,
     });
@@ -661,7 +662,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     const since = opts.updatedSince ? { or: [{ [m.receivedAt]: { gte: opts.updatedSince } }, { createdAt: { gte: opts.updatedSince } }] } : undefined;
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.message.plural, this.s.objects.message.typeName, sel), {
       filter: since,
-      orderBy: [{ [m.receivedAt]: 'DescNullsLast' }],
+      // N19: id order, as above; the reconcile sorts the mail by date itself.
       first: Math.min(opts.limit ?? PAGE_SIZE, PAGE_SIZE),
       after: opts.after ?? null,
     });
@@ -719,7 +720,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     const filter = this.sinceFilter(this.s.task.updatedAt, opts.updatedSince) ?? undefined;
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.task.plural, this.s.objects.task.typeName, sel), {
       filter,
-      orderBy: [{ [this.s.task.updatedAt]: 'DescNullsLast' }],
+      // N19: id order, as above.
       first: Math.min(opts.limit ?? PAGE_SIZE, PAGE_SIZE),
       after: opts.after ?? null,
     });
@@ -738,7 +739,8 @@ export class TwentyGraphqlClient implements TwentyClient {
     const filter = this.and(this.sinceFilter(o.updatedAt, opts.updatedSince), opts.personId ? { [o.pointOfContactId]: { eq: opts.personId } } : null);
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.opportunity.plural, this.s.objects.opportunity.typeName, sel), {
       filter,
-      orderBy: [{ [o.createdAt]: 'DescNullsLast' }],
+      // N19: newest first for one person's few; a listing of everything goes in id order, as above.
+      orderBy: opts.personId ? [{ [o.createdAt]: 'DescNullsLast' }] : undefined,
       first: Math.min(opts.limit ?? PAGE_SIZE, PAGE_SIZE),
       after: opts.after ?? null,
     });
