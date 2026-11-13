@@ -1394,3 +1394,12 @@ Plan: `Notes/linkedin-2026-11-12/PLAN.md`. Console developer's spec: https://cla
   - The numbers live in Settings > LinkedIn.
 - **Touches.** Request sent and message sent are outbound LinkedIn touches. A message received is an inbound one and counts as a reply. Acceptances and withdrawals are state on `LinkedInLink`, never touches, so reply figures are unchanged by them.
 - **Weekly limit.** The Console's count of requests per account in the last 7 days shows in Settings and on resend tasks (default warning at 80). Nothing is blocked.
+- **Twilio numbers from h00ks (13 Nov 2026).** Numbers are assigned in one place, the h00ks dialpad
+  admin. Before each 2-minute call import the worker reads h00ks's partner API (`GET /staff`, a Live
+  key with `staff:read` only, `H00KS_API_TOKEN`) and gives each active Cadence user the number of
+  the h00ks staff member with the same email; resigned, unassigned, removed or unknown people hold
+  none. A changed number counts from then, so earlier calls keep their rep. The dialpad identity is
+  added to the user's aliases. A failed read, a test key or an empty list changes nothing. Settings >
+  Calling then lists the numbers read only, with anyone h00ks numbers but Cadence cannot match by
+  email; assigning by hand is refused, and Remove access no longer asks about the number. Without
+  the key, numbers are assigned in Settings > Calling as before.
