@@ -156,3 +156,18 @@ describe('the Meetings object the team made in Twenty', () => {
     expect(await client.meetingSchema()).toBeNull();
   });
 });
+
+describe('N37: a field an admin adds does not take over a mapping', () => {
+  it('labels match on whole words only', async () => {
+    const fields = METADATA.objects.edges[0].node.fieldsList as unknown[];
+    fields.unshift(field('updatedOn', 'Updated on', 'DATE'), field('teamworkTags', 'Teamwork tags', 'MULTI_SELECT', { options: [] }), field('productionNotes', 'Production notes link', 'LINKS'));
+    try {
+      const schema = (await fakeTwenty().client.meetingSchema())!;
+      expect(schema.fields.date?.name).toBe('meetingDate');
+      expect(schema.fields.team?.name).toBe('teamOnTheCall');
+      expect(schema.fields.recording).toBe('recording');
+    } finally {
+      fields.splice(0, 3);
+    }
+  });
+});

@@ -1197,13 +1197,15 @@ export class TwentyGraphqlClient implements TwentyClient {
     const SYSTEM = new Set(['id', 'createdAt', 'updatedAt', 'deletedAt', 'createdBy', 'updatedBy', 'position', 'searchVector', 'name']);
     const finder = (object: (typeof objects)[number]) => {
       const candidates = object.fields.filter((f) => !SYSTEM.has(f.name)).sort((a, b) => Number(Boolean(b.isCustom)) - Number(Boolean(a.isCustom)));
+      // N37: labels match on whole words ("date", not "update"; "no", not "notes"), so a field an
+      // admin adds whose label merely contains one of these letters cannot take over a mapping.
       const find = (test: RegExp, types: string[]) => candidates.find((f) => types.includes(f.type) && test.test(label(f)));
       const tag = (test: RegExp, types: string[]) => {
         const f = find(test, types);
         return f ? { id: f.id, name: f.name, multi: f.type === 'MULTI_SELECT', text: f.type === 'TEXT', options: (f.rawOptions ?? []).map((o) => ({ value: String(o.value ?? ''), label: String(o.label ?? o.value ?? '') })).filter((o) => o.value) } : null;
       };
       const date = () => {
-        const f = find(/date|when/, ['DATE_TIME', 'DATE']);
+        const f = find(/\b(date|when)\b/, ['DATE_TIME', 'DATE']);
         return f ? { name: f.name, dateOnly: f.type === 'DATE' } : null;
       };
       return { find, tag, date };
@@ -1225,19 +1227,19 @@ export class TwentyGraphqlClient implements TwentyClient {
       meeting: { typeName: meetingType, plural: meeting.namePlural, createdBy: fields.some((f) => f.name === 'createdBy') },
       fields: {
         date: finder(meeting).date(),
-        bookedBy: tag(/booked/, ['SELECT', 'MULTI_SELECT', 'TEXT']),
-        products: tag(/product/, ['MULTI_SELECT', 'SELECT']),
-        team: tag(/team/, ['MULTI_SELECT']),
-        recording: find(/recording/, ['LINKS'])?.name ?? null,
-        cadenceLink: find(/cadence/, ['LINKS'])?.name ?? null,
-        cadenceId: find(/cadence/, ['TEXT'])?.name ?? null,
-        guests: find(/guest/, ['TEXT'])?.name ?? null,
+        bookedBy: tag(/\bbooked\b/, ['SELECT', 'MULTI_SELECT', 'TEXT']),
+        products: tag(/\bproducts?\b/, ['MULTI_SELECT', 'SELECT']),
+        team: tag(/\bteam\b/, ['MULTI_SELECT']),
+        recording: find(/\brecording\b/, ['LINKS'])?.name ?? null,
+        cadenceLink: find(/\bcadence\b/, ['LINKS'])?.name ?? null,
+        cadenceId: find(/\bcadence\b/, ['TEXT'])?.name ?? null,
+        guests: find(/\bguests?\b/, ['TEXT'])?.name ?? null,
         companyId: idFor(fields, this.s.objects.company.typeName),
         personId: idFor(fields, this.s.objects.person.typeName),
         assigneeId: idFor(fields, 'WorkspaceMember'),
         // "Meeting Number", "Meeting Count", "Meeting #", "Meeting No.".
-        meetingNumber: find(/number|count|#|\bno\b/, ['NUMBER'])?.name ?? null,
-        firstMeeting: find(/first/, ['BOOLEAN'])?.name ?? null,
+        meetingNumber: find(/\b(number|count|no)\b|#/, ['NUMBER'])?.name ?? null,
+        firstMeeting: find(/\bfirst\b/, ['BOOLEAN'])?.name ?? null,
       },
       contact,
     };
