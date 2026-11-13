@@ -13,7 +13,9 @@
 #                        jobspec sets auto_revert, which is what makes an
 #                        unattended deploy safe: a release that cannot pass its
 #                        health check rolls back instead of staying up broken.
-#   notify             — the shared Acumen-org workflow, to Teams and Mattermost.
+#   notify             — on main, posts the outcome to the incoming webhook in the
+#                        secret DEPLOY_NOTIFY_WEBHOOK (Teams or Mattermost, both
+#                        take {"text": ...}); without that secret it only warns (T13).
 #
 # Postgres 18 matches production (db-acumen), and Prisma is version-sensitive
 # enough that pinning it here keeps CI honest about migrations.
@@ -27,13 +29,15 @@ on:
   pull_request:
   workflow_dispatch:
 
+# T15: a newer push cancels an older pull-request run, never a run on main: its deploy may be
+# applying a migration. Runs on main queue behind each other instead.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# T50: nothing here needs an identity token.
 permissions:
   contents: read
-  id-token: write
 
 env:
   NODE_VERSION: "22"
@@ -83,8 +87,10 @@ jobs:
           POSTGRES_USER: cadence
           POSTGRES_PASSWORD: cadence
           POSTGRES_DB: cadence_test
+        # T51: a free host port chosen by Docker, so two runs on one machine
+        # never collide on 5432.
         ports:
-          - 5432:5432
+          - 5432
         # Without the health check the first migration races the server's boot.
         options: >-
           --health-cmd pg_isready
@@ -93,10 +99,6 @@ jobs:
           --health-retries 5
 
     env:
-      # 127.0.0.1, not localhost: Node resolves localhost to ::1 first and the
-      # service container only listens on IPv4.
-      DATABASE_URL: postgresql://cadence:cadence@127.0.0.1:5432/cadence_test
-      SESSION_SECRET: ci-session-secret-not-a-real-one
       TWENTY_MODE: mock
 
     steps:
@@ -114,9 +116,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
 
+      # The service's Postgres 18, as in production. 127.0.0.1, not localhost:
+      # Node resolves localhost to ::1 first and the service only listens on IPv4.
       - name: apply migrations
+        env:
+          DATABASE_URL: postgresql://cadence:cadence@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/cadence_test
         run: pnpm db:migrate
 
+      # vitest starts its own embedded Postgres (tests/setup/global-setup.ts).
       - name: vitest
         run: pnpm test
 
@@ -129,7 +136,6 @@ jobs:
     needs: [lint]
 
     env:
-      SESSION_SECRET: ci-session-secret-not-a-real-one
       TWENTY_MODE: mock
 
     steps:
@@ -210,9 +216,9 @@ jobs:
           build-args: |
             SKIP_TYPE_CHECK=true
             NEXT_BUILD_CPUS=2
+          # T52: only the release's own tag; no moving `latest` for anything to pull by mistake.
           tags: |
             ${{ env.DOCKER_IMAGE }}:${{ env.IMAGE_TAG }}
-            ${{ env.DOCKER_IMAGE }}:latest
           cache-from: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache,mode=max
 
@@ -221,6 +227,10 @@ jobs:
     name: deploy to Nomad
     runs-on: self-hosted
     needs: build
+    # T15: one production deploy at a time, and never cancelled part-way.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
 
     env:
       IMAGE_TAG: ${{ needs.build.outputs.IMAGE_TAG }}
@@ -228,6 +238,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # T16 (needs-infra): pin this action to a commit SHA and `version` to the
+      # cluster's Nomad release (DEPLOY.md, "CI pins").
       - name: Setup Nomad
         uses: hashicorp/setup-nomad@main
         with:
@@ -246,3 +258,23 @@ jobs:
             -var="harbor_username=${{ secrets.HARBOR_USERNAME }}" \
             -var="harbor_password=${{ secrets.HARBOR_PASSWORD }}" \
             nomad/cadence.hcl
+
+  # ------------------------------------------------------------------- notify
+  # T13: tells people when a run on main fails or deploys. Needs the secret
+  # DEPLOY_NOTIFY_WEBHOOK (an incoming webhook URL); without it this only warns.
+  # It runs after the deploy and never fails the run.
+  notify:
+    name: notify
+    runs-on: self-hosted
+    needs: [lint, test, e2e, build, deploy]
+    if: always() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    steps:
+      - name: post the outcome
+        env:
+          WEBHOOK: ${{ secrets.DEPLOY_NOTIFY_WEBHOOK }}
+          RESULT: ${{ contains(needs.*.result, 'failure') && 'FAILED' || needs.deploy.result == 'success' && 'deployed' || needs.deploy.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          text="Cadence ${GITHUB_SHA::7} on main: ${RESULT}. ${RUN_URL}"
+          if [ -z "$WEBHOOK" ]; then echo "::warning::DEPLOY_NOTIFY_WEBHOOK is not set, nobody was told: $text"; exit 0; fi
+          curl -fsS -m 20 -H 'Content-Type: application/json' -d "{\"text\": \"$text\"}" "$WEBHOOK" || echo "::warning::the notification could not be sent"
