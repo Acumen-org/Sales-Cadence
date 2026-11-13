@@ -16,7 +16,32 @@ function logLevels(): LogOption[] {
   return ['warn', 'error'];
 }
 
-export const prisma: PrismaClient = globalForPrisma.prisma ?? new PrismaClient({ log: logLevels() as never });
+/**
+ * T20: this process's pool size and wait (DATABASE_CONNECTION_LIMIT, DATABASE_POOL_TIMEOUT, set by
+ * the Nomad job) are added to DATABASE_URL here, after `&` when the stored address already carries
+ * parameters of its own (sslmode=require, say), so it is never turned into a broken address.
+ * A parameter the address already sets is left as it is. Neither set: the address is used as it is.
+ */
+export function pooledDatabaseUrl(url: string | undefined, limit = process.env.DATABASE_CONNECTION_LIMIT, timeout = process.env.DATABASE_POOL_TIMEOUT): string | undefined {
+  if (!url) return url;
+  const add: [string, string | undefined][] = [['connection_limit', limit], ['pool_timeout', timeout]];
+  const at = url.indexOf('?');
+  const params = new URLSearchParams(at < 0 ? '' : url.slice(at + 1));
+  let changed = false;
+  for (const [key, value] of add) {
+    if (value && !params.has(key)) {
+      params.set(key, value);
+      changed = true;
+    }
+  }
+  return changed ? `${at < 0 ? url : url.slice(0, at)}?${params.toString()}` : url;
+}
+
+const datasourceUrl = pooledDatabaseUrl(process.env.DATABASE_URL);
+
+export const prisma: PrismaClient =
+  globalForPrisma.prisma ??
+  new PrismaClient({ log: logLevels() as never, ...(datasourceUrl && datasourceUrl !== process.env.DATABASE_URL ? { datasourceUrl } : {}) });
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 

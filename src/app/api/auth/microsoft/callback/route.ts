@@ -2,7 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import { env } from '@/lib/env';
 import { logAudit, userActor } from '@/lib/audit';
-import { startSession } from '@/lib/auth/session';
+import { cookieSecure, startSession } from '@/lib/auth/session';
 import { safeReturnPath } from '@/lib/auth/redirect';
 import { microsoftConfig, microsoftUser, redeemCode, retirePasswords, SignInError } from '@/lib/auth/microsoft';
 import { ATTEMPT_COOKIE, decodeAttempt } from '../attempt';
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
   const attempt = decodeAttempt(req.cookies.get(ATTEMPT_COOKIE)?.value);
   const done = (path: string, session?: Awaited<ReturnType<typeof startSession>>) => {
     const res = NextResponse.redirect(new URL(path, base));
-    res.cookies.set(ATTEMPT_COOKIE, '', { httpOnly: true, sameSite: 'lax', secure: env().COOKIE_SECURE, path: '/api/auth/microsoft', maxAge: 0 });
+    res.cookies.set(ATTEMPT_COOKIE, '', { httpOnly: true, sameSite: 'lax', secure: cookieSecure(), path: '/api/auth/microsoft', maxAge: 0 });
     if (session) res.cookies.set(session.name, session.value, session.options);
     return res;
   };

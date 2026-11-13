@@ -6,6 +6,10 @@ import { addDays, localDateToInstant, todayIn } from '../src/lib/dates';
 export async function seedLegacyCampaign(name: string, personIds: string[]) {
   const db = new PrismaClient({ datasourceUrl: 'postgresql://postgres:postgres@localhost:5435/cadence' });
   try {
+    // Run again on the same workspace (a CI retry), the campaign is already there with its people
+    // enrolled, and enrolling them twice is refused by design: reuse it.
+    const existing = await db.campaign.findFirst({where:{name},select:{id:true}});
+    if (existing) return existing.id;
     const pod = await db.pod.findFirstOrThrow({where:{podOwnerValue:'ALISA'}});
     const fo = await db.user.findUniqueOrThrow({where:{email:'alisa@cadence.local'}});
     const sequence = await db.sequence.findFirstOrThrow({where:{campaignOwned:false}});

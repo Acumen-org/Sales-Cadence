@@ -29,10 +29,25 @@ const nextConfig = {
     cpus,
     workerThreads: false,
   },
-  // Trim the client bundle: only the icons actually imported ship.
-  compiler: { removeConsole: process.env.NODE_ENV === 'production' ? { exclude: ['error', 'warn'] } : false },
+  // T46: console.log is kept. Next strips it from server code as well as the browser's, and the
+  // server's log lines are what there is to read during an incident.
   typescript: { ignoreBuildErrors: process.env.SKIP_TYPE_CHECK === 'true' },
   eslint: { ignoreDuringBuilds: process.env.SKIP_TYPE_CHECK === 'true' },
+  // Audit Q16: security headers on every answer. The policy is deliberately narrow (no script-src:
+  // Next's own inline scripts would need nonces): no other site may frame Cadence, no plugins, no
+  // <base> rewriting. HSTS is ignored by browsers on plain http, so local runs are unaffected.
+  async headers() {
+    return [{
+      source: '/:path*',
+      headers: [
+        { key: 'Content-Security-Policy', value: "frame-ancestors 'self'; base-uri 'self'; object-src 'none'" },
+        { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+        { key: 'X-Content-Type-Options', value: 'nosniff' },
+        { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+        { key: 'Strict-Transport-Security', value: 'max-age=31536000' },
+      ],
+    }];
+  },
 };
 
 export default nextConfig;

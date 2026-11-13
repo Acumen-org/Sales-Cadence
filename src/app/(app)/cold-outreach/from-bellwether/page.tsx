@@ -20,7 +20,7 @@ export default async function FromBellwetherPage({ searchParams }: { searchParam
   if (!seesPushes(user)) {
     return <PageFrame className="space-y-4 px-6 pb-8 pt-2">
       <ColdOutreachHeader user={user} current="contacts" />
-      <Notice tone="info">From Bellwether is for Sales Leaders, Pod Managers, Biz Ops and admins. Ask your pod leader what happened to a push.</Notice>
+      <Notice tone="info">From Bellwether is for Sales Leaders, Pod Managers, Biz Ops and admins. Ask your pod leader what happened to contacts moved to Cadence from Bellwether.</Notice>
     </PageFrame>;
   }
   const { rows, total, pages, page } = await listPushes(user, Number(sp.page ?? 1) || 1);
@@ -28,7 +28,7 @@ export default async function FromBellwetherPage({ searchParams }: { searchParam
   return <PageFrame className="space-y-4 px-6 pb-8 pt-2">
     <ColdOutreachHeader user={user} current="bellwether" />
     <Surface flush>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-3 text-[13px]"><span className="text-ink-600">{isAdmin(user) || isBizOps(user) ? 'Every push from Bellwether' : `Pushes from Bellwether for ${user.pods.map((x) => x.name).join(', ') || 'your pods'}`}, newest first. Open one to see what happened to each contact and why.</span><span className="tabular-nums text-ink-500">{total === 1 ? '1 push' : `${total} pushes`}</span></div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-3 text-[13px]"><span className="text-ink-600">{isAdmin(user) || isBizOps(user) ? 'Every batch moved to Cadence from Bellwether' : `Batches moved to Cadence from Bellwether for ${user.pods.map((x) => x.name).join(', ') || 'your pods'}`}, newest first. Open one to see what happened to each contact and why.</span><span className="tabular-nums text-ink-500">{total === 1 ? '1 push' : `${total} pushes`}</span></div>
       {rows.length ? <ul className="divide-y divide-line">{rows.map((p) => <li key={p.id}>
         <details className="group">
           <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-4 gap-y-1.5 px-5 py-3 text-[13px] hover:bg-canvas/60">
@@ -49,9 +49,9 @@ export default async function FromBellwetherPage({ searchParams }: { searchParam
               <td className="px-5 py-2">{c.href ? <Link href={c.href} className="text-ink-900 hover:text-brand-700">{c.name}</Link> : <span className="text-ink-700">{c.name}</span>}</td>
               <td className="px-4 py-2"><Badge tone={c.tone}>{c.result}</Badge></td>
               <td className="px-4 py-2 text-ink-600">{c.why ?? '-'}</td>
-            </tr>)}</tbody></table></div> : <p className="border-t border-line px-5 py-3 text-[13px] text-ink-500">This push has no contact results kept.</p>}
+            </tr>)}</tbody></table></div> : <p className="border-t border-line px-5 py-3 text-[13px] text-ink-500">This batch has no contact results kept.</p>}
         </details>
-      </li>)}</ul> : <EmptyState title="No pushes from Bellwether yet" hint="When a rep sends contacts from Bellwether, each push shows here with what became of every contact." />}
+      </li>)}</ul> : <EmptyState title="Nothing moved to Cadence from Bellwether yet" hint="When a rep moves contacts to Cadence from Bellwether, each batch shows here with what became of every contact." />}
       {pages > 1 ? <div className="flex items-center justify-end gap-2 border-t border-line px-4 py-2 text-[13px]">{page > 1 ? <Link href={pageHref(page - 1)} className="btn-ghost btn-sm">Previous</Link> : null}<span className="tabular-nums text-ink-500">{page} of {pages}</span>{page < pages ? <Link href={pageHref(page + 1)} className="btn-ghost btn-sm">Next</Link> : null}</div> : null}
     </Surface>
   </PageFrame>;

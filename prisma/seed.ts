@@ -22,12 +22,17 @@ async function seedCore() {
 
   const e = env();
   const adminEmail = e.ADMIN_EMAIL.toLowerCase();
-  if (!(await prisma.user.findUnique({ where: { email: adminEmail } }))) {
+  if (!(await prisma.user.findUnique({ where: { email: adminEmail } })) && !e.ADMIN_PASSWORD && (await prisma.user.count({ where: { role: 'ADMIN', active: true } }))) {
+    // T23: once an admin exists the server need not keep a first password (DEPLOY.md, "Admin locked out").
+    console.log('  = an admin exists and ADMIN_PASSWORD is not set: no first account to create');
+  } else if (!(await prisma.user.findUnique({ where: { email: adminEmail } }))) {
     // Refused rather than defaulted: an account created with a password nobody chose is an
     // account whose password everybody knows.
     if (!e.ADMIN_PASSWORD) throw new Error('Set ADMIN_PASSWORD in .env before seeding: it is the password for the first account.');
     if (e.ADMIN_PASSWORD === 'change-me-before-first-run') throw new Error('ADMIN_PASSWORD is still the placeholder from .env.example. Choose a real one.');
-    const weak = validatePasswordStrength(e.ADMIN_PASSWORD);
+    // Q25: a real deployment's admin (reachable through /login/admin) gets the admin rule, which
+    // refuses the launcher's and the demo's known passwords; the test and local set-ups run in mock mode.
+    const weak = validatePasswordStrength(e.ADMIN_PASSWORD, { admin: !(e.TWENTY_MODE === 'mock' && e.CADENCE_ALLOW_MOCK === '1') });
     if (weak) throw new Error(`ADMIN_PASSWORD: ${weak}`);
     await prisma.user.create({ data: { email: adminEmail, name: 'Admin', role: 'ADMIN', passwordHash: await hashPassword(e.ADMIN_PASSWORD), timezone: WORKSPACE_TIMEZONE } });
     console.log(`  + admin user ${adminEmail}`);

@@ -11,6 +11,7 @@ import { formatLocalDate, isLocalDate, todayIn } from '../dates';
 import { exitEnrollment, finishEnrollment, OCCUPYING_STATUSES, reassignEnrollment } from '../engine/enrollment';
 import { applyExitConsequence, completeCall, moveToStep, skipWithReason } from '../engine/outcomes';
 import { completeTask, skipTask, snoozeDefault, snoozeTask } from '../engine/tasks';
+import { afterResponse, loadSyncTask, syncTaskRescheduled } from '../engine/sync-out';
 import { ACTION_TYPES, channelOf } from '../sequences/steps';
 import { getSettings } from '../settings';
 import type { ActionResult } from './users';
@@ -112,6 +113,48 @@ export async function skipTaskAction(formData: FormData): Promise<ActionResult> 
 }
 
 const SnoozeSchema = z.object({ taskId: z.string().min(1), toDate: z.string().trim() });
+
+/**
+ * R11: a step's open actions snoozed together, all or none. Every action is checked first; they move
+ * to one day; if one is refused after all, those already moved go back, and the CRM is told only once
+ * every action has moved.
+ */
+export async function snoozeStepAction(formData: FormData): Promise<ActionResult> {
+  const ids = [...new Set(String(formData.get('taskIds') ?? '').split(',').map((s) => s.trim()).filter(Boolean))].slice(0, 20);
+  if (!ids.length) return { ok: false, error: 'Invalid request.' };
+  if (ids.length === 1) { const one = new FormData(); one.set('taskId', ids[0]); one.set('toDate', String(formData.get('toDate') ?? 'next')); return snoozeTaskAction(one); }
+  const user = await requireUser();
+  const tasks = [];
+  for (const id of ids) {
+    const { task, error } = await loadForUser(id, user);
+    if (!task) return { ok: false, error: error ?? 'Task not found.' };
+    tasks.push(task);
+  }
+  const settings = await getSettings();
+  const today = todayIn(user.timezone);
+  const latest = tasks.map((t) => t.snoozedTo ?? t.dueDate).sort().at(-1)!;
+  const nextDay = snoozeDefault(today, latest, settings.rules.workingDays);
+  const asked = String(formData.get('toDate') ?? 'next').trim();
+  let toDate = asked === 'next' ? nextDay : asked;
+  if (!isLocalDate(toDate)) return { ok: false, error: 'Pick a valid date.' };
+  if (!canSnoozeFreely(toActor(user)) && toDate !== nextDay) toDate = nextDay;
+  const ctx = { actor: userActor(user), skipSync: true };
+  const moved: typeof tasks = [];
+  let shown: string | null = null;
+  for (const task of tasks) {
+    const r = await snoozeTask({ taskId: task.id, toDate }, ctx);
+    if (!r.ok) {
+      for (const back of moved) await prisma.task.updateMany({ where: { id: back.id, state: 'PENDING' }, data: { snoozedTo: back.snoozedTo, dueAt: back.dueAt } });
+      revalidate();
+      return { ok: false, error: `${describeFailure(r.reason, r.detail)}${moved.length ? ' Nothing was snoozed.' : ''}` };
+    }
+    moved.push(task);
+    shown = r.task.snoozedTo ?? toDate;
+  }
+  for (const task of moved) await afterResponse(async () => { const full = await loadSyncTask(task.id); if (full) await syncTaskRescheduled(full); });
+  revalidate();
+  return { ok: true, message: `Snoozed to ${formatLocalDate(shown ?? toDate, 'long')}.` };
+}
 
 export async function snoozeTaskAction(formData: FormData): Promise<ActionResult> {
   const parsed = SnoozeSchema.safeParse({ taskId: formData.get('taskId'), toDate: formData.get('toDate') ?? 'next' });
@@ -300,6 +343,11 @@ export async function bulkTasksAction(formData: FormData): Promise<ActionResult>
         const e = await prisma.enrollment.findUniqueOrThrow({ where: { id: task.enrollment.id } });
         if (!canManageEnrollment(toActor(user), e)) {
           problems.push(`${task.label}: cannot reassign`);
+          continue;
+        }
+        // Q-X3: as one at a time (enrollments.ts): a cold contact's campaign goes with the contact's owner.
+        if (e.sandboxContactId && !e.personId) {
+          problems.push(`${task.label}: a cold contact's campaign is worked by its owner; give the contact to someone else from Cold outreach`);
           continue;
         }
         await reassignEnrollment(e.id, d.foUserId, ctx);

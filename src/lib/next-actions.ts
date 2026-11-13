@@ -1,5 +1,5 @@
 import { closeEmailReplyTasks } from './linkedin/follow-ups';
-import type { ActionType, NextActionKind, NextActionRepeat } from '@prisma/client';
+import { Prisma, type ActionType, type NextActionKind, type NextActionRepeat } from '@prisma/client';
 import { prisma } from './db';
 import { logAudit, SYSTEM_ACTOR, type AuditActor } from './audit';
 import { addDays, formatLocalDate, isLocalDate, safeTimezone, toLocalDate, todayIn, type LocalDate } from './dates';
@@ -40,34 +40,41 @@ export const REPEAT_LABELS: Record<NextActionRepeat, string> = {
 
 export const NEXT_ACTION_CHANNELS: ActionType[] = ['EMAIL', 'CALL', 'LINKEDIN_MESSAGE', 'LINKEDIN_CONNECT'];
 
-/** The same day of the month `months` later, or the month's last day when it has fewer days. */
-function addMonths(date: LocalDate, months: number): LocalDate {
+/**
+ * The same day of the month `months` later, or the month's last day when it has fewer days. `day` is
+ * the day of the month the person chose (P20), so the 31st comes back after February.
+ */
+function addMonths(date: LocalDate, months: number, day?: number | null): LocalDate {
   const [y, m, d] = date.split('-').map(Number);
   const target = new Date(Date.UTC(y, m - 1 + months, 1));
   const last = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
-  target.setUTCDate(Math.min(d, last));
+  target.setUTCDate(Math.min(day ?? d, last));
   return target.toISOString().slice(0, 10);
 }
 
-function step(date: LocalDate, repeat: NextActionRepeat): LocalDate {
+function step(date: LocalDate, repeat: NextActionRepeat, day?: number | null): LocalDate {
   switch (repeat) {
     case 'WEEKLY': return addDays(date, 7);
     case 'BIWEEKLY': return addDays(date, 14);
-    case 'MONTHLY': return addMonths(date, 1);
-    case 'QUARTERLY': return addMonths(date, 3);
+    case 'MONTHLY': return addMonths(date, 1, day);
+    case 'QUARTERLY': return addMonths(date, 3, day);
     default: return date;
   }
 }
 
+/** P20: the day of the month a person chose for a repeating next action, kept apart from the rolled due date. */
+export const repeatDayOf = (date: LocalDate): number => Number(date.slice(8, 10));
+
 /**
  * The next date of a repeating next action after it was done: its rhythm from the date it was
  * due, never today or earlier, so one done late keeps its day of the week (or month), and on a
- * working day.
+ * working day. A monthly or quarterly one keeps the day of the month it was set for (`repeatDay`),
+ * not the day a weekend or a short month moved the last one to (P20).
  */
-export function nextOccurrence(due: LocalDate, repeat: NextActionRepeat, today: LocalDate, workingDays: number[]): LocalDate | null {
+export function nextOccurrence(due: LocalDate, repeat: NextActionRepeat, today: LocalDate, workingDays: number[], repeatDay?: number | null): LocalDate | null {
   if (repeat === 'NONE') return null;
-  let next = step(due, repeat);
-  for (let i = 0; next <= today && i < 520; i++) next = step(next, repeat);
+  let next = step(due, repeat, repeatDay);
+  for (let i = 0; next <= today && i < 520; i++) next = step(next, repeat, repeatDay);
   return nextWorkingDay(next, workingDays);
 }
 
@@ -105,8 +112,8 @@ export async function setNextActions(personIds: string[], input: NextActionInput
     // B007: an opted-out person gets no new next action either.
     if (p.optedOut) { skipped.push({ personId: id, reason: 'Asked not to be contacted' }); continue; }
     const foUserId = input.foUserId ?? (p.ownerMemberId ? ownerOf.get(p.ownerMemberId) : undefined) ?? fallbackFoUserId;
-    const data = { label: input.label, action: input.action, dueDate: input.dueDate, repeat: input.repeat, foUserId, kind: input.kind ?? 'ACTION', meetingAt: input.meetingAt ?? null, crmPending: true, crmError: null };
-    const row = await prisma.$transaction(async (tx) => {
+    const data = { label: input.label, action: input.action, dueDate: input.dueDate, repeatDay: repeatDayOf(input.dueDate), repeat: input.repeat, foUserId, kind: input.kind ?? 'ACTION', meetingAt: input.meetingAt ?? null, crmPending: true, crmError: null };
+    const save = () => prisma.$transaction(async (tx) => {
       const open = await tx.nextAction.findFirst({ where: { personId: id, state: 'OPEN' }, select: { id: true } });
       const saved = open
         ? await tx.nextAction.update({ where: { id: open.id }, data })
@@ -115,6 +122,8 @@ export async function setNextActions(personIds: string[], input: NextActionInput
       await tx.personCache.update({ where: { id }, data: { nextAction: saved.label, nextActionDueDate: saved.dueDate } });
       return saved;
     });
+    // P30: someone else gave this person a next action a moment ago; once theirs is saved, this one replaces it.
+    const row = await save().catch((err) => (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002' ? save() : Promise.reject(err)));
     await logAudit({ entityType: 'person', entityId: id, action: 'next_action_set', actor, details: { label: row.label, dueDate: row.dueDate, repeat: row.repeat, foUserId } });
     set.push(row.id);
   }
@@ -130,7 +139,7 @@ export async function completeNextAction(id: string, actor: AuditActor & { id?: 
   // Done on a screen showing an earlier date: that occurrence is already done.
   if (expectedDue && expectedDue !== na.dueDate) return { ok: false, error: `This one is already done. The next is due ${formatLocalDate(na.dueDate, 'long')}.` };
   const today = todayIn((await prisma.user.findUnique({ where: { id: na.foUserId }, select: { timezone: true } }))?.timezone ?? 'America/Chicago', now);
-  const next = nextOccurrence(na.dueDate, na.repeat, today, rules.workingDays);
+  const next = nextOccurrence(na.dueDate, na.repeat, today, rules.workingDays, na.repeatDay);
   const claimed = await prisma.nextAction.updateMany({
     where: { id, state: 'OPEN', dueDate: na.dueDate },
     data: next
@@ -175,7 +184,7 @@ export async function moveNextAction(id: string, dueDate: LocalDate, actor: Audi
   if (!isLocalDate(dueDate) || dueDate <= today) return { ok: false, error: 'Pick a later day.' };
   const na = await prisma.nextAction.findUnique({ where: { id } });
   if (!na || na.state !== 'OPEN') return { ok: false, error: 'This task is already closed.' };
-  await prisma.nextAction.update({ where: { id }, data: { dueDate, crmPending: Boolean(na.personId) } });
+  await prisma.nextAction.update({ where: { id }, data: { dueDate, repeatDay: repeatDayOf(dueDate), crmPending: Boolean(na.personId) } });
   await logAudit({ ...auditSubject(na), action: 'next_action_moved', actor, details: { label: na.label, from: na.dueDate, to: dueDate } });
   await afterResponse(async () => { await pushNextAction(id); });
   return { ok: true };
@@ -256,8 +265,16 @@ export async function syncNextActions(now = new Date()): Promise<{ pushed: numbe
   const pending = await prisma.nextAction.findMany({ where: { crmPending: true, crmAttempts: { lt: MAX_NEXT_ACTION_ATTEMPTS }, OR: [{ crmRetryAt: null }, { crmRetryAt: { lte: now } }] }, orderBy: { updatedAt: 'asc' }, take: 25, select: { id: true } });
   for (const p of pending) { if (await pushNextAction(p.id)) stats.pushed++; else stats.failed++; }
 
+  // P21: only those whose person changed in Twenty since Cadence last matched it, found in the database,
+  // rather than every open next action and its person loaded each minute to compare dates.
+  const changed = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT na.id FROM "NextAction" na JOIN "PersonCache" p ON p.id = na."personId"
+    WHERE na.state = 'OPEN' AND na."crmPending" = false AND p."twentyUpdatedAt" IS NOT NULL
+      AND (na."crmSyncedAt" IS NULL OR p."twentyUpdatedAt" > na."crmSyncedAt")
+    ORDER BY na.id LIMIT 500`;
+  if (!changed.length) return stats;
   const open = await prisma.nextAction.findMany({
-    where: { state: 'OPEN', crmPending: false, ...CRM_SUBJECT },
+    where: { id: { in: changed.map((c) => c.id) }, state: 'OPEN', crmPending: false, ...CRM_SUBJECT },
     select: { id: true, label: true, dueDate: true, crmSyncedAt: true, personId: true, person: { select: { nextAction: true, nextActionDueDate: true, twentyUpdatedAt: true } } },
   });
   for (const na of open) {
@@ -274,7 +291,7 @@ export async function syncNextActions(now = new Date()): Promise<{ pushed: numbe
       stats.closed++;
       continue;
     }
-    await prisma.nextAction.update({ where: { id: na.id }, data: { dueDate: date, label, crmSyncedAt: crm.twentyUpdatedAt } });
+    await prisma.nextAction.update({ where: { id: na.id }, data: { dueDate: date, repeatDay: repeatDayOf(date), label, crmSyncedAt: crm.twentyUpdatedAt } });
     await logAudit({ entityType: 'person', entityId: na.personId, action: 'next_action_moved', actor: SYSTEM_ACTOR, details: { label, from: na.dueDate, to: date, reason: 'Changed in the CRM' } });
     stats.followed++;
   }

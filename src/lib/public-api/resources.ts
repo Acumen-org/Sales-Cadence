@@ -104,7 +104,9 @@ const MEETING = pick(
   'createdById', 'bookedById', 'review', 'reviewedById', 'reviewedAt', 'twentyMeetingId', 'createdAt', 'updatedAt',
 );
 const COLD_CONTACT = pick(
-  'id', 'status', 'source', 'firstName', 'lastName', 'jobTitle', 'email', 'emailIsRole', 'emailVerification', 'phone', 'phoneType', 'phoneExtension', 'additionalPhones',
+  // V08: every way to reach the person Cadence holds, with what it knows of them, as the record shows it.
+  'id', 'status', 'source', 'firstName', 'lastName', 'jobTitle', 'email', 'additionalEmails', 'emailIsRole', 'emailVerification', 'phone', 'phoneType', 'phoneExtension', 'additionalPhones',
+  'designations', 'tags', 'productInterest',
   'linkedinUrl', 'city', 'state', 'country', 'individualCrd', 'companyName', 'companyDomain', 'companyWebsite', 'companyCrd', 'companyCity', 'companyState', 'companyCountry',
   'companyPhone', 'companyAumUsd', 'companyEmployees', 'ownerId', 'podId', 'claimedAt', 'firstClaimedAt', 'bellwetherContactId', 'bellwetherUrl', 'sourceNote', 'collectedAt',
   'pushedByEmail', 'pushedByName', 'createdById', 'badEmail', 'badPhone', 'possibleBounceAt', 'optedOutAt', 'optOutReason', 'optOutSource', 'optOutLiftedAt', 'removedById',
@@ -195,10 +197,11 @@ export const RESOURCES: Resource[] = [
     one: (id) => prisma.callLog.findUnique(byId(CALL)(id)),
   },
   {
-    path: 'meetings', scope: 'activity', changed: 'updatedAt', oneOnly: 'transcript',
+    // S03: a scope of its own, and only approved meetings, as the screens show them.
+    path: 'meetings', scope: 'meetings', changed: 'updatedAt', oneOnly: 'transcript',
     filters: { companyId: eq('companyId', 'Company id'), from: instant('occurredAt', 'gte', 'Held at or after'), to: instant('occurredAt', 'lt', 'Held before') },
-    find: (a) => prisma.meeting.findMany(args(a, MEETING)),
-    one: (id) => prisma.meeting.findUnique(byId({ ...MEETING, transcript: true, transcriptFormat: true })(id)),
+    find: (a) => prisma.meeting.findMany(args({ ...a, where: { ...a.where, review: 'APPROVED' } }, MEETING)),
+    one: (id) => prisma.meeting.findFirst({ where: { id, review: 'APPROVED' }, select: { ...MEETING, transcript: true, transcriptFormat: true } }),
   },
   {
     path: 'cold-outreach/contacts', scope: 'cold-outreach', changed: 'updatedAt',

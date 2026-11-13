@@ -138,7 +138,12 @@ async function main() {
   ensureEnv();
   const fileEnv = readEnvFile();
   const env: NodeJS.ProcessEnv = { ...fileEnv, ...process.env, DATABASE_URL: databaseUrl, APP_URL: `http://localhost:${port}`, NODE_ENV: 'production', NEXT_TELEMETRY_DISABLED: '1' };
-  if (!env.TWENTY_MODE) env.TWENTY_MODE = 'mock';
+  // T43: said out loud, so nobody takes the sample workspace for a real CRM.
+  if (!env.TWENTY_MODE) {
+    env.TWENTY_MODE = 'mock';
+    log('TWENTY_MODE is not set: using the built-in SAMPLE CRM (invented contacts, nothing real). Set TWENTY_MODE=graphql in .env for a real Twenty.');
+  }
+  if (env.TWENTY_MODE === 'mock') log('CRM: built-in sample workspace (mock). This launcher is for one machine, never a server.');
   // The launcher is a development tool, so it opts in to the built-in fake CRM on your behalf.
   if (env.TWENTY_MODE === 'mock') env.CADENCE_ALLOW_MOCK = '1';
 

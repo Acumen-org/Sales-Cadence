@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import clsx from 'clsx';
 import { flushTaskDrafts } from './draft-registry';
-import { completeTaskAction, delegateTaskAction, finishFromTaskAction, moveToStepAction, removeFromSequenceAction, skipTaskAction, snoozeTaskAction } from '@/lib/actions/tasks';
+import { completeTaskAction, delegateTaskAction, finishFromTaskAction, moveToStepAction, removeFromSequenceAction, skipTaskAction, snoozeStepAction } from '@/lib/actions/tasks';
 import type { ActionResult } from '@/lib/actions/users';
 import { type ActionType } from '@/lib/sequences/steps';
 import { formatLocalDate } from '@/lib/dates';
@@ -89,7 +89,9 @@ export function TaskActions(p: Props) {
   const [panel, setPanel] = useState<Panel>('none');
   const [pendingAction, setPendingAction] = useState<ActionType>(p.action);
   const [disposition, setDisposition] = useState<string>('');
-  const [note, setNote] = useState('');
+  // R10: the call notes and the skip detail are kept apart, so text typed for one action is never saved with another.
+  const [callNote, setCallNote] = useState('');
+  const [skipNote, setSkipNote] = useState('');
   const [reasonKey, setReasonKey] = useState(p.skipReasons[0]?.key ?? 'other');
   const [snoozeDate, setSnoozeDate] = useState(p.nextWorkingDay);
   const [moveTo, setMoveTo] = useState<number>(p.steps.find((s) => s.index > p.currentStep)?.index ?? p.currentStep + 1);
@@ -109,7 +111,7 @@ export function TaskActions(p: Props) {
           }
           setError(null);
           setPanel('none');
-          setNote('');
+          setCallNote(''); setSkipNote('');
           setDisposition('');
           // The confirmation travels in the URL so it survives the navigation to the next task.
           const target = new URL(goTo ?? (advance && p.nextUrl ? p.nextUrl : window.location.pathname + window.location.search), window.location.origin);
@@ -134,10 +136,10 @@ export function TaskActions(p: Props) {
       fd.set('taskId', p.taskId);
       fd.set('chosenAction', chosen);
       if (dispositionKey) fd.set('disposition', dispositionKey);
-      if (note.trim()) fd.set('note', note.trim());
+      if (chosen === 'CALL' && callNote.trim()) fd.set('note', callNote.trim());
       run(() => completeTaskAction(fd));
     },
-    [ask, note, p.taskId, run],
+    [ask, callNote, p.taskId, run],
   );
 
   const who = p.subjectName ?? 'this person';
@@ -162,23 +164,17 @@ export function TaskActions(p: Props) {
     const fd = new FormData();
     fd.set('taskId', p.taskId);
     fd.set('reasonKey', reasonKey);
-    if (note.trim()) fd.set('note', note.trim());
+    if (skipNote.trim()) fd.set('note', skipNote.trim());
     run(() => skipTaskAction(fd));
-  }, [ask, note, p.skipReasons, p.taskId, reasonKey, run, who]);
+  }, [ask, skipNote, p.skipReasons, p.taskId, reasonKey, run, who]);
 
   const submitSnooze = useCallback(() => {
     const ids = p.snoozeTaskIds?.length ? p.snoozeTaskIds : [p.taskId];
-    run(async () => {
-      let result: ActionResult | null = null;
-      for (const id of ids) {
-        const fd = new FormData();
-        fd.set('taskId', id);
-        fd.set('toDate', p.canPickSnoozeDate ? snoozeDate : 'next');
-        result = await snoozeTaskAction(fd);
-        if (!result.ok) return result;
-      }
-      return result!;
-    });
+    // R11: one request for the whole step, so its actions move together or not at all.
+    const fd = new FormData();
+    fd.set('taskIds', ids.join(','));
+    fd.set('toDate', p.canPickSnoozeDate ? snoozeDate : 'next');
+    run(() => snoozeStepAction(fd));
   }, [p.canPickSnoozeDate, p.snoozeTaskIds, p.taskId, run, snoozeDate]);
 
   const submitEnd = useCallback(async () => {
@@ -375,7 +371,7 @@ export function TaskActions(p: Props) {
               </div>
               <div className="mt-3 space-y-1">
                 <label htmlFor={`note-${p.taskId}`}>Call notes, saved to the CRM</label>
-                <textarea id={`note-${p.taskId}`} ref={noteRef} rows={3} value={note} onChange={(e) => setNote(e.target.value)} className="w-full" placeholder="What was said, the next step, the best time to call back..." />
+                <textarea id={`note-${p.taskId}`} ref={noteRef} rows={3} value={callNote} onChange={(e) => setCallNote(e.target.value)} className="w-full" placeholder="What was said, the next step, the best time to call back..." />
               </div>
               <div className="mt-3 flex items-center gap-2">
                 <button type="submit" disabled={pending || !disposition} className="btn-primary">
@@ -411,7 +407,7 @@ export function TaskActions(p: Props) {
                 </div>
                 <div className="min-w-[240px] flex-1 space-y-1">
                   <label htmlFor={`skipnote-${p.taskId}`}>Detail, optional</label>
-                  <input id={`skipnote-${p.taskId}`} value={note} onChange={(e) => setNote(e.target.value)} className="w-full" placeholder="e.g. mailbox full, referred to a colleague" />
+                  <input id={`skipnote-${p.taskId}`} value={skipNote} onChange={(e) => setSkipNote(e.target.value)} className="w-full" placeholder="e.g. mailbox full, referred to a colleague" />
                 </div>
                 <button type="submit" disabled={pending} className="btn-secondary">
                   Skip step

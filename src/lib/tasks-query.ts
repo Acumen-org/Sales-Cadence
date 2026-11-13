@@ -200,6 +200,16 @@ async function heldCampaigns(heldIn: Map<string, number>): Promise<HeldCampaign[
   }).sort((a, b) => b.steps - a.steps);
 }
 
+/**
+ * R07: Task flow's counter. It counts campaign steps, says so, and names the other tasks the tab
+ * count also holds; a task opened from outside the tab says that instead of "0 / n".
+ */
+export function flowCounter(index: number, steps: number, tabTotal: number): string {
+  if (index < 0) return 'Not in this tab';
+  const others = Math.max(0, tabTotal - steps);
+  return `${index + 1} / ${steps} ${steps === 1 ? 'step' : 'steps'}${others ? `, ${others} other ${others === 1 ? 'task' : 'tasks'}` : ''}`;
+}
+
 /** "3 steps held: Q4 Harbor paused by Leigh Chen" (B160). */
 export function heldWords(heldBy: HeldCampaign[]): string {
   const steps = heldBy.reduce((n, h) => n + h.steps, 0);
@@ -258,7 +268,8 @@ export async function listNextActionItems(user: SessionUser, filters: TaskFilter
     for (const g of byTab[i]) {
       const ch = channelOfAction(g.action);
       if (!filters.channel || ch === filters.channel) counts[tab] += g._count._all;
-      if (tab === filters.tab && tab !== 'done') channelCounts[ch] += g._count._all;
+      // R06: Done's chips count finished next actions too, as its tab count and list do.
+      if (tab === filters.tab) channelCounts[ch] += g._count._all;
     }
   });
   return { rows, counts, channelCounts, today, total: counts[filters.tab] };
