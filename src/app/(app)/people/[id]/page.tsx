@@ -1,6 +1,5 @@
-import { presentNoteBody } from '@/lib/crm-text';
 import Link from 'next/link';
-import { Suspense } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import { RecordSync } from '@/components/record-sync';
 import { canReadPerson } from '@/lib/people-scope';
 import { accountScopeCompanyIds } from '@/lib/accounts-query';
@@ -26,7 +25,6 @@ import { accentFor } from '@/lib/accent';
 import { CallButton } from '@/components/calls/call-button';
 import { callGate } from '@/lib/calls/gate';
 import { cachedPersonName } from '@/lib/person-cache';
-import { auditDetailText, describeAudit } from '@/lib/audit-format';
 import { describeStep, parseSteps } from '@/lib/sequences/steps';
 import { getSettings, getTwentyConnection } from '@/lib/settings';
 import { getTwentyClient } from '@/lib/twenty';
@@ -41,10 +39,21 @@ import { Avatar, Badge, Card, contactWarnings, crmStanding, enrollmentTone, enro
 import { campaignStatusLabel } from '@/lib/campaign-status';
 import { linkedinSubjectView } from '@/lib/linkedin/subject-view';
 import { LinkedInCard } from '@/components/linkedin/linkedin-card';
-import { AddLinkedInLinkForm } from '@/components/linkedin/add-linkedin-link';
+import { AddLinkedInButton, AddLinkedInLinkForm } from '@/components/linkedin/add-linkedin-link';
+import { ActivityFeed } from '@/components/activity-feed';
+import { personFeed } from '@/lib/person-feed';
+import { callOutcomes } from '@/lib/call-outcomes';
 
-type TimelineItem = { at: Date; kind: 'touch' | 'note' | 'task' | 'state'; icon: string; title: string; detail?: string | null; tone?: 'in' | 'out' | 'neutral' };
+/** Only the values a record holds: an empty field is not worth a row (owner, 13 Nov 2026). */
+const filled = <T extends { value: ReactNode }>(items: T[]) => items.filter((i) => i.value !== null && i.value !== undefined && i.value !== '' && i.value !== false);
 
+/**
+ * A CRM person. The header says who they are (title, firm, city) and holds every way to reach them,
+ * Add LinkedIn included when there is no link. Overview: what to do next, their campaign and recent
+ * activity, then the CRM's own fields, filled ones only. Beside it, on every tab: contact details,
+ * LinkedIn, opportunities and colleagues. Activity is one feed by day with a filter per kind; Emails
+ * are conversations.
+ */
 export default async function PersonPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; crmNotes?: string; crmEmails?: string }> }) {
   const user = await requireUser();
   const { id } = await params;
@@ -79,7 +88,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
     // B027: a colleague's call left a suggested next step for this owner.
     openSuggestions(user.id, { personId: id }),
     loadPersonSubject(id),
-    tab === 'overview' ? linkedinSubjectView({ personId: id }, user.timezone) : Promise.resolve(null),
+    linkedinSubjectView({ personId: id }, user.timezone),
   ]);
   // B120: Call says why when this viewer may not call (Biz Ops read only), in words under the button.
   const callVerdict = subject ? canAct(toActor(user), subject, 'call') : null;
@@ -116,89 +125,65 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
   const podName = person.podOwner ? pods.find((x) => x.podOwnerValue === person.podOwner)?.name ?? optionLabel(person.podOwner) : null;
   const ownerName = person.ownerMemberId ? (await prisma.user.findFirst({ where: { twentyMemberId: person.ownerMemberId }, select: { name: true } }))?.name ?? null : null;
   const twentyUrl = twentyPersonUrl(conn.baseUrl, id);
-  // Unified timeline
-  const items: TimelineItem[] = [
-    ...touches.map<TimelineItem>((t) => ({ at: t.occurredAt, kind: 'touch', icon: t.channel, title: t.summary, detail: notes.find(n => t.externalId.startsWith(`note:${n.id}:`))?.bodyMarkdown || t.actorLabel, tone: t.direction === 'INBOUND' ? 'in' : 'out' })),
-    ...notes
-      .filter((n) => !touches.some((t) => t.externalId.startsWith(`note:${n.id}:`)))
-      .map<TimelineItem>((n) => ({ at: new Date(n.createdAt), kind: 'note', icon: 'NOTE', title: n.title, detail: presentNoteBody(n.bodyMarkdown) || n.createdByName, tone: 'neutral' })),
-    ...tasks
-      .filter((t) => t.state === 'SKIPPED' || (t.state === 'DONE' && !touches.some((x) => x.externalId === `task:${t.id}` || x.externalId === t.evidenceId)))
-      .map<TimelineItem>((t) => ({ at: t.completedAt ?? t.updatedAt, kind: 'task', icon: t.action, title: `${t.label} ${t.state === 'DONE' ? 'done' : 'skipped'}${t.disposition ? ` - ${t.disposition}` : ''}${t.skipReason ? `: ${t.skipReason}` : ''}`, detail: t.note ?? t.fo.name, tone: 'out' })),
-    ...audit
-      .filter((a) => ['enrolled', 'replied', 'meeting', 'exited', 'completed', 'paused', 'resumed', 'finished', 'moved_to_step', 'flags_updated', 'reassigned'].includes(a.action))
-      .map<TimelineItem>((a) => {
-        const { title, fields } = describeAudit(a.action, a.details as Record<string, unknown> | null, a.actorLabel, a.entityType);
-        return { at: a.createdAt, kind: 'state', icon: 'STATE', title, detail: auditDetailText(fields), fields, tone: 'neutral' };
-      }),
-  ].sort((a, b) => b.at.getTime() - a.at.getTime());
+  const outcomes = callOutcomes(settings.rules);
+  const feed = personFeed({
+    touches, notes, tasks, audit, prefix: settings.matching.cadencePrefix,
+    sequenceOf: (enrollmentId) => enrollments.find((e) => e.id === enrollmentId)?.sequence.name ?? null,
+    outcomeLabel: (key) => outcomes.find((o) => o.key === key)?.label ?? key,
+  });
 
   const openTasks = tasks.filter((t) => t.state === 'PENDING');
+  // Counts only where they mean work to do; Activity, Emails and Notes are read, not worked.
   const tabs = [
     { key: 'overview', label: 'Overview' },
     { key: 'sequences', label: 'Campaigns', count: enrollments.length + memberships.filter((m) => m.kind === 'upcoming').length },
     { key: 'tasks', label: 'Tasks', count: openTasks.length },
-    { key: 'activity', label: 'Activity', count: items.length },
+    { key: 'activity', label: 'Activity' },
     { key: 'emails', label: 'Emails' },
     { key: 'notes', label: 'Notes' },
   ];
   const accent = accentFor(id);
   const today = todayIn(user.timezone);
   const horizon = addDays(today, 30);
+  const name = cachedPersonName(person);
+  const company = person.companyName ? (canOpenAccount ? <Link href={`/accounts/${person.companyId}`} className="hover:text-brand-700 hover:underline">{person.companyName}</Link> : person.companyName) : null;
+  const sub = [person.jobTitle, company, person.city].filter(Boolean);
 
   return (
     <>
       <RecordSync kind="person" id={id} />
       <div className="px-6 pt-2">
         <RecordHeader
-          name={cachedPersonName(person)}
+          name={name}
           accent={accent}
           seed={id}
-          badges={
-            <>
-              <Badge tone={standing.tone}>
-                {standing.label}
-              </Badge>
-              <TierBadge tier={person.tier} />
-              {warnings.map((w) => (
-                <Badge key={w.label} tone={w.tone}>
-                  {w.label}
-                </Badge>
-              ))}
-            </>
-          }
-          actions={
-            <>
-              {person.email ? (
-                <a href={`mailto:${person.email}`} className="btn-secondary btn-sm">
-                  <ActionIcon action="EMAIL" size={13} /> Email
-                </a>
-              ) : null}
-              {person.phone ? (
-                <CallButton phone={person.phone} template={settings.rules.clickToCallUrl} personId={person.id} nextActionId={openNext?.id ?? null} blocked={callGateNow?.blocked} warning={callGateNow?.warning} className="btn-secondary btn-sm" />
-              ) : null}
-              {person.linkedinUrl ? (
-                <a href={person.linkedinUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm">
-                  <ActionIcon action="LINKEDIN_MESSAGE" size={13} /> LinkedIn
-                </a>
-              ) : null}
-              {twentyUrl ? (
-                <a href={twentyUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm">
-                  <IconExternal size={13} /> CRM
-                </a>
-              ) : null}
-              <Link href="/people" className="btn-ghost btn-sm">
-                All people
-              </Link>
-            </>
-          }
+          stackOnPhone
+          sub={sub.length ? <span className="flex flex-wrap items-center gap-x-1.5">{sub.map((s, i) => <span key={i} className="inline-flex items-center gap-1.5">{i ? <span aria-hidden className="text-ink-400">·</span> : null}{s}</span>)}</span> : null}
+          badges={<>
+            <Badge tone={standing.tone}>{standing.label}</Badge>
+            <TierBadge tier={person.tier} />
+            {warnings.map((w) => <Badge key={w.label} tone={w.tone}>{w.label}</Badge>)}
+          </>}
+          actions={<>
+            {person.phone ? <CallButton phone={person.phone} template={settings.rules.clickToCallUrl} personId={person.id} nextActionId={openNext?.id ?? null} blocked={callGateNow?.blocked} warning={callGateNow?.warning} className="btn-secondary btn-sm" /> : null}
+            {person.email ? <a href={`mailto:${person.email}`} className="btn-secondary btn-sm"><ActionIcon action="EMAIL" size={13} /> Email</a> : null}
+            {person.linkedinUrl
+              ? <a href={person.linkedinUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm"><ActionIcon action="LINKEDIN_MESSAGE" size={13} /> LinkedIn</a>
+              : nextAccess.canSet ? <AddLinkedInButton personId={id} name={name} /> : null}
+            {twentyUrl ? <a href={twentyUrl} target="_blank" rel="noreferrer" className="btn-ghost btn-sm"><IconExternal size={13} /> Open in CRM</a> : null}
+          </>}
         />
         {formOpt ? <div className="mt-2"><Notice tone="error"><span className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
           <span><span className="font-medium">Do not contact</span> since {formOpt.at ? formatInstant(formOpt.at, user.timezone) : 'the call'}: {formOpt.byName ?? 'a rep'} chose &quot;Asked not to be contacted&quot; on the post-call form.</span>
-          <FormOptOutControls subject={{ personId: id }} name={cachedPersonName(person)} mayLift={user.role === 'ADMIN'} ticket={formOpt.ticket ? `Biz Ops are looking at it: raised by ${formOpt.ticket.raisedBy ?? 'someone'}.` : null} />
+          <FormOptOutControls subject={{ personId: id }} name={name} mayLift={user.role === 'ADMIN'} ticket={formOpt.ticket ? `Biz Ops are looking at it: raised by ${formOpt.ticket.raisedBy ?? 'someone'}.` : null} />
         </span></Notice></div> : null}
+        {/* Consent only appears when there is a restriction: its absence is normal. */}
+        {person.dnd && !formOpt ? <div className="mt-2"><Notice tone="error">
+          <span className="font-medium">{optionLabel(person.dndReason ?? 'DO_NOT_CONTACT')}</span>, set in the CRM.
+          {isUnmappedDndValue(person.dndReason, defaultTwentySchema) ? " This option is not in Cadence's field mapping; it is treated as do not contact. An admin should add it to the mapping or correct it in the CRM." : null}
+        </Notice></div> : null}
       </div>
-      <div className="grid gap-3 px-6 pb-8 pt-3 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="grid items-start gap-3 px-6 pb-8 pt-3 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0">
           <Surface flush>
             <Tabs inset={false} current={tab} tabs={tabs.map((t) => ({ ...t, href: `/people/${id}?tab=${t.key}` }))} />
@@ -222,33 +207,10 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                 })()}
               </Card>
             ) : null}
-            {tab === 'activity' ? (
-              <Card title="Activity">
-                {items.length === 0 ? (
-                  <div className="p-4 text-sm text-ink-500">No activity yet.</div>
-                ) : (
-                  <ol className="divide-y divide-line">
-                    {items.map((it, i) => (
-                      <li key={i} className="flex gap-3 px-4 py-2.5 text-sm">
-                        <span className={it.tone === 'in' ? 'mt-0.5 text-emerald-600' : it.tone === 'out' ? 'mt-0.5 text-ink-500' : 'mt-0.5 text-ink-500'}>
-                          {it.icon === 'NOTE' || it.icon === 'STATE' ? <span className="inline-block h-3.5 w-3.5 rounded-full border border-current" /> : <ActionIcon action={it.icon} size={14} />}
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="text-ink-800">{it.title}</span>
-                          {/* A CRM note arrives whole: it wraps to a readable measure and breaks
-                              a long address rather than pushing the column sideways. */}
-                          {it.detail ? <span className="block max-w-[70ch] whitespace-pre-wrap break-words text-sm leading-6 text-ink-700">{it.detail}</span> : null}
-                        </span>
-                        <span className="shrink-0 text-xs text-ink-500">{formatInstant(it.at, user.timezone)}</span>
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </Card>
-            ) : null}
+            {tab === 'activity' ? <Card title="Activity"><ActivityFeed items={feed} timezone={user.timezone} today={today} empty="No activity yet." /></Card> : null}
 
             {tab === 'sequences' ? (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {memberships.filter((m) => m.kind === 'upcoming').map((m) => (
                   <Card key={m.campaignId} title={<Link href={`/campaigns/${m.campaignId}`} className="font-medium hover:underline">{m.campaignName}</Link>} actions={<Badge tone="purple">{m.campaignStatus === 'PENDING_APPROVAL' ? 'Awaiting approval' : 'Upcoming'}</Badge>}>
                     <div className="p-4"><RecordFields className="lg:grid-cols-4" items={[
@@ -278,9 +240,8 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                       <ol className="divide-y divide-line">
                         {steps.map((step, i) => {
                           const st = eTasks.filter((t) => t.stepIndex === i);
-                          const reached = st.length > 0;
                           return (
-                            <li key={step.id} className={`flex items-center gap-3 px-4 py-2 text-sm `}>
+                            <li key={step.id} className="flex items-center gap-3 px-4 py-2 text-sm">
                               <span className="w-14 shrink-0 text-xs font-semibold uppercase text-ink-500">Day {step.day}</span>
                               <span className="flex-1 text-ink-800">{describeStep(step)}</span>
                               <span className="flex flex-wrap gap-1">
@@ -290,7 +251,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                                     {t.disposition ? ` (${t.disposition})` : ''}
                                   </Badge>
                                 ))}
-                                {!reached ? <span className="text-xs text-ink-500">Not reached</span> : null}
+                                {!st.length ? <span className="text-xs text-ink-500">Not reached</span> : null}
                               </span>
                             </li>
                           );
@@ -303,7 +264,6 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
             ) : null}
 
             {tab === 'overview' ? (
-              // Grouped the way the record is grouped in Twenty, so the two read the same.
               <div className="space-y-3">
                 <Card
                   title="Task"
@@ -314,23 +274,26 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                   </span> : null}
                 >
                   {openNext ? (
-                    <div className="p-4">
-                      <RecordFields items={[
-                        { label: 'What to do', value: openNext.label },
-                        { label: 'How', value: ACTION_LABELS[openNext.action] },
-                        { label: 'Due', value: <span className={openNext.dueDate < today ? 'text-red-700' : undefined}>{formatLocalDate(openNext.dueDate, 'long')}</span> },
-                        { label: 'Repeats', value: REPEAT_LABELS[openNext.repeat] },
-                        { label: 'FO', value: openNext.fo.name },
-                      ]} />
+                    <div className="flex items-start gap-3 p-4">
+                      <span aria-hidden className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-700"><ActionIcon action={openNext.action} size={16} /></span>
+                      <div className="min-w-0">
+                        <div className="text-[14px] font-medium text-ink-900">{openNext.label}</div>
+                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[12.5px] text-ink-600">
+                          <span>{ACTION_LABELS[openNext.action]}</span>
+                          <span className={openNext.dueDate < today ? 'font-medium text-red-700' : undefined}>Due {formatLocalDate(openNext.dueDate, 'long')}{openNext.dueDate < today ? ' (overdue)' : ''}</span>
+                          <span>{openNext.fo.name}</span>
+                          {openNext.repeat !== 'NONE' ? <span>{REPEAT_LABELS[openNext.repeat]}</span> : null}
+                        </div>
+                      </div>
                     </div>
-                  ) : <p className="p-4 text-[13px] text-ink-500">None</p>}
+                  ) : <p className="p-4 text-[13px] text-ink-500">No task yet.{person.dnd ? '' : ' Create one so this person is not forgotten.'}</p>}
                   {suggestions.length ? <div className="border-t border-line p-4"><SuggestionList items={suggestions.map((s) => ({ id: s.id, from: s.from, words: s.words }))} /></div> : null}
                 </Card>
 
-                <Card title={memberships.some((m) => m.kind !== 'finished') || !memberships.length ? 'Campaigns' : 'Last campaign'} actions={<span className="flex items-center gap-2">{mayChangeCampaignPeople(user) ? <AddToCampaign personIds={[id]} className="btn-secondary btn-sm" /> : null}<Link href={`/people/${id}?tab=sequences`} className="btn-ghost btn-sm">View history</Link></span>}>
+                <Card title={memberships.some((m) => m.kind !== 'finished') || !memberships.length ? 'Campaigns' : 'Last campaign'} actions={<span className="flex items-center gap-2">{mayChangeCampaignPeople(user) ? <AddToCampaign personIds={[id]} className="btn-secondary btn-sm" /> : null}{memberships.length ? <Link href={`/people/${id}?tab=sequences`} className="btn-ghost btn-sm">View history</Link> : null}</span>}>
                   {memberships.length ? <div className="divide-y divide-line">{memberships.filter((m) => m.kind !== 'finished').concat(memberships.filter((m) => m.kind === 'finished').slice(0, 1)).map((m) => {
                     const label = membershipLabel(m);
-                    return <div key={`${m.campaignId}-${m.enrollmentId ?? 'soon'}`} className="flex flex-wrap items-center justify-between gap-3 p-4">
+                    return <div key={`${m.campaignId}-${m.enrollmentId ?? 'soon'}`} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
                       <div className="min-w-0">
                         <div className="font-medium text-ink-900"><Link href={`/campaigns/${m.campaignId}`} className="hover:text-brand-700 hover:underline">{m.campaignName}</Link></div>
                         <div className="mt-1 text-[12.5px] text-ink-500"><Link href={`/sequences/${m.sequenceId}`} className="text-brand-700">{m.sequenceName}</Link>{m.step !== null ? ` · step ${m.step + 1} of ${m.steps}` : m.kind === 'upcoming' ? ` · starts ${formatLocalDate(m.startDate)}` : ''}{m.endDate ? ` · ends ${formatLocalDate(m.endDate)}` : ''}</div>
@@ -339,171 +302,121 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                     </div>;
                   })}</div> : <div className="p-4 text-sm text-ink-500">Never in a campaign</div>}
                 </Card>
-                {linkedin ? <LinkedInCard view={linkedin} hasLink={Boolean(person.linkedinKey)} addLink={nextAccess.canSet ? <AddLinkedInLinkForm personId={id} /> : null} /> : null}
 
-                <Card title="Contact details">
-                  <div className="p-4">
-                    {/* Consent only appears when there is a restriction: its absence is normal. */}
-                    {person.dnd ? (
-                      <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-[12.5px] font-medium text-red-700">
-                        {optionLabel(person.dndReason ?? 'DO_NOT_CONTACT')} - set in the CRM.
-                        {isUnmappedDndValue(person.dndReason, defaultTwentySchema) ? " This option is not in Cadence's field mapping; it is treated as do not contact. An admin should add it to the mapping or correct it in the CRM." : null}
-                      </p>
-                    ) : null}
-                    <KeyValue
-                      items={[
-                        { k: 'Email', v: person.email },
-                        { k: 'Other emails', v: person.additionalEmails.join(', ') || null },
-                        { k: 'Phone', v: person.phone },
-                        { k: 'Other phone', v: person.additionalPhone },
-                        // The handle, not the whole URL set in bold: the link carries the rest.
-                        { k: 'LinkedIn', v: person.linkedinUrl ? <a href={person.linkedinUrl} target="_blank" rel="noreferrer" title={person.linkedinUrl} className="text-brand-700 hover:underline">{person.linkedinUrl.replace(/^https?:\/\/(www\.)?linkedin\.com\//i, '')}</a> : null },
-                        { k: 'X', v: person.xUrl },
-                        { k: 'Title', v: person.jobTitle },
-                        { k: 'Company', v: canOpenAccount ? <Link href={`/accounts/${person.companyId}`} className="text-brand-700 hover:underline">{person.companyName}</Link> : person.companyName },
-                        { k: 'City', v: person.city },
-                      ]}
-                    />
-                  </div>
+                <Card title="Recent activity" actions={feed.length ? <Link href={`/people/${id}?tab=activity`} className="btn-ghost btn-sm">View all</Link> : null}>
+                  <ActivityFeed items={feed} timezone={user.timezone} today={today} limit={5} empty="No activity yet." />
                 </Card>
 
-                <Card title="Ownership">
-                  <div className="p-4">
-                    <KeyValue
-                      items={[
-                        { k: 'Owner', v: ownerName },
-                        { k: 'Pod', v: podName },
-                        { k: 'Rotated', v: person.rotatedTo ? `${optionLabel(person.rotatedTo)}${person.rotationChangedAt ? ` on ${formatInstant(person.rotationChangedAt, user.timezone)}` : ''}` : null },
-                        { k: 'Added by', v: person.createdByName ? `${person.createdByName}${person.createdBySource ? ` (${optionLabel(person.createdBySource)})` : ''}` : null },
-                      ]}
-                    />
-                  </div>
-                </Card>
-
-                <Card title="Classification">
-                  <div className="p-4">
-                    <KeyValue
-                      items={[
-                        { k: 'Tier', v: person.tier ? optionLabel(person.tier) : null },
-                        { k: 'Contact type', v: optionLabels(person.contactType, ' / ') || null },
-                        { k: 'Pipeline stage', v: person.pipelineStage ? optionLabel(person.pipelineStage) : null },
-                        {
-                          k: 'CRM cadence tag',
-                          v: person.listCategory
-                            ? `${optionLabel(person.listCategory)}${person.previousCadence ? ` (was ${optionLabel(person.previousCadence)})` : ''}`
-                            : null,
-                        },
-                        { k: 'Lead source', v: optionLabels(person.leadSource) || null },
-                        { k: 'Lead source notes', v: person.leadSourceNotes ? <span className="whitespace-pre-line">{person.leadSourceNotes}</span> : null },
-                        { k: 'Product interest', v: optionLabels(person.productInterest) || null },
-                        { k: 'Primary product', v: person.primaryProduct ? optionLabel(person.primaryProduct) : null },
-                        { k: 'Campaigns in the CRM', v: optionLabels(person.campaigns) || null },
-                        { k: 'Deal signal', v: person.dealSignalStrength ? optionLabel(person.dealSignalStrength) : null },
-                        { k: 'Calling list', v: person.onCallingList ? 'Yes' : null },
-                        {
-                          k: 'Tags',
-                          v: person.tags.length ? (
-                            <span className="flex flex-wrap gap-1">
-                              {person.tags.map((t) => (
-                                <span key={t} className="rounded border border-line bg-canvas px-1.5 py-0.5 text-[11.5px] text-ink-700" title={t}>
-                                  {optionLabel(t)}
-                                </span>
-                              ))}
-                            </span>
-                          ) : null,
-                        },
-                      ]}
-                    />
-                  </div>
-                </Card>
-
-                <Card title="CRM activity details">
-                  <div className="p-4">
-                    <KeyValue
-                      items={[
-                        { k: 'Next action', v: person.nextAction },
-                        { k: 'Due', v: person.nextActionDueDate ? formatLocalDate(person.nextActionDueDate, 'long') : null },
-                        { k: 'By', v: person.nextStep ? optionLabel(person.nextStep) : null },
-                        { k: 'POC due', v: person.nextActionDueDatePoc ? formatLocalDate(person.nextActionDueDatePoc, 'long') : null },
-                        { k: 'Last note', v: person.lastNote },
-                        { k: 'Last call', v: person.lastCallAt ? formatInstant(person.lastCallAt, user.timezone) : null },
-                        { k: 'Last email', v: person.lastEmailAt ? formatInstant(person.lastEmailAt, user.timezone) : null },
-                        {
-                          k: 'Meeting link',
-                          v: person.meetingUrl ? (
-                            <a href={person.meetingUrl} target="_blank" rel="noreferrer" className="text-brand-700 hover:underline">
-                              Join
-                            </a>
-                          ) : null,
-                        },
-                        {
-                          k: 'Recording',
-                          v: person.recordingUrl && canCreateMeeting(user) ? (
-                            <Link href={`/meetings/new?personId=${person.id}&url=${encodeURIComponent(person.recordingUrl)}`} className="text-brand-700 hover:underline">
-                              Add meeting
-                            </Link>
-                          ) : null,
-                        },
-                        { k: 'Booking', v: person.bookingId },
-                      ]}
-                    />
-                  </div>
-                </Card>
-
-                <Card title="Record">
-                  <div className="p-4">
-                    <KeyValue
-                      items={[
-                        { k: 'CRM id', v: <span className="font-mono text-xs">{person.id}</span> },
-                        { k: 'Changed in the CRM', v: formatInstant(person.twentyUpdatedAt, user.timezone) },
-                        { k: 'Last synced', v: formatInstant(person.syncedAt, user.timezone) },
-                      ]}
-                    />
-                  </div>
-                </Card>
+                <CrmProfile person={person} ownerName={ownerName} podName={podName} timezone={user.timezone} mayAddMeeting={canCreateMeeting(user)} />
               </div>
             ) : null}
           </div>
         </div>
 
         <aside className="min-w-0 space-y-3">
+          <Card title="Contact details">
+            <div className="p-4">
+              <KeyValue items={[
+                { k: 'Email', v: person.email ? <a href={`mailto:${person.email}`} className="text-brand-700 hover:underline">{person.email}</a> : null },
+                { k: 'Phone', v: person.phone ? <span className="tabular-nums">{person.phone}</span> : null },
+                ...filled([
+                  { k: 'Other emails', value: person.additionalEmails.join(', ') },
+                  { k: 'Other phone', value: person.additionalPhone },
+                  // The handle, not the whole URL: the link carries the rest.
+                  { k: 'LinkedIn', value: person.linkedinUrl ? <a href={person.linkedinUrl} target="_blank" rel="noreferrer" title={person.linkedinUrl} className="text-brand-700 hover:underline">{person.linkedinUrl.replace(/^https?:\/\/(www\.)?linkedin\.com\//i, '')}</a> : null },
+                  { k: 'X', value: person.xUrl },
+                  { k: 'Title', value: person.jobTitle },
+                  { k: 'Company', value: company },
+                  { k: 'City', value: person.city },
+                ]).map((i) => ({ k: i.k, v: i.value })),
+              ]} />
+            </div>
+          </Card>
+          <LinkedInCard view={linkedin} hasLink={Boolean(person.linkedinKey)} addLink={nextAccess.canSet ? <AddLinkedInLinkForm personId={id} /> : null} />
           {opportunities.length ? <Card title="Open opportunities">
-            {(
-              <ul className="divide-y divide-line">
-                {opportunities.map((o) => (
-                  <li key={o.id} className="flex items-center justify-between px-4 py-2 text-sm">
-                    <span>{o.name}</span>
-                    <Badge tone="purple">{o.stage ? optionLabel(o.stage) : 'Open'}</Badge>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <ul className="divide-y divide-line">
+              {opportunities.map((o) => <li key={o.id} className="flex items-center justify-between gap-2 px-4 py-2.5 text-[13px]"><span className="min-w-0 truncate text-ink-800">{o.name}</span><Badge tone="purple">{o.stage ? optionLabel(o.stage) : 'Open'}</Badge></li>)}
+            </ul>
           </Card> : null}
           {colleagues.length ? <Card title={`Colleagues at ${person.companyName ?? 'company'}`}>
-            {(
-              <ul className="divide-y divide-line">
-                {colleagues.map((c) => {
-                  const st = crmStanding(c);
-                  return (
-                    <li key={c.id} className="flex items-center justify-between gap-2 px-4 py-2 text-[13px]">
-                      <Link href={`/people/${c.id}`} className="flex min-w-0 items-center gap-2 hover:text-brand-700">
-                        <Avatar name={cachedPersonName(c)} shape="circle" size={24} />
-                        <span className="min-w-0">
-                          <span className="block truncate text-ink-800">{cachedPersonName(c)}</span>
-                          {c.jobTitle ? <span className="block truncate text-[12px] leading-4 text-ink-500" title={c.jobTitle}>{c.jobTitle}</span> : null}
-                        </span>
-                      </Link>
-                      <Badge tone={st.tone}>
-                        {st.label}
-                      </Badge>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+            <ul className="divide-y divide-line">
+              {colleagues.map((c) => {
+                const st = crmStanding(c);
+                return <li key={c.id} className="flex items-center justify-between gap-2 px-4 py-2 text-[13px]">
+                  <Link href={`/people/${c.id}`} className="flex min-w-0 items-center gap-2 hover:text-brand-700">
+                    <Avatar name={cachedPersonName(c)} shape="circle" size={24} />
+                    <span className="min-w-0">
+                      <span className="block truncate text-ink-800">{cachedPersonName(c)}</span>
+                      {c.jobTitle ? <span className="block truncate text-[12px] leading-4 text-ink-500" title={c.jobTitle}>{c.jobTitle}</span> : null}
+                    </span>
+                  </Link>
+                  <Badge tone={st.tone}>{st.label}</Badge>
+                </li>;
+              })}
+            </ul>
           </Card> : null}
         </aside>
       </div>
     </>
   );
+}
+
+type ProfilePerson = NonNullable<Awaited<ReturnType<typeof prisma.personCache.findUnique>>>;
+
+/**
+ * The CRM's own fields, in two parts: who they are to us (owner, pod, how they are classified) and
+ * what the CRM itself last recorded. Filled fields only; the record's ids in one quiet line.
+ */
+function CrmProfile({ person, ownerName, podName, timezone, mayAddMeeting }: { person: ProfilePerson; ownerName: string | null; podName: string | null; timezone: string; mayAddMeeting: boolean }) {
+  const profile = filled([
+    { label: 'Owner', value: ownerName },
+    { label: 'Pod', value: podName },
+    { label: 'Tier', value: person.tier ? optionLabel(person.tier) : null },
+    { label: 'Contact type', value: optionLabels(person.contactType, ' / ') },
+    { label: 'Pipeline stage', value: person.pipelineStage ? optionLabel(person.pipelineStage) : null },
+    { label: 'CRM cadence tag', value: person.listCategory ? `${optionLabel(person.listCategory)}${person.previousCadence ? ` (was ${optionLabel(person.previousCadence)})` : ''}` : null },
+    { label: 'Lead source', value: optionLabels(person.leadSource) },
+    { label: 'Primary product', value: person.primaryProduct ? optionLabel(person.primaryProduct) : null },
+    { label: 'Product interest', value: optionLabels(person.productInterest) },
+    { label: 'Campaigns in the CRM', value: optionLabels(person.campaigns) },
+    { label: 'Deal signal', value: person.dealSignalStrength ? optionLabel(person.dealSignalStrength) : null },
+    { label: 'Calling list', value: person.onCallingList ? 'Yes' : null },
+    { label: 'Rotated', value: person.rotatedTo ? `${optionLabel(person.rotatedTo)}${person.rotationChangedAt ? ` on ${formatInstant(person.rotationChangedAt, timezone)}` : ''}` : null },
+    { label: 'Added by', value: person.createdByName ? `${person.createdByName}${person.createdBySource ? ` (${optionLabel(person.createdBySource)})` : ''}` : null },
+  ]);
+  const latest = filled([
+    { label: 'Next action', value: person.nextAction },
+    { label: 'By', value: person.nextStep ? optionLabel(person.nextStep) : null },
+    { label: 'Due', value: person.nextActionDueDate ? formatLocalDate(person.nextActionDueDate, 'long') : null },
+    { label: 'POC due', value: person.nextActionDueDatePoc ? formatLocalDate(person.nextActionDueDatePoc, 'long') : null },
+    { label: 'Last call', value: person.lastCallAt ? formatInstant(person.lastCallAt, timezone) : null },
+    { label: 'Last email', value: person.lastEmailAt ? formatInstant(person.lastEmailAt, timezone) : null },
+    { label: 'Meeting link', value: person.meetingUrl ? <a href={person.meetingUrl} target="_blank" rel="noreferrer" className="text-brand-700 hover:underline">Join</a> : null },
+    { label: 'Recording', value: person.recordingUrl && mayAddMeeting ? <Link href={`/meetings/new?personId=${person.id}&url=${encodeURIComponent(person.recordingUrl)}`} className="text-brand-700 hover:underline">Add meeting</Link> : null },
+    { label: 'Booking', value: person.bookingId },
+  ]);
+  return <Card title="CRM profile">
+    <div className="space-y-5 p-4">
+      {profile.length ? <RecordFields items={profile} /> : <p className="text-[13px] text-ink-500">The CRM holds nothing else on them yet.</p>}
+      {person.tags.length ? <div className="space-y-1.5">
+        <div className="text-[11px] font-medium uppercase tracking-wide text-ink-400">Tags</div>
+        <div className="flex flex-wrap gap-1">{person.tags.map((t) => <span key={t} className="rounded border border-line bg-canvas px-1.5 py-0.5 text-[11.5px] text-ink-700" title={t}>{optionLabel(t)}</span>)}</div>
+      </div> : null}
+      {person.leadSourceNotes ? <div className="space-y-1.5">
+        <div className="text-[11px] font-medium uppercase tracking-wide text-ink-400">Lead source notes</div>
+        <p className="max-w-[75ch] whitespace-pre-line text-[13px] text-ink-800">{person.leadSourceNotes}</p>
+      </div> : null}
+      {latest.length || person.lastNote ? <div className="space-y-3 border-t border-line pt-4">
+        <div className="text-[12px] font-semibold text-ink-700">Latest in the CRM</div>
+        {latest.length ? <RecordFields items={latest} /> : null}
+        {person.lastNote ? <div className="space-y-1.5">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-ink-400">Last note</div>
+          <p className="max-w-[75ch] whitespace-pre-line rounded-lg border border-line bg-canvas/60 px-3 py-2 text-[13px] text-ink-800">{person.lastNote}</p>
+        </div> : null}
+      </div> : null}
+    </div>
+    <div className="border-t border-line px-4 py-2.5 text-[11.5px] text-ink-500">
+      CRM id <span className="font-mono">{person.id}</span> · changed in the CRM {formatInstant(person.twentyUpdatedAt, timezone)} · synced {formatInstant(person.syncedAt, timezone)}
+    </div>
+  </Card>;
 }

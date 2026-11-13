@@ -218,21 +218,23 @@ test('an account shows its people, hierarchy and one timeline', async ({ page })
   await expect(page).toHaveURL(/\/accounts\//);
   await expect(page.getByRole('heading', { name: 'Dummy Company A' })).toBeVisible();
 
-  await page.getByRole('link', { name: 'People by title' }).click();
-  await expect(page.getByRole('link', { name: 'Dummy One' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Dummy Two' })).toBeVisible();
+  // People holds the list and the view by title (owner, 13 Nov 2026).
+  await page.locator('main').getByRole('link', { name: /^People/ }).first().click();
+  await page.getByRole('link', { name: 'By title', exact: true }).click();
+  await expect(page.locator('main').getByRole('link', { name: 'Dummy One' }).first()).toBeVisible();
+  await expect(page.locator('main').getByRole('link', { name: 'Dummy Two' }).first()).toBeVisible();
   // Grouped by the job title the CRM holds, not by a stance nobody could measure.
   await expect(page.getByText(/^(Executive|Leadership|Management|Other) titles$/).first()).toBeVisible();
   for (const invented of ['Champion', 'Supporter', 'Detractor']) {
     await expect(page.getByText(invented, { exact: true }), invented).toHaveCount(0);
   }
 
-  await page.locator('main').getByRole('link', { name: 'People', exact: true }).click();
+  await page.getByRole('link', { name: 'List', exact: true }).click();
   // The people table names each person's manager.
   await expect(page.locator('table tbody tr').first()).toBeVisible();
   await expect(page.locator('table')).toContainText('Dummy One');
 
-  await page.getByRole('link', { name: 'Timeline' }).click();
+  await page.locator('main').getByRole('link', { name: 'Activity', exact: true }).click();
   await expect(page.locator('main')).toContainText(/Email|Call|Meeting|enrolled/i);
   await logout(page);
 });
@@ -301,17 +303,17 @@ test('the person record shows the real Twenty fields, grouped as Twenty groups t
   await page.goto('/people/dummy-01?tab=overview');
   const main = page.locator('main');
 
-  // The groups the CRM record has: identity, who owns it, how it is classified, what the CRM
-  // itself last recorded, and the provenance of the row.
-  for (const card of ['Contact details', 'Ownership', 'Classification', 'CRM activity details', 'Record']) {
+  // Contact details beside the work; the CRM's own fields in one card, filled ones only, with what
+  // the CRM itself last recorded and the row's provenance in one line (owner, 13 Nov 2026).
+  for (const card of ['Contact details', 'CRM profile', 'Latest in the CRM']) {
     await expect(main.getByText(card, { exact: true }), card).toBeVisible();
   }
 
-  // Ownership comes from assignedTo and podOwner, not from an invented owner field.
+  // The owner comes from assignedTo and podOwner, not from an invented owner field.
   await expect(main.getByText('Alisa Senior').first()).toBeVisible();
   await expect(main.getByText("Alisa's pod").first()).toBeVisible();
 
-  // Classification, with every option rendered as a label rather than a constant.
+  // How they are classified, with every option rendered as a label rather than a constant.
   await expect(main.getByText('Tier 1').first()).toBeVisible();
   await expect(main.getByText('Prospect').first()).toBeVisible();
   await expect(main.getByText(/Bi-weekly \(was Monthly\)/)).toBeVisible();
