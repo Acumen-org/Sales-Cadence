@@ -44,7 +44,7 @@ export type IngestInput = {
 };
 
 export type IngestResult = {
-  status: 'processed' | 'duplicate' | 'ignored' | 'error';
+  status: 'processed' | 'duplicate' | 'ignored' | 'error' | 'queued';
   result: string;
   eventId?: string;
   needsReview?: boolean;
@@ -110,7 +110,13 @@ const isStaleClaim = (row: { result: string | null; receivedAt: Date; processedA
  * Processing is idempotent by construction (single-use evidence, no-op state transitions), so a
  * lost race or a reconcile re-scan can never advance a step twice.
  */
-export async function ingestEvent(input: IngestInput, client?: TwentyClient): Promise<IngestResult> {
+export async function ingestEvent(input: IngestInput, client?: TwentyClient): Promise<IngestResult>;
+/**
+ * N22: `defer` stores the event and hands back its processing as `run`, for the webhook to do after
+ * it has answered Twenty. A run that never happens (a restart) is picked up by the sweep (N03).
+ */
+export async function ingestEvent(input: IngestInput, client: TwentyClient | undefined, opts: { defer: true }): Promise<IngestResult & { run?: () => Promise<IngestResult> }>;
+export async function ingestEvent(input: IngestInput, client?: TwentyClient, opts: { defer?: boolean } = {}): Promise<IngestResult & { run?: () => Promise<IngestResult> }> {
   const schema = await getTwentySchema();
   const canonical = canonicalObjectType(input.objectType, schema) ?? (input.objectType as CanonicalObject);
   const recordId = input.recordId ?? (typeof input.record.id === 'string' ? input.record.id : String(input.record.id ?? ''));
@@ -153,6 +159,12 @@ export async function ingestEvent(input: IngestInput, client?: TwentyClient): Pr
     }
   }
 
+  const run = () => runStored(event, canonical, recordId, input, client);
+  if (opts.defer) return { status: 'queued', result: 'queued', eventId: event.id, run };
+  return run();
+}
+
+async function runStored(event: Pick<ActivityEvent, 'id'>, canonical: CanonicalObject, recordId: string, input: IngestInput, client?: TwentyClient): Promise<IngestResult> {
   const actor: AuditActor = input.source === 'RECONCILE' ? RECONCILE_ACTOR : webhookActor(input.eventName, recordId);
   const ctx: EngineContext = { actor, now: input.now, skipSync: input.skipSync };
   try {

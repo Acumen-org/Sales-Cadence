@@ -54,3 +54,17 @@ describe('N21: the event table does not grow for good', () => {
     expect((await prisma.activityEvent.findMany({ select: { externalId: true }, orderBy: { externalId: 'asc' } })).map((r) => r.externalId)).toEqual(['old-review', 'recent']);
   });
 });
+
+describe('N22: a webhook is answered before its event is processed', () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  it('the event is stored at once and processed by the run handed back', async () => {
+    const r = await ingestEvent({ source: 'WEBHOOK', objectType: 'note', eventName: 'note.deleted', record: { id: 'n-later' }, recordId: 'n-later' }, undefined, { defer: true });
+    expect(r.status).toBe('queued');
+    expect((await prisma.activityEvent.findFirstOrThrow({ where: { externalId: 'n-later' } })).result).toBeNull();
+    expect((await r.run!()).result).toBe('ignored_deleted');
+    expect((await prisma.activityEvent.findFirstOrThrow({ where: { externalId: 'n-later' } })).result).toBe('ignored_deleted');
+  });
+});
