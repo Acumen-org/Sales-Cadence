@@ -385,7 +385,7 @@ export async function tableRows(ids: string[], user: SessionUser, today: string,
       source: { label: sourceLabel, title: c.source === 'BELLWETHER' ? `Sent from Bellwether${c.pushedByName ? ` by ${c.pushedByName}` : ''} on ${created}` : `${sourceLabel} on ${created}` },
       move: m ? {
         undo: c.status === 'MOVED' && m.canUndo ? { itemId: m.itemId, confirm: m.undoConfirm, campaigns: m.campaigns } : null,
-        failed: c.status === 'ACTIVE' && m.state === 'FAILED' ? { error: m.error ?? 'see the move', href: coldMoveHref(m.moveId), label: m.failure === 'permanent' ? 'Move again' : 'Retry' } : null,
+        failed: c.status === 'ACTIVE' && m.state === 'FAILED' ? { error: (m.error ?? 'see the move').replace(/\.+$/, ''), href: coldMoveHref(m.moveId), label: 'See the move', retrying: m.retrying } : null,
       } : null,
       allows, hasWork: inCampaign || c.nextActions.length > 0,
     });

@@ -149,7 +149,7 @@
     background-position: 7px 7px;
   }
   .card-head {
-    @apply flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4;
+    @apply flex min-h-[57px] flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-2.5;
   }
   .card-title {
     @apply text-[14px] font-semibold text-ink-900;

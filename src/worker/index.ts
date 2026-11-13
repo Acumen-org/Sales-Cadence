@@ -69,7 +69,7 @@ const nightly=nightlyLoop({hour:config.RECONCILE_HOUR,log,jobs:()=>{
  */
 let callsAt=0;let mailAt=0;let crmCleanupAt=0;let healthAt=0;
 async function sandboxJobs(now:number){
- try{const moved=await runMoveQueue({pauseMs:1500});if(moved.done||moved.failed||moved.dryRun)log('moves to CRM',moved);}catch(error){log('moves to CRM failed',error);}
+ try{const moved=await runMoveQueue({pauseMs:1500,autoRetry:true});if(moved.done||moved.failed||moved.dryRun)log('moves to CRM',moved);}catch(error){log('moves to CRM failed',error);}
  if(now>=callsAt){callsAt=now+120_000;try{const stats=await importTwilioCalls();if(stats.ran&&(stats.created||stats.forms||stats.recordings||stats.error))log('twilio import',stats);}catch(error){log('twilio import failed',error);}}
  // Every 5 minutes: people Twenty's mail or calendar sync created for sandbox contacts, removed when nobody worked them.
  // B012: a Bellwether push cut off part-way (a restart, the database gone) is marked failed; its retry runs it again.

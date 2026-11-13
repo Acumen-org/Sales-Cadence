@@ -62,8 +62,9 @@ export function MoveDialog({ ids, onClose, owners = [], pods = [], contactHref =
     if (!r.ok) { setError(r.error); setItems([]); return; }
     setItems(r.items); setCounts(r.counts); setToday(r.today);
     setStep((s) => (s.dueDate ? s : { ...s, dueDate: r.today }));
-    // Ready and already-in-CRM contacts start ticked; "No conversation yet" never does (D3).
-    setPicked((prev) => new Set(r.items.filter((i) => (i.group === 'ready' || i.group === 'in_crm') || (keepPicks && prev.has(i.contactId) && i.group === 'no_conversation')).map((i) => i.contactId)));
+    // Ready and already-in-CRM contacts start ticked. "No conversation yet" does only when it is the one
+    // contact the dialog was opened for: its own confirm below is then the one extra step (D3), not two.
+    setPicked((prev) => new Set(r.items.filter((i) => (i.group === 'ready' || i.group === 'in_crm') || (i.group === 'no_conversation' && ((keepPicks && prev.has(i.contactId)) || ids.length === 1))).map((i) => i.contactId)));
   }, [ids]);
   useEffect(() => { void load(false); }, [load]);
 
