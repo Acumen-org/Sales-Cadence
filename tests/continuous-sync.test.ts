@@ -146,3 +146,20 @@ describe('N17: a listing that keeps failing', () => {
     expect(asked[0]).toBe('2026-09-08T10:01:00.000Z');
   });
 });
+
+describe('N23, N32: CRM members and Cadence users', () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+  it('a member invited again under a new id is followed; linking never resets the time zone', async () => {
+    const { seedBasics } = await import('./helpers/db');
+    const { syncWorkspaceMembers } = await import('@/lib/continuous-sync');
+    const { getMockTwentyClient } = await import('@/lib/twenty/mock-client');
+    const b = await seedBasics();
+    await prisma.user.update({ where: { id: b.users.alisa.id }, data: { email: 'alisa@acumen.example', twentyMemberId: 'wm-removed', timezone: 'America/Chicago' } });
+    await prisma.user.update({ where: { id: b.users.leigh.id }, data: { email: 'leigh@acumen.example', twentyMemberId: null, timezone: 'Asia/Tokyo' } });
+    await syncWorkspaceMembers(getMockTwentyClient());
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: b.users.alisa.id } })).toMatchObject({ twentyMemberId: 'wm-alisa', timezone: 'America/Chicago' });
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: b.users.leigh.id } })).toMatchObject({ twentyMemberId: 'wm-leigh', timezone: 'Asia/Tokyo' });
+  });
+});

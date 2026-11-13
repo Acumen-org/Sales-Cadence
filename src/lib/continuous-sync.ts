@@ -13,11 +13,16 @@ import type { TwentyClient } from './twenty/client';
 /** Discover CRM members without granting login access or restoring removed users. */
 export async function syncWorkspaceMembers(client: TwentyClient) {
   const members = await client.listWorkspaceMembers();
+  const current = new Set(members.map((m) => m.id));
   for (const member of members) {
     const email = member.email?.trim().toLowerCase(); if (!email) continue;
     const existing = await prisma.user.findFirst({ where: { OR: [{ twentyMemberId: member.id }, { email }] } });
     if (existing) {
-      if (!existing.twentyMemberId) await prisma.user.updateMany({ where: { id: existing.id, twentyMemberId: null }, data: { twentyMemberId: member.id, timezone: workspaceTimezone() } });
+      // N32: linking keeps the user's own time zone. N23: a member removed and invited again has a new
+      // id; the user found by email follows it, once the old id is no longer a member at all.
+      if (existing.twentyMemberId !== member.id && (!existing.twentyMemberId || !current.has(existing.twentyMemberId)) && !(await prisma.user.findFirst({ where: { twentyMemberId: member.id }, select: { id: true } }))) {
+        await prisma.user.updateMany({ where: { id: existing.id, twentyMemberId: existing.twentyMemberId }, data: { twentyMemberId: member.id } });
+      }
     } else {
       await prisma.user.upsert({ where: { email }, create: { email, name: [member.firstName,member.lastName].filter(Boolean).join(' ') || email, twentyMemberId: member.id, timezone: workspaceTimezone(), role: 'JUNIOR_FO', active: false, passwordHash: await hashPassword(randomBytes(32).toString('hex')) }, update: {} });
     }
