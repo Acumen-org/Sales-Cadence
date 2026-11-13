@@ -3,6 +3,9 @@
 set -e
 ROLE="${1:-web}"
 
+# T41: a mistyped setting (COOKIE_SECURE=maybe) stops the start here, not the first request.
+node --import tsx -e "import('./src/lib/env.ts').then((m)=>m.env()).catch((e)=>{console.error('[cadence] FATAL: '+e.message);process.exit(1)})"
+
 # T01: a migration that failed (or was cut off part-way) makes Prisma refuse every later
 # `migrate deploy`. Two cases, told apart by whether this image carries the failed migration:
 #  - it does: nothing can start until someone resolves it. Say so plainly and stop, rather than
