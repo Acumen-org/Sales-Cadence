@@ -32,6 +32,7 @@ import { ringHealth } from '../lib/outreach/health';
 import { coldOutreachReleaseOnce } from '../lib/outreach/release';
 import { runLinkedInPass } from '../lib/linkedin/pass';
 import { beatWorker } from '../lib/worker-heartbeat';
+import { setCrmRequestPriority } from '../lib/twenty/pace';
 
 const config=env();
 const log=(message:string,extra?:unknown)=>console.log('[worker '+new Date().toISOString()+'] '+message,extra??'');
@@ -218,6 +219,8 @@ async function tick(){
  }catch(error){log('tick failed',error);}finally{running=false;}
 }
 async function main(){
+ // N12: the worker's CRM requests are background work: they leave room in the minute for reps' clicks.
+ setCrmRequestPriority('background');
  log('Continuous sync every '+config.CRM_SYNC_SECONDS+' seconds; nightly reconcile after '+config.RECONCILE_HOUR+':00 '+workspaceTimezone());
  await tick();const timer=setInterval(tick,Math.min(config.WORKER_TICK_SECONDS,config.CRM_SYNC_SECONDS,120)*1000);
  const stop=async()=>{stopping=true;clearInterval(timer);while(running)await new Promise(resolve=>setTimeout(resolve,100));await nightly.settled();await prisma.$disconnect();process.exit(0);};

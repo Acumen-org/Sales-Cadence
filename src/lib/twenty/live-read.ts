@@ -20,6 +20,9 @@ const TRIP_AT = 3;
 const failures: number[] = [];
 let pausedUntil = 0;
 let lastError: string | null = null;
+/** N12: a record read live this recently is not read again: opening a page twice costs one request. */
+const RECENT_MS = 2 * 60_000;
+const recent = new Map<string, number>();
 
 export function liveReadHealth(now = Date.now()): { failuresLastHour: number; pausedUntil: Date | null; lastError: string | null } {
   return { failuresLastHour: failures.filter((t) => now - t < 3_600_000).length, pausedUntil: pausedUntil > now ? new Date(pausedUntil) : null, lastError };
@@ -30,6 +33,7 @@ export function resetLiveReadHealth() {
   failures.length = 0;
   pausedUntil = 0;
   lastError = null;
+  recent.clear();
 }
 
 function recordFailure(err: unknown, now: number) {
@@ -49,6 +53,10 @@ function moved(cached: Date | null | undefined, live: string | null | undefined)
 /** Returns whether the cached record changed; never throws. */
 export async function liveRead(kind: Kind, id: string, now = Date.now()): Promise<{ changed: boolean; skipped: boolean }> {
   if (pausedUntil > now) return { changed: false, skipped: true };
+  const key = `${kind}:${id}`;
+  if (now - (recent.get(key) ?? -Infinity) < RECENT_MS) return { changed: false, skipped: true };
+  if (recent.size > 5_000) for (const [k, t] of recent) if (now - t >= RECENT_MS) recent.delete(k);
+  recent.set(key, now);
   try {
     const client = await getTwentyClient();
     if (kind === 'person') {

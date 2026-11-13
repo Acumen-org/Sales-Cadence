@@ -37,6 +37,8 @@ export type TwentyGraphqlClientOptions = {
   schema: TwentySchema;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /** N12: waits for a slot in the requests-per-minute budget the web app and worker share. */
+  pace?: () => Promise<void>;
 };
 
 type Raw = Record<string, unknown>;
@@ -121,6 +123,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     const once = /^\s*mutation\s+Create/.test(query);
     for (let attempt = 0; attempt < 2; attempt++) {
       const controller = new AbortController();
+      await this.opts.pace?.();
       const timer = setTimeout(() => controller.abort(), this.timeoutMs);
       try {
         const res = await this.fetchImpl(url, {
@@ -212,6 +215,7 @@ export class TwentyGraphqlClient implements TwentyClient {
 
   private async rest<T = Raw>(method: 'GET' | 'POST', resource: string, body?: Raw): Promise<{ status: number; json: T | null; text: string }> {
     const url = `${this.opts.baseUrl.replace(/\/+$/, '')}/rest/${resource}`;
+    await this.opts.pace?.();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {

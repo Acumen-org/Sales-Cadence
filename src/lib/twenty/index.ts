@@ -8,6 +8,7 @@ import { getMockTwentyClient } from './mock-client';
 import { mockStoreEnabled, sharedMock } from './mock-store';
 import type { CreateNoteInput, UpdateNoteInput, TwentyMeetingSchema, TwentyMeetingRecordInput, TwentyTagField, CreateTaskInput, UpdateTaskInput, EnrichPersonInput, PersonNextActionInput, PersonDndInput, EnrichCompanyInput, TwentyPerson, TwentyCompany, CreatePersonInput, CreateCompanyInput } from './types';
 import { blankPerson } from './mock-client';
+import { paceCrmRequest } from './pace';
 
 /**
  * CADENCE_DRY_RUN=true: reads pass through, writes are logged (console + TwentyWrite
@@ -154,7 +155,7 @@ export async function getTwentyClient(): Promise<TwentyClient> {
     const schema = await getTwentySchema();
     const key = `${conn.baseUrl}|${conn.apiKey}|${JSON.stringify(schema)}`;
     if (!g.__cadenceTwentyClient || g.__cadenceTwentyClient.key !== key) {
-      g.__cadenceTwentyClient = { key, client: new TwentyGraphqlClient({ baseUrl: conn.baseUrl, apiKey: conn.apiKey, schema }) };
+      g.__cadenceTwentyClient = { key, client: new TwentyGraphqlClient({ baseUrl: conn.baseUrl, apiKey: conn.apiKey, schema, pace: () => paceCrmRequest() }) };
     }
     base = g.__cadenceTwentyClient.client;
   }

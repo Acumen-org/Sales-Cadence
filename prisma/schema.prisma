@@ -839,6 +839,12 @@ model AuditLog {
   @@index([entityType, createdAt])
 }
 
+/// N12: CRM requests sent per minute, shared by the web app and the worker (src/lib/twenty/pace.ts).
+model CrmRequestBudget {
+  minute DateTime @id
+  used   Int      @default(0)
+}
+
 model Setting {
   key       String   @id
   value     Json
