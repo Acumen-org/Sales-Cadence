@@ -156,3 +156,22 @@ describe('N33: reads that asked for one page', () => {
     expect((await twenty.findCompanies({ domain: 'acme.example' })).map((c) => c.id)).toEqual(['co-2']);
   });
 });
+
+describe('N39: pauses before asking the CRM again', () => {
+  it('waits before retrying a 5xx, and honours a Retry-After given as a date', async () => {
+    let n = 0;
+    const when = new Date(Date.now() + 9_000).toUTCString();
+    const fetchImpl = (async () => {
+      n += 1;
+      if (n === 1) return new Response('busy', { status: 429, headers: { 'retry-after': when } });
+      if (n === 2) return new Response('bad gateway', { status: 502 });
+      return new Response(JSON.stringify({ data: { ok: true } }));
+    }) as unknown as typeof fetch;
+    const twenty = new TwentyGraphqlClient({ baseUrl: 'https://twenty.example', apiKey: 'k', schema: mergeTwentySchema(), fetchImpl });
+    const waits: number[] = [];
+    twenty.sleep = async (ms) => { waits.push(ms); };
+    await twenty.request('query Q { ok }');
+    expect(waits[0]).toBeGreaterThan(6_000);
+    expect(waits[1]).toBeGreaterThanOrEqual(1_000);
+  });
+});

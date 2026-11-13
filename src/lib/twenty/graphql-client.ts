@@ -137,8 +137,11 @@ export class TwentyGraphqlClient implements TwentyClient {
           // The minute's budget is spent. Wait what Twenty asks for (or a few seconds) and go again;
           // this attempt does not count against the retry budget.
           rateLimited += 1;
-          const retryAfter = Number(res.headers.get('retry-after'));
-          await this.sleep(Math.min(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 2_000 * rateLimited, MAX_RATE_LIMIT_WAIT_MS));
+          // N39: Retry-After is seconds or an HTTP date; either is honoured, a guess only without one.
+          const header = res.headers.get('retry-after');
+          const seconds = Number(header);
+          const asked = header && Number.isFinite(seconds) ? seconds * 1000 : header ? Date.parse(header) - Date.now() : NaN;
+          await this.sleep(Math.min(Number.isFinite(asked) && asked > 0 ? asked : 2_000 * rateLimited, MAX_RATE_LIMIT_WAIT_MS));
           attempt -= 1;
           continue;
         }
@@ -146,6 +149,8 @@ export class TwentyGraphqlClient implements TwentyClient {
           const err = new TwentyApiError(`The CRM's ${endpoint} responded ${res.status}: ${text.slice(0, 300)}`, res.status);
           if (res.status >= 500 && attempt === 0 && !once) {
             lastErr = err;
+            // N39: a server in trouble gets a moment before the one retry, not a second request at once.
+            await this.sleep(1_000 + Math.floor(Math.random() * 1_000));
             continue;
           }
           throw err;
