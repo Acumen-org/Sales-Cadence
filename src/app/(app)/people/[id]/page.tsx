@@ -23,7 +23,9 @@ import { prisma } from '@/lib/db';
 import { addDays, formatInstant, formatLocalDate, todayIn } from '@/lib/dates';
 import { accentFor } from '@/lib/accent';
 import { CallButton } from '@/components/calls/call-button';
-import { callGate } from '@/lib/calls/gate';
+import { callGate, pendingFormBlock } from '@/lib/calls/gate';
+import { openCallItems } from '@/lib/calls/link';
+import { LogCallButton } from '@/components/calls/log-call';
 import { cachedPersonName } from '@/lib/person-cache';
 import { describeStep, parseSteps } from '@/lib/sequences/steps';
 import { getSettings, getTwentyConnection } from '@/lib/settings';
@@ -94,6 +96,15 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
   const callVerdict = subject ? canAct(toActor(user), subject, 'call') : null;
   const gateNow = person.phone ? await callGate(user, { personId: person.id, phone: person.phone, state: person.city?.split(',').pop()?.trim() ?? null, optedOut: person.optedOut, dnd: person.dnd, email: person.email, linkedinUrl: person.linkedinUrl }) : null;
   const callGateNow = gateNow && callVerdict && !callVerdict.ok ? { blocked: callVerdict.reason, warning: null } : gateNow;
+  // Log a call (a voicemail from a mobile, say), with or without a phone on file: the server's rules,
+  // who may log for this person and no form waiting, say why under the button, as on a cold contact.
+  const logVerdict = subject ? canAct(toActor(user), subject, 'log_call') : { ok: false as const, reason: 'This person is no longer in the CRM.' };
+  const [logPending, logSteps] = await Promise.all([
+    logVerdict.ok ? pendingFormBlock(user.id, user.timezone) : Promise.resolve(null),
+    logVerdict.ok ? openCallItems({ personId: id, sandboxContactId: null }, null) : Promise.resolve([]),
+  ]);
+  const logBlocked = !logVerdict.ok ? logVerdict.reason : logPending?.replace(/ \([^)]*\) first\.$/, ' first.') ?? null;
+  const nowLocal = new Intl.DateTimeFormat('sv-SE', { timeZone: user.timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()).replace(' ', 'T');
   // D4: an opt-out from the post-call form can be questioned by anyone and undone by an admin.
   const formOpt = person.optedOut ? await formOptOut(personRef(id)) : null;
   const mayWorkNext = openNext ? openNext.foUserId === user.id || user.role === 'ADMIN' || (nextAccess.canAssign && nextAccess.fos.some((f) => f.id === openNext.foUserId)) : false;
@@ -166,6 +177,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
           </>}
           actions={<>
             {person.phone ? <CallButton phone={person.phone} template={settings.rules.clickToCallUrl} personId={person.id} nextActionId={openNext?.id ?? null} blocked={callGateNow?.blocked} warning={callGateNow?.warning} className="btn-secondary btn-sm" /> : null}
+            <span className="inline-flex max-w-[13rem] flex-col"><LogCallButton personId={person.id} name={name} steps={logSteps.map((s) => ({ key: `${s.kind}:${s.id}`, words: s.words }))} now={nowLocal} blocked={logBlocked} /></span>
             {person.email ? <a href={`mailto:${person.email}`} className="btn-secondary btn-sm"><ActionIcon action="EMAIL" size={13} /> Email</a> : null}
             {person.linkedinUrl
               ? <a href={person.linkedinUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm"><ActionIcon action="LINKEDIN_MESSAGE" size={13} /> LinkedIn</a>
