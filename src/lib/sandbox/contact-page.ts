@@ -263,7 +263,12 @@ export async function loadContactPage(id: string, user: SessionUser, now = new D
     const pendingWho = pendingNow ? (pendingNow.person ?? pendingNow.sandboxContact) : null;
     if (s.moving) blocker = { tone: 'info', text: `Moving ${firstName} to the CRM… The contact is locked until the move ends.`, fix: move ? { kind: 'link', label: 'See the move', href: coldMoveHref(move.moveId) } : null };
     else if (!work.ok) blocker = { tone: 'info', text: work.reason, fix: null };
-    else if (move?.state === 'FAILED') blocker = { tone: 'error', text: `Move failed: ${move.error ?? 'see the move'}.`, fix: { kind: 'link', label: move.failure === 'permanent' ? 'See the move' : 'Move again', href: coldMoveHref(move.moveId) } };
+    else if (move?.state === 'FAILED') {
+      const why = (move.error ?? 'see the move').replace(/\.+$/, '');
+      blocker = move.retrying
+        ? { tone: 'warn', text: `Not in the CRM yet: ${why}.`, fix: { kind: 'link', label: 'See the move', href: coldMoveHref(move.moveId) } }
+        : { tone: 'error', text: `Move failed: ${why}.`, fix: { kind: 'link', label: 'See the move', href: coldMoveHref(move.moveId) } };
+    }
     else if (pendingNow && sales) blocker = { tone: 'warn', text: `Your call with ${pendingWho ? `${pendingWho.firstName} ${pendingWho.lastName}`.trim() || 'a removed contact' : (pendingNow.direction === 'INBOUND' ? pendingNow.fromNumber : pendingNow.toNumber) ?? 'an unknown number'} (${callTimeWords(pendingNow.startedAt ?? pendingNow.createdAt, user.timezone, now)}) needs its form before you can call again.`, fix: { kind: 'form', label: 'Fill it in' } };
     else if (outreach && !outreach.ok && outreach.block === 'in_crm') blocker = { tone: 'info', text: `${firstName} is in the CRM already (${crmPerson ? `${crmPerson.firstName} ${crmPerson.lastName}`.trim() : 'a CRM person'}${memberName(crmPerson?.ownerMemberId) ? `, ${memberName(crmPerson?.ownerMemberId)}` : ''}). Outreach stopped.`, fix: !move_.blocked ? { kind: 'move', label: 'Move to CRM' } : null };
     else if (outreach && !outreach.ok) blocker = { tone: 'error', text: `${outreach.reason} Do not email, call or message this person.`, fix: null };
