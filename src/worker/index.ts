@@ -20,6 +20,7 @@ import { workspaceTimezone } from '../lib/workspace';
 import { syncNextActions } from '../lib/next-actions';
 import { runMoveQueue } from '../lib/sandbox/move';
 import { CLEANUP_EVERY_MS, cleanupSandboxCrmPeople } from '../lib/sandbox/crm-cleanup';
+import { cancelNonReplyTasks } from '../lib/linkedin/follow-ups';
 import { syncH00ksNumbers } from '../lib/calls/h00ks';
 import { runCrmCheck } from '../lib/sandbox/crm-check';
 import { backfillPhoneE164, runSandboxRetention } from '../lib/sandbox/retention';
@@ -82,6 +83,8 @@ async function sandboxJobs(now:number){
  // Every 5 minutes: people Twenty's mail or calendar sync created for sandbox contacts, removed when nobody worked them.
  // B012: a Bellwether push cut off part-way (a restart, the database gone) is marked failed; its retry runs it again.
  if(now>=crmCleanupAt){try{const swept=await sweepStuckPushes();if(swept)log('bellwether pushes swept',swept);}catch(error){log('bellwether push sweep failed',error);}}
+ // Every 5 minutes: "Reply to their email" tasks that are not replies to us (newsletters, no-reply, never emailed) close.
+ if(now>=crmCleanupAt){try{const n=await cancelNonReplyTasks();if(n)log('reply tasks that were not replies cancelled',n);}catch(error){log('reply task check failed',error);}}
  if(now>=crmCleanupAt){crmCleanupAt=now+CLEANUP_EVERY_MS;try{const stats=await cleanupSandboxCrmPeople();if(stats.removed||stats.kept||stats.dryRun||stats.errors)log('sandbox CRM cleanup',stats);}catch(error){log('sandbox CRM cleanup failed',error);}}
  // Every 5 minutes: the health card (PLAN 4.7); a line that turns amber rings the admins once.
  if(now>=healthAt){healthAt=now+300_000;try{const rang=await ringHealth(new Date(now));if(rang.length)log('health card amber',rang);}catch(error){log('health check failed',error);}}
