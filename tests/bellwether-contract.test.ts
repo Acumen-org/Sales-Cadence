@@ -352,7 +352,8 @@ describe('contract v1.1 and the push intake (W11)', () => {
       const r = await owners(V11);
       expect(r.status).toBe(200);
       expect(r.body.owners.map((o: Row) => `${o.email}:${o.pods.join('+')}`).sort()).toEqual(['alisa@cadence.local:ALISA', 'andrew@cadence.local:ANDREW', 'karson@cadence.local:ALISA', 'leigh@cadence.local:ALISA+LEIGH']);
-      expect(Object.keys(r.body.owners[0])).toEqual(['email', 'name', 'pods']);
+      // U16: each owner also carries the other addresses Cadence accepts for them.
+      expect(Object.keys(r.body.owners[0])).toEqual(['email', 'name', 'pods', 'aliases']);
       expect((await owners({ key: 'wrong' })).status).toBe(401);
     });
 
