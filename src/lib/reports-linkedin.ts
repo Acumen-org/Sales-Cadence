@@ -83,7 +83,8 @@ export async function linkedinRows(period: Period): Promise<LinkedInRows> {
       select: { externalId: true, summary: true, actorUserId: true, audience: true },
     }),
     prisma.linkedInFollowUp.findMany({
-      where: { state: 'OPEN' },
+      // LinkedIn tasks only: "Reply to their email" lives in the same table.
+      where: { state: 'OPEN', kind: { not: 'EMAIL_REPLY' } },
       select: { foUserId: true, dueDate: true, audience: true, personId: true, sandboxContact: { select: { podId: true } } },
     }),
   ]);

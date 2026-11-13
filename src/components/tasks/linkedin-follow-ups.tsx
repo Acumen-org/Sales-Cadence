@@ -9,34 +9,36 @@ import { Avatar, Badge, Notice, RecordFields, Surface } from '@/components/ui';
 import { LinkedInFollowUpControls } from './linkedin-follow-up-controls';
 
 /*
- * LinkedIn tasks Cadence opened from what the LinkedIn Console saw (src/lib/linkedin): message someone
- * who accepted or wrote back, withdraw a request left waiting, send it again after LinkedIn's cool-off.
- * Cadence never acts on LinkedIn: each task opens the person in the Console, where the teammate does it
- * by hand, and closes itself when the Console sees it done.
+ * Follow-ups Cadence opened from what it saw: LinkedIn ones from the LinkedIn Console (src/lib/linkedin) -
+ * message someone who accepted or wrote back, withdraw a request left waiting, send it again after
+ * LinkedIn's cool-off - and "Reply to their email" when someone answers an email (owner, 13 Nov 2026).
+ * Cadence never acts on LinkedIn: a LinkedIn task opens the person in the Console, where the teammate
+ * does it by hand. Each closes itself when Cadence sees it done.
  */
 
 export function followUpSubject(f: Pick<FollowUpRow, 'person' | 'sandboxContact' | 'link'>) {
   const who = f.person ?? f.sandboxContact;
   const name = (who ? `${who.firstName} ${who.lastName}`.trim() : '') || 'LinkedIn member';
-  return { name, who, profileKey: f.person?.linkedinKey ?? f.link.profileKey };
+  return { name, who, profileKey: f.person?.linkedinKey ?? f.link?.profileKey ?? null };
 }
 
-const actionOf = (f: Pick<FollowUpRow, 'kind'>) => (f.kind === 'MESSAGE' ? 'LINKEDIN_MESSAGE' : 'LINKEDIN_CONNECT');
+const actionOf = (f: Pick<FollowUpRow, 'kind'>) => (f.kind === 'EMAIL_REPLY' ? 'EMAIL' : f.kind === 'MESSAGE' ? 'LINKEDIN_MESSAGE' : 'LINKEDIN_CONNECT');
 
 /** Why the task exists, in a few words. */
 export function followUpWhy(f: Pick<FollowUpRow, 'kind' | 'trigger' | 'triggeredAt' | 'link'>, timezone: string): string {
   const on = (d: Date | null) => (d ? formatInstant(d, timezone).split(',')[0] : 'recently');
-  if (f.kind === 'MESSAGE') return f.trigger === 'replied' ? `Wrote to us on LinkedIn on ${on(f.triggeredAt)}` : `Accepted our connection request on ${on(f.link.acceptedAt ?? f.triggeredAt)}`;
-  if (f.kind === 'WITHDRAW') return `Our request has waited since ${on(f.link.invitedAt)} with no answer`;
-  return `Our request was withdrawn on ${on(f.link.withdrawnAt ?? f.triggeredAt)}; LinkedIn lets it go again after 3 weeks`;
+  if (f.kind === 'EMAIL_REPLY') return `Answered our email on ${on(f.triggeredAt)}`;
+  if (f.kind === 'MESSAGE') return f.trigger === 'replied' ? `Wrote to us on LinkedIn on ${on(f.triggeredAt)}` : `Accepted our connection request on ${on(f.link?.acceptedAt ?? f.triggeredAt)}`;
+  if (f.kind === 'WITHDRAW') return `Our request has waited since ${on(f.link?.invitedAt ?? null)} with no answer`;
+  return `Our request was withdrawn on ${on(f.link?.withdrawnAt ?? f.triggeredAt)}; LinkedIn lets it go again after 3 weeks`;
 }
 
 const dueLabel = (due: string | null, today: string) => (!due ? 'No owner' : due === today ? 'Today' : formatLocalDate(due));
 
-/** LinkedIn tasks at the top of a tab's list: whose, what, when. */
+/** Follow-ups (replies and LinkedIn) at the top of a tab's list: whose, what, when. */
 export function LinkedInFollowUpList({ items, selectedId, today, showFo, href }: { items: FollowUpRow[]; selectedId: string | null; today: string; showFo: boolean; href: (id: string) => string }) {
   return <div className="border-b border-line">
-    <div className="bg-canvas/60 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-500">LinkedIn tasks <span className="tabular-nums">· {items.length}</span></div>
+    <div className="bg-canvas/60 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-500">Replies and LinkedIn <span className="tabular-nums">· {items.length}</span></div>
     <ul className="divide-y divide-line">{items.map((f) => {
       const { name } = followUpSubject(f);
       return <li key={f.id}>
@@ -55,20 +57,21 @@ export function LinkedInFollowUpList({ items, selectedId, today, showFo, href }:
 
 type PanelProps = { item: FollowUpRow; account: AccountView | null; today: string; timezone: string; nextUrl: string; nextWorkingDay: string; mayWork: boolean; whyNot?: string | null; workingDays?: number[] };
 
-/** An open LinkedIn task: what and why, the account to use, the Console link, and Done / Snooze / Not needed. */
+/** An open follow-up: what and why, for LinkedIn the account to use and the Console link, and Done / Snooze / Not needed. */
 export function LinkedInFollowUpPanel({ item: f, account, today, timezone, nextUrl, nextWorkingDay, mayWork, whyNot = null, workingDays = [] }: PanelProps) {
   const { name, who, profileKey } = followUpSubject(f);
   const ref = refOf(f);
   const open = f.state === 'OPEN';
   const overdue = open && f.dueDate !== null && f.dueDate < today;
-  const consoleHref = consoleProfileLink(f.accountId, profileKey);
+  const email = f.kind === 'EMAIL_REPLY';
+  const consoleHref = email ? null : consoleProfileLink(f.accountId, profileKey);
   const resendHeld = f.kind === 'RESEND' && account?.atLimit;
-  const closesWhen = f.kind === 'MESSAGE' ? 'It closes by itself when the Console sees a message to them go out.' : f.kind === 'WITHDRAW' ? 'It closes by itself when the Console sees the request withdrawn, or if they accept first.' : 'It closes by itself when the Console sees the request sent.';
+  const closesWhen = email ? 'It closes by itself when Cadence sees an email to them go out.' : f.kind === 'MESSAGE' ? 'It closes by itself when the Console sees a message to them go out.' : f.kind === 'WITHDRAW' ? 'It closes by itself when the Console sees the request withdrawn, or if they accept first.' : 'It closes by itself when the Console sees the request sent.';
   return <Surface flush>
     <div className="flex items-start gap-3 rounded-t-[inherit] bg-brand-900 px-5 py-3.5 text-white">
       <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/10 text-[#d5e9ad]"><ActionIcon action={actionOf(f)} size={16} /></span>
       <div className="min-w-0 flex-1">
-        <span className="text-[12px] text-brand-200">LinkedIn task</span>
+        <span className="text-[12px] text-brand-200">{email ? 'Reply' : 'LinkedIn task'}</span>
         <div className="mt-1 break-words text-[19px] font-semibold leading-snug tracking-[-0.01em]">{followUpLabel(f)}</div>
       </div>
     </div>
@@ -78,7 +81,7 @@ export function LinkedInFollowUpPanel({ item: f, account, today, timezone, nextU
       <RecordFields items={[
         { label: 'Company', value: who?.companyName ?? null },
         { label: 'Why', value: followUpWhy(f, timezone) },
-        { label: 'From the account of', value: account ? `${account.name}${account.atLimit ? ' (at its weekly request limit)' : account.nearLimit ? ' (near its weekly request limit)' : ''}` : f.accountId },
+        ...(email ? [{ label: 'Email', value: who?.email ?? null }] : [{ label: 'From the account of', value: account ? `${account.name}${account.atLimit ? ' (at its weekly request limit)' : account.nearLimit ? ' (near its weekly request limit)' : ''}` : f.accountId }]),
         { label: 'Due', value: f.dueDate ? formatLocalDate(f.dueDate, 'long') : 'When someone takes it' },
         { label: 'Assigned to', value: f.fo?.name ?? 'Nobody yet' },
       ]} />
@@ -86,7 +89,7 @@ export function LinkedInFollowUpPanel({ item: f, account, today, timezone, nextU
     </header>
     {open ? <div className="space-y-3 p-5">
       {resendHeld ? <Notice tone="warn">{account!.name}&apos;s account sent {account!.invites} requests in the last 7 days, its limit. Wait a day or two before sending this one.</Notice> : null}
-      {consoleHref ? <a href={consoleHref} target="_blank" rel="noreferrer" className="btn-secondary inline-flex"><IconExternal size={15} /> Open in LinkedIn Console</a> : <Notice tone="info">Open {name} in the LinkedIn Console, from {account?.name ?? 'the account above'}, and do it there.</Notice>}
+      {email ? null : consoleHref ? <a href={consoleHref} target="_blank" rel="noreferrer" className="btn-secondary inline-flex"><IconExternal size={15} /> Open in LinkedIn Console</a> : <Notice tone="info">Open {name} in the LinkedIn Console, from {account?.name ?? 'the account above'}, and do it there.</Notice>}
       {mayWork ? <LinkedInFollowUpControls id={f.id} nextUrl={nextUrl} nextWorkingDay={nextWorkingDay} subjectName={name} label={followUpLabel(f)} workingDays={workingDays} /> : whyNot ? <Notice tone="info">{whyNot}</Notice> : null}
     </div> : null}
   </Surface>;
