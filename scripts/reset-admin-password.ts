@@ -15,15 +15,15 @@ async function main() {
     console.error('usage: pnpm admin:password -- <email> <new password>');
     process.exit(2);
   }
-  const weak = validatePasswordStrength(password);
-  if (weak) {
-    console.error(weak);
-    process.exit(2);
-  }
   const user = await prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
   if (!user) {
     console.error(`no account with the email ${email}`);
     process.exit(1);
+  }
+  const weak = validatePasswordStrength(password, { admin: user.role === 'ADMIN' });
+  if (weak) {
+    console.error(weak);
+    process.exit(2);
   }
   await prisma.$transaction([
     prisma.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(password) } }),

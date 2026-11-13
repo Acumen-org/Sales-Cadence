@@ -148,6 +148,9 @@ model User {
   /// False for someone who joined by signing in with Microsoft: they work as a Junior FO and show
   /// no title until an admin gives them one.
   roleAssigned   Boolean   @default(true)
+  /// Q14: when an admin removed this person's access (null once restored or re-added). A removed
+  /// person never comes back through a Microsoft sign-in.
+  accessRemovedAt DateTime?
   /// The Microsoft account (its object id) this user signs in with.
   microsoftId    String?   @unique
   /// The rep's Twilio number (E.164), confirmed by an admin in Settings > Calling from Twilio's
@@ -819,6 +822,19 @@ model TwentyWrite {
   @@index([taskId])
   @@index([twentyId])
   @@index([status, nextAttemptAt])
+}
+
+/// Q02/Q03/Q08/Q09: one password sign-in attempt (either form), counted to slow guessing. Kept a day.
+/// The key is the address tried; ip is the caller's address when the proxy tells it, else "unknown".
+model SignInAttempt {
+  id        String   @id @default(uuid())
+  form      String
+  email     String
+  ip        String
+  createdAt DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@index([ip, createdAt])
 }
 
 model AuditLog {
