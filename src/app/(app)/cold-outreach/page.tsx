@@ -14,6 +14,7 @@ import { IconPeople, IconSearch } from '@/components/icons';
 import { PeopleTable } from '@/components/people/people-table';
 import { PeopleToolbar } from '@/components/people/people-toolbar';
 import { NeedsNewOwner } from '@/components/sandbox/needs-new-owner';
+import { LinkedInNeedsOwnerSection } from '@/components/linkedin/needs-owner-section';
 import { ColdOutreachHeader } from '@/components/sandbox/section-tabs';
 import { AddContactButton } from '@/components/sandbox/add-contact';
 import { QuickViews } from '@/components/sandbox/quick-views';
@@ -50,6 +51,8 @@ export default async function ColdOutreachPage({ searchParams }: { searchParams:
   return <PageFrame className="space-y-4 px-6 pb-8 pt-2">
     <ColdOutreachHeader user={user} current="contacts" />
     {stranded.length ? <NeedsNewOwner stranded={stranded} owners={owners} /> : null}
+    {/* People we reached on LinkedIn who answered and have no owner yet (src/lib/linkedin). */}
+    <LinkedInNeedsOwnerSection user={user} />
     <Surface flush>
       <ViewHeader
         title={params.view === 'any' ? 'Search results' : VIEW_LABELS[params.view]}

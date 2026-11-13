@@ -154,10 +154,10 @@ const countsFor = (t: TouchLike, action: Task['action'], matching: MatchingSetti
   isMessage(t) ? action === 'EMAIL' : (actionTypesFor(classifyNoteTitle(t.summary, matching).kind, matching) as string[]).includes(action);
 
 /**
- * Close the earliest open email or call step of this person's running campaign that a touch just
- * seen can count for. Returns a result code for the Activity log.
+ * Close the earliest open email or call step (or LinkedIn step, from the LinkedIn Console) of this
+ * person's running campaign that a touch just seen can count for. Returns a result code for the Activity log.
  */
-export async function closeFromTouch(params: ({ personId: string } | { sandboxContactId: string }) & { types: Array<'EMAIL' | 'CALL'>; touch: TouchLike; source: 'OBSERVED_NOTE' | 'OBSERVED_MESSAGE'; matching: MatchingSettings; ctx: EngineContext }): Promise<{ code: string; taskId?: string }> {
+export async function closeFromTouch(params: ({ personId: string } | { sandboxContactId: string }) & { types: Array<'EMAIL' | 'CALL' | 'LINKEDIN_CONNECT' | 'LINKEDIN_MESSAGE'>; touch: TouchLike; source: 'OBSERVED_NOTE' | 'OBSERVED_MESSAGE'; matching: MatchingSettings; ctx: EngineContext }): Promise<{ code: string; taskId?: string }> {
   const { types, touch, matching } = params;
   const subject: EvidenceSubject = 'personId' in params ? params.personId : { sandboxContactId: params.sandboxContactId };
   const enrollment = await prisma.enrollment.findFirst({ where: { ...subjectWhere(subject), status: 'ACTIVE' } });

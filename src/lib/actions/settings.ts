@@ -6,7 +6,7 @@ import { logAudit, userActor } from '../audit';
 import { cleanupSandboxCrmPeople } from '../sandbox/crm-cleanup';
 import { crmCheckWords, CRM_CHECK_RUNNING, RUN_NOW_BUDGET_MS, runCrmCheck } from '../sandbox/crm-check';
 import { crmValueChoices, crmValueRefusal } from '../sandbox/cold-settings';
-import { CallingSettingsSchema, getSettings, MatchingSettingsSchema, RulesSettingsSchema, SandboxSettingsSchema, saveSettingsSection, SyncSettingsSchema, TwentySettingsSchema } from '../settings';
+import { CallingSettingsSchema, getSettings, LinkedInSettingsSchema, MatchingSettingsSchema, RulesSettingsSchema, SandboxSettingsSchema, saveSettingsSection, SyncSettingsSchema, TwentySettingsSchema } from '../settings';
 import { applyNeverProspectRule } from '../non-prospects';
 import type { ActionResult } from './users';
 import { issueText } from '../form-errors';
@@ -199,6 +199,44 @@ export async function saveCallingSettingsAction(formData: FormData): Promise<Act
   await logAudit({ entityType: 'settings', entityId: 'calling', action: 'updated', actor: userActor(admin), details: parsed.data });
   revalidatePath('/settings');
   return { ok: true, message: 'Calling settings saved.' };
+}
+
+const LINKEDIN_FIELDS: Record<string, string> = {
+  withdrawAfterDays: 'Withdraw a request after',
+  resendAfterDays: 'Send it again after',
+  maxResends: 'Times to send again',
+  messageAfterAcceptDays: 'Message after acceptance',
+  inviteWeeklyLimit: 'Requests per account per week',
+};
+
+/** "Withdraw a request after must be at least 7.", not Zod's "Too small: expected number to be >=7". */
+function linkedInIssues(list: ReadonlyArray<{ code: string; path: PropertyKey[]; message: string; minimum?: unknown; maximum?: unknown }>): string {
+  return [...new Set(list.map((i) => {
+    const label = LINKEDIN_FIELDS[String(i.path[0])];
+    if (!label) return issueText([i]);
+    if (i.code === 'too_small') return `${label} must be at least ${String(i.minimum)}.`;
+    if (i.code === 'too_big') return `${label} must be at most ${String(i.maximum)}.`;
+    return `${label} must be a whole number.`;
+  }))].join(' ');
+}
+
+/** Settings > LinkedIn: when Cadence asks a teammate to withdraw, resend or message. It never acts on LinkedIn itself. */
+export async function saveLinkedInSettingsAction(formData: FormData): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  const num = (k: string) => (formData.get(k) ? Number(formData.get(k)) : undefined);
+  const parsed = LinkedInSettingsSchema.safeParse({
+    enabled: bool(formData.get('enabled')),
+    withdrawAfterDays: num('withdrawAfterDays'),
+    resendAfterDays: num('resendAfterDays'),
+    maxResends: num('maxResends'),
+    messageAfterAcceptDays: num('messageAfterAcceptDays'),
+    inviteWeeklyLimit: num('inviteWeeklyLimit'),
+  });
+  if (!parsed.success) return { ok: false, error: linkedInIssues(parsed.error.issues) };
+  await saveSettingsSection('linkedin', parsed.data);
+  await logAudit({ entityType: 'settings', entityId: 'linkedin', action: 'updated', actor: userActor(admin), details: parsed.data });
+  revalidatePath('/settings');
+  return { ok: true, message: 'LinkedIn settings saved.' };
 }
 
 /** Settings > Cold outreach: run the CRM cleanup now instead of waiting for the worker's next five minutes. */

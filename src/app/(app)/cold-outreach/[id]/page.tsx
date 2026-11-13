@@ -26,6 +26,8 @@ import { AddToColdCampaign, ClaimWithPod, ColdNextStepButton, EditContactButton,
 import { ColdOutreachHeader } from '@/components/sandbox/section-tabs';
 import { ColdListLink } from '@/components/sandbox/list-link';
 import { coldRef, subjectHref } from '@/lib/subject';
+import { linkedinSubjectView, type LinkedInSubjectView } from '@/lib/linkedin/subject-view';
+import { LinkedInCard } from '@/components/linkedin/linkedin-card';
 
 /** "Jane Doe · Cold outreach" (B115). */
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -64,6 +66,8 @@ export default async function ColdContactPage({ params, searchParams }: { params
   ];
   // A result that survives the refresh, ending with what happens next (B148, PLAN 4.0).
   const flashTone = sp.flashTone === 'error' ? 'error' : 'ok';
+  // The LinkedIn card is on the overview; a contact whose details were cleared has none to show.
+  const linkedin = tab === 'overview' && !m.contact.piiClearedAt ? await linkedinSubjectView({ sandboxContactId: id }, user.timezone) : null;
   const flash = sp.flash ? `${sp.flash.slice(0, 300)}${flashTone === 'ok' && m.nextLine && !/Next:/.test(sp.flash) ? ` ${m.nextLine}` : ''}` : null;
 
   return <>
@@ -90,7 +94,7 @@ export default async function ColdContactPage({ params, searchParams }: { params
     <div className="px-6 pb-8 pt-3">
       <Surface flush><Tabs inset={false} current={tab} tabs={tabs.map((t) => ({ ...t, href: href(t.key as Tab) }))} /></Surface>
       <div className="pt-3">
-        {tab === 'overview' ? <Overview m={m} timezone={user.timezone} /> : null}
+        {tab === 'overview' ? <Overview m={m} timezone={user.timezone} linkedin={linkedin} /> : null}
         {tab === 'sequences' ? <Campaigns m={m} /> : null}
         {tab === 'tasks' ? <TasksTab m={m} /> : null}
         {tab === 'activity' ? <Activity m={m} timezone={user.timezone} /> : null}
@@ -182,7 +186,7 @@ function TombstoneActions({ m }: { m: ContactPage }) {
 }
 
 /** Overview: the next step, the CRM checklist, the details and where the contact came from. */
-function Overview({ m, timezone }: { m: ContactPage; timezone: string }) {
+function Overview({ m, timezone, linkedin }: { m: ContactPage; timezone: string; linkedin: LinkedInSubjectView | null }) {
   const ct = c(m);
   const n = m.nextStep.open;
   const how = n ? (n.kind === 'MEETING' ? 'Meeting' : ACTION_LABELS[n.action]) : null;
@@ -192,7 +196,7 @@ function Overview({ m, timezone }: { m: ContactPage; timezone: string }) {
     linkedinUrl: ct.linkedinUrl ? `https://www.${ct.linkedinUrl}` : '', city: ct.city ?? '', state: ct.state ?? '', country: ct.country ?? 'US', companyName: ct.companyName ?? '', companyWebsite: ct.companyWebsite ?? ct.companyDomain ?? '',
     companyCrd: ct.companyCrd ?? '', individualCrd: ct.individualCrd ?? '', productInterest: ct.productInterest,
   };
-  const edit = (label: string, focus?: 'firstName' | 'companyName' | 'email', className?: string) => m.edit.may ? <EditContactButton id={m.id} contact={editable} version={m.edit.version} countries={m.countries} products={m.productChoices} label={label} focus={focus} className={className} /> : null;
+  const edit = (label: string, focus?: 'firstName' | 'companyName' | 'email' | 'linkedinUrl', className?: string) => m.edit.may ? <EditContactButton id={m.id} contact={editable} version={m.edit.version} countries={m.countries} products={m.productChoices} label={label} focus={focus} className={className} /> : null;
   const k = m.checklist;
   return <div className="grid items-start gap-3 lg:grid-cols-2">
     {m.live ? <Card title="Next step" actions={m.nextStep.blocked || !m.sales ? null : <ColdNextStepButton id={m.id} today={m.today} workingDays={m.settings.rules.workingDays} label={n ? 'Change' : 'Set next step'} className="btn-ghost btn-sm" initial={n ? { label: n.label, action: n.action, dueDate: n.dueDate < m.today ? m.today : n.dueDate, repeat: 'NONE', foUserId: '' } : { label: '', action: 'CALL', dueDate: m.today, repeat: 'NONE', foUserId: '' }} existing={n ? { label: n.label, dueDate: n.dueDate } : null} />}>
@@ -243,6 +247,9 @@ function Overview({ m, timezone }: { m: ContactPage; timezone: string }) {
         ]} />
       </div>
     </Card>}
+
+    {/* What the LinkedIn Console saw; with no profile link yet, Edit adds it. */}
+    {linkedin ? <LinkedInCard view={linkedin} hasLink={Boolean(ct.linkedinUrl)} addLink={m.live ? edit('Add LinkedIn link', 'linkedinUrl', 'btn-secondary btn-sm') : null} /> : null}
 
     {/* B205, B143, B017, B068: who sent it and when, later sends, and anyone it may be. */}
     {m.contact.piiClearedAt ? null : <Card title="Source" actions={m.source.bellwetherUrl ? <a href={m.source.bellwetherUrl} target="_blank" rel="noreferrer" className="btn-ghost btn-sm"><IconExternal size={13} /> Open in Bellwether</a> : null}>

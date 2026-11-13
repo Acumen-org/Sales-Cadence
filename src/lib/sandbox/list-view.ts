@@ -36,9 +36,9 @@ export function listRole(role: Role): ListRole {
   return role === 'ADMIN' ? 'admin' : 'reader';
 }
 
-export const CONTACT_SOURCES = ['BELLWETHER', 'MANUAL', 'CSV', 'CALL'] as const;
+export const CONTACT_SOURCES = ['BELLWETHER', 'MANUAL', 'CSV', 'CALL', 'LINKEDIN'] as const;
 export type ContactSourceValue = (typeof CONTACT_SOURCES)[number];
-export const SOURCE_LABELS: Record<ContactSourceValue, string> = { BELLWETHER: 'Bellwether', MANUAL: 'Added here', CSV: 'From a file', CALL: 'From a call' };
+export const SOURCE_LABELS: Record<ContactSourceValue, string> = { BELLWETHER: 'Bellwether', MANUAL: 'Added here', CSV: 'From a file', CALL: 'From a call', LINKEDIN: 'From LinkedIn' };
 
 /** The page's query string, as Next hands it over. */
 export type ListSearch = Partial<Record<'view' | 'q' | 'owner' | 'pod' | 'source' | 'page' | 'status' | 'ready' | 'flash' | 'flashTone', string | string[]>>;

@@ -43,6 +43,7 @@ import { ColdOutreachSettings } from '@/components/settings/cold-outreach-settin
 import { loadColdOutreachSettings } from '@/lib/sandbox/cold-settings';
 import { COLD_OUTREACH_SETTINGS_TAB, settingsRoute } from '@/lib/settings-tabs';
 import { ApiKeysPanel } from '@/components/settings/api-keys-panel';
+import { LinkedInTab } from '@/components/settings/linkedin-tab';
 import { DEFAULT_EXPIRY_DAYS, MAX_EXPIRY_DAYS, SCOPES } from '@/lib/public-api/keys';
 
 const TABS = [
@@ -54,6 +55,7 @@ const TABS = [
   { key: 'signin', label: 'Sign-in' },
   { key: 'calling', label: 'Calling' },
   { key: COLD_OUTREACH_SETTINGS_TAB, label: 'Cold outreach' },
+  { key: 'linkedin', label: 'LinkedIn' },
   { key: 'blocked', label: 'Blocked accounts' },
   { key: ASSISTANT_SETTINGS_TAB, label: ASSISTANT_NAME },
   { key: 'api', label: 'API keys' },
@@ -101,6 +103,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       {tab === 'calling' ? <CallingTab timezone={user.timezone} /> : null}
       {/* Cold outreach asks the CRM for its options, so it follows the page in the same way. */}
       {tab === COLD_OUTREACH_SETTINGS_TAB ? <Suspense fallback={loading}><ColdOutreachTab admin timezone={user.timezone} /></Suspense> : null}
+      {tab === 'linkedin' ? <Suspense fallback={loading}><LinkedInTab timezone={user.timezone} /></Suspense> : null}
       {tab === 'blocked' ? <BlockedTab timezone={user.timezone} /> : null}
       {tab === ASSISTANT_SETTINGS_TAB ? <AssistantTab /> : null}
       {tab === 'api' ? <ApiKeysTab timezone={user.timezone} /> : null}

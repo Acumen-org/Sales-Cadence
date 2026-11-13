@@ -115,7 +115,7 @@ client uses to trim its selections, and all 45 browser tests ride on it.
 - **Only the enrollment's FO completes tasks.** Outbound activity by anyone else is recorded as a `Touch` (so the brief shows it) and reported as `ignored_non_fo`. Paused enrollments do not accept completions.
 - **Actor resolution for notes**: `createdBy.workspaceMemberId` first, then the `(?<actor>...)` handle from the title (matched against `User.aliases`, `tw_<firstname>`, or the email local part), then the creator's display name. Unknown actors are recorded as touches and flagged for review, never guessed.
 - **Message direction**: outbound when the `from` participant is one of our users (workspace member id, or the handle equals a user's email); inbound when it is a person (participant `personId`, else the handle matched against cached emails). Anything else is ignored. `messageParticipant` events re-fetch the whole message so partial participant sets converge; re-processing is harmless.
-- **LinkedIn is never inferred.** Even a note titled about LinkedIn only produces a touch; LinkedIn actions complete when the FO clicks Done.
+- **LinkedIn is never inferred from the CRM.** A note titled about LinkedIn only produces a touch. LinkedIn steps close from the LinkedIn Console's events (see "LinkedIn through the LinkedIn Console", 12 Nov 2026), or when the FO clicks Done.
 - **Stale evidence** older than `enrollment.createdAt - evidenceGraceDays` (default 1 day) is a touch, not a completion, so a 30-day reconcile cannot complete steps with pre-enrollment emails.
 - **Cadence's own notes** (title starts with `matching.cadencePrefix`, default `[Cadence]`) are ignored on the way back in.
 - **Mirrored Twenty tasks**: a Twenty `task.updated` whose id is a mirrored task and whose status is the configured "done" value completes the Cadence task with source `OBSERVED_TWENTY_TASK`; deleting a mirrored task in Twenty just unlinks it. Tasks Cadence did not create are ignored.
@@ -1374,3 +1374,23 @@ Built on the local branch `outreach-sandbox` from Rahul's brief of 2 November an
 - **Owner's change of 12 Nov 2026.** Cold outreach > Campaigns opens on the reader's pod with no
   name filter: a junior sees every campaign of their pod. Moves to CRM opens on the reader's pod
   too, listing the moves of that pod's contacts.
+
+## LinkedIn through the LinkedIn Console (12 November 2026)
+
+Plan: `Notes/linkedin-2026-11-12/PLAN.md`. Console developer's spec: https://claude.ai/artifact/1kHyec4CPJSoy5TgTEm4fD.
+
+- **Cadence never acts on LinkedIn** (owner: "we cannot have anything that can cause reason for ban. Not at all allowed"). Teammates do every LinkedIn action by hand in the Console. Cadence reads the Console's events and closes and opens tasks. Its links into the Console only open a page.
+- **Events in.** `POST /api/webhooks/linkedin` (HMAC `X-LinkedIn-Console-Signature` with `LINKEDIN_CONSOLE_WEBHOOK_SECRET`) and the Console's read-only feed (`LINKEDIN_CONSOLE_URL`, `LINKEDIN_CONSOLE_API_KEY`), read every 2 minutes. Both keep each event once, by the Console's `seq`. The worker processes them in order each tick.
+- **Who.** People are matched by profile link (`linkedin.com/in/<slug>`, `PersonCache.linkedinKey`): a CRM person first, then an active cold contact. A moved contact is its CRM person. Two CRM people with one link are listed for review, never guessed. Teammates are matched by work email. An event with no profile link waits up to 30 days for one.
+- **A LinkedIn account is not a rep.** Several teammates work one account, often a sales leader's. Tasks go to the contact's owner: the CRM assignee or the cold contact's owner. Without one, a withdrawal or resend goes to the teammate who sent the request.
+- **Owner only after a response.** Someone unknown whom a teammate reaches (a request or a message) becomes a cold contact with no owner (source LinkedIn), in the sender's pod. Once they accept or write back, their task waits in "LinkedIn: needs an owner" (Tasks and Cold outreach). Anyone in the pod can take it; a leader can give it. Strangers who write first, or ask to connect, are not brought in.
+- **Steps close.** A "LinkedIn connect" step closes when a request is seen sent from the step's day on. If the person is already connected, or a request is already waiting, it closes saying so. A "LinkedIn message" step closes on a message seen sent. Any account and any teammate counts. Done stays.
+- **Follow-ups** (`LinkedInFollowUp`, not next actions, which hold one per person and write Twenty's Next Action):
+  - Accepted, then "Message on LinkedIn", due 2 working days after acceptance, or after someone takes the contact on if that is later. Not opened if they were messaged after accepting.
+  - A reply stops the campaign, as an email reply does, and opens "Reply on LinkedIn".
+  - A request waiting 14 days opens "Withdraw the connection request".
+  - A withdrawal opens "Send the connection request again", 3 weeks later (LinkedIn's cool-off). There is one resend, then it stops.
+  - Each closes itself when the Console sees it done. Accepting cancels a waiting withdraw or resend. Someone who must not be contacted gets none, and theirs close.
+  - The numbers live in Settings > LinkedIn.
+- **Touches.** Request sent and message sent are outbound LinkedIn touches. A message received is an inbound one and counts as a reply. Acceptances and withdrawals are state on `LinkedInLink`, never touches, so reply figures are unchanged by them.
+- **Weekly limit.** The Console's count of requests per account in the last 7 days shows in Settings and on resend tasks (default warning at 80). Nothing is blocked.
