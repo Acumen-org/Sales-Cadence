@@ -107,3 +107,27 @@ describe('N11: the data model read is not kept for ever', () => {
     }
   });
 });
+
+describe('N16, N14: meeting records in the CRM', () => {
+  const schema = { meeting: { typeName: 'Meeting', plural: 'meetings', createdBy: false }, fields: { cadenceId: null } as never, contact: { typeName: 'MeetingContact', plural: 'meetingContacts', meetingId: 'meetingId', personId: 'personId' } };
+
+  it('N16: when the contacts fail after the record is made, the error carries its id', async () => {
+    const { twenty } = client((c) => {
+      if (c.query.includes('mutation CreateMeeting(')) return { data: { createMeeting: { id: 'mt-1' } } };
+      if (c.query.includes('query MeetingContacts(')) return new Response('down', { status: 503 });
+      return { data: {} };
+    });
+    twenty.sleep = async () => {};
+    const err = await twenty.saveMeetingRecord(schema as never, { id: null, cadenceId: 'c-1', data: { name: 'M' }, contacts: [{ personId: 'p-1', name: 'M · P' }] }).catch((e) => e);
+    expect(err).toMatchObject({ meetingRecordId: 'mt-1' });
+  });
+
+  it('N14: a tag the CRM refused is not asked for again at every meeting', async () => {
+    const { twenty, calls } = client((c) => (c.query.includes('AddOption') ? new Response('forbidden', { status: 403 }) : { data: { objects: { edges: [] } } }));
+    const field = { id: 'f-1', name: 'products', multi: true, text: false, options: [] };
+    expect(await twenty.addSelectOption(field, 'New Product')).toBeNull();
+    const before = calls.length;
+    expect(await twenty.addSelectOption(field, 'New Product')).toBeNull();
+    expect(calls.length).toBe(before);
+  });
+});

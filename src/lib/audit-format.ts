@@ -132,6 +132,7 @@ const TITLES: Record<string, string> = {
   attendees_updated: 'Attendees updated',
   transcript_saved: 'Transcript saved',
   prospects_linked: 'Prospects linked to the meeting',
+  crm_duplicate_removed: 'A duplicate of the meeting removed from the CRM',
   plan_updated: 'Sequence plan updated',
   // Administration (not in Activity, but never a raw name).
   'user:created': 'Team member added',

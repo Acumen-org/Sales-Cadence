@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { backfillMeetingsToCrm, meetingSchemaShape, missingMeetingTags } from '../lib/meetings/crm';
+import { backfillMeetingsToCrm, meetingSchemaShape, missingMeetingTags, missingTagsNowInCrm } from '../lib/meetings/crm';
 import { backfillTeamsTranscripts } from '../lib/meetings/teams-transcript';
 import { MEETINGS_CHANGED_KEY, checkMeetingsInCrm } from '../lib/meetings/crm-check';
 import { backfillSharePointPlayers } from '../lib/meetings/sharepoint-player';
@@ -163,13 +163,17 @@ async function teamsTranscripts(now:number){
  if(now<teamsTranscriptsAt)return;teamsTranscriptsAt=now+3_600_000;
  try{const found=await backfillTeamsTranscripts();if(found)log('Teams transcripts fetched',found);}catch(error){log('Teams transcripts failed',error);}
 }
-// While some tag is missing in Twenty, write the meetings again each hour, so a tag an admin adds
-// by hand fills in without anyone asking.
+// While some tag is missing in Twenty, look each hour whether an admin has added one by hand; when
+// one has, write the meetings again so it fills in without anyone asking (N14: not every hour regardless).
 let meetingTagsRetryAt=Date.now()+3_600_000;
 async function meetingTagsRetry(now:number){
  if(now<meetingTagsRetryAt)return;meetingTagsRetryAt=now+3_600_000;
- if(!(await missingMeetingTags()).length)return;
- try{const written=await backfillMeetingsToCrm({all:true});if(written!==null)log('meetings written again for missing tags',written);}catch(error){log('meetings tag retry failed',error);}
+ const missing=await missingMeetingTags();if(!missing.length)return;
+ try{
+  const schema=await (await getTwentyClient()).meetingSchema();
+  if(!schema||!missingTagsNowInCrm(schema,missing))return;
+  const written=await backfillMeetingsToCrm({all:true});if(written!==null)log('meetings written again for missing tags',written);
+ }catch(error){log('meetings tag retry failed',error);}
 }
 /**
  * Once Microsoft lets Cadence read the team's files: meetings saved earlier with a SharePoint sharing

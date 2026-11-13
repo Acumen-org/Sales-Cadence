@@ -1238,7 +1238,12 @@ export class TwentyGraphqlClient implements TwentyClient {
       const created = await this.request<Record<string, { id: string }>>(`mutation CreateMeeting($data: ${t}CreateInput!) { create${t}(data: $data) { id } }`, { data: input.data });
       id = created[`create${t}`].id;
     }
-    if (schema.contact) await this.syncMeetingContacts(schema.contact, id, input.contacts);
+    try {
+      if (schema.contact) await this.syncMeetingContacts(schema.contact, id, input.contacts);
+    } catch (err) {
+      // N16: the caller keeps the id of the record already made, so a retry does not make another.
+      throw Object.assign(err instanceof Error ? err : new Error(String(err)), { meetingRecordId: id });
+    }
     return { id };
   }
 
@@ -1309,9 +1314,14 @@ export class TwentyGraphqlClient implements TwentyClient {
     await this.request(`mutation DeleteMeeting($id: UUID!) { delete${t}(id: $id) { id } }`, { id });
   }
 
+  /** N14: tags the CRM refused to add, and when: not asked again (a data model read and a write each) for six hours. */
+  private refusedOptions = new Map<string, number>();
+
   /** A new tag on a Select or Multi-select field, when the API key may change the data model. */
   async addSelectOption(field: TwentyTagField, label: string): Promise<string | null> {
     const value = label.normalize('NFKD').replace(/[^\w\s-]/g, '').trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'OPTION';
+    const refusedKey = `${field.id}|${value}`;
+    if (Date.now() - (this.refusedOptions.get(refusedKey) ?? -Infinity) < 6 * 3600_000) return null;
     try {
       const objects = await this.metadataObjects();
       const current = objects.flatMap((o) => o.fields).find((f) => f.id === field.id);
@@ -1323,6 +1333,7 @@ export class TwentyGraphqlClient implements TwentyClient {
       return value;
     } catch (err) {
       console.warn(`[twenty] could not add the tag "${label}": ${err instanceof Error ? err.message : String(err)}`);
+      this.refusedOptions.set(refusedKey, Date.now());
       return null;
     }
   }
