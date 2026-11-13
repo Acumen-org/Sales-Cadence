@@ -228,8 +228,9 @@ describe('Cold outreach screens (S10)', () => {
   });
 
   it('N057: from 1280px the contact card sits beside the composer, in its own column, not below it', () => {
-    expect(taskGridClass('list', true)).toContain('xl:grid-cols-[248px_minmax(0,1fr)_288px]');
-    expect(taskGridClass('list', false)).toBe('grid items-start gap-4 xl:grid-cols-[300px_minmax(0,1fr)]');
+    // The list is wide enough to read without lines cut off (owner, 13 Nov 2026).
+    expect(taskGridClass('list', true)).toContain('xl:grid-cols-[320px_minmax(0,1fr)_300px]');
+    expect(taskGridClass('list', false)).toBe('grid items-start gap-4 xl:grid-cols-[360px_minmax(0,1fr)]');
     expect(taskGridClass('flow', true)).toContain('xl:grid-cols-[minmax(0,1fr)_380px]');
   });
 

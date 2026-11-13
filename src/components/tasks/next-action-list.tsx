@@ -25,10 +25,21 @@ export function nextSubject(n: Pick<NextActionListRow, 'person' | 'sandboxContac
 
 const dueLabel = (due: string, today: string) => (due === today ? 'Today' : formatLocalDate(due));
 
-/** Tasks created for a person, at the top of a tab's list: whose, what, how and when. */
-export function NextActionList({ items, selectedId, today, showFo, href }: { items: NextActionListRow[]; selectedId: string | null; today: string; showFo: boolean; href: (id: string) => string }) {
+/** A group of the Tasks list: what it holds, how many, and one line on where they come from. */
+export function GroupHeader({ title, count, hint }: { title: string; count: number; hint?: string }) {
+  return <div className="border-b border-line bg-canvas/70 px-3 py-2">
+    <div className="flex items-baseline gap-2"><span className="text-[12px] font-semibold text-ink-800">{title}</span><span className="text-[12px] tabular-nums text-ink-500">{count}</span></div>
+    {hint ? <div className="text-[11.5px] leading-4 text-ink-500">{hint}</div> : null}
+  </div>;
+}
+
+/**
+ * Follow-ups a rep set by hand (after a call, or from a person's page), at the top of a tab's list:
+ * whom, what to do (wrapping, never cut off), when, who set it and whose it is (owner, 13 Nov 2026).
+ */
+export function NextActionList({ items, selectedId, today, showFo, href, setBy = {} }: { items: NextActionListRow[]; selectedId: string | null; today: string; showFo: boolean; href: (id: string) => string; /** User id to name, for "Set by Bryan". */ setBy?: Record<string, string> }) {
   return <div className="border-b border-line">
-    <div className="bg-canvas/60 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-500">Created tasks <span className="tabular-nums">· {items.length}</span></div>
+    <GroupHeader title="Follow-ups set by reps" count={items.length} hint="Set by hand after a call or on a person's page, outside campaigns" />
     <ul className="divide-y divide-line">{items.map((n) => {
       const name = nextSubject(n).name;
       return <li key={n.id}>
@@ -36,8 +47,8 @@ export function NextActionList({ items, selectedId, today, showFo, href }: { ite
           <Avatar name={name} shape="circle" size={30} />
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink-900">{name}</span><span className={`shrink-0 text-[12px] ${n.state === 'OPEN' && n.dueDate < today ? 'text-red-700' : 'text-ink-500'}`}>{n.state === 'OPEN' ? dueLabel(n.dueDate, today) : 'Done'}</span></span>
-            <span className="mt-0.5 flex items-center gap-1.5 text-[12px] text-ink-600"><span className="shrink-0 text-ink-500"><ActionIcon action={n.kind === 'MEETING' ? 'MEETING' : n.action} size={12} /></span><span className="truncate">{n.label}</span>{n.repeat !== 'NONE' ? <span className="shrink-0 text-ink-400" title={REPEAT_LABELS[n.repeat]}><IconRefresh size={11} /></span> : null}</span>
-            {showFo ? <span className="mt-0.5 block truncate text-[11.5px] text-ink-500">FO {n.fo.name}</span> : null}
+            <span className="mt-0.5 flex items-start gap-1.5 text-[12.5px] text-ink-700"><span className="mt-0.5 shrink-0 text-ink-500"><ActionIcon action={n.kind === 'MEETING' ? 'MEETING' : n.action} size={12} /></span><span className="line-clamp-2 break-words">{n.label}</span>{n.repeat !== 'NONE' ? <span className="mt-0.5 shrink-0 text-ink-400" title={REPEAT_LABELS[n.repeat]}><IconRefresh size={11} /></span> : null}</span>
+            <span className="mt-0.5 block truncate text-[11.5px] text-ink-500">{[n.createdById && setBy[n.createdById] ? `Set by ${setBy[n.createdById]} on ${formatLocalDate(n.createdAt.toISOString().slice(0, 10) as never)}` : null, showFo && (!n.createdById || n.createdById !== n.foUserId) ? `for ${n.fo.name}` : null].filter(Boolean).join(' ')}</span>
           </span>
         </Link>
       </li>;
@@ -64,10 +75,12 @@ type PanelProps = {
   chips?: Cue[];
   /** On a cold Email next step: whether it closes itself when the rep sends from Outlook (N088). */
   closeWords?: string | null;
+  /** Who set it, for the band: "Follow-up set by Alisa". */
+  setByName?: string | null;
 };
 
 /** An open created task: the band says it is one and what it is; below, the person and the controls. */
-export function NextActionPanel({ item: n, today, timezone, nextUrl, nextWorkingDay, mayWork, whyNot = null, done = false, workingDays = [], callSlot = null, warning = null, chips = [], closeWords = null }: PanelProps) {
+export function NextActionPanel({ item: n, today, timezone, nextUrl, nextWorkingDay, mayWork, whyNot = null, done = false, workingDays = [], callSlot = null, warning = null, chips = [], closeWords = null, setByName = null }: PanelProps) {
   const { name, firstName, who } = nextSubject(n);
   const ref = refOf(n);
   const cold = !n.person;
@@ -79,7 +92,7 @@ export function NextActionPanel({ item: n, today, timezone, nextUrl, nextWorking
       <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/10 text-[#d5e9ad]"><IconRefresh size={16} /></span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-3">
-          <span className="flex-1 text-[12px] text-brand-200">Task</span>
+          <span className="flex-1 text-[12px] text-brand-200">{setByName ? `Follow-up set by ${setByName}` : 'Follow-up'}</span>
           <span className="flex shrink-0 items-center gap-1.5 text-[11px] leading-none"><span className="rounded-full bg-white/10 px-2 py-1 text-white">{REPEAT_LABELS[n.repeat]}</span></span>
         </div>
         <div className="mt-1 break-words text-[19px] font-semibold leading-snug tracking-[-0.01em]">{n.label}</div>

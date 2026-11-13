@@ -46,7 +46,7 @@ export function LinkedInFollowUpList({ items, selectedId, today, showFo, href }:
           <Avatar name={name} shape="circle" size={30} />
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink-900">{name}</span><span className={`shrink-0 text-[12px] ${f.state === 'OPEN' && f.dueDate && f.dueDate < today ? 'text-red-700' : 'text-ink-500'}`}>{f.state === 'OPEN' ? dueLabel(f.dueDate, today) : 'Done'}</span></span>
-            <span className="mt-0.5 flex items-center gap-1.5 text-[12px] text-ink-600"><span className="shrink-0 text-ink-500"><ActionIcon action={actionOf(f)} size={12} /></span><span className="truncate">{followUpLabel(f)}</span></span>
+            <span className="mt-0.5 flex items-start gap-1.5 text-[12.5px] text-ink-700"><span className="mt-0.5 shrink-0 text-ink-500"><ActionIcon action={actionOf(f)} size={12} /></span><span className="line-clamp-2 break-words">{followUpLabel(f)}</span></span>
             {showFo && f.fo ? <span className="mt-0.5 block truncate text-[11.5px] text-ink-500">FO {f.fo.name}</span> : null}
           </span>
         </Link>

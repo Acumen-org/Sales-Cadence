@@ -171,15 +171,15 @@ export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispos
                       {t.state === 'PENDING' ? relativeDays(t.due, today) : STATE_LABELS[t.state] ?? t.state}
                     </span>
                   </span>
-                  <span className="mt-0.5 flex items-center gap-1.5 text-[12.5px] text-ink-600">
-                    <ActionIcon action={t.action} size={12} className="text-ink-400" />
-                    <span className="truncate">
+                  <span className="mt-0.5 flex items-start gap-1.5 text-[12.5px] text-ink-700">
+                    <ActionIcon action={t.action} size={12} className="mt-1 shrink-0 text-ink-400" />
+                    <span className="line-clamp-2 break-words">
                       {t.state === 'PENDING' && t.parts && t.parts.some((p) => p.done) ? t.parts.map((p, i) => <span key={p.label}>{i ? ' + ' : ''}<span className={p.done ? 'text-emerald-700' : undefined}>{p.done ? '✓ ' : ''}{p.label}</span></span>) : t.label}
                     </span>
                   </span>
                   <span className="mt-0.5 flex items-center gap-2 text-[11.5px] text-ink-500">
                     <span className="min-w-0 flex-1 truncate">{t.companyName ?? 'No company'}</span>
-                    <span className="shrink-0">Day <span className="font-medium text-ink-700">{t.stepDay}</span></span>
+                    <span className="shrink-0" title={t.campaignName ?? undefined}>Day <span className="font-medium text-ink-700">{t.stepDay}</span></span>
                     {t.chips?.length ? <SubjectBadges badge={null} chips={t.chips} limit={1} links={false} className="shrink-0 flex-nowrap" /> : t.warning ? <Badge tone="amber">{t.warning}</Badge> : null}
                     {t.snoozed ? <Badge tone="sky">snoozed</Badge> : null}
                   </span>
