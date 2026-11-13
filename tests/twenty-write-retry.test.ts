@@ -156,3 +156,29 @@ describe('N31: a write the CRM refused is queued even when the audit line cannot
     expect(await prisma.twentyWrite.count({ where: { taskId: task.id, operation: 'createNote', status: 'FAILED' } })).toBe(1);
   });
 });
+
+describe('N38: closing a mirrored CRM task', () => {
+  it('sends the workspace\'s own "done" value', async () => {
+    await resetDb();
+    const b = await seedBasics();
+    const { enrollPeople } = await import('@/lib/engine/enrollment');
+    const { SYSTEM_ACTOR } = await import('@/lib/audit');
+    const { loadSyncTask, syncTaskCompleted } = await import('@/lib/engine/sync-out');
+    const { getSettings, saveSettingsSection } = await import('@/lib/settings');
+    const { getMockTwentyClient } = await import('@/lib/twenty/mock-client');
+    const s = await getSettings();
+    await saveSettingsSection('twenty', { ...s.twenty, schema: { taskStatus: { done: 'COMPLETED' } } } as typeof s.twenty);
+    try {
+      const now = new Date();
+      await enrollPeople({ personIds: ['person-01'], sequenceId: b.sequence.id, podId: b.pods.Alisa.id, startDate: now.toISOString().slice(0, 10), assignment: { mode: 'FIXED', foUserId: b.users.alisa.id }, actor: SYSTEM_ACTOR }, { now });
+      const task = await prisma.task.findFirstOrThrow({ where: { enrollment: { personId: 'person-01' }, state: 'PENDING' } });
+      await prisma.task.update({ where: { id: task.id }, data: { state: 'DONE', completedAt: now, twentyTaskId: 'tw-task-1', twentyNoteId: 'already' } });
+      const mock = getMockTwentyClient();
+      mock.writes = [];
+      await syncTaskCompleted((await loadSyncTask(task.id))!);
+      expect(mock.writes).toContainEqual(expect.objectContaining({ op: 'updateTask', id: 'tw-task-1', patch: expect.objectContaining({ status: 'COMPLETED' }) }));
+    } finally {
+      await saveSettingsSection('twenty', s.twenty);
+    }
+  });
+});
