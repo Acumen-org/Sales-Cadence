@@ -122,7 +122,7 @@ export async function registerWebhookAction(): Promise<ActionResult> {
   const user = await requireAdmin();
   try {
     const e = env();
-    if (!e.TWENTY_WEBHOOK_SECRET && !e.CADENCE_WEBHOOK_TOKEN && !e.CADENCE_WEBHOOK_OPEN) return { ok: false, error: 'The server has no webhook secret: set TWENTY_WEBHOOK_SECRET in its environment first.' };
+    if (!e.TWENTY_WEBHOOK_SECRET && !e.CADENCE_WEBHOOK_TOKEN && e.CADENCE_WEBHOOK_OPEN !== '1') return { ok: false, error: 'The server has no webhook secret: set TWENTY_WEBHOOK_SECRET in its environment first.' };
     const targetUrl = `${e.APP_URL.replace(/\/+$/, '')}/api/webhooks/twenty${!e.TWENTY_WEBHOOK_SECRET && e.CADENCE_WEBHOOK_TOKEN ? `?token=${encodeURIComponent(e.CADENCE_WEBHOOK_TOKEN)}` : ''}`;
     const client = await getTwentyClient();
     const existing = (await client.listWebhooks()).filter((w) => w.targetUrl.split('?')[0] === targetUrl.split('?')[0]);

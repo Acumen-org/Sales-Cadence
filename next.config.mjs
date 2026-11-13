@@ -29,8 +29,8 @@ const nextConfig = {
     cpus,
     workerThreads: false,
   },
-  // Trim the client bundle: only the icons actually imported ship.
-  compiler: { removeConsole: process.env.NODE_ENV === 'production' ? { exclude: ['error', 'warn'] } : false },
+  // T46: console.log is kept. Next strips it from server code as well as the browser's, and the
+  // server's log lines are what there is to read during an incident.
   typescript: { ignoreBuildErrors: process.env.SKIP_TYPE_CHECK === 'true' },
   eslint: { ignoreDuringBuilds: process.env.SKIP_TYPE_CHECK === 'true' },
 };

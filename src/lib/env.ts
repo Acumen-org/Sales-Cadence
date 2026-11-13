@@ -1,9 +1,16 @@
 import { z } from 'zod';
 
+/** T41: `True` or ` false ` mean what they say; anything else is refused when the process starts. */
 const BoolString = z
-  .enum(['true', 'false', '1', '0', ''])
-  .optional()
+  .preprocess((v) => (typeof v === 'string' ? v.trim().toLowerCase() : v), z.enum(['true', 'false', '1', '0', '']).optional())
   .transform((v) => v === 'true' || v === '1');
+
+/** T42: where these live, unless a test (mock mode) points them at a stand-in. */
+const TEST_ONLY_URLS = {
+  MICROSOFT_LOGIN_URL: 'https://login.microsoftonline.com',
+  MICROSOFT_GRAPH_URL: 'https://graph.microsoft.com',
+  TWILIO_API_URL: 'https://api.twilio.com',
+} as const;
 
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -28,9 +35,9 @@ const EnvSchema = z.object({
   MICROSOFT_TENANT_ID: z.string().optional(),
   MICROSOFT_CLIENT_SECRET: z.string().optional(),
   /** Where Microsoft's sign-in pages live. Only a test points it elsewhere. */
-  MICROSOFT_LOGIN_URL: z.string().default('https://login.microsoftonline.com'),
+  MICROSOFT_LOGIN_URL: z.string().default(TEST_ONLY_URLS.MICROSOFT_LOGIN_URL),
   /** Where Microsoft Graph lives, which names the file behind a SharePoint sharing link. Only a test points it elsewhere. */
-  MICROSOFT_GRAPH_URL: z.string().default('https://graph.microsoft.com'),
+  MICROSOFT_GRAPH_URL: z.string().default(TEST_ONLY_URLS.MICROSOFT_GRAPH_URL),
   /** true brings password sign-in back after Microsoft took over, if Microsoft sign-in ever fails. */
   PASSWORD_SIGN_IN: BoolString,
   /** The key Bellwether sends in X-Cadence-Api-Key. Unset: every Bellwether call gets 503 integration_disabled. */
@@ -48,7 +55,7 @@ const EnvSchema = z.object({
   TWILIO_API_KEY_SID: z.string().optional(),
   TWILIO_API_KEY_SECRET: z.string().optional(),
   /** Where Twilio's REST API lives. Only a test points it elsewhere. */
-  TWILIO_API_URL: z.string().default('https://api.twilio.com'),
+  TWILIO_API_URL: z.string().default(TEST_ONLY_URLS.TWILIO_API_URL),
   /** h00ks partner API key with staff:read: which rep has which Twilio number. Empty: numbers are assigned in Settings > Calling. */
   H00KS_API_TOKEN: z.string().optional(),
   H00KS_API_URL: z.string().default('https://h00ks.acm.acumen-strategy.com/api/partner/v1'),
@@ -80,9 +87,20 @@ export function env(): Env {
     if (!parsed.success) {
       throw new Error(`Invalid environment: ${parsed.error.message}`);
     }
+    const problem = testOnlyUrlProblem(parsed.data);
+    if (problem) throw new Error(`Invalid environment: ${problem}`);
+    // T41: unset, cookies are marked secure whenever the app is served over https.
+    if (!process.env.COOKIE_SECURE?.trim()) parsed.data.COOKIE_SECURE = parsed.data.APP_URL.startsWith('https://');
     cached = parsed.data;
   }
   return cached;
+}
+
+/** T42: in production, outside mock mode, the test-only addresses cannot point anywhere else. */
+export function testOnlyUrlProblem(e: Pick<Env, 'NODE_ENV' | 'TWENTY_MODE' | 'CADENCE_ALLOW_MOCK' | keyof typeof TEST_ONLY_URLS>): string | null {
+  if (e.NODE_ENV !== 'production' || (e.TWENTY_MODE === 'mock' && e.CADENCE_ALLOW_MOCK === '1')) return null;
+  const changed = (Object.keys(TEST_ONLY_URLS) as (keyof typeof TEST_ONLY_URLS)[]).filter((key) => e[key].replace(/\/+$/, '') !== TEST_ONLY_URLS[key]);
+  return changed.length ? `${changed.join(', ')} may only point elsewhere in test (mock) mode; remove ${changed.length > 1 ? 'them' : 'it'} in production` : null;
 }
 
 /** Test helper: forget the cached env so changed process.env values are re-read. */

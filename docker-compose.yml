@@ -10,7 +10,9 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: cadence
-      POSTGRES_PASSWORD: cadence
+      # T47: set POSTGRES_PASSWORD in .env (letters and digits; it goes into the address below).
+      # It only takes effect when the volume is first created.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cadence}
       POSTGRES_DB: cadence
       # Checksums catch silent corruption; cheap on modern CPUs.
       POSTGRES_INITDB_ARGS: '--data-checksums'
@@ -60,11 +62,18 @@ services:
       - .env
     environment:
       # connection_limit keeps Prisma's pool small enough for a 1-vCPU box.
-      DATABASE_URL: postgresql://cadence:cadence@db:5432/cadence?connection_limit=6&pool_timeout=20
+      DATABASE_URL: postgresql://cadence:${POSTGRES_PASSWORD:-cadence}@db:5432/cadence?connection_limit=6&pool_timeout=20
       NODE_ENV: production
       NODE_OPTIONS: --max-old-space-size=512
     ports:
-      - "${CADENCE_PORT:-3100}:3000"
+      # T47: only this machine (the reverse proxy) by default; CADENCE_BIND=0.0.0.0 for a proxy elsewhere.
+      - "${CADENCE_BIND:-127.0.0.1}:${CADENCE_PORT:-3100}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then((r)=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 300s
     depends_on:
       db:
         condition: service_healthy
@@ -84,7 +93,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://cadence:cadence@db:5432/cadence?connection_limit=4&pool_timeout=20
+      DATABASE_URL: postgresql://cadence:${POSTGRES_PASSWORD:-cadence}@db:5432/cadence?connection_limit=4&pool_timeout=20
       NODE_ENV: production
       SEED_ON_START: "false"
       NODE_OPTIONS: --max-old-space-size=320
@@ -92,7 +101,7 @@ services:
       db:
         condition: service_healthy
       web:
-        condition: service_started
+        condition: service_healthy
     command: ["sh", "docker/entrypoint.sh", "worker"]
     deploy:
       resources:

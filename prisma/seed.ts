@@ -22,7 +22,10 @@ async function seedCore() {
 
   const e = env();
   const adminEmail = e.ADMIN_EMAIL.toLowerCase();
-  if (!(await prisma.user.findUnique({ where: { email: adminEmail } }))) {
+  if (!(await prisma.user.findUnique({ where: { email: adminEmail } })) && !e.ADMIN_PASSWORD && (await prisma.user.count({ where: { role: 'ADMIN', active: true } }))) {
+    // T23: once an admin exists the server need not keep a first password (DEPLOY.md, "Admin locked out").
+    console.log('  = an admin exists and ADMIN_PASSWORD is not set: no first account to create');
+  } else if (!(await prisma.user.findUnique({ where: { email: adminEmail } }))) {
     // Refused rather than defaulted: an account created with a password nobody chose is an
     // account whose password everybody knows.
     if (!e.ADMIN_PASSWORD) throw new Error('Set ADMIN_PASSWORD in .env before seeding: it is the password for the first account.');
