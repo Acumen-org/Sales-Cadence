@@ -124,3 +124,25 @@ describe('N13: a one-minute pass reads each listing once', () => {
     expect(calls).toEqual({ people: 1, deleted: 1, introspect: 0 });
   });
 });
+
+describe('N17: a listing that keeps failing', () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+  it('re-reads at most the nightly look-back, not everything since it first failed', async () => {
+    const client = new PartlyBrokenTwenty();
+    client.reset('demo');
+    client.broken.add('listNotes');
+    await syncContinuously(new Date('2026-09-01T10:00:00Z'), client);
+    await syncContinuously(new Date('2026-09-11T10:00:00Z'), client);
+    client.broken.clear();
+    const asked: string[] = [];
+    const listNotes = client.listNotes;
+    client.listNotes = async (o) => {
+      if (o?.updatedSince) asked.push(o.updatedSince);
+      return listNotes(o);
+    };
+    await syncContinuously(new Date('2026-09-11T10:01:00Z'), client);
+    expect(asked[0]).toBe('2026-09-08T10:01:00.000Z');
+  });
+});

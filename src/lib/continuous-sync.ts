@@ -3,6 +3,7 @@ import { prisma } from './db';
 import { applyNeverProspectRule } from './non-prospects';
 import { hashPassword } from './auth/password';
 import { workspaceTimezone } from './workspace';
+import { getSettings } from './settings';
 import { getTwentyClient } from './twenty';
 import { refreshPersonCache, type FullRefreshProgress } from './person-cache';
 import { reconcile } from './engine/reconcile';
@@ -116,7 +117,10 @@ export async function syncContinuously(now = new Date(), injected?: TwentyClient
     const watermark = state?.watermark ? new Date(state.watermark).getTime() : now.getTime() - 14 * 86400000;
     const since = new Date(watermark - 10 * 60000).toISOString();
     const stageWatermarks = Object.fromEntries(CURSOR_STAGES.map((stage) => [stage, state?.stageWatermarks?.[stage] ?? new Date(watermark).toISOString()]));
-    const sinceByStage = Object.fromEntries(CURSOR_STAGES.map((stage) => [stage, new Date(new Date(stageWatermarks[stage]).getTime() - 10 * 60000).toISOString()]));
+    // N17: a listing that keeps failing re-reads at most the nightly look-back, not a window that
+    // grows for as long as it fails; the nightly reconcile covers that same span.
+    const floor = state?.watermark ? now.getTime() - (await getSettings()).rules.reconcileLookbackDays * 86_400_000 : 0;
+    const sinceByStage = Object.fromEntries(CURSOR_STAGES.map((stage) => [stage, new Date(Math.max(new Date(stageWatermarks[stage]).getTime() - 10 * 60000, floor)).toISOString()]));
     const result = await reconcile({ since, sinceByStage, now, actor: SYSTEM_ACTOR }, client);
     Object.assign(stageErrors, result.stageErrors);
     try {
