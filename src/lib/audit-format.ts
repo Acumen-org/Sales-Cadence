@@ -331,6 +331,11 @@ function describe(action: string, details: Details, actorLabel: string | null, e
       return { title: d.by === 'retention' ? 'Removed by retention: no activity for a long time' : `Removed from Cold outreach${by}`, fields: [] };
     case 'move_failed':
       return { title: 'Move to the CRM failed', fields: str(d.reason) ? [{ label: 'Why', value: str(d.reason)! }] : str(d.error) ? [{ label: 'Why', value: str(d.error)! }] : [] };
+    case 'move_fields_kept_in_notes': {
+      const KEPT: Record<string, string> = { email: 'email (as an other email)', phones: 'phones', links: 'LinkedIn, city and title', choices: 'lead source, products and tags', owner: 'owner and other emails', firm: 'firm' };
+      const dropped = Array.isArray(d.dropped) ? (d.dropped as unknown[]).map((x) => KEPT[String(x)] ?? String(x)) : [];
+      return { title: 'Moved to the CRM with some details in its notes', fields: dropped.length ? [{ label: 'The CRM did not take', value: dropped.join(', ') }] : [] };
+    }
     case 'email_to_do_not_contact':
       return { title: 'Emailed although they must not be contacted', fields: [...(str(d.why) ? [{ label: 'Why not', value: str(d.why)! }] : []), ...(str(d.address) ? [{ label: 'Address', value: str(d.address)! }] : [])] };
     case 'call_form_submitted':
