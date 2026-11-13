@@ -31,6 +31,8 @@ export type MeetingFormValues = {
   team: TeamOption[];
   prospects: ProspectOption[];
   transcript: string;
+  /** S18: the fingerprint of the transcript the form opened on (src/lib/meetings/transcript-key.ts). */
+  transcriptKey?: string;
 };
 
 type Filled = { title?: string; occurredAt?: string; transcript?: string };
@@ -287,6 +289,7 @@ export function MeetingForm({ fos, initial, mode }: { fos: { id: string; name: s
         {transcriptOpen
           ? <TranscriptInput name="transcript" label="Transcript" value={transcript} onChange={(v) => { setTranscript(v); setTranscriptFrom(null); }} rows={8} />
           : <input type="hidden" name="transcript" value={transcript} />}
+        {initial.transcriptKey ? <input type="hidden" name="transcriptKey" value={initial.transcriptKey} /> : null}
       </section>
 
       <div className="flex flex-wrap items-center gap-3 pt-6">
