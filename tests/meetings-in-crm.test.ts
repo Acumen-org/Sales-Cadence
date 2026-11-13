@@ -134,3 +134,56 @@ describe('Twenty holds every meeting as Cadence wrote it', () => {
     expect(changedInTwenty(wrote, { ...wrote, day: '2026-09-20', contacts: ['person-01', 'person-02'] })).toEqual(['day', 'contacts']);
   });
 });
+
+describe('N14, N15, N16: meeting writes that change nothing are not repeated', () => {
+  it('N15: a record that cannot match, unchanged since Cadence wrote it, is written again at most hourly', async () => {
+    const m = await add('Kick-off', '2026-10-01', ['person-01']);
+    // Twenty holds it another way, without anyone editing it since (its updatedAt does not move).
+    record(m.twentyMeetingId).data.name = 'Kick-off (stored otherwise)';
+    // Twenty stamped Cadence's write a moment before Cadence noted it (the answer's round trip).
+    record(m.twentyMeetingId).updatedAt = new Date(Date.now() - 60_000).toISOString();
+    expect(await check()).toMatchObject({ written: 0 });
+    await prisma.meeting.update({ where: { id: m.id }, data: { twentySyncedAt: new Date(Date.now() - 2 * 3600_000) } });
+    expect(await check()).toMatchObject({ written: 1 });
+  });
+
+  it('N16: a second record carrying the same Cadence ID is removed', async () => {
+    const m = await add('Kick-off', '2026-10-01', ['person-01']);
+    const dup = mock.addMeetingInTwenty({ ...record(m.twentyMeetingId).data }, ['person-01']);
+    expect(await check()).toMatchObject({ duplicatesRemoved: 1 });
+    expect(mock.meetingRecords.has(dup)).toBe(false);
+    expect(mock.meetingRecords.has(m.twentyMeetingId!)).toBe(true);
+  });
+
+  it('N14: meetings are written again for a missing tag only once Twenty has it', async () => {
+    const { missingTagsNowInCrm } = await import('@/lib/meetings/crm');
+    const schema = (await mock.meetingSchema())!;
+    const products = schema.fields.products!;
+    expect(missingTagsNowInCrm(schema, [{ field: 'Products', name: 'Brand New' }])).toBe(false);
+    products.options.push({ value: 'BRAND_NEW', label: 'Brand New' });
+    expect(missingTagsNowInCrm(schema, [{ field: 'Products', name: 'brand new' }])).toBe(true);
+  });
+});
+
+describe('N15: the webhook Twenty sends for Cadence\'s own meeting write', () => {
+  it('is known as an echo for two minutes, for the record and its contact rows', async () => {
+    const { ownMeetingEcho } = await import('@/lib/meetings/crm-check');
+    const m = await add('Kick-off', '2026-10-01', ['person-01']);
+    expect(await ownMeetingEcho(m.twentyMeetingId!, {})).toBe(true);
+    expect(await ownMeetingEcho('row-9', { meetingId: m.twentyMeetingId })).toBe(true);
+    expect(await ownMeetingEcho(m.twentyMeetingId!, {}, Date.now() + 5 * 60_000)).toBe(false);
+  });
+});
+
+describe('N24: a typed-in name on a meeting with an account', () => {
+  it('links only a person of that name at that account', async () => {
+    const at = new Date('2026-10-02T17:00:00Z');
+    const tomas = await prisma.personCache.findUniqueOrThrow({ where: { id: 'person-02' } });
+    const other = await prisma.companyCache.findFirstOrThrow({ where: { NOT: { id: tomas.companyId ?? '' } } });
+    const elsewhere = await prisma.meeting.create({ data: { title: 'Namesake', sourceUrl: '', occurredAt: at, companyId: other.id, attendees: { create: [{ name: 'Tomas Berg', external: true }] } } });
+    const same = await prisma.meeting.create({ data: { title: 'Same firm', sourceUrl: '', occurredAt: at, companyId: tomas.companyId, attendees: { create: [{ name: 'Tomas Berg', external: true }] } } });
+    await check();
+    expect((await prisma.meetingAttendee.findFirstOrThrow({ where: { meetingId: elsewhere.id } })).personId).toBeNull();
+    expect((await prisma.meetingAttendee.findFirstOrThrow({ where: { meetingId: same.id } })).personId).toBe('person-02');
+  });
+});

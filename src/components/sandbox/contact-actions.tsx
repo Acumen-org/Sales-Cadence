@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import clsx from 'clsx';
 import { ConfirmDialog, useConfirm, type ConfirmOptions } from '@/components/confirm-dialog';
 import { useFlash } from '@/components/flash';
@@ -71,11 +72,11 @@ export function WithReason({ reason, children }: { reason?: string | null; child
 }
 
 /** Move to CRM: the dialog with its groups and fixes (4.5). */
-export function MoveButton({ id, ready, users = [], pods = [], openMove = false, blocked = null, label = 'Move to CRM', className }: { id: string; ready: boolean; users?: Owner[]; pods?: Option[]; openMove?: boolean; blocked?: string | null; label?: string; className?: string }) {
+export function MoveButton({ id, ready, users = [], pods = [], openMove = false, blocked = null, label = 'Move to CRM', className, reasonBelow = true }: { id: string; ready: boolean; users?: Owner[]; pods?: Option[]; openMove?: boolean; blocked?: string | null; label?: string; className?: string; /** False where the row says why once for all its buttons. */ reasonBelow?: boolean }) {
   const [moving, setMoving] = useState(openMove && !blocked);
   const cls = className ?? (ready && !blocked ? 'btn-primary btn-sm' : 'btn-secondary btn-sm');
-  return <WithReason reason={blocked}>
-    <button type="button" className={cls} disabled={Boolean(blocked)} onClick={() => setMoving(true)}>{label}</button>
+  return <WithReason reason={reasonBelow ? blocked : null}>
+    <button type="button" className={cls} disabled={Boolean(blocked)} title={blocked ?? undefined} onClick={() => setMoving(true)}>{label}</button>
     {moving ? <MoveDialog ids={[id]} owners={users.map((u) => ({ ...u, podIds: u.podIds ?? [] }))} pods={pods} onClose={() => setMoving(false)} /> : null}
   </WithReason>;
 }
@@ -127,20 +128,34 @@ export const MORE_WORDS: Record<MoreItem, { label: string; line: (name: string) 
 /** More: the rarer acts, each said in one line, each with its confirm naming every effect (PLAN 4.0). */
 export function ContactMoreMenu({ id, name = 'this contact', mayOptOut, mayAssign, mayRelease = false, mayErase, mayMove, mayRemove = mayMove, users, ownerId = null, work, confirms, whyNot = {} }: Props) {
   const [open, setOpen] = useState(false);
-  // The menu opens towards the side with room: rightwards from More, or leftwards near the right edge.
-  const [toLeft, setToLeft] = useState(false);
+  // The menu is drawn over the page (a portal, fixed to More), so no card or header it sits in can
+  // cut it off; it opens towards the side with room, and scrolls within the window when long.
+  const [place, setPlace] = useState<CSSProperties | null>(null);
   const [assigning, setAssigning] = useState<'assign' | 'release' | null>(null);
   const [pending, start] = useTransition();
   const [ask, dialog] = useConfirm();
   const say = useFlash();
   const box = useRef<HTMLSpanElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const placeMenu = () => {
+    const r = box.current?.getBoundingClientRect();
+    if (!r) return;
+    const width = Math.min(304, window.innerWidth - 16);
+    const left = r.left + width > window.innerWidth - 8 ? Math.max(8, r.right - width) : r.left;
+    const below = window.innerHeight - r.bottom - 12;
+    const up = below < 220 && r.top > below;
+    setPlace({ position: 'fixed', left, width, ...(up ? { bottom: window.innerHeight - r.top + 4, maxHeight: r.top - 12 } : { top: r.bottom + 4, maxHeight: below }) });
+  };
   useEffect(() => {
     if (!open) return;
-    const away = (e: MouseEvent) => { if (box.current && !box.current.contains(e.target as Node)) setOpen(false); };
+    const away = (e: MouseEvent) => { const t = e.target as Node; if (!box.current?.contains(t) && !menuRef.current?.contains(t)) setOpen(false); };
     const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    const move = () => setOpen(false);
     document.addEventListener('mousedown', away);
     document.addEventListener('keydown', esc);
-    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
+    window.addEventListener('resize', move);
+    window.addEventListener('scroll', move, true);
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); window.removeEventListener('resize', move); window.removeEventListener('scroll', move, true); };
   }, [open]);
   const allowed: Record<MoreItem, boolean> = { assign: mayAssign, release: mayRelease && !mayAssign, opt_out: mayOptOut, remove: mayRemove, erase: mayErase };
   const items = (Object.keys(MORE_WORDS) as MoreItem[]).filter((k) => allowed[k] || whyNot[k]);
@@ -165,19 +180,20 @@ export function ContactMoreMenu({ id, name = 'this contact', mayOptOut, mayAssig
     if (item === 'assign' || item === 'release') { setOpen(false); setAssigning(item); return; }
     run(item);
   };
+  const menu = (shown: boolean) => <div ref={shown ? menuRef : undefined} role="menu" hidden={!shown} aria-label={`More for ${name}`} style={shown && place ? place : undefined} className={clsx('z-50 overflow-y-auto rounded-xl border border-line bg-white py-1 shadow-pop', !shown && 'absolute')}>
+    {items.map((k) => {
+      const off = !allowed[k];
+      const danger = k === 'opt_out' || k === 'remove' || k === 'erase';
+      return <button key={k} type="button" role="menuitem" disabled={off} onClick={() => choose(k)} className={clsx('block w-full px-3.5 py-2 text-left transition', off ? 'cursor-not-allowed' : 'hover:bg-canvas')}>
+        <span className={clsx('block text-[13px] font-medium', off ? 'text-ink-400' : danger ? 'text-red-700' : 'text-ink-900')}>{MORE_WORDS[k].label}</span>
+        <span className="block text-[12px] leading-4 text-ink-500">{off ? whyNot[k] : MORE_WORDS[k].line(name)}</span>
+      </button>;
+    })}
+  </div>;
   return <span ref={box} className="relative inline-flex">
-    <button type="button" className="btn-secondary btn-sm" aria-haspopup="menu" aria-expanded={open} disabled={pending} onClick={() => { const r = box.current?.getBoundingClientRect(); setToLeft(Boolean(r && r.left + 320 > window.innerWidth)); setOpen((v) => !v); }}><IconDots size={14} />More</button>
-    {/* Drawn closed too (hidden), so what More holds is in the page from the first paint. */}
-    {<div role="menu" hidden={!open} aria-label={`More for ${name}`} className={clsx('absolute top-full z-30 mt-1 w-[19rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-line bg-white py-1 shadow-pop', toLeft ? 'right-0' : 'left-0')}>
-      {items.map((k) => {
-        const off = !allowed[k];
-        const danger = k === 'opt_out' || k === 'remove' || k === 'erase';
-        return <button key={k} type="button" role="menuitem" disabled={off} onClick={() => choose(k)} className={clsx('block w-full px-3.5 py-2 text-left transition', off ? 'cursor-not-allowed' : 'hover:bg-canvas')}>
-          <span className={clsx('block text-[13px] font-medium', off ? 'text-ink-400' : danger ? 'text-red-700' : 'text-ink-900')}>{MORE_WORDS[k].label}</span>
-          <span className="block text-[12px] leading-4 text-ink-500">{off ? whyNot[k] : MORE_WORDS[k].line(name)}</span>
-        </button>;
-      })}
-    </div>}
+    <button type="button" className="btn-secondary btn-sm" aria-haspopup="menu" aria-expanded={open} disabled={pending} onClick={() => { if (!open) placeMenu(); setOpen((v) => !v); }}><IconDots size={14} />More</button>
+    {/* Drawn closed too (hidden), so what More holds is in the page from the first paint; open, it is drawn over the page. */}
+    {open && place ? createPortal(menu(true), document.body) : menu(false)}
     {assigning ? <AssignButton id={id} name={name} users={users} ownerId={ownerId} work={work} release={assigning === 'release'} open onClose={() => setAssigning(null)} /> : null}
     {dialog}
   </span>;

@@ -37,6 +37,8 @@ export type TwentyGraphqlClientOptions = {
   schema: TwentySchema;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /** N12: waits for a slot in the requests-per-minute budget the web app and worker share. */
+  pace?: () => Promise<void>;
 };
 
 type Raw = Record<string, unknown>;
@@ -65,6 +67,27 @@ const PAGE_SIZE = 60;
 const FIND_PAGES = 5;
 /** Twenty allows 100 API requests a minute. A 429 is waited out, not treated as a failure. */
 const MAX_RATE_LIMIT_WAIT_MS = 30_000;
+/**
+ * N11: what the workspace's data model says is read again after this long, so a field added,
+ * renamed or removed in the CRM is noticed without a restart; a read that failed is tried again
+ * after a minute instead of being kept as "unknown" for good.
+ */
+const MODEL_CACHE_MS = 10 * 60_000;
+const MODEL_RETRY_MS = 60_000;
+
+type Cached<T> = { at: number; ttl: number; value: Promise<T> };
+/** A read of the data model, kept for MODEL_CACHE_MS, or MODEL_RETRY_MS when it failed (`fallback`). */
+function cachedRead<T>(cache: Map<string, Cached<T>>, key: string, read: () => Promise<T>, fallback: T): Promise<T> {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < hit.ttl) return hit.value;
+  const entry: Cached<T> = { at: Date.now(), ttl: MODEL_CACHE_MS, value: Promise.resolve(fallback) };
+  entry.value = read().catch(() => {
+    entry.ttl = MODEL_RETRY_MS;
+    return fallback;
+  });
+  cache.set(key, entry);
+  return entry.value;
+}
 
 /**
  * Twenty CRM over GraphQL. Every query and mutation Cadence uses lives in this file.
@@ -78,8 +101,8 @@ export class TwentyGraphqlClient implements TwentyClient {
   private readonly s: TwentySchema;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
-  private readonly fieldCache = new Map<string, Promise<Set<string> | null>>();
-  private aumTypePromise?: Promise<'number' | 'currency' | null>;
+  private readonly fieldCache = new Map<string, Cached<Set<string> | null>>();
+  private readonly aumTypeCache = new Map<string, Cached<'number' | 'currency' | null>>();
 
   constructor(private readonly opts: TwentyGraphqlClientOptions) {
     this.s = opts.schema;
@@ -100,6 +123,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     const once = /^\s*mutation\s+Create/.test(query);
     for (let attempt = 0; attempt < 2; attempt++) {
       const controller = new AbortController();
+      await this.opts.pace?.();
       const timer = setTimeout(() => controller.abort(), this.timeoutMs);
       try {
         const res = await this.fetchImpl(url, {
@@ -113,8 +137,11 @@ export class TwentyGraphqlClient implements TwentyClient {
           // The minute's budget is spent. Wait what Twenty asks for (or a few seconds) and go again;
           // this attempt does not count against the retry budget.
           rateLimited += 1;
-          const retryAfter = Number(res.headers.get('retry-after'));
-          await this.sleep(Math.min(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 2_000 * rateLimited, MAX_RATE_LIMIT_WAIT_MS));
+          // N39: Retry-After is seconds or an HTTP date; either is honoured, a guess only without one.
+          const header = res.headers.get('retry-after');
+          const seconds = Number(header);
+          const asked = header && Number.isFinite(seconds) ? seconds * 1000 : header ? Date.parse(header) - Date.now() : NaN;
+          await this.sleep(Math.min(Number.isFinite(asked) && asked > 0 ? asked : 2_000 * rateLimited, MAX_RATE_LIMIT_WAIT_MS));
           attempt -= 1;
           continue;
         }
@@ -122,6 +149,8 @@ export class TwentyGraphqlClient implements TwentyClient {
           const err = new TwentyApiError(`The CRM's ${endpoint} responded ${res.status}: ${text.slice(0, 300)}`, res.status);
           if (res.status >= 500 && attempt === 0 && !once) {
             lastErr = err;
+            // N39: a server in trouble gets a moment before the one retry, not a second request at once.
+            await this.sleep(1_000 + Math.floor(Math.random() * 1_000));
             continue;
           }
           throw err;
@@ -148,20 +177,15 @@ export class TwentyGraphqlClient implements TwentyClient {
     throw new TwentyApiError(`The CRM is unreachable at ${url}: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
   }
 
-  private createInputCache = new Map<string, Promise<boolean>>();
+  private createInputCache = new Map<string, Cached<boolean>>();
   /**
    * N05: whether `<Type>CreateInput` takes a caller-chosen id. That id is the idempotency marker:
    * after a lost answer, the record is looked up by it instead of being created again.
    */
   private createTakesId(typeName: string): Promise<boolean> {
-    let cached = this.createInputCache.get(typeName);
-    if (!cached) {
-      cached = this.request<{ __type: { inputFields?: Array<{ name: string }> | null } | null }>(`query CreateInputFields($name: String!) { __type(name: $name) { inputFields { name } } }`, { name: `${typeName}CreateInput` })
-        .then((d) => Boolean(d.__type?.inputFields?.some((f) => f.name === 'id')))
-        .catch(() => false);
-      this.createInputCache.set(typeName, cached);
-    }
-    return cached;
+    return cachedRead(this.createInputCache, typeName, () =>
+      this.request<{ __type: { inputFields?: Array<{ name: string }> | null } | null }>(`query CreateInputFields($name: String!) { __type(name: $name) { inputFields { name } } }`, { name: `${typeName}CreateInput` })
+        .then((d) => Boolean(d.__type?.inputFields?.some((f) => f.name === 'id'))), false);
   }
 
   /** Injectable so a test can run a rate-limit retry without waiting. */
@@ -169,14 +193,9 @@ export class TwentyGraphqlClient implements TwentyClient {
 
   /** Fields that exist on a GraphQL type, or null when introspection is unavailable. */
   private availableFields(typeName: string): Promise<Set<string> | null> {
-    let cached = this.fieldCache.get(typeName);
-    if (!cached) {
-      cached = this.request<{ __type: { fields: Array<{ name: string }> } | null }>(`query Fields($name: String!) { __type(name: $name) { fields { name } } }`, { name: typeName })
-        .then((d) => (d.__type ? new Set(d.__type.fields.map((f) => f.name)) : null))
-        .catch(() => null);
-      this.fieldCache.set(typeName, cached);
-    }
-    return cached;
+    return cachedRead(this.fieldCache, typeName, () =>
+      this.request<{ __type: { fields: Array<{ name: string }> } | null }>(`query Fields($name: String!) { __type(name: $name) { fields { name } } }`, { name: typeName })
+        .then((d) => (d.__type ? new Set(d.__type.fields.map((f) => f.name)) : null)), null);
   }
 
   /**
@@ -186,18 +205,13 @@ export class TwentyGraphqlClient implements TwentyClient {
    * any personId field", and selecting it silently returns nothing, so no note ever reaches the
    * person it is about. The workspace says which it has, once, and everything below uses that.
    */
-  private targetFieldsCache = new Map<'noteTarget' | 'taskTarget', Promise<{ personId: string; companyId: string; opportunityId: string }>>();
   private targetFields(kind: 'noteTarget' | 'taskTarget') {
-    let cached = this.targetFieldsCache.get(kind);
-    if (!cached) {
-      const mapped = this.s[kind];
-      cached = this.availableFields(this.s.objects[kind].typeName).then((available) => {
-        const pick = (name: string, alias: string) => (available && !available.has(name) && available.has(alias) ? alias : name);
-        return { personId: pick(mapped.personId, 'targetPersonId'), companyId: pick(mapped.companyId, 'targetCompanyId'), opportunityId: pick(mapped.opportunityId, 'targetOpportunityId') };
-      });
-      this.targetFieldsCache.set(kind, cached);
-    }
-    return cached;
+    // Derived from availableFields each time, so it follows that cache's refresh (N11).
+    const mapped = this.s[kind];
+    return this.availableFields(this.s.objects[kind].typeName).then((available) => {
+      const pick = (name: string, alias: string) => (available && !available.has(name) && available.has(alias) ? alias : name);
+      return { personId: pick(mapped.personId, 'targetPersonId'), companyId: pick(mapped.companyId, 'targetCompanyId'), opportunityId: pick(mapped.opportunityId, 'targetOpportunityId') };
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -206,6 +220,7 @@ export class TwentyGraphqlClient implements TwentyClient {
 
   private async rest<T = Raw>(method: 'GET' | 'POST', resource: string, body?: Raw): Promise<{ status: number; json: T | null; text: string }> {
     const url = `${this.opts.baseUrl.replace(/\/+$/, '')}/rest/${resource}`;
+    await this.opts.pace?.();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
@@ -223,11 +238,20 @@ export class TwentyGraphqlClient implements TwentyClient {
   }
 
   async listWebhooks(): Promise<TwentyWebhook[]> {
-    const res = await this.rest<Raw>('GET', 'webhooks?limit=60');
-    if (res.status >= 400) throw new TwentyApiError(`The CRM's webhooks responded ${res.status}: ${res.text.slice(0, 300)}`, res.status);
-    const data = (res.json?.data ?? res.json ?? {}) as Raw;
-    const list = (Array.isArray(data.webhooks) ? data.webhooks : Array.isArray(data) ? data : []) as Raw[];
-    return list.map(TwentyGraphqlClient.webhookOf);
+    // N33: every page the CRM says there is, not the first 60 only.
+    const out: TwentyWebhook[] = [];
+    let cursor: string | null = null;
+    for (let i = 0; i < 20; i++) {
+      const res = await this.rest<Raw>('GET', `webhooks?limit=60${cursor ? `&starting_after=${encodeURIComponent(cursor)}` : ''}`);
+      if (res.status >= 400) throw new TwentyApiError(`The CRM's webhooks responded ${res.status}: ${res.text.slice(0, 300)}`, res.status);
+      const data = (res.json?.data ?? res.json ?? {}) as Raw;
+      const list = (Array.isArray(data.webhooks) ? data.webhooks : Array.isArray(data) ? data : []) as Raw[];
+      out.push(...list.map(TwentyGraphqlClient.webhookOf));
+      const info = (res.json?.pageInfo ?? (data as Raw).pageInfo) as { hasNextPage?: boolean; endCursor?: string | null } | undefined;
+      if (!info?.hasNextPage || !info.endCursor || info.endCursor === cursor) return out;
+      cursor = info.endCursor;
+    }
+    return out;
   }
 
   /**
@@ -471,8 +495,7 @@ export class TwentyGraphqlClient implements TwentyClient {
   }
 
   private companyAumType() {
-    if (!this.aumTypePromise) {
-      this.aumTypePromise = this.request<{ __type: { fields: Array<{ name: string; type: { kind: string; name: string | null; ofType?: { kind: string; name: string | null } } }> } | null }>(
+    return cachedRead(this.aumTypeCache, 'aum', () => this.request<{ __type: { fields: Array<{ name: string; type: { kind: string; name: string | null; ofType?: { kind: string; name: string | null } } }> } | null }>(
         'query CompanyFieldTypes($name: String!) { __type(name: $name) { fields { name type { kind name ofType { kind name } } } } }',
         { name: this.s.objects.company.typeName },
       ).then((result) => {
@@ -482,9 +505,7 @@ export class TwentyGraphqlClient implements TwentyClient {
         if (named.kind === 'OBJECT' && /Currency/i.test(named.name ?? '')) return 'currency';
         if (named.kind === 'SCALAR' && /Float|Int|Numeric|Decimal|BigInt|Number/i.test(named.name ?? '')) return 'number';
         return null;
-      }).catch(() => null);
-    }
-    return this.aumTypePromise;
+      }), null);
   }
 
   private async companySelection() {
@@ -540,11 +561,20 @@ export class TwentyGraphqlClient implements TwentyClient {
   async listWorkspaceMembers(): Promise<TwentyWorkspaceMember[]> {
     const w = this.s.workspaceMember;
     const sel = await this.selection(this.s.objects.workspaceMember.typeName, ['id', { field: w.name, sub: '{ firstName lastName }' }, w.userEmail, w.timeZone]);
-    const data = await this.request<Record<string, Connection>>(
-      `query Members($first: Int) { ${this.s.objects.workspaceMember.plural}(first: $first) { edges { node { ${sel} } } pageInfo { hasNextPage endCursor } } }`,
-      { first: 200 },
-    );
-    return this.page(data[this.s.objects.workspaceMember.plural], (n) => normalizeWorkspaceMember(n, this.s)).items;
+    // N33: Twenty serves 60 a page whatever is asked: every page is read.
+    const out: TwentyWorkspaceMember[] = [];
+    let after: string | null = null;
+    for (let i = 0; i < 50; i++) {
+      const data: Record<string, Connection> = await this.request<Record<string, Connection>>(
+        `query Members($first: Int, $after: String) { ${this.s.objects.workspaceMember.plural}(first: $first, after: $after) { edges { node { ${sel} } } pageInfo { hasNextPage endCursor } } }`,
+        { first: PAGE_SIZE, after },
+      );
+      const page = this.page(data[this.s.objects.workspaceMember.plural], (n) => normalizeWorkspaceMember(n, this.s));
+      out.push(...page.items);
+      if (!page.hasNextPage || !page.endCursor) return out;
+      after = page.endCursor;
+    }
+    throw new TwentyApiError(`Workspace members: more than ${50 * PAGE_SIZE} to read`);
   }
 
   // ---------------------------------------------------------------------------
@@ -576,7 +606,9 @@ export class TwentyGraphqlClient implements TwentyClient {
     const sel = await this.personSelection();
     const people: TwentyPerson[] = [];
     let after: string | null = null;
-    for (let i = 0; i < 200; i++) {
+    for (let i = 0; ; i++) {
+      // N33: a view larger than this is refused, never silently cut short.
+      if (i >= 200) throw new TwentyApiError(`That view holds more than ${200 * PAGE_SIZE} people. Narrow it in the CRM, or paste person ids instead.`);
       const page: Record<string, Connection> = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.person.plural, this.s.objects.person.typeName, sel), {
         filter: filters.length ? { and: filters } : undefined,
         first: PAGE_SIZE,
@@ -613,7 +645,8 @@ export class TwentyGraphqlClient implements TwentyClient {
     }
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.note.plural, this.s.objects.note.typeName, sel), {
       filter: this.sinceFilter(this.s.note.updatedAt, opts.updatedSince) ?? undefined,
-      orderBy: [{ [this.s.note.createdAt]: 'DescNullsLast' }],
+      // N19: no timestamp order. Twenty cuts a listing ordered by a timestamp many rows share short
+      // and says there are no more pages (see listPeople); id order pages through all of them.
       first: Math.min(opts.limit ?? PAGE_SIZE, PAGE_SIZE),
       after: opts.after ?? null,
     });
@@ -654,7 +687,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     const since = opts.updatedSince ? { or: [{ [m.receivedAt]: { gte: opts.updatedSince } }, { createdAt: { gte: opts.updatedSince } }] } : undefined;
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.message.plural, this.s.objects.message.typeName, sel), {
       filter: since,
-      orderBy: [{ [m.receivedAt]: 'DescNullsLast' }],
+      // N19: id order, as above; the reconcile sorts the mail by date itself.
       first: Math.min(opts.limit ?? PAGE_SIZE, PAGE_SIZE),
       after: opts.after ?? null,
     });
@@ -712,7 +745,7 @@ export class TwentyGraphqlClient implements TwentyClient {
     const filter = this.sinceFilter(this.s.task.updatedAt, opts.updatedSince) ?? undefined;
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.task.plural, this.s.objects.task.typeName, sel), {
       filter,
-      orderBy: [{ [this.s.task.updatedAt]: 'DescNullsLast' }],
+      // N19: id order, as above.
       first: Math.min(opts.limit ?? PAGE_SIZE, PAGE_SIZE),
       after: opts.after ?? null,
     });
@@ -731,7 +764,8 @@ export class TwentyGraphqlClient implements TwentyClient {
     const filter = this.and(this.sinceFilter(o.updatedAt, opts.updatedSince), opts.personId ? { [o.pointOfContactId]: { eq: opts.personId } } : null);
     const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.opportunity.plural, this.s.objects.opportunity.typeName, sel), {
       filter,
-      orderBy: [{ [o.createdAt]: 'DescNullsLast' }],
+      // N19: newest first for one person's few; a listing of everything goes in id order, as above.
+      orderBy: opts.personId ? [{ [o.createdAt]: 'DescNullsLast' }] : undefined,
       first: Math.min(opts.limit ?? PAGE_SIZE, PAGE_SIZE),
       after: opts.after ?? null,
     });
@@ -771,12 +805,27 @@ export class TwentyGraphqlClient implements TwentyClient {
       ...[...new Set([input.personId, ...(input.personIds ?? [])].filter((p): p is string => Boolean(p)))].filter((personId) => !existing?.personIds.includes(personId)).map((personId) => ({ [fields.personId]: personId })),
       ...(input.companyId && !existing?.companyIds.includes(input.companyId) ? [{ [fields.companyId]: input.companyId }] : []),
     ];
-    for (const target of targets) {
-      await this.request(`mutation CreateNoteTarget($data: ${nt.typeName}CreateInput!) { create${nt.typeName}(data: $data) { id } }`, {
-        data: { [this.s.noteTarget.noteId]: id, ...target },
-      });
+    try {
+      for (const target of targets) {
+        await this.request(`mutation CreateNoteTarget($data: ${nt.typeName}CreateInput!) { create${nt.typeName}(data: $data) { id } }`, {
+          data: { [this.s.noteTarget.noteId]: id, ...target },
+        });
+      }
+    } catch (err) {
+      await this.dropOrphan(Boolean(marker || existing), () => this.deleteNote(id));
+      throw err;
     }
     return { id };
+  }
+
+  /**
+   * N08: a record whose link to its person failed is attached to nobody. With an id marker the
+   * replay finds it and adds only the missing link; without one the replay would make another, so
+   * the half-made record is removed before the write is queued again.
+   */
+  private async dropOrphan(replayFindsIt: boolean, remove: () => Promise<void>) {
+    if (replayFindsIt) return;
+    await remove().catch((err) => console.warn(`[twenty] a record left without its person could not be removed: ${err instanceof Error ? err.message : String(err)}`));
   }
 
   async updateNote(id: string, patch: UpdateNoteInput): Promise<void> {
@@ -814,9 +863,14 @@ export class TwentyGraphqlClient implements TwentyClient {
     }
     if (existing?.personIds.includes(input.personId)) return { id };
     const tt = this.s.objects.taskTarget;
-    await this.request(`mutation CreateTaskTarget($data: ${tt.typeName}CreateInput!) { create${tt.typeName}(data: $data) { id } }`, {
-      data: { [this.s.taskTarget.taskId]: id, [(await this.targetFields('taskTarget')).personId]: input.personId },
-    });
+    try {
+      await this.request(`mutation CreateTaskTarget($data: ${tt.typeName}CreateInput!) { create${tt.typeName}(data: $data) { id } }`, {
+        data: { [this.s.taskTarget.taskId]: id, [(await this.targetFields('taskTarget')).personId]: input.personId },
+      });
+    } catch (err) {
+      await this.dropOrphan(Boolean(marker || existing), () => this.deleteTask(id));
+      throw err;
+    }
     return { id };
   }
 
@@ -992,8 +1046,17 @@ export class TwentyGraphqlClient implements TwentyClient {
     ];
     if (!or.length) return [];
     const sel = await this.companySelection();
-    const data = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.company.plural, this.s.objects.company.typeName, sel), { filter: { or }, first: PAGE_SIZE, after: null });
-    return this.page(data[this.s.objects.company.plural], (n) => normalizeCompany(n, this.s)).items
+    // N33: past the first page (a domain many accounts share), so an existing account is not missed.
+    const found: TwentyCompany[] = [];
+    let after: string | null = null;
+    for (let i = 0; i < FIND_PAGES; i++) {
+      const data: Record<string, Connection> = await this.request<Record<string, Connection>>(this.connectionQuery(this.s.objects.company.plural, this.s.objects.company.typeName, sel), { filter: { or }, first: PAGE_SIZE, after });
+      const page = this.page(data[this.s.objects.company.plural], (n) => normalizeCompany(n, this.s));
+      found.push(...page.items);
+      if (!page.hasNextPage || !page.endCursor) break;
+      after = page.endCursor;
+    }
+    return found
       .filter((company) => !company.deletedAt && ((domain && normalizeDomain(company.domain) === domain) || (q.name && company.name.trim().toLowerCase() === q.name.trim().toLowerCase())));
   }
 
@@ -1139,13 +1202,15 @@ export class TwentyGraphqlClient implements TwentyClient {
     const SYSTEM = new Set(['id', 'createdAt', 'updatedAt', 'deletedAt', 'createdBy', 'updatedBy', 'position', 'searchVector', 'name']);
     const finder = (object: (typeof objects)[number]) => {
       const candidates = object.fields.filter((f) => !SYSTEM.has(f.name)).sort((a, b) => Number(Boolean(b.isCustom)) - Number(Boolean(a.isCustom)));
+      // N37: labels match on whole words ("date", not "update"; "no", not "notes"), so a field an
+      // admin adds whose label merely contains one of these letters cannot take over a mapping.
       const find = (test: RegExp, types: string[]) => candidates.find((f) => types.includes(f.type) && test.test(label(f)));
       const tag = (test: RegExp, types: string[]) => {
         const f = find(test, types);
         return f ? { id: f.id, name: f.name, multi: f.type === 'MULTI_SELECT', text: f.type === 'TEXT', options: (f.rawOptions ?? []).map((o) => ({ value: String(o.value ?? ''), label: String(o.label ?? o.value ?? '') })).filter((o) => o.value) } : null;
       };
       const date = () => {
-        const f = find(/date|when/, ['DATE_TIME', 'DATE']);
+        const f = find(/\b(date|when)\b/, ['DATE_TIME', 'DATE']);
         return f ? { name: f.name, dateOnly: f.type === 'DATE' } : null;
       };
       return { find, tag, date };
@@ -1167,19 +1232,19 @@ export class TwentyGraphqlClient implements TwentyClient {
       meeting: { typeName: meetingType, plural: meeting.namePlural, createdBy: fields.some((f) => f.name === 'createdBy') },
       fields: {
         date: finder(meeting).date(),
-        bookedBy: tag(/booked/, ['SELECT', 'MULTI_SELECT', 'TEXT']),
-        products: tag(/product/, ['MULTI_SELECT', 'SELECT']),
-        team: tag(/team/, ['MULTI_SELECT']),
-        recording: find(/recording/, ['LINKS'])?.name ?? null,
-        cadenceLink: find(/cadence/, ['LINKS'])?.name ?? null,
-        cadenceId: find(/cadence/, ['TEXT'])?.name ?? null,
-        guests: find(/guest/, ['TEXT'])?.name ?? null,
+        bookedBy: tag(/\bbooked\b/, ['SELECT', 'MULTI_SELECT', 'TEXT']),
+        products: tag(/\bproducts?\b/, ['MULTI_SELECT', 'SELECT']),
+        team: tag(/\bteam\b/, ['MULTI_SELECT']),
+        recording: find(/\brecording\b/, ['LINKS'])?.name ?? null,
+        cadenceLink: find(/\bcadence\b/, ['LINKS'])?.name ?? null,
+        cadenceId: find(/\bcadence\b/, ['TEXT'])?.name ?? null,
+        guests: find(/\bguests?\b/, ['TEXT'])?.name ?? null,
         companyId: idFor(fields, this.s.objects.company.typeName),
         personId: idFor(fields, this.s.objects.person.typeName),
         assigneeId: idFor(fields, 'WorkspaceMember'),
         // "Meeting Number", "Meeting Count", "Meeting #", "Meeting No.".
-        meetingNumber: find(/number|count|#|\bno\b/, ['NUMBER'])?.name ?? null,
-        firstMeeting: find(/first/, ['BOOLEAN'])?.name ?? null,
+        meetingNumber: find(/\b(number|count|no)\b|#/, ['NUMBER'])?.name ?? null,
+        firstMeeting: find(/\bfirst\b/, ['BOOLEAN'])?.name ?? null,
       },
       contact,
     };
@@ -1211,17 +1276,31 @@ export class TwentyGraphqlClient implements TwentyClient {
       const created = await this.request<Record<string, { id: string }>>(`mutation CreateMeeting($data: ${t}CreateInput!) { create${t}(data: $data) { id } }`, { data: input.data });
       id = created[`create${t}`].id;
     }
-    if (schema.contact) await this.syncMeetingContacts(schema.contact, id, input.contacts);
+    try {
+      if (schema.contact) await this.syncMeetingContacts(schema.contact, id, input.contacts);
+    } catch (err) {
+      // N16: the caller keeps the id of the record already made, so a retry does not make another.
+      throw Object.assign(err instanceof Error ? err : new Error(String(err)), { meetingRecordId: id });
+    }
     return { id };
   }
 
   /** The meeting's contact rows follow its attendees: missing ones added, removed ones deleted. */
   private async syncMeetingContacts(c: NonNullable<TwentyMeetingSchema['contact']>, meetingId: string, wanted: { personId: string; name: string }[]) {
-    const rows = await this.request<Record<string, Connection>>(
-      `query MeetingContacts($filter: ${c.typeName}FilterInput) { ${c.plural}(filter: $filter, first: 200) { edges { node { id name ${c.personId} } } } }`,
-      { filter: { [c.meetingId]: { eq: meetingId } } },
-    );
-    const have = connectionToArray(rows[c.plural]).map((r) => ({ id: String(r.id), name: String(r.name ?? ''), personId: String(r[c.personId] ?? '') }));
+    // N33: every page of the meeting's contact rows (Twenty serves 60 a page).
+    const nodes: Raw[] = [];
+    let after: string | null = null;
+    for (let i = 0; i < 20; i++) {
+      const rows: Record<string, Connection> = await this.request<Record<string, Connection>>(
+        `query MeetingContacts($filter: ${c.typeName}FilterInput, $first: Int, $after: String) { ${c.plural}(filter: $filter, first: $first, after: $after) { edges { node { id name ${c.personId} } } pageInfo { hasNextPage endCursor } } }`,
+        { filter: { [c.meetingId]: { eq: meetingId } }, first: PAGE_SIZE, after },
+      );
+      nodes.push(...connectionToArray(rows[c.plural]));
+      const info = rows[c.plural]?.pageInfo;
+      if (!info?.hasNextPage || !info.endCursor) break;
+      after = info.endCursor;
+    }
+    const have = nodes.map((r) => ({ id: String(r.id), name: String(r.name ?? ''), personId: String(r[c.personId] ?? '') }));
     for (const row of have) {
       if (!wanted.some((w) => w.personId === row.personId)) await this.request(`mutation DeleteMeetingContact($id: UUID!) { delete${c.typeName}(id: $id) { id } }`, { id: row.id });
     }
@@ -1282,9 +1361,14 @@ export class TwentyGraphqlClient implements TwentyClient {
     await this.request(`mutation DeleteMeeting($id: UUID!) { delete${t}(id: $id) { id } }`, { id });
   }
 
+  /** N14: tags the CRM refused to add, and when: not asked again (a data model read and a write each) for six hours. */
+  private refusedOptions = new Map<string, number>();
+
   /** A new tag on a Select or Multi-select field, when the API key may change the data model. */
   async addSelectOption(field: TwentyTagField, label: string): Promise<string | null> {
     const value = label.normalize('NFKD').replace(/[^\w\s-]/g, '').trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'OPTION';
+    const refusedKey = `${field.id}|${value}`;
+    if (Date.now() - (this.refusedOptions.get(refusedKey) ?? -Infinity) < 6 * 3600_000) return null;
     try {
       const objects = await this.metadataObjects();
       const current = objects.flatMap((o) => o.fields).find((f) => f.id === field.id);
@@ -1296,6 +1380,7 @@ export class TwentyGraphqlClient implements TwentyClient {
       return value;
     } catch (err) {
       console.warn(`[twenty] could not add the tag "${label}": ${err instanceof Error ? err.message : String(err)}`);
+      this.refusedOptions.set(refusedKey, Date.now());
       return null;
     }
   }

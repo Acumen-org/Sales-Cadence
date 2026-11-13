@@ -4,7 +4,7 @@ import { resetDb, seedBasics, type Basics } from './helpers/db';
 import { getSettings, invalidateSettingsCache, isExternalEmail, saveSettingsSection } from '@/lib/settings';
 import { microsoftUser, readIdToken, retirePasswords, signInMethods, SignInError, type MicrosoftIdentity } from '@/lib/auth/microsoft';
 import { getMockTwentyClient } from '@/lib/twenty/mock-client';
-import { missingMeetingTags, missingTagsNowInTwenty, pushMeetingToCrm, syncMeetingToCrm } from '@/lib/meetings/crm';
+import { missingMeetingTags, missingTagsNowInCrm, pushMeetingToCrm, syncMeetingToCrm } from '@/lib/meetings/crm';
 
 /**
  * Signing in with Microsoft (owner, 9 October 2026): the team signs in with their work accounts and
@@ -124,9 +124,9 @@ describe('tags Twenty lacks', () => {
     await syncMeetingToCrm(meeting.id);
     refuse.mockRestore();
     const schema = (await mock.meetingSchema())!;
-    expect(await missingTagsNowInTwenty(schema)).toBe(false);
+    expect(missingTagsNowInCrm(schema, await missingMeetingTags())).toBe(false);
     await mock.addSelectOption(schema.fields.bookedBy!, b.users.karson.name);
-    expect(await missingTagsNowInTwenty((await mock.meetingSchema())!)).toBe(true);
+    expect(missingTagsNowInCrm((await mock.meetingSchema())!, await missingMeetingTags())).toBe(true);
   });
 
   it('S23: a meeting that keeps failing to reach Twenty waits in the retry list once', async () => {

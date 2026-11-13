@@ -1,7 +1,8 @@
 import type { TwentyWrite } from '@prisma/client';
 import { prisma } from '../db';
 import { getTwentyClient, type TwentyClient } from '../twenty';
-import { retryDelayMs } from './sync-out';
+import { loadSyncTask, retryDelayMs, syncTaskCompleted } from './sync-out';
+import { getSettings } from '../settings';
 
 /**
  * The outbox. A write Twenty refused or never received sits in TwentyWrite as FAILED with the
@@ -15,11 +16,19 @@ import { retryDelayMs } from './sync-out';
  * than stuck forever.
  */
 const CLAIM_LEASE_MS = 10 * 60_000;
+/**
+ * N27: after this many attempts (about five days of back-off) a write is given up: GAVE_UP, kept with
+ * its last error in Settings > Activity log, where an admin can still retry or discard it. A write the
+ * replay cannot make at all is given up at once.
+ */
+export const MAX_WRITE_ATTEMPTS = 25;
+class NotReplayable extends Error {}
 
 export async function retryFailedWrites(opts: { now?: Date; limit?: number; ids?: string[]; ignoreBackoff?: boolean } = {}) {
   const now = opts.now ?? new Date();
-  // FAILED and due, or RETRYING with an expired lease.
-  const retryable = { OR: [{ status: 'FAILED' }, { status: 'RETRYING', nextAttemptAt: { lte: now } }] };
+  // FAILED and due, or RETRYING with an expired lease; a write given up only when an admin asks.
+  const byAdmin = Boolean(opts.ids || opts.ignoreBackoff);
+  const retryable = { OR: [{ status: 'FAILED' }, { status: 'RETRYING', nextAttemptAt: { lte: now } }, ...(byAdmin ? [{ status: 'GAVE_UP' }] : [])] };
   const rows = await prisma.twentyWrite.findMany({
     where: opts.ids
       ? { id: { in: opts.ids }, ...retryable }
@@ -45,7 +54,7 @@ export async function retryFailedWrites(opts: { now?: Date; limit?: number; ids?
     // Claim the row first: the worker tick and an admin's Retry can run at the same moment, and a
     // note written twice is worse than a note written late. The claim carries a lease (above).
     const claimed = await prisma.twentyWrite.updateMany({
-      where: { id: row.id, OR: [{ status: 'FAILED' }, { status: 'RETRYING', nextAttemptAt: { lte: now } }] },
+      where: { id: row.id, ...retryable },
       data: { status: 'RETRYING', nextAttemptAt: new Date(now.getTime() + CLAIM_LEASE_MS) },
     });
     if (!claimed.count) continue;
@@ -128,8 +137,48 @@ async function replay(client: TwentyClient, row: TwentyWrite): Promise<string | 
       return id;
     }
     default:
-      throw new Error(`Cannot replay a ${row.operation} write`);
+      throw new NotReplayable(`Cannot replay a ${row.operation} write`);
   }
+}
+
+/** How long after a click its CRM writes may still be running (rate-limit waits) before the sweep looks. */
+const UNWRITTEN_AFTER_MS = 15 * 60_000;
+/** How far back the sweep looks: a restart is noticed within minutes, not days later. */
+const UNWRITTEN_WITHIN_MS = 2 * 86_400_000;
+
+/**
+ * N09: the CRM writes a rep's click causes (completion note, mirrored task closed, opt-out's Do not
+ * contact) run after the page has answered. A restart while they wait loses them without a trace,
+ * so the worker looks for clicks that left no write at all (neither done nor queued) and makes them.
+ */
+export async function sweepUnwrittenSyncs(now = new Date(), limit = 25): Promise<{ tasks: number; optOuts: number }> {
+  const out = { tasks: 0, optOuts: 0 };
+  const client = await getTwentyClient();
+  if (client.kind === 'dry-run') return out;
+  const window = { gte: new Date(now.getTime() - UNWRITTEN_WITHIN_MS), lt: new Date(now.getTime() - UNWRITTEN_AFTER_MS) };
+  const settings = await getSettings();
+  const tasks = await prisma.task.findMany({
+    where: { state: 'DONE', completedAt: window, enrollment: { personId: { not: null } }, OR: [{ twentyTaskId: { not: null } }, ...(settings.sync.writeCompletionNotes ? [{ twentyNoteId: null }] : [])] },
+    select: { id: true, completedAt: true },
+    orderBy: { completedAt: 'asc' },
+    take: limit * 4,
+  });
+  for (const t of tasks) {
+    if (out.tasks >= limit) break;
+    if (await prisma.twentyWrite.findFirst({ where: { taskId: t.id, operation: { in: ['createNote', 'updateTask'] }, createdAt: { gte: t.completedAt! } }, select: { id: true } })) continue;
+    const full = await loadSyncTask(t.id);
+    if (!full) continue;
+    await syncTaskCompleted(full);
+    out.tasks += 1;
+  }
+  const optedOut = await prisma.personCache.findMany({ where: { optedOut: true, dnd: false, deletedAt: null, optedOutAt: window }, select: { id: true, optedOutAt: true }, take: limit });
+  const { writeCrmDoNotContact } = await import('../outreach/transitions');
+  for (const p of optedOut) {
+    if (await prisma.twentyWrite.findFirst({ where: { twentyId: p.id, operation: 'setPersonDnd', createdAt: { gte: p.optedOutAt! } }, select: { id: true } })) continue;
+    await writeCrmDoNotContact(p.id, { dnd: true });
+    out.optOuts += 1;
+  }
+  return out;
 }
 
 function messageOf(err: unknown): string {
@@ -139,6 +188,12 @@ function messageOf(err: unknown): string {
 async function postpone(rows: TwentyWrite[], err: unknown, now: Date, statuses: string[] = ['FAILED', 'RETRYING']) {
   const error = messageOf(err);
   for (const row of rows) {
-    await prisma.twentyWrite.updateMany({ where: { id: row.id, status: { in: statuses } }, data: { status: 'FAILED', attempts: { increment: 1 }, error, nextAttemptAt: new Date(now.getTime() + retryDelayMs(row.attempts + 1)) } });
+    const giveUp = err instanceof NotReplayable || row.attempts + 1 >= MAX_WRITE_ATTEMPTS;
+    await prisma.twentyWrite.updateMany({
+      where: { id: row.id, status: { in: statuses } },
+      data: giveUp
+        ? { status: 'GAVE_UP', attempts: { increment: 1 }, error: `Gave up after ${row.attempts + 1} attempt(s): ${error}`.slice(0, 2000), nextAttemptAt: null }
+        : { status: 'FAILED', attempts: { increment: 1 }, error, nextAttemptAt: new Date(now.getTime() + retryDelayMs(row.attempts + 1)) },
+    });
   }
 }

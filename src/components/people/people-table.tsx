@@ -302,7 +302,7 @@ function ColdPeopleTable({ rows, canSelect, bulk }: ColdProps) {
                 <td className={`${COLD_CELL} ${WRAP_BADGES}`}>
                   <SubjectBadges badge={r.badge} chips={r.chips} limit={2} />
                   {r.move?.undo ? <div className="mt-1"><UndoMoveButton itemIds={[r.move.undo.itemId]} confirm={r.move.undo.confirm} campaigns={r.move.undo.campaigns} /></div> : null}
-                  {r.move?.failed ? <div className="mt-1 break-words text-[12px] text-red-700">Move failed: {r.move.failed.error} <Link href={r.move.failed.href} className="underline">{r.move.failed.label}</Link></div> : null}
+                  {r.move?.failed ? <div className={`mt-1 break-words text-[12px] ${r.move.failed.retrying ? 'text-amber-800' : 'text-red-700'}`}>{r.move.failed.retrying ? 'Not in the CRM yet' : 'Move failed'}: {r.move.failed.error}. <Link href={r.move.failed.href} className="underline">{r.move.failed.label}</Link></div> : null}
                 </td>
                 {has('next') ? <td className={`${COLD_CELL} break-words text-[12px]`}>
                   {r.next ? (

@@ -42,7 +42,7 @@ describe('LinkedIn tasks on the Tasks screen', () => {
     const list = await listFollowUpItems(karson, { tab: 'upcoming', foUserId: karson.id }, new Date());
     expect(list.rows.map((x) => x.id)).toEqual([f.id]);
     expect(list.counts.upcoming).toBe(1);
-    expect(list.linkedin).toBe(1);
+    expect(list.channelCounts).toEqual({ CALL: 0, EMAIL: 0, LINKEDIN: 1 });
     expect((await listFollowUpItems(karson, { tab: 'upcoming', channel: 'EMAIL' }, new Date())).rows).toEqual([]);
     expect(await dueCounts(karson.id, 'all', todayIn(karson.timezone))).toEqual({ today: 0, overdue: 0 });
     await prisma.linkedInFollowUp.update({ where: { id: f.id }, data: { dueDate: todayIn(karson.timezone) } });
