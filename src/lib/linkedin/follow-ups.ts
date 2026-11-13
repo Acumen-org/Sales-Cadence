@@ -31,7 +31,7 @@ export const FOLLOW_UP_LABELS: Record<LinkedInFollowUpKind, string> = {
   EMAIL_REPLY: 'Reply to their email',
 };
 
-/** An email reply is answered within this many working days (owner, 13 Nov 2026: "The deadline is 2 days"). */
+/** A reply, by email or on LinkedIn, is answered within this many working days (owner, 13 Nov 2026: "The deadline is 2 days"; LinkedIn too). */
 export const EMAIL_REPLY_DAYS = 2;
 /** A reply older than this when Cadence first sees it (a catch-up, a backfill) opens no task. */
 const EMAIL_REPLY_FRESH_MS = 7 * 86_400_000;
@@ -52,14 +52,14 @@ export function workingDaysAfter(date: LocalDate, n: number, workingDays: number
 
 /**
  * The day it is due, in the FO's own calendar. A MESSAGE after an acceptance is due 2 working days after
- * the acceptance, or after someone took the contact on if that was later; a reply is answered the same
- * working day. A withdrawal is due at once (the 14 days already passed). A resend is due when LinkedIn's
+ * the acceptance, or after someone took the contact on if that was later; a reply is answered within 2
+ * working days, as an email reply is. A withdrawal is due at once (the 14 days already passed). A resend is due when LinkedIn's
  * cool-off ends.
  */
 export function dueDateFor(f: { kind: LinkedInFollowUpKind; trigger: string; triggeredAt: Date }, assignedAt: Date | null, timezone: string, linkedin: LinkedInSettings, workingDays: number[]): LocalDate {
   const tz = safeTimezone(timezone);
   const from = maxLocalDate(toLocalDate(f.triggeredAt, tz), assignedAt ? toLocalDate(assignedAt, tz) : toLocalDate(f.triggeredAt, tz));
-  if (f.kind === 'MESSAGE') return workingDaysAfter(from, f.trigger === 'accepted' ? linkedin.messageAfterAcceptDays : 0, workingDays);
+  if (f.kind === 'MESSAGE') return workingDaysAfter(from, f.trigger === 'accepted' ? linkedin.messageAfterAcceptDays : EMAIL_REPLY_DAYS, workingDays);
   if (f.kind === 'EMAIL_REPLY') return workingDaysAfter(from, EMAIL_REPLY_DAYS, workingDays);
   if (f.kind === 'RESEND') return nextWorkingDay(maxLocalDate(addDays(toLocalDate(f.triggeredAt, tz), linkedin.resendAfterDays), from), workingDays);
   return nextWorkingDay(from, workingDays);
