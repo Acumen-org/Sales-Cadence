@@ -37,6 +37,8 @@ export type IngestInput = {
   skipSync?: boolean;
   /** Read it again even if it was read before: idempotent, for a one-off pass after a rule change. */
   reread?: boolean;
+  /** The stored event's own key, when the sweep replays a row saved but never processed (N03). */
+  dedupeKey?: string;
 };
 
 export type IngestResult = {
@@ -65,6 +67,14 @@ const INCOMPLETE = new Set(['ignored_note_no_person', 'ignored_note_not_found', 
 export const isIncompleteResult = (result: string | null | undefined) => Boolean(result && (INCOMPLETE.has(result) || result.startsWith('error:')));
 
 /**
+ * N03: an event is saved first and processed second. A row still without a result this long after
+ * it was saved (or last claimed) was cut off by a restart or a crash, not merely in progress.
+ */
+export const STALE_EVENT_MS = 10 * 60_000;
+const isStaleClaim = (row: { result: string | null; receivedAt: Date; processedAt: Date | null }, now = Date.now()) =>
+  row.result === null && (row.processedAt ?? row.receivedAt).getTime() < now - STALE_EVENT_MS;
+
+/**
  * Rule 6: every inbound event is stored once (dedupe on object + id + updatedAt), then processed.
  * Processing is idempotent by construction (single-use evidence, no-op state transitions), so a
  * lost race or a reconcile re-scan can never advance a step twice.
@@ -76,17 +86,19 @@ export async function ingestEvent(input: IngestInput, client?: TwentyClient): Pr
   if (!recordId) return { status: 'ignored', result: 'no_record_id' };
   const deletionAt = (input.eventName.endsWith('.deleted') || input.eventName.endsWith('.destroyed')) && typeof input.record.deletedAt === 'string' ? input.record.deletedAt : null;
   const updatedAt = deletionAt ?? input.updatedAt ?? (typeof input.record.updatedAt === 'string' ? input.record.updatedAt : null);
-  const dedupeKey = dedupeKeyFor(canonical, recordId, updatedAt, input.eventName);
+  const dedupeKey = input.dedupeKey ?? dedupeKeyFor(canonical, recordId, updatedAt, input.eventName);
 
-  const existing = await prisma.activityEvent.findUnique({ where: { dedupeKey }, select: { id: true, result: true } });
-  if (existing && !isIncompleteResult(existing.result) && !(input.reread && existing.result !== null)) return { status: 'duplicate', result: 'duplicate', eventId: existing.id, details: { dedupeKey } };
+  const existing = await prisma.activityEvent.findUnique({ where: { dedupeKey }, select: { id: true, result: true, receivedAt: true, processedAt: true } });
+  const stale = existing ? isStaleClaim(existing) : false;
+  if (existing && !stale && !isIncompleteResult(existing.result) && !(input.reread && existing.result !== null)) return { status: 'duplicate', result: 'duplicate', eventId: existing.id, details: { dedupeKey } };
 
   let event: Pick<ActivityEvent, 'id'>;
   if (existing) {
-    // Claimed on the result it had, so two readers arriving at once do not both read it again.
+    // Claimed on the result it had, so two readers arriving at once do not both read it again. A
+    // row cut off before it had a result is claimed on its claim time, which the claim moves on.
     const claimed = await prisma.activityEvent.updateMany({
-      where: { id: existing.id, result: existing.result },
-      data: { source: input.source, eventName: input.eventName, payload: input.record as Prisma.InputJsonValue, processedAt: null, result: null },
+      where: { id: existing.id, result: existing.result, ...(stale ? { processedAt: existing.processedAt } : {}) },
+      data: { source: input.source, eventName: input.eventName, payload: input.record as Prisma.InputJsonValue, processedAt: stale ? new Date() : null, result: null },
     });
     if (!claimed.count) return { status: 'duplicate', result: 'duplicate', eventId: existing.id, details: { dedupeKey } };
     event = existing;
@@ -125,6 +137,27 @@ export async function ingestEvent(input: IngestInput, client?: TwentyClient): Pr
     await logAudit({ entityType: 'event', entityId: event.id, action: 'ingest_failed', actor, details: { message, eventName: input.eventName } });
     return { status: 'error', result: message, eventId: event.id, needsReview: true };
   }
+}
+
+/**
+ * N03: events saved but never processed (the app was restarted between the two) are processed now,
+ * from the payload they were saved with. The worker runs this each pass; anything that fails is
+ * marked for review in the Activity log, as any other failed event is.
+ */
+export async function sweepUnprocessedEvents(now = new Date(), limit = 50): Promise<number> {
+  const cutoff = new Date(now.getTime() - STALE_EVENT_MS);
+  const rows = await prisma.activityEvent.findMany({
+    where: { result: null, receivedAt: { lt: cutoff }, OR: [{ processedAt: null }, { processedAt: { lt: cutoff } }] },
+    orderBy: { receivedAt: 'asc' },
+    take: limit,
+  });
+  let swept = 0;
+  for (const row of rows) {
+    const record = (row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload) ? row.payload : {}) as Record<string, unknown>;
+    const out = await ingestEvent({ source: row.source, objectType: row.objectType, eventName: row.eventName, record, recordId: row.externalId, updatedAt: row.externalUpdatedAt?.toISOString() ?? null, dedupeKey: row.dedupeKey });
+    if (out.status !== 'duplicate') swept += 1;
+  }
+  return swept;
 }
 
 async function process(type: CanonicalObject, input: IngestInput, ctx: EngineContext, settings: Settings, client?: TwentyClient): Promise<ProcessOutcome> {

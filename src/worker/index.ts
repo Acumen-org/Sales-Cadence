@@ -4,6 +4,7 @@ import { backfillTeamsTranscripts } from '../lib/meetings/teams-transcript';
 import { MEETINGS_CHANGED_KEY, checkMeetingsInCrm } from '../lib/meetings/crm-check';
 import { backfillSharePointPlayers } from '../lib/meetings/sharepoint-player';
 import { retryFailedWrites } from '../lib/engine/sync-retry';
+import { sweepUnprocessedEvents } from '../lib/engine/ingest';
 import { prisma } from '../lib/db';
 import { env } from '../lib/env';
 import { SYSTEM_ACTOR } from '../lib/audit';
@@ -187,6 +188,8 @@ async function tick(){
    if(now-lastSync>=config.CRM_SYNC_SECONDS*1000&&!nightly.crmBusy){
      try{await syncContinuously();lastSync=now;}catch(error){log('CRM sync failed',error);}
    }
+   // N03: CRM events saved but cut off before processing (a restart, a deploy) are processed now.
+   try{const swept=await sweepUnprocessedEvents();if(swept)log('unprocessed CRM events swept',swept);}catch(error){log('event sweep failed',error);}
    await nightly.poke(new Date(now)).catch((error)=>log('nightly failed to start',error));
    await evidenceRescan(new Date(now));
    await meetingsWithTwenty(now);
