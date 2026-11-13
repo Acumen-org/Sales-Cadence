@@ -27,7 +27,7 @@ const actionOf = (f: Pick<FollowUpRow, 'kind'>) => (f.kind === 'EMAIL_REPLY' ? '
 /** Why the task exists, in a few words. */
 export function followUpWhy(f: Pick<FollowUpRow, 'kind' | 'trigger' | 'triggeredAt' | 'link'>, timezone: string): string {
   const on = (d: Date | null) => (d ? formatInstant(d, timezone).split(',')[0] : 'recently');
-  if (f.kind === 'EMAIL_REPLY') return `Answered our email on ${on(f.triggeredAt)}`;
+  if (f.kind === 'EMAIL_REPLY') return `Replied on ${on(f.triggeredAt)}`;
   if (f.kind === 'MESSAGE') return f.trigger === 'replied' ? `Wrote to us on LinkedIn on ${on(f.triggeredAt)}` : `Accepted our connection request on ${on(f.link?.acceptedAt ?? f.triggeredAt)}`;
   if (f.kind === 'WITHDRAW') return `Our request has waited since ${on(f.link?.invitedAt ?? null)} with no answer`;
   return `Our request was withdrawn on ${on(f.link?.withdrawnAt ?? f.triggeredAt)}; LinkedIn lets it go again after 3 weeks`;

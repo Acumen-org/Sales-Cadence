@@ -502,7 +502,7 @@ async function handleMessage(message: TwentyMessage, ctx: EngineContext, setting
     if (cold.size) {
       const automatic = isAutomaticReply(subject);
       // L02: a reply through the CRM carries its text too: a request to stop opts them out everywhere.
-      const r = await recordColdReply(from, { key: `message:${message.id}`, conversationId: message.threadId, subject: message.subject, at: occurredAt, mailboxUserId: cls.recipientUsers[0]?.id ?? null, via: 'crm' }, automatic, !automatic && asksToStop(message.subject, message.text));
+      const r = await recordColdReply(from, { key: `message:${message.id}`, conversationId: message.threadId, subject: message.subject, at: occurredAt, mailboxUserId: cls.recipientUsers[0]?.id ?? null, via: 'crm', text: message.text }, automatic, !automatic && asksToStop(message.subject, message.text));
       return { result: automatic ? 'inbound_cold_automatic_reply' : r.optedOut ? 'inbound_cold_opt_out' : 'inbound_cold_reply', details: { coldContacts: r.contacts.length } };
     }
     let personId = cls.fromPersonId;
@@ -534,7 +534,7 @@ async function handleMessage(message: TwentyMessage, ctx: EngineContext, setting
       return { result: 'inbound_opt_out', details: { personId, changed: r.changed } };
     }
     // Answer them within 2 working days, in a campaign or not (owner, 13 Nov 2026).
-    await openEmailReplyTask({ personId }, occurredAt, `message:${message.id}:person:${personId}`);
+    await openEmailReplyTask({ personId }, occurredAt, `message:${message.id}:person:${personId}`, new Date(), { from: cls.fromHandle, subject: message.subject, text: message.text });
     const enrollment = await prisma.enrollment.findFirst({
       where: { personId, status: { in: [...OCCUPYING_STATUSES, 'REPLIED', 'MEETING'] } },
       orderBy: { createdAt: 'desc' },

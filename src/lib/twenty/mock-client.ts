@@ -279,6 +279,7 @@ export class MockTwentyClient implements TwentyClient {
   addMessage(input: {
     id?: string;
     subject?: string;
+    text?: string;
     receivedAt?: string;
     from: { handle: string; personId?: string | null; workspaceMemberId?: string | null };
     to: Array<{ handle: string; personId?: string | null; workspaceMemberId?: string | null; role?: 'to' | 'cc' | 'bcc' }>;
@@ -289,7 +290,7 @@ export class MockTwentyClient implements TwentyClient {
       { id: `${id}-p1`, messageId: id, role: 'from' as const, handle: input.from.handle, displayName: null, personId: input.from.personId ?? null, workspaceMemberId: input.from.workspaceMemberId ?? null },
       ...input.to.map((t, i) => ({ id: `${id}-p${i + 2}`, messageId: id, role: t.role ?? ('to' as const), handle: t.handle, displayName: null, personId: t.personId ?? null, workspaceMemberId: t.workspaceMemberId ?? null })),
     ];
-    const msg: TwentyMessage = { id, subject: input.subject ?? null, text: null, receivedAt, threadId: null, participants, updatedAt: receivedAt };
+    const msg: TwentyMessage = { id, subject: input.subject ?? null, text: input.text ?? null, receivedAt, threadId: null, participants, updatedAt: receivedAt };
     this.messages.push(msg);
     return msg;
   }

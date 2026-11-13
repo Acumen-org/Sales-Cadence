@@ -47,6 +47,8 @@ export type SeenMail = {
   /** Whose mailbox: the rep who sent it, or the one whose inbox it reached. */
   mailboxUserId: string | null;
   via: 'outlook' | 'crm';
+  /** The words, when the source gives them (the CRM's copy): to tell a newsletter from a reply. */
+  text?: string | null;
 };
 
 export const EMAIL_TO_DO_NOT_CONTACT = 'email_to_do_not_contact';
@@ -329,7 +331,7 @@ export async function recordColdReply(from: string, mail: SeenMail, automatic: b
     out.replies++;
     // Answer them within 2 working days, in a campaign or not (owner, 13 Nov 2026): the CRM person's task when
     // the contact is also in the CRM, else the contact's, in Needs an owner while nobody owns them.
-    await openEmailReplyTask(c.crmMatchPersonId ? { personId: c.crmMatchPersonId } : { sandboxContactId: c.id }, mail.at, externalId);
+    await openEmailReplyTask(c.crmMatchPersonId ? { personId: c.crmMatchPersonId } : { sandboxContactId: c.id }, mail.at, externalId, new Date(), { from, subject: mail.subject, text: mail.text, contactId: c.id });
     // The rep may have marked this reply in Tasks already: it counts once.
     await joinMarkedReply(touch);
     const running = await prisma.enrollment.findMany({ where: { sandboxContactId: c.id, personId: null, status: { in: OCCUPYING_STATUSES } }, select: { id: true, foUserId: true } });

@@ -1,5 +1,6 @@
 import type { SessionUser } from '@/lib/auth/current-user';
-import { isBizOps, toActor } from '@/lib/auth/rbac';
+import { isAdmin, isBizOps, isPodLeader, toActor } from '@/lib/auth/rbac';
+import { prisma } from '@/lib/db';
 import { assignableOwners } from '@/lib/outreach/ownership';
 import { refOf, subjectHref } from '@/lib/subject';
 import { accountViews, needsOwnerItems } from '@/lib/linkedin/tasks-view';
@@ -11,11 +12,19 @@ export async function LinkedInNeedsOwnerSection({ user, scope = 'cold' }: { user
   if (isBizOps(toActor(user))) return null;
   const items = await needsOwnerItems(user, 100, scope);
   if (!items.length) return null;
-  const [owners, accounts] = await Promise.all([assignableOwners(user), accountViews(items.flatMap((f) => (f.accountId ? [f.accountId] : [])))]);
+  const sources = items.flatMap((f) => (f.kind === 'EMAIL_REPLY' && f.sourceId ? [f.sourceId] : []));
+  const [owners, accounts, touches] = await Promise.all([
+    assignableOwners(user),
+    accountViews(items.flatMap((f) => (f.accountId ? [f.accountId] : []))),
+    // The reply's subject, so the reader sees what they wrote about before taking them.
+    sources.length ? prisma.touch.findMany({ where: { externalId: { in: sources } }, select: { externalId: true, summary: true } }) : [],
+  ]);
+  const subjectOf = new Map(touches.map((t) => [t.externalId, t.summary.replace(/^(Reply|Auto-reply): /, '')]));
   const rows = items.map((f) => {
     const { name, who } = followUpSubject(f);
     const ref = refOf(f);
-    return { id: f.id, name, href: ref ? subjectHref(ref) : null, why: followUpWhy(f, user.timezone), account: f.accountId ? accounts.get(f.accountId)?.name ?? f.accountId : null, company: who?.companyName ?? null, podIds: f.sandboxContact?.podId ? [f.sandboxContact.podId] : [] };
+    return { id: f.id, name, href: ref ? subjectHref(ref) : null, why: followUpWhy(f, user.timezone), account: f.accountId ? accounts.get(f.accountId)?.name ?? f.accountId : null, company: who?.companyName ?? null, podIds: f.sandboxContact?.podId ? [f.sandboxContact.podId] : [], subject: f.sourceId ? subjectOf.get(f.sourceId) ?? null : null };
   });
-  return <LinkedInNeedsOwner rows={rows} owners={owners} canTake />;
+  const actor = toActor(user);
+  return <LinkedInNeedsOwner rows={rows} owners={owners} canTake canGive={isAdmin(actor) || isPodLeader(actor)} />;
 }

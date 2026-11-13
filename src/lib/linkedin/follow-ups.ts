@@ -7,6 +7,7 @@ import { audienceOf } from '../outreach/audience';
 import { assignContact } from '../sandbox/contacts';
 import { getSettings, type LinkedInSettings } from '../settings';
 import { workspaceTimezone } from '../workspace';
+import { isAutomatedMail } from '../mail/automated';
 
 /**
  * LinkedIn tasks Cadence makes from what the Console saw, outside any campaign (owner, 12 Nov 2026):
@@ -150,14 +151,54 @@ export async function openFollowUp(input: { kind: LinkedInFollowUpKind; trigger:
   }
 }
 
+/** What the reply task needs to know about the mail: who sent it and its words, to tell a person from a machine. */
+export type ReplyMail = { from?: string | null; subject?: string | null; text?: string | null; /** The cold contact it came to, when the task goes on their CRM person. */ contactId?: string | null };
+
+/** How far back an email of ours makes theirs a reply. */
+export const REPLY_WINDOW_DAYS = 120;
+
+/** We emailed them (or the cold contact that is them) in the window before their email. */
+export async function weWroteFirst(subject: LinkedInSubject, at: Date, contactId?: string | null): Promise<boolean> {
+  const since = new Date(at.getTime() - REPLY_WINDOW_DAYS * 86_400_000);
+  // A CRM person who is also a cold contact was emailed as the contact, often.
+  const who: Prisma.TouchWhereInput[] = [
+    subjectWhere(subject) as Prisma.TouchWhereInput,
+    ...(contactId ? [{ sandboxContactId: contactId }] : []),
+    ...('personId' in subject ? [{ sandboxContact: { OR: [{ crmMatchPersonId: subject.personId }, { crmAutoPersonId: subject.personId }, { twentyPersonId: subject.personId }] } }] : []),
+  ];
+  return (await prisma.touch.count({ where: { OR: who, channel: 'EMAIL', direction: 'OUTBOUND', occurredAt: { gte: since, lt: at } } })) > 0;
+}
+
+/**
+ * Open "Reply to their email" tasks that are not answers to us: a newsletter, a notification, a
+ * no-reply sender, or someone we never emailed. Cancelled, with the reason in their history. Runs in
+ * the worker; tasks opened before the rule are cleaned up the first time it runs.
+ */
+export async function cancelNonReplyTasks(): Promise<number> {
+  const open = await prisma.linkedInFollowUp.findMany({ where: { kind: 'EMAIL_REPLY', state: 'OPEN' }, select: { id: true, personId: true, sandboxContactId: true, triggeredAt: true, sourceId: true } });
+  let n = 0;
+  for (const f of open) {
+    const subject: LinkedInSubject = f.personId ? { personId: f.personId } : { sandboxContactId: f.sandboxContactId ?? '' };
+    const touch = f.sourceId ? await prisma.touch.findUnique({ where: { externalId: f.sourceId }, select: { actorLabel: true, summary: true } }) : null;
+    const automated = isAutomatedMail({ from: touch?.actorLabel ?? null, subject: touch?.summary ?? null });
+    if (!automated && (await weWroteFirst(subject, f.triggeredAt))) continue;
+    n += await closeFollowUps({ id: f.id }, { state: 'CANCELLED', at: new Date(), reason: automated ? 'Not a reply: sent by a machine (newsletter, notification or no-reply).' : 'Not a reply: we had not emailed them.' });
+  }
+  return n;
+}
+
 /**
  * They answered an email, in a campaign or not (owner, 13 Nov 2026): "Reply to their email", due 2 working
  * days later, for a CRM person or a live cold contact. An auto-reply is not an answer and never gets here.
  * One task per reply (`sourceId`, the reply's touch); none for a reply already answered, or one first seen
  * long after it came (a catch-up). Returns its id, or null.
  */
-export async function openEmailReplyTask(subject: LinkedInSubject, at: Date, sourceId: string, now = new Date()): Promise<string | null> {
+export async function openEmailReplyTask(subject: LinkedInSubject, at: Date, sourceId: string, now = new Date(), mail: ReplyMail = {}): Promise<string | null> {
   if (now.getTime() - at.getTime() > EMAIL_REPLY_FRESH_MS) return null;
+  // Only an answer to us (owner, 13 Nov 2026): never a newsletter, a notification or a no-reply
+  // sender, and only from someone we emailed first.
+  if (isAutomatedMail(mail)) return null;
+  if (!(await weWroteFirst(subject, at, mail.contactId))) return null;
   if (!(await mayContact(subject))) return null;
   if (await prisma.linkedInFollowUp.count({ where: { sourceId } })) return null;
   // Answered already (we wrote after it), or a task for an earlier reply is still open: that one stands.
