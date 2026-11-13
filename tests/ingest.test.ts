@@ -284,3 +284,23 @@ describe('webhook ingestion', () => {
     expect((await prisma.companyCache.findUniqueOrThrow({ where: { id: 'co-live-01' } })).deletedAt).not.toBeNull();
   });
 });
+
+describe('N34: an inbound email the CRM has not linked to a person', () => {
+  it('N34: a reply from an address the CRM has not linked goes to the live person, not a deleted duplicate', async () => {
+    await resetDb();
+    const b = await seedBasics();
+    await enrollPeople({ personIds: ['person-03'], sequenceId: b.sequence.id, podId: b.pods.Alisa.id, startDate: '2026-09-07', assignment: { mode: 'FIXED', foUserId: b.users.alisa.id }, actor: SYSTEM_ACTOR }, { now: at('2026-09-06') });
+    const mock = getMockTwentyClient();
+    const { upsertPersonCache } = await import('@/lib/person-cache');
+    const live = (await mock.getPerson('person-03'))!;
+    await upsertPersonCache({ ...live, id: 'person-000-deleted-dup', deletedAt: iso('2026-09-01') });
+    // The live row rewritten after it, so a plain first match would meet the deleted one first.
+    await prisma.personCache.update({ where: { id: 'person-03' }, data: { syncedAt: new Date() } });
+    const reply = mock.addMessage({ subject: 'Re: hello', receivedAt: iso('2026-09-11'), from: { handle: live.email!.toUpperCase() }, to: [{ handle: 'alisa@acumen.example', workspaceMemberId: 'wm-alisa' }] });
+    // The CRM has not linked the sender to anyone.
+    const unlinked = { ...reply, participants: reply.participants.map((p) => (p.role === 'from' ? { ...p, personId: null } : p)) };
+    const r = await ingestEvent({ source: 'WEBHOOK', objectType: 'message', eventName: 'message.created', record: rawFromMessage(unlinked), now: at('2026-09-11') });
+    expect(r.result).toBe('replied');
+    expect((await prisma.enrollment.findFirstOrThrow({ where: { personId: 'person-03' } })).status).toBe('REPLIED');
+  });
+});

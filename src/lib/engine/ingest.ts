@@ -499,8 +499,12 @@ async function handleMessage(message: TwentyMessage, ctx: EngineContext, setting
     }
     let personId = cls.fromPersonId;
     if (!personId && cls.fromHandle) {
-      const p = await prisma.personCache.findFirst({ where: { email: { equals: cls.fromHandle, mode: 'insensitive' } }, select: { id: true } });
-      personId = p?.id ?? null;
+      // N34: a live person only (never a deleted duplicate), and of several with the address the one
+      // in a running sequence, so the reply stops the sequence it answers.
+      const handle = cls.fromHandle.trim().toLowerCase();
+      const people = await prisma.personCache.findMany({ where: { deletedAt: null, OR: [{ email: { equals: handle, mode: 'insensitive' } }, { emailNorm: handle }, { additionalEmailsNorm: { has: handle } }] }, select: { id: true }, orderBy: { id: 'asc' } });
+      const running = people.length > 1 ? await prisma.enrollment.findFirst({ where: { personId: { in: people.map((p) => p.id) }, status: { in: OCCUPYING_STATUSES } }, orderBy: { createdAt: 'desc' }, select: { personId: true } }) : null;
+      personId = running?.personId ?? people[0]?.id ?? null;
     }
     if (!personId) return { result: 'ignored_inbound_unknown_sender' };
     // An out-of-office or "automatic reply" is a machine answering: it is recorded as what it is,
