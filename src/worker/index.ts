@@ -186,22 +186,35 @@ async function sharePointPlayers(now:number){
  if(await prisma.setting.findUnique({where:{key}})){sharePointPlayersAt=Infinity;return;}
  try{const played=await backfillSharePointPlayers();if(played===null)return;log('SharePoint recordings that now play',played);await prisma.setting.upsert({where:{key},create:{key,value:{at:new Date().toISOString(),played}},update:{value:{at:new Date().toISOString(),played}}});sharePointPlayersAt=Infinity;}catch(error){log('SharePoint players failed',error);}
 }
+/**
+ * N18: the CRM sync, the meeting checks and the meeting rewrites run in a loop of their own beside the
+ * tick, as the nightly does, so a long one (a full listing, a rewrite of every meeting) never holds
+ * up the scheduler, the write retries, moves, call import or mailbox reading.
+ */
+let crmRunning=false;
+async function crmJobs(now:number){
+ if(now-lastSync>=config.CRM_SYNC_SECONDS*1000&&!nightly.crmBusy){
+   try{await syncContinuously();lastSync=now;}catch(error){log('CRM sync failed',error);}
+ }
+ // N03: CRM events saved but cut off before processing (a restart, a deploy) are processed now.
+ try{const swept=await sweepUnprocessedEvents();if(swept)log('unprocessed CRM events swept',swept);}catch(error){log('event sweep failed',error);}
+ await evidenceRescan(new Date(now));
+ await meetingsWithTwenty(now);
+ await meetingsBackfill(now);
+ await meetingTagsRetry(now);
+}
+function startCrmJobs(now:number){
+ if(crmRunning||stopping)return;crmRunning=true;
+ void crmJobs(now).catch((error)=>log('CRM jobs failed',error)).finally(()=>{crmRunning=false;});
+}
 async function tick(){
  if(running||stopping)return;running=true;
  try{
    const now=Date.now();
    // P01: the heartbeat Nomad checks (/api/health/worker). Stamped as each pass starts, so a pass that hangs goes stale.
    try{await beatWorker(new Date(now));}catch(error){log('heartbeat failed',error);}
-   if(now-lastSync>=config.CRM_SYNC_SECONDS*1000&&!nightly.crmBusy){
-     try{await syncContinuously();lastSync=now;}catch(error){log('CRM sync failed',error);}
-   }
-   // N03: CRM events saved but cut off before processing (a restart, a deploy) are processed now.
-   try{const swept=await sweepUnprocessedEvents();if(swept)log('unprocessed CRM events swept',swept);}catch(error){log('event sweep failed',error);}
+   startCrmJobs(now);
    await nightly.poke(new Date(now)).catch((error)=>log('nightly failed to start',error));
-   await evidenceRescan(new Date(now));
-   await meetingsWithTwenty(now);
-   await meetingsBackfill(now);
-   await meetingTagsRetry(now);
    await sharePointPlayers(now);
    await teamsTranscripts(now);
    await phoneE164Backfill();
@@ -226,7 +239,7 @@ async function main(){
  setCrmRequestPriority('background');
  log('Continuous sync every '+config.CRM_SYNC_SECONDS+' seconds; nightly reconcile after '+config.RECONCILE_HOUR+':00 '+workspaceTimezone());
  await tick();const timer=setInterval(tick,Math.min(config.WORKER_TICK_SECONDS,config.CRM_SYNC_SECONDS,120)*1000);
- const stop=async()=>{stopping=true;clearInterval(timer);while(running)await new Promise(resolve=>setTimeout(resolve,100));await nightly.settled();await prisma.$disconnect();process.exit(0);};
+ const stop=async()=>{stopping=true;clearInterval(timer);while(running||crmRunning)await new Promise(resolve=>setTimeout(resolve,100));await nightly.settled();await prisma.$disconnect();process.exit(0);};
  process.on('SIGTERM',stop);process.on('SIGINT',stop);
 }
 main().catch(error=>{console.error('[worker] fatal',error);process.exit(1);});
