@@ -27,6 +27,20 @@ export function useFlash() {
   }, [router]);
 }
 
+/**
+ * R09: a toast that fades also leaves the address, so a reload or Back does not show it again. The
+ * page is not re-read for it: the address is rewritten in place (Next keeps its router in step).
+ */
+export function dropFlashFromAddress(): void {
+  try {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('flash') && !url.searchParams.has('flashTone')) return;
+    url.searchParams.delete('flash');
+    url.searchParams.delete('flashTone');
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  } catch { /* no window or history: nothing to clean */ }
+}
+
 /** The toast: bottom centre, green and fading for a result, red and staying for a refusal. */
 export function Flash({ message, tone = 'ok' }: { message: string; tone?: FlashTone }) {
   const router = useRouter();
@@ -34,7 +48,7 @@ export function Flash({ message, tone = 'ok' }: { message: string; tone?: FlashT
   useEffect(() => {
     setVisible(true);
     if (tone === 'error') return;
-    const t = setTimeout(() => setVisible(false), 6000);
+    const t = setTimeout(() => { setVisible(false); dropFlashFromAddress(); }, 6000);
     return () => clearTimeout(t);
   }, [message, tone]);
   const clear = () => {
