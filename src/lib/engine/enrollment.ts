@@ -16,6 +16,7 @@ import { nextWorkingDay } from './clock';
 import { workspaceTimezone } from '../workspace';
 import { advanceEnrollment, cancelOpenTasks, isUniqueViolation, syncCancelled, type EngineContext } from './tasks';
 import { loadSyncTasks, syncTaskRescheduled, syncTaskResolved, syncTasksCreated } from './sync-out';
+import { refillDraftsFor } from '../sequences/refill-drafts';
 
 export const OCCUPYING_STATUSES: EnrollmentStatus[] = ['ACTIVE', 'PAUSED'];
 
@@ -402,6 +403,7 @@ export async function reassignEnrollment(enrollmentId: string, newFoUserId: stri
       await tx.task.update({ where: { id: t.id }, data: { foUserId: newFoUserId, dueAt: localDateToInstant(t.snoozedTo ?? t.dueDate, workspaceTimezone(), 9), twentyTaskId: null } });
     }
     const u = await tx.enrollment.update({ where: { id: enrollmentId }, data: { foUserId: newFoUserId } });
+    await refillDraftsFor(tx, pending.map((t) => t.id));
     await logAudit({ entityType: 'enrollment', entityId: enrollmentId, action: 'reassigned', actor: opts.actor, details: { from: e.foUserId, to: newFoUserId, tasks: pending.length } }, tx);
     return u;
   });

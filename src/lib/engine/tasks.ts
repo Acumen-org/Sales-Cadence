@@ -102,6 +102,10 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
       // it started never gets another step; its enrollment ends with the reason instead.
       const cold = e.sandboxContactId && !e.personId ? e.sandboxContact : null;
       if (cold && cold.status !== 'ACTIVE') { ending = COLD_EXIT[cold.status] ?? 'removed'; return { outcome: 'inactive' as const, reason: 'The contact can no longer be contacted' }; }
+      // L06: the same net for a CRM person opted out or marked Do not contact however the flag arrived
+      // (the nightly refresh, a page's live read), not only through the event feed.
+      const crm = e.personId ? e.person : null;
+      if (crm && (crm.optedOut || crm.dnd)) { ending = crm.optedOut ? 'opted_out' : 'dnd'; return { outcome: 'inactive' as const, reason: 'The person can no longer be contacted' }; }
       const today = todayIn(workspaceTimezone(), now);
       const steps = parseSteps(e.sequence.steps);
       const currentTasks = e.tasks.filter((t) => t.stepIndex === e.currentStep);
@@ -182,6 +186,9 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
           const why = stepSkip ?? (own && !own.ok && own.effect === 'skip' ? firstSentence(own.reason) : null);
           if (why) skipped.set(i, why);
         }
+      } else if (crm) {
+        // L11: a CRM person's email step is made already skipped when their address is known to bounce.
+        for (let i = 0; i < step.actions.length; i++) if (step.actions[i].type === 'EMAIL' && crm.badEmail) skipped.set(i, 'Email bounced');
       }
 
       const taskIds: string[] = [];

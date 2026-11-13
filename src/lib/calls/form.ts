@@ -440,7 +440,7 @@ export async function logManualCall(input: { userId: string; personId?: string |
       taskId: input.taskId ?? null, nextActionId: input.nextActionId ?? null, enrollmentId: task?.enrollmentId ?? null, campaignId: task?.enrollment.campaignId ?? null,
       startedAt, endedAt: input.talkSec ? new Date(startedAt.getTime() + input.talkSec * 1000) : startedAt, talkSec: input.talkSec ?? null, formDueAt: now,
       // Stamped once, when the call is written (PLAN 8.4): who it was with, and the pod it counts for (B040).
-      audience: await audienceFor(subject), podId: await callPodFor({ enrollmentId: task?.enrollmentId ?? null, sandboxContactId: subject.sandboxContactId, userId: input.userId }),
+      audience: await audienceFor(subject), podId: await callPodFor({ enrollmentId: task?.enrollmentId ?? null, sandboxContactId: subject.sandboxContactId, userId: input.userId, personId: subject.personId }),
     },
   });
 }

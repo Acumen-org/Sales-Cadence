@@ -272,7 +272,7 @@ export async function attachCallContactAction(formData: FormData): Promise<Actio
 /** The call is with this person or contact: matched, stamped once (PLAN 8.4), its touch written, audited. */
 async function attachCallTo(callId: string, before: { audience: string | null; podId: string | null; enrollmentId: string | null; userId: string | null }, subject: { personId: string | null; sandboxContactId: string | null }, user: Awaited<ReturnType<typeof requireUser>>) {
   // Stamped once, when the call is matched (PLAN 8.4): an unmatched call had no audience until now.
-  const stamp = { ...(before.audience ? {} : { audience: await audienceFor(subject) }), ...(before.podId ? {} : { podId: await callPodFor({ enrollmentId: before.enrollmentId, sandboxContactId: subject.sandboxContactId, userId: before.userId }) }) };
+  const stamp = { ...(before.audience ? {} : { audience: await audienceFor(subject) }), ...(before.podId ? {} : { podId: await callPodFor({ enrollmentId: before.enrollmentId, sandboxContactId: subject.sandboxContactId, userId: before.userId, personId: subject.personId }) }) };
   const call = await prisma.callLog.update({ where: { id: callId }, data: { ...subject, matchedBy: 'chosen', candidates: undefined, ...stamp } });
   if (call.statusRank >= 4) await recordCallTouch(call);
   await logAudit({ entityType: 'call', entityId: callId, action: 'contact_chosen', actor: userActor(user), details: subject.personId ? { kind: 'person', id: subject.personId } : { kind: 'sandbox', id: subject.sandboxContactId } });

@@ -38,9 +38,11 @@ export const CALLS_PAGE = 50;
  * N046: forms waiting now, whatever the period, by whoever holds them (the rep, or whom it was handed
  * to), with the oldest one's due time: the backlog leaders chase. Scoped by pod or rep only.
  */
-export async function formsWaiting(f: { podId?: string | null; foUserId?: string | null } = {}): Promise<Map<string, { count: number; oldest: Date }>> {
+export async function formsWaiting(f: { podId?: string | null; foUserId?: string | null; campaignId?: string | null; direction?: 'OUTBOUND' | 'INBOUND' | null; part?: CallPart | null } = {}): Promise<Map<string, { count: number; oldest: Date }>> {
   const podUsers = f.podId ? (await prisma.userPod.findMany({ where: { podId: f.podId }, select: { userId: true } })).map((u) => u.userId) : null;
-  const rows = await prisma.callLog.findMany({ where: { formDueAt: { not: null }, formDoneAt: null, discardedAt: null }, select: { userId: true, formUserId: true, formDueAt: true } });
+  // M36: the backlog follows the report's audience, campaign and direction too.
+  const scope: Prisma.CallLogWhereInput = { ...(f.campaignId ? { campaignId: f.campaignId } : {}), ...(f.direction ? { direction: f.direction } : {}), ...(f.part ? { audience: f.part === 'crm' ? 'CRM' : f.part === 'cold' ? 'SANDBOX' : null } : {}) };
+  const rows = await prisma.callLog.findMany({ where: { formDueAt: { not: null }, formDoneAt: null, discardedAt: null, ...scope }, select: { userId: true, formUserId: true, formDueAt: true } });
   const by = new Map<string, { count: number; oldest: Date }>();
   for (const r of rows) {
     const holder = r.formUserId ?? r.userId;
@@ -76,15 +78,21 @@ async function callScope(f: CallFilters): Promise<Prisma.CallLogWhereInput> {
 
 const callInclude = { form: { select: { outcome: true, rating: true, flags: true } }, user: { select: { id: true, name: true } } } satisfies Prisma.CallLogInclude;
 type CallRow = Prisma.CallLogGetPayload<{ include: typeof callInclude }>;
+/** M38: the figures read only what they need from each call of the period, not every column. */
+const statSelect = { id: true, direction: true, status: true, talkSec: true, formDueAt: true, formDoneAt: true, priceUsd: true, audience: true, userId: true, startedAt: true, form: { select: { outcome: true, rating: true, flags: true } }, user: { select: { timezone: true } } } satisfies Prisma.CallLogSelect;
+type StatRow = Prisma.CallLogGetPayload<{ select: typeof statSelect }>;
 const partOf = (c: Pick<CallRow, 'audience'>): CallPart => (c.audience === 'CRM' ? 'crm' : c.audience === 'SANDBOX' ? 'cold' : 'unmatched');
 const inPart = (audience: AudienceScope) => (c: Pick<CallRow, 'audience'>) => audience === 'all' || (audience === 'crm' ? c.audience === 'CRM' : c.audience === 'SANDBOX');
 
-function totals(calls: CallRow[], connected: (c: CallRow) => boolean, conversationSeconds: number): CallTotals {
+function totals(calls: StatRow[], connected: (c: StatRow) => boolean, conversationSeconds: number): CallTotals {
   const outbound = calls.filter((c) => c.direction === 'OUTBOUND');
   const connects = outbound.filter(connected);
   const talk = connects.reduce((n, c) => n + (c.talkSec ?? 0), 0);
   const rated = calls.filter((c) => c.form?.rating);
-  const waits = calls.filter((c) => c.formDoneAt && c.formDueAt).map((c) => (c.formDoneAt!.getTime() - c.formDueAt!.getTime()) / 60_000).sort((a, b) => a - b);
+  // M39: only forms filled in count (a form a leader closed without one does not), and an even count takes the mean of the middle two.
+  const waits = calls.filter((c) => c.form && c.formDoneAt && c.formDueAt).map((c) => (c.formDoneAt!.getTime() - c.formDueAt!.getTime()) / 60_000).sort((a, b) => a - b);
+  const mid = waits.length / 2;
+  const median = waits.length ? (waits.length % 2 ? waits[Math.floor(mid)] : (waits[mid - 1] + waits[mid]) / 2) : null;
   return {
     dials: outbound.length,
     inbound: calls.length - outbound.length,
@@ -97,7 +105,7 @@ function totals(calls: CallRow[], connected: (c: CallRow) => boolean, conversati
     meetings: calls.filter((c) => c.form?.outcome === 'meeting_booked').length,
     avgRating: rated.length ? Math.round((rated.reduce((n, c) => n + (c.form!.rating ?? 0), 0) / rated.length) * 10) / 10 : null,
     formsOutstanding: calls.filter((c) => c.formDueAt && !c.formDoneAt).length,
-    medianMinutesToForm: waits.length ? Math.round(waits[Math.floor(waits.length / 2)]) : null,
+    medianMinutesToForm: median == null ? null : Math.round(median),
     costUsd: Math.round(calls.reduce((n, c) => n + Number(c.priceUsd ?? 0), 0) * 100) / 100,
     calledOptedOut: calls.filter((c) => c.form?.flags.includes('called_opted_out')).length,
     longVoicemails: calls.filter((c) => c.form?.flags.includes('long_voicemail')).length,
@@ -146,34 +154,38 @@ export async function callReport(f: CallFilters & { audience?: AudienceScope; pr
     OR: [{ userId: null }, { matchedBy: { in: ['none', 'ambiguous'] } }],
     AND: [{ OR: [{ userId: null }, where] }, countWhere(audience)],
   };
+  const waitingScope = { podId: f.podId, foUserId: f.foUserId, campaignId: f.campaignId, direction: f.direction };
   const page = Math.max(1, f.page ?? 1);
   const unmatchedPage = Math.max(1, f.unmatchedPage ?? 1);
   const [calls, previousCalls, users, waiting, listTotal, listPage, unmatchedTotal, unmatchedRows] = await Promise.all([
-    prisma.callLog.findMany({ where: period(f.from, f.to), include: callInclude, orderBy: { startedAt: 'desc' } }),
-    f.previous ? prisma.callLog.findMany({ where: { AND: [period(f.previous.from, f.previous.to), countWhere(audience)] }, include: callInclude }) : Promise.resolve(null),
+    prisma.callLog.findMany({ where: period(f.from, f.to), select: statSelect, orderBy: { startedAt: 'desc' } }),
+    f.previous ? prisma.callLog.findMany({ where: { AND: [period(f.previous.from, f.previous.to), countWhere(audience)] }, select: statSelect }) : Promise.resolve(null),
     prisma.user.findMany({ select: { id: true, name: true, active: true } }),
-    formsWaiting(f),
+    formsWaiting({ ...waitingScope, part: audience === 'all' ? null : audience }),
     prisma.callLog.count({ where: listWhere }),
     prisma.callLog.findMany({ where: listWhere, include: callInclude, orderBy: [{ startedAt: 'desc' }, { id: 'desc' }], skip: (page - 1) * CALLS_PAGE, take: CALLS_PAGE }),
     prisma.callLog.count({ where: unmatchedWhere }),
     prisma.callLog.findMany({ where: unmatchedWhere, include: callInclude, orderBy: [{ startedAt: 'desc' }, { id: 'desc' }], skip: (unmatchedPage - 1) * CALLS_PAGE, take: CALLS_PAGE }),
   ]);
-  const t = (list: CallRow[]) => totals(list, connected, settings.calling.conversationSeconds);
+  const t = (list: StatRow[]) => totals(list, connected, settings.calling.conversationSeconds);
   const split: Record<CallPart | 'all', CallTotals> = { crm: t(calls.filter((c) => partOf(c) === 'crm')), cold: t(calls.filter((c) => partOf(c) === 'cold')), unmatched: t(calls.filter((c) => partOf(c) === 'unmatched')), all: t(calls) };
   const shown = calls.filter(inPart(audience));
   const head = audience === 'all' ? split.all : split[audience];
-  // N046: forms outstanding are the backlog now, never only the period's.
-  head.formsOutstanding = [...waiting.values()].reduce((n, w) => n + w.count, 0);
+  // N046: forms outstanding are the backlog now, never only the period's; M36: in every column of the split, each its own part's.
+  const backlog = async (part: CallPart | null) => [...(await formsWaiting({ ...waitingScope, part })).values()].reduce((n, w) => n + w.count, 0);
+  [split.crm.formsOutstanding, split.cold.formsOutstanding, split.unmatched.formsOutstanding, split.all.formsOutstanding] = await Promise.all([backlog('crm'), backlog('cold'), backlog('unmatched'), backlog(null)]);
   // N065: a rep who has left keeps their row, marked "(removed)".
   const nameOf = (id: string) => { const u = users.find((x) => x.id === id); return u ? (u.active ? u.name : `${u.name} (removed)`) : 'Unknown'; };
   const repIds = new Set([...shown.map((c) => c.userId).filter((id): id is string => Boolean(id)), ...waiting.keys()]);
   const byRep = [...repIds].map((id) => ({ userId: id, name: nameOf(id), ...t(shown.filter((c) => c.userId === id)), formsOutstanding: waiting.get(id)?.count ?? 0, oldestFormDue: waiting.get(id)?.oldest ?? null })).sort((a, b) => b.dials - a.dials || b.formsOutstanding - a.formsOutstanding);
   const byOutcome = outcomes.map((o) => ({ key: o.key, label: o.label, count: shown.filter((c) => c.form?.outcome === o.key).length })).filter((o) => o.count);
-  const hourFmt = new Intl.DateTimeFormat('en-US', { timeZone: workspaceTimezone(), hour: 'numeric', weekday: 'short', hour12: false });
+  // M37: each call's hour on its rep's own clock, not the workspace's.
+  const formats = new Map<string, Intl.DateTimeFormat>();
+  const hourFmt = (tz: string) => { let fmt = formats.get(tz); if (!fmt) { try { fmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', weekday: 'short', hour12: false }); } catch { fmt = new Intl.DateTimeFormat('en-US', { timeZone: workspaceTimezone(), hour: 'numeric', weekday: 'short', hour12: false }); } formats.set(tz, fmt); } return fmt; };
   const hours = new Map<string, { dials: number; connects: number }>();
   for (const c of shown) {
     if (c.direction !== 'OUTBOUND' || !c.startedAt) continue;
-    const parts = hourFmt.formatToParts(c.startedAt);
+    const parts = hourFmt(c.user?.timezone || workspaceTimezone()).formatToParts(c.startedAt);
     const key = `${parts.find((p) => p.type === 'weekday')?.value} ${Number(parts.find((p) => p.type === 'hour')?.value ?? 0) % 24}`;
     const cell = hours.get(key) ?? { dials: 0, connects: 0 };
     cell.dials++;

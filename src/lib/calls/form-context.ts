@@ -176,7 +176,7 @@ export async function chooseCallContact(callId: string, contact: string, user: V
   if (!exists) return { ok: false, error: kind === 'person' ? 'That person is no longer in the CRM.' : 'That contact is no longer in Cold outreach.' };
   const subject = { personId: kind === 'person' ? id : null, sandboxContactId: kind === 'sandbox' ? id : null };
   // Stamped once, when the call is matched (PLAN 8.4).
-  const stamp: Prisma.CallLogUncheckedUpdateInput = { ...(call.audience ? {} : { audience: await audienceFor(subject) }), ...(call.podId ? {} : { podId: await callPodFor({ enrollmentId: call.enrollmentId, sandboxContactId: subject.sandboxContactId, userId: call.userId }) }) };
+  const stamp: Prisma.CallLogUncheckedUpdateInput = { ...(call.audience ? {} : { audience: await audienceFor(subject) }), ...(call.podId ? {} : { podId: await callPodFor({ enrollmentId: call.enrollmentId, sandboxContactId: subject.sandboxContactId, userId: call.userId, personId: subject.personId }) }) };
   const updated = await prisma.callLog.update({ where: { id: callId }, data: { ...subject, matchedBy: 'chosen', candidates: undefined, ...stamp } });
   if (updated.statusRank >= 4) await recordCallTouch(updated);
   await logAudit({ entityType: 'call', entityId: callId, action: 'contact_chosen', actor, details: { kind, id, by: 'rep' } });

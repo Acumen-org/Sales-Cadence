@@ -2,9 +2,14 @@ import { prisma } from '../db';
 import { logAudit, type AuditActor } from '../audit';
 import { lastDay, StepsSchema, type SequenceStep } from '../sequences/steps';
 import { cleanRichText } from '../rich-text';
+import { unknownTokenError } from '../sequences/personalize';
 
 function validatedSteps(input: unknown) {
-  return StepsSchema.parse(input).map((s) => ({
+  const parsed = StepsSchema.parse(input);
+  // L13, L17: a placeholder nobody can fill is refused here, never sent as typed or as a gap.
+  const unknown = unknownTokenError(parsed);
+  if (unknown) throw new Error(unknown);
+  return parsed.map((s) => ({
     ...s,
     actions: s.actions.map((a) => ({ ...a, ...(a.bodyHtml === undefined ? {} : { bodyHtml: cleanRichText(a.bodyHtml) }) })),
   }));

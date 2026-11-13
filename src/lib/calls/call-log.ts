@@ -162,7 +162,7 @@ export async function upsertImportedCall(leg: TwilioCall, parent: TwilioCall | n
   // Stamped once, when the call is first matched to someone (PLAN 8.4): its audience, and the pod it counts for (B040).
   const stamp: Prisma.CallLogUncheckedUpdateInput = {};
   if (!existing?.audience) { const audience = await audienceFor(subject); if (audience) stamp.audience = audience; }
-  if (!existing?.podId) { const podId = await callPodFor({ enrollmentId: (filed.enrollmentId as string | null | undefined) ?? (link.enrollmentId as string | null | undefined) ?? existing?.enrollmentId ?? null, sandboxContactId: subject.sandboxContactId, userId }); if (podId) stamp.podId = podId; }
+  if (!existing?.podId) { const podId = await callPodFor({ enrollmentId: (filed.enrollmentId as string | null | undefined) ?? (link.enrollmentId as string | null | undefined) ?? existing?.enrollmentId ?? null, sandboxContactId: subject.sandboxContactId, userId, personId: subject.personId }); if (podId) stamp.podId = podId; }
   const data = { ...facts, ...link, ...filed, userId, repMatchedBy, ...stamp, ...(formOpened ? { formDueAt: endedAt ?? ctx.now } : {}) };
 
   let created = false;

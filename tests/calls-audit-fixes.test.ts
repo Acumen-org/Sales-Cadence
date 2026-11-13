@@ -6,7 +6,9 @@ import { prisma } from '@/lib/db';
 import type { SessionUser } from '@/lib/auth/current-user';
 import { FakeTwilio } from '@/lib/calls/fake-twilio';
 import { importTwilioCalls, STATUS_KEY, WATERMARK_KEY } from '@/lib/calls/import';
-import { logManualCall, pendingForms, submitCallForm } from '@/lib/calls/form';
+import { logManualCall, pendingForms, submitCallForm, validateCallForm } from '@/lib/calls/form';
+import { zonedInstant } from '@/lib/calls/words';
+import { DEFAULT_SETTINGS } from '@/lib/settings';
 import { discardCall } from '@/lib/calls/form-context';
 import { unreadCallBlock, UNREAD_CALL } from '@/lib/calls/gate';
 import { costlyNumber } from '@/lib/calls/hours';
@@ -210,6 +212,17 @@ describe('calls: audit fixes of 12 Nov', () => {
     fake.addRecording(session1.sid, 470);
     await importTwilioCalls({ reader: fake, now: at(10) });
     expect(await prisma.callLog.count({ where: { recordingSid: { not: null } } })).toBe(0);
+  });
+
+  it('M33, M46: an unanswered outcome keeps no rating, and notes too long are refused, not cut', () => {
+    const ctx = { rules: DEFAULT_SETTINGS.rules, today: '2026-11-03' as never };
+    expect(validateCallForm({ outcome: 'no_answer', rating: 4, nextStep: 'none' }, ctx)).toEqual(expect.objectContaining({ ok: true, value: expect.objectContaining({ rating: null }) }));
+    expect(validateCallForm({ outcome: 'no_answer', notes: 'x'.repeat(10_001), nextStep: 'none' }, ctx)).toEqual(expect.objectContaining({ ok: false, field: 'notes' }));
+  });
+
+  it('M34: a time typed just after the clock goes back is the right hour', () => {
+    expect(zonedInstant('2026-11-01', '03:00', 'America/New_York')?.toISOString()).toBe('2026-11-01T08:00:00.000Z');
+    expect(zonedInstant('2026-03-08', '03:30', 'America/New_York')?.toISOString()).toBe('2026-03-08T07:30:00.000Z');
   });
 
   it('M25: a call first read in progress still joins the CRM\'s quick Log call when it ends', async () => {

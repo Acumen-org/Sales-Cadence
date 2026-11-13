@@ -66,6 +66,9 @@ export default async function CallPage({ params }: { params: Promise<{ id: strin
           { label: 'Source', value: call.source === 'MANUAL' ? (call.twilioCallSid ? 'Logged by hand, then read from Twilio' : 'Logged by hand') : 'Twilio' },
         ]} />
         {call.recordingSid && hears ? <audio controls preload="none" className="mt-4 w-full max-w-xl" src={`/api/calls/${call.id}/recording`} /> : null}
+        {/* M30: a call paused and resumed, or transferred, has more than one recording; only the last plays here. */}
+        {call.recordingSid && hears && (call.recordingCount ?? 0) > 1 ? <p className="mt-2 text-[12.5px] text-ink-500">This call has {call.recordingCount} recordings; the last one plays here. The others are in Twilio.</p> : null}
+        {!call.recordingSid && call.recordingStatus === 'erased' ? <p className="mt-3 text-[13px] text-ink-500">Recording removed from Cadence: this contact&apos;s details were erased.</p> : null}
         {/* N050: looked for until 48 hours after the call. */}
         {!call.recordingSid && call.recordingStatus === 'not_found' ? <p className="mt-3 text-[13px] text-ink-500">Recording not found: Twilio had none 48 hours after the call.</p> : null}
         {!hears ? <p className="mt-3 text-[12.5px] text-ink-500">{HIDDEN_CALL}</p> : null}
