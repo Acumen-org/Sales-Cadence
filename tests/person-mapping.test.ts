@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizePerson } from '@/lib/twenty/normalize';
+import { isUnmappedDndValue, normalizePerson } from '@/lib/twenty/normalize';
 import { mergeTwentySchema } from '@/lib/twenty/twenty-schema';
 import { personToCacheData } from '@/lib/person-cache';
 
@@ -145,6 +145,14 @@ describe('normalizePerson against the real workspace', () => {
     const fromExport = normalizePerson({ ...raw, leadSource: '["NIL","LEADGEN"]', contactType: 'PROSPECT' }, schema);
     expect(fromExport.leadSource).toEqual(['NIL', 'LEADGEN']);
     expect(fromExport.contactType).toEqual(['PROSPECT']);
+  });
+
+  it('N02: a Do not contact option the mapping does not know still means do not contact, and is flagged', () => {
+    const unknown = normalizePerson({ ...raw, dnd: 'UNSUBSCRIBED', tags: [] }, schema);
+    expect(unknown.dnd).toBe(true);
+    expect(unknown.dndReason).toBe('UNSUBSCRIBED');
+    expect(isUnmappedDndValue('UNSUBSCRIBED', schema)).toBe(true);
+    expect(isUnmappedDndValue('DO_NOT_DISTURB', schema)).toBe(false);
   });
 
   it('a do-not-contact tag alone is enough, for the records that use it instead of the select', () => {
