@@ -182,12 +182,9 @@ EOH
       driver = "docker"
       consul {}
       # P14: the worker waits up to 20 s for the pass in progress before it exits; the default 5 s kill cut it mid-pass.
+      # T10: a longer wait (5m, for a CRM move or the nightly reconcile) needs max_kill_timeout raised in
+      # worker-5's Nomad client config first (capped at 30 s until then) and STOP_WAIT_MS raised to match.
       kill_timeout = "30s"
-
-      # T10: time to finish the current pass (a CRM move, the nightly reconcile)
-      # after the stop signal before Nomad kills it. The Nomad client caps this
-      # at its own max_kill_timeout (30 s unless raised in the client config).
-      kill_timeout = "5m"
 
       config {
         image       = local.image
