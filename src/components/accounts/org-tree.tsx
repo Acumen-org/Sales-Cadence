@@ -26,14 +26,22 @@ export function OrgTree({ everyone }: { everyone: TreePerson[] }) {
       .sort((a, b) => (a.jobTitle ?? '').localeCompare(b.jobTitle ?? '') || a.name.localeCompare(b.name)),
   })).filter((band) => band.people.length);
 
-  return <div className="space-y-7">
-    <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-base font-semibold text-ink-900">People by title</h3></div>
-    {grouped.map((band) => <section key={band.label} className="space-y-3">
-      <div className="flex items-center gap-3"><h4 className="text-sm font-medium text-ink-500">{band.label}</h4><strong className="rounded-full bg-brand-50 px-2 py-0.5 text-xs text-brand-800">{band.people.length}</strong><div className="h-px flex-1 bg-line" /></div>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{band.people.map((p) => <article key={p.id} className="rounded-xl border border-line bg-white p-4">
-        <div className="flex items-start gap-3"><Avatar name={p.name} shape="circle" size={36} /><div className="min-w-0"><Link href={`/people/${p.id}`} className="font-medium text-ink-900 hover:text-brand-700 hover:underline">{p.name}</Link><div className="mt-1 text-sm text-ink-500">{p.jobTitle ?? 'Title missing'}</div></div></div>
-        <div className="mt-4 flex flex-wrap gap-2">{p.enrollment ? <Badge tone={p.enrollment.tone}>{p.enrollment.label}</Badge> : null}{p.dnd || p.optedOut ? <Badge tone="red">Do not contact</Badge> : null}</div>
-        <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-line pt-3 text-xs"><div><dt className="text-ink-500">Touches</dt><dd className="mt-1 text-[20px] leading-none tracking-tight"><Count value={p.touches} /></dd></div><div><dt className="text-ink-500">Last touch</dt><dd className="mt-1 font-medium text-ink-900">{p.lastTouch ?? <span className="font-normal text-ink-300">-</span>}</dd></div>{p.enrollment ? <div className="col-span-2"><dt className="text-ink-500">FO</dt><dd className="mt-1 font-medium text-ink-900">{p.enrollment.foName}</dd></div> : null}</dl>
+  return <div className="space-y-5">
+    {grouped.map((band) => <section key={band.label} className="space-y-2.5">
+      <div className="flex items-center gap-3"><h4 className="text-[13px] font-medium text-ink-600">{band.label}</h4><strong className="rounded-full bg-brand-50 px-2 py-0.5 text-xs text-brand-800">{band.people.length}</strong><div className="h-px flex-1 bg-line" /></div>
+      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">{band.people.map((p) => <article key={p.id} className="rounded-xl border border-line bg-white px-3.5 py-3">
+        <div className="flex items-start gap-2.5">
+          <Avatar name={p.name} shape="circle" size={30} />
+          <div className="min-w-0 flex-1">
+            <Link href={`/people/${p.id}`} className="block truncate text-[13.5px] font-medium text-ink-900 hover:text-brand-700 hover:underline">{p.name}</Link>
+            <div className="truncate text-[12.5px] text-ink-500">{p.jobTitle ?? 'Title missing'}</div>
+          </div>
+          {p.dnd || p.optedOut ? <Badge tone="red">Do not contact</Badge> : p.enrollment ? <Badge tone={p.enrollment.tone}>{p.enrollment.label}</Badge> : null}
+        </div>
+        {/* One quiet line: how often they were reached, when last, and by whom. */}
+        <div className="mt-2 border-t border-line pt-2 text-[12px] text-ink-500">
+          {p.touches ? <><Count value={p.touches} className="!font-normal text-ink-700" /> touch{p.touches === 1 ? '' : 'es'}{p.lastTouch ? ` · last ${p.lastTouch}` : ''}</> : 'Not contacted yet'}{p.enrollment ? ` · ${p.enrollment.foName}` : ''}
+        </div>
       </article>)}</div>
     </section>)}
   </div>;
