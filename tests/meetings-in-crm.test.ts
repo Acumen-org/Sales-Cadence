@@ -150,3 +150,16 @@ describe('N15: the webhook Twenty sends for Cadence\'s own meeting write', () =>
     expect(await ownMeetingEcho(m.twentyMeetingId!, {}, Date.now() + 5 * 60_000)).toBe(false);
   });
 });
+
+describe('N24: a typed-in name on a meeting with an account', () => {
+  it('links only a person of that name at that account', async () => {
+    const at = new Date('2026-10-02T17:00:00Z');
+    const tomas = await prisma.personCache.findUniqueOrThrow({ where: { id: 'person-02' } });
+    const other = await prisma.companyCache.findFirstOrThrow({ where: { NOT: { id: tomas.companyId ?? '' } } });
+    const elsewhere = await prisma.meeting.create({ data: { title: 'Namesake', sourceUrl: '', occurredAt: at, companyId: other.id, attendees: { create: [{ name: 'Tomas Berg', external: true }] } } });
+    const same = await prisma.meeting.create({ data: { title: 'Same firm', sourceUrl: '', occurredAt: at, companyId: tomas.companyId, attendees: { create: [{ name: 'Tomas Berg', external: true }] } } });
+    await check();
+    expect((await prisma.meetingAttendee.findFirstOrThrow({ where: { meetingId: elsewhere.id } })).personId).toBeNull();
+    expect((await prisma.meetingAttendee.findFirstOrThrow({ where: { meetingId: same.id } })).personId).toBe('person-02');
+  });
+});

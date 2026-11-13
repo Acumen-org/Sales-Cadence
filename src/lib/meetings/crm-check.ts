@@ -68,7 +68,7 @@ function cadenceIdOf(f: { cadenceId: string | null; cadenceLink: string | null }
  * The prospects of a meeting that has none: each person outside the team who is in Twenty, by their
  * address or by a name only one person there has. Returns their ids.
  */
-async function linkTypedIn(meetingId: string, attendees: { id: string; personId: string | null; userId: string | null; name: string | null; email: string | null }[], internalDomains: string[], notTeam: Prisma.PersonCacheWhereInput): Promise<string[]> {
+async function linkTypedIn(meetingId: string, attendees: { id: string; personId: string | null; userId: string | null; name: string | null; email: string | null }[], internalDomains: string[], notTeam: Prisma.PersonCacheWhereInput, companyId: string | null = null): Promise<string[]> {
   const linked: string[] = [];
   for (const a of attendees) {
     if (a.userId || (a.email && !isExternalEmail(a.email, internalDomains))) continue;
@@ -77,7 +77,8 @@ async function linkTypedIn(meetingId: string, attendees: { id: string; personId:
       const [first, ...rest] = (a.name ?? '').trim().split(/\s+/);
       const match = a.email
         ? { email: { equals: a.email.trim(), mode: 'insensitive' as const } }
-        : first && rest.length ? { firstName: { equals: first, mode: 'insensitive' as const }, lastName: { equals: rest.join(' '), mode: 'insensitive' as const } } : null;
+        // N24: a name alone, when the meeting has an account, only matches someone at that account.
+        : first && rest.length ? { firstName: { equals: first, mode: 'insensitive' as const }, lastName: { equals: rest.join(' '), mode: 'insensitive' as const }, ...(companyId ? { companyId } : {}) } : null;
       if (!match) continue;
       const hits = await prisma.personCache.findMany({ where: { AND: [{ deletedAt: null }, match, notTeam] }, select: { id: true }, take: 2 });
       if (hits.length !== 1) continue;
@@ -106,10 +107,10 @@ export async function checkMeetingsInCrm(options: { client?: TwentyClient } = {}
   const first: string[] = [];
 
   // Older meetings with no prospect: linked to the people they were with, where Twenty knows them.
-  const unlinked = await prisma.meeting.findMany({ where: { review: 'APPROVED', attendees: { none: { prospect: true } } }, select: { id: true, attendees: { select: { id: true, personId: true, userId: true, name: true, email: true } } } });
+  const unlinked = await prisma.meeting.findMany({ where: { review: 'APPROVED', attendees: { none: { prospect: true } } }, select: { id: true, companyId: true, attendees: { select: { id: true, personId: true, userId: true, name: true, email: true } } } });
   const notTeam = unlinked.length ? await externalPeopleWhere({ keepBlocked: true }) : {};
   for (const m of unlinked) {
-    const linked = await linkTypedIn(m.id, m.attendees, rules.internalDomains, notTeam).catch((err) => {
+    const linked = await linkTypedIn(m.id, m.attendees, rules.internalDomains, notTeam, m.companyId).catch((err) => {
       console.warn(`[meetings] could not link the people on meeting ${m.id}: ${err instanceof Error ? err.message : String(err)}`);
       return [];
     });
