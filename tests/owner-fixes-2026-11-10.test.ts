@@ -12,10 +12,13 @@ let b: Basics;
 beforeEach(async () => { await resetDb(); b = await seedBasics(); });
 const as = (u: Basics['users']['alisa'], podIds: string[]) => ({ id: u.id, name: u.name, timezone: 'Europe/London', role: u.role, podIds });
 
-describe('no calling hours', () => {
-  it('Call is open at any hour of the contact\'s day', async () => {
+// Calling hours are back (owner, 13 Nov 2026; audit M02): this test's old expectation, open at any hour, was reversed.
+describe('calling hours (owner, 13 Nov 2026)', () => {
+  it('Call is open from 8am to 9pm of the contact\'s day, and closed outside it', async () => {
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { state: 'IL' });
-    expect(await callGate({ id: b.users.alisa.id, timezone: 'Europe/London' }, c)).toEqual({ blocked: null, warning: null });
+    const rep = { id: b.users.alisa.id, timezone: 'Europe/London' };
+    expect(await callGate(rep, c, new Date('2026-11-10T18:00:00Z'))).toEqual({ blocked: null, warning: expect.stringContaining('Recording notice') });
+    expect((await callGate(rep, c, new Date('2026-11-11T04:00:00Z'))).blocked).toEqual(expect.stringContaining('8am to 9pm'));
   });
 });
 

@@ -15,6 +15,7 @@ import { createContact } from '../sandbox/contacts';
 import { logManualCall, submitCallForm, type CallFormInput } from '../calls/form';
 import { callFormContext, chooseCallContact, discardCall, searchCallContacts, type CallContactOption, type CallFormContext } from '../calls/form-context';
 import { pendingFormBlock } from '../calls/gate';
+import { callingHoursBlock, callPlace } from '../calls/hours';
 import { intentStep } from '../calls/link';
 import { importTwilioCalls } from '../calls/import';
 import { getTwilioReader } from '../calls/twilio';
@@ -51,6 +52,10 @@ export async function recordCallIntentAction(input: { phone: string; taskId?: st
     if (ask && !input.confirmed) return { ok: true, message: ask, data: { confirm: true } };
   } else if (isBizOps(user)) {
     return { ok: false, error: 'Biz Ops can view calls but cannot make them from Cadence.' };
+  } else {
+    // M02: a number with nobody behind it still keeps calling hours, in US Eastern time (said so).
+    const hours = callingHoursBlock(callPlace({}), new Date());
+    if (hours) return { ok: false, error: hours };
   }
   const step = await intentStep({ taskId: input.taskId ?? null, nextActionId: input.nextActionId ?? null });
   await prisma.callIntent.create({ data: { userId: user.id, toNumber, taskId: step.taskId, nextActionId: step.nextActionId, personId: input.personId ?? null, sandboxContactId: input.personId ? null : input.sandboxContactId ?? null } });

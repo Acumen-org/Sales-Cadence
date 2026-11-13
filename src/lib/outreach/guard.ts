@@ -19,7 +19,7 @@ export type Act = 'note' | 'edit' | 'next_action' | 'call' | 'log_call' | 'form_
 
 /** The button that fixes a refusal, when there is one. */
 export type Fix = { label: string; href?: string | null };
-export type RefusalCode = 'not_found' | 'opted_out' | 'removed' | 'moved' | 'not_moved' | 'already_opted_out' | 'not_liftable' | 'moving' | 'read_only' | 'admins_assign' | 'already_yours' | 'claimed' | 'not_yours' | 'other_pod' | 'admins_only' | 'not_allowed' | 'deleted' | 'do_not_contact' | 'suppressed' | 'in_crm' | 'form_pending' | 'no_channel';
+export type RefusalCode = 'not_found' | 'opted_out' | 'removed' | 'moved' | 'not_moved' | 'already_opted_out' | 'not_liftable' | 'moving' | 'read_only' | 'admins_assign' | 'already_yours' | 'claimed' | 'not_yours' | 'other_pod' | 'admins_only' | 'not_allowed' | 'deleted' | 'do_not_contact' | 'suppressed' | 'in_crm' | 'form_pending' | 'no_channel' | 'calling_hours' | 'call_limit';
 export type Refusal = { ok: false; code: RefusalCode; reason: string; fix: Fix | null };
 export type Verdict = { ok: true } | Refusal;
 

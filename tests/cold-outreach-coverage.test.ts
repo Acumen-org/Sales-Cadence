@@ -49,21 +49,21 @@ describe('B191: the risky cold outreach paths, covered', () => {
     expect(await prisma.auditLog.count({ where: { entityId: c.id, action: 'claimed' } })).toBe(1);
   });
 
-  it('B191: the Call button\'s gate, every branch: a form waiting, Also in CRM, the suppression list; never the time of day', async () => {
+  it('B191: the Call button\'s gate, every branch: a form waiting, Also in CRM, the suppression list (calling hours: M02 test)', async () => {
     const rep = { id: b.users.alisa.id, timezone: 'America/Chicago' };
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
     const noon = new Date('2026-11-10T18:00:00Z');
-    // No calling hours (owner, 10 Nov 2026): any time of day is open.
-    expect(await callGate(rep, c)).toEqual({ blocked: null, warning: null });
+    // At noon in Chicago Call is open; Illinois needs everyone to agree to a recording, so the notice comes with it (M03).
+    expect(await callGate(rep, c, noon)).toEqual({ blocked: null, warning: expect.stringContaining('Recording notice') });
     // Also in CRM.
-    expect(await callGate(rep, { ...c, crmMatchPersonId: 'person-01' })).toEqual({ blocked: 'This person is in the CRM now, so their outreach has stopped. Move to CRM to work them there.', warning: null });
+    expect(await callGate(rep, { ...c, crmMatchPersonId: 'person-01' }, noon)).toEqual({ blocked: 'This person is in the CRM now, so their outreach has stopped. Move to CRM to work them there.', warning: null });
     // On the suppression list.
     const other = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
     await prisma.suppression.create({ data: { kind: 'email', valueHash: (await import('@/lib/sandbox/suppression')).suppressionHash('email', other.email!), reason: 'opted_out' } });
-    expect((await callGate(rep, other)).blocked).toEqual(expect.any(String));
+    expect((await callGate(rep, other, noon)).blocked).toEqual(expect.any(String));
     // A call of the rep's still waiting for its form comes first, whoever they want to call next.
     await prisma.callLog.create({ data: { source: 'MANUAL', direction: 'OUTBOUND', status: 'COMPLETED', userId: rep.id, sandboxContactId: other.id, startedAt: new Date(noon.getTime() - 3600_000), formDueAt: new Date(noon.getTime() - 3600_000) } });
-    expect((await callGate(rep, c)).blocked).toEqual(expect.stringContaining(FORM_FIRST));
+    expect((await callGate(rep, c, noon)).blocked).toEqual(expect.stringContaining(FORM_FIRST));
   });
 
   it('B191: Undo is refused, with the reason, once the CRM person has activity or a CRM campaign since the move', async () => {
