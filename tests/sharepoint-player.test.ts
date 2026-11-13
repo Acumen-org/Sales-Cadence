@@ -105,8 +105,13 @@ describe('a sharing link plays once Microsoft lets Cadence look', () => {
     expect(await sharePointPlayer(SHARING)).toBeNull();
     expect(await sharePointPlayerStatus()).toEqual({ plays: false, why: 'Microsoft refused: Access denied' });
 
-    vi.stubGlobal('fetch', microsoft({ token: { body: { access_token: accessToken(['Files.ReadWrite.All']) } }, graph: { body: recording } }).impl);
+    // Granting another read permission retires the refusal.
+    vi.stubGlobal('fetch', microsoft({ token: { body: { access_token: accessToken(['Sites.Read.All']) } }, graph: { body: recording } }).impl);
     expect(await sharePointPlayerStatus()).toEqual({ plays: true });
+    // S02: a grant that can change every file is never used, and Settings says to remove it (this test used to accept it).
+    vi.stubGlobal('fetch', microsoft({ token: { body: { access_token: accessToken(['Files.Read.All', 'Sites.FullControl.All']) } }, graph: { body: recording } }).impl);
+    expect(await sharePointPlayerStatus()).toEqual({ plays: false, why: expect.stringContaining('Sites.FullControl.All') });
+    expect(await sharePointPlayer(SHARING)).toBeNull();
   });
 
   it('gives meetings saved before then their player, once, and leaves the rest alone', async () => {

@@ -16,8 +16,14 @@ import { meetingDay } from './day';
  * file: whoever watches still needs access to the recording in their own Microsoft 365 session.
  */
 
-/** Any one of these application permissions lets the app read a file's ids; Files.Read.All is the least. */
-const FILE_ROLES = ['Files.Read.All', 'Files.ReadWrite.All', 'Sites.Read.All', 'Sites.ReadWrite.All', 'Sites.Manage.All', 'Sites.FullControl.All'];
+/** Either read-only application permission lets the app read a file's ids; Files.Read.All is the least. */
+const FILE_ROLES = ['Files.Read.All', 'Sites.Read.All'];
+/**
+ * Grants that can change or delete every file in the company (audit S02): reading one recording never
+ * needs them, so while the app holds one Cadence does not use it, and Settings says to remove it.
+ */
+const TOO_WIDE = ['Files.ReadWrite.All', 'Sites.ReadWrite.All', 'Sites.Manage.All', 'Sites.FullControl.All'];
+export const tooWideRoles = (roles: string[]) => roles.filter((r) => TOO_WIDE.includes(r));
 /** Microsoft's last refusal, and the permissions the app had then: granting another one retires it. */
 const REFUSED = 'sharePointPlayerRefused';
 const TIMEOUT_MS = 8000;
@@ -30,7 +36,7 @@ export type Player = { embedUrl: string; title: string | null; date: string | nu
 export type RecordingFile = { driveId: string; createdAt: string; durationMs: number | null };
 
 const graphUrl = () => env().MICROSOFT_GRAPH_URL.replace(/\/+$/, '');
-export const mayReadFiles = (roles: string[]) => roles.some((r) => FILE_ROLES.includes(r));
+export const mayReadFiles = (roles: string[]) => roles.some((r) => FILE_ROLES.includes(r)) && !tooWideRoles(roles).length;
 
 /** Graph's form of a sharing link: `u!` and the link in base64url, unpadded. */
 export function encodeSharingUrl(url: string): string {
@@ -202,6 +208,8 @@ export async function sharePointPlayerStatus(): Promise<PlayerStatus | null> {
   if (!c) return null;
   const token = await currentToken(c, true);
   if ('error' in token) return { plays: false, why: `Microsoft gave Cadence no token: ${token.error}` };
+  const wide = tooWideRoles(token.roles);
+  if (wide.length) return { plays: false, why: `The app holds ${wide.join(', ')}, which can change every file in the company. An admin should remove it and grant Files.Read.All only` };
   if (!mayReadFiles(token.roles)) return { plays: false, why: 'The app needs the Files.Read.All application permission' };
   const refused = await standingRefusal(token.roles);
   return refused === null ? { plays: true } : { plays: false, why: `Microsoft refused: ${refused}` };
