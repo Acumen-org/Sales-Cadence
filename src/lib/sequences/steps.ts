@@ -19,7 +19,10 @@ export function channelOf(action: ActionType): Channel {
   return 'LINKEDIN';
 }
 
-/** Actions that can be completed by observing Twenty activity. LinkedIn is manual only. */
+/**
+ * Actions that can be completed by observing Twenty activity. LinkedIn steps are closed from the LinkedIn
+ * Console's events instead (src/lib/linkedin), and by Done when the Console did not see them.
+ */
 export function isObservable(action: ActionType): boolean {
   return action === 'EMAIL' || action === 'CALL';
 }

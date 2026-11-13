@@ -270,9 +270,11 @@ export async function listNextActionItems(user: SessionUser, filters: TaskFilter
  * today or earlier, of the work this user is the FO of, in the audience asked for.
  */
 export async function dueCounts(foUserId: string, audience: AudienceScope, today: LocalDate): Promise<{ today: number; overdue: number }> {
-  const [tasks, next] = await Promise.all([
+  const [tasks, next, linkedin] = await Promise.all([
     prisma.task.findMany({ where: { AND: [workTaskWhere(audience), WORKABLE, { foUserId, state: 'PENDING' }, { OR: [{ snoozedTo: null, dueDate: { lte: today } }, { snoozedTo: { not: null, lte: today } }] }] }, select: { enrollmentId: true, stepId: true, dueDate: true, snoozedTo: true } }),
     prisma.nextAction.findMany({ where: { AND: [workWhere(audience), { foUserId, state: 'OPEN', dueDate: { lte: today } }] }, select: { dueDate: true } }),
+    // LinkedIn follow-ups (src/lib/linkedin) are work in the same tabs: one each.
+    prisma.linkedInFollowUp.findMany({ where: { foUserId, state: 'OPEN', dueDate: { lte: today }, ...(audience === 'cold' ? { personId: null, sandboxContact: { status: 'ACTIVE' } } : audience === 'crm' ? { personId: { not: null } } : { OR: [{ personId: { not: null } }, { personId: null, sandboxContact: { status: 'ACTIVE' } }] }) }, select: { dueDate: true } }),
   ]);
   const earliest = new Map<string, string>();
   for (const t of tasks) {
@@ -283,7 +285,7 @@ export async function dueCounts(foUserId: string, audience: AudienceScope, today
   }
   let dueToday = 0;
   let overdue = 0;
-  for (const day of [...earliest.values(), ...next.map((n) => n.dueDate)]) {
+  for (const day of [...earliest.values(), ...next.map((n) => n.dueDate), ...linkedin.flatMap((f) => (f.dueDate ? [f.dueDate] : []))]) {
     if (day < today) overdue++;
     else dueToday++;
   }

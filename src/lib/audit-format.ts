@@ -290,6 +290,23 @@ function describe(action: string, details: Details, actorLabel: string | null, e
       return { title: `Meeting number set${by}`, fields: Number.isFinite(num(d.to)) ? [{ label: 'Set to', value: String(num(d.to)) }] : [] };
     case 'number_cleared':
       return { title: `Meeting number counted again${by}`, fields: [] };
+    // LinkedIn, as the LinkedIn Console saw it (src/lib/linkedin): a link added, and the tasks Cadence opened from it.
+    case 'linkedin_link_added':
+      return { title: `LinkedIn link added${by}`, fields: str(d.linkedinUrl) ? [{ label: 'Link', value: str(d.linkedinUrl)! }] : [] };
+    case 'linkedin_follow_up_opened':
+    case 'linkedin_follow_up_done':
+    case 'linkedin_follow_up_cancelled':
+    case 'linkedin_follow_up_moved':
+    case 'linkedin_follow_up_assigned': {
+      const what = { MESSAGE: 'Message on LinkedIn', WITHDRAW: 'Withdraw the connection request', RESEND: 'Send the connection request again' }[str(d.kind) ?? ''] ?? 'LinkedIn task';
+      const verb = { linkedin_follow_up_opened: 'LinkedIn task opened', linkedin_follow_up_done: str(d.evidenceId) ? 'LinkedIn task done: the LinkedIn Console saw it' : 'LinkedIn task done', linkedin_follow_up_cancelled: 'LinkedIn task closed, not needed', linkedin_follow_up_moved: 'LinkedIn task moved', linkedin_follow_up_assigned: 'LinkedIn task given an owner' }[action];
+      const fields: AuditField[] = [{ label: 'Task', value: what }];
+      const day = (v: string) => (isLocalDate(v) ? formatLocalDate(v, 'long') : v);
+      if (str(d.dueDate)) fields.push({ label: 'Due', value: day(str(d.dueDate)!) });
+      if (str(d.to) && action === 'linkedin_follow_up_moved') fields.push({ label: 'Moved to', value: day(str(d.to)!) });
+      if (str(d.reason)) fields.push({ label: 'Why', value: str(d.reason) === 'owner' ? "It follows the contact's owner" : str(d.reason)! });
+      return { title: `${verb}${by}`, fields };
+    }
     // A task created for a person or a cold contact (stored under its old name, next action).
     case 'next_action_set':
     case 'next_action_done':

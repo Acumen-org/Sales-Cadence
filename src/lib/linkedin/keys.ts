@@ -39,5 +39,6 @@ export function consoleProfileLink(accountId: string | null | undefined, profile
   if (!base) return null;
   if (accountId && profileKey) return `${base}/accounts/${encodeURIComponent(accountId)}/live?profile=${encodeURIComponent(slugOf(profileKey))}`;
   if (accountId) return `${base}/accounts/${encodeURIComponent(accountId)}/live`;
-  return `${base}/inbox`;
+  // No account used with them yet: the accounts list, where the teammate picks the one to work from.
+  return `${base}/accounts`;
 }
