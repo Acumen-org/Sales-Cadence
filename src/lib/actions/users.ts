@@ -174,7 +174,8 @@ export async function setUserAccessAction(formData: FormData): Promise<ActionRes
       }
       const left = await tx.enrollment.findMany({ where: { foUserId: userId, status: { in: ['ACTIVE', 'PAUSED'] } }, select: { id: true } });
       const enrollmentIds = left.map((enrollment) => enrollment.id);
-      pending.push(...await tx.task.findMany({ where: { enrollmentId: { in: enrollmentIds }, state: 'PENDING' }, include: syncTaskInclude }));
+      // P09: only the leaver's own steps; one they delegated to a colleague stays with that colleague.
+      pending.push(...await tx.task.findMany({ where: { enrollmentId: { in: enrollmentIds }, state: 'PENDING', foUserId: userId }, include: syncTaskInclude }));
       await tx.enrollment.updateMany({ where: { id: { in: enrollmentIds }, foUserId: userId, status: { in: ['ACTIVE', 'PAUSED'] } }, data: { foUserId: replacementId } });
       for (const task of pending) await tx.task.updateMany({ where: { id: task.id, state: 'PENDING' }, data: { foUserId: replacementId, dueAt: localDateToInstant(task.snoozedTo ?? task.dueDate, workspaceTimezone(), 9), twentyTaskId: null } });
       for (const enrollment of left) await logAudit({ entityType: 'enrollment', entityId: enrollment.id, action: 'reassigned', actor: userActor(admin), details: { from: userId, to: replacementId, reason: 'team_access_removed' } }, tx);
@@ -182,6 +183,15 @@ export async function setUserAccessAction(formData: FormData): Promise<ActionRes
       // Nothing else to hand on: the line is let go, and Settings > Calling says whose it was (N107).
       await tx.user.update({ where: { id: userId }, data: { callerNumber: null } });
       await logAudit({ entityType: 'user', entityId: userId, action: 'caller_number_released', actor: userActor(admin), details: { number: existing.callerNumber, to: null } }, tx);
+    }
+    if (!restore) {
+      // P09: steps colleagues delegated to the leaver go back to the FO of their own enrollment.
+      const delegatedIn = await tx.task.findMany({ where: { foUserId: userId, state: 'PENDING', enrollment: { foUserId: { not: userId } } }, include: syncTaskInclude });
+      for (const task of delegatedIn) {
+        await tx.task.updateMany({ where: { id: task.id, state: 'PENDING', foUserId: userId }, data: { foUserId: task.enrollment.foUserId, dueAt: localDateToInstant(task.snoozedTo ?? task.dueDate, workspaceTimezone(), 9), twentyTaskId: null } });
+        await logAudit({ entityType: 'task', entityId: task.id, action: 'delegated', actor: userActor(admin), details: { from: userId, to: task.enrollment.foUserId, reason: 'team_access_removed' } }, tx);
+      }
+      pending.push(...delegatedIn);
     }
     await tx.user.update({ where: { id: userId }, data: { active: restore, timezone: workspaceTimezone() } });
     if (!restore) await tx.session.deleteMany({ where: { userId } });

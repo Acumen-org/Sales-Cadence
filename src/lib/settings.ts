@@ -275,7 +275,10 @@ export async function saveSettingsSection<K extends SettingsSection>(key: K, val
     create: { key, value: parsed as object },
     update: { value: parsed as object },
   });
-  invalidateSettingsCache();
+  // P29: the saved section goes into the cache, marked stale, rather than the cache being emptied: the
+  // synchronous readers (workspaceTimezone) keep the right values until the next full read.
+  const cached = g.__cadenceSettingsCache;
+  g.__cadenceSettingsCache = cached ? { at: 0, value: { ...cached.value, [key]: parsed } } : undefined;
   return parsed;
 }
 
