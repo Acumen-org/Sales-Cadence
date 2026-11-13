@@ -161,12 +161,14 @@ describe('Bellwether push API (contract section 14)', () => {
   });
 
   describe('ownership (14.7)', () => {
-    it('owns by assignTo, leaves an unknown pusher unclaimed, and ignores a pod the owner does not work', async () => {
+    // U01 (owner contract, 13 Nov 2026): an unknown pusher's contacts used to arrive unclaimed; now they are refused.
+    it('owns by assignTo, refuses the contacts of an unknown pusher (owner_not_found), and ignores a pod the owner does not work', async () => {
       const r1 = await push(envelope([bwContact()], { assignTo: { email: 'karson@cadence.local' } }));
       expect(r1.body.results[0].ownerEmail).toBe('karson@cadence.local');
       const r2 = await push(envelope([bwContact()], { pushedBy: { email: 'stranger@bellwether.example' } }));
       expect(r2.body.owner).toBeNull();
-      expect((await prisma.sandboxContact.findUniqueOrThrow({ where: { id: r2.body.results[0].cadenceContactId } })).ownerId).toBeNull();
+      expect(r2.body.results[0]).toEqual(expect.objectContaining({ result: 'rejected', reason: 'owner_not_found', cadenceContactId: null }));
+      expect(await prisma.sandboxContact.count({ where: { ownerId: null } })).toBe(0);
       const r3 = await push(envelope([bwContact()], { pod: 'LEIGH' }));
       expect(r3.body.results[0].warnings.map((w: { code: string }) => w.code)).toContain('pod_ignored');
     });

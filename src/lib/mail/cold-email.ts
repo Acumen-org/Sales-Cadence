@@ -17,6 +17,7 @@ import { notify, podLeaders } from '../notifications';
 import { normalizeEmail } from '../sandbox/normalize';
 import { maskValue, suppressionHash } from '../sandbox/suppression';
 import { autoCreatedFor } from '../sandbox/crm-cleanup';
+import { optOutSandboxContact } from '../sandbox/opt-out';
 
 /**
  * What one email to or from a cold contact does (cold outreach PLAN 8.11, W10), whichever way
@@ -294,9 +295,13 @@ export async function doNotContactEmails(period: { from: Date; to: Date }): Prom
 // Replies
 // ---------------------------------------------------------------------------
 
-/** A message from a cold contact: recorded on each live contact with the address; a real reply stops their campaign and rings the bell. */
-export async function recordColdReply(from: string, mail: SeenMail, automatic: boolean): Promise<{ replies: number; autoReplies: number; contacts: string[] }> {
-  const out = { replies: 0, autoReplies: 0, contacts: [] as string[] };
+/**
+ * A message from a cold contact: recorded on each live contact with the address; a real reply stops
+ * their campaign and rings the bell. A reply asking to stop (`stop`, L02: stop-request.ts) opts the
+ * contact out instead, which ends every campaign as Opted out and suppresses their details.
+ */
+export async function recordColdReply(from: string, mail: SeenMail, automatic: boolean, stop = false): Promise<{ replies: number; autoReplies: number; optedOut: number; contacts: string[] }> {
+  const out = { replies: 0, autoReplies: 0, optedOut: 0, contacts: [] as string[] };
   const contacts = (await coldContactsByAddress([from])).filter((c) => c.status === 'ACTIVE');
   for (const c of contacts) {
     if (await seenAlready(c.id, ['REPLY', 'AUTO_REPLY'], mail)) continue;
@@ -312,11 +317,14 @@ export async function recordColdReply(from: string, mail: SeenMail, automatic: b
     // The rep may have marked this reply in Tasks already: it counts once.
     await joinMarkedReply(touch);
     const running = await prisma.enrollment.findMany({ where: { sandboxContactId: c.id, personId: null, status: { in: OCCUPYING_STATUSES } }, select: { id: true, foUserId: true } });
-    for (const e of running) await markReplied(e.id, { at: mail.at, evidenceId: externalId, actor: SYSTEM_ACTOR });
+    if (stop) {
+      // L02: "stop emailing me" is an opt-out everywhere, never just this campaign's reply (B091).
+      if ((await optOutSandboxContact(c.id, { source: 'email_reply', actor: SYSTEM_ACTOR, reason: `Replied asking not to be contacted: ${mail.subject || '(no subject)'}`.slice(0, 300), now: mail.at })).changed) out.optedOut++;
+    } else for (const e of running) await markReplied(e.id, { at: mail.at, evidenceId: externalId, actor: SYSTEM_ACTOR });
     // The campaign's rep, the mailbox it reached and the owner; the pod's leaders when nobody owns it.
     const owner = await activeOwner(c.ownerId);
     const leaders = owner ? [] : await podLeaders(c.podId ? [c.podId] : mail.mailboxUserId ? (await prisma.userPod.findMany({ where: { userId: mail.mailboxUserId }, select: { podId: true } })).map((p) => p.podId) : []);
-    await notify([...running.map((e) => e.foUserId), mail.mailboxUserId, owner, ...leaders], { kind: 'reply', sandboxContactId: c.id, payload: { subject: mail.subject, touchId: touch.id, at: mail.at.toISOString() } });
+    await notify([...running.map((e) => e.foUserId), mail.mailboxUserId, owner, ...leaders], { kind: 'reply', sandboxContactId: c.id, payload: { subject: mail.subject, touchId: touch.id, at: mail.at.toISOString(), ...(stop ? { optedOut: true } : {}) } });
   }
   return out;
 }

@@ -19,7 +19,7 @@ export type Act = 'note' | 'edit' | 'next_action' | 'call' | 'log_call' | 'form_
 
 /** The button that fixes a refusal, when there is one. */
 export type Fix = { label: string; href?: string | null };
-export type RefusalCode = 'not_found' | 'opted_out' | 'removed' | 'moved' | 'not_moved' | 'already_opted_out' | 'not_liftable' | 'moving' | 'read_only' | 'admins_assign' | 'already_yours' | 'claimed' | 'not_yours' | 'other_pod' | 'admins_only' | 'not_allowed' | 'deleted' | 'do_not_contact' | 'suppressed' | 'in_crm' | 'form_pending' | 'no_channel';
+export type RefusalCode = 'not_found' | 'opted_out' | 'removed' | 'moved' | 'not_moved' | 'already_opted_out' | 'not_liftable' | 'moving' | 'read_only' | 'admins_assign' | 'already_yours' | 'claimed' | 'not_yours' | 'other_pod' | 'admins_only' | 'not_allowed' | 'deleted' | 'do_not_contact' | 'suppressed' | 'in_crm' | 'form_pending' | 'no_channel' | 'calling_hours' | 'call_limit';
 export type Refusal = { ok: false; code: RefusalCode; reason: string; fix: Fix | null };
 export type Verdict = { ok: true } | Refusal;
 
@@ -59,7 +59,7 @@ export const WORK_ACTS = new Set<Act>(['note', 'edit', 'next_action', 'call', 'l
 /** Acts that count as activity on the contact, for retention (N032). */
 export const ACTIVITY_ACTS = new Set<Act>(['note', 'edit', 'next_action', 'call', 'log_call', 'form_next_step', 'claim', 'assign', 'enroll', 'undo']);
 
-const SOURCE_WORDS: Record<string, string> = { call_form: 'the post-call form', contact_page: 'the contact page', suppression_list: 'the suppression list', bellwether: 'Bellwether', erase: 'an erasure', skip_reason: 'a skipped step', person_page: 'the person page' };
+const SOURCE_WORDS: Record<string, string> = { call_form: 'the post-call form', contact_page: 'the contact page', suppression_list: 'the suppression list', bellwether: 'Bellwether', erase: 'an erasure', skip_reason: 'a skipped step', person_page: 'the person page', email_reply: 'an email reply asking to stop' };
 export const optOutSourceWords = (source: string | null | undefined) => SOURCE_WORDS[source ?? ''] ?? 'Cadence';
 
 const leadersOf = (pod: string | null) => (pod ? `the Senior FOs, Sales Leaders and Pod Managers of ${pod}` : 'the leaders of its pod');

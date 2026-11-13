@@ -29,7 +29,7 @@ import { scrub } from './scrub';
  * (N026): both take the lock, and Remove only changes an ACTIVE contact that was never opted out.
  */
 
-export type OptOutSource = 'call_form' | 'contact_page' | 'suppression_list' | 'skip_reason' | 'erase' | 'bellwether' | 'person_page';
+export type OptOutSource = 'call_form' | 'contact_page' | 'suppression_list' | 'skip_reason' | 'erase' | 'bellwether' | 'person_page' | 'email_reply';
 export type TransitionOptions = { actor: AuditActor; /** The signed-in user the guard judges; null for Cadence itself. */ guard?: GuardActor | null; now?: Date; createdById?: string | null };
 export type OptOutOptions = TransitionOptions & { source: OptOutSource; reason?: string | null; /** False for the opt-outs one opt-out causes (N025), so they do not cascade. */ sweep?: boolean; endSequences?: boolean };
 export type TransitionResult = { ok: true; changed: boolean } | Refusal;

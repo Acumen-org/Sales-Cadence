@@ -10,6 +10,8 @@ import { completeNextAction, setNextActions, stopNextAction } from '../next-acti
 import { ANSWERED_CALL_PREFIX } from '../reply-credit';
 import { getTwentyClient } from '../twenty';
 import { optOutSubject } from '../sandbox/opt-out';
+import { addSuppressions } from '../sandbox/suppression';
+import { toE164 } from '../sandbox/normalize';
 import { setColdNextStep } from '../sandbox/work';
 import { callNoteDraft, writeNote } from '../sandbox/history-notes';
 import { coldRef, personRef, subjectHref } from '../subject';
@@ -248,11 +250,12 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
   const step = NEXT_STEPS.find((s) => s.key === v.nextStep)!;
   const stop = v.outcome === OPT_OUT_OUTCOME;
 
-  // Owner, 10 Nov 2026: whoever fills the form may give an owned cold contact to someone in its pod.
+  // Owner, 10 Nov 2026: whoever fills the form may give an owned cold contact to someone in its pod,
+  // within the same rules as Assign (V01): the choices are only those this user may give it to.
   const giveTo = subject.sandboxContactId && input.newOwnerId ? input.newOwnerId : null;
   if (giveTo) {
-    const { choices } = await formOwnerChoices(subject.sandboxContactId!);
-    if (!choices.some((c) => c.id === giveTo)) return { ok: false, error: 'Pick an owner from the pod this contact is in.', field: 'newOwnerId' };
+    const { choices } = await formOwnerChoices(subject.sandboxContactId!, guard);
+    if (!choices.some((c) => c.id === giveTo)) return { ok: false, error: guard ? 'You cannot give this contact to that person: pick an owner from the list, or ask a leader of its pod.' : 'Pick an owner from the pod this contact is in.', field: 'newOwnerId' };
   }
 
   // N077: a next step the contact cannot be reached by is refused before anything is saved, so the rep picks another.
@@ -317,16 +320,30 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
 
   let reminder: string | null = null;
   const openWhere = subject.personId ? { personId: subject.personId } : { sandboxContactId: subject.sandboxContactId, personId: null };
-  if (stop && hasSubject) {
+  let stopMessage: string | null = null;
+  if (stop) {
     // Every opt-out of a CRM person sets the CRM's Do not contact and clears its Next Action (D6). The
     // campaign ends as Opted out (B091). It came from the form, so an admin can lift it (D4).
-    await optOutSubject(subject, { source: 'call_form', actor, now, createdById: user.id, guard });
-    if (subject.personId) reminder = 'Do not contact is set on this person in the CRM too.';
+    const r = hasSubject ? await optOutSubject(subject, { source: 'call_form', actor, now, createdById: user.id, guard }) : null;
+    if (r && !r.refused) {
+      if (subject.personId) reminder = 'Do not contact is set on this person in the CRM too.';
+      stopMessage = `Saved. ${name} is opted out: Cadence will not contact them again.`;
+    } else {
+      // M01: nobody to opt out (or the opt-out was refused): the number called is put on the suppression
+      // list so it is never called again, and the message says exactly what was and was not done.
+      const dialled = toE164(call.direction === 'INBOUND' ? call.fromNumber : call.toNumber);
+      if (dialled) {
+        await addSuppressions([{ kind: 'phone', value: dialled }], { reason: 'do_not_contact', source: 'call_form', createdById: user.id });
+        await logAudit({ entityType: 'call', entityId: callId, action: 'suppression_added', actor, details: { kind: 'phone', source: 'call_form', refused: r?.refused ?? null } });
+      }
+      const why = r?.refused ? `${name} could not be opted out: ${r.refused}` : 'Nobody is matched to this call, so nobody was opted out.';
+      stopMessage = `Saved, but ${why} ${dialled ? 'The number called is on the suppression list now, so Cadence will not call it again.' : 'No number was recorded for this call, so nothing was put on the suppression list.'} Say who it was with, or add them to the suppression list in Settings.`;
+    }
   } else if (hasSubject) {
     // The new owner first, with the contact's work (B049), so the next step below is theirs.
     let handedTo: string | null = null;
     if (giveTo && subjectRow?.ownerId && giveTo !== subjectRow.ownerId && subjectRow.status === 'ACTIVE') {
-      const given = await assignContact(subject.sandboxContactId!, giveTo, actor, undefined, null, subjectRow.ownerId);
+      const given = await assignContact(subject.sandboxContactId!, giveTo, actor, undefined, guard, subjectRow.ownerId);
       if (given.ok) handedTo = giveTo;
       else reminder = `The owner did not change: ${given.error}`;
     }
@@ -376,7 +393,7 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
 
   // The result says what happens next (B182): "Saved. Next: Email 2 of Q4 Harbor on Thu, 5 Nov 2026."
   const next = hasSubject && !stop ? await nextWords(subject) : null;
-  const message = stop ? `Saved. ${name} is opted out: Cadence will not contact them again.` : v.nextStep === 'campaign' && next ? `Saved. The campaign continues: next is ${next}.` : next ? `Saved. Next: ${next}.` : 'Saved. No next step is set.';
+  const message = stop ? stopMessage! :v.nextStep === 'campaign' && next ? `Saved. The campaign continues: next is ${next}.` : next ? `Saved. Next: ${next}.` : 'Saved. No next step is set.';
   const followUp = v.outcome === 'meeting_booked' && hasSubject
     ? { addMeeting: subject.personId ? `/meetings/new?personId=${encodeURIComponent(subject.personId)}` : null, moveToCrm: subject.sandboxContactId ? `${subjectHref(coldRef(subject.sandboxContactId))}?move=1` : null }
     : undefined;

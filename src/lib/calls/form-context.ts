@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import type { Prisma, Role } from '@prisma/client';
 import { prisma } from '../db';
 import { logAudit, type AuditActor } from '../audit';
 import { formatLocalDate, todayIn } from '../dates';
@@ -62,7 +62,7 @@ export type CallFormContext = {
 const PREFILL: Record<string, string> = { busy: 'busy', 'no-answer': 'no_answer', failed: 'no_answer', canceled: 'no_answer' };
 export const DISCARD_WINDOW_MS = 24 * 3600_000;
 
-type Viewer = { id: string; timezone: string };
+type Viewer = { id: string; timezone: string; role?: Role; podIds?: string[] };
 
 /** Why this call can't be discarded by this user now, or null. */
 function discardRefusal(call: { formDoneAt: Date | null; discardedAt: Date | null; startedAt: Date | null; createdAt: Date; userId: string | null; formUserId: string | null }, user: Viewer, now: Date): string | null {
@@ -110,7 +110,7 @@ export async function callFormContext(callId: string, user: Viewer, now = new Da
   const colleague = who?.active && ownerId && ownerId !== user.id && (!openRow || openRow.foUserId !== user.id) ? `${first} is ${ownerName ?? 'someone else'}'s contact. ${openRow ? 'Their next step stays; yours goes to them as a suggestion.' : 'Your next step goes to them as a suggestion.'}` : null;
   const claim = who?.kind === 'cold' && who.active && !ownerId ? `Saving claims ${first} for you.` : null;
   const task = running?.tasks[0];
-  const ownerChoices = who?.kind === 'cold' && who.active && ownerId ? (await formOwnerChoices(who.id)).choices : [];
+  const ownerChoices = who?.kind === 'cold' && who.active && ownerId ? (await formOwnerChoices(who.id, user.role ? { id: user.id, role: user.role, podIds: user.podIds ?? [] } : null)).choices : [];
   const owner = ownerId && ownerChoices.length ? { currentId: ownerId, currentName: ownerName ?? 'Someone else', choices: ownerChoices.some((c) => c.id === ownerId) ? ownerChoices : [{ id: ownerId, name: ownerName ?? 'Someone else' }, ...ownerChoices] } : null;
 
   const outcomes = callOutcomes(settings.rules).map((o) => {

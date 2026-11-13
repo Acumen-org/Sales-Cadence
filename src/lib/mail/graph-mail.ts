@@ -3,6 +3,7 @@ import { env } from '../env';
 import { microsoftConfig } from '../auth/microsoft';
 import { currentToken } from '../meetings/sharepoint-player';
 import { isAutomaticReply } from '../engine/ingest';
+import { asksToStop } from './stop-request';
 import { normalizeEmail } from '../sandbox/normalize';
 import { alertSuppressedAddresses, emailsToDoNotContact, recordBounce, recordColdReply, recordColdSent, systemNotice, type SeenMail } from './cold-email';
 
@@ -106,7 +107,8 @@ export async function processInbox(m: GraphMessage, userId: string, stats: Graph
   // A delay, a delivery receipt, a relay: nothing bounced and nobody replied (N059).
   if (notice === 'notice') { stats.notices++; return; }
   if (!from) return;
-  const r = await recordColdReply(from, mail, isAutomaticReply(m.subject));
+  // L02: only the subject is read here (never the body), so a subject asking to stop is the signal.
+  const r = await recordColdReply(from, mail, isAutomaticReply(m.subject), asksToStop(m.subject));
   stats.replies += r.replies;
   stats.autoReplies += r.autoReplies;
 }

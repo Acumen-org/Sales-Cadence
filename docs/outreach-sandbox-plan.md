@@ -555,8 +555,8 @@ Cadence's Call buttons are disabled until the form is in.
   contact has no pod until it has an owner. A pod is required before Move to CRM, because Twenty's
   Pod Owner comes from it.
 - **Arriving from Bellwether.** Everyone in Bellwether may push (decision 16). The owner is
-  `assignTo`, or else the person who pushed (the rules are in section 14). If that user has no
-  sales role in Cadence, the contacts arrive unclaimed.
+  `assignTo`, or else the person who pushed (the rules are in section 14). If that user cannot own
+  contacts in Cadence, each new contact is refused (`owner_not_found`), never created unclaimed.
 - **Claiming.** Any sales role can claim an unclaimed contact, and the first claim wins. On
   launch, a sandbox campaign gives each unclaimed contact in its audience to the FO it assigns,
   who becomes the owner.
@@ -1365,10 +1365,17 @@ carries `possible_sandbox_duplicate` naming them (1.1).
 1. The owner is `assignTo` if given, else `pushedBy`. Cadence matches the user by
    `microsoftObjectId`, then email, then alias.
 2. If that user is an active Junior FO, Senior FO, Sales Leader or Pod Manager in at least one
-   pod, they own the new contacts. Otherwise (unknown, inactive, an admin, Biz Ops, in no pod) the
-   contacts are created unclaimed, `owner` is null in the response, and each created contact carries
-   `owner_not_found`, or `assign_to_not_found` when `assignTo` was given, saying who and why (1.1).
-   `GET /owners` (14.16) lists exactly the people who can own.
+   pod, they own the new contacts. Otherwise (unknown, inactive, an admin, Biz Ops, in no pod) no
+   contact is created unclaimed: each contact the push would create is `rejected` with reason
+   `owner_not_found` (whether the owner came from `assignTo` or `pushedBy`), its `detail` saying who
+   and why, and `owner` is null in the response. The owner is checked when the push or check
+   arrives, so a list Bellwether read earlier, or a request it queued and sends later, never names
+   an owner who has since left (agreed owner contract, 13 Nov 2026; audit U01, U02, U03).
+   `POST /contacts/check` answers the same way before any send. `GET /owners` (14.16) lists exactly
+   the people who can own.
+   A contact already in Cold outreach (`duplicate_in_sandbox`) or in the CRM (`already_in_crm`)
+   keeps its own owner rules: the push never changes its owner, and `ownerEmail` says who owns it
+   (U05).
 3. The pod is `pod` if the owner works that pod (by its value or its name, in any case), else the
    owner's only pod, else the first of their pods by name. A contact with an owner always has a pod.
 4. A push is not a claim: the funnel's "Claimed" counts a later claim or assignment only.
@@ -1453,7 +1460,7 @@ the 1.1 warning codes:
 | `bellwetherContactId` | string | As sent (without control characters). |
 | `result` | `"created"`, `"duplicate_in_sandbox"`, `"already_in_crm"` or `"rejected"` | |
 | `cadenceContactId` | string (UUID) or null | The sandbox contact, for `created` and `duplicate_in_sandbox`. |
-| `reason` | string or null | `rejected` only: `invalid_field`, `do_not_contact`, `suppressed`, `blocked_account`, `internal_contact`, `duplicate_in_request`, or `internal_error` (Cadence failed on this one contact and finished the rest; it may be sent again, and it is never kept as a refusal). `internal_error` reaches every caller. |
+| `reason` | string or null | `rejected` only: `invalid_field`, `do_not_contact`, `suppressed`, `blocked_account`, `internal_contact`, `duplicate_in_request`, `owner_not_found` (nobody who can own contacts was named: 14.7), or `internal_error` (Cadence failed on this one contact and finished the rest; it may be sent again, and it is never kept as a refusal). `internal_error` reaches every caller. |
 | `detail` | string or null | One plain sentence for a person to read. |
 | `matchedOn` | `"bellwether_contact_id"`, `"individual_crd"`, `"email"`, `"linkedin_url"`, `"phone"` or null | Set for `duplicate_in_sandbox` and `already_in_crm`. |
 | `crmPersonId` | string or null | `already_in_crm`: the Twenty person id. |
@@ -1561,7 +1568,7 @@ Response 200:
 | `possibleCrmPersonId` | string or null | A CRM person the push thought might be this contact. |
 | `lastOutcome`, `lastOutcomeAt` | string or null | The latest post-call outcome and when it was filed: the form's outcome key, one of `connected`, `gatekeeper`, `voicemail`, `no_answer`, `busy`, `wrong_number`, `not_interested`, `meeting_booked`, `do_not_contact`, `no_conversation`, or a key an admin added in Settings, Rules. |
 | `optOutLiftedAt` | string or null | When Cadence last lifted an opt-out of this contact (only an opt-out from the post-call form can be lifted), sent once the status is no longer `opted_out`. Bellwether then lifts only the suppression that opt-out wrote there. A Cadence lift never removes a Do not contact set in Bellwether, and a Bellwether lift never lifts a Cadence opt-out. |
-| `reason` | string or null | `refused`: the push's reason (`invalid_field`, `do_not_contact`, `blocked_account`, `internal_contact`, `duplicate_in_request`). |
+| `reason` | string or null | `refused`: the push's reason (`invalid_field`, `do_not_contact`, `blocked_account`, `internal_contact`, `duplicate_in_request`, `owner_not_found`). |
 
 ```json
 {
@@ -1894,9 +1901,14 @@ that change Cadence are noted.
     after the push if never worked; a suppression hash is kept.
 14. **Compliance: changed.** Calling hours 8:00 to 21:00 local stay, as a check on Cadence's own
     Call button only, because that needs no Twilio change. No recording announcement (it would need
-    a Twilio change). No counsel sign-off step.
-15. **Unclaimed contacts: default.** Everyone sees every sandbox contact; pushes from people who
-    are not Cadence sales users land unclaimed, and the first rep to claim owns them.
+    a Twilio change). No counsel sign-off step. Changed 13 Nov 2026 (audit M02, M03): Cadence's Call
+    button and its server check refuse calls outside 8:00 to 21:00 in the contact's zone (the firm's
+    state, else US Eastern, when unknown; said on screen) and after 2 calls to the person that day,
+    and show the rep a recording notice to read in two-party-consent states. The national Do Not
+    Call registry and Twilio's own recording settings are still to be set up.
+15. **Unclaimed contacts: default.** Everyone sees every sandbox contact, and the first rep to claim
+    an unclaimed one owns it. Changed 13 Nov 2026 (agreed owner contract): a push whose owner
+    cannot own contacts is refused contact by contact (`owner_not_found`), never created unclaimed.
 16. **Who may push (Bellwether): changed.** Everyone can push; admins get no special permission or
     narrowing. Nothing changes in Cadence: the contract never checked the pusher's Bellwether role.
 17. **Customer and Disqualified firms (Bellwether): default, plus a CRM check.** Before a push,

@@ -295,6 +295,12 @@ Writes, and only these:
 | A rep moves a sandbox contact to the CRM (Sandbox > Move to CRM, one or up to 50) | One **Person**, and one **Company** when no firm matches by CRD, domain or exact name, with the fields set once at creation: name, emails, phones, LinkedIn, job title, city, company, `assignedTo` (the owner's Twenty login), `podOwner`, `leadSource` (BELLWETHER, else LEADGEN), `leadSourceNotes`, `productInterest`, `tags` (existing options only), `contactType`, `listCategory`, `pipelineStageField`, and the optional `cadenceSandboxId`. Then `[Cadence]` **Notes** for the contact's calls, notes and a sandbox history summary. Undo (within a year, while nobody changed the person) deletes those notes and the person, and the company when Cadence created it and nobody else is linked to it. `CADENCE_DRY_RUN=true` writes none of it. |
 | A rep fills in the post-call form for a CRM person | One **Note**: `[Cadence] Call 14 Oct 2026 by Alyssa - Connected (4/5)`, in place of the step's completion note; the next step and its date become the person's Next Action and Next Action Due Date as any next action does. |
 
+Contacts pushed from Bellwether (`docs/outreach-sandbox-plan.md` section 14) are owned by the push's
+`assignTo`, or else its `pushedBy`. When that person cannot own contacts in Cadence now (unknown,
+deactivated, an admin or Biz Ops, in no pod), each contact the push would create is refused with
+`result: "rejected"`, `reason: "owner_not_found"`, never created unclaimed; a contact already in
+Cadence or the CRM keeps the owner it has (agreed owner contract, 13 Nov 2026).
+
 Two optional fields make Move to CRM exact; Cadence writes them only when the workspace has them: a
 Text field `cadenceSandboxId` on Person (a retried move finds the person it created) and a Text field
 `crd` on Company (the firm is matched by CRD first). The API key's role must allow creating People,

@@ -175,7 +175,7 @@ export async function TasksScreen({ sp, audience, basePath, header }: { sp: Task
     briefId && kind === 'person' ? getTaskBrief(briefId, user) : Promise.resolve(null),
     briefId && kind === 'cold' ? getColdTaskBrief(briefId, user) : Promise.resolve(null),
   ]);
-  const gate = brief ? await callGate(user, { phone: brief.person.phone, state: brief.person.city?.split(',').pop()?.trim() ?? null, optedOut: brief.person.optedOut, dnd: brief.person.dnd, email: brief.person.email, linkedinUrl: brief.person.linkedinUrl }) : null;
+  const gate = brief ? await callGate(user, { personId: brief.person.id, phone: brief.person.phone, state: brief.person.city?.split(',').pop()?.trim() ?? null, optedOut: brief.person.optedOut, dnd: brief.person.dnd, email: brief.person.email, linkedinUrl: brief.person.linkedinUrl }) : null;
   const missing = Boolean(requested && !inView && !brief && !cold);
   const nextWorkingDay = nextWorkingDaySnooze(today, settings.rules.workingDays);
   // The CRM's quick Log call offers Settings > Rules' outcomes, exactly as before (owner: "CRM Log call

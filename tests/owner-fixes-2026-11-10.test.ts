@@ -12,33 +12,42 @@ let b: Basics;
 beforeEach(async () => { await resetDb(); b = await seedBasics(); });
 const as = (u: Basics['users']['alisa'], podIds: string[]) => ({ id: u.id, name: u.name, timezone: 'Europe/London', role: u.role, podIds });
 
-describe('no calling hours', () => {
-  it('Call is open at any hour of the contact\'s day', async () => {
+// Calling hours are back (owner, 13 Nov 2026; audit M02): this test's old expectation, open at any hour, was reversed.
+describe('calling hours (owner, 13 Nov 2026)', () => {
+  it('Call is open from 8am to 9pm of the contact\'s day, and closed outside it', async () => {
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { state: 'IL' });
-    expect(await callGate({ id: b.users.alisa.id, timezone: 'Europe/London' }, c)).toEqual({ blocked: null, warning: null });
+    const rep = { id: b.users.alisa.id, timezone: 'Europe/London' };
+    expect(await callGate(rep, c, new Date('2026-11-10T18:00:00Z'))).toEqual({ blocked: null, warning: expect.stringContaining('Recording notice') });
+    expect((await callGate(rep, c, new Date('2026-11-11T04:00:00Z'))).blocked).toEqual(expect.stringContaining('8am to 9pm'));
   });
 });
 
 describe('the post-call form gives the contact to someone in its pod', () => {
-  it('a colleague who called Alisa\'s contact gives it to themselves: they own it with the next step', async () => {
+  // V01 (audit, 13 Nov 2026): the form's owner change passes the same check as Assign. This test used to
+  // let a Junior FO take a colleague's contact; that expectation was the finding, so it was reversed.
+  it('V01: a Junior FO who called a colleague\'s contact cannot take it; its owner can give it to them', async () => {
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
     await prisma.nextAction.create({ data: { sandboxContactId: c.id, foUserId: b.users.alisa.id, label: 'Call back', action: 'CALL', dueDate: '2099-01-05', audience: 'SANDBOX' } });
     const call = await logManualCall({ userId: b.users.karson.id, sandboxContactId: c.id });
     const karson = as(b.users.karson, [b.pods.Alisa.id]);
-
-    // The form offers the pod's reps, the owner marked.
-    const ctx = await callFormContext(call.id, karson);
-    expect(ctx.ok && ctx.context.owner).toEqual(expect.objectContaining({ currentId: b.users.alisa.id, choices: expect.arrayContaining([expect.objectContaining({ id: b.users.karson.id }), expect.objectContaining({ id: b.users.alisa.id })]) }));
-    // Someone from another pod is refused.
     const date = '2099-01-06';
-    expect(await submitCallForm(call.id, { outcome: 'no_answer', nextStep: 'call_again', nextStepDate: date, newOwnerId: b.users.daniel.id }, karson)).toEqual(expect.objectContaining({ ok: false, field: 'newOwnerId' }));
 
-    const r = await submitCallForm(call.id, { outcome: 'no_answer', nextStep: 'call_again', nextStepDate: date, newOwnerId: b.users.karson.id }, karson);
-    expect(r).toEqual(expect.objectContaining({ ok: true, reminder: expect.stringContaining('yours now') }));
+    // Karson is offered nobody but the owner, and a handover he sends anyway is refused before anything is saved.
+    const ctx = await callFormContext(call.id, karson);
+    expect(ctx.ok && ctx.context.owner?.choices.map((u) => u.id)).toEqual([b.users.alisa.id]);
+    expect(await submitCallForm(call.id, { outcome: 'no_answer', nextStep: 'call_again', nextStepDate: date, newOwnerId: b.users.karson.id }, karson)).toEqual(expect.objectContaining({ ok: false, field: 'newOwnerId' }));
+    expect(await submitCallForm(call.id, { outcome: 'no_answer', nextStep: 'call_again', nextStepDate: date, newOwnerId: b.users.daniel.id }, karson)).toEqual(expect.objectContaining({ ok: false, field: 'newOwnerId' }));
+    expect((await prisma.sandboxContact.findUniqueOrThrow({ where: { id: c.id } })).ownerId).toBe(b.users.alisa.id);
+
+    // Alisa, the owner, gives it to Karson from her own call's form: he owns it with the next step.
+    const own = await logManualCall({ userId: b.users.alisa.id, sandboxContactId: c.id });
+    const alisa = as(b.users.alisa, [b.pods.Alisa.id]);
+    const ctx2 = await callFormContext(own.id, alisa);
+    expect(ctx2.ok && ctx2.context.owner?.choices.map((u) => u.id)).toEqual(expect.arrayContaining([b.users.karson.id, b.users.alisa.id]));
+    const r = await submitCallForm(own.id, { outcome: 'no_answer', nextStep: 'call_again', nextStepDate: date, newOwnerId: b.users.karson.id }, alisa);
+    expect(r).toEqual(expect.objectContaining({ ok: true, reminder: expect.stringContaining("'s now") }));
     expect((await prisma.sandboxContact.findUniqueOrThrow({ where: { id: c.id } })).ownerId).toBe(b.users.karson.id);
-    // The form's next step replaced Alisa's, and it is Karson's: no suggestion went to Alisa.
-    expect(await prisma.nextAction.findMany({ where: { sandboxContactId: c.id, state: 'OPEN' } })).toEqual([expect.objectContaining({ foUserId: b.users.karson.id, dueDate: date })]);
-    expect(await prisma.notification.count({ where: { kind: 'next_step_suggestion' } })).toBe(0);
+    expect(await prisma.nextAction.findMany({ where: { sandboxContactId: c.id, state: 'OPEN' } })).toEqual([expect.objectContaining({ dueDate: date })]);
   });
 
   it('without a new owner, a colleague\'s next step still goes to the owner as a suggestion', async () => {

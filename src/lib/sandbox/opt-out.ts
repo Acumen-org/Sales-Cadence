@@ -36,10 +36,10 @@ export async function optOutPerson(personId: string, opts: Opts): Promise<{ chan
   return { changed: r.ok && r.changed };
 }
 
-/** Opt out whichever subject a row is about. */
-export async function optOutSubject(subject: RowSubject, opts: Opts): Promise<{ changed: boolean }> {
+/** Opt out whichever subject a row is about. `refused` says why it could not be done (M01), never swallowed. */
+export async function optOutSubject(subject: RowSubject, opts: Opts): Promise<{ changed: boolean; refused?: string }> {
   const r = await optOutRow(subject, asOptions(opts));
-  return { changed: r.ok && r.changed };
+  return r.ok ? { changed: r.changed } : { changed: false, refused: r.reason };
 }
 
 /**

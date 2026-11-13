@@ -81,7 +81,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
   ]);
   // B120: Call says why when this viewer may not call (Biz Ops read only), in words under the button.
   const callVerdict = subject ? canAct(toActor(user), subject, 'call') : null;
-  const gateNow = person.phone ? await callGate(user, { phone: person.phone, state: person.city?.split(',').pop()?.trim() ?? null, optedOut: person.optedOut, dnd: person.dnd, email: person.email, linkedinUrl: person.linkedinUrl }) : null;
+  const gateNow = person.phone ? await callGate(user, { personId: person.id, phone: person.phone, state: person.city?.split(',').pop()?.trim() ?? null, optedOut: person.optedOut, dnd: person.dnd, email: person.email, linkedinUrl: person.linkedinUrl }) : null;
   const callGateNow = gateNow && callVerdict && !callVerdict.ok ? { blocked: callVerdict.reason, warning: null } : gateNow;
   // D4: an opt-out from the post-call form can be questioned by anyone and undone by an admin.
   const formOpt = person.optedOut ? await formOptOut(personRef(id)) : null;

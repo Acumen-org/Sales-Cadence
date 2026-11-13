@@ -5,6 +5,7 @@ import { hasUsableEmail } from '../sandbox/ready';
 import { crmDoNotContactTwin, optedOutTwin } from '../sandbox/dedupe';
 import { checkKeysOf, findSuppressed, personCheckKeys, suppressionHash } from '../sandbox/suppression';
 import { readExtraPhones, toE164 } from '../sandbox/normalize';
+import { attemptLimitBlock, callAttemptsToday, callingHoursBlock, callPlace, recordingNotice, type CallPlace } from '../calls/hours';
 import type { SubjectRef } from '../subject';
 import type { Fix, RefusalCode } from './guard';
 
@@ -19,14 +20,16 @@ import type { Fix, RefusalCode } from './guard';
  *      firm match such a CRM person (N003);
  *   4. "Also in CRM" (B053);
  *   5. a post-call form of the caller's still waiting;
- *   6. no usable detail for the channel: email, phone, LinkedIn (B136, N077). No calling hours (owner, 10 Nov 2026).
+ *   6. no usable detail for the channel: email, phone, LinkedIn (B136, N077);
+ *   7. a call only: outside 8am to 9pm in the person's zone, or 2 calls already today (owner, 13 Nov 2026,
+ *      audit M02); a call to a two-party-consent state carries the recording notice as its warning (M03).
  * Not every block applies to every act: EFFECTS is the table in 8.2, and the caller reads `effect`.
  */
 
 /** Who asks: the Call button, setting a next step (by hand or in the form), task generation, a campaign, Outlook step-closing, Move. */
 export type ContactAct = 'call' | 'next_step' | 'form_next_step' | 'task' | 'enroll' | 'step_close' | 'move';
 export type ContactChannel = 'CALL' | 'EMAIL' | 'LINKEDIN';
-export type Block = 'inactive' | 'suppressed' | 'do_not_contact' | 'in_crm' | 'form_pending' | 'no_channel';
+export type Block = 'inactive' | 'suppressed' | 'do_not_contact' | 'in_crm' | 'form_pending' | 'no_channel' | 'calling_hours' | 'call_limit';
 /**
  * What a block does to an act: refuse it (block), leave the step or contact out (skip, leave_out),
  * end the enrollment (end), raise a compliance alert (alert), close the step (close), ask once
@@ -42,9 +45,12 @@ export const EFFECTS: Record<Block, Record<ContactAct, Effect>> = {
   // The form being filed is itself the pending form: its own next step never waits on the queue it clears.
   form_pending: { call: 'block', next_step: 'block', form_next_step: 'runs', task: 'runs', enroll: 'warn', step_close: 'runs', move: 'runs' },
   no_channel: { call: 'block', next_step: 'block', form_next_step: 'block', task: 'skip', enroll: 'warn', step_close: 'runs', move: 'runs' },
+  // M02: only the call itself waits for the hour or the next day; planning a call never does.
+  calling_hours: { call: 'block', next_step: 'runs', form_next_step: 'runs', task: 'runs', enroll: 'runs', step_close: 'runs', move: 'runs' },
+  call_limit: { call: 'block', next_step: 'runs', form_next_step: 'runs', task: 'runs', enroll: 'runs', step_close: 'runs', move: 'runs' },
 };
 
-const CODE: Record<Block, RefusalCode> = { inactive: 'opted_out', suppressed: 'suppressed', do_not_contact: 'do_not_contact', in_crm: 'in_crm', form_pending: 'form_pending', no_channel: 'no_channel' };
+const CODE: Record<Block, RefusalCode> = { inactive: 'opted_out', suppressed: 'suppressed', do_not_contact: 'do_not_contact', in_crm: 'in_crm', form_pending: 'form_pending', no_channel: 'no_channel', calling_hours: 'calling_hours', call_limit: 'call_limit' };
 
 export type ContactCheck =
   | { ok: true; warning: string | null; /** Asked once before the act goes ahead: a number marked wrong. */ confirm: string | null }
@@ -124,6 +130,7 @@ async function coldCheck(c: ColdRow, opts: ContactOptions): Promise<ContactCheck
     () => (c.crmMatchPersonId || c.crmAutoPersonId ? blocked('in_crm', opts, 'This person is in the CRM now, so their outreach has stopped. Move to CRM to work them there.', { label: 'Move to CRM' }) : null),
     () => formPending(opts),
     () => channelBlock(opts, { email: c.email, badEmail: !hasUsableEmail(c), phone: c.phone ?? readExtraPhones(c.additionalPhones)[0]?.number ?? null, badPhone: c.badPhone, linkedin: c.linkedinUrl }),
+    () => callRules(opts, { sandboxContactId: c.id }, () => callPlace({ state: c.state, country: c.country }, { state: c.companyState, country: c.companyCountry })),
   ]);
 }
 
@@ -138,7 +145,21 @@ async function personCheck(p: PersonRow, opts: ContactOptions): Promise<ContactC
     () => (p.optedOut ? blocked('do_not_contact', opts, 'This person asked not to be contacted.') : p.dnd ? blocked('do_not_contact', opts, 'This person is marked Do not contact in the CRM.') : null),
     () => formPending(opts),
     () => channelBlock(opts, { email: p.email, badEmail: p.badEmail || p.emailMissing, phone: p.phone, badPhone: p.badPhone, linkedin: p.linkedinUrl }),
+    () => callRules(opts, { personId: p.id }, async () => callPlace({ state: p.city }, { state: p.companyId ? (await tx.companyCache.findUnique({ where: { id: p.companyId }, select: { city: true } }))?.city : null })),
   ]);
+}
+
+/** M02, M03: a call only. The hour and today's calls in the person's own zone; the recording notice where all must agree. */
+async function callRules(opts: ContactOptions, subject: { personId?: string; sandboxContactId?: string }, placeOf: () => CallPlace | Promise<CallPlace>): Promise<ContactCheck | null> {
+  if (opts.act !== 'call') return null;
+  const now = opts.now ?? new Date();
+  const place = await placeOf();
+  const hours = callingHoursBlock(place, now);
+  if (hours) return blocked('calling_hours', opts, hours);
+  const limit = attemptLimitBlock(await callAttemptsToday(subject, place, now), place);
+  if (limit) return blocked('call_limit', opts, limit);
+  const notice = recordingNotice(place);
+  return notice ? { ok: true, warning: notice, confirm: null } : null;
 }
 
 async function formPending(opts: ContactOptions): Promise<ContactCheck | null> {

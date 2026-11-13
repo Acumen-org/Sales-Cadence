@@ -55,7 +55,7 @@ describe('contract v1.1 and the push intake (W11)', () => {
 
     it('a request without X-Cadence-Contract gets exactly the v1 answer: v1 fields, v1 warning codes, no refused status', async () => {
       const c = bwContact({ email: null, phone: null });
-      const v1 = await push(envelope([c], { pushedBy: { email: 'stranger@bellwether.example' } }));
+      const v1 = await push(envelope([c]));
       expect(Object.keys(v1.body.results[0]).sort()).toEqual(['bellwetherContactId', 'cadenceContactId', 'crmPersonId', 'crmUrl', 'detail', 'filledFields', 'matchedOn', 'ownerEmail', 'ownerName', 'reason', 'result', 'warnings']);
       expect(codes(v1.body.results[0])).toEqual([]);
       const row = await statusOf(c.bellwetherContactId);
@@ -63,8 +63,8 @@ describe('contract v1.1 and the push intake (W11)', () => {
       // The same contact read with 1.1 has the new fields, and the push's warnings were kept for it.
       const v11 = await statusOf(c.bellwetherContactId, '1.1');
       expect(v11.cadenceUrl).toMatch(new RegExp(`/cold-outreach/${row.cadenceContactId}$`));
-      const again = await check(envelope([bwContact({ email: null, phone: null })], { pushedBy: { email: 'stranger@bellwether.example' } }), V11);
-      expect(codes(again.body.results[0])).toEqual(['no_reach', 'owner_not_found']);
+      const again = await check(envelope([bwContact({ email: null, phone: null })]), V11);
+      expect(codes(again.body.results[0])).toEqual(['no_reach']);
     });
   });
 
@@ -281,16 +281,26 @@ describe('contract v1.1 and the push intake (W11)', () => {
       expect(line.body.results[0].result).toBe('created');
     });
 
-    it('B070: an owner Cadence cannot give contacts to, an admin included, leaves them unclaimed and the push says who and why', async () => {
+    // U01, U02, U03, U05 (agreed owner contract, 13 Nov 2026): this test used to expect unclaimed contacts.
+    it('B070, U01: an owner Cadence cannot give contacts to, an admin included, gets each new contact refused (owner_not_found), saying who and why', async () => {
       const admin = await push(envelope([bwContact()], { pushedBy: { email: 'ria@cadence.local' } }), V11);
       expect(admin.body.owner).toBeNull();
-      expect(admin.body.results[0].warnings).toEqual([expect.objectContaining({ code: 'owner_not_found', field: 'pushedBy.email', detail: expect.stringContaining('an admin') })]);
+      expect(admin.body.results[0]).toEqual(expect.objectContaining({ result: 'rejected', reason: 'owner_not_found', cadenceContactId: null, detail: expect.stringContaining('an admin') }));
       const unknown = await push(envelope([bwContact()], { assignTo: { email: 'nobody@cadence.local' } }), V11);
-      expect(unknown.body.results[0].warnings).toEqual([expect.objectContaining({ code: 'assign_to_not_found', detail: 'nobody@cadence.local is not a Cadence user. The contact arrives unclaimed.' })]);
+      expect(unknown.body.results[0]).toEqual(expect.objectContaining({ result: 'rejected', reason: 'owner_not_found', detail: expect.stringContaining('nobody@cadence.local is not a Cadence user.') }));
+      // U02, U03: checked when the push arrives, however old Bellwether's list or its queued request is.
       await prisma.user.update({ where: { id: b.users.karson.id }, data: { active: false } });
       const left = await push(envelope([bwContact()], { assignTo: { email: 'karson@cadence.local' } }), V11);
-      expect(left.body.results[0].warnings[0].detail).toMatch(/no longer has access/);
-      expect((await prisma.sandboxContact.findUniqueOrThrow({ where: { id: left.body.results[0].cadenceContactId } })).ownerId).toBeNull();
+      expect(left.body.results[0]).toEqual(expect.objectContaining({ result: 'rejected', reason: 'owner_not_found', detail: expect.stringMatching(/no longer has access/) }));
+      // The check says the same before any send, so Bellwether can stop it.
+      const preview = await check(envelope([bwContact()], { assignTo: { email: 'karson@cadence.local' } }), V11);
+      expect(preview.body.results[0]).toEqual(expect.objectContaining({ result: 'rejected', reason: 'owner_not_found' }));
+      expect(await prisma.sandboxContact.count({ where: { ownerId: null } })).toBe(0);
+      // U05: a person already in Cold outreach keeps the owner they have; the push changes nothing there.
+      const kept = bwContact();
+      await push(envelope([kept]), V11);
+      const again = await push(envelope([kept], { pushedBy: { email: 'ria@cadence.local' } }), V11);
+      expect(again.body.results[0]).toEqual(expect.objectContaining({ result: 'duplicate_in_sandbox', ownerEmail: 'alisa@cadence.local' }));
     });
 
     it('B071: pushing a moved contact again keeps it moved_to_crm, with its Cadence id and move date', async () => {
@@ -348,9 +358,10 @@ describe('contract v1.1 and the push intake (W11)', () => {
 
     it('B061: a claim, an assignment and a release reach Bellwether\'s read of changes, with the new owner; a leaver owns nothing', async () => {
       const c = bwContact();
-      const pushed = await push(envelope([c], { pushedBy: { email: 'stranger@bellwether.example' } }));
+      const pushed = await push(envelope([c]));
       const id = pushed.body.results[0].cadenceContactId;
-      await prisma.sandboxContact.update({ where: { id }, data: { podId: b.pods.Alisa.id, statusChangedAt: new Date('2026-11-01T00:00:00Z') } });
+      // Unclaimed (U01: a push no longer makes one, so it is let go here).
+      await prisma.sandboxContact.update({ where: { id }, data: { ownerId: null, claimedAt: null, podId: b.pods.Alisa.id, statusChangedAt: new Date('2026-11-01T00:00:00Z') } });
       const since = '2026-11-02T00:00:00Z';
       expect((await status({ changedSince: since })).body.results).toHaveLength(0);
       expect((await claimContact(id, { id: b.users.alisa.id, podIds: [b.pods.Alisa.id], role: 'SENIOR_FO' }, userActor(b.users.alisa))).ok).toBe(true);

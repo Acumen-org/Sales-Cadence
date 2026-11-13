@@ -2,11 +2,13 @@ import { prisma } from '../db';
 import { suppressionReason } from '../sandbox/opt-out';
 import { formsHeldBy } from './form-holder';
 import { callTimeWords, FORM_FIRST } from './words';
+import { attemptLimitBlock, callAttemptsToday, callingHoursBlock, callPlace, recordingNotice } from './hours';
 
 /**
  * Whether Cadence's Call button may open the dialpad for this contact now, as the button is drawn: a
  * call of yours still waiting for its form, "Also in CRM", an opt-out or the suppression list.
- * Calling hours are not checked (owner, 10 Nov 2026: where a contact is cannot be known). The click asks the full check again on the server (contactability, N008), since a
+ * Then the hour (8am to 9pm in the contact's zone), today's calls (at most 2), and the recording
+ * notice where everyone must agree (owner, 13 Nov 2026; M02, M03). The click asks the full check again on the server (contactability, N008), since a
  * page left open goes stale. The dialpad itself is outside Cadence's reach (decision 14).
  */
 
@@ -22,13 +24,19 @@ export async function pendingFormBlock(userId: string, timezone: string, now = n
   return `${FORM_FIRST} ${pending.direction === 'INBOUND' ? 'call from' : 'call with'} ${name} (${callTimeWords(pending.startedAt ?? pending.createdAt, timezone, now)}) first.`;
 }
 
-export async function callGate(user: { id: string; timezone: string }, contact: { state?: string | null; companyState?: string | null; phone?: string | null; country?: string | null; status?: string; optedOut?: boolean; dnd?: boolean; email?: string | null; additionalEmails?: string[]; phoneType?: string | null; additionalPhones?: unknown; linkedinUrl?: string | null; bellwetherContactId?: string | null; individualCrd?: string | null; crmMatchPersonId?: string | null; crmAutoPersonId?: string | null }): Promise<CallGate> {
-  const pending = await pendingFormBlock(user.id, user.timezone);
+export async function callGate(user: { id: string; timezone: string }, contact: { id?: string; personId?: string | null; companyCountry?: string | null; state?: string | null; companyState?: string | null; phone?: string | null; country?: string | null; status?: string; optedOut?: boolean; dnd?: boolean; email?: string | null; additionalEmails?: string[]; phoneType?: string | null; additionalPhones?: unknown; linkedinUrl?: string | null; bellwetherContactId?: string | null; individualCrd?: string | null; crmMatchPersonId?: string | null; crmAutoPersonId?: string | null }, now = new Date()): Promise<CallGate> {
+  const pending = await pendingFormBlock(user.id, user.timezone, now);
   if (pending) return { blocked: pending, warning: null };
   // B053: outreach to a contact who is also in the CRM has stopped; Move to CRM is the way on.
   if (contact.crmMatchPersonId || contact.crmAutoPersonId) return { blocked: 'This person is in the CRM now, so their outreach has stopped. Move to CRM to work them there.', warning: null };
   // Every phone of every type is checked against the list (B001); the click checks again (N008).
   const suppressed = await suppressionReason({ ...contact, phoneType: contact.phoneType ?? 'unknown' });
   if (suppressed) return { blocked: suppressed, warning: null };
-  return { blocked: null, warning: null };
+  const place = callPlace({ state: contact.state, country: contact.country }, { state: contact.companyState, country: contact.companyCountry });
+  const hours = callingHoursBlock(place, now);
+  if (hours) return { blocked: hours, warning: null };
+  const subject = contact.personId ? { personId: contact.personId } : contact.id ? { sandboxContactId: contact.id } : null;
+  const limit = subject ? attemptLimitBlock(await callAttemptsToday(subject, place, now), place) : null;
+  if (limit) return { blocked: limit, warning: null };
+  return { blocked: null, warning: recordingNotice(place) };
 }

@@ -579,8 +579,13 @@ describe('W4: calls and the post-call form', () => {
   it('N008: the Call button checks again at the click: a form that came due since the page was drawn blocks it', async () => {
     const { recordCallIntentAction } = await import('@/lib/actions/call-forms');
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
-    expect(await recordCallIntentAction({ phone: c.phone!, sandboxContactId: c.id, confirmed: true })).toEqual(expect.objectContaining({ ok: true }));
-    await logManualCall({ userId: b.users.alisa.id, sandboxContactId: c.id });
-    expect(await recordCallIntentAction({ phone: c.phone!, sandboxContactId: c.id, confirmed: true })).toEqual({ ok: false, error: expect.stringMatching(/^Fill in the form for your call with/) });
+    // Noon in Chicago, inside calling hours (M02).
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-10T18:00:00Z'));
+    try {
+      expect(await recordCallIntentAction({ phone: c.phone!, sandboxContactId: c.id, confirmed: true })).toEqual(expect.objectContaining({ ok: true }));
+      await logManualCall({ userId: b.users.alisa.id, sandboxContactId: c.id });
+      expect(await recordCallIntentAction({ phone: c.phone!, sandboxContactId: c.id, confirmed: true })).toEqual({ ok: false, error: expect.stringMatching(/^Fill in the form for your call with/) });
+    } finally { vi.useRealTimers(); }
   });
 });
