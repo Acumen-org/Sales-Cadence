@@ -95,6 +95,19 @@ export async function missingMeetingTags(): Promise<{ field: string; name: strin
   return (row?.value as { items?: { field: string; name: string }[] } | null)?.items ?? [];
 }
 
+/**
+ * N14: whether any tag on the missing list is now in Twenty (an admin added it by hand), so writing
+ * the meetings again would fill it in. While none is, rewriting every meeting each hour changes nothing.
+ */
+export function missingTagsNowInCrm(schema: TwentyMeetingSchema, missing: { field: string; name: string }[]): boolean {
+  const fields: Record<string, TwentyTagField | null> = { 'Booked by': schema.fields.bookedBy, Products: schema.fields.products, 'Team on the call': schema.fields.team };
+  return missing.some((t) => {
+    const field = fields[t.field];
+    const key = t.name.trim().toLowerCase();
+    return Boolean(field && (field.text || field.options.some((o) => o.label.trim().toLowerCase() === key || o.value.toLowerCase() === key)));
+  });
+}
+
 /** The record's field values and the contacts to link, in the names this workspace gave its fields. */
 export async function meetingRecord(m: MeetingForCrm, schema: TwentyMeetingSchema, client: TwentyClient): Promise<{ data: Record<string, unknown>; contacts: { personId: string; name: string }[]; tags: TagOutcome[] }> {
   const f = schema.fields;
@@ -201,7 +214,16 @@ export async function syncMeetingToCrm(meetingId: string): Promise<string | null
   if (schema) {
     const { tags, ...record } = await meetingRecord(meeting, schema, client);
     await rememberTags(tags);
-    const { id } = await client.saveMeetingRecord(schema, { id: meeting.twentyMeetingId, cadenceId: meeting.id, ...record });
+    let id: string;
+    try {
+      ({ id } = await client.saveMeetingRecord(schema, { id: meeting.twentyMeetingId, cadenceId: meeting.id, ...record }));
+    } catch (err) {
+      // N16: the record was made but its contacts failed: keep its id, so the retry updates that
+      // record instead of creating a second one.
+      const made = (err as { meetingRecordId?: unknown }).meetingRecordId;
+      if (typeof made === 'string' && made !== meeting.twentyMeetingId) await prisma.meeting.update({ where: { id: meetingId }, data: { twentyMeetingId: made } });
+      throw err;
+    }
     // What Twenty now holds, so a later difference there is found and written over (meetings/crm-check.ts).
     const snapshot = meetingFacts(schema, record.data, record.contacts.map((c) => c.personId));
     await prisma.meeting.update({ where: { id: meetingId }, data: { twentyMeetingId: id, twentySnapshot: snapshot, twentySyncedAt: new Date() } });
@@ -223,7 +245,10 @@ export async function syncMeetingToCrm(meetingId: string): Promise<string | null
 
 function keepForRetry(operation: string, payload: Record<string, unknown>, err: unknown, twentyId: string | null = null) {
   const message = err instanceof Error ? err.message : String(err);
-  return prisma.twentyWrite.create({ data: { operation, objectType: 'meeting', twentyId, payload: payload as object, status: 'FAILED', error: message, attempts: 1, nextAttemptAt: new Date(Date.now() + retryDelayMs(1)) } }).catch(() => undefined);
+  const data = { operation, objectType: 'meeting', twentyId, payload: payload as object, status: 'FAILED', error: message, attempts: 1, nextAttemptAt: new Date(Date.now() + retryDelayMs(1)) };
+  // N31: tried once more, then reported as an error; the ten-minute check (crm-check.ts) rewrites a
+  // meeting Twenty does not hold all the same.
+  return prisma.twentyWrite.create({ data }).catch(() => prisma.twentyWrite.create({ data })).catch((e) => console.error(`[meetings] LOST: ${operation} could not be queued for retry: ${e instanceof Error ? e.message : String(e)}`));
 }
 
 /** Write it now, or keep it in the outbox the worker retries with backoff. */

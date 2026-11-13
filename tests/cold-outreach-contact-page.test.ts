@@ -133,32 +133,22 @@ describe('Cold contact page: layout and cues (S10, PLAN 4.2)', () => {
     const html = text(await draw(c.id, alisa));
     // 23:30 UTC on 3 Nov is still 3 Nov in Chicago, the workspace zone.
     expect(html).toContain(`From Bellwether, sent by ${A} on 3 Nov 2026`);
-    expect(html).toContain(`Sent again by ${K} on 5 Nov 2026`);
+    expect(html).toContain(`Sent again ${K} , 5 Nov 2026`);
     expect(html).toContain('Met at the FPA booth.');
     expect(html).not.toContain('sent by alisa@cadence.local');
     expect(optOutConfirm({ name: 'Jane Doe' }).reason).toEqual(expect.objectContaining({ required: true }));
   });
 
-  it('B154 B155 B104: the checklist in plain nouns, "4 of 5 done", then "CRM details complete", then green "Ready to move"; readiness warnings shown', async () => {
+  it('B154 B155 B104: no CRM checklist on the page (owner, 13 Nov 2026); readiness reads in plain nouns, and "Ready to move" needs a positive outcome', async () => {
     const r = checkReady({ firstName: 'Jane', lastName: 'Doe', companyName: 'Harbor', email: null, emailVerification: null, badEmail: false, phone: null, phoneType: null, badPhone: false, additionalPhones: [], status: 'ACTIVE', jobTitle: null, linkedinUrl: null, city: null, productInterest: [], ownerId: null, podId: null }, { owner: null, podName: null, settings: DEFAULT_SETTINGS.sandbox });
     expect(r.missing.map((m) => m.text)).toEqual(['Email or direct phone', 'Owner (claim it)', 'Pod']);
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { jobTitle: null, linkedinUrl: null });
     let html = text(await draw(c.id, alisa));
-    expect(html).toContain('CRM checklist');
-    expect(html).toContain('CRM details complete');
+    expect(html).not.toContain('CRM checklist');
     expect(html).not.toContain('Ready to move');
-    expect(html).toContain('No conversation yet');
-    // B104: what is worth adding before the move.
-    expect(html).toContain('Worth adding before the move: No job title · No LinkedIn');
     await meetingBooked(c.id, b.users.alisa.id);
     html = text(await draw(c.id, alisa));
-    expect(html).toContain('Ready to move');
-    expect(html).toContain('Positive outcome: Meeting booked');
-    const gap = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { email: null, phone: null });
-    html = text(await draw(gap.id, alisa));
-    expect(html).toContain('4 of 5 done');
-    expect(html).toContain('Email or direct phone');
-    expect(html).not.toMatch(/Needs [a-z]/);
+    expect(html).toContain('Ready to move: CRM details complete, and a positive outcome (Meeting booked)');
   });
 
   it('B050: the checklist offers a pod picker when the owner works in several pods', async () => {

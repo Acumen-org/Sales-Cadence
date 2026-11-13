@@ -99,3 +99,67 @@ describe('continuous sync survives a failing stage', () => {
     expect(stats.removed).toBe(0); // no company was marked deleted on the strength of a failed listing
   });
 });
+
+describe('N13: a one-minute pass reads each listing once', () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+  it('people and deleted people are listed once, and the data model is not read', async () => {
+    const client = new PartlyBrokenTwenty();
+    client.reset('demo');
+    await syncContinuously(new Date('2026-09-11T10:00:00Z'), client);
+    const calls = { people: 0, deleted: 0, introspect: 0 };
+    const listPeople = client.listPeople;
+    client.listPeople = async (o) => {
+      if (o?.deletedSince) calls.deleted += 1;
+      else if (o?.updatedSince) calls.people += 1;
+      return listPeople(o);
+    };
+    const introspect = client.introspect.bind(client);
+    client.introspect = async () => {
+      calls.introspect += 1;
+      return introspect();
+    };
+    await syncContinuously(new Date('2026-09-11T10:01:00Z'), client);
+    expect(calls).toEqual({ people: 1, deleted: 1, introspect: 0 });
+  });
+});
+
+describe('N17: a listing that keeps failing', () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+  it('re-reads at most the nightly look-back, not everything since it first failed', async () => {
+    const client = new PartlyBrokenTwenty();
+    client.reset('demo');
+    client.broken.add('listNotes');
+    await syncContinuously(new Date('2026-09-01T10:00:00Z'), client);
+    await syncContinuously(new Date('2026-09-11T10:00:00Z'), client);
+    client.broken.clear();
+    const asked: string[] = [];
+    const listNotes = client.listNotes;
+    client.listNotes = async (o) => {
+      if (o?.updatedSince) asked.push(o.updatedSince);
+      return listNotes(o);
+    };
+    await syncContinuously(new Date('2026-09-11T10:01:00Z'), client);
+    expect(asked[0]).toBe('2026-09-08T10:01:00.000Z');
+  });
+});
+
+describe('N23, N32: CRM members and Cadence users', () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+  it('a member invited again under a new id is followed; linking never resets the time zone', async () => {
+    const { seedBasics } = await import('./helpers/db');
+    const { syncWorkspaceMembers } = await import('@/lib/continuous-sync');
+    const { getMockTwentyClient } = await import('@/lib/twenty/mock-client');
+    const b = await seedBasics();
+    await prisma.user.update({ where: { id: b.users.alisa.id }, data: { email: 'alisa@acumen.example', twentyMemberId: 'wm-removed', timezone: 'America/Chicago' } });
+    await prisma.user.update({ where: { id: b.users.leigh.id }, data: { email: 'leigh@acumen.example', twentyMemberId: null, timezone: 'Asia/Tokyo' } });
+    await syncWorkspaceMembers(getMockTwentyClient());
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: b.users.alisa.id } })).toMatchObject({ twentyMemberId: 'wm-alisa', timezone: 'America/Chicago' });
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: b.users.leigh.id } })).toMatchObject({ twentyMemberId: 'wm-leigh', timezone: 'Asia/Tokyo' });
+  });
+});

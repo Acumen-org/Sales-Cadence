@@ -3,6 +3,7 @@ import { prisma } from './db';
 import { applyNeverProspectRule } from './non-prospects';
 import { hashPassword } from './auth/password';
 import { workspaceTimezone } from './workspace';
+import { getSettings } from './settings';
 import { getTwentyClient } from './twenty';
 import { refreshPersonCache, type FullRefreshProgress } from './person-cache';
 import { reconcile } from './engine/reconcile';
@@ -12,11 +13,16 @@ import type { TwentyClient } from './twenty/client';
 /** Discover CRM members without granting login access or restoring removed users. */
 export async function syncWorkspaceMembers(client: TwentyClient) {
   const members = await client.listWorkspaceMembers();
+  const current = new Set(members.map((m) => m.id));
   for (const member of members) {
     const email = member.email?.trim().toLowerCase(); if (!email) continue;
     const existing = await prisma.user.findFirst({ where: { OR: [{ twentyMemberId: member.id }, { email }] } });
     if (existing) {
-      if (!existing.twentyMemberId) await prisma.user.updateMany({ where: { id: existing.id, twentyMemberId: null }, data: { twentyMemberId: member.id, timezone: workspaceTimezone() } });
+      // N32: linking keeps the user's own time zone. N23: a member removed and invited again has a new
+      // id; the user found by email follows it, once the old id is no longer a member at all.
+      if (existing.twentyMemberId !== member.id && (!existing.twentyMemberId || !current.has(existing.twentyMemberId)) && !(await prisma.user.findFirst({ where: { twentyMemberId: member.id }, select: { id: true } }))) {
+        await prisma.user.updateMany({ where: { id: existing.id, twentyMemberId: existing.twentyMemberId }, data: { twentyMemberId: member.id } });
+      }
     } else {
       await prisma.user.upsert({ where: { email }, create: { email, name: [member.firstName,member.lastName].filter(Boolean).join(' ') || email, twentyMemberId: member.id, timezone: workspaceTimezone(), role: 'JUNIOR_FO', active: false, passwordHash: await hashPassword(randomBytes(32).toString('hex')) }, update: {} });
     }
@@ -116,7 +122,10 @@ export async function syncContinuously(now = new Date(), injected?: TwentyClient
     const watermark = state?.watermark ? new Date(state.watermark).getTime() : now.getTime() - 14 * 86400000;
     const since = new Date(watermark - 10 * 60000).toISOString();
     const stageWatermarks = Object.fromEntries(CURSOR_STAGES.map((stage) => [stage, state?.stageWatermarks?.[stage] ?? new Date(watermark).toISOString()]));
-    const sinceByStage = Object.fromEntries(CURSOR_STAGES.map((stage) => [stage, new Date(new Date(stageWatermarks[stage]).getTime() - 10 * 60000).toISOString()]));
+    // N17: a listing that keeps failing re-reads at most the nightly look-back, not a window that
+    // grows for as long as it fails; the nightly reconcile covers that same span.
+    const floor = state?.watermark ? now.getTime() - (await getSettings()).rules.reconcileLookbackDays * 86_400_000 : 0;
+    const sinceByStage = Object.fromEntries(CURSOR_STAGES.map((stage) => [stage, new Date(Math.max(new Date(stageWatermarks[stage]).getTime() - 10 * 60000, floor)).toISOString()]));
     const result = await reconcile({ since, sinceByStage, now, actor: SYSTEM_ACTOR }, client);
     Object.assign(stageErrors, result.stageErrors);
     try {

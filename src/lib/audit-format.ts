@@ -132,6 +132,7 @@ const TITLES: Record<string, string> = {
   attendees_updated: 'Attendees updated',
   transcript_saved: 'Transcript saved',
   prospects_linked: 'Prospects linked to the meeting',
+  crm_duplicate_removed: 'A duplicate of the meeting removed from the CRM',
   plan_updated: 'Sequence plan updated',
   // Administration (not in Activity, but never a raw name).
   'user:created': 'Team member added',
@@ -151,6 +152,7 @@ const TITLES: Record<string, string> = {
   admin_login_failed: 'Admin sign-in failed',
   caller_number_set: 'Calling number set',
   caller_number_released: 'Calling number released',
+  caller_number_synced: 'Calling number copied from h00ks',
   caller_number_moved: 'Calling number moved to the replacement',
   reconcile_ran: 'Checked against the CRM',
   webhook_registered: 'CRM webhook registered',
@@ -335,6 +337,11 @@ function describe(action: string, details: Details, actorLabel: string | null, e
       return { title: d.by === 'retention' ? 'Removed by retention: no activity for a long time' : `Removed from Cold outreach${by}`, fields: [] };
     case 'move_failed':
       return { title: 'Move to the CRM failed', fields: str(d.reason) ? [{ label: 'Why', value: str(d.reason)! }] : str(d.error) ? [{ label: 'Why', value: str(d.error)! }] : [] };
+    case 'move_fields_kept_in_notes': {
+      const KEPT: Record<string, string> = { email: 'email (as an other email)', phones: 'phones', links: 'LinkedIn, city and title', choices: 'lead source, products and tags', owner: 'owner and other emails', firm: 'firm' };
+      const dropped = Array.isArray(d.dropped) ? (d.dropped as unknown[]).map((x) => KEPT[String(x)] ?? String(x)) : [];
+      return { title: 'Moved to the CRM with some details in its notes', fields: dropped.length ? [{ label: 'The CRM did not take', value: dropped.join(', ') }] : [] };
+    }
     case 'email_to_do_not_contact':
       return { title: 'Emailed although they must not be contacted', fields: [...(str(d.why) ? [{ label: 'Why not', value: str(d.why)! }] : []), ...(str(d.address) ? [{ label: 'Address', value: str(d.address)! }] : [])] };
     case 'call_form_submitted':

@@ -252,7 +252,7 @@ const errorText = (err: unknown) => (err instanceof Error ? err.message : String
  * scan never sees them. Without `since` the pass is complete, so anything cached that Twenty did
  * not return no longer exists there and is marked deleted here.
  */
-export async function refreshPersonCache(client: TwentyClient, opts: { since?: string; sinceByStage?: Partial<Record<RefreshStage, string>>; resume?: FullRefreshProgress; pageBudget?: number } = {}): Promise<RefreshStats> {
+export async function refreshPersonCache(client: TwentyClient, opts: { since?: string; sinceByStage?: Partial<Record<RefreshStage, string>>; resume?: FullRefreshProgress; pageBudget?: number; /** N13: the people a change scan listed, kept for the caller so it need not list them again. */ collect?: { people: TwentyPerson[]; deletedPeople: TwentyPerson[] } } = {}): Promise<RefreshStats> {
   const stats: RefreshStats = { people: 0, companies: 0, deleted: 0, removed: 0, failed: 0, firstError: null, stageErrors: {} };
   const startedAt = new Date();
   const attempt = async (label: string, fn: () => Promise<unknown>) => {
@@ -277,14 +277,19 @@ export async function refreshPersonCache(client: TwentyClient, opts: { since?: s
       return false;
     }
   };
-  try {
-    await syncPodsFromTwenty(client);
-  } catch (err) {
-    console.warn('[cache] pod sync skipped:', errorText(err));
+  // N13: the whole data model is read for new pods once a day with the full listing, not every
+  // minute; a person arriving with an unknown pod creates it on the spot all the same (ensurePod).
+  if (!opts.since) {
+    try {
+      await syncPodsFromTwenty(client);
+    } catch (err) {
+      console.warn('[cache] pod sync skipped:', errorText(err));
+    }
   }
   if (opts.since) {
     await stage('people', async () => {
       for await (const person of paginate((after) => client.listPeople({ updatedSince: opts.sinceByStage?.people ?? opts.since, after, limit: 100, includeDeleted: true }))) {
+        opts.collect?.people.push(person);
         if (await attempt(`person ${person.id}`, () => upsertPersonCache(person, prisma, { fresh: true }))) stats.people += 1;
       }
     });
@@ -295,6 +300,7 @@ export async function refreshPersonCache(client: TwentyClient, opts: { since?: s
     });
     await stage('deletedPeople', async () => {
       for await (const person of paginate((after) => client.listPeople({ deletedSince: opts.sinceByStage?.deletedPeople ?? opts.since, after, limit: 100 }))) {
+        opts.collect?.deletedPeople.push(person);
         if (await attempt(`deleted person ${person.id}`, () => upsertPersonCache(person, prisma, { fresh: true }))) stats.deleted += 1;
       }
     });
@@ -378,8 +384,16 @@ async function sweepUnseen(kind: 'person' | 'company', client: TwentyClient, sin
     return;
   }
   const stale = { where: { deletedAt: null, syncedAt: { lt: since } }, data: { deletedAt: since, syncedAt: since } };
+  // N07: a person gone from the CRM leaves their sequences too, as the deletion webhook would have.
+  const goneIds = kind === 'person' ? (await prisma.personCache.findMany({ where: stale.where, select: { id: true } })).map((p) => p.id) : [];
   const gone = kind === 'person' ? await prisma.personCache.updateMany(stale) : await prisma.companyCache.updateMany(stale);
   stats.removed += gone.count;
+  if (!goneIds.length) return;
+  const { applyPersonFlags } = await import('./engine/enrollment');
+  const marked = await prisma.personCache.findMany({ where: { id: { in: goneIds }, deletedAt: since }, select: { id: true } });
+  for (const { id } of marked) {
+    await applyPersonFlags({ id, dnd: false, deletedAt: since.toISOString() }, { actor: SYSTEM_ACTOR }).catch((err) => console.warn(`[cache] person ${id} removed but not taken out of their sequence: ${errorText(err)}`));
+  }
 }
 
 /** Make sure the given person ids are cached, fetching missing ones from Twenty. */

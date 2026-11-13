@@ -117,7 +117,7 @@ export async function retryTwentyWriteAction(formData: FormData): Promise<Action
 export async function discardTwentyWriteAction(formData: FormData): Promise<ActionResult> {
   await requireAdmin();
   const writeId = String(formData.get('writeId') ?? '');
-  const changed = await prisma.twentyWrite.updateMany({ where: { id: writeId, status: { in: ['FAILED', 'RETRYING'] } }, data: { status: 'DISCARDED', nextAttemptAt: null } });
+  const changed = await prisma.twentyWrite.updateMany({ where: { id: writeId, status: { in: ['FAILED', 'RETRYING', 'GAVE_UP'] } }, data: { status: 'DISCARDED', nextAttemptAt: null } });
   revalidatePath('/settings');
   return changed.count ? { ok: true, message: 'Discarded. The CRM will not receive this write.' } : { ok: false, error: 'That write is no longer waiting.' };
 }
