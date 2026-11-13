@@ -203,6 +203,15 @@ describe('read API', () => {
       expect((await call('', { key: other.key })).status).toBe(200);
     });
 
+    it('V08: a cold contact carries its extra emails, designations, tags and products, as well as its extra phones', async () => {
+      const { key } = await makeKey(['cold-outreach']);
+      const { readyContact } = await import('./helpers/sandbox');
+      const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { additionalEmails: ['second@example.com'], designations: ['CFP'], tags: ['vip'], productInterest: ['ETF'] });
+      const r = await call(`/cold-outreach/contacts/${c.id}`, { key });
+      expect(r.status).toBe(200);
+      expect(r.body.data).toEqual(expect.objectContaining({ additionalEmails: ['second@example.com'], designations: ['CFP'], tags: ['vip'], productInterest: ['ETF'], additionalPhones: expect.any(Array) }));
+    });
+
     it('V09: the limit is shared through the database, and a caller sending wrong keys is slowed', async () => {
       const { id, key } = await makeKey(['crm']);
       const now = new Date();

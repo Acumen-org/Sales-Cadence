@@ -104,7 +104,9 @@ const MEETING = pick(
   'createdById', 'bookedById', 'review', 'reviewedById', 'reviewedAt', 'twentyMeetingId', 'createdAt', 'updatedAt',
 );
 const COLD_CONTACT = pick(
-  'id', 'status', 'source', 'firstName', 'lastName', 'jobTitle', 'email', 'emailIsRole', 'emailVerification', 'phone', 'phoneType', 'phoneExtension', 'additionalPhones',
+  // V08: every way to reach the person Cadence holds, with what it knows of them, as the record shows it.
+  'id', 'status', 'source', 'firstName', 'lastName', 'jobTitle', 'email', 'additionalEmails', 'emailIsRole', 'emailVerification', 'phone', 'phoneType', 'phoneExtension', 'additionalPhones',
+  'designations', 'tags', 'productInterest',
   'linkedinUrl', 'city', 'state', 'country', 'individualCrd', 'companyName', 'companyDomain', 'companyWebsite', 'companyCrd', 'companyCity', 'companyState', 'companyCountry',
   'companyPhone', 'companyAumUsd', 'companyEmployees', 'ownerId', 'podId', 'claimedAt', 'firstClaimedAt', 'bellwetherContactId', 'bellwetherUrl', 'sourceNote', 'collectedAt',
   'pushedByEmail', 'pushedByName', 'createdById', 'badEmail', 'badPhone', 'possibleBounceAt', 'optedOutAt', 'optOutReason', 'optOutSource', 'optOutLiftedAt', 'removedById',
