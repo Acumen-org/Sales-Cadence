@@ -64,16 +64,14 @@ export function retryDelayMs(attempts: number): number {
 async function reportFailure(task: SyncTask, operation: string, err: unknown, write?: FailedWrite) {
   const message = err instanceof Error ? err.message : String(err);
   console.warn(`[sync-out] ${operation} failed for task ${task.id}: ${message}`);
-  try {
-    await logAudit({ entityType: 'task', entityId: task.id, action: 'sync_failed', actor: SYSTEM_ACTOR, details: { operation, message } });
-    if (write) {
-      await prisma.twentyWrite.create({
-        data: { operation, objectType: write.objectType, payload: write.payload, twentyId: write.twentyId ?? null, taskId: task.id, dryRun: false, status: 'FAILED', error: message, attempts: 1, nextAttemptAt: new Date(Date.now() + retryDelayMs(1)) },
-      });
-    }
-  } catch {
-    /* ignore */
+  // N31: the outbox row comes first and on its own: an audit line that cannot be written must not
+  // cost the write itself. A save that fails is tried once more, then reported as an error; the
+  // worker's sweep for completed steps without a CRM write (sync-retry.ts, N09) still finds it.
+  if (write) {
+    const data = { operation, objectType: write.objectType, payload: write.payload, twentyId: write.twentyId ?? null, taskId: task.id, dryRun: false, status: 'FAILED', error: message, attempts: 1, nextAttemptAt: new Date(Date.now() + retryDelayMs(1)) };
+    await prisma.twentyWrite.create({ data }).catch(() => prisma.twentyWrite.create({ data })).catch((err) => console.error(`[sync-out] LOST: ${operation} for task ${task.id} could not be queued for retry: ${err instanceof Error ? err.message : String(err)}`));
   }
+  await logAudit({ entityType: 'task', entityId: task.id, action: 'sync_failed', actor: SYSTEM_ACTOR, details: { operation, message } }).catch(() => undefined);
 }
 
 /**

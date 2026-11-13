@@ -245,7 +245,10 @@ export async function syncMeetingToCrm(meetingId: string): Promise<string | null
 
 function keepForRetry(operation: string, payload: Record<string, unknown>, err: unknown, twentyId: string | null = null) {
   const message = err instanceof Error ? err.message : String(err);
-  return prisma.twentyWrite.create({ data: { operation, objectType: 'meeting', twentyId, payload: payload as object, status: 'FAILED', error: message, attempts: 1, nextAttemptAt: new Date(Date.now() + retryDelayMs(1)) } }).catch(() => undefined);
+  const data = { operation, objectType: 'meeting', twentyId, payload: payload as object, status: 'FAILED', error: message, attempts: 1, nextAttemptAt: new Date(Date.now() + retryDelayMs(1)) };
+  // N31: tried once more, then reported as an error; the ten-minute check (crm-check.ts) rewrites a
+  // meeting Twenty does not hold all the same.
+  return prisma.twentyWrite.create({ data }).catch(() => prisma.twentyWrite.create({ data })).catch((e) => console.error(`[meetings] LOST: ${operation} could not be queued for retry: ${e instanceof Error ? e.message : String(e)}`));
 }
 
 /** Write it now, or keep it in the outbox the worker retries with backoff. */

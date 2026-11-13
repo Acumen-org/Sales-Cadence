@@ -132,3 +132,27 @@ describe('N27: a write that can never succeed is given up, not retried for ever'
     expect((await retryFailedWrites({ ids: [unknown.id] })).retried).toBe(1);
   });
 });
+
+describe('N31: a write the CRM refused is queued even when the audit line cannot be written', () => {
+  it('keeps the outbox row', async () => {
+    const { vi } = await import('vitest');
+    await resetDb();
+    const b = await seedBasics();
+    const { enrollPeople } = await import('@/lib/engine/enrollment');
+    const { SYSTEM_ACTOR } = await import('@/lib/audit');
+    const { loadSyncTask, syncTaskCompleted } = await import('@/lib/engine/sync-out');
+    const { getMockTwentyClient } = await import('@/lib/twenty/mock-client');
+    const now = new Date();
+    await enrollPeople({ personIds: ['person-01'], sequenceId: b.sequence.id, podId: b.pods.Alisa.id, startDate: now.toISOString().slice(0, 10), assignment: { mode: 'FIXED', foUserId: b.users.alisa.id }, actor: SYSTEM_ACTOR }, { now });
+    const task = await prisma.task.findFirstOrThrow({ where: { enrollment: { personId: 'person-01' }, state: 'PENDING' } });
+    await prisma.task.update({ where: { id: task.id }, data: { state: 'DONE', completedAt: now, twentyTaskId: null } });
+    getMockTwentyClient().failNext = new Error('Twenty is down');
+    const audit = vi.spyOn(prisma.auditLog, 'create').mockRejectedValue(new Error('audit table locked'));
+    try {
+      await syncTaskCompleted((await loadSyncTask(task.id))!);
+    } finally {
+      audit.mockRestore();
+    }
+    expect(await prisma.twentyWrite.count({ where: { taskId: task.id, operation: 'createNote', status: 'FAILED' } })).toBe(1);
+  });
+});
