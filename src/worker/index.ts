@@ -3,7 +3,7 @@ import { backfillMeetingsToCrm, meetingSchemaShape, missingMeetingTags } from '.
 import { backfillTeamsTranscripts } from '../lib/meetings/teams-transcript';
 import { MEETINGS_CHANGED_KEY, checkMeetingsInCrm } from '../lib/meetings/crm-check';
 import { backfillSharePointPlayers } from '../lib/meetings/sharepoint-player';
-import { retryFailedWrites } from '../lib/engine/sync-retry';
+import { retryFailedWrites, sweepUnwrittenSyncs } from '../lib/engine/sync-retry';
 import { sweepUnprocessedEvents } from '../lib/engine/ingest';
 import { prisma } from '../lib/db';
 import { env } from '../lib/env';
@@ -35,7 +35,7 @@ import { beatWorker } from '../lib/worker-heartbeat';
 
 const config=env();
 const log=(message:string,extra?:unknown)=>console.log('[worker '+new Date().toISOString()+'] '+message,extra??'');
-let running=false;let lastSync=0;let lastPurge=0;let stopping=false;
+let running=false;let lastSync=0;let lastPurge=0;let stopping=false;let unwrittenAt=0;
 /**
  * The nightly catch-up, which the docs have always promised and nothing ran: continuous sync
  * follows a watermark, so an event Twenty never delivered is never noticed. Once a day, in the
@@ -208,6 +208,8 @@ async function tick(){
    // P02: a scheduler failure is logged and the rest of the pass (write retry, next actions, clean-up) still runs.
    try{const stats=await runSchedulerTick({actor:SYSTEM_ACTOR});if(stats.generated||stats.completed)log('scheduler',stats);}catch(error){log('scheduler failed',error);}
    try{const retried=await retryFailedWrites();if(retried.retried)log('twenty write retry',retried);}catch(error){log('twenty write retry failed',error);}
+   // N09: CRM writes a click caused that a restart cut off (neither done nor queued) are made now.
+   if(now>=unwrittenAt){unwrittenAt=now+300_000;try{const swept=await sweepUnwrittenSyncs(new Date(now));if(swept.tasks||swept.optOuts)log('unwritten CRM writes swept',swept);}catch(error){log('unwritten CRM writes sweep failed',error);}}
    // LinkedIn, as the LinkedIn Console saw it: events in, tasks closed and opened (src/lib/linkedin).
    try{const li=await runLinkedInPass();if(Object.keys(li).length)log('linkedin',li);}catch(error){log('linkedin failed',error);}
    // Next actions: what has not reached Twenty yet, and what people changed there.

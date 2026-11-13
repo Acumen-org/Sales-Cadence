@@ -86,3 +86,25 @@ describe('writes Twenty did not receive are kept and replayed', () => {
     expect((await retryFailedWrites({ ids: [live.id] })).retried).toBe(0);
   });
 });
+
+describe('N09: CRM writes a restart cut off after the click are made later', () => {
+  it('a completed step with no note and no queued write gets its note; an opt-out gets its Do not contact', async () => {
+    await resetDb();
+    const b = await seedBasics();
+    const { enrollPeople } = await import('@/lib/engine/enrollment');
+    const { SYSTEM_ACTOR } = await import('@/lib/audit');
+    const { sweepUnwrittenSyncs } = await import('@/lib/engine/sync-retry');
+    const now = new Date();
+    await enrollPeople({ personIds: ['person-01'], sequenceId: b.sequence.id, podId: b.pods.Alisa.id, startDate: now.toISOString().slice(0, 10), assignment: { mode: 'FIXED', foUserId: b.users.alisa.id }, actor: SYSTEM_ACTOR }, { now });
+    const task = await prisma.task.findFirstOrThrow({ where: { enrollment: { personId: 'person-01' }, state: 'PENDING' } });
+    // Done, but the process stopped before the after-response write ran.
+    await prisma.task.update({ where: { id: task.id }, data: { state: 'DONE', completedAt: new Date(now.getTime() - 30 * 60_000), twentyTaskId: null } });
+    await prisma.personCache.update({ where: { id: 'person-02' }, data: { optedOut: true, optedOutAt: new Date(now.getTime() - 30 * 60_000), dnd: false } });
+
+    expect(await sweepUnwrittenSyncs(now)).toEqual({ tasks: 1, optOuts: 1 });
+    expect((await prisma.task.findUniqueOrThrow({ where: { id: task.id } })).twentyNoteId).toBeTruthy();
+    expect((await prisma.personCache.findUniqueOrThrow({ where: { id: 'person-02' } })).dnd).toBe(true);
+    // once written, never again
+    expect(await sweepUnwrittenSyncs(now)).toEqual({ tasks: 0, optOuts: 0 });
+  });
+});
