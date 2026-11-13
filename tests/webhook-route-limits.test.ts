@@ -11,7 +11,7 @@ describe('the Twenty webhook', () => {
     const big = new ReadableStream<Uint8Array>({
       start(c) { for (let i = 0; i < 3; i++) c.enqueue(new Uint8Array(1024 * 1024)); c.close(); },
     });
-    const req = new NextRequest('http://localhost/api/webhooks/twenty', { method: 'POST', body: big, duplex: 'half' } as RequestInit & { duplex: 'half' });
+    const req = new NextRequest('http://localhost/api/webhooks/twenty', { method: 'POST', body: big, duplex: 'half' } as unknown as ConstructorParameters<typeof NextRequest>[1]);
     expect((await POST(req)).status).toBe(413);
   });
 

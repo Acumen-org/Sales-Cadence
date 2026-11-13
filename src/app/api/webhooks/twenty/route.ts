@@ -3,6 +3,7 @@ import { env } from '@/lib/env';
 import { ingestEvent, type IngestResult } from '@/lib/engine/ingest';
 import { parseWebhookEvent, verifyWebhook } from '@/lib/twenty/webhook-auth';
 import { noteMeetingsChangedInTwenty } from '@/lib/meetings/crm-check';
+import { boundedText } from '@/lib/http-body';
 
 export const runtime = 'nodejs';
 
@@ -13,24 +14,6 @@ export const runtime = 'nodejs';
  */
 /** Q05: the most a webhook body may be. Twenty sends one event (or a few) at a time. */
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
-
-/** The body as text, or null once it passes the cap: read in pieces, never whole first. */
-async function boundedText(req: Request, max: number): Promise<string | null> {
-  const declared = Number(req.headers.get('content-length') ?? '');
-  if (Number.isFinite(declared) && declared > max) return null;
-  if (!req.body) return '';
-  const reader = req.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > max) { await reader.cancel().catch(() => undefined); return null; }
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks).toString('utf8');
-}
 
 export async function POST(req: NextRequest) {
   const rawBody = await boundedText(req, MAX_BODY_BYTES);
