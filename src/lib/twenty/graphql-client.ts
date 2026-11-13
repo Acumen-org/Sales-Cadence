@@ -771,12 +771,27 @@ export class TwentyGraphqlClient implements TwentyClient {
       ...[...new Set([input.personId, ...(input.personIds ?? [])].filter((p): p is string => Boolean(p)))].filter((personId) => !existing?.personIds.includes(personId)).map((personId) => ({ [fields.personId]: personId })),
       ...(input.companyId && !existing?.companyIds.includes(input.companyId) ? [{ [fields.companyId]: input.companyId }] : []),
     ];
-    for (const target of targets) {
-      await this.request(`mutation CreateNoteTarget($data: ${nt.typeName}CreateInput!) { create${nt.typeName}(data: $data) { id } }`, {
-        data: { [this.s.noteTarget.noteId]: id, ...target },
-      });
+    try {
+      for (const target of targets) {
+        await this.request(`mutation CreateNoteTarget($data: ${nt.typeName}CreateInput!) { create${nt.typeName}(data: $data) { id } }`, {
+          data: { [this.s.noteTarget.noteId]: id, ...target },
+        });
+      }
+    } catch (err) {
+      await this.dropOrphan(Boolean(marker || existing), () => this.deleteNote(id));
+      throw err;
     }
     return { id };
+  }
+
+  /**
+   * N08: a record whose link to its person failed is attached to nobody. With an id marker the
+   * replay finds it and adds only the missing link; without one the replay would make another, so
+   * the half-made record is removed before the write is queued again.
+   */
+  private async dropOrphan(replayFindsIt: boolean, remove: () => Promise<void>) {
+    if (replayFindsIt) return;
+    await remove().catch((err) => console.warn(`[twenty] a record left without its person could not be removed: ${err instanceof Error ? err.message : String(err)}`));
   }
 
   async updateNote(id: string, patch: UpdateNoteInput): Promise<void> {
@@ -814,9 +829,14 @@ export class TwentyGraphqlClient implements TwentyClient {
     }
     if (existing?.personIds.includes(input.personId)) return { id };
     const tt = this.s.objects.taskTarget;
-    await this.request(`mutation CreateTaskTarget($data: ${tt.typeName}CreateInput!) { create${tt.typeName}(data: $data) { id } }`, {
-      data: { [this.s.taskTarget.taskId]: id, [(await this.targetFields('taskTarget')).personId]: input.personId },
-    });
+    try {
+      await this.request(`mutation CreateTaskTarget($data: ${tt.typeName}CreateInput!) { create${tt.typeName}(data: $data) { id } }`, {
+        data: { [this.s.taskTarget.taskId]: id, [(await this.targetFields('taskTarget')).personId]: input.personId },
+      });
+    } catch (err) {
+      await this.dropOrphan(Boolean(marker || existing), () => this.deleteTask(id));
+      throw err;
+    }
     return { id };
   }
 

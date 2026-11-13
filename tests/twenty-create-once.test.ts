@@ -59,3 +59,25 @@ describe('N06: additional emails when looking for an existing CRM person', () =>
     await expect(twenty.findPeople({ emails: ['john.smith@firm.com'] })).rejects.toThrow(/503/);
   });
 });
+
+describe('N08: a note or task whose link to the person fails is not left attached to nobody', () => {
+  it('without an id marker the half-made note is removed before the write is queued again', async () => {
+    const { twenty, calls } = client((c) => {
+      if (c.query.includes('mutation CreateNote(')) return { data: { createNote: { id: 'n-1' } } };
+      if (c.query.includes('mutation CreateNoteTarget(')) return new Response('bad request', { status: 400 });
+      return { data: { deleteNote: { id: 'n-1' } } };
+    });
+    await expect(twenty.createNote({ title: 'Call', bodyMarkdown: 'b', personId: 'p-1' })).rejects.toThrow(/400/);
+    expect(calls.find((c) => c.query.includes('mutation DeleteNote('))?.variables).toEqual({ id: 'n-1' });
+  });
+
+  it('with an id marker the task is kept, for the replay to find and link', async () => {
+    const { twenty, calls } = client((c) => {
+      if (c.query.includes('mutation CreateTask(')) return { data: { createTask: { id: '6f1c1d2e-0000-4000-8000-000000000002' } } };
+      if (c.query.includes('mutation CreateTaskTarget(')) return new Response('bad request', { status: 400 });
+      return { data: {} };
+    });
+    await expect(twenty.createTask({ id: '6f1c1d2e-0000-4000-8000-000000000002', title: 'T', personId: 'p-1' })).rejects.toThrow(/400/);
+    expect(calls.some((c) => c.query.includes('mutation DeleteTask('))).toBe(false);
+  });
+});
