@@ -78,7 +78,7 @@ export function stopEffects(outcome: FormOutcomeView, ctx: CallFormContext): str
  * missing; the result names the next step. Notes are kept as a draft until it is in (B087).
  */
 export function PostCallForm({ callId, onClose, initial }: { callId: string; onClose: () => void; /** Already read: the form starts at once (and renders on the server, for the tests). */ initial?: CallFormContext }) {
-  const [loaded, setLoaded] = useState<{ ok: true; context: CallFormContext } | { ok: false; error: string } | null>(initial ? { ok: true, context: initial } : null);
+  const [loaded, setLoaded] = useState<{ ok: true; context: CallFormContext } | { ok: false; error: string; retry?: boolean } | null>(initial ? { ok: true, context: initial } : null);
   const start0 = initial ? startingValues(initial, null) : null;
   const [outcome, setOutcome] = useState(start0?.outcome ?? '');
   const [rating, setRating] = useState<number | null>(start0?.rating ?? null);
@@ -104,7 +104,8 @@ export function PostCallForm({ callId, onClose, initial }: { callId: string; onC
   const formRef = useRef<HTMLFormElement>(null);
 
   const load = useCallback(async () => {
-    const r = await loadCallFormAction(callId);
+    // M47: a failed read (a network blip, a deploy) says so and offers Try again, instead of waiting for ever.
+    const r = await loadCallFormAction(callId).catch(() => ({ ok: false as const, error: 'Cadence could not open the form just now. Check your connection and try again.', retry: true }));
     setLoaded(r);
     if (!r.ok) return;
     const v = startingValues(r.context, readDraft(callId));
@@ -132,7 +133,10 @@ export function PostCallForm({ callId, onClose, initial }: { callId: string; onC
     return <div className="space-y-3">
       <Notice tone="warn">{loaded.ok ? 'This form could not be opened.' : loaded.error}</Notice>
       {draft?.notes ? <label className="block text-xs text-ink-500">What you typed here<textarea readOnly rows={4} value={draft.notes} className="mt-1 w-full" /></label> : null}
-      <div className="flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={() => { dropDraft(callId); onClose(); router.refresh(); }}>Close</button></div>
+      <div className="flex justify-end gap-2">
+        {!loaded.ok && 'retry' in loaded ? <button type="button" className="btn-primary" onClick={() => { setLoaded(null); void load(); }}>Try again</button> : null}
+        <button type="button" className="btn-secondary" onClick={() => { if (loaded.ok || !('retry' in loaded)) dropDraft(callId); onClose(); router.refresh(); }}>Close</button>
+      </div>
     </div>;
   }
 
@@ -172,7 +176,8 @@ export function PostCallForm({ callId, onClose, initial }: { callId: string; onC
     if (!formRef.current || missing) return;
     const fd = new FormData(formRef.current);
     fd.set('callId', callId);
-    if (rating) fd.set('rating', String(rating));
+    // M33: a rating belongs to an answered call only; one clicked before changing the outcome is not sent.
+    if (rating && reached) fd.set('rating', String(rating));
     fd.set('what', whatShown);
     if (closes !== null) fd.set('closes', closes);
     if (ctx.claim) { fd.set('claimShown', '1'); fd.set('claim', claim ? '1' : '0'); }

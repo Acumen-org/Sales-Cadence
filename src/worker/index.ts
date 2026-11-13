@@ -1,10 +1,10 @@
 import 'dotenv/config';
-import { backfillMeetingsToCrm, meetingSchemaShape, missingMeetingTags } from '../lib/meetings/crm';
+import { backfillMeetingsToCrm, meetingSchemaShape, missingMeetingTags, missingTagsNowInCrm } from '../lib/meetings/crm';
 import { backfillTeamsTranscripts } from '../lib/meetings/teams-transcript';
 import { MEETINGS_CHANGED_KEY, checkMeetingsInCrm } from '../lib/meetings/crm-check';
 import { backfillSharePointPlayers } from '../lib/meetings/sharepoint-player';
-import { retryFailedWrites } from '../lib/engine/sync-retry';
-import { sweepUnprocessedEvents } from '../lib/engine/ingest';
+import { retryFailedWrites, sweepUnwrittenSyncs } from '../lib/engine/sync-retry';
+import { pruneActivityEvents, sweepUnprocessedEvents } from '../lib/engine/ingest';
 import { prisma } from '../lib/db';
 import { env } from '../lib/env';
 import { SYSTEM_ACTOR } from '../lib/audit';
@@ -14,13 +14,13 @@ import { runSchedulerTick } from '../lib/engine/tasks';
 import { launchScheduledCampaigns } from '../lib/engine/campaigns';
 import { syncContinuously } from '../lib/continuous-sync';
 import { reconcile } from '../lib/engine/reconcile';
-import { refreshPersonCache } from '../lib/person-cache';
 import { snapshotScorecard } from '../lib/enrichment-work';
 import { getTwentyClient } from '../lib/twenty';
 import { workspaceTimezone } from '../lib/workspace';
 import { syncNextActions } from '../lib/next-actions';
 import { runMoveQueue } from '../lib/sandbox/move';
 import { CLEANUP_EVERY_MS, cleanupSandboxCrmPeople } from '../lib/sandbox/crm-cleanup';
+import { syncH00ksNumbers } from '../lib/calls/h00ks';
 import { runCrmCheck } from '../lib/sandbox/crm-check';
 import { backfillPhoneE164, runSandboxRetention } from '../lib/sandbox/retention';
 import { purgeOldPushes, sweepStuckPushes } from '../lib/sandbox/bellwether-api';
@@ -33,10 +33,11 @@ import { ringHealth } from '../lib/outreach/health';
 import { coldOutreachReleaseOnce } from '../lib/outreach/release';
 import { runLinkedInPass } from '../lib/linkedin/pass';
 import { beatWorker } from '../lib/worker-heartbeat';
+import { setCrmRequestPriority } from '../lib/twenty/pace';
 
 const config=env();
 const log=(message:string,extra?:unknown)=>console.log('[worker '+new Date().toISOString()+'] '+message,extra??'');
-let running=false;let lastSync=0;let lastPurge=0;let stopping=false;
+let running=false;let lastSync=0;let lastPurge=0;let stopping=false;let unwrittenAt=0;
 /**
  * The nightly catch-up, which the docs have always promised and nothing ran: continuous sync
  * follows a watermark, so an event Twenty never delivered is never noticed. Once a day, in the
@@ -54,7 +55,7 @@ const nightly=nightlyLoop({hour:config.RECONCILE_HOUR,log,jobs:()=>{
  return [
   // P31: back over every day since the last finished run, not only the fixed look-back, so a worker down for a week leaves no gap.
   {name:'nightly reconcile',crm:true,run:async()=>reconcile({actor:SYSTEM_ACTOR,now,days:await nightlyLookbackDays(now,(await getSettings()).rules.reconcileLookbackDays)})},
-  {name:'cache refresh',crm:true,run:async()=>refreshPersonCache(await getTwentyClient())},
+  // N13: no full cache listing here: the continuous sync makes its own once a day, resumably (N01).
   {name:'enrichment scorecard snapshot',run:()=>snapshotScorecard(now)},
   // Sandbox contacts Twenty gained after the push: flagged, outreach stopped (crm-check.ts).
   // Each run is recorded for Settings > Cold outreach (B168), failed or not; one an admin started is not run twice at once.
@@ -64,17 +65,22 @@ const nightly=nightlyLoop({hour:config.RECONCILE_HOUR,log,jobs:()=>{
   {name:'sandbox retention',run:()=>runSandboxRetention(now)},
   {name:'bellwether push keys forgotten',run:()=>purgeOldPushes(now)},
   {name:'read api log pruned',run:()=>pruneReadApiLog(now)},
+  // N21: CRM events past the retention (needs-review ones stay until someone looks).
+  {name:'crm events pruned',run:()=>pruneActivityEvents(now)},
  ];
 }});
 /**
- * Every 2 minutes: calls read from Twilio (read only), and the sales mailboxes read through Graph
+ * Every 2 minutes: reps' numbers copied from h00ks, then calls read from Twilio (read only), and the sales mailboxes read through Graph
  * when GRAPH_MAIL_ENABLED is set. Moves to the CRM go at every tick, paced under Twenty's limit.
  * Every 5 minutes: the sandbox CRM cleanup (src/lib/sandbox/crm-cleanup.ts).
  */
 let callsAt=0;let mailAt=0;let crmCleanupAt=0;let healthAt=0;
+/** M31: calls are read first in each pass, so forms open within the 2 minutes the screen promises whatever runs after. */
+async function callsImport(now:number){
+ if(now>=callsAt){callsAt=now+120_000;try{const synced=await syncH00ksNumbers();if(synced.ran&&(synced.changed.length||synced.identitiesAdded||synced.error))log('h00ks numbers',{changed:synced.changed.map((c)=>`${c.name}: ${c.from??'none'} -> ${c.to??'none'}`),identitiesAdded:synced.identitiesAdded,unmatched:synced.unmatched.length,error:synced.error});}catch(error){log('h00ks numbers failed',error);}try{const stats=await importTwilioCalls();if(stats.ran&&(stats.created||stats.forms||stats.recordings||stats.error))log('twilio import',stats);}catch(error){log('twilio import failed',error);}}
+}
 async function sandboxJobs(now:number){
- try{const moved=await runMoveQueue({pauseMs:1500});if(moved.done||moved.failed||moved.dryRun)log('moves to CRM',moved);}catch(error){log('moves to CRM failed',error);}
- if(now>=callsAt){callsAt=now+120_000;try{const stats=await importTwilioCalls();if(stats.ran&&(stats.created||stats.forms||stats.recordings||stats.error))log('twilio import',stats);}catch(error){log('twilio import failed',error);}}
+ try{const moved=await runMoveQueue({pauseMs:1500,autoRetry:true});if(moved.done||moved.failed||moved.dryRun)log('moves to CRM',moved);}catch(error){log('moves to CRM failed',error);}
  // Every 5 minutes: people Twenty's mail or calendar sync created for sandbox contacts, removed when nobody worked them.
  // B012: a Bellwether push cut off part-way (a restart, the database gone) is marked failed; its retry runs it again.
  if(now>=crmCleanupAt){try{const swept=await sweepStuckPushes();if(swept)log('bellwether pushes swept',swept);}catch(error){log('bellwether push sweep failed',error);}}
@@ -165,13 +171,17 @@ async function teamsTranscripts(now:number){
  if(now<teamsTranscriptsAt)return;teamsTranscriptsAt=now+3_600_000;
  try{const found=await backfillTeamsTranscripts();if(found)log('Teams transcripts fetched',found);}catch(error){log('Teams transcripts failed',error);}
 }
-// While some tag is missing in Twenty, write the meetings again each hour, so a tag an admin adds
-// by hand fills in without anyone asking.
+// While some tag is missing in Twenty, look each hour whether an admin has added one by hand; when
+// one has, write the meetings again so it fills in without anyone asking (N14: not every hour regardless).
 let meetingTagsRetryAt=Date.now()+3_600_000;
 async function meetingTagsRetry(now:number){
  if(now<meetingTagsRetryAt)return;meetingTagsRetryAt=now+3_600_000;
- if(!(await missingMeetingTags()).length)return;
- try{const written=await backfillMeetingsToCrm({all:true});if(written!==null)log('meetings written again for missing tags',written);}catch(error){log('meetings tag retry failed',error);}
+ const missing=await missingMeetingTags();if(!missing.length)return;
+ try{
+  const schema=await (await getTwentyClient()).meetingSchema();
+  if(!schema||!missingTagsNowInCrm(schema,missing))return;
+  const written=await backfillMeetingsToCrm({all:true});if(written!==null)log('meetings written again for missing tags',written);
+ }catch(error){log('meetings tag retry failed',error);}
 }
 /**
  * Once Microsoft lets Cadence read the team's files: meetings saved earlier with a SharePoint sharing
@@ -184,22 +194,36 @@ async function sharePointPlayers(now:number){
  if(await prisma.setting.findUnique({where:{key}})){sharePointPlayersAt=Infinity;return;}
  try{const played=await backfillSharePointPlayers();if(played===null)return;log('SharePoint recordings that now play',played);await prisma.setting.upsert({where:{key},create:{key,value:{at:new Date().toISOString(),played}},update:{value:{at:new Date().toISOString(),played}}});sharePointPlayersAt=Infinity;}catch(error){log('SharePoint players failed',error);}
 }
+/**
+ * N18: the CRM sync, the meeting checks and the meeting rewrites run in a loop of their own beside the
+ * tick, as the nightly does, so a long one (a full listing, a rewrite of every meeting) never holds
+ * up the scheduler, the write retries, moves, call import or mailbox reading.
+ */
+let crmRunning=false;
+async function crmJobs(now:number){
+ if(now-lastSync>=config.CRM_SYNC_SECONDS*1000&&!nightly.crmBusy){
+   try{await syncContinuously();lastSync=now;}catch(error){log('CRM sync failed',error);}
+ }
+ // N03: CRM events saved but cut off before processing (a restart, a deploy) are processed now.
+ try{const swept=await sweepUnprocessedEvents();if(swept)log('unprocessed CRM events swept',swept);}catch(error){log('event sweep failed',error);}
+ await evidenceRescan(new Date(now));
+ await meetingsWithTwenty(now);
+ await meetingsBackfill(now);
+ await meetingTagsRetry(now);
+}
+function startCrmJobs(now:number){
+ if(crmRunning||stopping)return;crmRunning=true;
+ void crmJobs(now).catch((error)=>log('CRM jobs failed',error)).finally(()=>{crmRunning=false;});
+}
 async function tick(){
  if(running||stopping)return;running=true;
  try{
    const now=Date.now();
    // P01: the heartbeat Nomad checks (/api/health/worker). Stamped as each pass starts, so a pass that hangs goes stale.
    try{await beatWorker(new Date(now));}catch(error){log('heartbeat failed',error);}
-   if(now-lastSync>=config.CRM_SYNC_SECONDS*1000&&!nightly.crmBusy){
-     try{await syncContinuously();lastSync=now;}catch(error){log('CRM sync failed',error);}
-   }
-   // N03: CRM events saved but cut off before processing (a restart, a deploy) are processed now.
-   try{const swept=await sweepUnprocessedEvents();if(swept)log('unprocessed CRM events swept',swept);}catch(error){log('event sweep failed',error);}
+    await callsImport(now);
+    startCrmJobs(now);
    await nightly.poke(new Date(now)).catch((error)=>log('nightly failed to start',error));
-   await evidenceRescan(new Date(now));
-   await meetingsWithTwenty(now);
-   await meetingsBackfill(now);
-   await meetingTagsRetry(now);
    await sharePointPlayers(now);
    await teamsTranscripts(now);
    await phoneE164Backfill();
@@ -207,6 +231,8 @@ async function tick(){
    await coldOutreachRelease();
    await sandboxJobs(now);
    try{const retried=await retryFailedWrites();if(retried.retried)log('twenty write retry',retried);}catch(error){log('twenty write retry failed',error);}
+   // N09: CRM writes a click caused that a restart cut off (neither done nor queued) are made now.
+   if(now>=unwrittenAt){unwrittenAt=now+300_000;try{const swept=await sweepUnwrittenSyncs(new Date(now));if(swept.tasks||swept.optOuts)log('unwritten CRM writes swept',swept);}catch(error){log('unwritten CRM writes sweep failed',error);}}
    // LinkedIn, as the LinkedIn Console saw it: events in, tasks closed and opened (src/lib/linkedin).
    try{const li=await runLinkedInPass();if(Object.keys(li).length)log('linkedin',li);}catch(error){log('linkedin failed',error);}
    // Next actions: what has not reached Twenty yet, and what people changed there.
@@ -230,6 +256,8 @@ async function engineTick(){
 /** P14: how long a stop waits for the passes in progress; Nomad's kill_timeout (nomad/cadence.hcl) is longer. */
 const STOP_WAIT_MS=20_000;
 async function main(){
+ // N12: the worker's CRM requests are background work: they leave room in the minute for reps' clicks.
+ setCrmRequestPriority('background');
  log('Continuous sync every '+config.CRM_SYNC_SECONDS+' seconds; nightly reconcile after '+config.RECONCILE_HOUR+':00 '+workspaceTimezone());
  const every=Math.min(config.WORKER_TICK_SECONDS,config.CRM_SYNC_SECONDS,120)*1000;
  let timers:NodeJS.Timeout[]=[];
@@ -238,7 +266,7 @@ async function main(){
  const stop=async()=>{
   if(stopping)return;stopping=true;for(const t of timers)clearInterval(t);
   const until=Date.now()+STOP_WAIT_MS;
-  while((running||engineRunning)&&Date.now()<until)await new Promise(resolve=>setTimeout(resolve,100));
+  while((running||engineRunning||crmRunning)&&Date.now()<until)await new Promise(resolve=>setTimeout(resolve,100));
   await nightly.release().catch(error=>log('nightly release failed',error));
   await prisma.$disconnect().catch(()=>undefined);process.exit(0);
  };

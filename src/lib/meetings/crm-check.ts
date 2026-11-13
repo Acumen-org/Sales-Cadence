@@ -31,7 +31,14 @@ import { refreshMeetingAccounts } from './account';
 /** Writes per pass; the rest follow at the next tick. Twenty allows 100 requests a minute. */
 const MAX_WRITES = 60;
 
-export type MeetingsInCrmStats = { read: number; linked: number; written: number; waiting: number; notFromCadence: number };
+export type MeetingsInCrmStats = { read: number; linked: number; written: number; waiting: number; notFromCadence: number; duplicatesRemoved?: number };
+
+/**
+ * N15: a record that still differs from what Cadence wrote, though nobody has changed it since Cadence
+ * last wrote it, can never match (a field Twenty stores another way): it is written again at most
+ * once in this long, not at every pass.
+ */
+const UNMATCHABLE_RETRY_MS = 3_600_000;
 
 /** A tag's name and its value read the same: "Karson Reed" is KARSON_REED. */
 const slug = (s: string) => s.normalize('NFKD').replace(/[^\w\s-]/g, '').trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_');
@@ -61,7 +68,7 @@ function cadenceIdOf(f: { cadenceId: string | null; cadenceLink: string | null }
  * The prospects of a meeting that has none: each person outside the team who is in Twenty, by their
  * address or by a name only one person there has. Returns their ids.
  */
-async function linkTypedIn(meetingId: string, attendees: { id: string; personId: string | null; userId: string | null; name: string | null; email: string | null }[], internalDomains: string[], notTeam: Prisma.PersonCacheWhereInput): Promise<string[]> {
+async function linkTypedIn(meetingId: string, attendees: { id: string; personId: string | null; userId: string | null; name: string | null; email: string | null }[], internalDomains: string[], notTeam: Prisma.PersonCacheWhereInput, companyId: string | null = null): Promise<string[]> {
   const linked: string[] = [];
   for (const a of attendees) {
     if (a.userId || (a.email && !isExternalEmail(a.email, internalDomains))) continue;
@@ -70,7 +77,8 @@ async function linkTypedIn(meetingId: string, attendees: { id: string; personId:
       const [first, ...rest] = (a.name ?? '').trim().split(/\s+/);
       const match = a.email
         ? { email: { equals: a.email.trim(), mode: 'insensitive' as const } }
-        : first && rest.length ? { firstName: { equals: first, mode: 'insensitive' as const }, lastName: { equals: rest.join(' '), mode: 'insensitive' as const } } : null;
+        // N24: a name alone, when the meeting has an account, only matches someone at that account.
+        : first && rest.length ? { firstName: { equals: first, mode: 'insensitive' as const }, lastName: { equals: rest.join(' '), mode: 'insensitive' as const }, ...(companyId ? { companyId } : {}) } : null;
       if (!match) continue;
       const hits = await prisma.personCache.findMany({ where: { AND: [{ deletedAt: null }, match, notTeam] }, select: { id: true }, take: 2 });
       if (hits.length !== 1) continue;
@@ -99,10 +107,10 @@ export async function checkMeetingsInCrm(options: { client?: TwentyClient } = {}
   const first: string[] = [];
 
   // Older meetings with no prospect: linked to the people they were with, where Twenty knows them.
-  const unlinked = await prisma.meeting.findMany({ where: { review: 'APPROVED', attendees: { none: { prospect: true } } }, select: { id: true, attendees: { select: { id: true, personId: true, userId: true, name: true, email: true } } } });
+  const unlinked = await prisma.meeting.findMany({ where: { review: 'APPROVED', attendees: { none: { prospect: true } } }, select: { id: true, companyId: true, attendees: { select: { id: true, personId: true, userId: true, name: true, email: true } } } });
   const notTeam = unlinked.length ? await externalPeopleWhere({ keepBlocked: true }) : {};
   for (const m of unlinked) {
-    const linked = await linkTypedIn(m.id, m.attendees, rules.internalDomains, notTeam).catch((err) => {
+    const linked = await linkTypedIn(m.id, m.attendees, rules.internalDomains, notTeam, m.companyId).catch((err) => {
       console.warn(`[meetings] could not link the people on meeting ${m.id}: ${err instanceof Error ? err.message : String(err)}`);
       return [];
     });
@@ -118,13 +126,16 @@ export async function checkMeetingsInCrm(options: { client?: TwentyClient } = {}
   moved.push(...(await refreshMeetingAccounts()));
 
   // What Twenty holds against what Cadence wrote.
-  const meetings = await prisma.meeting.findMany({ select: { id: true, review: true, meetingNumber: true, twentyMeetingId: true, twentySnapshot: true, attendees: { where: { prospect: true }, select: { personId: true } } } });
+  const meetings = await prisma.meeting.findMany({ select: { id: true, review: true, meetingNumber: true, twentyMeetingId: true, twentySnapshot: true, twentySyncedAt: true, attendees: { where: { prospect: true }, select: { personId: true } } } });
   const byRecord = new Map(records.map((r) => [r.id, r]));
   const byCadenceId = new Map(records.flatMap((r) => { const id = cadenceIdOf(f, r); return id ? [[id, r] as const] : []; }));
   const stale: string[] = [];
+  const recordOf = new Map<string, string>();
+  const nowMs = Date.now();
   for (const m of meetings) {
     if (m.review !== 'APPROVED') continue;
     const r = (m.twentyMeetingId ? byRecord.get(m.twentyMeetingId) : undefined) ?? byCadenceId.get(m.id);
+    if (r) recordOf.set(m.id, r.id);
     if (r && r.id !== m.twentyMeetingId) await prisma.meeting.update({ where: { id: m.id }, data: { twentyMeetingId: r.id } });
     if (!r || !m.twentySnapshot) { stale.push(m.id); continue; }
     const n = m.meetingNumber ?? null;
@@ -136,8 +147,14 @@ export async function checkMeetingsInCrm(options: { client?: TwentyClient } = {}
       (f.meetingNumber && number !== n) ||
       (f.firstMeeting && Boolean(r.data[f.firstMeeting]) !== (n === 1)) ||
       (there.contacts && prospects.join() !== there.contacts.join())
-    ) stale.push(m.id);
+    ) {
+      const editedSince = !m.twentySyncedAt || Date.parse(r.updatedAt) >= m.twentySyncedAt.getTime();
+      if (editedSince || nowMs - m.twentySyncedAt!.getTime() >= UNMATCHABLE_RETRY_MS) stale.push(m.id);
+    }
   }
+  // N16: a second record carrying a meeting's Cadence ID (a create whose answer was lost) is a
+  // duplicate of the meeting's own record: it would count twice on the bonus dashboard.
+  const duplicates = records.filter((r) => { const id = cadenceIdOf(f, r); const own = id ? recordOf.get(id) : undefined; return Boolean(own && own !== r.id); });
 
   // Records Cadence did not write: left as they are, and listed for the admin.
   const written = new Set(meetings.flatMap((m) => (m.twentyMeetingId ? [m.twentyMeetingId] : [])));
@@ -148,6 +165,15 @@ export async function checkMeetingsInCrm(options: { client?: TwentyClient } = {}
   await prisma.setting.upsert({ where: { key: NOT_FROM_CADENCE_KEY }, create: { key: NOT_FROM_CADENCE_KEY, value: listed }, update: { value: listed } });
 
   if (client.kind === 'dry-run') return stats;
+  for (const r of duplicates.slice(0, 10)) {
+    try {
+      await client.deleteMeetingRecord(schema, r.id);
+      stats.duplicatesRemoved = (stats.duplicatesRemoved ?? 0) + 1;
+      await logAudit({ entityType: 'meeting', entityId: cadenceIdOf(f, r)!, action: 'crm_duplicate_removed', actor: SYSTEM_ACTOR, details: { twentyMeetingId: r.id } });
+    } catch (err) {
+      console.warn(`[meetings] could not remove duplicate CRM meeting ${r.id}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
   const approved = new Set(meetings.filter((m) => m.review === 'APPROVED').map((m) => m.id));
   const queue = [...new Set([...first, ...moved, ...stale])].filter((id) => approved.has(id) && !pending.has(id));
   for (const id of queue.slice(0, MAX_WRITES)) {
@@ -156,6 +182,16 @@ export async function checkMeetingsInCrm(options: { client?: TwentyClient } = {}
   }
   stats.waiting = Math.max(0, queue.length - MAX_WRITES);
   return stats;
+}
+
+/**
+ * N15: Cadence's own write to a meeting makes Twenty send a meeting webhook. A record (or a meeting
+ * contact row pointing at a record) Cadence wrote in the last two minutes is that echo, not a change.
+ */
+export async function ownMeetingEcho(recordId: string, record: Record<string, unknown>, now = Date.now()): Promise<boolean> {
+  const recent = await prisma.meeting.findMany({ where: { twentySyncedAt: { gte: new Date(now - 120_000) }, twentyMeetingId: { not: null } }, select: { twentyMeetingId: true } });
+  const ids = new Set(recent.map((m) => m.twentyMeetingId!));
+  return ids.has(recordId) || Object.values(record).some((v) => typeof v === 'string' && ids.has(v));
 }
 
 /** Twenty told Cadence a meeting or a meeting contact changed: the worker checks them on its next tick. */

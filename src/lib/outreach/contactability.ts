@@ -130,6 +130,8 @@ async function coldCheck(c: ColdRow, opts: ContactOptions): Promise<ContactCheck
     () => (c.crmMatchPersonId || c.crmAutoPersonId ? blocked('in_crm', opts, 'This person is in the CRM now, so their outreach has stopped. Move to CRM to work them there.', { label: 'Move to CRM' }) : null),
     () => formPending(opts),
     () => channelBlock(opts, { email: c.email, badEmail: !hasUsableEmail(c), phone: c.phone ?? readExtraPhones(c.additionalPhones)[0]?.number ?? null, badPhone: c.badPhone, linkedin: c.linkedinUrl }),
+    // L08: an address not verified as deliverable is said, so nobody mails it unaware.
+    () => (opts.channel === 'EMAIL' && c.email && c.emailVerification !== 'valid' ? { ok: true as const, warning: `${c.email} is ${c.emailVerification === 'risky' ? 'marked risky (the mail server accepts every address)' : 'not verified'}: it may bounce.`, confirm: null } : null),
     () => callRules(opts, { sandboxContactId: c.id }, () => callPlace({ state: c.state, country: c.country }, { state: c.companyState, country: c.companyCountry })),
   ]);
 }

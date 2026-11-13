@@ -97,10 +97,22 @@ describe('next actions', () => {
     mock.failNext = new Error('Twenty is down');
     const [id] = (await setNextActions([p.id], input, userActor(b.users.alisa), b.users.alisa.id)).set;
     expect((await prisma.nextAction.findUniqueOrThrow({ where: { id } })).crmPending).toBe(true);
-    // P21: a failed write waits half an hour before the worker tries it again.
+    // N28: not sent again the same minute; once the back-off has passed it is.
     expect(await syncNextActions()).toEqual(expect.objectContaining({ pushed: 0, failed: 0 }));
-    expect(await syncNextActions(new Date(Date.now() + 31 * 60_000))).toEqual(expect.objectContaining({ pushed: 1 }));
+    expect(await syncNextActions(new Date(Date.now() + 2 * 60_000))).toEqual(expect.objectContaining({ pushed: 1 }));
     expect((await prisma.nextAction.findUniqueOrThrow({ where: { id } })).crmPending).toBe(false);
+  });
+
+  it('N28: a change the CRM keeps refusing backs off and is given up by the worker, still pending', async () => {
+    const { MAX_NEXT_ACTION_ATTEMPTS } = await import('@/lib/next-actions');
+    const p = await prisma.personCache.findFirstOrThrow({ where: { deletedAt: null, dnd: false } });
+    mock.failNext = new Error('Twenty is down');
+    const [id] = (await setNextActions([p.id], input, userActor(b.users.alisa), b.users.alisa.id)).set;
+    await prisma.nextAction.update({ where: { id }, data: { crmAttempts: MAX_NEXT_ACTION_ATTEMPTS - 1, crmRetryAt: null } });
+    mock.failNext = new Error('Twenty is down');
+    expect(await syncNextActions()).toEqual(expect.objectContaining({ failed: 1 }));
+    expect(await prisma.nextAction.findUniqueOrThrow({ where: { id } })).toMatchObject({ crmPending: true, crmAttempts: MAX_NEXT_ACTION_ATTEMPTS, crmError: expect.stringMatching(/^Gave up after/) });
+    expect(await syncNextActions(new Date(Date.now() + 7 * 3600_000))).toEqual(expect.objectContaining({ pushed: 0, failed: 0 }));
   });
 
   it("a junior FO's next actions are their own, whoever they pick", async () => {

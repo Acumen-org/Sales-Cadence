@@ -193,6 +193,13 @@ async function sweepSamePerson(c: SandboxContact, opts: OptOutOptions, now: Date
     for (const t of twins) await optOutContact(t.id, follow);
   }
   for (const personId of new Set([c.crmMatchPersonId, c.crmAutoPersonId].filter((id): id is string => Boolean(id)))) await optOutPerson(personId, follow);
+  // L19: a CRM person not linked to the contact but holding the same personal email is the same person,
+  // opted out now rather than at their next refresh from the CRM.
+  const personal = [...new Set(emails.map((e) => e.trim().toLowerCase()))];
+  if (personal.length) {
+    const same = await prisma.personCache.findMany({ where: { deletedAt: null, optedOut: false, id: { notIn: [c.crmMatchPersonId, c.crmAutoPersonId].filter((id): id is string => Boolean(id)) }, OR: [{ emailNorm: { in: personal } }, { additionalEmailsNorm: { hasSome: personal } }] }, select: { id: true } });
+    for (const p of same) await optOutPerson(p.id, follow);
+  }
 }
 
 // ---------------------------------------------------------------------------

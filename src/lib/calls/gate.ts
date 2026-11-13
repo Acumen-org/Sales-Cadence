@@ -3,6 +3,8 @@ import { suppressionReason } from '../sandbox/opt-out';
 import { formsHeldBy } from './form-holder';
 import { callTimeWords, FORM_FIRST } from './words';
 import { attemptLimitBlock, callAttemptsToday, callingHoursBlock, callPlace, recordingNotice } from './hours';
+import { importStatus } from './import';
+import { twilioStatus } from './twilio';
 
 /**
  * Whether Cadence's Call button may open the dialpad for this contact now, as the button is drawn: a
@@ -24,9 +26,31 @@ export async function pendingFormBlock(userId: string, timezone: string, now = n
   return `${FORM_FIRST} ${pending.direction === 'INBOUND' ? 'call from' : 'call with'} ${name} (${callTimeWords(pending.startedAt ?? pending.createdAt, timezone, now)}) first.`;
 }
 
+/** How long the import may go without a run before Cadence stops trusting it to open forms (M06). */
+const IMPORT_STALE_MS = 10 * 60_000;
+export const UNREAD_CALL = 'Cadence cannot read calls back from Twilio right now, so it cannot ask for the form of your last call. Log that call by hand (Log a call) first, then call again.';
+
+/**
+ * M06: "a form before your next call" holds while the import is down too. Twilio is set up, but its
+ * import has failed twice running or not run for 10 minutes, and this rep pressed Call in the last two
+ * hours with no call read back for it: that call is logged by hand first.
+ */
+export async function unreadCallBlock(userId: string, now = new Date()): Promise<string | null> {
+  let configured = false;
+  try { configured = twilioStatus().configured; } catch { configured = true; }
+  if (!configured) return null;
+  const s = await importStatus();
+  const stale = s.failedInARow >= 2 || !s.lastRunAt || now.getTime() - Date.parse(s.lastRunAt) > IMPORT_STALE_MS;
+  if (!stale) return null;
+  const pressed = await prisma.callIntent.count({ where: { userId, callId: null, createdAt: { gte: new Date(now.getTime() - 2 * 3600_000) } } });
+  return pressed ? UNREAD_CALL : null;
+}
+
 export async function callGate(user: { id: string; timezone: string }, contact: { id?: string; personId?: string | null; companyCountry?: string | null; state?: string | null; companyState?: string | null; phone?: string | null; country?: string | null; status?: string; optedOut?: boolean; dnd?: boolean; email?: string | null; additionalEmails?: string[]; phoneType?: string | null; additionalPhones?: unknown; linkedinUrl?: string | null; bellwetherContactId?: string | null; individualCrd?: string | null; crmMatchPersonId?: string | null; crmAutoPersonId?: string | null }, now = new Date()): Promise<CallGate> {
   const pending = await pendingFormBlock(user.id, user.timezone, now);
   if (pending) return { blocked: pending, warning: null };
+  const unread = await unreadCallBlock(user.id, now);
+  if (unread) return { blocked: unread, warning: null };
   // B053: outreach to a contact who is also in the CRM has stopped; Move to CRM is the way on.
   if (contact.crmMatchPersonId || contact.crmAutoPersonId) return { blocked: 'This person is in the CRM now, so their outreach has stopped. Move to CRM to work them there.', warning: null };
   // Every phone of every type is checked against the list (B001); the click checks again (N008).

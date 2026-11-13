@@ -30,3 +30,57 @@ describe('N03: events saved but never processed', () => {
     expect((await prisma.activityEvent.findUniqueOrThrow({ where: { id: other.id } })).result).toBe('ignored_deleted');
   });
 });
+
+describe('N21: the event table does not grow for good', () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  it('an object Cadence does not act on is not stored', async () => {
+    const r = await ingestEvent({ source: 'WEBHOOK', objectType: 'workspaceMember', eventName: 'workspaceMember.updated', record: { id: 'wm-1' }, recordId: 'wm-1' });
+    expect(r.status).toBe('ignored');
+    expect(await prisma.activityEvent.count()).toBe(0);
+  });
+
+  it('processed events past the retention are deleted; one waiting for review stays', async () => {
+    const { pruneActivityEvents, EVENT_RETENTION_DAYS } = await import('@/lib/engine/ingest');
+    const now = new Date();
+    const old = new Date(now.getTime() - (EVENT_RETENTION_DAYS + 1) * 86_400_000);
+    const row = (id: string, extra: Record<string, unknown>) => prisma.activityEvent.create({ data: { source: 'WEBHOOK', objectType: 'note', eventName: 'note.updated', externalId: id, dedupeKey: `note:${id}`, payload: {}, ...extra } });
+    await row('old-done', { receivedAt: old, result: 'ignored_note_other' });
+    await row('old-review', { receivedAt: old, result: 'error: x', needsReview: true });
+    await row('recent', { result: 'ignored_note_other' });
+    expect(await pruneActivityEvents(now)).toBe(1);
+    expect((await prisma.activityEvent.findMany({ select: { externalId: true }, orderBy: { externalId: 'asc' } })).map((r) => r.externalId)).toEqual(['old-review', 'recent']);
+  });
+});
+
+describe('N22: a webhook is answered before its event is processed', () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  it('the event is stored at once and processed by the run handed back', async () => {
+    const r = await ingestEvent({ source: 'WEBHOOK', objectType: 'note', eventName: 'note.deleted', record: { id: 'n-later' }, recordId: 'n-later' }, undefined, { defer: true });
+    expect(r.status).toBe('queued');
+    expect((await prisma.activityEvent.findFirstOrThrow({ where: { externalId: 'n-later' } })).result).toBeNull();
+    expect((await r.run!()).result).toBe('ignored_deleted');
+    expect((await prisma.activityEvent.findFirstOrThrow({ where: { externalId: 'n-later' } })).result).toBe('ignored_deleted');
+  });
+});
+
+describe('N36: an incomplete event is not read again for good', () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  it('is read again while recent, and is a duplicate once older than the retry window', async () => {
+    const { INCOMPLETE_RETRY_MS } = await import('@/lib/engine/ingest');
+    const row = (id: string, receivedAt: Date) => prisma.activityEvent.create({ data: { source: 'RECONCILE', objectType: 'note', eventName: 'note.deleted', externalId: id, dedupeKey: dedupeKeyFor('note', id, null, 'note.deleted'), payload: { id }, receivedAt, processedAt: receivedAt, result: 'ignored_note_no_person' } });
+    await row('n-recent', new Date());
+    await row('n-old', new Date(Date.now() - INCOMPLETE_RETRY_MS - 60_000));
+    const again = (id: string) => ingestEvent({ source: 'RECONCILE', objectType: 'note', eventName: 'note.deleted', record: { id }, recordId: id });
+    expect((await again('n-recent')).status).not.toBe('duplicate');
+    expect((await again('n-old')).status).toBe('duplicate');
+  });
+});

@@ -3,6 +3,7 @@ import { logAudit, userActor } from '../audit';
 import { canManageEnrollment, needsPod } from '../auth/rbac';
 import type { SessionUser } from '../auth/current-user';
 import { loadSyncTasks, syncTaskInclude, syncTaskResolved, syncTasksCreated, type SyncTask } from './sync-out';
+import { refillDraftsFor } from '../sequences/refill-drafts';
 
 /**
  * Hand one touchpoint (every open module of it) to a pod-mate. The enrollment keeps its FO -
@@ -32,6 +33,7 @@ export async function delegateTasks(taskIds: string[], toUserId: string, actor: 
       for (const t of [...tasks].sort((a, b) => a.id.localeCompare(b.id))) {
         const changed = await tx.task.updateMany({ where: { id: t.id, state: 'PENDING', foUserId: t.foUserId, twentyTaskId: t.twentyTaskId }, data: { foUserId: to.id, twentyTaskId: null } });
         if (changed.count !== 1) throw new ChangedTask();
+        await refillDraftsFor(tx, [t.id]);
         await logAudit({ entityType: 'task', entityId: t.id, action: 'delegated', actor: userActor(actor), details: { from: t.foUserId, to: to.id, toName: to.name, personId: t.enrollment.personId } }, tx);
       }
     });

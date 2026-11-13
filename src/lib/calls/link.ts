@@ -71,14 +71,17 @@ export async function ownerOfSubject(subject: CallSubject): Promise<string | nul
 }
 
 /** An intent's step counts only when it is a call step still open (N013). */
-export async function intentStep(intent: { taskId: string | null; nextActionId: string | null }): Promise<{ taskId: string | null; nextActionId: string | null }> {
+export async function intentStep(intent: { taskId: string | null; nextActionId: string | null; personId?: string | null; sandboxContactId?: string | null }): Promise<{ taskId: string | null; nextActionId: string | null }> {
   const [task, next] = await Promise.all([
-    intent.taskId ? prisma.task.findUnique({ where: { id: intent.taskId }, select: { action: true, state: true } }) : null,
-    intent.nextActionId ? prisma.nextAction.findUnique({ where: { id: intent.nextActionId }, select: { action: true, kind: true, state: true } }) : null,
+    intent.taskId ? prisma.task.findUnique({ where: { id: intent.taskId }, select: { action: true, state: true, enrollment: { select: { personId: true, sandboxContactId: true } } } }) : null,
+    intent.nextActionId ? prisma.nextAction.findUnique({ where: { id: intent.nextActionId }, select: { action: true, kind: true, state: true, personId: true, sandboxContactId: true } }) : null,
   ]);
+  // M44: when the press names who is called, the step must be theirs, not another person's.
+  const named = intent.personId !== undefined || intent.sandboxContactId !== undefined;
+  const theirs = (s: { personId: string | null; sandboxContactId: string | null } | null | undefined) => !named || Boolean(s && ((intent.personId && s.personId === intent.personId) || (intent.sandboxContactId && s.sandboxContactId === intent.sandboxContactId)));
   return {
-    taskId: task?.action === 'CALL' && task.state === 'PENDING' ? intent.taskId : null,
-    nextActionId: next?.action === 'CALL' && next.kind === 'ACTION' && next.state === 'OPEN' ? intent.nextActionId : null,
+    taskId: task?.action === 'CALL' && task.state === 'PENDING' && theirs(task.enrollment) ? intent.taskId : null,
+    nextActionId: next?.action === 'CALL' && next.kind === 'ACTION' && next.state === 'OPEN' && theirs(next) ? intent.nextActionId : null,
   };
 }
 

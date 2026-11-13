@@ -22,4 +22,29 @@ describe('mock mode is refused without an explicit opt-in', () => {
     const { getTwentyClient } = await import('@/lib/twenty');
     await expect(getTwentyClient()).resolves.toBeTruthy();
   });
+
+  it('N40: refuses the fake where a real CRM API key is configured, even with both switches set', async () => {
+    process.env.CADENCE_ALLOW_MOCK = '1';
+    process.env.TWENTY_API_KEY = 'a-real-key';
+    try {
+      const { getTwentyClient } = await import('@/lib/twenty');
+      await expect(getTwentyClient()).rejects.toThrow(/API key is configured/);
+    } finally {
+      delete process.env.TWENTY_API_KEY;
+    }
+  });
+
+  it('N41: a dry-run write is logged by name, without its content', async () => {
+    const { DryRunTwentyClient } = await import('@/lib/twenty');
+    const { getMockTwentyClient } = await import('@/lib/twenty/mock-client');
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    try {
+      await new DryRunTwentyClient(getMockTwentyClient()).createNote({ title: 'Call with Jane', bodyMarkdown: 'jane@private.example 555-0100', personId: 'person-01' });
+      const logged = info.mock.calls.map((c) => c.join(' ')).join(' ');
+      expect(logged).toContain('createNote');
+      expect(logged).not.toContain('jane@private.example');
+    } finally {
+      info.mockRestore();
+    }
+  });
 });

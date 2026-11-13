@@ -3,6 +3,7 @@ import { isAdmin, isPodLeader, needsPod } from '../auth/rbac';
 import { logAudit, type AuditActor } from '../audit';
 import { localDateToInstant } from '../dates';
 import { workspaceTimezone } from '../workspace';
+import { refillDraftsFor } from '../sequences/refill-drafts';
 
 /**
  * Who owns a cold contact, and what moves with it (cold outreach PLAN 8.8, W3). These are the rules
@@ -108,6 +109,7 @@ export async function moveWorkTo(tx: Tx, contactId: string, toId: string, actor:
     const pending = await tx.task.findMany({ where: { enrollmentId: e.id, state: 'PENDING' }, select: { id: true, dueDate: true, snoozedTo: true } });
     for (const t of pending) await tx.task.update({ where: { id: t.id }, data: { foUserId: toId, dueAt: localDateToInstant(t.snoozedTo ?? t.dueDate, workspaceTimezone(), 9), twentyTaskId: null } });
     await tx.enrollment.update({ where: { id: e.id }, data: { foUserId: toId } });
+    await refillDraftsFor(tx, pending.map((t) => t.id));
     await logAudit({ entityType: 'enrollment', entityId: e.id, action: 'reassigned', actor, details: { from: e.foUserId, to: toId, tasks: pending.length, reason } }, tx);
     done.enrollments++;
     done.tasks += pending.length;

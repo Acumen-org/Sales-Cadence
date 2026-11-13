@@ -5,7 +5,7 @@ import { getSettings } from '../settings';
 import { workspaceTimezone } from '../workspace';
 import { canUndoMove, type Actor } from '../auth/rbac';
 import { coldRef, subjectHref } from '../subject';
-import { undoClosesOn, undoLeftWords, type LeftOut, type UndoReport } from './move';
+import { AUTO_RETRIES, undoClosesOn, undoLeftWords, type LeftOut, type UndoReport } from './move';
 
 /**
  * What the Move to CRM pages read (4.5): one move's result page, the Moves tab, and a contact's last
@@ -61,7 +61,7 @@ export type MovePage = {
   createdAt: Date;
   count: number;
   settled: boolean;
-  counts: { done: number; waiting: number; failed: number; undone: number };
+  counts: { done: number; waiting: number; failed: number; retrying: number; undone: number };
   /** Share of items that have finished, for the progress bar. */
   progress: number;
   leftOut: LeftOut[];
@@ -122,7 +122,7 @@ export async function loadMovePage(moveId: string, viewer: Actor, now = new Date
       : null;
     return {
       itemId: i.id, contactId: i.sandboxContactId, name, href: i.state === 'DONE' && i.twentyPersonId ? `/people/${i.twentyPersonId}` : contactHref,
-      state: i.state, stateLabel: ITEM_STATE[i.state]?.label ?? i.state, tone: ITEM_STATE[i.state]?.tone ?? 'gray', mode: i.mode,
+      state: i.state, stateLabel: willRetry(i) ? 'Trying again' : ITEM_STATE[i.state]?.label ?? i.state, tone: willRetry(i) ? 'amber' : ITEM_STATE[i.state]?.tone ?? 'gray', mode: i.mode,
       personId: i.twentyPersonId, personName, firm: firmWords(i, companies.find((x) => x.id === i.twentyCompanyId)?.name ?? null), detail, failure: i.failure, fix,
       undoUntil: open && closes ? day(closes) : null, canUndo: (open || i.state === 'UNDO_PARTIAL') && may,
       campaigns: i.exitedEnrollmentIds.flatMap((id) => { const e = enrollments.find((x) => x.id === id); return e && (!e.campaign || e.campaign.status === 'ACTIVE') ? [{ enrollmentId: id, name: e.campaign?.name ?? e.sequence.name }] : []; }),
@@ -133,6 +133,8 @@ export async function loadMovePage(moveId: string, viewer: Actor, now = new Date
     done: move.items.filter((i) => i.state === 'DONE').length,
     waiting: move.items.filter((i) => i.state === 'QUEUED' || i.state === 'RUNNING' || i.state === 'UNDOING').length,
     failed: move.items.filter((i) => i.state === 'FAILED').length,
+    /** Of the failed, those the worker tries again by itself. */
+    retrying: move.items.filter(willRetry).length,
     undone: move.items.filter((i) => i.state === 'UNDONE' || i.state === 'UNDO_PARTIAL').length,
   };
   const mayRetry = (i: SandboxMoveItem) => canUndoMove(viewer, { movedById: move.createdById, podId: contacts.find((c) => c.id === i.sandboxContactId)?.podId ?? null });
@@ -146,33 +148,50 @@ export async function loadMovePage(moveId: string, viewer: Actor, now = new Date
   };
 }
 
-export type MoveListRow = { id: string; createdAt: Date; moverId: string; moverName: string; count: number; done: number; failed: number; waiting: number; undone: number; names: string[] };
+export type MoveListRow = { id: string; createdAt: Date; moverId: string; moverName: string; count: number; done: number; failed: number; retrying: number; waiting: number; undone: number; names: string[]; contactId: string | null; error: string | null };
 
-/** The Moves tab (4.5): every move, failed ones stay visible, newest first; by state and by mover. */
-export async function listMoves(filters: { state?: string | null; moverId?: string | null; podId?: string | null }, take = 100): Promise<MoveListRow[]> {
-  // A pod's moves: those of contacts in that pod (owner, 10 Nov 2026: Cold outreach opens on the reader's pod).
-  const inPod = filters.podId ? (await prisma.sandboxContact.findMany({ where: { podId: filters.podId }, select: { id: true } })).map((c) => c.id) : null;
+/** A transient failure the worker will try again by itself (move.ts, requeueTransientFailures). */
+export const willRetry = (i: { state: string; failure: string | null; attempts: number }) => i.state === 'FAILED' && i.failure !== 'permanent' && i.attempts < AUTO_RETRIES;
+
+/**
+ * The Moves tab (4.5): every move, failed ones stay visible, newest first; by state and by mover.
+ * A pod's moves are those of its contacts, and every move the reader made themselves (V03), found in
+ * the database rather than by listing the pod's contacts (V04).
+ */
+export async function listMoves(filters: { state?: string | null; moverId?: string | null; podId?: string | null; viewerId?: string | null }, take = 100): Promise<MoveListRow[]> {
+  const inPod = filters.podId ? (await prisma.$queryRaw<{ moveId: string }[]>`SELECT DISTINCT i."moveId" FROM "SandboxMoveItem" i JOIN "SandboxContact" c ON c.id = i."sandboxContactId" WHERE c."podId" = ${filters.podId}`).map((r) => r.moveId) : null;
   const where = {
     ...(filters.moverId ? { createdById: filters.moverId } : {}),
     ...(filters.state === 'running' ? { state: { in: ['QUEUED', 'RUNNING'] } } : {}),
     AND: [
-      ...(inPod ? [{ items: { some: { sandboxContactId: { in: inPod } } } }] : []),
+      ...(inPod ? [{ OR: [{ id: { in: inPod } }, ...(filters.viewerId ? [{ createdById: filters.viewerId }] : [])] }] : []),
       ...(filters.state === 'failed' ? [{ items: { some: { state: 'FAILED' } } }] : filters.state === 'undone' ? [{ items: { some: { state: { in: ['UNDONE', 'UNDO_PARTIAL'] } } } }] : []),
     ],
   };
-  const moves = await prisma.sandboxMove.findMany({ where, orderBy: { createdAt: 'desc' }, take, include: { items: { select: { state: true, sandboxContactId: true, snapshot: true } } } });
+  const moves = await prisma.sandboxMove.findMany({ where, orderBy: { createdAt: 'desc' }, take, include: { items: { select: { state: true, sandboxContactId: true, snapshot: true, failure: true, attempts: true, error: true }, orderBy: { id: 'asc' } } } });
   const movers = new Map((await prisma.user.findMany({ where: { id: { in: [...new Set(moves.map((m) => m.createdById))] } }, select: { id: true, name: true } })).map((u) => [u.id, u.name]));
-  return moves.map((m) => ({
-    id: m.id, createdAt: m.createdAt, moverId: m.createdById, moverName: movers.get(m.createdById) ?? 'Someone', count: m.items.length,
-    done: m.items.filter((i) => i.state === 'DONE').length, failed: m.items.filter((i) => i.state === 'FAILED').length,
-    waiting: m.items.filter((i) => i.state === 'QUEUED' || i.state === 'RUNNING').length, undone: m.items.filter((i) => i.state === 'UNDONE' || i.state === 'UNDO_PARTIAL').length,
-    names: m.items.slice(0, 3).map((i) => { const s = i.snapshot as { firstName?: string; lastName?: string } | null; return `${s?.firstName ?? ''} ${s?.lastName ?? ''}`.trim(); }).filter(Boolean),
-  }));
+  // The name as moved; a contact cleared since, or an item with no snapshot, reads its name now.
+  const ids = [...new Set(moves.flatMap((m) => m.items.slice(0, 3).map((i) => i.sandboxContactId)))];
+  const now = new Map((await prisma.sandboxContact.findMany({ where: { id: { in: ids } }, select: { id: true, firstName: true, lastName: true } })).map((c) => [c.id, `${c.firstName} ${c.lastName}`.trim()]));
+  return moves.map((m) => {
+    const failed = m.items.filter((i) => i.state === 'FAILED');
+    const retrying = failed.filter(willRetry).length;
+    return {
+      id: m.id, createdAt: m.createdAt, moverId: m.createdById, moverName: movers.get(m.createdById) ?? 'Someone', count: m.items.length,
+      done: m.items.filter((i) => i.state === 'DONE').length, failed: failed.length - retrying, retrying,
+      waiting: m.items.filter((i) => i.state === 'QUEUED' || i.state === 'RUNNING').length, undone: m.items.filter((i) => i.state === 'UNDONE' || i.state === 'UNDO_PARTIAL').length,
+      names: m.items.slice(0, 3).map((i) => { const s = i.snapshot as { firstName?: string; lastName?: string } | null; return `${s?.firstName ?? ''} ${s?.lastName ?? ''}`.trim() || now.get(i.sandboxContactId) || ''; }).filter(Boolean),
+      contactId: m.items.length === 1 ? m.items[0].sandboxContactId : null,
+      error: m.items.length === 1 && failed.length ? failed[0].error : null,
+    };
+  });
 }
 
 /** A contact's latest move item, as its page and its list row show it: the move, a failure, Undo (B036, B108). */
 export type ContactMove = {
   itemId: string; moveId: string; state: string; mode: string; error: string | null; failure: string | null;
+  /** A transient failure the worker is still trying again by itself. */
+  retrying: boolean;
   moverName: string | null; doneAt: Date | null; undoUntil: string | null; canUndo: boolean; personId: string | null; personName: string | null;
   undoConfirm: string; campaigns: { enrollmentId: string; name: string }[];
 };
@@ -197,7 +216,7 @@ export async function latestMoves(contactIds: string[], viewer: Actor, now = new
     const closes = undoClosesOn(i, settings.sandbox);
     const open = i.state === 'DONE' && Boolean(closes && closes > now) && c?.status === 'MOVED';
     out.set(contactId, {
-      itemId: i.id, moveId: i.moveId, state: i.state, mode: i.mode, error: i.error, failure: i.failure,
+      itemId: i.id, moveId: i.moveId, state: i.state, mode: i.mode, error: i.error, failure: i.failure, retrying: willRetry(i),
       moverName: movers.find((u) => u.id === i.move.createdById)?.name ?? null, doneAt: i.doneAt, undoUntil: open && closes ? day(closes) : null,
       canUndo: open && canUndoMove(viewer, { movedById: c?.movedById ?? i.move.createdById, podId: c?.podId ?? null }), personId: i.twentyPersonId, personName,
       undoConfirm: undoConfirmWords(i.mode, personName ?? 'the CRM person', c ? `${c.firstName} ${c.lastName}`.trim() : 'the contact'),

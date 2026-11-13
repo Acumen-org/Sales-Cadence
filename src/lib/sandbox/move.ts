@@ -4,7 +4,8 @@ import { logAudit, SYSTEM_ACTOR, type AuditActor } from '../audit';
 import { addDays, formatLocalDate, toLocalDate } from '../dates';
 import { getSettings, type SandboxSettings } from '../settings';
 import { getTwentyClient, type TwentyClient } from '../twenty';
-import type { CreatePersonInput, TwentyCompany, TwentyIntrospection } from '../twenty/types';
+import { TwentyApiError } from '../twenty/graphql-client';
+import type { CreateCompanyInput, CreatePersonInput, TwentyCompany, TwentyIntrospection, TwentyPerson } from '../twenty/types';
 import { markCompanyDeleted, markPersonDeleted, upsertCompanyCache, upsertPersonCache } from '../person-cache';
 import { cancelOpenTasks, isUniqueViolation, syncCancelled } from '../engine/tasks';
 import { afterResponse } from '../engine/sync-out';
@@ -235,7 +236,9 @@ export async function preflightMove(contactIds: string[], actor: Actor): Promise
   // B112: one batched lookup for every contact that could move, not one per contact; a failure is
   // never read as "not in the CRM".
   const live = contacts.filter((c) => c.status === 'ACTIVE' && !inFlight.has(c.id));
-  if (!(await refreshCrm(client, live))) return { items: [], limit, refused: 'The CRM did not answer, so Cadence cannot tell who is in it already. Nothing was moved; try again in a minute.', counts };
+  // A CRM that does not answer here never stops the move: Cadence's copy groups the contacts, and the
+  // worker asks the CRM itself again (email, phones, LinkedIn) before it writes anything.
+  const crmAnswered = await refreshCrm(client, live);
   const signals = await moveSignals(live.map((c) => c.id));
   const items: PreflightItem[] = [];
   for (const c of contacts) {
@@ -287,6 +290,7 @@ export async function preflightMove(contactIds: string[], actor: Actor): Promise
       ...(i.endsCampaigns.length ? [`Ends ${i.endsCampaigns.join(', ')}`] : []),
       i.group === 'in_crm' && i.crmPerson?.nextAction ? `Keeps ${i.crmPerson.name}'s own Next Action` : i.ownStep ? `Keeps ${stepWords(i.ownStep)}` : 'Gets the next step below',
       ...(i.bouncedOn !== null ? [`Email bounced${i.bouncedOn ? ` on ${i.bouncedOn}` : ''}: it goes to the CRM flagged`] : []),
+      ...(crmAnswered ? [] : ['The CRM was slow to answer: Cadence checks it again before it writes anything']),
     ];
   }
   items.sort((a, b) => a.name.localeCompare(b.name));
@@ -433,13 +437,38 @@ export function personInput(c: MoveContact, companyId: string | null, settings: 
 
 export type FailureKind = 'transient' | 'permanent';
 
-/** B100: an error as the mover reads it. The raw text goes to the audit log only. */
+/** The CRM said no to the request itself (a value it does not accept, a duplicate), as opposed to not answering. */
+export function crmRefused(err: unknown): boolean {
+  if (!(err instanceof TwentyApiError)) return false;
+  if (err.graphqlErrors?.length) return true;
+  return err.status != null && err.status >= 400 && err.status < 500 && ![401, 403, 408, 429].includes(err.status);
+}
+
+/** The CRM refused because a record with the same unique value (an email, a firm's domain) is there already. */
+export const crmDuplicate = (err: unknown) => crmRefused(err) && /duplicate|already exists|unique|violates/i.test(err instanceof Error ? err.message : String(err));
+
+/** "Invalid phone number" from "CRM GraphQL error: Invalid phone number; ...": the CRM's own words, short. */
+function crmWords(err: unknown): string {
+  const m = (err instanceof Error ? err.message : String(err)).replace(/^CRM GraphQL error:\s*/i, '').replace(/^The CRM's \w+ responded \d+:\s*/i, '');
+  return m.split(/;\s*/)[0].replace(/[{}"[\]]/g, '').trim().slice(0, 160).replace(/\.$/, '') || 'no reason given';
+}
+
+/**
+ * B100: an error as the mover reads it. The raw text goes to the audit log only. A transient one is
+ * tried again by the worker on its own (runMoveQueue), so the words say so.
+ */
 export function failureWords(err: unknown): { text: string; failure: FailureKind } {
   const raw = err instanceof Error ? `${err.name} ${err.message}` : String(err);
-  if (isUniqueViolation(err) || /P2002|Unique constraint/i.test(raw)) return { text: 'This contact\'s CRM person is already linked to another contact in Cold outreach, so both cannot move onto it. Ask an admin to check the two.', failure: 'permanent' };
-  if (/not configured|TWENTY_API|api key/i.test(raw)) return { text: 'The CRM is not connected. An admin can connect it in Settings; then Retry.', failure: 'transient' };
-  if (/Twenty|fetch|network|timeout|timed out|ECONN|ETIMEDOUT|socket|429|5\d\d|rate/i.test(raw)) return { text: 'The CRM did not answer. Retry in a few minutes.', failure: 'transient' };
-  return { text: 'Something went wrong moving this contact. Retry, and tell an admin if it happens again.', failure: 'transient' };
+  if (isUniqueViolation(err) || /P2002|Unique constraint/i.test(raw)) {
+    const target = String((err as { meta?: { target?: unknown } })?.meta?.target ?? raw);
+    if (/twentyPersonId/i.test(target) || !/\w+Id|one_|_key/i.test(target)) return { text: 'This contact\'s CRM person is already linked to another contact in Cold outreach, so both cannot move onto it. Ask an admin to check the two.', failure: 'permanent' };
+    return { text: 'Cadence was busy with this contact. It tries again by itself in a few minutes.', failure: 'transient' };
+  }
+  if (/not configured|TWENTY_API|api key/i.test(raw)) return { text: 'The CRM is not connected. An admin can connect it in Settings; Cadence tries again once it is.', failure: 'transient' };
+  if (err instanceof TwentyApiError && (err.status === 401 || err.status === 403)) return { text: 'The CRM refused Cadence\'s key. An admin can check Settings > Twenty; Cadence tries again by itself.', failure: 'transient' };
+  if (crmRefused(err)) return { text: `The CRM refused it: ${crmWords(err)}. Cadence tries again by itself; tell an admin if it stays.`, failure: 'transient' };
+  if (err instanceof TwentyApiError || /fetch|network|timeout|timed out|ECONN|ETIMEDOUT|socket|\b429\b|\b5\d\d\b|rate limit|unreachable/i.test(raw)) return { text: 'The CRM did not answer. Cadence tries again by itself in a few minutes.', failure: 'transient' };
+  return { text: 'Something went wrong moving this contact. Cadence tries again by itself; tell an admin if it stays.', failure: 'transient' };
 }
 
 async function fail(item: Pick<SandboxMoveItem, 'id' | 'sandboxContactId' | 'moveId'>, text: string, failure: FailureKind, raw?: unknown) {
@@ -482,6 +511,99 @@ async function attachableNow(client: TwentyClient, contact: SandboxContact): Pro
   return crm.card && !crm.card.sharedLine ? crm.card.id : null;
 }
 
+type Existing = { kind: 'none' } | { kind: 'attach'; person: TwentyPerson } | { kind: 'refuse'; text: string };
+
+/**
+ * Before a create: is this contact a CRM person already? Asked of the CRM itself (email, phones,
+ * LinkedIn), never on a shared line by itself (B006). One another contact already moved onto, or one
+ * marked Do not contact, is a refusal in plain words; one the mover said is not the same is skipped.
+ */
+async function existingPerson(client: TwentyClient, contact: SandboxContact, byEmail: TwentyPerson[], declined: string | null): Promise<Existing> {
+  if (!(await refreshCrmCopyFor([dedupeInputOf(contact)], client))) throw new TwentyApiError('The CRM did not answer the check for this person before the move.');
+  const pick: TwentyPerson[] = [];
+  if (!declined) {
+    const crm = await crmCandidates(contact);
+    if (crm.dnc) return { kind: 'refuse', text: `Not moved: ${crm.dnc}.` };
+    if (crm.taken) return { kind: 'refuse', text: `Not moved: ${crm.taken.name} in the CRM is already linked to ${crm.taken.by}, moved earlier. They look like the same person: remove one of the two, or ask an admin.` };
+    if (crm.card && !crm.card.sharedLine) { const p = await client.getPerson(crm.card.id); if (p && !p.deletedAt) pick.push(p); }
+  }
+  pick.push(...byEmail.filter((p) => !p.deletedAt));
+  for (const person of pick) {
+    if (person.id === declined) continue;
+    const taken = await prisma.sandboxContact.findFirst({ where: { twentyPersonId: person.id, id: { not: contact.id } }, select: { firstName: true, lastName: true } });
+    const name = `${person.firstName} ${person.lastName}`.trim() || 'This person';
+    if (taken) return { kind: 'refuse', text: `Not moved: ${name} in the CRM is already linked to ${`${taken.firstName} ${taken.lastName}`.trim()}, moved earlier. They look like the same person: remove one of the two, or ask an admin.` };
+    if (person.dnd) return { kind: 'refuse', text: `Not moved: ${name} is marked Do not contact in the CRM.` };
+    return { kind: 'attach', person };
+  }
+  return { kind: 'none' };
+}
+
+/**
+ * The firm for a new person: a live one of that domain or name, else created; one the CRM refuses
+ * (a domain held by a deleted firm, a value it does not take) is made again with its name alone, and
+ * if even that is refused the person goes without a firm, its name in their notes. Never a failed move.
+ */
+async function firmFor(client: TwentyClient, contact: MoveContact, name: string, dryRun: boolean): Promise<{ id: string; action: 'linked' | 'created' } | null> {
+  const liveCo: TwentyCompany | undefined = (await client.findCompanies({ domain: contact.companyDomain, name: contact.companyName })).find((co) => !co.deletedAt);
+  if (liveCo) { if (!dryRun) await upsertCompanyCache(liveCo); return { id: liveCo.id, action: 'linked' }; }
+  const full: CreateCompanyInput = { name, domain: contact.companyDomain, city: contact.companyCity ?? contact.city, state: contact.companyState ?? contact.state, employees: contact.companyEmployees, aum: contact.companyAumUsd ? contact.companyAumUsd.toFixed(0) : null, linkedinUrl: null, crd: contact.companyCrd };
+  for (const input of [full, { name, domain: null, city: null, state: null, employees: null, aum: null, linkedinUrl: null, crd: null }]) {
+    try {
+      const created = await client.createCompany(input);
+      if (!dryRun) await upsertCompanyCache(created);
+      return { id: created.id, action: 'created' };
+    } catch (err) {
+      if (!crmRefused(err)) throw err;
+      console.warn('[move] the CRM refused the firm', name, err instanceof Error ? err.message : err);
+    }
+  }
+  return null;
+}
+
+/**
+ * Steps a refused create takes, each leaving out more of what the CRM may not accept. Whatever is
+ * left out is written into the person's lead-source notes, so nothing the contact held is lost.
+ */
+const LEAVE_OUT: { key: string; out: (i: CreatePersonInput, kept: string[]) => void }[] = [
+  { key: 'phones', out: (i, kept) => { if (i.phone) kept.push(`Phone ${i.phone}`); if (i.additionalPhone) kept.push(`Other phone ${i.additionalPhone}`); i.phone = null; i.additionalPhone = null; } },
+  { key: 'links', out: (i, kept) => { if (i.linkedinUrl) kept.push(`LinkedIn ${i.linkedinUrl}`); if (i.city) kept.push(`City ${i.city}`); if (i.jobTitle) kept.push(`Title ${i.jobTitle}`); i.linkedinUrl = null; i.city = null; i.jobTitle = null; } },
+  { key: 'choices', out: (i, kept) => { const v = [...i.productInterest, ...i.tags]; if (v.length) kept.push(`Products and tags ${v.join(', ')}`); i.leadSource = []; i.productInterest = []; i.tags = []; i.contactType = []; i.listCategory = null; i.pipelineStage = null; i.podOwner = null; } },
+  { key: 'owner', out: (i, kept) => { if (i.additionalEmails.length) kept.push(`Other emails ${i.additionalEmails.join(', ')}`); i.assignedToMemberId = null; i.additionalEmails = []; } },
+  { key: 'firm', out: (i) => { i.companyId = null; } },
+];
+
+/** createPerson that a refused value never stops (see LEAVE_OUT); a CRM that does not answer still throws, for the retry. */
+export async function createPersonSafely(client: TwentyClient, input: CreatePersonInput): Promise<{ person: TwentyPerson; dropped: string[]; refusals: string[] }> {
+  const attempt: CreatePersonInput = { ...input, additionalEmails: [...input.additionalEmails], leadSource: [...input.leadSource], productInterest: [...input.productInterest], tags: [...input.tags], contactType: [...input.contactType] };
+  const dropped: string[] = [];
+  const refusals: string[] = [];
+  const kept: string[] = [];
+  let step = 0;
+  for (;;) {
+    try {
+      const notes = kept.length ? `${input.leadSourceNotes ?? ''}\nKept here, as the CRM did not take them: ${kept.join('; ')}`.trim() : input.leadSourceNotes;
+      return { person: await client.createPerson({ ...attempt, leadSourceNotes: notes }), dropped, refusals };
+    } catch (err) {
+      if (!crmRefused(err)) throw err;
+      refusals.push(crmWords(err));
+      // The email is on another CRM record (one in the trash, or one the mover said is someone else):
+      // the person is made with it as an other email, so it still finds them.
+      if (crmDuplicate(err) && attempt.email && !dropped.includes('email')) {
+        kept.push(`Email ${attempt.email} (on another CRM record already)`);
+        attempt.additionalEmails = [attempt.email, ...attempt.additionalEmails];
+        attempt.email = null;
+        dropped.push('email');
+        continue;
+      }
+      const next = LEAVE_OUT[step++];
+      if (!next) throw err;
+      next.out(attempt, kept);
+      dropped.push(next.key);
+    }
+  }
+}
+
 /** One item: idempotent, so a retry after a crash finds what the first attempt created. */
 export async function processMoveItem(itemId: string, now = new Date()): Promise<MoveItemOutcome> {
   if (!(await claimItem(itemId))) return 'CLAIMED_ELSEWHERE';
@@ -493,7 +615,9 @@ export async function processMoveItem(itemId: string, now = new Date()): Promise
   let client: TwentyClient;
   try { client = await getTwentyClient(); } catch (err) { await fail(item, failureWords(err).text, 'transient', err); return 'FAILED'; }
   // Resume: the local transaction ran but the process stopped before the notes were all written.
-  if (contact.status === 'MOVED' && item.twentyPersonId && contact.twentyPersonId === item.twentyPersonId) return finishNotes(item, contact, client, actor, now);
+  if (contact.status === 'MOVED' && item.twentyPersonId && contact.twentyPersonId === item.twentyPersonId) {
+    try { return await finishNotes(item, contact, client, actor, now); } catch (err) { const words = failureWords(err); await fail(item, words.text, words.failure, err); return 'FAILED'; }
+  }
   // The checks again, right before anything is written to the CRM (N001, N017, N003, B105).
   if (contact.status !== 'ACTIVE') { await fail(item, notActiveWords(contact), 'permanent'); return 'FAILED'; }
   if (!contact.ownerId) { await fail(item, 'Not moved: it has no owner. Assign one, then move it again.', 'permanent'); return 'FAILED'; }
@@ -539,33 +663,45 @@ export async function processMoveItem(itemId: string, now = new Date()): Promise
       const earlier = await client.findPeople({ emails: contact.email ? [contact.email] : [], cadenceSandboxId: contact.id });
       const ours = earlier.find((p) => (p.raw as Record<string, unknown> | undefined)?.cadenceSandboxId === contact.id || (p.createdBySource === 'API' && new Date(p.createdAt) >= item.move.createdAt && normalizeEmail(p.email) === contact.email));
       const declined = (item.snapshot as { notSamePersonAs?: string } | null)?.notSamePersonAs ?? null;
-      const theirs = earlier.find((p) => p !== ours && !p.deletedAt && p.id !== declined);
-      if (!ours && theirs && !declined) { await fail(item, `${theirs.firstName} ${theirs.lastName} is in the CRM with this email now. Move it again: the history goes to that person.`, 'permanent'); return 'FAILED'; }
       if (ours) {
         personId = ours.id; companyId = ours.companyId; personUpdatedAt = ours.updatedAt; companyAction = companyAction ?? (ours.companyId ? 'linked' : 'none');
       } else {
-        const firm = await resolveFirm(contact, item.chosenCompanyId);
-        if (firm.action === 'blocked') { await fail(item, `Not moved: ${firm.name} is a blocked account.`, 'permanent'); return 'FAILED'; }
-        if (firm.action === 'choose') { await fail(item, 'Several firms in the CRM match. Move it again and choose one.', 'permanent'); return 'FAILED'; }
-        if (firm.action === 'link') { companyId = firm.companyId; companyAction = 'linked'; }
-        if (firm.action === 'create') {
-          const liveCo: TwentyCompany | undefined = (await client.findCompanies({ domain: contact.companyDomain, name: contact.companyName })).find((co) => !co.deletedAt);
-          if (liveCo) { companyId = liveCo.id; companyAction = 'linked'; if (!dryRun) await upsertCompanyCache(liveCo); }
-          else {
-            const created = await client.createCompany({ name: firm.name, domain: contact.companyDomain, city: contact.companyCity ?? contact.city, state: contact.companyState ?? contact.state, employees: contact.companyEmployees, aum: contact.companyAumUsd ? contact.companyAumUsd.toFixed(0) : null, linkedinUrl: null, crd: contact.companyCrd });
-            companyId = created.id; companyAction = 'created';
-            if (!dryRun) await upsertCompanyCache(created);
-            await prisma.sandboxMoveItem.update({ where: { id: item.id }, data: { twentyCompanyId: companyId, companyAction } });
+        // The CRM may have gained this person since the dialog (or the dialog could not ask it): the
+        // history goes to them, as "Move it again" would have done, never a second person (B006).
+        const found = await existingPerson(client, contact, earlier.filter((p) => p.id !== declined), declined);
+        if (found.kind === 'refuse') { await fail(item, found.text, 'permanent'); return 'FAILED'; }
+        if (found.kind === 'attach') {
+          const person = found.person;
+          mode = 'attach'; personId = person.id; companyId = person.companyId; companyAction = 'none'; personUpdatedAt = person.updatedAt;
+          personNextBefore = { nextAction: person.nextAction ?? null, nextActionDueDate: person.nextActionDueDate ?? null };
+          await prisma.sandboxMoveItem.update({ where: { id: item.id }, data: { mode, attachPersonId: person.id, personNextBefore: personNextBefore as Prisma.InputJsonValue } });
+          if (!dryRun) await upsertPersonCache(person);
+        } else {
+          const firm = await resolveFirm(contact, item.chosenCompanyId);
+          if (firm.action === 'blocked') { await fail(item, `Not moved: ${firm.name} is a blocked account.`, 'permanent'); return 'FAILED'; }
+          // Several firms match and none was chosen: the first by name links, rather than no move at all.
+          if (firm.action === 'choose') { companyId = firm.candidates[0].id; companyAction = 'linked'; }
+          if (firm.action === 'link') { companyId = firm.companyId; companyAction = 'linked'; }
+          if (firm.action === 'create' && !companyId) {
+            const co = await firmFor(client, contact, firm.name, dryRun);
+            companyId = co?.id ?? null; companyAction = co ? co.action : 'none';
+            if (co?.action === 'created') await prisma.sandboxMoveItem.update({ where: { id: item.id }, data: { twentyCompanyId: companyId, companyAction } });
           }
+          if (firm.action === 'none') companyAction = 'none';
+          const schema = await client.introspect().catch(() => null);
+          const p = (await import('../twenty/twenty-schema')).defaultTwentySchema.person;
+          const input = personInput(contact, companyId, settings.sandbox, optionFilter(schema), { leadSource: p.leadSource, productInterest: p.productInterest, tags: p.tags, contactType: p.contactType, listCategory: p.listCategory, pipelineStageField: p.pipelineStageField });
+          // The firm went missing in the CRM meanwhile, or never took: its name stays in the notes.
+          if (!companyId && contact.companyName) input.leadSourceNotes = `${input.leadSourceNotes}\nFirm: ${contact.companyName}`;
+          const made = await createPersonSafely(client, input);
+          const created = made.person;
+          personId = created.id; personUpdatedAt = created.updatedAt;
+          if (made.dropped.includes('firm')) { companyId = null; companyAction = 'none'; }
+          // Stored at once, so a crash after this point retries without a second person.
+          await prisma.sandboxMoveItem.update({ where: { id: item.id }, data: { twentyPersonId: personId, twentyCompanyId: companyId, companyAction, personUpdatedAt } });
+          if (made.dropped.length) await logAudit({ entityType: 'sandbox_contact', entityId: contact.id, action: 'move_fields_kept_in_notes', actor: SYSTEM_ACTOR, details: { moveId: item.moveId, itemId: item.id, dropped: made.dropped, refusals: made.refusals } });
+          if (!dryRun) await upsertPersonCache(created);
         }
-        if (firm.action === 'none') companyAction = 'none';
-        const schema = await client.introspect().catch(() => null);
-        const p = (await import('../twenty/twenty-schema')).defaultTwentySchema.person;
-        const created = await client.createPerson(personInput(contact, companyId, settings.sandbox, optionFilter(schema), { leadSource: p.leadSource, productInterest: p.productInterest, tags: p.tags, contactType: p.contactType, listCategory: p.listCategory, pipelineStageField: p.pipelineStageField }));
-        personId = created.id; personUpdatedAt = created.updatedAt;
-        // Stored at once, so a crash after this point retries without a second person.
-        await prisma.sandboxMoveItem.update({ where: { id: item.id }, data: { twentyPersonId: personId, twentyCompanyId: companyId, companyAction, personUpdatedAt } });
-        if (!dryRun) await upsertPersonCache(created);
       }
     }
     if (dryRun) {
@@ -646,6 +782,8 @@ async function completeLocally(item: ItemWithMove, personId: string, companyId: 
     await fail(item, `Not moved: opted out during the move, on ${day(c.optedOutAt ?? now)}. The CRM person is marked Do not contact.`, 'permanent');
     return { ok: false, outcome: 'FAILED' };
   }
+  // Still active: the lock was refused for another reason (busy, a check that changed). It is tried again.
+  if (c.status === 'ACTIVE') { await fail(item, 'Cadence was busy with this contact. It tries again by itself in a few minutes.', 'transient', r.reason); return { ok: false, outcome: 'FAILED' }; }
   await fail(item, notActiveWords(c), 'permanent');
   return { ok: false, outcome: 'FAILED' };
 }
@@ -672,9 +810,41 @@ async function finishNotes(item: ItemWithMove, contact: MoveContact, client: Twe
   return 'DONE';
 }
 
+/** How many times the worker tries a transient failure again by itself, and over how long a move stays eligible. */
+export const AUTO_RETRIES = 6;
+const AUTO_RETRY_WINDOW_MS = 7 * 86_400_000;
+/** Waits between tries: 1, 2, 4, 8, 16, 30 minutes. */
+export const autoRetryDelayMs = (attempts: number) => Math.min(30, 2 ** Math.max(0, attempts - 1)) * 60_000;
+
+/**
+ * A transient failure (the CRM did not answer, refused a value, Cadence was busy) goes back on the
+ * queue by itself, after a growing wait, a few times; only then does it wait for someone's Retry.
+ * The worker's checks run again on each try, so a contact that changed meanwhile is judged as it is now.
+ */
+export async function requeueTransientFailures(now = new Date()): Promise<number> {
+  const failed = await prisma.sandboxMoveItem.findMany({
+    where: { state: 'FAILED', attempts: { lt: AUTO_RETRIES }, OR: [{ failure: 'transient' }, { failure: null }], move: { createdAt: { gt: new Date(now.getTime() - AUTO_RETRY_WINDOW_MS) } } },
+    select: { id: true, moveId: true, attempts: true, claimedAt: true },
+    take: 50,
+  });
+  const moves = new Set<string>();
+  for (const i of failed) {
+    if (i.claimedAt && now.getTime() - i.claimedAt.getTime() < autoRetryDelayMs(i.attempts)) continue;
+    const r = await prisma.sandboxMoveItem.updateMany({ where: { id: i.id, state: 'FAILED' }, data: { state: 'QUEUED' } }).catch((err) => {
+      // Another move holds this contact now (B005): this one stays failed, and that one runs.
+      if (isUniqueViolation(err)) return { count: 0 };
+      throw err;
+    });
+    if (r.count) moves.add(i.moveId);
+  }
+  if (moves.size) await prisma.sandboxMove.updateMany({ where: { id: { in: [...moves] } }, data: { state: 'QUEUED', finishedAt: null, notifiedAt: null } });
+  return moves.size;
+}
+
 /** Every tick: queued items one at a time, paced under Twenty's 100 requests a minute. */
-export async function runMoveQueue(opts: { now?: Date; maxItems?: number; pauseMs?: number } = {}): Promise<{ done: number; failed: number; dryRun: number }> {
+export async function runMoveQueue(opts: { now?: Date; maxItems?: number; pauseMs?: number; autoRetry?: boolean } = {}): Promise<{ done: number; failed: number; dryRun: number }> {
   const stats = { done: 0, failed: 0, dryRun: 0 };
+  if (opts.autoRetry) await requeueTransientFailures(opts.now ?? new Date());
   const stale = new Date(Date.now() - MOVE_CLAIM_STALE_MS);
   const items = await prisma.sandboxMoveItem.findMany({ where: { OR: [{ state: 'QUEUED' }, { state: 'RUNNING', claimedAt: { lt: stale } }] }, orderBy: [{ move: { createdAt: 'asc' } }, { id: 'asc' }], take: opts.maxItems ?? 12, select: { id: true, moveId: true } });
   const moves = new Set(items.map((i) => i.moveId));

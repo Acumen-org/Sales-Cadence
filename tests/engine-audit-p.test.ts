@@ -106,15 +106,12 @@ describe('campaign engine (audit 14, P03 onward)', () => {
     expect(await prisma.auditLog.count({ where: { entityId: c.id, action: 'launch_failed' } })).toBe(1);
   });
 
-  it('P15, P14: an open CRM step never mirrored, or a done one never noted, is caught up', async () => {
+  it('P14: an open CRM step a restart left without its CRM task is mirrored once', async () => {
     const [id] = await enrol(['person-01']);
-    const [first] = await prisma.task.findMany({ where: { enrollmentId: id }, orderBy: { actionIndex: 'asc' } });
-    await completeTask({ taskId: first.id, source: 'MANUAL' }, quiet(at('2026-09-07')));
     const later = new Date(Date.now() + 11 * 60_000);
-    expect(await mirrorMissedWrites(later)).toEqual({ created: 1, completed: 1 });
+    expect(await mirrorMissedWrites(later)).toEqual({ created: 2 });
     expect(await prisma.task.count({ where: { enrollmentId: id, state: 'PENDING', twentyTaskId: null } })).toBe(0);
-    expect((await prisma.task.findUniqueOrThrow({ where: { id: first.id } })).twentyNoteId).not.toBeNull();
-    expect(await mirrorMissedWrites(later)).toEqual({ created: 0, completed: 0 });
+    expect(await mirrorMissedWrites(later)).toEqual({ created: 0 });
   });
 
   it('P28: one email closes one step, even when two steps take it at once', async () => {
@@ -147,10 +144,12 @@ describe('worker, nightly and next actions (audit 14)', () => {
     expect(nextOccurrence('2027-02-26', 'MONTHLY', '2027-02-26', rules.workingDays, 31)).toBe('2027-03-31');
   });
 
-  it('P21: a next action the CRM refused waits before it is tried again', async () => {
-    await prisma.nextAction.create({ data: { personId: 'person-01', foUserId: b.users.alisa.id, label: 'Call back', dueDate: '2026-11-20', crmPending: true, crmError: 'Person not found' } });
-    expect(await syncNextActions(new Date())).toMatchObject({ pushed: 0, failed: 0 });
-    expect(await syncNextActions(new Date(Date.now() + 31 * 60_000))).toMatchObject({ pushed: 1 });
+  it('P21: the worker follows only next actions whose person changed in the CRM', async () => {
+    const na = await prisma.nextAction.create({ data: { personId: 'person-01', foUserId: b.users.alisa.id, label: 'Call back', dueDate: '2026-11-20', crmPending: false, crmSyncedAt: new Date() } });
+    expect(await syncNextActions(new Date())).toMatchObject({ followed: 0, closed: 0 });
+    await prisma.personCache.update({ where: { id: 'person-01' }, data: { nextAction: 'Call back', nextActionDueDate: '2026-11-24', twentyUpdatedAt: new Date(Date.now() + 60_000) } });
+    expect(await syncNextActions(new Date())).toMatchObject({ followed: 1 });
+    expect((await prisma.nextAction.findUniqueOrThrow({ where: { id: na.id } })).dueDate).toBe('2026-11-24');
   });
 
   it('P22: a reply rings the FO of a running or recent sequence, not every past FO for ever', async () => {

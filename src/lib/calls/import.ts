@@ -1,7 +1,7 @@
 import { prisma } from '../db';
 import { logAudit, SYSTEM_ACTOR } from '../audit';
 import { getTwilioReader, type TwilioCall, type TwilioReader } from './twilio';
-import { hasClientEnd, upsertImportedCall, type RepUser } from './call-log';
+import { FORM_CATCH_UP_MS, hasClientEnd, upsertImportedCall, type RepUser } from './call-log';
 
 /**
  * The worker job `twilioImport` (plan 9.3): every 2 minutes, read-only. Calls.json from the
@@ -23,6 +23,11 @@ const FIRST_RUN_MS = 24 * 3600_000;
 export const RECORDING_WINDOW_MS = 48 * 3600_000;
 /** A run that died keeps its lease no longer than this. */
 const LEASE_MS = 10 * 60_000;
+/** M21: the longest stretch of calls one run reads; a longer backlog takes several runs. */
+const CATCH_UP_WINDOW_MS = FIRST_RUN_MS;
+const MAX_PAGES = 100;
+/** M17: how long an answered call is read again while Twilio has not priced it. */
+const PRICE_WINDOW_MS = 24 * 3600_000;
 
 export const IMPORT_RUNNING = 'An import is already running. Its calls show here when it ends.';
 
@@ -73,19 +78,33 @@ export async function importTwilioCalls(opts: { now?: Date; reader?: TwilioReade
     // N049: until a run has gone through, nothing is due a form; the first good run starts the clock.
     const formsFrom = (await getSetting(FORMS_FROM_KEY)) ?? now.toISOString();
     const after = new Date((watermark ? Date.parse(watermark) : now.getTime() - FIRST_RUN_MS) - OVERLAP_MS);
+    // M21: catching up after an outage reads one window at a time, oldest first, and the bookmark moves
+    // only to the end of what was read, so a long backlog is never cut short.
+    const before = now.getTime() - after.getTime() > CATCH_UP_WINDOW_MS + OVERLAP_MS ? new Date(after.getTime() + CATCH_UP_WINDOW_MS) : null;
 
     const legs = new Map<string, TwilioCall>();
     let page: string | null = null;
-    for (let i = 0; i < 100; i++) {
-      const r: { calls: TwilioCall[]; nextPage: string | null } = await reader.listCalls({ after, nextPage: page });
+    for (let i = 0; ; i++) {
+      if (i === MAX_PAGES) throw new Error(`More than ${MAX_PAGES} pages of calls in one window; nothing was skipped, the bookmark stays where it was.`);
+      const r: { calls: TwilioCall[]; nextPage: string | null } = await reader.listCalls({ after, before, nextPage: page });
       for (const c of r.calls) legs.set(c.sid, c);
       page = r.nextPage;
       if (!page) break;
     }
-    // A long call that began before the overlap still has to end (a hand-logged call joined to it too).
-    const unfinished = await prisma.callLog.findMany({ where: { statusRank: { lt: 4 }, startedAt: { gte: new Date(now.getTime() - 6 * 3600_000) }, twilioCallSid: { not: null } }, select: { twilioCallSid: true } });
+    // A long call that began before the overlap still has to end (a hand-logged call joined to it too);
+    // M26: however long the worker was down. M17: an ended call is read again until Twilio has priced it.
+    const unfinished = await prisma.callLog.findMany({
+      where: { twilioCallSid: { not: null }, OR: [
+        { statusRank: { lt: 4 }, startedAt: { gte: new Date(now.getTime() - FORM_CATCH_UP_MS) } },
+        { status: 'COMPLETED', talkSec: { gt: 0 }, priceUsd: null, endedAt: { gte: new Date(now.getTime() - PRICE_WINDOW_MS) }, importedAt: { lt: new Date(now.getTime() - 10 * 60_000) } },
+      ] },
+      select: { twilioCallSid: true }, take: 200,
+    });
     for (const u of unfinished) if (!legs.has(u.twilioCallSid!)) { const c = await reader.getCall(u.twilioCallSid!); if (c) legs.set(c.sid, c); }
     stats.read = legs.size;
+    // M11, M12: the dialpad's browser legs of an incoming call say whether a rep answered it, and who.
+    const clientLegs = new Map<string, TwilioCall[]>();
+    for (const leg of legs.values()) if (leg.parentCallSid && hasClientEnd(leg)) clientLegs.set(leg.parentCallSid, [...(clientLegs.get(leg.parentCallSid) ?? []), leg]);
 
     const parents = new Map<string, TwilioCall | null>();
     const parentOf = async (c: TwilioCall) => {
@@ -101,7 +120,7 @@ export async function importTwilioCalls(opts: { now?: Date; reader?: TwilioReade
       if (hasClientEnd(leg)) { stats.skippedLegs++; continue; }
       const parent = await parentOf(leg);
       if (parent && !hasClientEnd(parent)) { stats.skippedLegs++; continue; }
-      const r = await upsertImportedCall(leg, parent, ctx);
+      const r = await upsertImportedCall(leg, parent, ctx, leg.direction === 'inbound' ? clientLegs.get(leg.sid) : undefined);
       stats.stored++;
       if (r.created) stats.created++;
       if (r.formOpened) stats.forms++;
@@ -110,21 +129,25 @@ export async function importTwilioCalls(opts: { now?: Date; reader?: TwilioReade
     // N050: every ended call without its recording is looked at again until 48 hours after it ended,
     // whenever it was first read; after that it is marked not found, so the call page can say so.
     // Only an answered call is recorded. A call two hours old is asked about every half hour, not every run.
-    const waiting = await prisma.callLog.findMany({ where: { twilioCallSid: { not: null }, status: 'COMPLETED', recordingSid: null, recordingStatus: null, endedAt: { not: null } }, select: { id: true, twilioCallSid: true, parentCallSid: true, endedAt: true, importedAt: true }, take: 500 });
+    // M29: the calls asked about longest ago come first, so none is marked not found without being asked.
+    const waiting = await prisma.callLog.findMany({ where: { twilioCallSid: { not: null }, status: 'COMPLETED', recordingSid: null, recordingStatus: null, endedAt: { not: null } }, select: { id: true, twilioCallSid: true, parentCallSid: true, endedAt: true, importedAt: true }, orderBy: [{ importedAt: 'asc' }, { endedAt: 'asc' }], take: 500 });
     for (const c of waiting) {
       const age = now.getTime() - c.endedAt!.getTime();
       if (age >= RECORDING_WINDOW_MS) { await prisma.callLog.update({ where: { id: c.id }, data: { recordingStatus: 'not_found' } }); continue; }
-      // (A call read again in this very run is asked about now.)
+      // (A call read again in this very run is asked about now.) M28: every run only in its first
+      // 10 minutes, then every 10 minutes up to 2 hours, then every half hour.
       const lastAsked = c.importedAt && c.importedAt.getTime() !== now.getTime() ? now.getTime() - c.importedAt.getTime() : Infinity;
-      if (age >= 2 * 3600_000 && lastAsked < 30 * 60_000) continue;
-      const recordings = [...(await reader.listRecordings(c.twilioCallSid!)), ...(c.parentCallSid ? await reader.listRecordings(c.parentCallSid) : [])].filter((x) => x.status === 'completed');
+      if (age >= 10 * 60_000 && lastAsked < (age >= 2 * 3600_000 ? 30 : 10) * 60_000) continue;
+      // M24: the dialpad session's own recording counts only when this call is the session's one conversation.
+      const shared = c.parentCallSid ? (await prisma.callLog.count({ where: { parentCallSid: c.parentCallSid } })) > 1 : false;
+      const recordings = [...(await reader.listRecordings(c.twilioCallSid!)), ...(c.parentCallSid && !shared ? await reader.listRecordings(c.parentCallSid) : [])].filter((x) => x.status === 'completed');
       const latest = recordings.sort((a, b) => (b.dateCreated ?? '').localeCompare(a.dateCreated ?? ''))[0];
       if (latest) {
         await prisma.callLog.update({ where: { id: c.id }, data: { recordingSid: latest.sid, recordingSec: latest.durationSec, recordingCount: recordings.length, recordingStatus: 'found' } });
         stats.recordings++;
-      } else if (age >= 2 * 3600_000) await prisma.callLog.update({ where: { id: c.id }, data: { importedAt: now } });
+      } else if (age >= 10 * 60_000) await prisma.callLog.update({ where: { id: c.id }, data: { importedAt: now } });
     }
-    await putSetting(WATERMARK_KEY, { at: now.toISOString() });
+    await putSetting(WATERMARK_KEY, { at: (before ?? now).toISOString() });
     // N049: the clock for forms starts with the first run that went through, never a failed one.
     if (!(await getSetting(FORMS_FROM_KEY))) await putSetting(FORMS_FROM_KEY, { at: formsFrom });
     await putSetting(STATUS_KEY, { at: now.toISOString(), error: null, stats, failedInARow: 0 });

@@ -1,3 +1,4 @@
+import { openEmailReplyTask } from '../linkedin/follow-ups';
 import { createHash } from 'node:crypto';
 import { Prisma, type SandboxContact, type SandboxEmailKind } from '@prisma/client';
 import { prisma } from '../db';
@@ -171,14 +172,15 @@ export async function joinMarkedReply(touch: { id: string; sandboxContactId: str
 export type SentResult = { recorded: string[]; closed: number; alerts: number; /** The addresses a cold contact answered for. */ matched: Set<string> };
 
 /** An email from our side to these addresses: each cold contact behind them, by its status and contactability. */
-export async function recordColdSent(addresses: string[], mail: SeenMail): Promise<SentResult> {
+export async function recordColdSent(addresses: string[], mail: SeenMail, opts: { /** L24: a copy or an invite: alerts only, no step closed. */ alertOnly?: boolean } = {}): Promise<SentResult> {
   const out: SentResult = { recorded: [], closed: 0, alerts: 0, matched: new Set() };
   const wanted = new Set(addresses.map((a) => normalizeEmail(a)).filter((a): a is string => Boolean(a)));
   for (const c of await coldContactsByAddress([...wanted])) {
     const mine = addressesOf(c).filter((a) => wanted.has(a));
-    for (const a of mine) out.matched.add(a);
-    // In the CRM now: the email is the CRM person's, and the CRM's mail sync records it there.
+    // In the CRM now: the email is the CRM person's, and the CRM's mail sync records it there. L07: the
+    // address is not answered for here, so the suppression list is still checked for it (a CRM opt-out).
     if (c.status === 'MOVED') continue;
+    for (const a of mine) out.matched.add(a);
     const dnc = { contactId: c.id, personId: null, podId: c.podId, name: nameOf(c), address: mine[0] };
     if (c.status !== 'ACTIVE') {
       // A removal never stops the CRM: someone in the CRM with this address is theirs to email.
@@ -194,6 +196,7 @@ export async function recordColdSent(addresses: string[], mail: SeenMail): Promi
       if (await alertDoNotContact({ ...dnc, why: check.reason }, mail)) out.alerts++;
       continue;
     }
+    if (opts.alertOnly) continue;
     const r = await recordSent(c, mail);
     if (r) { out.recorded.push(c.id); if (r.closed) out.closed++; }
   }
@@ -300,9 +303,19 @@ export async function doNotContactEmails(period: { from: Date; to: Date }): Prom
  * their campaign and rings the bell. A reply asking to stop (`stop`, L02: stop-request.ts) opts the
  * contact out instead, which ends every campaign as Opted out and suppresses their details.
  */
-export async function recordColdReply(from: string, mail: SeenMail, automatic: boolean, stop = false): Promise<{ replies: number; autoReplies: number; optedOut: number; contacts: string[] }> {
+export async function recordColdReply(from: string, mail: SeenMail, automatic: boolean, stop = false, byConversation = false): Promise<{ replies: number; autoReplies: number; optedOut: number; contacts: string[] }> {
   const out = { replies: 0, autoReplies: 0, optedOut: 0, contacts: [] as string[] };
-  const contacts = (await coldContactsByAddress([from])).filter((c) => c.status === 'ACTIVE');
+  let contacts = (await coldContactsByAddress([from])).filter((c) => c.status === 'ACTIVE');
+  // L04: a reply from another address (a personal one, an assistant) in the conversation of an email this
+  // mailbox sent to one cold contact is that contact's reply. A colleague's message in the thread is not.
+  if (!contacts.length && byConversation && mail.conversationId && mail.mailboxUserId) {
+    const { rules } = await getSettings();
+    const domain = normalizeEmail(from)?.split('@')[1] ?? '';
+    if (domain && !rules.internalDomains.some((d) => domain === d.toLowerCase())) {
+      const ids = [...new Set((await prisma.sandboxEmail.findMany({ where: { kind: 'SENT', userId: mail.mailboxUserId, conversationId: mail.conversationId }, select: { sandboxContactId: true } })).map((s) => s.sandboxContactId))];
+      if (ids.length === 1) contacts = await prisma.sandboxContact.findMany({ where: { id: ids[0], status: 'ACTIVE' } });
+    }
+  }
   for (const c of contacts) {
     if (await seenAlready(c.id, ['REPLY', 'AUTO_REPLY'], mail)) continue;
     const externalId = touchKey(mail, c.id);
@@ -314,6 +327,9 @@ export async function recordColdReply(from: string, mail: SeenMail, automatic: b
     // An out-of-office answers nobody: it never stops a campaign and never rings (N064).
     if (automatic) { out.autoReplies++; continue; }
     out.replies++;
+    // Answer them within 2 working days, in a campaign or not (owner, 13 Nov 2026): the CRM person's task when
+    // the contact is also in the CRM, else the contact's, in Needs an owner while nobody owns them.
+    await openEmailReplyTask(c.crmMatchPersonId ? { personId: c.crmMatchPersonId } : { sandboxContactId: c.id }, mail.at, externalId);
     // The rep may have marked this reply in Tasks already: it counts once.
     await joinMarkedReply(touch);
     const running = await prisma.enrollment.findMany({ where: { sandboxContactId: c.id, personId: null, status: { in: OCCUPYING_STATUSES } }, select: { id: true, foUserId: true } });
@@ -334,9 +350,10 @@ export async function recordColdReply(from: string, mail: SeenMail, automatic: b
 // ---------------------------------------------------------------------------
 
 /** A mail system, not a person. */
-const SYSTEM_SENDER = /^(postmaster|mailer-daemon|microsoftexchange[0-9a-f]*)@/i;
-/** What a failed delivery is called. */
-const FAILURE = /^\s*(undeliverable|undelivered mail|delivery has failed|delivery failure|mail delivery failed|returned mail|failure notice|message not delivered|delivery status notification \(failure\))/i;
+// L23: the usual return paths of other mail systems too (mail-daemon, bounces+id@, mdaemon).
+const SYSTEM_SENDER = /^(postmaster|mailer-daemon|mail-daemon|maildaemon|mdaemon|microsoftexchange[0-9a-f]*|bounces?([+-][^@]*)?)@/i;
+/** What a failed delivery is called; L23: "Non-delivery report", "Mail System Error" and common non-English wording too. */
+const FAILURE = /^\s*(undeliverable|undelivered mail|delivery has failed|delivery failure|mail delivery failed|returned mail|failure notice|message not delivered|delivery status notification \(failure\)|non-?delivery( report| notification)?|mail system error|returned to sender|unzustellbar|nicht zustellbar|non remis|non distribuable|no se puede entregar|non recapitabile|onbestelbaar)/i;
 /** What a delay, a delivery receipt or a relay is called: never a bounce (N059). */
 const NOT_A_FAILURE = /^\s*(delivery delayed|delayed|delivered|relayed|expanded|delivery status notification \((delay|success|relay)\))/i;
 
@@ -370,6 +387,12 @@ export async function recordBounce(mail: SeenMail): Promise<{ bounced: string[];
   if (!byConversation) {
     const original = originalSubject(mail.subject);
     if (original) sent = await prisma.sandboxEmail.findMany({ where: { ...fromHere, subject: original, at: { gte: new Date(mail.at.getTime() - BOUNCE_WINDOW_MS), lte: mail.at } }, select: { sandboxContactId: true, subject: true } });
+    // L10: a notice naming no subject (Postfix, Exim): the one cold email this mailbox sent in the two
+    // hours before is a possible bounce for the rep to check; with several, nobody is guessed at.
+    else {
+      const recent = await prisma.sandboxEmail.findMany({ where: { ...fromHere, at: { gte: new Date(mail.at.getTime() - 2 * 3_600_000), lte: mail.at } }, select: { sandboxContactId: true, subject: true } });
+      if (new Set(recent.map((s) => s.sandboxContactId)).size === 1) sent = recent;
+    }
   }
   const ids = [...new Set(sent.map((s) => s.sandboxContactId))];
   if (!ids.length) return out;

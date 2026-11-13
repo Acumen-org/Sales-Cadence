@@ -1,3 +1,4 @@
+import { closeEmailReplyTasks } from './linkedin/follow-ups';
 import { Prisma, type ActionType, type NextActionKind, type NextActionRepeat } from '@prisma/client';
 import { prisma } from './db';
 import { logAudit, SYSTEM_ACTOR, type AuditActor } from './audit';
@@ -7,7 +8,10 @@ import { nextWorkingDay } from './engine/clock';
 import { getSettings } from './settings';
 import { getTwentyClient } from './twenty';
 import { logOwnPersonWrite } from './twenty/own-writes';
-import { afterResponse } from './engine/sync-out';
+import { afterResponse, retryDelayMs } from './engine/sync-out';
+
+/** N28: sends the worker makes of one Next Action the CRM keeps refusing before it gives up. */
+export const MAX_NEXT_ACTION_ATTEMPTS = 25;
 import { CRM_SUBJECT } from './subject';
 
 /** The audit row for a next action: on its person, or on its sandbox contact while it has none. */
@@ -159,6 +163,8 @@ export async function completeNextAction(id: string, actor: AuditActor & { id?: 
  * A repeating one moves on, as Done would. Returns the next action closed, if any.
  */
 export async function closeEmailNextAction(subject: { personId: string } | { sandboxContactId: string }, at: Date, evidence: string): Promise<string | null> {
+  // The same email answers a reply waiting for one ("Reply to their email", src/lib/linkedin/follow-ups.ts).
+  await closeEmailReplyTasks(subject, at, evidence);
   const where = 'personId' in subject ? { personId: subject.personId } : { sandboxContactId: subject.sandboxContactId, personId: null };
   const open = await prisma.nextAction.findMany({ where: { ...where, state: 'OPEN', action: 'EMAIL', kind: 'ACTION' }, include: { fo: { select: { timezone: true } } }, orderBy: { dueDate: 'asc' } });
   for (const na of open) {
@@ -229,13 +235,23 @@ export async function pushNextAction(id: string): Promise<boolean> {
     // B033: a moved person's updatedAt after Cadence's own write, so Undo does not mistake it for an edit.
     await logOwnPersonWrite(client, personId, 'setPersonNextAction', { id: personId, ...patch });
     // Only if nothing changed meanwhile: a newer change is still pending and goes on the next pass.
-    await prisma.nextAction.updateMany({ where: { id, updatedAt: na.updatedAt }, data: { crmPending: false, crmSyncedAt: new Date(), crmError: null } });
+    await prisma.nextAction.updateMany({ where: { id, updatedAt: na.updatedAt }, data: { crmPending: false, crmSyncedAt: new Date(), crmError: null, crmAttempts: 0, crmRetryAt: null } });
     await prisma.personCache.updateMany({ where: { id: personId }, data: patch });
     return true;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[next-action] could not update Twenty for ${personId}: ${message}`);
-    await prisma.nextAction.updateMany({ where: { id, updatedAt: na.updatedAt }, data: { crmError: message.slice(0, 500) } });
+    // N28: the next try backs off (a minute, doubling, six hours at most); after 25 the worker gives up
+    // and says so. It stays pending (so the CRM's value is never followed over it) and a new change
+    // in Cadence still sends it at once.
+    const attempts = na.crmAttempts + 1;
+    const giveUp = attempts >= MAX_NEXT_ACTION_ATTEMPTS;
+    await prisma.nextAction.updateMany({
+      where: { id, updatedAt: na.updatedAt },
+      data: giveUp
+        ? { crmAttempts: attempts, crmRetryAt: null, crmError: `Gave up after ${attempts} attempts: ${message}`.slice(0, 500) }
+        : { crmError: message.slice(0, 500), crmAttempts: attempts, crmRetryAt: new Date(Date.now() + retryDelayMs(attempts)) },
+    });
     return false;
   }
 }
@@ -244,15 +260,9 @@ export async function pushNextAction(id: string): Promise<boolean> {
  * The worker's pass, every minute: send what has not reached Twenty yet, then follow what people
  * changed in Twenty - a new date moves the next action, a cleared date closes it.
  */
-/** P21: how long a next action whose CRM write failed waits before it is tried again. */
-export const NEXT_ACTION_RETRY_MS = 30 * 60_000;
-
 export async function syncNextActions(now = new Date()): Promise<{ pushed: number; failed: number; followed: number; closed: number }> {
   const stats = { pushed: 0, failed: 0, followed: 0, closed: 0 };
-  // P21: one whose last write failed waits half an hour before the next try, rather than spending the
-  // shared CRM rate limit every minute on a person the CRM keeps refusing.
-  const retryAfter = new Date(now.getTime() - NEXT_ACTION_RETRY_MS);
-  const pending = await prisma.nextAction.findMany({ where: { crmPending: true, OR: [{ crmError: null }, { updatedAt: { lt: retryAfter } }] }, orderBy: { updatedAt: 'asc' }, take: 25, select: { id: true } });
+  const pending = await prisma.nextAction.findMany({ where: { crmPending: true, crmAttempts: { lt: MAX_NEXT_ACTION_ATTEMPTS }, OR: [{ crmRetryAt: null }, { crmRetryAt: { lte: now } }] }, orderBy: { updatedAt: 'asc' }, take: 25, select: { id: true } });
   for (const p of pending) { if (await pushNextAction(p.id)) stats.pushed++; else stats.failed++; }
 
   // P21: only those whose person changed in Twenty since Cadence last matched it, found in the database,

@@ -7,7 +7,11 @@ export type WebhookAuthInput = {
   queryToken: string | null;
   secret: string | null | undefined;
   token: string | null | undefined;
+  now?: number;
 };
+
+/** N25: a signed delivery older (or newer) than this is refused, so a captured one cannot be sent again later. */
+export const WEBHOOK_MAX_AGE_MS = 5 * 60_000;
 
 export type WebhookAuthResult = { ok: true; method: 'signature' | 'token' | 'open' } | { ok: false; reason: string };
 
@@ -24,28 +28,34 @@ export function signWebhook(secret: string, timestamp: string, body: string): st
 /**
  * Verify a Twenty webhook. If a secret is configured, the request must carry a valid
  * HMAC-SHA256 signature (`X-Twenty-Webhook-Signature` over `${timestamp}:${body}`, timestamp
- * from `X-Twenty-Webhook-Timestamp`; a plain HMAC of the body is accepted too). If a shared
- * token is configured, `?token=` must match. With neither configured the endpoint is open,
- * which is only acceptable on a private network.
+ * from `X-Twenty-Webhook-Timestamp`, which must be within five minutes (N25); a plain HMAC of the
+ * body is accepted only from a sender that sends no timestamp at all). If a shared token is
+ * configured, `?token=` (or an `X-Cadence-Webhook-Token` header) must match; with a valid signature
+ * the token is not needed, so the address need not carry it (N26). With neither configured the
+ * endpoint is open, which is only acceptable on a private network.
  */
 export function verifyWebhook(input: WebhookAuthInput): WebhookAuthResult {
   const secret = input.secret?.trim();
   const token = input.token?.trim();
+  const sentToken = input.headers.get('x-cadence-webhook-token')?.trim() || input.queryToken;
   if (secret) {
     const signature = (input.headers.get('x-twenty-webhook-signature') ?? input.headers.get('x-webhook-signature') ?? '').trim();
     if (!signature) return { ok: false, reason: 'missing signature' };
     const timestamp = (input.headers.get('x-twenty-webhook-timestamp') ?? '').trim();
-    const candidates = [
-      timestamp ? signWebhook(secret, timestamp, input.rawBody) : null,
-      createHmac('sha256', secret).update(input.rawBody).digest('hex'),
-    ].filter((c): c is string => Boolean(c));
+    if (timestamp) {
+      const n = Number(timestamp);
+      const at = n < 1e12 ? n * 1000 : n;
+      if (!Number.isFinite(at) || Math.abs((input.now ?? Date.now()) - at) > WEBHOOK_MAX_AGE_MS) return { ok: false, reason: 'stale timestamp' };
+    }
+    // A timestamped delivery must be signed with its timestamp: the body-only form would let it be replayed.
+    const expected = timestamp ? signWebhook(secret, timestamp, input.rawBody) : createHmac('sha256', secret).update(input.rawBody).digest('hex');
     const provided = signature.replace(/^sha256=/, '');
-    if (!candidates.some((c) => safeEqual(c, provided))) return { ok: false, reason: 'invalid signature' };
-    if (token && !(input.queryToken && safeEqual(token, input.queryToken))) return { ok: false, reason: 'invalid token' };
+    if (!safeEqual(expected, provided)) return { ok: false, reason: 'invalid signature' };
+    if (token && sentToken && !safeEqual(token, sentToken)) return { ok: false, reason: 'invalid token' };
     return { ok: true, method: 'signature' };
   }
   if (token) {
-    if (!input.queryToken || !safeEqual(token, input.queryToken)) return { ok: false, reason: 'invalid token' };
+    if (!sentToken || !safeEqual(token, sentToken)) return { ok: false, reason: 'invalid token' };
     return { ok: true, method: 'token' };
   }
   // No secret and no token is fine on a laptop and a liability in production: anyone who finds the

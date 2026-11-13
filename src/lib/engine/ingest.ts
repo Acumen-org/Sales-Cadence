@@ -1,3 +1,4 @@
+import { openEmailReplyTask } from '../linkedin/follow-ups';
 import type { ActivityEvent, EventSource, Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { logAudit, webhookActor, RECONCILE_ACTOR, type AuditActor } from '../audit';
@@ -44,7 +45,7 @@ export type IngestInput = {
 };
 
 export type IngestResult = {
-  status: 'processed' | 'duplicate' | 'ignored' | 'error';
+  status: 'processed' | 'duplicate' | 'ignored' | 'error' | 'queued';
   result: string;
   eventId?: string;
   needsReview?: boolean;
@@ -52,6 +53,35 @@ export type IngestResult = {
 };
 
 export type ProcessOutcome = { result: string; needsReview?: boolean; reviewNote?: string; details?: Record<string, unknown> };
+
+/**
+ * N20: what is kept of an event. An email's text is read while it is processed (a reply asking to
+ * stop) but never stored: Cadence's database is no archive of the CRM's mail. A replay of a stored
+ * email (N03) reads it from the CRM again.
+ */
+const TEXT_OMITTED = '_cadenceTextOmitted';
+function storedPayload(canonical: CanonicalObject, record: Record<string, unknown>, textField: string): Prisma.InputJsonValue {
+  if (canonical !== 'message' || record[textField] == null) return record as Prisma.InputJsonValue;
+  return { ...record, [textField]: null, [TEXT_OMITTED]: true } as Prisma.InputJsonValue;
+}
+
+/** N21: the objects Cadence acts on. Twenty's webhook sends every object; the rest are not stored. */
+const HANDLED = new Set<string>(['person', 'company', 'note', 'noteTarget', 'message', 'messageParticipant', 'task', 'opportunity']);
+
+/** N21: processed events older than this are deleted each night; the nightly re-read looks back 90 days at most. */
+export const EVENT_RETENTION_DAYS = 120;
+
+/** N21: forget processed events past the retention, in batches so no long lock is held. Needs-review rows stay. */
+export async function pruneActivityEvents(now = new Date()): Promise<number> {
+  const cutoff = new Date(now.getTime() - EVENT_RETENTION_DAYS * 86_400_000);
+  let removed = 0;
+  for (let i = 0; i < 50; i++) {
+    const n = await prisma.$executeRaw`DELETE FROM "ActivityEvent" WHERE id IN (SELECT id FROM "ActivityEvent" WHERE "receivedAt" < ${cutoff} AND "needsReview" = false AND "result" IS NOT NULL LIMIT 5000)`;
+    removed += n;
+    if (n < 5000) break;
+  }
+  return removed;
+}
 
 export function dedupeKeyFor(objectType: string, recordId: string, updatedAt: string | null | undefined, eventName: string): string {
   if (eventName.endsWith('.deleted') || eventName.endsWith('.destroyed')) return `${objectType}:${recordId}:deleted:${updatedAt ?? eventName}`;
@@ -67,6 +97,12 @@ export function dedupeKeyFor(objectType: string, recordId: string, updatedAt: st
  */
 const INCOMPLETE = new Set(['ignored_note_no_person', 'ignored_note_not_found', 'ignored_outbound_no_person', 'message_outbound_partial', 'ignored_message_not_found', 'ignored_message_unknown_direction']);
 export const isIncompleteResult = (result: string | null | undefined) => Boolean(result && (INCOMPLETE.has(result) || result.startsWith('error:')));
+/**
+ * N36: an incomplete record is read again for this long after it was first seen; Twenty links a
+ * note's person or an email's people within moments. Past it, a sighting is a duplicate like any
+ * other, so a note to nobody is not read again (with a CRM request) on every pass for good.
+ */
+export const INCOMPLETE_RETRY_MS = 2 * 86_400_000;
 
 /**
  * N03: an event is saved first and processed second. A row still without a result this long after
@@ -81,18 +117,26 @@ const isStaleClaim = (row: { result: string | null; receivedAt: Date; processedA
  * Processing is idempotent by construction (single-use evidence, no-op state transitions), so a
  * lost race or a reconcile re-scan can never advance a step twice.
  */
-export async function ingestEvent(input: IngestInput, client?: TwentyClient): Promise<IngestResult> {
+export async function ingestEvent(input: IngestInput, client?: TwentyClient): Promise<IngestResult>;
+/**
+ * N22: `defer` stores the event and hands back its processing as `run`, for the webhook to do after
+ * it has answered Twenty. A run that never happens (a restart) is picked up by the sweep (N03).
+ */
+export async function ingestEvent(input: IngestInput, client: TwentyClient | undefined, opts: { defer: true }): Promise<IngestResult & { run?: () => Promise<IngestResult> }>;
+export async function ingestEvent(input: IngestInput, client?: TwentyClient, opts: { defer?: boolean } = {}): Promise<IngestResult & { run?: () => Promise<IngestResult> }> {
   const schema = await getTwentySchema();
   const canonical = canonicalObjectType(input.objectType, schema) ?? (input.objectType as CanonicalObject);
   const recordId = input.recordId ?? (typeof input.record.id === 'string' ? input.record.id : String(input.record.id ?? ''));
   if (!recordId) return { status: 'ignored', result: 'no_record_id' };
+  if (!HANDLED.has(canonical)) return { status: 'ignored', result: `ignored_object_${canonical}` };
   const deletionAt = (input.eventName.endsWith('.deleted') || input.eventName.endsWith('.destroyed')) && typeof input.record.deletedAt === 'string' ? input.record.deletedAt : null;
   const updatedAt = deletionAt ?? input.updatedAt ?? (typeof input.record.updatedAt === 'string' ? input.record.updatedAt : null);
   const dedupeKey = input.dedupeKey ?? dedupeKeyFor(canonical, recordId, updatedAt, input.eventName);
 
   const existing = await prisma.activityEvent.findUnique({ where: { dedupeKey }, select: { id: true, result: true, receivedAt: true, processedAt: true } });
   const stale = existing ? isStaleClaim(existing) : false;
-  if (existing && !stale && !isIncompleteResult(existing.result) && !(input.reread && existing.result !== null)) return { status: 'duplicate', result: 'duplicate', eventId: existing.id, details: { dedupeKey } };
+  const retryIncomplete = existing ? isIncompleteResult(existing.result) && existing.receivedAt.getTime() > Date.now() - INCOMPLETE_RETRY_MS : false;
+  if (existing && !stale && !retryIncomplete && !(input.reread && existing.result !== null)) return { status: 'duplicate', result: 'duplicate', eventId: existing.id, details: { dedupeKey } };
 
   let event: Pick<ActivityEvent, 'id'>;
   if (existing) {
@@ -100,7 +144,7 @@ export async function ingestEvent(input: IngestInput, client?: TwentyClient): Pr
     // row cut off before it had a result is claimed on its claim time, which the claim moves on.
     const claimed = await prisma.activityEvent.updateMany({
       where: { id: existing.id, result: existing.result, ...(stale ? { processedAt: existing.processedAt } : {}) },
-      data: { source: input.source, eventName: input.eventName, payload: input.record as Prisma.InputJsonValue, processedAt: stale ? new Date() : null, result: null },
+      data: { source: input.source, eventName: input.eventName, payload: storedPayload(canonical, input.record, schema.message.text), processedAt: stale ? new Date() : null, result: null },
     });
     if (!claimed.count) return { status: 'duplicate', result: 'duplicate', eventId: existing.id, details: { dedupeKey } };
     event = existing;
@@ -114,7 +158,7 @@ export async function ingestEvent(input: IngestInput, client?: TwentyClient): Pr
           externalId: recordId,
           externalUpdatedAt: updatedAt ? new Date(updatedAt) : null,
           dedupeKey,
-          payload: input.record as Prisma.InputJsonValue,
+          payload: storedPayload(canonical, input.record, schema.message.text),
         },
       });
     } catch (err) {
@@ -123,6 +167,12 @@ export async function ingestEvent(input: IngestInput, client?: TwentyClient): Pr
     }
   }
 
+  const run = () => runStored(event, canonical, recordId, input, client);
+  if (opts.defer) return { status: 'queued', result: 'queued', eventId: event.id, run };
+  return run();
+}
+
+async function runStored(event: Pick<ActivityEvent, 'id'>, canonical: CanonicalObject, recordId: string, input: IngestInput, client?: TwentyClient): Promise<IngestResult> {
   const actor: AuditActor = input.source === 'RECONCILE' ? RECONCILE_ACTOR : webhookActor(input.eventName, recordId);
   const ctx: EngineContext = { actor, now: input.now, skipSync: input.skipSync };
   try {
@@ -192,7 +242,7 @@ async function process(type: CanonicalObject, input: IngestInput, ctx: EngineCon
     case 'message': {
       if (deleted) return { result: 'ignored_deleted' };
       const inline = normalizeMessage(input.record, schema);
-      const full = inline.participants.length ? inline : await fetchMessage(inline.id, client);
+      const full = inline.participants.length && !input.record[TEXT_OMITTED] ? inline : await fetchMessage(inline.id, client);
       if (!full) return { result: 'ignored_message_not_found' };
       return handleMessage(full, ctx, settings);
     }
@@ -209,6 +259,8 @@ async function process(type: CanonicalObject, input: IngestInput, ctx: EngineCon
       return handleTwentyTask(normalizeTask(input.record, schema), ctx, settings);
     case 'opportunity':
       if (deleted) return { result: 'ignored_deleted' };
+      // N10: the rule is "a meeting when an opportunity is created": a later edit of an old one is not.
+      if (!input.eventName.endsWith('.created')) return { result: 'ignored_opportunity_not_created' };
       return handleOpportunity(normalizeOpportunity(input.record, schema), ctx, settings);
     default:
       return { result: `ignored_object_${type}` };
@@ -455,8 +507,12 @@ async function handleMessage(message: TwentyMessage, ctx: EngineContext, setting
     }
     let personId = cls.fromPersonId;
     if (!personId && cls.fromHandle) {
-      const p = await prisma.personCache.findFirst({ where: { email: { equals: cls.fromHandle, mode: 'insensitive' } }, select: { id: true } });
-      personId = p?.id ?? null;
+      // N34: a live person only (never a deleted duplicate), and of several with the address the one
+      // in a running sequence, so the reply stops the sequence it answers.
+      const handle = cls.fromHandle.trim().toLowerCase();
+      const people = await prisma.personCache.findMany({ where: { deletedAt: null, OR: [{ email: { equals: handle, mode: 'insensitive' } }, { emailNorm: handle }, { additionalEmailsNorm: { has: handle } }] }, select: { id: true }, orderBy: { id: 'asc' } });
+      const running = people.length > 1 ? await prisma.enrollment.findFirst({ where: { personId: { in: people.map((p) => p.id) }, status: { in: OCCUPYING_STATUSES } }, orderBy: { createdAt: 'desc' }, select: { personId: true } }) : null;
+      personId = running?.personId ?? people[0]?.id ?? null;
     }
     if (!personId) return { result: 'ignored_inbound_unknown_sender' };
     // An out-of-office or "automatic reply" is a machine answering: it is recorded as what it is,
@@ -477,6 +533,8 @@ async function handleMessage(message: TwentyMessage, ctx: EngineContext, setting
       const r = await optOutPerson(personId, { source: 'email_reply', actor: ctx.actor, reason: `Replied asking not to be contacted: ${subject}`.slice(0, 300), now: occurredAt });
       return { result: 'inbound_opt_out', details: { personId, changed: r.changed } };
     }
+    // Answer them within 2 working days, in a campaign or not (owner, 13 Nov 2026).
+    await openEmailReplyTask({ personId }, occurredAt, `message:${message.id}:person:${personId}`);
     const enrollment = await prisma.enrollment.findFirst({
       where: { personId, status: { in: [...OCCUPYING_STATUSES, 'REPLIED', 'MEETING'] } },
       orderBy: { createdAt: 'desc' },

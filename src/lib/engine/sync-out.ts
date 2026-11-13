@@ -3,7 +3,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { logAudit, SYSTEM_ACTOR } from '../audit';
 import { cachedPersonName } from '../person-cache';
-import { getSettings } from '../settings';
+import { getSettings, getTwentySchema } from '../settings';
 import { callOutcomes } from '../call-outcomes';
 import { firstNameOf } from '../names';
 import { getTwentyClient, type TwentyClient } from '../twenty';
@@ -64,16 +64,14 @@ export function retryDelayMs(attempts: number): number {
 async function reportFailure(task: SyncTask, operation: string, err: unknown, write?: FailedWrite) {
   const message = err instanceof Error ? err.message : String(err);
   console.warn(`[sync-out] ${operation} failed for task ${task.id}: ${message}`);
-  try {
-    await logAudit({ entityType: 'task', entityId: task.id, action: 'sync_failed', actor: SYSTEM_ACTOR, details: { operation, message } });
-    if (write) {
-      await prisma.twentyWrite.create({
-        data: { operation, objectType: write.objectType, payload: write.payload, twentyId: write.twentyId ?? null, taskId: task.id, dryRun: false, status: 'FAILED', error: message, attempts: 1, nextAttemptAt: new Date(Date.now() + retryDelayMs(1)) },
-      });
-    }
-  } catch {
-    /* ignore */
+  // N31: the outbox row comes first and on its own: an audit line that cannot be written must not
+  // cost the write itself. A save that fails is tried once more, then reported as an error; the
+  // worker's sweep for completed steps without a CRM write (sync-retry.ts, N09) still finds it.
+  if (write) {
+    const data = { operation, objectType: write.objectType, payload: write.payload, twentyId: write.twentyId ?? null, taskId: task.id, dryRun: false, status: 'FAILED', error: message, attempts: 1, nextAttemptAt: new Date(Date.now() + retryDelayMs(1)) };
+    await prisma.twentyWrite.create({ data }).catch(() => prisma.twentyWrite.create({ data })).catch((err) => console.error(`[sync-out] LOST: ${operation} for task ${task.id} could not be queued for retry: ${err instanceof Error ? err.message : String(err)}`));
   }
+  await logAudit({ entityType: 'task', entityId: task.id, action: 'sync_failed', actor: SYSTEM_ACTOR, details: { operation, message } }).catch(() => undefined);
 }
 
 /**
@@ -171,10 +169,12 @@ export async function syncTaskCompleted(task: SyncTask): Promise<void> {
     }
   }
   if (task.twentyTaskId) {
-    const patch = { id: task.twentyTaskId, status: 'DONE' as const };
+    // N38: the workspace's own "done" value, as creating and reading a task use.
+    const done = (await getTwentySchema()).taskStatus.done;
+    const patch = { id: task.twentyTaskId, status: done };
     try {
       if (!client) throw clientError;
-      await client.updateTask(task.twentyTaskId, { status: 'DONE' });
+      await client.updateTask(task.twentyTaskId, { status: done });
       await recordWrite(client, 'updateTask', 'task', patch, task.twentyTaskId, task.id);
     } catch (err) {
       await reportFailure(task, 'updateTask', err, { objectType: 'task', payload: patch, twentyId: task.twentyTaskId });
@@ -187,14 +187,15 @@ export async function syncTaskResolved(task: SyncTask): Promise<void> {
   if (!task.twentyTaskId) return;
   const settings = await getSettings();
   const remove = settings.sync.deleteMirroredTaskOnSkip;
+  const done = (await getTwentySchema()).taskStatus.done;
   const payload = remove
     ? { id: task.twentyTaskId, reason: task.state }
-    : { id: task.twentyTaskId, status: 'DONE' as const, title: `${mirroredTaskTitle(task)} (${task.state.toLowerCase()})` };
+    : { id: task.twentyTaskId, status: done, title: `${mirroredTaskTitle(task)} (${task.state.toLowerCase()})` };
   const operation = remove ? 'deleteTask' : 'updateTask';
   try {
     const client = await getTwentyClient();
     if (remove) await client.deleteTask(task.twentyTaskId);
-    else await client.updateTask(task.twentyTaskId, { status: 'DONE', title: (payload as { title: string }).title });
+    else await client.updateTask(task.twentyTaskId, { status: done, title: (payload as { title: string }).title });
     await recordWrite(client, operation, 'task', payload, task.twentyTaskId, task.id);
     await prisma.task.update({ where: { id: task.id }, data: { twentyTaskId: null } });
   } catch (err) {

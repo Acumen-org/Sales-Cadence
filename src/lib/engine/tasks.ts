@@ -102,6 +102,10 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
       // it started never gets another step; its enrollment ends with the reason instead.
       const cold = e.sandboxContactId && !e.personId ? e.sandboxContact : null;
       if (cold && cold.status !== 'ACTIVE') { ending = COLD_EXIT[cold.status] ?? 'removed'; return { outcome: 'inactive' as const, reason: 'The contact can no longer be contacted' }; }
+      // L06: the same net for a CRM person opted out or marked Do not contact however the flag arrived
+      // (the nightly refresh, a page's live read), not only through the event feed.
+      const crm = e.personId ? e.person : null;
+      if (crm && (crm.optedOut || crm.dnd)) { ending = crm.optedOut ? 'opted_out' : 'dnd'; return { outcome: 'inactive' as const, reason: 'The person can no longer be contacted' }; }
       const today = todayIn(workspaceTimezone(), now);
       const steps = parseSteps(e.sequence.steps);
       const currentTasks = e.tasks.filter((t) => t.stepIndex === e.currentStep);
@@ -187,6 +191,9 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
           const why = stepSkip ?? (own && !own.ok && own.effect === 'skip' ? firstSentence(own.reason) : null);
           if (why) skipped.set(i, why);
         }
+      } else if (crm) {
+        // L11: a CRM person's email step is made already skipped when their address is known to bounce.
+        for (let i = 0; i < step.actions.length; i++) if (step.actions[i].type === 'EMAIL' && crm.badEmail) skipped.set(i, 'Email bounced');
       }
 
       const taskIds: string[] = [];
@@ -515,26 +522,21 @@ export async function resumeReleasedEnrollments(ctx: EngineContext, take = 50): 
 /**
  * P14, P15: CRM writes lost to a worker killed mid-pass or a web server restarted before its
  * after-response work ran. An open CRM step with no mirrored task and no attempt to make one since it
- * last changed is mirrored now; a step done with no completion note and no attempt to write one gets
- * it. Only the last two days, settled for ten minutes, a few a pass; failures go to the outbox as usual.
+ * last changed is mirrored now. Only the last two days, settled for ten minutes, a few a pass; failures
+ * go to the outbox as usual.
  */
-export async function mirrorMissedWrites(now = new Date(), take = 25): Promise<{ created: number; completed: number }> {
+export async function mirrorMissedWrites(now = new Date(), take = 25): Promise<{ created: number }> {
   const settings = await getSettings();
   const settled = new Date(now.getTime() - 10 * 60_000);
   const since = new Date(now.getTime() - 2 * 86_400_000);
-  const stats = { created: 0, completed: 0 };
+  const stats = { created: 0 };
   if (settings.sync.mirrorOpenTasks) {
     const open = await prisma.task.findMany({ where: { state: 'PENDING', twentyTaskId: null, updatedAt: { gte: since, lt: settled }, enrollment: { personId: { not: null } } }, select: { id: true, updatedAt: true }, orderBy: { updatedAt: 'asc' }, take: take * 4 });
     const tried = new Set((await prisma.twentyWrite.findMany({ where: { taskId: { in: open.map((t) => t.id) }, operation: 'createTask' }, select: { taskId: true, createdAt: true } })).filter((w) => open.some((t) => t.id === w.taskId && w.createdAt >= t.updatedAt)).map((w) => w.taskId));
     const missed = open.filter((t) => !tried.has(t.id)).slice(0, take).map((t) => t.id);
     if (missed.length) { await syncTasksCreated(await loadSyncTasks(missed)); stats.created = missed.length; }
   }
-  if (settings.sync.writeCompletionNotes) {
-    const done = await prisma.task.findMany({ where: { state: 'DONE', twentyNoteId: null, updatedAt: { gte: since, lt: settled }, enrollment: { personId: { not: null } } }, select: { id: true }, orderBy: { updatedAt: 'asc' }, take: take * 4 });
-    const tried = new Set((await prisma.twentyWrite.findMany({ where: { taskId: { in: done.map((t) => t.id) }, operation: 'createNote' }, select: { taskId: true } })).map((w) => w.taskId));
-    const missed = done.filter((t) => !tried.has(t.id)).slice(0, take).map((t) => t.id);
-    for (const t of await loadSyncTasks(missed)) { await syncTaskCompleted(t); stats.completed++; }
-  }
+  // Completed steps whose note never went are caught up by the worker's N09 sweep (sweepUnwrittenSyncs), not here.
   return stats;
 }
 

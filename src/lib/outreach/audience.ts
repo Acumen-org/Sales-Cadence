@@ -34,7 +34,7 @@ export async function audienceFor(subject: AudienceSubject, tx: Tx = prisma): Pr
  * The pod a call counts for, at the time of the call (B040): its enrollment's, else the cold
  * contact's, else the rep's only pod. Null when none of them says.
  */
-export async function callPodFor(call: { enrollmentId?: string | null; sandboxContactId?: string | null; userId?: string | null }, tx: Tx = prisma): Promise<string | null> {
+export async function callPodFor(call: { enrollmentId?: string | null; sandboxContactId?: string | null; userId?: string | null; personId?: string | null }, tx: Tx = prisma): Promise<string | null> {
   if (call.enrollmentId) {
     const e = await tx.enrollment.findUnique({ where: { id: call.enrollmentId }, select: { podId: true } });
     if (e?.podId) return e.podId;
@@ -46,6 +46,12 @@ export async function callPodFor(call: { enrollmentId?: string | null; sandboxCo
   if (call.userId) {
     const pods = await tx.userPod.findMany({ where: { userId: call.userId, pod: { archived: false } }, select: { podId: true }, take: 2 });
     if (pods.length === 1) return pods[0].podId;
+  }
+  // M40: a rep in several pods calling a CRM person in no campaign: the person's own pod in the CRM.
+  if (call.personId) {
+    const p = await tx.personCache.findUnique({ where: { id: call.personId }, select: { podOwner: true } });
+    const pod = p?.podOwner ? await tx.pod.findFirst({ where: { podOwnerValue: p.podOwner, archived: false }, select: { id: true } }) : null;
+    if (pod) return pod.id;
   }
   return null;
 }

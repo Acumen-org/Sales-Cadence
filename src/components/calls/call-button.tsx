@@ -57,18 +57,19 @@ export function CallButton({ phone, template, taskId, nextActionId, personId, sa
   const dialpad = opensDialpad(template);
   const href = callHref(phone, template);
   const open = (tab: Window | null) => { if (tab) tab.location.href = href; else window.location.href = href; };
+  // M05: a button, not a link holding the number, so a middle click or "open in new tab" cannot reach
+  // the dialpad without the server's check.
   return <span className="inline-flex flex-col items-start gap-1">
-    <a
-      href={href}
-      target={dialpad ? '_blank' : undefined}
-      rel={dialpad ? 'noreferrer' : undefined}
+    <button
+      type="button"
       className={clsx(className, busy && 'pointer-events-none opacity-70')}
       aria-busy={busy}
       aria-label={ariaLabel}
-      onClick={async (event) => {
-        event.preventDefault();
+      onClick={async () => {
         if (warning && !(await ask({ title: 'Call anyway?', body: warning, confirmLabel: 'Call' }))) return;
         const tab = dialpad ? window.open('about:blank', '_blank') : null;
+        // M50: the dialpad page cannot reach back into Cadence's tab.
+        if (tab) tab.opener = null;
         setBusy(true);
         setRefused(null);
         const input = { phone, taskId, nextActionId, personId, sandboxContactId };
@@ -98,7 +99,7 @@ export function CallButton({ phone, template, taskId, nextActionId, personId, sa
           }
         })();
       }}
-    ><IconPhone size={15} />{label}</a>
+    ><IconPhone size={15} />{label}</button>
     {refused ? <span role="alert" className="max-w-xs text-[12px] text-red-700">{refused}</span> : null}
     {dialog}
   </span>;

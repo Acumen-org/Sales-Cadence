@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { h00ksConfigured } from '@/lib/calls/h00ks';
 import { needsPod } from '../auth/rbac';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
@@ -144,7 +145,8 @@ export async function setUserAccessAction(formData: FormData): Promise<ActionRes
   const userId = String(formData.get('userId') ?? '');
   const restore = formData.get('active') === 'true';
   const replacementId = String(formData.get('replacementId') ?? '');
-  const number = formData.get('number') === 'move' ? 'move' : 'release';
+  // With h00ks, numbers are moved there: Cadence only lets the leaver's go.
+  const number = formData.get('number') === 'move' && !h00ksConfigured() ? 'move' : 'release';
   if (!restore && userId === admin.id) return { ok: false, error: 'You cannot remove your own access.' };
   const work = restore ? null : (await leaverWork([userId])).get(userId) ?? null;
   // A calling number alone needs nobody when it is let go.

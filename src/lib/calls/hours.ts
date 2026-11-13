@@ -93,6 +93,20 @@ export async function callAttemptsToday(subject: { personId?: string | null; san
   return calls + intents;
 }
 
+/** M23: premium-rate area codes inside +1, never dialled from Cadence. */
+const PREMIUM_AREAS = new Set(['900', '976']);
+/** +1 area codes outside the US mainland and Canada (the Caribbean and Atlantic islands), charged as international. */
+const DEAR_AREAS = new Set(['242', '246', '264', '268', '284', '345', '441', '473', '649', '658', '664', '721', '758', '767', '784', '809', '829', '849', '868', '869', '876']);
+
+/** M23: whether a number costs more than an ordinary call: refused (premium rate) or asked about once (abroad). */
+export function costlyNumber(e164: string): { block: string | null; ask: string | null } {
+  const area = e164.startsWith('+1') ? e164.slice(2, 5) : null;
+  if (area && PREMIUM_AREAS.has(area)) return { block: `${e164} is a premium-rate number (${area}). Cadence does not call premium-rate numbers.`, ask: null };
+  if (area && DEAR_AREAS.has(area)) return { block: null, ask: `${e164} is in the Caribbean or Atlantic islands (area code ${area}), charged at international rates.` };
+  if (!area) return { block: null, ask: `${e164} is outside the US and Canada, charged at international rates.` };
+  return { block: null, ask: null };
+}
+
 export function attemptLimitBlock(attempts: number, place: CallPlace): string | null {
   return attempts >= MAX_CALL_ATTEMPTS_PER_DAY ? `This person has already been called ${attempts} times today. At most ${MAX_CALL_ATTEMPTS_PER_DAY} calls a day are allowed; call again tomorrow (their time).${place.guessed ? ` ${place.guessed}` : ''}` : null;
 }

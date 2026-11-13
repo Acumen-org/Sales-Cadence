@@ -30,11 +30,16 @@ export function callTimeWords(at: Date, timezone: string, now = new Date()): str
 /** The instant a wall-clock day and HH:MM mean in a zone: a meeting's start, a call logged by hand. */
 export function zonedInstant(day: string, time: string, timezone: string): Date | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return null;
-  const guess = new Date(`${day}T${time}:00Z`);
-  const shown = new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hour12: false, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(guess);
-  const get = (t: string) => Number(shown.find((p) => p.type === t)?.value ?? 0);
-  const asIfUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour') % 24, get('minute'));
-  return new Date(guess.getTime() - (asIfUtc - guess.getTime()));
+  const guess = new Date(`${day}T${time}:00Z`).getTime();
+  const fmt = new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hour12: false, year: 'numeric', month: '2-digit', day: '2-digit' });
+  const offsetAt = (at: number) => {
+    const shown = fmt.formatToParts(new Date(at));
+    const get = (t: string) => Number(shown.find((p) => p.type === t)?.value ?? 0);
+    return Date.UTC(get('year'), get('month') - 1, get('day'), get('hour') % 24, get('minute')) - at;
+  };
+  // M34: the zone's offset is taken again at the answer, so a time just after a clock change is not an hour out.
+  const first = guess - offsetAt(guess);
+  return new Date(guess - offsetAt(first));
 }
 
 /** "3m 12s", "45s"; null when nobody talked. */

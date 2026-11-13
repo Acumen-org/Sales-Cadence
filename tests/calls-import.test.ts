@@ -88,9 +88,10 @@ describe('the Twilio import', () => {
     expect(await prisma.callLog.findFirstOrThrow()).toEqual(expect.objectContaining({ sandboxContactId: contact.id, userId: b.users.alisa.id, formDueAt: null }));
   });
 
-  it('matches the rep by number first, then by handle', () => {
+  // M10 (audit 12 Nov): the dialpad's sign-in name wins over a number the team may share; this test asserted the reverse.
+  it('matches the rep by handle first, then by number', () => {
     const users = [{ id: 'a', callerNumber: ALISA_LINE, aliases: ['tw_alisa'] }, { id: 'k', callerNumber: null, aliases: ['tw_karson'] }];
-    expect(matchRep({ direction: 'OUTBOUND', fromNumber: ALISA_LINE, toNumber: '+1', repIdentity: 'tw_karson' }, users)).toEqual({ userId: 'a', by: 'caller_number' });
+    expect(matchRep({ direction: 'OUTBOUND', fromNumber: ALISA_LINE, toNumber: '+1', repIdentity: 'tw_karson' }, users)).toEqual({ userId: 'k', by: 'alias' });
     expect(matchRep({ direction: 'INBOUND', fromNumber: '+1', toNumber: ALISA_LINE, repIdentity: null }, users)).toEqual({ userId: 'a', by: 'caller_number' });
     expect(matchRep({ direction: 'OUTBOUND', fromNumber: '+19995550000', toNumber: '+1', repIdentity: 'TW_Karson' }, users)).toEqual({ userId: 'k', by: 'alias' });
   });

@@ -55,14 +55,11 @@ export function resolveNoteActor<U extends UserLike>(note: Pick<TwentyNote, 'cre
   }
   if (actorHandle) {
     const h = actorHandle.toLowerCase();
-    const byAlias = users.find(
-      (u) =>
-        u.aliases.some((a) => a.toLowerCase() === h) ||
-        `tw_${u.name.split(/\s+/)[0]?.toLowerCase()}` === h ||
-        u.email.toLowerCase().split('@')[0] === h ||
-        u.email.toLowerCase() === h,
-    );
+    const byAlias = users.find((u) => u.aliases.some((a) => a.toLowerCase() === h) || u.email.toLowerCase().split('@')[0] === h || u.email.toLowerCase() === h);
     if (byAlias) return byAlias;
+    // N35: tw_<first name> credits a user only when no one else has that first name.
+    const byFirstName = users.filter((u) => `tw_${u.name.split(/\s+/)[0]?.toLowerCase()}` === h);
+    if (byFirstName.length === 1) return byFirstName[0];
   }
   if (note.createdByName) {
     const n = note.createdByName.trim().toLowerCase();
