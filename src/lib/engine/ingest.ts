@@ -96,6 +96,12 @@ export function dedupeKeyFor(objectType: string, recordId: string, updatedAt: st
  */
 const INCOMPLETE = new Set(['ignored_note_no_person', 'ignored_note_not_found', 'ignored_outbound_no_person', 'message_outbound_partial', 'ignored_message_not_found', 'ignored_message_unknown_direction']);
 export const isIncompleteResult = (result: string | null | undefined) => Boolean(result && (INCOMPLETE.has(result) || result.startsWith('error:')));
+/**
+ * N36: an incomplete record is read again for this long after it was first seen; Twenty links a
+ * note's person or an email's people within moments. Past it, a sighting is a duplicate like any
+ * other, so a note to nobody is not read again (with a CRM request) on every pass for good.
+ */
+export const INCOMPLETE_RETRY_MS = 2 * 86_400_000;
 
 /**
  * N03: an event is saved first and processed second. A row still without a result this long after
@@ -128,7 +134,8 @@ export async function ingestEvent(input: IngestInput, client?: TwentyClient, opt
 
   const existing = await prisma.activityEvent.findUnique({ where: { dedupeKey }, select: { id: true, result: true, receivedAt: true, processedAt: true } });
   const stale = existing ? isStaleClaim(existing) : false;
-  if (existing && !stale && !isIncompleteResult(existing.result) && !(input.reread && existing.result !== null)) return { status: 'duplicate', result: 'duplicate', eventId: existing.id, details: { dedupeKey } };
+  const retryIncomplete = existing ? isIncompleteResult(existing.result) && existing.receivedAt.getTime() > Date.now() - INCOMPLETE_RETRY_MS : false;
+  if (existing && !stale && !retryIncomplete && !(input.reread && existing.result !== null)) return { status: 'duplicate', result: 'duplicate', eventId: existing.id, details: { dedupeKey } };
 
   let event: Pick<ActivityEvent, 'id'>;
   if (existing) {

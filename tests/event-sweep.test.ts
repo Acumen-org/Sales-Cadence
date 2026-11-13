@@ -68,3 +68,19 @@ describe('N22: a webhook is answered before its event is processed', () => {
     expect((await prisma.activityEvent.findFirstOrThrow({ where: { externalId: 'n-later' } })).result).toBe('ignored_deleted');
   });
 });
+
+describe('N36: an incomplete event is not read again for good', () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  it('is read again while recent, and is a duplicate once older than the retry window', async () => {
+    const { INCOMPLETE_RETRY_MS } = await import('@/lib/engine/ingest');
+    const row = (id: string, receivedAt: Date) => prisma.activityEvent.create({ data: { source: 'RECONCILE', objectType: 'note', eventName: 'note.deleted', externalId: id, dedupeKey: dedupeKeyFor('note', id, null, 'note.deleted'), payload: { id }, receivedAt, processedAt: receivedAt, result: 'ignored_note_no_person' } });
+    await row('n-recent', new Date());
+    await row('n-old', new Date(Date.now() - INCOMPLETE_RETRY_MS - 60_000));
+    const again = (id: string) => ingestEvent({ source: 'RECONCILE', objectType: 'note', eventName: 'note.deleted', record: { id }, recordId: id });
+    expect((await again('n-recent')).status).not.toBe('duplicate');
+    expect((await again('n-old')).status).toBe('duplicate');
+  });
+});
