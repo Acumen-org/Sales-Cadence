@@ -32,6 +32,7 @@ import { coldOutreachReleaseOnce } from '../lib/outreach/release';
 import { runLinkedInPass } from '../lib/linkedin/pass';
 import { beatWorker } from '../lib/worker-heartbeat';
 import { setCrmRequestPriority } from '../lib/twenty/pace';
+import { LEASE_RENEW_MS, newLeaseHolder, releaseWorkerLease, takeWorkerLease } from '../lib/worker-lease';
 
 const config=env();
 const log=(message:string,extra?:unknown)=>console.log('[worker '+new Date().toISOString()+'] '+message,extra??'');
@@ -240,12 +241,31 @@ async function tick(){
    if(now-lastPurge>=3600000){await purgeExpiredSessions();lastPurge=now;}
  }catch(error){log('tick failed',error);}finally{running=false;}
 }
+const leaseHolder=newLeaseHolder();
 async function main(){
  // N12: the worker's CRM requests are background work: they leave room in the minute for reps' clicks.
  setCrmRequestPriority('background');
  log('Continuous sync every '+config.CRM_SYNC_SECONDS+' seconds; nightly reconcile after '+config.RECONCILE_HOUR+':00 '+workspaceTimezone());
- await tick();const timer=setInterval(tick,Math.min(config.WORKER_TICK_SECONDS,config.CRM_SYNC_SECONDS,120)*1000);
- const stop=async()=>{stopping=true;clearInterval(timer);while(running||crmRunning)await new Promise(resolve=>setTimeout(resolve,100));await nightly.settled();await prisma.$disconnect();process.exit(0);};
+ let timer:ReturnType<typeof setInterval>|undefined;let renew:ReturnType<typeof setInterval>|undefined;
+ // T35: listening for the stop signal before the first pass, so a stop during it waits for it too.
+ const stop=async()=>{
+  if(stopping)return;stopping=true;if(timer)clearInterval(timer);if(renew)clearInterval(renew);
+  log('stopping: waiting for the current pass to finish');
+  while(running||crmRunning)await new Promise(resolve=>setTimeout(resolve,100));
+  await nightly.settled();
+  await releaseWorkerLease(leaseHolder).catch((error)=>log('worker lease release failed',error));
+  await prisma.$disconnect();process.exit(0);
+ };
  process.on('SIGTERM',stop);process.on('SIGINT',stop);
+ // T19: one worker only. A second copy waits here until the first stops (or its lease runs out).
+ let waiting=false;
+ while(!stopping){
+  try{if(await takeWorkerLease(leaseHolder))break;}catch(error){log('worker lease check failed',error);}
+  if(!waiting){log('another worker holds the lease; waiting until it stops');waiting=true;}
+  await new Promise(resolve=>setTimeout(resolve,15_000));
+ }
+ if(stopping)return;
+ renew=setInterval(()=>{void takeWorkerLease(leaseHolder).then((held)=>{if(!held){log('another worker took the lease; stopping');void stop();}}).catch((error)=>log('worker lease renewal failed',error));},LEASE_RENEW_MS);
+ await tick();if(!stopping)timer=setInterval(tick,Math.min(config.WORKER_TICK_SECONDS,config.CRM_SYNC_SECONDS,120)*1000);
 }
 main().catch(error=>{console.error('[worker] fatal',error);process.exit(1);});
