@@ -20,7 +20,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (!mayHearCall(toActor(user), { userId: call.userId, formUserId: call.formUserId, ownerId: await callOwnerId(call) })) return NextResponse.json({ error: HIDDEN_CALL }, { status: 403 });
   const reader = getTwilioReader();
   if (!reader) return NextResponse.json({ error: 'Twilio is not connected.' }, { status: 503 });
-  const upstream = await reader.recordingMedia(call.recordingSid, req.headers.get('range'));
+  // M48: Twilio out of reach is said plainly, not a bare 500.
+  const upstream = await reader.recordingMedia(call.recordingSid, req.headers.get('range')).catch(() => null);
+  if (!upstream) return NextResponse.json({ error: 'Twilio could not be reached for this recording. Try again in a moment.' }, { status: 502 });
   if (!upstream.ok && upstream.status !== 206) return NextResponse.json({ error: `Twilio answered ${upstream.status}.` }, { status: upstream.status === 404 ? 404 : 502 });
   const headers = new Headers({ 'cache-control': 'private, no-store', 'content-type': upstream.headers.get('content-type') ?? 'audio/mpeg' });
   for (const h of ['content-length', 'content-range', 'accept-ranges']) { const v = upstream.headers.get(h); if (v) headers.set(h, v); }

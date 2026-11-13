@@ -44,9 +44,9 @@ export class FakeTwilio implements TwilioReader {
     return n;
   }
 
-  async listCalls(opts: { after: Date; nextPage?: string | null }) {
+  async listCalls(opts: { after: Date; before?: Date | null; nextPage?: string | null }) {
     this.requests.push(`calls:${opts.after.toISOString()}:${opts.nextPage ?? ''}`);
-    const all = this.calls.filter((c) => c.startTime && new Date(c.startTime) > opts.after).sort((a, b) => (b.startTime ?? '').localeCompare(a.startTime ?? ''));
+    const all = this.calls.filter((c) => c.startTime && new Date(c.startTime) > opts.after && (!opts.before || new Date(c.startTime) < opts.before)).sort((a, b) => (b.startTime ?? '').localeCompare(a.startTime ?? ''));
     const offset = opts.nextPage ? Number(opts.nextPage) : 0;
     const page = all.slice(offset, offset + this.pageSize);
     return { calls: JSON.parse(JSON.stringify(page)) as TwilioCall[], nextPage: offset + this.pageSize < all.length ? String(offset + this.pageSize) : null };

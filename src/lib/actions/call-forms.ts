@@ -14,8 +14,9 @@ import { toE164 } from '../sandbox/normalize';
 import { createContact } from '../sandbox/contacts';
 import { logManualCall, submitCallForm, type CallFormInput } from '../calls/form';
 import { callFormContext, chooseCallContact, discardCall, searchCallContacts, type CallContactOption, type CallFormContext } from '../calls/form-context';
-import { pendingFormBlock } from '../calls/gate';
-import { callingHoursBlock, callPlace } from '../calls/hours';
+import { pendingFormBlock, unreadCallBlock } from '../calls/gate';
+import { callingHoursBlock, callPlace, costlyNumber } from '../calls/hours';
+import { formHolderOf } from '../calls/form-holder';
 import { intentStep } from '../calls/link';
 import { importTwilioCalls } from '../calls/import';
 import { getTwilioReader } from '../calls/twilio';
@@ -26,6 +27,13 @@ import type { ActionResult } from './users';
 
 function refresh() {
   revalidatePath('/', 'layout');
+}
+
+/** M42: the stand-in numbers Twilio shows for a hidden, blocked or unknown caller: never anyone's number. */
+const HIDDEN_CALLER_NUMBERS = new Set(['+266696687', '+7378742833', '+2562533', '+8656696', '+86282452253']);
+function hiddenNumberRefusal(number: string | null): string | null {
+  if (!number || HIDDEN_CALLER_NUMBERS.has(number) || !/^\+\d{8,15}$/.test(number)) return 'The caller\'s number was hidden, so it cannot be given to a contact. Say who it was with instead.';
+  return null;
 }
 
 /**
@@ -40,7 +48,14 @@ export async function recordCallIntentAction(input: { phone: string; taskId?: st
   const user = await requireUser();
   const toNumber = toE164(input.phone);
   if (!toNumber) return { ok: false, error: 'That number could not be read.' };
+  // M23: premium-rate numbers are refused; dear destinations are asked about once.
+  const dear = costlyNumber(toNumber);
+  if (dear.block) return { ok: false, error: dear.block };
+  // M06: while calls cannot be read back from Twilio, no form can open, so a rep's last call must be logged first.
+  const unread = await unreadCallBlock(user.id);
+  if (unread) return { ok: false, error: unread };
   const ref = input.personId ? personRef(input.personId) : input.sandboxContactId ? coldRef(input.sandboxContactId) : null;
+  let ask = dear.ask ?? '';
   if (ref) {
     const subject = await loadSubject(ref);
     if (!subject) return { ok: false, error: ref.kind === 'cold' ? 'This contact is no longer in Cold outreach.' : 'This person is no longer in the CRM.' };
@@ -48,8 +63,7 @@ export async function recordCallIntentAction(input: { phone: string; taskId?: st
     if (!verdict.ok) return { ok: false, error: verdict.reason };
     const check = await contactability(ref, { act: 'call', channel: 'CALL', number: toNumber, user });
     if (!check.ok) return { ok: false, error: check.reason };
-    const ask = [check.confirm, check.warning].filter(Boolean).join(' ');
-    if (ask && !input.confirmed) return { ok: true, message: ask, data: { confirm: true } };
+    ask = [check.confirm, check.warning, dear.ask].filter(Boolean).join(' ');
   } else if (isBizOps(user)) {
     return { ok: false, error: 'Biz Ops can view calls but cannot make them from Cadence.' };
   } else {
@@ -57,7 +71,9 @@ export async function recordCallIntentAction(input: { phone: string; taskId?: st
     const hours = callingHoursBlock(callPlace({}), new Date());
     if (hours) return { ok: false, error: hours };
   }
-  const step = await intentStep({ taskId: input.taskId ?? null, nextActionId: input.nextActionId ?? null });
+  if (ask && !input.confirmed) return { ok: true, message: ask, data: { confirm: true } };
+  // M44: the step pressed counts only when it is this person's.
+  const step = await intentStep({ taskId: input.taskId ?? null, nextActionId: input.nextActionId ?? null, personId: input.personId ?? null, sandboxContactId: input.sandboxContactId ?? null });
   await prisma.callIntent.create({ data: { userId: user.id, toNumber, taskId: step.taskId, nextActionId: step.nextActionId, personId: input.personId ?? null, sandboxContactId: input.personId ? null : input.sandboxContactId ?? null } });
   return { ok: true };
 }
@@ -114,8 +130,13 @@ export async function addCallContactAction(formData: FormData): Promise<ActionRe
   const user = await requireUser();
   if (!isAdmin(user) && !needsPod(user.role)) return { ok: false, error: 'Biz Ops can view cold contacts but cannot add them.' };
   const callId = String(formData.get('callId') ?? '');
-  const call = await prisma.callLog.findUnique({ where: { id: callId }, select: { direction: true, toNumber: true, fromNumber: true, userId: true, formUserId: true } });
+  const call = await prisma.callLog.findUnique({ where: { id: callId }, select: { direction: true, toNumber: true, fromNumber: true, userId: true, formUserId: true, formDoneAt: true, discardedAt: true } });
   if (!call) return { ok: false, error: 'Call not found.' };
+  // M15: the call must be this rep's form to fill before anyone is created with its number.
+  if (formHolderOf(call) !== user.id) return { ok: false, error: 'This form is someone else\'s to fill in.' };
+  if (call.formDoneAt || call.discardedAt) return { ok: false, error: 'This call already has its form.' };
+  const hidden = hiddenNumberRefusal(call.direction === 'INBOUND' ? call.fromNumber : call.toNumber);
+  if (hidden) return { ok: false, error: hidden };
   const created = await createContact({
     firstName: String(formData.get('firstName') ?? ''), lastName: String(formData.get('lastName') ?? ''), companyName: String(formData.get('companyName') ?? '') || null,
     phone: (call.direction === 'INBOUND' ? call.fromNumber : call.toNumber) ?? null, phoneType: 'unknown',
@@ -167,9 +188,13 @@ export async function logManualCallAction(formData: FormData): Promise<ActionRes
   }
   // The step it closes, when the rep picked one: a call step only (N013). An incoming call closes none (B093).
   const [kind, id] = closes.split(':');
-  const step = direction === 'OUTBOUND' && id ? await intentStep({ taskId: kind === 'task' ? id : null, nextActionId: kind === 'next' ? id : null }) : { taskId: null, nextActionId: null };
+  const step = direction === 'OUTBOUND' && id ? await intentStep({ taskId: kind === 'task' ? id : null, nextActionId: kind === 'next' ? id : null, personId, sandboxContactId }) : { taskId: null, nextActionId: null };
   const minutes = Number(formData.get('minutes') ?? 0);
+  // M35: the browser's 600-minute limit holds on the server too.
+  if (Number.isFinite(minutes) && minutes > 600) return { ok: false, error: 'A call logged by hand can last at most 600 minutes.' };
   const call = await logManualCall({ userId: user.id, personId, sandboxContactId, taskId: step.taskId, nextActionId: step.nextActionId, startedAt, direction, talkSec: Number.isFinite(minutes) && minutes > 0 ? Math.round(minutes * 60) : null });
+  // M06: the rep's Call presses for this person before it are this call, so they no longer wait to be read back.
+  await prisma.callIntent.updateMany({ where: { userId: user.id, callId: null, createdAt: { gte: new Date(Date.now() - 2 * 3600_000) }, ...(personId ? { personId } : { sandboxContactId }) }, data: { callId: call.id } });
   await recordCallTouch(call);
   await logAudit({ entityType: 'call', entityId: call.id, action: 'call_logged', actor: userActor(user) });
   refresh();
@@ -204,8 +229,15 @@ export async function assignCallRepAction(formData: FormData): Promise<ActionRes
   if (!rep) return { ok: false, error: 'Choose an active sales rep: only reps make calls.' };
   const call = await prisma.callLog.findUnique({ where: { id: callId } });
   if (!call) return { ok: false, error: 'Call not found.' };
+  // M14: a leader gives only a call nobody was matched to, and only in their own pods.
+  if (!isAdmin(user)) {
+    if (call.userId) return { ok: false, error: 'This call already has its rep. Only an admin can change it.' };
+    if (call.podId && !user.podIds.includes(call.podId)) return { ok: false, error: 'This call is in a pod that is not one of yours.' };
+  }
   const final = call.statusRank >= 4;
-  const opensForm = final && !call.formDueAt && !call.formDoneAt && Boolean(call.startedAt && Date.now() - call.startedAt.getTime() < 7 * 86_400_000);
+  // M43: an incoming call nobody answered needs no form, whoever it is given to (B093).
+  const answeredIfIncoming = call.direction === 'OUTBOUND' || (call.status === 'COMPLETED' && (call.talkSec ?? 0) > 0);
+  const opensForm = final && answeredIfIncoming && !call.formDueAt && !call.formDoneAt && Boolean(call.startedAt && Date.now() - call.startedAt.getTime() < 7 * 86_400_000);
   await prisma.callLog.update({ where: { id: callId }, data: { userId: rep.id, repMatchedBy: 'chosen', ...(opensForm ? { formDueAt: new Date() } : {}) } });
   await logAudit({ entityType: 'call', entityId: callId, action: 'rep_chosen', actor: userActor(user), details: { userId: rep.id } });
   refresh();
@@ -219,8 +251,13 @@ export async function attachCallContactAction(formData: FormData): Promise<Actio
   const callId = String(formData.get('callId') ?? '');
   const [kind, id] = String(formData.get('contact') ?? '').split(':');
   if (!id || (kind !== 'person' && kind !== 'sandbox')) return { ok: false, error: 'Choose who the call was with.' };
-  const before = await prisma.callLog.findUnique({ where: { id: callId }, select: { audience: true, podId: true, enrollmentId: true, userId: true } });
+  const before = await prisma.callLog.findUnique({ where: { id: callId }, select: { audience: true, podId: true, enrollmentId: true, userId: true, personId: true, sandboxContactId: true } });
   if (!before) return { ok: false, error: 'Call not found.' };
+  // M14: a leader says who an unmatched call was with, in their own pods; moving a matched call is an admin's.
+  if (!isAdmin(user)) {
+    if (before.personId || before.sandboxContactId) return { ok: false, error: 'This call is already matched to someone. Only an admin can change it.' };
+    if (before.podId && !user.podIds.includes(before.podId)) return { ok: false, error: 'This call is in a pod that is not one of yours.' };
+  }
   if (kind === 'sandbox' && !isAdmin(user)) {
     // B008: a pod leader attaches calls to contacts of their own pods (an unclaimed one, or one with no pod, too).
     const c = await prisma.sandboxContact.findUnique({ where: { id }, select: { podId: true, pod: { select: { name: true } } } });
@@ -254,6 +291,8 @@ export async function newColdContactFromCallAction(formData: FormData): Promise<
   const call = await prisma.callLog.findUnique({ where: { id: callId }, select: { direction: true, toNumber: true, fromNumber: true, userId: true, podId: true, audience: true, enrollmentId: true, personId: true, sandboxContactId: true } });
   if (!call) return { ok: false, error: 'Call not found.' };
   if (call.personId || call.sandboxContactId) return { ok: false, error: 'This call is already matched to someone.' };
+  const hidden = hiddenNumberRefusal(call.direction === 'INBOUND' ? call.fromNumber : call.toNumber);
+  if (hidden) return { ok: false, error: hidden };
   const rep = call.userId ? await prisma.user.findFirst({ where: { id: call.userId, ...SALES }, select: { id: true, pods: { select: { podId: true } } } }) : null;
   const podId = call.podId ?? user.podIds[0] ?? null;
   if (!isAdmin(user) && podId && !user.podIds.includes(podId)) return { ok: false, error: 'This call is in a pod that is not one of yours.' };
@@ -296,6 +335,8 @@ export async function setCallerNumberAction(formData: FormData): Promise<ActionR
   const rep = userId ? await prisma.user.findFirst({ where: { id: userId, active: true, role: { not: 'BIZ_OPS' } }, select: { id: true, name: true, callerNumber: true } }) : null;
   if (userId && !rep) return { ok: false, error: 'Choose an active rep.' };
   if (rep?.callerNumber === number) return { ok: true, message: `${rep.name} has this number already.` };
+  // M41: calls made on the number up to now are read first, so they keep the rep who had it.
+  if (reader) await importTwilioCalls().catch(() => undefined);
   const now = new Date();
   await prisma.$transaction(async (tx) => {
     await tx.user.updateMany({ where: { callerNumber: number }, data: { callerNumber: null, callerNumberSince: null } });

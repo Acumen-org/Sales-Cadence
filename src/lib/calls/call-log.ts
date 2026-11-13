@@ -6,6 +6,9 @@ import { identityOf, matchContact, matchRep } from './match';
 import { intentStep, linkData, stepByRule } from './link';
 import { audienceFor, callPodFor } from '../outreach/audience';
 import { isUniqueViolation } from '../engine/tasks';
+import { logAudit, SYSTEM_ACTOR } from '../audit';
+import { notify, podLeaders } from '../notifications';
+import { findSuppressed, maskValue } from '../sandbox/suppression';
 
 /**
  * One call read from Twilio, stored once and kept up to date: its status only moves forward, the
@@ -45,10 +48,14 @@ async function findIntent(number: string | null, startedAt: Date | null, userId:
 }
 
 /** A call the rep already logged by hand, with the same person, close in time: the import joins it (N014). */
-async function loggedByHand(userId: string | null, subject: { personId: string | null; sandboxContactId: string | null }, startedAt: Date | null) {
-  if (!userId || !startedAt || (!subject.personId && !subject.sandboxContactId)) return null;
+async function loggedByHand(userId: string | null, subject: { personId: string | null; sandboxContactId: string | null }, startedAt: Date | null, other: string | null) {
+  // M45: a call to a firm's main line has nobody matched; the hand log of someone at that number is it.
+  const who: Prisma.CallLogWhereInput | null = subject.personId ? { personId: subject.personId } : subject.sandboxContactId ? { sandboxContactId: subject.sandboxContactId }
+    : other?.startsWith('+') ? { OR: [{ sandboxContact: { OR: [{ phone: other }, { companyPhone: other }] } }, { person: { OR: [{ phoneE164: other }, { additionalPhoneE164: other }] } }] } : null;
+  if (!userId || !startedAt || !who) return null;
   return prisma.callLog.findFirst({
-    where: { source: 'MANUAL', twilioCallSid: null, userId, discardedAt: null, ...(subject.personId ? { personId: subject.personId } : { sandboxContactId: subject.sandboxContactId }), startedAt: { gte: new Date(startedAt.getTime() - JOIN_WINDOW_MS), lte: new Date(startedAt.getTime() + JOIN_WINDOW_MS) } },
+    // M09: a call is logged by hand after it was made, so a log written before this call began is another call.
+    where: { source: 'MANUAL', twilioCallSid: null, userId, discardedAt: null, ...who, startedAt: { gte: new Date(startedAt.getTime() - JOIN_WINDOW_MS), lte: new Date(startedAt.getTime() + JOIN_WINDOW_MS) }, createdAt: { gte: new Date(startedAt.getTime() - 60_000) } },
     orderBy: { startedAt: 'desc' },
   });
 }
@@ -72,22 +79,27 @@ async function loggedOnStep(userId: string | null, personId: string | null, star
   return { task, touchId: touch?.id ?? null };
 }
 
-export async function upsertImportedCall(leg: TwilioCall, parent: TwilioCall | null, ctx: UpsertContext): Promise<{ call: CallLog; created: boolean; formOpened: boolean; joined?: 'logged_call' | 'log_call_step' }> {
+export async function upsertImportedCall(leg: TwilioCall, parent: TwilioCall | null, ctx: UpsertContext, clientLegs?: TwilioCall[]): Promise<{ call: CallLog; created: boolean; formOpened: boolean; joined?: 'logged_call' | 'log_call_step' }> {
   const status = STATUS_OF[leg.status] ?? 'QUEUED';
   const direction = leg.direction === 'inbound' ? 'INBOUND' : 'OUTBOUND';
   const fromNumber = toE164(leg.from) ?? (leg.from || null);
   const toNumber = toE164(leg.to) ?? (leg.to || null);
-  const repIdentity = identityOf(leg.from, leg.to, parent?.from, parent?.to);
+  // M11, M12: an incoming call rung through to the dialpad was answered only if a browser leg was, and
+  // that leg names the rep; the incoming leg alone reads "completed" even when nobody picked up.
+  const answeredLeg = clientLegs?.length ? clientLegs.find((c) => c.status === 'completed' && (c.durationSec ?? 0) > 0) ?? null : undefined;
+  const repIdentity = identityOf(leg.from, leg.to, parent?.from, parent?.to, answeredLeg?.from, answeredLeg?.to, ...(clientLegs ?? []).flatMap((c) => [c.from, c.to]));
   const startedAt = leg.startTime ? new Date(leg.startTime) : null;
   const endedAt = leg.endTime ? new Date(leg.endTime) : null;
   const other = direction === 'OUTBOUND' ? toNumber : fromNumber;
   let existing = await prisma.callLog.findUnique({ where: { twilioCallSid: leg.sid } });
+  const wasFinal = Boolean(existing && existing.statusRank >= 4);
 
   // Talk time is the leg to the phone network, from when it was answered: the dialpad's own leg, which
   // rings first, is never counted (B025, PLAN 8.7).
   const facts: Prisma.CallLogUncheckedUpdateInput = { twilioStatus: leg.status, importedAt: ctx.now, parentCallSid: leg.parentCallSid ?? parent?.sid ?? null, repIdentity };
   if (!existing || RANK[status] >= existing.statusRank) {
-    Object.assign(facts, { status, statusRank: RANK[status], fromNumber, toNumber, startedAt, endedAt, talkSec: isFinal(status) ? leg.durationSec ?? 0 : null, priceUsd: leg.price != null ? Math.abs(leg.price) : null });
+    const talked = answeredLeg === undefined ? leg.durationSec ?? 0 : answeredLeg ? answeredLeg.durationSec ?? 0 : 0;
+    Object.assign(facts, { status, statusRank: RANK[status], fromNumber, toNumber, startedAt, endedAt, talkSec: isFinal(status) ? talked : null, priceUsd: leg.price != null ? Math.abs(leg.price) : null });
   }
 
   let userId = existing?.userId ?? null;
@@ -118,7 +130,7 @@ export async function upsertImportedCall(leg: TwilioCall, parent: TwilioCall | n
 
   // N014: one call, one record. A call logged by hand is this call: it takes Twilio's facts and keeps its form.
   if (!existing) {
-    const manual = await loggedByHand(userId, subject, startedAt);
+    const manual = await loggedByHand(userId, subject, startedAt, other);
     if (manual) {
       const merged = await prisma.callLog.update({ where: { id: manual.id }, data: { ...facts, twilioCallSid: leg.sid } });
       if (intentId) await prisma.callIntent.updateMany({ where: { id: intentId, callId: null }, data: { callId: merged.id } });
@@ -137,7 +149,8 @@ export async function upsertImportedCall(leg: TwilioCall, parent: TwilioCall | n
   // N014: the CRM's quick Log call already filed this call on its step: no second form, note or touch.
   let joined: 'log_call_step' | undefined;
   let filed: Prisma.CallLogUncheckedUpdateInput = {};
-  if (!existing && finalNow && subject.personId) {
+  // M25: also when the call was first read while still in progress, and ends now.
+  if ((!existing || existing.statusRank < 4) && finalNow && subject.personId && !existing?.formDoneAt) {
     const step = await loggedOnStep(userId, subject.personId, started, endedAt, intentTaskId);
     if (step) {
       joined = 'log_call_step';
@@ -172,14 +185,42 @@ export async function upsertImportedCall(leg: TwilioCall, parent: TwilioCall | n
     if (step) call = await prisma.callLog.update({ where: { id: call.id }, data: linkData(step) });
   }
   if (finalNow) await recordCallTouch(call);
+  if (finalNow && !wasFinal && direction === 'OUTBOUND') await alertCallToDoNotContact(call);
   return { call: await prisma.callLog.findUniqueOrThrow({ where: { id: call.id } }), created, formOpened, joined };
+}
+
+export const CALL_TO_DO_NOT_CONTACT = 'call_to_do_not_contact';
+
+/**
+ * M07: a call made (from the dialpad too) to a number on the suppression list, or to someone opted out,
+ * removed or Do not contact: counted once (audit) and the rep and their pod's leaders are told, whether
+ * or not the number still belongs to anyone.
+ */
+async function alertCallToDoNotContact(call: CallLog): Promise<void> {
+  const number = call.toNumber && call.toNumber.startsWith('+') ? call.toNumber : null;
+  const cold = call.sandboxContactId ? await prisma.sandboxContact.findUnique({ where: { id: call.sandboxContactId }, select: { status: true, firstName: true, lastName: true, podId: true } }) : null;
+  const person = call.personId ? await prisma.personCache.findUnique({ where: { id: call.personId }, select: { optedOut: true, dnd: true, firstName: true, lastName: true } }) : null;
+  const why = cold?.status === 'OPTED_OUT' || person?.optedOut ? 'They asked not to be contacted.'
+    : cold?.status === 'REMOVED' ? 'They were removed from Cold outreach.'
+    : person?.dnd ? 'They are marked Do not contact in the CRM.'
+    : number && (await findSuppressed([{ kind: 'phone', value: number }])) ? 'The number is on the suppression list.'
+    : null;
+  if (!why) return;
+  if (await prisma.auditLog.count({ where: { action: CALL_TO_DO_NOT_CONTACT, entityId: call.id } })) return;
+  await logAudit({ entityType: 'call', entityId: call.id, action: CALL_TO_DO_NOT_CONTACT, actor: SYSTEM_ACTOR, details: { userId: call.userId, number: number ? maskValue('phone', number) : null, why } });
+  const rep = call.userId ? await prisma.user.findUnique({ where: { id: call.userId }, select: { name: true, pods: { select: { podId: true } } } }) : null;
+  const leaders = await podLeaders([call.podId ?? cold?.podId ?? null, ...(call.podId || cold?.podId ? [] : rep?.pods.map((p) => p.podId) ?? [])]);
+  const name = (cold && `${cold.firstName} ${cold.lastName}`.trim()) || (person && `${person.firstName} ${person.lastName}`.trim()) || (number ? maskValue('phone', number) : 'an unknown number');
+  const text = `${rep?.name ?? 'Someone'} called ${name}. ${why} Do not email, call or message this person.`;
+  await notify([call.userId, ...leaders], { kind: 'compliance_alert', sandboxContactId: cold ? call.sandboxContactId : null, personId: person ? call.personId : null, fromUserId: call.userId, payload: { text, name, address: number ? maskValue('phone', number) : null, why, at: (call.startedAt ?? call.createdAt).toISOString(), href: `/calls/${call.id}` } });
 }
 
 const talk = (sec: number | null) => (!sec ? 'not connected' : sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}m ${sec % 60}s`);
 
 /** The call on the contact's timeline, once: `twilio:<CallSid>` merges with the dialpad's own note. */
 export async function recordCallTouch(call: CallLog): Promise<void> {
-  if (call.touchId || (!call.personId && !call.sandboxContactId)) return;
+  // M13: a discarded call counts nowhere, even when the import reads it again.
+  if (call.touchId || call.discardedAt || (!call.personId && !call.sandboxContactId)) return;
   const at = call.startedAt ?? call.createdAt;
   const externalId = call.twilioCallSid ? `twilio:${call.twilioCallSid}` : `call:${call.id}`;
   const user = call.userId ? await prisma.user.findUnique({ where: { id: call.userId }, select: { name: true } }) : null;

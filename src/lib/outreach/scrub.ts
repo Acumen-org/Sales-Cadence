@@ -64,5 +64,7 @@ export async function scrub(tx: Prisma.TransactionClient, c: ScrubTarget): Promi
     if (JSON.stringify(clean) !== JSON.stringify(a.details)) await tx.auditLog.update({ where: { id: a.id }, data: { details: clean ?? Prisma.DbNull } });
   }
   const recordings = await tx.callLog.findMany({ where: { sandboxContactId: c.id, recordingSid: { not: null } }, select: { recordingSid: true } });
+  // M08: an erased contact's recordings no longer play in Cadence, and are never looked for again.
+  await tx.callLog.updateMany({ where: { sandboxContactId: c.id }, data: { recordingSid: null, recordingSec: null, recordingStatus: 'erased' } });
   return { recordings: recordings.map((r) => r.recordingSid!) };
 }

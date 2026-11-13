@@ -70,9 +70,12 @@ const nightly=nightlyLoop({hour:config.RECONCILE_HOUR,log,jobs:()=>{
  * Every 5 minutes: the sandbox CRM cleanup (src/lib/sandbox/crm-cleanup.ts).
  */
 let callsAt=0;let mailAt=0;let crmCleanupAt=0;let healthAt=0;
+/** M31: calls are read first in each pass, so forms open within the 2 minutes the screen promises whatever runs after. */
+async function callsImport(now:number){
+ if(now>=callsAt){callsAt=now+120_000;try{const stats=await importTwilioCalls();if(stats.ran&&(stats.created||stats.forms||stats.recordings||stats.error))log('twilio import',stats);}catch(error){log('twilio import failed',error);}}
+}
 async function sandboxJobs(now:number){
  try{const moved=await runMoveQueue({pauseMs:1500});if(moved.done||moved.failed||moved.dryRun)log('moves to CRM',moved);}catch(error){log('moves to CRM failed',error);}
- if(now>=callsAt){callsAt=now+120_000;try{const stats=await importTwilioCalls();if(stats.ran&&(stats.created||stats.forms||stats.recordings||stats.error))log('twilio import',stats);}catch(error){log('twilio import failed',error);}}
  // Every 5 minutes: people Twenty's mail or calendar sync created for sandbox contacts, removed when nobody worked them.
  // B012: a Bellwether push cut off part-way (a restart, the database gone) is marked failed; its retry runs it again.
  if(now>=crmCleanupAt){try{const swept=await sweepStuckPushes();if(swept)log('bellwether pushes swept',swept);}catch(error){log('bellwether push sweep failed',error);}}
@@ -188,6 +191,7 @@ async function tick(){
    const now=Date.now();
    // P01: the heartbeat Nomad checks (/api/health/worker). Stamped as each pass starts, so a pass that hangs goes stale.
    try{await beatWorker(new Date(now));}catch(error){log('heartbeat failed',error);}
+   await callsImport(now);
    if(now-lastSync>=config.CRM_SYNC_SECONDS*1000&&!nightly.crmBusy){
      try{await syncContinuously();lastSync=now;}catch(error){log('CRM sync failed',error);}
    }

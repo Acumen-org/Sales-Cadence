@@ -122,6 +122,8 @@ export function validateCallForm(input: CallFormInput, ctx: FormRulesContext): {
   if (SILENT_OUTCOMES.has(outcome.key) && (ctx.talkSec ?? 0) >= (ctx.connectSeconds ?? 30)) return { ok: false, error: `This call lasted ${talkWords(ctx.talkSec)}, so someone picked up. Pick Voicemail, Gatekeeper, Line connected with no conversation, or what was said.`, field: 'outcome' };
   const rating = input.rating == null || (input.rating as unknown) === '' ? null : Number(input.rating);
   const notes = input.notes?.trim() || null;
+  // M46: notes too long are refused, never cut short without a word.
+  if (notes && notes.length > 10_000) return { ok: false, error: `Keep the notes under 10,000 characters (they are ${notes.length.toLocaleString('en-US')}).`, field: 'notes' };
   if (outcome.answered) {
     if (rating == null || !Number.isInteger(rating) || rating < 1 || rating > 5) return { ok: false, error: 'Rate the call from 1 to 5.', field: 'rating' };
     if (!notes) return { ok: false, error: 'Write what was said.', field: 'notes' };
@@ -161,7 +163,7 @@ export function validateCallForm(input: CallFormInput, ctx: FormRulesContext): {
   if (what && what.length > 200) return { ok: false, error: 'Keep the next step under 200 characters.', field: 'what' };
   if (input.interest && !(INTEREST as readonly string[]).includes(input.interest)) return { ok: false, error: 'Interest is hot, warm or cold.', field: 'interest' };
   if (input.decisionMaker && !(DECISION_MAKER as readonly string[]).includes(input.decisionMaker)) return { ok: false, error: 'Decision maker is yes, no or unknown.', field: 'decisionMaker' };
-  return { ok: true, value: { outcome: outcome.key, rating, notes: notes?.slice(0, 10_000) ?? null, nextStep: step.key as NextStepKey, nextStepDate: dated(step.key) ? date : null, interest: input.interest || null, productsDiscussed: [...new Set(input.productsDiscussed ?? [])].slice(0, 10), decisionMaker: input.decisionMaker || null, what: dated(step.key) ? what : null, meetingTime } };
+  return { ok: true, value: { outcome: outcome.key, rating: outcome.answered ? rating : null, notes, nextStep: step.key as NextStepKey, nextStepDate: dated(step.key) ? date : null, interest: input.interest || null, productsDiscussed: [...new Set(input.productsDiscussed ?? [])].slice(0, 10), decisionMaker: input.decisionMaker || null, what: dated(step.key) ? what : null, meetingTime } };
 }
 
 const pendingInclude = { person: { select: { firstName: true, lastName: true } }, sandboxContact: { select: { firstName: true, lastName: true } } } as const;
@@ -265,14 +267,46 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
   }
 
   // What leaders look at: a long voicemail, a line picked up with nobody on it, a call to someone opted out (B025, B029).
-  const subjectRow = subject.sandboxContactId ? await prisma.sandboxContact.findUnique({ where: { id: subject.sandboxContactId }, select: { status: true, firstName: true, lastName: true, ownerId: true, owner: { select: { active: true } } } }) : null;
-  const personRow = subject.personId ? await prisma.personCache.findUnique({ where: { id: subject.personId }, select: { optedOut: true, dnd: true, firstName: true, lastName: true } }) : null;
+  const subjectRow = subject.sandboxContactId ? await prisma.sandboxContact.findUnique({ where: { id: subject.sandboxContactId }, select: { status: true, optedOutAt: true, firstName: true, lastName: true, ownerId: true, owner: { select: { active: true } } } }) : null;
+  const personRow = subject.personId ? await prisma.personCache.findUnique({ where: { id: subject.personId }, select: { optedOut: true, optedOutAt: true, dnd: true, firstName: true, lastName: true } }) : null;
+  // M32: an opt-out counts against the call only when it came before the call did.
+  const callAt = call.startedAt ?? call.createdAt;
+  const before = (at: Date | null | undefined) => !at || at <= callAt;
   const flags = [
     ...(v.outcome === 'voicemail' && (call.talkSec ?? 0) >= LONG_VOICEMAIL_SEC ? ['long_voicemail'] : []),
     ...(v.outcome === 'no_conversation' ? ['no_conversation'] : []),
-    ...(subjectRow?.status === 'OPTED_OUT' || subjectRow?.status === 'REMOVED' || personRow?.optedOut || personRow?.dnd ? ['called_opted_out'] : []),
+    ...((subjectRow?.status === 'OPTED_OUT' && before(subjectRow.optedOutAt)) || subjectRow?.status === 'REMOVED' || (personRow?.optedOut && before(personRow.optedOutAt)) || personRow?.dnd ? ['called_opted_out'] : []),
   ];
   const name = subjectRow ? `${subjectRow.firstName} ${subjectRow.lastName}`.trim() || 'This contact' : personRow ? `${personRow.firstName} ${personRow.lastName}`.trim() || 'This person' : 'They';
+
+  // M04: "Asked not to be contacted" takes effect before anything else, so a restart or a failure part
+  // way through the save can never leave the call recorded but the person still contactable.
+  let stopMessage: string | null = null;
+  let reminder: string | null = null;
+  // The call's own touch, which the step it closes takes (B043).
+  const touchId = call.touchId ?? (hasSubject ? (await recordCallTouch(call), (await prisma.callLog.findUnique({ where: { id: callId }, select: { touchId: true } }))?.touchId ?? null) : null);
+  // The call step closes first, with this outcome (B023, N013); before an opt-out, which would end it otherwise.
+  const closeTask = () => completeCall({ taskId: closes!.id, disposition: v.outcome, note: v.notes, callTouchId: touchId, optOut: false }, { actor, now });
+  const stopClosed = stop && closes?.kind === 'task' ? await closeTask() : null;
+  if (stop) {
+    // Every opt-out of a CRM person sets the CRM's Do not contact and clears its Next Action (D6). The
+    // campaign ends as Opted out (B091). It came from the form, so an admin can lift it (D4).
+    const r = hasSubject ? await optOutSubject(subject, { source: 'call_form', actor, now, createdById: user.id, guard }) : null;
+    if (r && !r.refused) {
+      if (subject.personId) reminder = 'Do not contact is set on this person in the CRM too.';
+      stopMessage = `Saved. ${name} is opted out: Cadence will not contact them again.`;
+    } else {
+      // M01: nobody to opt out (or the opt-out was refused): the number called is put on the suppression
+      // list so it is never called again, and the message says exactly what was and was not done.
+      const dialled = toE164(call.direction === 'INBOUND' ? call.fromNumber : call.toNumber);
+      if (dialled) {
+        await addSuppressions([{ kind: 'phone', value: dialled }], { reason: 'do_not_contact', source: 'call_form', createdById: user.id });
+        await logAudit({ entityType: 'call', entityId: callId, action: 'suppression_added', actor, details: { kind: 'phone', source: 'call_form', refused: r?.refused ?? null } });
+      }
+      const why = r?.refused ? `${name} could not be opted out: ${r.refused}` : 'Nobody is matched to this call, so nobody was opted out.';
+      stopMessage = `Saved, but ${why} ${dialled ? 'The number called is on the suppression list now, so Cadence will not call it again.' : 'No number was recorded for this call, so nothing was put on the suppression list.'} Say who it was with, or add them to the suppression list in Settings.`;
+    }
+  }
 
   // One form per call, even with two tabs at once (B184): the call row is claimed first.
   const form = await prisma.$transaction(async (tx) => {
@@ -282,8 +316,6 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
     return tx.callForm.create({ data: { callId, userId: user.id, outcome: v.outcome, rating: v.rating, notes: v.notes, nextStep: v.nextStep, nextStepDate: v.nextStepDate, nextStepLabel: v.what, interest: v.interest, productsDiscussed: v.productsDiscussed, decisionMaker: v.decisionMaker, flags, submittedAt: now, audience } });
   });
   if (!form) return { ok: false, error: 'This call already has its form: it was saved, perhaps in another tab. Copy anything you typed that is not in it.' };
-  // The call's own touch, which the step it closes takes (B043).
-  const touchId = call.touchId ?? (hasSubject ? (await recordCallTouch(call), (await prisma.callLog.findUnique({ where: { id: callId }, select: { touchId: true } }))?.touchId ?? null) : null);
   if (flags.includes('long_voicemail')) await flagToLeaders(call, user, `${user.name} left a ${talkWords(call.talkSec)} voicemail for ${name}.`);
 
   // A CRM person's note goes to Twenty now, and stands in for the step's completion note.
@@ -304,8 +336,10 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
   // The call step closes first, with this outcome (B023, N013); a repeating next action rolls on (N054).
   let campaignEnded = false;
   if (closes?.kind === 'task') {
-    const r = await completeCall({ taskId: closes.id, disposition: v.outcome, note: v.notes, callTouchId: touchId, optOut: false }, { actor, now });
+    const r = stopClosed ?? await closeTask();
     campaignEnded = Boolean(r.ok && (r.replied || stop));
+    // M04: a step that would not close is said, never hidden behind "Saved".
+    if (!r.ok) reminder = [reminder, `The call step was not closed (${r.detail ?? r.reason.replace(/_/g, ' ')}); close it from Tasks.`].filter(Boolean).join(' ');
   } else if (closes?.kind === 'next') {
     await completeNextAction(closes.id, actor, now);
   }
@@ -318,28 +352,8 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
     campaignEnded = true;
   }
 
-  let reminder: string | null = null;
   const openWhere = subject.personId ? { personId: subject.personId } : { sandboxContactId: subject.sandboxContactId, personId: null };
-  let stopMessage: string | null = null;
-  if (stop) {
-    // Every opt-out of a CRM person sets the CRM's Do not contact and clears its Next Action (D6). The
-    // campaign ends as Opted out (B091). It came from the form, so an admin can lift it (D4).
-    const r = hasSubject ? await optOutSubject(subject, { source: 'call_form', actor, now, createdById: user.id, guard }) : null;
-    if (r && !r.refused) {
-      if (subject.personId) reminder = 'Do not contact is set on this person in the CRM too.';
-      stopMessage = `Saved. ${name} is opted out: Cadence will not contact them again.`;
-    } else {
-      // M01: nobody to opt out (or the opt-out was refused): the number called is put on the suppression
-      // list so it is never called again, and the message says exactly what was and was not done.
-      const dialled = toE164(call.direction === 'INBOUND' ? call.fromNumber : call.toNumber);
-      if (dialled) {
-        await addSuppressions([{ kind: 'phone', value: dialled }], { reason: 'do_not_contact', source: 'call_form', createdById: user.id });
-        await logAudit({ entityType: 'call', entityId: callId, action: 'suppression_added', actor, details: { kind: 'phone', source: 'call_form', refused: r?.refused ?? null } });
-      }
-      const why = r?.refused ? `${name} could not be opted out: ${r.refused}` : 'Nobody is matched to this call, so nobody was opted out.';
-      stopMessage = `Saved, but ${why} ${dialled ? 'The number called is on the suppression list now, so Cadence will not call it again.' : 'No number was recorded for this call, so nothing was put on the suppression list.'} Say who it was with, or add them to the suppression list in Settings.`;
-    }
-  } else if (hasSubject) {
+  if (!stop && hasSubject) {
     // The new owner first, with the contact's work (B049), so the next step below is theirs.
     let handedTo: string | null = null;
     if (giveTo && subjectRow?.ownerId && giveTo !== subjectRow.ownerId && subjectRow.status === 'ACTIVE') {

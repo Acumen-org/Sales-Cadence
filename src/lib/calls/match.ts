@@ -20,16 +20,17 @@ export const identityOf = (...numbers: (string | null | undefined)[]): string | 
 };
 
 export function matchRep(call: { direction: 'OUTBOUND' | 'INBOUND'; fromNumber: string | null; toNumber: string | null; repIdentity: string | null; startedAt?: Date | null }, users: RepUser[]): RepMatch {
+  // M10: the dialpad's own sign-in name says who made the call; a number the team shares only guesses.
+  if (call.repIdentity) {
+    const handle = call.repIdentity.toLowerCase();
+    const byAlias = users.find((u) => u.aliases.some((a) => a.trim().toLowerCase() === handle));
+    if (byAlias) return { userId: byAlias.id, by: 'alias' };
+  }
   const ours = call.direction === 'OUTBOUND' ? call.fromNumber : call.toNumber;
   if (ours) {
     // B165: a number counts for its rep only from when it was assigned to them.
     const byNumber = users.find((u) => u.callerNumber && u.callerNumber === ours && (!u.callerNumberSince || !call.startedAt || call.startedAt >= u.callerNumberSince));
     if (byNumber) return { userId: byNumber.id, by: 'caller_number' };
-  }
-  if (call.repIdentity) {
-    const handle = call.repIdentity.toLowerCase();
-    const byAlias = users.find((u) => u.aliases.some((a) => a.trim().toLowerCase() === handle));
-    if (byAlias) return { userId: byAlias.id, by: 'alias' };
   }
   return { userId: null, by: null };
 }
