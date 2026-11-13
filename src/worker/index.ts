@@ -202,10 +202,9 @@ async function tick(){
    await coldOutreachRelease();
    await sandboxJobs(now);
    try{await launchScheduledCampaigns({actor:SYSTEM_ACTOR});}catch(error){log('campaign launch failed',error);}
-   const stats=await runSchedulerTick({actor:SYSTEM_ACTOR});
-   if(stats.generated||stats.completed)log('scheduler',stats);
-   const retried=await retryFailedWrites();
-   if(retried.retried)log('twenty write retry',retried);
+   // P02: a scheduler failure is logged and the rest of the pass (write retry, next actions, clean-up) still runs.
+   try{const stats=await runSchedulerTick({actor:SYSTEM_ACTOR});if(stats.generated||stats.completed)log('scheduler',stats);}catch(error){log('scheduler failed',error);}
+   try{const retried=await retryFailedWrites();if(retried.retried)log('twenty write retry',retried);}catch(error){log('twenty write retry failed',error);}
    // LinkedIn, as the LinkedIn Console saw it: events in, tasks closed and opened (src/lib/linkedin).
    try{const li=await runLinkedInPass();if(Object.keys(li).length)log('linkedin',li);}catch(error){log('linkedin failed',error);}
    // Next actions: what has not reached Twenty yet, and what people changed there.
