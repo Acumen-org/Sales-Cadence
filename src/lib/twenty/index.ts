@@ -19,7 +19,9 @@ export class DryRunTwentyClient implements TwentyClient {
   constructor(private readonly inner: TwentyClient) {}
 
   private async record(operation: string, objectType: string, payload: unknown, twentyId?: string) {
-    console.info(`[twenty:dry-run] ${operation} ${objectType}`, JSON.stringify(payload));
+    // N41: the log line names the write, never its content (note text, contact details): that stays
+    // in the TwentyWrite row, which only admins see.
+    console.info(`[twenty:dry-run] ${operation} ${objectType}${twentyId ? ` ${twentyId}` : ''}`);
     try {
       await prisma.twentyWrite.create({
         data: { operation, objectType, twentyId: twentyId ?? null, payload: payload as object, dryRun: true },
@@ -145,6 +147,11 @@ export async function getTwentyClient(): Promise<TwentyClient> {
     // an entire sales team against invented contacts.
     if (env().CADENCE_ALLOW_MOCK !== '1') {
       throw new Error('TWENTY_MODE=mock needs CADENCE_ALLOW_MOCK=1. Set TWENTY_MODE=graphql and configure TWENTY_API_URL and TWENTY_API_KEY.');
+    }
+    // N40: a deployment holding a real CRM API key is a real one: the fake is refused there even
+    // with both switches set, so it cannot fill the real tables with invented people.
+    if (conn.apiKey) {
+      throw new Error('TWENTY_MODE=mock is refused where a CRM API key is configured (env or Settings > CRM). Set TWENTY_MODE=graphql.');
     }
     // Web and worker share the fake's records through the database (mock-store.ts).
     base = mockStoreEnabled() ? sharedMock(getMockTwentyClient()) : getMockTwentyClient();
