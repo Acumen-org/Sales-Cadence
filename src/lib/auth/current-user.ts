@@ -30,6 +30,8 @@ export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
   if (!session && mayBeLegacyToken(token)) {
     session = await prisma.session.findUnique({ where: { token }, include });
     if (session) await rekeySession(session.id, token);
+    // Another request of the same browser re-keyed it between our two reads: the hash finds it now.
+    else session = await prisma.session.findUnique({ where: { token: storedToken(token) }, include });
   }
   if (!session || session.expiresAt < new Date() || !session.user.active) return null;
   const u = session.user;
