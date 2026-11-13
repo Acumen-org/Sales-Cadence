@@ -23,6 +23,7 @@ const report = (n: number, audience: 'all' | 'crm' | 'cold' = 'all') => ({
   byPod: n ? [group('pod', "Alisa's pod", n)] : [], byFo: n ? [group('fo', 'Alyssa', n)] : [], byCampaign: n ? [group('c', 'Late September', n), group('d', 'Cold Q4', n, true)] : [],
   byProduct: n ? [group('PHH', 'PHH', n), group('none', 'No product', n)] : [],
   channels: n ? [{ action: 'EMAIL', label: 'Email', done: 3 * n, observed: 2, manual: 1, skipped: 1, open: 2, overdue: 0 }] : [],
+  linkedin: { totals: { requests: 4 * n, accepted: n, acceptanceRate: n ? 0.25 : 0, messages: 2 * n, replies: n, open: n, overdue: 0 }, byRep: n ? [{ key: 'fo', label: 'Alyssa', requests: 4 * n, accepted: n, acceptanceRate: 0.25, messages: 2 * n, replies: n, open: n, overdue: 0 }] : [] },
 }) as unknown as Reports;
 const campaigns = [
   { id: 'a', name: 'Late September', podName: "Alisa's pod", products: ['PHH'], paused: false, startDate: '2026-09-24', endDate: '2026-09-30', day: 1, total: 7, touchesDone: 1, touchesPlanned: 1, cold: true },

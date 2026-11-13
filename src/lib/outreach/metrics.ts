@@ -53,7 +53,8 @@ type Row = Credit & Who & { audience: Stamp; at: Date; campaignId: string | null
 /** One piece of outreach done (rule 8). `answered`: a call the person picked up. */
 export type SentRow = Row & { kind: 'step' | 'next_step' | 'call'; channel: Channel; action: string; answered: boolean; source: string | null };
 export type DialRow = Row & { connected: boolean };
-export type ReplyRow = Row;
+/** `channel`: what came back on (EMAIL, CALL, LINKEDIN), so Reports can show LinkedIn's part of Replies. */
+export type ReplyRow = Row & { channel: string };
 export type BookedRow = Row;
 export type HeldRow = Row & { products: string[] };
 
@@ -209,7 +210,7 @@ export async function replyRows(audience: AudienceScope, period: Period, opts: R
       WHERE p."id" = ANY(${orphanPeople}::text[])` : [],
   ]);
   const rows = touches.map((t): ReplyRow => {
-    const base = { at: t.occurredAt, personId: t.personId, sandboxContactId: t.sandboxContactId, audience: t.audience };
+    const base = { at: t.occurredAt, personId: t.personId, sandboxContactId: t.sandboxContactId, audience: t.audience, channel: t.channel as string };
     const rep = caller(t);
     if (rep) {
       const call = callOf.get(t.id);

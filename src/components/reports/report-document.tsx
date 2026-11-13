@@ -160,6 +160,8 @@ export function ReportDocument({ reports, previous, range, compared, scope, camp
         ) : <p className="rp-empty">No campaign is running</p>}
       </Figure>
 
+      <LinkedInFigure linkedin={r.linkedin} previous={p?.linkedin ?? null} />
+
       {breakdown ?? BREAKDOWNS.map((b) => (
         <Figure key={b.key} title={b.label} aside={p ? 'against the period before' : undefined}>
           <BreakdownTable tab={b.key} reports={r} previous={p} />
@@ -204,6 +206,63 @@ function ColdFunnelFigure({ cold }: { cold: NonNullable<Reports['cold']> }) {
         ) : none}
       </Figure>
     </>
+  );
+}
+
+/**
+ * LinkedIn (reports-linkedin.ts): requests, acceptances, messages and replies the LinkedIn Console
+ * reported, and the LinkedIn tasks open now, per rep with the total last. Replies here are part of
+ * Replies above; requests and messages are not in Sent, which counts campaign steps.
+ */
+function LinkedInFigure({ linkedin, previous }: { linkedin: Reports['linkedin']; previous: Reports['linkedin'] | null }) {
+  const t = linkedin.totals;
+  const before = previous?.totals;
+  const rows = linkedin.byRep.filter((x) => x.requests || x.messages || x.replies || x.open);
+  const total = (key: string, value: number, was: number | undefined) => <td key={key} className="rp-r rp-strong">{fmt(value)}{was !== undefined ? <> <Delta current={value} previous={was} /></> : null}</td>;
+  return (
+    <Figure title="LinkedIn" aside="from the LinkedIn Console">
+      {rows.length ? (
+        <>
+          <div className="rp-scroll"><table className="rp-table">
+            <thead><tr>
+              <th>Rep</th>
+              <th className="rp-r">Requests sent</th>
+              <th className="rp-r" title="Requests sent in this period that have been accepted so far">Accepted</th>
+              <th className="rp-r" title="Accepted out of requests sent in this period">Acceptance rate</th>
+              <th className="rp-r">Messages sent</th>
+              <th className="rp-r" title="LinkedIn replies, already counted in Replies">Replies</th>
+              <th className="rp-r" title="LinkedIn tasks open now">Open tasks</th>
+              <th className="rp-r">Overdue</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((x) => (
+                <tr key={x.key}>
+                  <td className="rp-name">{x.label}</td>
+                  <td className="rp-r">{fmt(x.requests)}</td>
+                  <td className="rp-r">{fmt(x.accepted)}</td>
+                  <td className="rp-r">{x.requests ? pct(x.acceptanceRate) : '–'}</td>
+                  <td className="rp-r">{fmt(x.messages)}</td>
+                  <td className="rp-r">{fmt(x.replies)}</td>
+                  <td className="rp-r">{fmt(x.open)}</td>
+                  <td className="rp-r">{fmt(x.overdue)}</td>
+                </tr>
+              ))}
+              <tr>
+                <td className="rp-name rp-strong">Total</td>
+                {total('q', t.requests, before?.requests)}
+                {total('a', t.accepted, before?.accepted)}
+                <td className="rp-r rp-strong">{t.requests ? pct(t.acceptanceRate) : '–'}</td>
+                {total('m', t.messages, before?.messages)}
+                {total('r', t.replies, before?.replies)}
+                <td className="rp-r rp-strong">{fmt(t.open)}</td>
+                <td className="rp-r rp-strong">{fmt(t.overdue)}</td>
+              </tr>
+            </tbody>
+          </table></div>
+          <p className="rp-small">Acceptance rate: requests sent in this period that were accepted, out of all requests sent in it. Replies are already in Replies above.</p>
+        </>
+      ) : <p className="rp-empty">No LinkedIn activity in this period</p>}
+    </Figure>
   );
 }
 

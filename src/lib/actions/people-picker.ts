@@ -184,7 +184,7 @@ const ColdFilters = z.object({
   q: z.string().trim().max(200).default(''),
   owner: z.string().trim().max(100).default(''),
   pod: z.string().trim().max(100).default(''),
-  source: z.enum(['', 'BELLWETHER', 'MANUAL', 'CALL', 'CSV']).default(''),
+  source: z.enum(['', 'BELLWETHER', 'MANUAL', 'CALL', 'CSV', 'LINKEDIN']).default(''),
   ready: z.enum(['', 'ready', 'not_ready']).default(''),
   state: z.enum(['free', 'any']).default('free'),
   page: z.number().int().min(1).max(100000).default(1),

@@ -37,6 +37,9 @@ import { ActionIcon, IconExternal } from '@/components/icons';
 import { optionLabel, optionLabels } from '@/lib/twenty/labels';
 import { Avatar, Badge, Card, contactWarnings, crmStanding, enrollmentTone, enrollmentStatusLabel, KeyValue, Notice, RecordFields, RecordHeader, Surface, Tabs, TierBadge } from '@/components/ui';
 import { campaignStatusLabel } from '@/lib/campaign-status';
+import { linkedinSubjectView } from '@/lib/linkedin/subject-view';
+import { LinkedInCard } from '@/components/linkedin/linkedin-card';
+import { AddLinkedInLinkForm } from '@/components/linkedin/add-linkedin-link';
 
 type TimelineItem = { at: Date; kind: 'touch' | 'note' | 'task' | 'state'; icon: string; title: string; detail?: string | null; tone?: 'in' | 'out' | 'neutral' };
 
@@ -68,12 +71,13 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
     person.companyId ? prisma.personCache.findMany({ where: { companyId: person.companyId, id: { not: id }, deletedAt: null }, include: { enrollments: { orderBy: { createdAt: 'desc' }, take: 1 } }, take: 30 }) : Promise.resolve([]),
   ]);
 
-  const [openNext, nextAccess, suggestions, subject] = await Promise.all([
+  const [openNext, nextAccess, suggestions, subject, linkedin] = await Promise.all([
     prisma.nextAction.findFirst({ where: { personId: id, state: 'OPEN' }, include: { fo: { select: { id: true, name: true } } } }),
     nextActionAccess(user),
     // B027: a colleague's call left a suggested next step for this owner.
     openSuggestions(user.id, { personId: id }),
     loadPersonSubject(id),
+    tab === 'overview' ? linkedinSubjectView({ personId: id }, user.timezone) : Promise.resolve(null),
   ]);
   // B120: Call says why when this viewer may not call (Biz Ops read only), in words under the button.
   const callVerdict = subject ? canAct(toActor(user), subject, 'call') : null;
@@ -333,6 +337,8 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
                     </div>;
                   })}</div> : <div className="p-4 text-sm text-ink-500">Never in a campaign</div>}
                 </Card>
+                {linkedin ? <LinkedInCard view={linkedin} hasLink={Boolean(person.linkedinKey)} addLink={nextAccess.canSet ? <AddLinkedInLinkForm personId={id} /> : null} /> : null}
+
                 <Card title="Contact details">
                   <div className="p-4">
                     {/* Consent only appears when there is a restriction: its absence is normal. */}

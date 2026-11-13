@@ -614,6 +614,9 @@ async function completeLocally(item: ItemWithMove, personId: string, companyId: 
     await tx.touch.updateMany({ where: { sandboxContactId: c.id, personId: null }, data: { personId } });
     await tx.callLog.updateMany({ where: { sandboxContactId: c.id, personId: null }, data: { personId } });
     await tx.enrollment.updateMany({ where: { sandboxContactId: c.id, personId: null }, data: { personId } });
+    // LinkedIn: where each account stands with them, and their open LinkedIn tasks, go with the person too.
+    await tx.linkedInLink.updateMany({ where: { sandboxContactId: c.id, personId: null }, data: { personId } });
+    await tx.linkedInFollowUp.updateMany({ where: { sandboxContactId: c.id, personId: null }, data: { personId } });
     // The cold next step closes; a CRM one opens, unless the person already has one of their own (B097).
     await tx.nextAction.updateMany({ where: { sandboxContactId: c.id, personId: null, state: 'OPEN' }, data: { state: 'CANCELLED', closedAt: now, crmPending: false } });
     const theirs = (await tx.nextAction.count({ where: { personId, state: 'OPEN' } })) || Boolean(personNextBefore && (personNextBefore.nextAction || personNextBefore.nextActionDueDate));
@@ -882,6 +885,8 @@ async function restoreLocally(item: SandboxMoveItem, contactId: string, personId
     await tx.touch.updateMany({ where: fromContact, data: { personId: null } });
     await tx.callLog.updateMany({ where: fromContact, data: { personId: null } });
     await tx.enrollment.updateMany({ where: fromContact, data: { personId: null } });
+    await tx.linkedInLink.updateMany({ where: fromContact, data: { personId: null } });
+    await tx.linkedInFollowUp.updateMany({ where: fromContact, data: { personId: null } });
     // The CRM next step the move opened closes; the contact's own comes back (B034).
     await tx.nextAction.updateMany({ where: { ...fromContact, state: 'OPEN' }, data: { state: 'CANCELLED', closedAt: now, crmPending: false } });
     const prior = item.priorNextAction as (MoveNextStep & { id?: string; foUserId?: string }) | null;

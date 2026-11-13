@@ -8,6 +8,7 @@ import { countTaskWhere, type AudienceScope } from './subject';
 import { bookedRows, dialRows, heldRows, inAudience, personKeyOf, peopleSplit, replyRows, sentRows, withPods, type Credit, type Stamp, type Who } from './outreach/metrics';
 import { doNotContactEmails } from './mail/cold-email';
 import { CHANNELS, NO_PRODUCT, productLabel, productRank, SEVERAL_PRODUCTS, type Channel } from './report-keys';
+import { linkedinReport, linkedinRows } from './reports-linkedin';
 
 export const reportingTimezone = () => workspaceTimezone();
 export type ReportingRange = { from: LocalDate; to: LocalDate; fromInstant: Date; toInstant: Date; error: string | null };
@@ -181,7 +182,7 @@ export async function buildReports(user: SessionUser, today: LocalDate, filters?
     && (!podId || c.pod === podId)
     && (!foUserId || c.rep === foUserId);
 
-  const [sentAll, dialsAll, repliesAll, bookedAll, heldAll, otherRead, users, pods, dncAll] = await Promise.all([
+  const [sentAll, dialsAll, repliesAll, bookedAll, heldAll, otherRead, users, pods, dncAll, linkedinAll] = await Promise.all([
     sentRows('all', period),
     dialRows('all', period),
     replyRows('all', period),
@@ -195,6 +196,8 @@ export async function buildReports(user: SessionUser, today: LocalDate, filters?
     prisma.user.findMany({ select: { id: true, name: true, active: true } }),
     prisma.pod.findMany({ select: { id: true, name: true } }),
     doNotContactEmails(period),
+    // LinkedIn requests and messages the Console reported, and LinkedIn tasks open now.
+    linkedinRows(period),
   ]);
   const sent = sentAll.filter(inScope);
   const dials = dialsAll.filter(inScope);
@@ -351,6 +354,8 @@ export async function buildReports(user: SessionUser, today: LocalDate, filters?
     byProduct: products,
     channels,
     cold,
+    /** LinkedIn per rep and in total (reports-linkedin.ts); its replies are part of Replies above, not added to them. */
+    linkedin: linkedinReport(linkedinAll, vReplies, { audience, inScope, today, userName }),
   };
 }
 

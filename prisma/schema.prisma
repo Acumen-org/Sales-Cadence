@@ -178,6 +178,7 @@ model User {
   ticketsRaised         Ticket[]              @relation("TicketRaisedBy")
   ticketsResolved       Ticket[]              @relation("TicketResolvedBy")
   notifications         Notification[]        @relation("NotificationFor")
+  linkedinFollowUps     LinkedInFollowUp[]    @relation("LinkedInFollowUpFo")
 }
 
 model Session {
@@ -441,6 +442,8 @@ model PersonCache {
   phoneE164       String?
   additionalPhoneE164 String?
   linkedinUrl     String?
+  /// `linkedinUrl` as linkedin.com/in/<slug> (normalizeLinkedin): what LinkedIn activity is matched on.
+  linkedinKey     String?
   jobTitle        String?
   companyId       String?
   companyName     String?
@@ -520,9 +523,11 @@ model PersonCache {
   numberTickets    MeetingNumberTicket[]
   calls            CallLog[]
   tickets          Ticket[]
+  linkedinFollowUps LinkedInFollowUp[]
 
   @@index([companyId])
   @@index([podOwner])
+  @@index([linkedinKey])
   @@index([email])
   @@index([emailNorm])
   @@index([additionalEmailsNorm], type: Gin)
@@ -1012,6 +1017,8 @@ enum ContactSource {
   MANUAL
   CSV
   CALL
+  /// Someone a teammate reached on LinkedIn who was in neither the CRM nor Cold outreach.
+  LINKEDIN
 }
 
 /// A contact that is not in Twenty. The firm is flat on the row: the sandbox works people, and the
@@ -1144,6 +1151,7 @@ model SandboxContact {
   notes       SandboxNote[]
   emails      SandboxEmail[]
   tickets     Ticket[]
+  linkedinFollowUps LinkedInFollowUp[]
 
   // CHECK SandboxContact_owner_has_pod ("ownerId" IS NULL OR "podId" IS NOT NULL) lives in the
   // migrations (B050, M2): an owned contact always has a pod. NOT VALID until W14 validates it.
@@ -1679,4 +1687,147 @@ model ApiRequestLog {
 
   @@index([keyId, createdAt])
   @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// LinkedIn, observed through the LinkedIn Console (Notes/linkedin-2026-11-12/PLAN.md). Cadence never
+// acts on LinkedIn: teammates act by hand in the Console, and the Console reports what it saw.
+// ---------------------------------------------------------------------------
+
+/// A LinkedIn account connected to the Console. Not a rep: several teammates often work one account.
+model LinkedInAccount {
+  /// The Console's account id.
+  id                String   @id
+  name              String
+  /// Connection requests sent from the account in the last 7 days, as the Console last counted them.
+  invitesLast7Days  Int      @default(0)
+  /// The account's own weekly limit from the Console; null = Settings > LinkedIn's.
+  inviteWeeklyLimit Int?
+  seenAt            DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+/// One event from the Console (webhook or feed), kept once by the Console's sequence number.
+model LinkedInEvent {
+  id               String    @id @default(uuid())
+  seq              BigInt    @unique
+  /// invitation.sent | invitation.withdrawn | connection.accepted | message.sent | message.received
+  type             String
+  at               DateTime
+  accountId        String?
+  /// The teammate the Console names (work email), and the Cadence user it matched.
+  userEmail        String?
+  userId           String?
+  memberUrn        String?
+  /// linkedin.com/in/<slug>; null while the Console does not know the person's profile link yet.
+  profileKey       String?
+  name             String?
+  payload          Json
+  /// webhook | feed | test
+  via              String
+  receivedAt       DateTime  @default(now())
+  processedAt      DateTime?
+  result           String?
+  personId         String?
+  sandboxContactId String?
+
+  @@index([processedAt])
+  @@index([profileKey])
+  @@index([memberUrn])
+  @@index([result])
+  @@index([at])
+}
+
+enum LinkedInLinkStatus {
+  /// A connection request is waiting.
+  PENDING
+  ACCEPTED
+  WITHDRAWN
+}
+
+/// Where one firm account stands with one person on LinkedIn.
+model LinkedInLink {
+  id               String             @id @default(uuid())
+  accountId        String
+  profileKey       String
+  memberUrn        String?
+  name             String?
+  personId         String?
+  sandboxContactId String?
+  status           LinkedInLinkStatus
+  /// False when they asked us to connect (or the Console cannot tell); only our own requests count.
+  invitedByUs      Boolean            @default(true)
+  invitedAt        DateTime?
+  invitedByUserId  String?
+  acceptedAt       DateTime?
+  withdrawnAt      DateTime?
+  /// Requests sent again after a withdrawal. The owner's rule: one resend, then stop.
+  resends          Int                @default(0)
+  lastSentAt       DateTime?
+  lastReplyAt      DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  followUps LinkedInFollowUp[]
+
+  @@unique([accountId, profileKey])
+  @@index([personId])
+  @@index([sandboxContactId])
+  @@index([profileKey])
+  @@index([status, invitedAt])
+}
+
+enum LinkedInFollowUpKind {
+  /// They accepted our request: message them.
+  MESSAGE
+  /// The request has waited too long: withdraw it.
+  WITHDRAW
+  /// The request was withdrawn: send it again after LinkedIn's cool-off.
+  RESEND
+}
+
+enum LinkedInFollowUpState {
+  OPEN
+  DONE
+  CANCELLED
+}
+
+/// A LinkedIn task Cadence made from what it saw, outside any campaign. No FO yet = Needs owner.
+model LinkedInFollowUp {
+  id               String                @id @default(uuid())
+  kind             LinkedInFollowUpKind
+  state            LinkedInFollowUpState @default(OPEN)
+  linkId           String
+  link             LinkedInLink          @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  /// The firm account to act from.
+  accountId        String
+  personId         String?
+  person           PersonCache?          @relation(fields: [personId], references: [id], onDelete: Cascade)
+  sandboxContactId String?
+  sandboxContact   SandboxContact?       @relation(fields: [sandboxContactId], references: [id], onDelete: Cascade)
+  foUserId         String?
+  fo               User?                 @relation("LinkedInFollowUpFo", fields: [foUserId], references: [id], onDelete: SetNull)
+  /// What started it: accepted | replied | pending | withdrawn.
+  trigger          String
+  /// When that happened.
+  triggeredAt      DateTime
+  /// LocalDate. Null while nobody owns it: the clock starts when someone does.
+  dueDate          String?
+  assignedAt       DateTime?
+  completedAt      DateTime?
+  completedById    String?
+  completionSource CompletionSource?
+  /// linkedin:<seq> of the event that closed it.
+  evidenceId       String?
+  closeReason      String?
+  audience         CampaignAudience?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  // One open follow-up of a kind per link: LinkedInFollowUp_one_open_per_link (linkId, kind) WHERE
+  // state = 'OPEN', in the migration.
+  @@index([foUserId, state, dueDate])
+  @@index([state, foUserId])
+  @@index([personId, state])
+  @@index([sandboxContactId, state])
 }
