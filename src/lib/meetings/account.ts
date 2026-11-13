@@ -31,12 +31,14 @@ export async function meetingCompany(prospectIds: string[]): Promise<MeetingAcco
 }
 
 /**
- * Every meeting's account worked out again from its prospects as they are now, so meetings saved
+ * Meetings without an account get one from their prospects as they are now, so meetings saved
  * before the rule, or before a prospect's account was known, get one too. Returns the meetings whose
  * account changed, which Twenty then needs to hear about.
  */
 export async function refreshMeetingAccounts(): Promise<string[]> {
-  const meetings = await prisma.meeting.findMany({ where: { attendees: { some: { prospect: true, personId: { not: null } } } }, select: { id: true, companyId: true, companyName: true, attendees: { where: { prospect: true, personId: { not: null } }, select: { personId: true } } } });
+  // S11: only meetings with no account yet. One that has an account keeps it when a prospect later
+  // changes employer: an October meeting with company A stays company A's (an edit sets it again).
+  const meetings = await prisma.meeting.findMany({ where: { companyId: null, attendees: { some: { prospect: true, personId: { not: null } } } }, select: { id: true, companyId: true, companyName: true, attendees: { where: { prospect: true, personId: { not: null } }, select: { personId: true } } } });
   if (!meetings.length) return [];
   const personIds = [...new Set(meetings.flatMap((m) => m.attendees.map((a) => a.personId!)))];
   const people = new Map((await prisma.personCache.findMany({ where: { id: { in: personIds } }, select: { id: true, companyId: true, companyName: true } })).map((p) => [p.id, p]));

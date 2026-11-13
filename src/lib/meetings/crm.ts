@@ -95,6 +95,19 @@ export async function missingMeetingTags(): Promise<{ field: string; name: strin
   return (row?.value as { items?: { field: string; name: string }[] } | null)?.items ?? [];
 }
 
+/**
+ * S09: whether a tag on the missing list now exists in Twenty (an admin added it by hand). Only then
+ * is it worth writing every meeting again; a tag Twenty still lacks would only fail again.
+ */
+export async function missingTagsNowInTwenty(schema: TwentyMeetingSchema): Promise<boolean> {
+  const fields: Record<string, TwentyTagField | null> = { 'Booked by': schema.fields.bookedBy, Products: schema.fields.products, 'Team on the call': schema.fields.team };
+  return (await missingMeetingTags()).some((t) => {
+    const field = fields[t.field];
+    const key = t.name.trim().toLowerCase();
+    return Boolean(field && !field.text && field.options.some((o) => o.label.trim().toLowerCase() === key || o.value.toLowerCase() === key));
+  });
+}
+
 /** The record's field values and the contacts to link, in the names this workspace gave its fields. */
 export async function meetingRecord(m: MeetingForCrm, schema: TwentyMeetingSchema, client: TwentyClient): Promise<{ data: Record<string, unknown>; contacts: { personId: string; name: string }[]; tags: TagOutcome[] }> {
   const f = schema.fields;
@@ -127,8 +140,10 @@ export async function meetingRecord(m: MeetingForCrm, schema: TwentyMeetingSchem
   const team: string[] = [];
   const external: MeetingForCrm['attendees'] = [];
   for (const a of m.attendees) {
-    const user = userOf(a);
-    if (user || (a.email && !isExternalEmail(a.email, rules.internalDomains))) { const n = user?.name ?? personName(a); if (n && !team.includes(n)) team.push(n); }
+    // S10: someone chosen as a prospect is linked as one, even when they share a colleague's name;
+    // the meetings check compares Twenty's contacts with the prospects, so the two must agree.
+    const user = a.prospect ? undefined : userOf(a);
+    if (!a.prospect && (user || (a.email && !isExternalEmail(a.email, rules.internalDomains)))) { const n = user?.name ?? personName(a); if (n && !team.includes(n)) team.push(n); }
     else external.push(a);
   }
   if (f.team) data[f.team.name] = await named(f.team, team, 'Team on the call');
@@ -221,8 +236,14 @@ export async function syncMeetingToCrm(meetingId: string): Promise<string | null
   return id;
 }
 
-function keepForRetry(operation: string, payload: Record<string, unknown>, err: unknown, twentyId: string | null = null) {
+async function keepForRetry(operation: string, payload: Record<string, unknown>, err: unknown, twentyId: string | null = null) {
   const message = err instanceof Error ? err.message : String(err);
+  // S23: one waiting write per meeting (or record): a later failure updates it rather than adding another.
+  const waiting = await prisma.twentyWrite.findFirst({
+    where: { operation, objectType: 'meeting', dryRun: false, status: { in: ['FAILED', 'RETRYING'] }, ...(operation === 'syncMeeting' ? { payload: { path: ['meetingId'], equals: String(payload.meetingId) } } : { twentyId }) },
+    select: { id: true },
+  }).catch(() => null);
+  if (waiting) return prisma.twentyWrite.update({ where: { id: waiting.id }, data: { error: message } }).catch(() => undefined);
   return prisma.twentyWrite.create({ data: { operation, objectType: 'meeting', twentyId, payload: payload as object, status: 'FAILED', error: message, attempts: 1, nextAttemptAt: new Date(Date.now() + retryDelayMs(1)) } }).catch(() => undefined);
 }
 
@@ -265,10 +286,14 @@ export function meetingSchemaShape(schema: TwentyMeetingSchema): string {
  * Once the workspace has a Meetings object, every meeting already in Cadence goes into it. Returns
  * null when there is no Meetings object yet (try again later), else how many were written.
  */
-export async function backfillMeetingsToCrm(options: { all?: boolean } = {}): Promise<number | null> {
+export async function backfillMeetingsToCrm(options: { all?: boolean; pauseMs?: number } = {}): Promise<number | null> {
   const client = await getTwentyClient();
   if (!(await client.meetingSchema())) return null;
   const pending = await prisma.meeting.findMany({ where: { review: 'APPROVED', ...(options.all ? {} : { twentyMeetingId: null }) }, orderBy: { occurredAt: 'asc' }, select: { id: true } });
-  for (const m of pending) await pushMeetingToCrm(m.id);
+  for (const [i, m] of pending.entries()) {
+    // S09: paced, so a rewrite of every meeting stays under Twenty's 100 requests a minute.
+    if (i && options.pauseMs) await new Promise((resolve) => setTimeout(resolve, options.pauseMs));
+    await pushMeetingToCrm(m.id);
+  }
   return pending.length;
 }

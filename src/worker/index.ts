@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { backfillMeetingsToCrm, meetingSchemaShape, missingMeetingTags } from '../lib/meetings/crm';
+import { backfillMeetingsToCrm, meetingSchemaShape, missingMeetingTags, missingTagsNowInTwenty } from '../lib/meetings/crm';
 import { backfillTeamsTranscripts } from '../lib/meetings/teams-transcript';
 import { MEETINGS_CHANGED_KEY, checkMeetingsInCrm } from '../lib/meetings/crm-check';
 import { backfillSharePointPlayers } from '../lib/meetings/sharepoint-player';
@@ -141,7 +141,7 @@ async function meetingsBackfill(now:number){
   const shape=`${MEETINGS_RELEASE}|${meetingSchemaShape(schema)}`;
   const row=await prisma.setting.findUnique({where:{key}});
   if((row?.value as {shape?:string}|null)?.shape===shape)return;
-  const written=await backfillMeetingsToCrm({all:true});if(written===null)return;
+  const written=await backfillMeetingsToCrm({all:true,pauseMs:1000});if(written===null)return;
   log('meetings written to Twenty',written);
   const value={at:new Date().toISOString(),written,shape};
   await prisma.setting.upsert({where:{key},create:{key,value},update:{value}});
@@ -157,6 +157,9 @@ async function meetingsWithTwenty(now:number){
  const flagged=await prisma.setting.findUnique({where:{key:MEETINGS_CHANGED_KEY}});
  const changedAt=Date.parse(String((flagged?.value as {at?:string}|null)?.at??''));
  if(now<meetingsTwentyAt&&!(changedAt>=meetingsTwentyRan))return;
+ // S22: a change reported by Twenty (often Cadence's own write coming back) or writes still waiting
+ // bring the full check forward, but never closer than two minutes after the last one.
+ if(now-meetingsTwentyRan<120_000)return;
  meetingsTwentyRan=now;meetingsTwentyAt=now+600_000;
  try{const stats=await checkMeetingsInCrm();if(stats&&(stats.linked||stats.written))log('meetings checked in Twenty',stats);if(stats?.waiting)meetingsTwentyAt=0;}catch(error){log('meetings check in Twenty failed',error);}
 }
@@ -172,7 +175,8 @@ let meetingTagsRetryAt=Date.now()+3_600_000;
 async function meetingTagsRetry(now:number){
  if(now<meetingTagsRetryAt)return;meetingTagsRetryAt=now+3_600_000;
  if(!(await missingMeetingTags()).length)return;
- try{const written=await backfillMeetingsToCrm({all:true});if(written!==null)log('meetings written again for missing tags',written);}catch(error){log('meetings tag retry failed',error);}
+ // S09: only once one of the missing tags exists in Twenty, and paced; a tag Twenty still refuses would only fail again.
+ try{const schema=await (await getTwentyClient()).meetingSchema();if(!schema||!(await missingTagsNowInTwenty(schema)))return;const written=await backfillMeetingsToCrm({all:true,pauseMs:1000});if(written!==null)log('meetings written again for missing tags',written);}catch(error){log('meetings tag retry failed',error);}
 }
 /**
  * Once Microsoft lets Cadence read the team's files: meetings saved earlier with a SharePoint sharing
