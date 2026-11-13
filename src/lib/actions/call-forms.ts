@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { h00ksConfigured } from '@/lib/calls/h00ks';
 import { prisma } from '../db';
 import { requireUser, toActor } from '../auth/current-user';
 import { canAttachCalls, canManageSettings, isAdmin, isBizOps, needsPod } from '../auth/rbac';
@@ -327,6 +328,7 @@ export async function importCallsNowAction(): Promise<ActionResult> {
 export async function setCallerNumberAction(formData: FormData): Promise<ActionResult> {
   const user = await requireUser();
   if (!isAdmin(user)) return { ok: false, error: 'Only admins can assign numbers.' };
+  if (h00ksConfigured()) return { ok: false, error: 'Numbers are assigned in the h00ks dialpad admin now. Cadence copies them every 2 minutes.' };
   const number = toE164(String(formData.get('number') ?? ''));
   const userId = String(formData.get('userId') ?? '') || null;
   if (!number) return { ok: false, error: 'That number could not be read.' };

@@ -183,10 +183,13 @@ describe('W5: Move to CRM and Undo', () => {
     expect(find).toHaveBeenCalledTimes(1);
     await queueMove(ids.map((contactId) => ({ contactId, noConversation: true })), actor, audit);
     expect(find).toHaveBeenCalledTimes(1);
-    // An answer the CRM never gave is not read as "not in the CRM".
+    // An answer the CRM never gave never stops the move, nor is read as "not in the CRM": the dialog
+    // says so, and the worker asks the CRM again before it writes anything.
     find.mockRejectedValueOnce(new Error('Twenty 503'));
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
-    expect((await preflightMove([c.id], actor)).refused).toMatch(/^The CRM did not answer/);
+    const pre = await preflightMove([c.id], actor);
+    expect(pre.refused).toBeNull();
+    expect(pre.items[0].plan).toContain('The CRM was slow to answer: Cadence checks it again before it writes anything');
     find.mockRestore();
   });
 
@@ -208,7 +211,7 @@ describe('W5: Move to CRM and Undo', () => {
     await runMoveQueue();
     const items = await prisma.sandboxMoveItem.findMany({ where: { moveId: q.moveId } });
     const failed = items.find((i) => i.state === 'FAILED')!;
-    expect(failed.error).toBe('The CRM did not answer. Retry in a few minutes.');
+    expect(failed.error).toBe('The CRM did not answer. Cadence tries again by itself in a few minutes.');
     const done = items.find((i) => i.state === 'DONE')!;
     const doneContact = done.sandboxContactId;
     const label = doneContact === own.id ? 'Call back Tuesday' : 'Intro call';
@@ -267,11 +270,11 @@ describe('W5: Move to CRM and Undo', () => {
 
   it('B100: errors read in plain words; the raw text stays in the audit log', async () => {
     expect(failureWords(Object.assign(new Error('Unique constraint failed on the fields: (`twentyPersonId`)'), { code: 'P2002' }))).toEqual({ text: expect.stringContaining('already linked to another contact'), failure: 'permanent' });
-    expect(failureWords(new Error('fetch failed: ECONNRESET'))).toEqual({ text: 'The CRM did not answer. Retry in a few minutes.', failure: 'transient' });
-    expect(failureWords(new Error('Cannot read properties of undefined (reading \'id\')')).text).toBe('Something went wrong moving this contact. Retry, and tell an admin if it happens again.');
+    expect(failureWords(new Error('fetch failed: ECONNRESET'))).toEqual({ text: 'The CRM did not answer. Cadence tries again by itself in a few minutes.', failure: 'transient' });
+    expect(failureWords(new Error('Cannot read properties of undefined (reading \'id\')')).text).toBe('Something went wrong moving this contact. Cadence tries again by itself; tell an admin if it stays.');
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
     const item = await moveOne(c.id, b.users.alisa.id, { failWith: new Error('TwentyApiError: 502 Bad Gateway') });
-    expect(item.error).toBe('The CRM did not answer. Retry in a few minutes.');
+    expect(item.error).toBe('The CRM did not answer. Cadence tries again by itself in a few minutes.');
     expect((await prisma.auditLog.findFirstOrThrow({ where: { entityId: c.id, action: 'move_failed' } })).details).toEqual(expect.objectContaining({ error: 'TwentyApiError: 502 Bad Gateway' }));
   });
 
@@ -318,7 +321,7 @@ describe('W5: Move to CRM and Undo', () => {
     const item = await moveOne(c.id, b.users.alisa.id, { failWith: new Error('fetch failed') });
     expect(item.state).toBe('FAILED');
     expect((await listMoves({ state: 'failed' })).map((m) => m.id)).toEqual([item.moveId]);
-    expect((await latestMoves([c.id], actor)).get(c.id)).toEqual(expect.objectContaining({ state: 'FAILED', error: 'The CRM did not answer. Retry in a few minutes.' }));
+    expect((await latestMoves([c.id], actor)).get(c.id)).toEqual(expect.objectContaining({ state: 'FAILED', error: 'The CRM did not answer. Cadence tries again by itself in a few minutes.' }));
     expect(await prisma.notification.findFirstOrThrow({ where: { userId: b.users.alisa.id, kind: 'move_finished' } })).toEqual(expect.objectContaining({ payload: expect.objectContaining({ moveId: item.moveId, done: 0, failed: 1 }) }));
     // Retry: the CRM gained the person meanwhile, so the move goes to them.
     const person = await prisma.personCache.findFirstOrThrow({ where: { email: { not: null }, deletedAt: null, dnd: false, optedOut: false } });
@@ -355,7 +358,7 @@ describe('W5: Move to CRM and Undo', () => {
     expect(page.rows[0].undoUntil).toMatch(/^\d+ \w+ \d{4}$/);
     expect(page.rows[0].detail).toMatch(/^\d+ notes? written to the CRM$/);
     expect(page.rows[0].firm).toMatch(/^(Created|Linked to) firm Rivera Wealth Partners$/);
-    expect(page).toEqual(expect.objectContaining({ progress: 100, settled: true, counts: { done: 2, waiting: 0, failed: 0, undone: 0 } }));
+    expect(page).toEqual(expect.objectContaining({ progress: 100, settled: true, counts: { done: 2, waiting: 0, failed: 0, retrying: 0, undone: 0 } }));
     expect(page.leftOut).toEqual([expect.objectContaining({ contactId: out.id, reason: 'Opted out' })]);
   });
 
