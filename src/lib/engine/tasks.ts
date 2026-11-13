@@ -112,6 +112,12 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
         shiftDays = shiftAfterStep(shiftDays, currentTasks[0].plannedDate, latestResolutionDate(currentTasks, workspaceTimezone()), 'shift');
       }
 
+      const fixedCalendar = e.scheduleDates.length > 0;
+      // P08: "Move to step" parks the enrollment just before its target and then generates it in a
+      // second call. Parked means the step it stands on was never generated and nothing is open; if the
+      // second call never ran (a lock wait, a restart), this pass generates the target as the move would have.
+      const parked = !fixedCalendar && e.currentStep >= 0 && Boolean(e.currentStepId) && !e.tasks.some((t) => t.stepId === e.currentStepId || t.state === 'PENDING');
+      const forceGenerate = Boolean(ctx.forceGenerate) || parked;
       const { nextIndex } = resolveNextStep({ currentStep: e.currentStep, currentStepId: e.currentStepId, steps });
       if (nextIndex >= steps.length) {
         if (!stepDone || e.tasks.some(t => t.state === 'PENDING')) return { outcome: 'waiting' as const, reason: 'Required actions are still in progress' };
@@ -137,12 +143,11 @@ export async function advanceEnrollment(enrollmentId: string, ctx: EngineContext
       }
 
       const step = steps[nextIndex];
-      const fixedCalendar = e.scheduleDates.length > 0;
       if (fixedCalendar && (!workingDay(today) || (e.campaign?.endDate && today > e.campaign.endDate))) return { outcome: 'waiting' as const, reason: 'New touchpoints appear only on weekdays within the campaign window.' };
       let planned = fixedCalendar ? e.scheduleDates[nextIndex] : plannedDateForStep(e.startDate, step.day, shiftDays, rules.workingDays);
       if (fixedCalendar && (!planned || planned > today || (e.currentStep >= 0 && !stepDone))) return { outcome: 'waiting' as const, reason: 'Waiting for the published date and completion of the previous touchpoint.' };
       if (fixedCalendar && ctx.forceGenerate) return { outcome: 'waiting' as const, reason: 'This campaign follows its published calendar.' };
-      if (!fixedCalendar && ctx.forceGenerate) {
+      if (!fixedCalendar && forceGenerate) {
         // Moved ahead by hand: the step is due now, never retroactively overdue.
         if (planned < today) planned = nextWorkingDay(today, rules.workingDays);
       } else if (!fixedCalendar && !shouldGenerateNow({ previousStepDone: stepDone, plannedDate: planned, today, mode: rules.clockMode, isFirstStep: e.currentStep < 0 })) {
@@ -284,6 +289,9 @@ export async function completeTask(input: CompleteTaskInput, ctx: EngineContext)
     if (!task) return { ok: false as const, reason: 'not_found' as const };
     if (task.state !== 'PENDING') return { ok: false as const, reason: 'already_resolved' as const };
     if (input.evidenceId) {
+      // P28: two processes recording the same email at once each read "not used" and both closed a step.
+      // The evidence id is locked first, so the second waits and then sees the first one's claim.
+      await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`evidence:${input.evidenceId}`}))`;
       const used = await tx.task.findFirst({ where: { evidenceId: input.evidenceId }, select: { id: true } });
       if (used) return { ok: false as const, reason: 'evidence_used' as const, detail: used.id };
     }
@@ -341,12 +349,17 @@ export async function completeTask(input: CompleteTaskInput, ctx: EngineContext)
   });
   if (!tx_result.ok) return tx_result;
 
-  const advance: AdvanceResult = ctx.deferAdvance ? { outcome: 'waiting', reason: 'applying outcome' } : await advanceEnrollment(tx_result.task.enrollmentId, ctx);
-  if (!ctx.skipSync) {
-    const id = tx_result.task.id;
-    await afterResponse(async () => { const full = await loadSyncTask(id); if (full) await syncTaskCompleted(full); });
+  // P15: the task is Done whatever happens next, so its CRM note and the close of its mirrored task are
+  // sent even when the follow-on advance fails (the worker's next pass advances it).
+  try {
+    const advance: AdvanceResult = ctx.deferAdvance ? { outcome: 'waiting', reason: 'applying outcome' } : await advanceEnrollment(tx_result.task.enrollmentId, ctx);
+    return { ok: true, task: tx_result.task, advance };
+  } finally {
+    if (!ctx.skipSync) {
+      const id = tx_result.task.id;
+      await afterResponse(async () => { const full = await loadSyncTask(id); if (full) await syncTaskCompleted(full); });
+    }
   }
-  return { ok: true, task: tx_result.task, advance };
 }
 
 export async function skipTask(input: { taskId: string; reason: string; note?: string | null }, ctx: EngineContext): Promise<ResolveResult> {
@@ -367,12 +380,16 @@ export async function skipTask(input: { taskId: string; reason: string; note?: s
     return { ok: true as const, task: updated };
   });
   if (!res.ok) return res;
-  const advance: AdvanceResult = ctx.deferAdvance ? { outcome: 'waiting', reason: 'applying outcome' } : await advanceEnrollment(res.task.enrollmentId, ctx);
-  if (!ctx.skipSync) {
-    const id = res.task.id;
-    await afterResponse(async () => { const full = await loadSyncTask(id); if (full) await syncTaskResolved(full); });
+  // P15: as for a completion, the CRM write goes even when the advance fails.
+  try {
+    const advance: AdvanceResult = ctx.deferAdvance ? { outcome: 'waiting', reason: 'applying outcome' } : await advanceEnrollment(res.task.enrollmentId, ctx);
+    return { ok: true, task: res.task, advance };
+  } finally {
+    if (!ctx.skipSync) {
+      const id = res.task.id;
+      await afterResponse(async () => { const full = await loadSyncTask(id); if (full) await syncTaskResolved(full); });
+    }
   }
-  return { ok: true, task: res.task, advance };
 }
 
 /** The only snooze target a Junior FO may pick: the next working day after today. */
@@ -451,7 +468,8 @@ export const HARD_STOP_BATCH = 50;
  */
 export async function stopEndedCampaigns(ctx: EngineContext, batchSize = HARD_STOP_BATCH) {
   const today = todayIn(workspaceTimezone(), ctx.now ?? new Date());
-  const hardStops = await prisma.campaign.findMany({ where: { status: 'ACTIVE', hardStopAtEnd: true, endDate: { lt: today } }, select: { id: true } });
+  // P16: a paused campaign past its end date cannot be resumed, so its people are ended here too.
+  const hardStops = await prisma.campaign.findMany({ where: { status: { in: ['ACTIVE', 'PAUSED'] }, hardStopAtEnd: true, endDate: { lt: today } }, select: { id: true, status: true } });
   for (const campaign of hardStops) {
     try {
       let ended = 0;
@@ -473,22 +491,74 @@ export async function stopEndedCampaigns(ctx: EngineContext, batchSize = HARD_ST
         if (batch.length < batchSize || !count) break;
       }
       if (ended) await logAudit({ entityType: 'campaign', entityId: campaign.id, action: 'ended', actor: ctx.actor, details: { endedEnrollments: ended } });
+      if (campaign.status === 'PAUSED') await prisma.campaign.updateMany({ where: { id: campaign.id, status: 'PAUSED', enrollments: { none: { status: { in: ['ACTIVE', 'PAUSED'] } } } }, data: { status: 'COMPLETED' } });
     } catch (err) {
       console.warn('[scheduler] end-date stop failed; it continues at the next pass', campaign.id, err);
     }
   }
 }
 
+/**
+ * P04: a campaign resumed from the web resumes its people one by one in the request. Any left Paused
+ * (the request timed out, the server restarted, one resume failed) are resumed here, a batch a pass.
+ */
+export async function resumeReleasedEnrollments(ctx: EngineContext, take = 50): Promise<number> {
+  const left = await prisma.enrollment.findMany({ where: { status: 'PAUSED', pauseReason: 'campaign_paused', campaign: { status: 'ACTIVE' } }, select: { id: true }, orderBy: { id: 'asc' }, take });
+  let resumed = 0;
+  const { resumeEnrollment } = await import('./enrollment');
+  for (const e of left) {
+    try { if ((await resumeEnrollment(e.id, ctx)).resumed) resumed++; } catch (err) { console.warn('[scheduler] could not resume enrollment', e.id, err); }
+  }
+  return resumed;
+}
+
+/**
+ * P14, P15: CRM writes lost to a worker killed mid-pass or a web server restarted before its
+ * after-response work ran. An open CRM step with no mirrored task and no attempt to make one since it
+ * last changed is mirrored now; a step done with no completion note and no attempt to write one gets
+ * it. Only the last two days, settled for ten minutes, a few a pass; failures go to the outbox as usual.
+ */
+export async function mirrorMissedWrites(now = new Date(), take = 25): Promise<{ created: number; completed: number }> {
+  const settings = await getSettings();
+  const settled = new Date(now.getTime() - 10 * 60_000);
+  const since = new Date(now.getTime() - 2 * 86_400_000);
+  const stats = { created: 0, completed: 0 };
+  if (settings.sync.mirrorOpenTasks) {
+    const open = await prisma.task.findMany({ where: { state: 'PENDING', twentyTaskId: null, updatedAt: { gte: since, lt: settled }, enrollment: { personId: { not: null } } }, select: { id: true, updatedAt: true }, orderBy: { updatedAt: 'asc' }, take: take * 4 });
+    const tried = new Set((await prisma.twentyWrite.findMany({ where: { taskId: { in: open.map((t) => t.id) }, operation: 'createTask' }, select: { taskId: true, createdAt: true } })).filter((w) => open.some((t) => t.id === w.taskId && w.createdAt >= t.updatedAt)).map((w) => w.taskId));
+    const missed = open.filter((t) => !tried.has(t.id)).slice(0, take).map((t) => t.id);
+    if (missed.length) { await syncTasksCreated(await loadSyncTasks(missed)); stats.created = missed.length; }
+  }
+  if (settings.sync.writeCompletionNotes) {
+    const done = await prisma.task.findMany({ where: { state: 'DONE', twentyNoteId: null, updatedAt: { gte: since, lt: settled }, enrollment: { personId: { not: null } } }, select: { id: true }, orderBy: { updatedAt: 'asc' }, take: take * 4 });
+    const tried = new Set((await prisma.twentyWrite.findMany({ where: { taskId: { in: done.map((t) => t.id) }, operation: 'createNote' }, select: { taskId: true } })).map((w) => w.taskId));
+    const missed = done.filter((t) => !tried.has(t.id)).slice(0, take).map((t) => t.id);
+    for (const t of await loadSyncTasks(missed)) { await syncTaskCompleted(t); stats.completed++; }
+  }
+  return stats;
+}
+
 export async function runSchedulerTick(ctx: EngineContext): Promise<{ scanned: number; generated: number; completed: number; tasks: number }> {
   const stats = { scanned: 0, generated: 0, completed: 0, tasks: 0 };
+  await resumeReleasedEnrollments(ctx).catch((err) => console.warn('[scheduler] resume pick-up failed', err));
+  // P12: only enrollments that can move. In shift mode, and on a published calendar, a step with an open
+  // task waits for it; the completion advances it. A campaign that is not running generates nothing.
+  const { rules } = await getSettings();
+  const nothingOpen: Prisma.EnrollmentWhereInput = { tasks: { none: { state: 'PENDING' } } };
+  const canMove: Prisma.EnrollmentWhereInput = {
+    AND: [
+      { OR: [{ campaignId: null }, { campaign: { status: 'ACTIVE' } }] },
+      rules.clockMode === 'shift' ? nothingOpen : { OR: [{ scheduleDates: { isEmpty: true } }, nothingOpen] },
+    ],
+  };
   let cursor: string | undefined;
   for (;;) {
     const batch = await prisma.enrollment.findMany({
-      where: { status: 'ACTIVE' },
+      // The advance below takes rows out of the filter, so the page moves on by id rather than by a cursor row.
+      where: { status: 'ACTIVE', AND: [canMove, ...(cursor ? [{ id: { gt: cursor } }] : [])] },
       select: { id: true },
       orderBy: { id: 'asc' },
       take: 200,
-      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
     });
     if (!batch.length) break;
     for (const { id } of batch) {
@@ -514,5 +584,6 @@ export async function runSchedulerTick(ctx: EngineContext): Promise<{ scanned: n
   // over; a campaign marked to stop hard ends what is left, through the same exit path as a stop.
   await stopEndedCampaigns(ctx);
   await prisma.campaign.updateMany({ where: { status: 'ACTIVE', enrollments: { some: {}, none: { status: { in: ['ACTIVE','PAUSED'] } } } }, data: { status: 'COMPLETED' } });
+  if (!ctx.skipSync) await mirrorMissedWrites(ctx.now).catch((err) => console.warn('[scheduler] missed CRM writes not caught up', err));
   return stats;
 }
