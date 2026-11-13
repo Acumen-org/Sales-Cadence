@@ -1387,7 +1387,7 @@ Plan: `Notes/linkedin-2026-11-12/PLAN.md`. Console developer's spec: https://cla
 - **Steps close.** A "LinkedIn connect" step closes when a request is seen sent from the step's day on. If the person is already connected, or a request is already waiting, it closes saying so. A "LinkedIn message" step closes on a message seen sent. Any account and any teammate counts. Done stays.
 - **Follow-ups** (`LinkedInFollowUp`, not next actions, which hold one per person and write Twenty's Next Action):
   - Accepted, then "Message on LinkedIn", due 2 working days after acceptance, or after someone takes the contact on if that is later. Not opened if they were messaged after accepting.
-  - A reply stops the campaign, as an email reply does, and opens "Reply on LinkedIn".
+  - A reply stops the campaign, as an email reply does, and opens "Reply on LinkedIn", due 2 working days later, as an email reply's is (owner, 13 Nov 2026).
   - A request waiting 14 days opens "Withdraw the connection request".
   - A withdrawal opens "Send the connection request again", 3 weeks later (LinkedIn's cool-off). There is one resend, then it stops.
   - Each closes itself when the Console sees it done. Accepting cancels a waiting withdraw or resend. Someone who must not be contacted gets none, and theirs close.

@@ -154,7 +154,10 @@ describe('LinkedIn events from the Console', () => {
     const enrollment = await linkedinCampaign(personId);
     expect(await feed(ev('message.received', { at: new Date(Date.now() + 60_000) }))).toEqual({ reply_campaign_stopped: 1 });
     expect(await prisma.enrollment.findUniqueOrThrow({ where: { id: enrollment.id } })).toMatchObject({ status: 'REPLIED' });
-    expect(await prisma.linkedInFollowUp.findFirstOrThrow({ where: { personId } })).toMatchObject({ kind: 'MESSAGE', trigger: 'replied', foUserId: b.users.alisa.id });
+    const reply = await prisma.linkedInFollowUp.findFirstOrThrow({ where: { personId } });
+    expect(reply).toMatchObject({ kind: 'MESSAGE', trigger: 'replied', foUserId: b.users.alisa.id });
+    // Answered within 2 working days, as an email reply is (owner, 13 Nov 2026).
+    expect(reply.dueDate).toBe(workingDaysAfter(todayIn('Europe/London', reply.triggeredAt), 2, DEFAULT_SETTINGS.rules.workingDays));
     expect(await prisma.touch.count({ where: { personId, channel: 'LINKEDIN', direction: 'INBOUND' } })).toBe(1);
   });
 
