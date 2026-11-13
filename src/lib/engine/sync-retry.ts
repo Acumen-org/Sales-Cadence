@@ -16,11 +16,19 @@ import { getSettings } from '../settings';
  * than stuck forever.
  */
 const CLAIM_LEASE_MS = 10 * 60_000;
+/**
+ * N27: after this many attempts (about five days of back-off) a write is given up: GAVE_UP, kept with
+ * its last error in Settings > Activity log, where an admin can still retry or discard it. A write the
+ * replay cannot make at all is given up at once.
+ */
+export const MAX_WRITE_ATTEMPTS = 25;
+class NotReplayable extends Error {}
 
 export async function retryFailedWrites(opts: { now?: Date; limit?: number; ids?: string[]; ignoreBackoff?: boolean } = {}) {
   const now = opts.now ?? new Date();
-  // FAILED and due, or RETRYING with an expired lease.
-  const retryable = { OR: [{ status: 'FAILED' }, { status: 'RETRYING', nextAttemptAt: { lte: now } }] };
+  // FAILED and due, or RETRYING with an expired lease; a write given up only when an admin asks.
+  const byAdmin = Boolean(opts.ids || opts.ignoreBackoff);
+  const retryable = { OR: [{ status: 'FAILED' }, { status: 'RETRYING', nextAttemptAt: { lte: now } }, ...(byAdmin ? [{ status: 'GAVE_UP' }] : [])] };
   const rows = await prisma.twentyWrite.findMany({
     where: opts.ids
       ? { id: { in: opts.ids }, ...retryable }
@@ -46,7 +54,7 @@ export async function retryFailedWrites(opts: { now?: Date; limit?: number; ids?
     // Claim the row first: the worker tick and an admin's Retry can run at the same moment, and a
     // note written twice is worse than a note written late. The claim carries a lease (above).
     const claimed = await prisma.twentyWrite.updateMany({
-      where: { id: row.id, OR: [{ status: 'FAILED' }, { status: 'RETRYING', nextAttemptAt: { lte: now } }] },
+      where: { id: row.id, ...retryable },
       data: { status: 'RETRYING', nextAttemptAt: new Date(now.getTime() + CLAIM_LEASE_MS) },
     });
     if (!claimed.count) continue;
@@ -129,7 +137,7 @@ async function replay(client: TwentyClient, row: TwentyWrite): Promise<string | 
       return id;
     }
     default:
-      throw new Error(`Cannot replay a ${row.operation} write`);
+      throw new NotReplayable(`Cannot replay a ${row.operation} write`);
   }
 }
 
@@ -180,6 +188,12 @@ function messageOf(err: unknown): string {
 async function postpone(rows: TwentyWrite[], err: unknown, now: Date, statuses: string[] = ['FAILED', 'RETRYING']) {
   const error = messageOf(err);
   for (const row of rows) {
-    await prisma.twentyWrite.updateMany({ where: { id: row.id, status: { in: statuses } }, data: { status: 'FAILED', attempts: { increment: 1 }, error, nextAttemptAt: new Date(now.getTime() + retryDelayMs(row.attempts + 1)) } });
+    const giveUp = err instanceof NotReplayable || row.attempts + 1 >= MAX_WRITE_ATTEMPTS;
+    await prisma.twentyWrite.updateMany({
+      where: { id: row.id, status: { in: statuses } },
+      data: giveUp
+        ? { status: 'GAVE_UP', attempts: { increment: 1 }, error: `Gave up after ${row.attempts + 1} attempt(s): ${error}`.slice(0, 2000), nextAttemptAt: null }
+        : { status: 'FAILED', attempts: { increment: 1 }, error, nextAttemptAt: new Date(now.getTime() + retryDelayMs(row.attempts + 1)) },
+    });
   }
 }

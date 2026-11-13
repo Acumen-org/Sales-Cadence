@@ -398,7 +398,7 @@ async function ActivityTab() {
   const [events, writes, failed] = await Promise.all([
     recentEvents(100),
     prisma.twentyWrite.findMany({ where: { status: 'OK' }, orderBy: { createdAt: 'desc' }, take: 50 }),
-    prisma.twentyWrite.findMany({ where: { status: { in: ['FAILED', 'RETRYING'] } }, orderBy: { createdAt: 'asc' }, take: 100 }),
+    prisma.twentyWrite.findMany({ where: { status: { in: ['FAILED', 'RETRYING', 'GAVE_UP'] } }, orderBy: { createdAt: 'asc' }, take: 100 }),
   ]);
   return (
     <div className="space-y-3">
@@ -423,7 +423,7 @@ async function ActivityTab() {
                 {failed.map((w) => (
                   <tr key={w.id}>
                     <td className="whitespace-nowrap text-[12px]">{formatInstant(w.createdAt, workspaceTimezone())}</td>
-                    <td className="text-[12px]">{w.operation}{w.status === 'RETRYING' ? <Badge tone="amber" className="ml-1.5">Retrying</Badge> : null}</td>
+                    <td className="text-[12px]">{w.operation}{w.status === 'RETRYING' ? <Badge tone="amber" className="ml-1.5">Retrying</Badge> : w.status === 'GAVE_UP' ? <Badge tone="red" className="ml-1.5">Gave up</Badge> : null}</td>
                     <td className="text-[12px]">{w.objectType}</td>
                     <td className="max-w-md text-[12px] text-red-700">{w.error}</td>
                     <td className="num text-[12px]">{w.attempts}</td>

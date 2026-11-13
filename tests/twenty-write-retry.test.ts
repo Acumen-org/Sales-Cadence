@@ -50,10 +50,11 @@ describe('writes Twenty did not receive are kept and replayed', () => {
     expect(result.retried).toBe(1);
     expect(result.succeeded).toBe(0);
     const brokenAfter = await prisma.twentyWrite.findUniqueOrThrow({ where: { id: broken.id } });
-    expect(brokenAfter.status).toBe('FAILED');
+    // N27: an operation the replay does not know can never succeed: given up, not postponed for ever.
+    expect(brokenAfter.status).toBe('GAVE_UP');
     expect(brokenAfter.attempts).toBe(2);
     expect(brokenAfter.error).toMatch(/Cannot replay/);
-    expect(brokenAfter.nextAttemptAt!.getTime()).toBeGreaterThan(Date.now());
+    expect(brokenAfter.nextAttemptAt).toBeNull();
     expect((await prisma.twentyWrite.findUniqueOrThrow({ where: { id: later.id } })).attempts).toBe(1);
 
     // "Retry all now" ignores the backoff for every waiting row, and a row that fails again is
@@ -63,13 +64,12 @@ describe('writes Twenty did not receive are kept and replayed', () => {
     expect(forced.succeeded).toBe(1);
     expect((await prisma.twentyWrite.findUniqueOrThrow({ where: { id: later.id } })).status).toBe('OK');
     const stillBroken = await prisma.twentyWrite.findUniqueOrThrow({ where: { id: broken.id } });
-    expect(stillBroken.status).toBe('FAILED');
+    expect(stillBroken.status).toBe('GAVE_UP');
     expect(stillBroken.attempts).toBe(3);
-    expect(stillBroken.nextAttemptAt!.getTime()).toBeLessThan(Date.now() + 7 * 3600_000);
   });
 
   it('retries a claim whose process died, and leaves a live claim alone', async () => {
-    await prisma.twentyWrite.updateMany({ where: { status: 'FAILED' }, data: { status: 'DISCARDED' } });
+    await prisma.twentyWrite.updateMany({ where: { status: { in: ['FAILED', 'GAVE_UP'] } }, data: { status: 'DISCARDED' } });
     // A replay claimed the row and never finished: its lease has passed.
     const stale = await prisma.twentyWrite.create({
       data: { operation: 'createNote', objectType: 'note', payload: note('person-03'), status: 'RETRYING', attempts: 1, nextAttemptAt: new Date(Date.now() - 1000) },
@@ -106,5 +106,29 @@ describe('N09: CRM writes a restart cut off after the click are made later', () 
     expect((await prisma.personCache.findUniqueOrThrow({ where: { id: 'person-02' } })).dnd).toBe(true);
     // once written, never again
     expect(await sweepUnwrittenSyncs(now)).toEqual({ tasks: 0, optOuts: 0 });
+  });
+});
+
+describe('N27: a write that can never succeed is given up, not retried for ever', () => {
+  it('an operation the replay does not know is given up at once; the attempt limit gives up the rest', async () => {
+    await resetDb();
+    await seedBasics();
+    const { MAX_WRITE_ATTEMPTS } = await import('@/lib/engine/sync-retry');
+    const unknown = await prisma.twentyWrite.create({ data: { operation: 'mysteryOp', objectType: 'note', payload: {}, status: 'FAILED', attempts: 1, nextAttemptAt: new Date(Date.now() - 1000) } });
+    const tired = await prisma.twentyWrite.create({ data: { operation: 'updateTask', objectType: 'task', payload: { id: 'no-such-task', status: 'DONE' }, status: 'FAILED', attempts: MAX_WRITE_ATTEMPTS - 1, nextAttemptAt: new Date(Date.now() - 1000) } });
+    const { getMockTwentyClient } = await import('@/lib/twenty/mock-client');
+    const mock = getMockTwentyClient();
+    const update = mock.updateTask;
+    mock.updateTask = async () => { throw new Error('Task not found'); };
+    try {
+      await retryFailedWrites();
+    } finally {
+      mock.updateTask = update;
+    }
+    expect((await prisma.twentyWrite.findUniqueOrThrow({ where: { id: unknown.id } })).status).toBe('GAVE_UP');
+    expect(await prisma.twentyWrite.findUniqueOrThrow({ where: { id: tired.id } })).toMatchObject({ status: 'GAVE_UP', nextAttemptAt: null });
+    // the worker leaves them alone; an admin can still retry one
+    expect((await retryFailedWrites()).retried).toBe(0);
+    expect((await retryFailedWrites({ ids: [unknown.id] })).retried).toBe(1);
   });
 });
