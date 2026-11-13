@@ -3,14 +3,9 @@ variable "image_tag" {
   default = "prod-v1.0.0-initial"
 }
 
-variable "harbor_username" {
-  type    = string
-  default = "admin"
-}
-
-variable "harbor_password" {
-  type = string
-}
+# T04: no registry credentials in this file or in the job Nomad stores. Images are pulled with
+# the Nomad client's own Docker auth (a Harbor robot account with pull rights only), configured on
+# worker-5 in the docker plugin block; see DEPLOY.md "Registry credentials".
 
 locals {
   registry = "h4rb0r.pmx.acumen-strategy.com"
@@ -74,12 +69,6 @@ job "cadence" {
         # reap them.
         init        = true
         dns_servers = ["172.17.0.1", "8.8.8.8"]
-
-        auth {
-          server_address = local.registry
-          username       = var.harbor_username
-          password       = var.harbor_password
-        }
       }
 
       template {
@@ -160,12 +149,6 @@ EOH
         args        = ["docker/entrypoint.sh", "worker"]
         init        = true
         dns_servers = ["172.17.0.1", "8.8.8.8"]
-
-        auth {
-          server_address = local.registry
-          username       = var.harbor_username
-          password       = var.harbor_password
-        }
       }
 
       template {

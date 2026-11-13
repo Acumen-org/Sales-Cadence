@@ -233,6 +233,8 @@ jobs:
         with:
           version: latest
 
+      # T04: registry credentials are not passed to the job; the Nomad client
+      # pulls with its own Docker auth (DEPLOY.md, "Registry credentials").
       # The web task applies Prisma migrations on start, so a release carrying
       # one takes longer than a plain restart; the jobspec's deadlines allow for
       # that, and auto_revert catches the case where it never comes up.
@@ -243,6 +245,4 @@ jobs:
         run: |
           nomad job run \
             -var="image_tag=${IMAGE_TAG}" \
-            -var="harbor_username=${{ secrets.HARBOR_USERNAME }}" \
-            -var="harbor_password=${{ secrets.HARBOR_PASSWORD }}" \
             nomad/cadence.hcl
