@@ -52,19 +52,23 @@ test('the rep\'s path: push and claim, a studio campaign, its step in both task 
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
 
-  // 1. Bellwether pushes a contact. The pusher is an admin, who never owns contacts, so it arrives unclaimed.
-  const pushed = await request.post('/api/integrations/bellwether/v1/contacts', {
+  // 1. Bellwether pushes a contact. Every move names an owner Cadence lets own contacts (13 Nov 2026):
+  // the pusher alone is an admin, who never owns contacts, so that move is refused, never created unclaimed.
+  const contact = { bellwetherContactId: `e2e:${stamp}`, firstName: NAME.first, lastName: NAME.last, jobTitle: 'Wealth Advisor', email: `erin.${stamp}@harbor-light-advisors.com`, emailVerification: 'valid', phone: CONTACT_LINE, phoneType: 'direct', state: 'IL', city: 'Chicago', country: 'US', linkedinUrl: `https://www.linkedin.com/in/erin-harbor-${stamp}`, firm: { name: 'Harbor Light Advisors', website: 'https://harbor-light-advisors.com' } };
+  const push = (assignTo?: { email: string }) => request.post('/api/integrations/bellwether/v1/contacts', {
     headers: { 'x-cadence-api-key': KEY, 'idempotency-key': randomUUID(), 'content-type': 'application/json' },
-    data: {
-      pushedBy: { email: 'admin@cadence.local', name: 'Admin' },
-      contacts: [{ bellwetherContactId: `e2e:${stamp}`, firstName: NAME.first, lastName: NAME.last, jobTitle: 'Wealth Advisor', email: `erin.${stamp}@harbor-light-advisors.com`, emailVerification: 'valid', phone: CONTACT_LINE, phoneType: 'direct', state: 'IL', city: 'Chicago', country: 'US', linkedinUrl: `https://www.linkedin.com/in/erin-harbor-${stamp}`, firm: { name: 'Harbor Light Advisors', website: 'https://harbor-light-advisors.com' } }],
-    },
+    data: { pushedBy: { email: 'admin@cadence.local', name: 'Admin' }, ...(assignTo ? { assignTo } : {}), contacts: [contact] },
   });
+  const refused = await push();
+  expect(refused.status()).toBe(200);
+  expect((await refused.json()).results[0]).toEqual(expect.objectContaining({ result: 'rejected', reason: 'owner_not_found' }));
+  // The move again, naming Alisa as the owner: it arrives hers.
+  const pushed = await push({ email: 'alisa@cadence.local' });
   expect(pushed.status()).toBe(200);
   const body = await pushed.json();
   expect(body.results[0]).toEqual(expect.objectContaining({ result: 'created' }));
   const contactId: string = body.results[0].cadenceContactId;
-  expect((await db.sandboxContact.findUniqueOrThrow({ where: { id: contactId } })).ownerId).toBeNull();
+  expect((await db.sandboxContact.findUniqueOrThrow({ where: { id: contactId } })).ownerId).not.toBeNull();
 
   // The admin confirms Alisa's Twilio number; the first import starts the forms clock.
   await signIn(page, 'admin@cadence.local', 'admin12345');
@@ -83,12 +87,12 @@ test('the rep\'s path: push and claim, a studio campaign, its step in both task 
   await expect(assigned).toBeVisible();
   await signOut(page);
 
-  // Alisa claims it from its page.
+  // Alisa opens it from its page: it is already hers, so there is nothing to claim.
   await signIn(page, 'alisa@cadence.local', 'password123');
   await page.goto(`/cold-outreach/${contactId}`);
   await expect(page.getByRole('heading', { name: FULL })).toBeVisible();
-  await page.getByRole('button', { name: 'Claim', exact: true }).first().click();
-  await expect.poll(async () => (await db.sandboxContact.findUniqueOrThrow({ where: { id: contactId } })).ownerId).not.toBeNull();
+  const alisa = await db.user.findFirstOrThrow({ where: { email: 'alisa@cadence.local' } });
+  expect((await db.sandboxContact.findUniqueOrThrow({ where: { id: contactId } })).ownerId).toBe(alisa.id);
 
   // 2. A cold campaign in the studio, starting today, with a call on its first day.
   await page.goto('/campaigns/new?audience=cold');
