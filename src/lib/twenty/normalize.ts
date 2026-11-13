@@ -344,7 +344,7 @@ export function canonicalObjectType(name: string, s: TwentySchema): CanonicalObj
 }
 
 /** N02: a Do not contact value set in the CRM that the field mapping does not list (still honoured). */
-export function isUnmappedDndValue(value: string | null | undefined, s: Pick<TwentySchema, 'personValues'>): boolean {
+export function isUnmappedDndValue(value: string | null | undefined, s: { personValues: { dnd: readonly string[]; doNotContactTags: readonly string[] } }): boolean {
   if (!value || value === 'true') return false;
   const known: readonly string[] = [...s.personValues.dnd, ...s.personValues.doNotContactTags];
   return !known.includes(value);
