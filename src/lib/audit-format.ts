@@ -158,6 +158,8 @@ const TITLES: Record<string, string> = {
   api_key_created: 'Read API key created',
   api_key_revoked: 'Read API key revoked',
   suppression_added: 'Added to the suppression list',
+  teams_transcript_fetch: 'Teams transcript asked of Microsoft',
+  recording_looked_up: 'Recording looked up in Microsoft 365',
   suppression_widened: 'Old opt-outs covered on every key',
   suppression_rerun_crm: 'Suppression list checked against the CRM',
   cold_outreach_backfill: 'Cold outreach data brought up to date',
