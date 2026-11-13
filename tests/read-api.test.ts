@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { resetEnvCache } from '@/lib/env';
 import { SYSTEM_ACTOR } from '@/lib/audit';
 import { clientIp, createApiKey, ipAllowed, parseCidr, pruneReadApiLog, revokeApiKey, validateKeyInput, type Scope } from '@/lib/public-api/keys';
-import { handleReadApi, RATE_LIMIT, resetReadApiLimits } from '@/lib/public-api/http';
+import { BAD_KEY_LIMIT, handleReadApi, RATE_LIMIT, resetReadApiLimits } from '@/lib/public-api/http';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 
 /** The read API, /api/v1 (Notes/public-api-2026-11-08/CONTRACT.md). */
@@ -201,6 +201,17 @@ describe('read API', () => {
       expect(Number(over.headers.get('retry-after'))).toBeGreaterThan(0);
       expect(over.headers.get('x-ratelimit-remaining')).toBe('0');
       expect((await call('', { key: other.key })).status).toBe(200);
+    });
+
+    it('answers a caller sending wrong keys 429 before looking any more up (Q19), and a broken escape 404 (Q20)', async () => {
+      process.env.API_TRUSTED_PROXY_HOPS = '1';
+      resetEnvCache();
+      const from = { 'x-forwarded-for': '198.51.100.7' };
+      for (let i = 0; i < BAD_KEY_LIMIT; i++) expect((await call('', { key: `cad_wrong${i}`, headers: from })).status).toBe(401);
+      expect((await call('', { key: 'cad_wrong-again', headers: from })).status).toBe(429);
+      const { key } = await makeKey(['crm']);
+      expect((await call('', { key, headers: { 'x-forwarded-for': '198.51.100.8' } })).status).toBe(200);
+      expect((await call('/people/%E0%A4%A', { key, headers: { 'x-forwarded-for': '198.51.100.8' } })).status).toBe(404);
     });
 
     it('logs each request by path without its query, stamps last used, and prunes after 90 days', async () => {
