@@ -26,10 +26,7 @@ export const storedToken = (token: string) => `${HASHED}${createHash('sha256').u
 /** A cookie value that may name a row stored before Q12 (never one shaped like a stored hash). */
 export const mayBeLegacyToken = (token: string) => !token.startsWith(HASHED);
 
-/**
- * A row found by its pre-Q12 token is re-keyed to the hash at once. One atomic update: when two
- * requests race, the loser matches no row (it is already re-keyed) and reads the row by its hash.
- */
+/** A row found by its pre-Q12 token is re-keyed to the hash at once. */
 export async function rekeySession(id: string, token: string): Promise<void> {
   await prisma.session.updateMany({ where: { id, token }, data: { token: storedToken(token) } });
 }
