@@ -342,14 +342,17 @@ export const reachable = (c: Pick<PushContact, 'email' | 'emailVerification' | '
 // ---------------------------------------------------------------------------
 
 export type Owner = { id: string; email: string; name: string; podId: string } | null;
-export type Ownership = { owner: Owner; podIgnored: boolean; /** Why nobody owns the new contacts (B070), on each created one. */ warning: Warning | null };
+export type Ownership = { owner: Owner; podIgnored: boolean; /** Why nobody can own the new contacts (B070): each one that would be created is refused with it (U01). */ warning: Warning | null };
 
 /**
  * Who owns what this push creates (14.7) by the ownership rules every other path uses (transfer.ts):
  * an active sales rep, never an admin or Biz Ops (B119, B208), in a pod; the pod Bellwether named
  * when the owner works it (compared case-insensitively, by its CRM value or its name, B170), else
- * the owner's only pod, else their first pod by name. Anyone else leaves the contacts unclaimed,
- * and the push says why (owner_not_found, assign_to_not_found; B070).
+ * the owner's only pod, else their first pod by name. The owner is `assignTo`, else `pushedBy`.
+ * Agreed owner contract (audit U01, U02, U03, U05; 13 Nov 2026): when that person cannot own contacts
+ * now (unknown, deactivated, an admin or Biz Ops, in no pod), each contact this push would create is
+ * refused (`rejected`, `owner_not_found`, saying who and why), never created unclaimed. Contacts
+ * already in Cadence or the CRM keep their own owner rules.
  */
 export async function resolveOwner(env: Envelope): Promise<Ownership> {
   const users = await prisma.user.findMany({ include: { pods: { where: { pod: { archived: false } }, include: { pod: true } } } });
@@ -359,7 +362,7 @@ export async function resolveOwner(env: Envelope): Promise<Ownership> {
   const user = byObject ?? users.find((u) => u.active && known(u)) ?? users.find(known);
   const nobody = (why: string): Ownership => ({
     owner: null, podIgnored: Boolean(env.pod),
-    warning: warn(env.assignTo ? 'assign_to_not_found' : 'owner_not_found', env.assignTo ? 'assignTo.email' : 'pushedBy.email', `${why} The contact arrives unclaimed.`),
+    warning: warn(env.assignTo ? 'assign_to_not_found' : 'owner_not_found', env.assignTo ? 'assignTo.email' : 'pushedBy.email', `${why} The contact was not created: send it again with an owner who can own contacts.`),
   });
   if (!user) return nobody(`${target} is not a Cadence user.`);
   const pods = user.pods.map((p) => p.pod);
@@ -737,11 +740,12 @@ async function judgeOne(c: PushContact, warnings: Warning[], ctx: JudgeCtx, tx: 
   const possible = await possibleCrmMatch(c, tx);
   const possibleName = possible ? await tx.personCache.findUnique({ where: { id: possible }, select: { firstName: true, lastName: true } }) : null;
   const twin = await possibleSandboxTwin(c, tx);
+  // U01: nobody who can own contacts was named, so the contact is refused, never created unclaimed.
+  if (!ownership.owner) return refused(tx, { ...base, reason: 'owner_not_found', detail: ownership.warning?.detail ?? 'Nobody who can own contacts was named. The contact was not created.' });
   const extra: Warning[] = [
     ...(reachable(c) ? [] : [warn('no_reach', null, 'No email, phone or LinkedIn profile is left, so the rep cannot reach this person.')]),
     ...(possible ? [{ code: 'possible_crm_match', field: null, crmPersonId: possible, detail: `${`${possibleName?.firstName ?? ''} ${possibleName?.lastName ?? ''}`.trim() || 'A person'}, at a firm with the same domain or CRD.` }] : []),
     ...(twin ? [warn('possible_sandbox_duplicate', null, `Possibly the same person as ${twin.name}, already in Cold outreach at the same firm.`)] : []),
-    ...(ownership.warning ? [ownership.warning] : []),
   ];
   const owner = ownership.owner;
   // A contact retention removed keeps its Bellwether id only until the person is pushed again.
