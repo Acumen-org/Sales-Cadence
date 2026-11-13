@@ -193,6 +193,14 @@ describe('webhook ingestion', () => {
     expect(await pendingTasks('person-11')).toHaveLength(0);
   });
 
+  it('N20: an email is processed with its text but stored without it', async () => {
+    const msg = mock.addMessage({ subject: 'Lunch?', receivedAt: iso('2026-09-12'), from: { handle: 'someone@elsewhere.example' }, to: [{ handle: 'leigh@acumen.example', workspaceMemberId: 'wm-leigh' }] });
+    const r = await ingestEvent({ source: 'WEBHOOK', objectType: 'message', eventName: 'message.created', record: { ...rawFromMessage(msg), text: 'Private words about lunch.' }, now: at('2026-09-12') });
+    const row = await prisma.activityEvent.findUniqueOrThrow({ where: { id: r.eventId! } });
+    expect((row.payload as Record<string, unknown>).text).toBeNull();
+    expect(JSON.stringify(row.payload)).not.toContain('Private words');
+  });
+
   it('N10: an edit of an old opportunity does not end the sequence as a meeting', async () => {
     const opp = { ...(await mock.listOpportunities()).items[0], id: 'opp-old', pointOfContactId: 'person-01', updatedAt: iso('2026-09-08') };
     const r = await ingestEvent({ source: 'WEBHOOK', objectType: 'opportunity', eventName: 'opportunity.updated', record: rawFromOpportunity(opp), now: at('2026-09-08') });

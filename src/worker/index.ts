@@ -4,7 +4,7 @@ import { backfillTeamsTranscripts } from '../lib/meetings/teams-transcript';
 import { MEETINGS_CHANGED_KEY, checkMeetingsInCrm } from '../lib/meetings/crm-check';
 import { backfillSharePointPlayers } from '../lib/meetings/sharepoint-player';
 import { retryFailedWrites, sweepUnwrittenSyncs } from '../lib/engine/sync-retry';
-import { sweepUnprocessedEvents } from '../lib/engine/ingest';
+import { pruneActivityEvents, sweepUnprocessedEvents } from '../lib/engine/ingest';
 import { prisma } from '../lib/db';
 import { env } from '../lib/env';
 import { SYSTEM_ACTOR } from '../lib/audit';
@@ -62,6 +62,8 @@ const nightly=nightlyLoop({hour:config.RECONCILE_HOUR,log,jobs:()=>{
   {name:'sandbox retention',run:()=>runSandboxRetention(now)},
   {name:'bellwether push keys forgotten',run:()=>purgeOldPushes(now)},
   {name:'read api log pruned',run:()=>pruneReadApiLog(now)},
+  // N21: CRM events past the retention (needs-review ones stay until someone looks).
+  {name:'crm events pruned',run:()=>pruneActivityEvents(now)},
  ];
 }});
 /**

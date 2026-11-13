@@ -5,6 +5,7 @@ import { getSettings } from '../settings';
 import { getTwentyClient, type TwentyClient } from '../twenty';
 import { paginate } from '../twenty/client';
 import { ingestEvent, type IngestResult } from './ingest';
+import { replyOwnText } from '../mail/stop-request';
 
 export type ReconcileStats = {
   since: string;
@@ -103,7 +104,8 @@ export async function reconcile(opts: { days?: number; since?: string; sinceBySt
     // (or the reply ends the campaign and the sent email finds no step to close). Read the run's mail,
     // then take it oldest first.
     const mail = [];
-    for await (const message of paginate((after) => c.listMessages({ updatedSince: stageSince('messages'), after, limit: 100 }))) mail.push(message);
+    // N20: only the sender's own words are kept in memory (all a stop request is read from), not every email whole.
+    for await (const message of paginate((after) => c.listMessages({ updatedSince: stageSince('messages'), after, limit: 100 }))) mail.push({ ...message, text: message.text ? replyOwnText(message.text) : message.text });
     mail.sort((a, b) => (a.receivedAt ?? a.updatedAt ?? '').localeCompare(b.receivedAt ?? b.updatedAt ?? ''));
     for (const message of mail) {
       stats.messages += 1;
