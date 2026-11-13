@@ -1374,3 +1374,12 @@ Built on the local branch `outreach-sandbox` from Rahul's brief of 2 November an
 - **Owner's change of 12 Nov 2026.** Cold outreach > Campaigns opens on the reader's pod with no
   name filter: a junior sees every campaign of their pod. Moves to CRM opens on the reader's pod
   too, listing the moves of that pod's contacts.
+- **Twilio numbers from h00ks (13 Nov 2026).** Numbers are assigned in one place, the h00ks dialpad
+  admin. Before each 2-minute call import the worker reads h00ks's partner API (`GET /staff`, a Live
+  key with `staff:read` only, `H00KS_API_TOKEN`) and gives each active Cadence user the number of
+  the h00ks staff member with the same email; resigned, unassigned, removed or unknown people hold
+  none. A changed number counts from then, so earlier calls keep their rep. The dialpad identity is
+  added to the user's aliases. A failed read, a test key or an empty list changes nothing. Settings >
+  Calling then lists the numbers read only, with anyone h00ks numbers but Cadence cannot match by
+  email; assigning by hand is refused, and Remove access no longer asks about the number. Without
+  the key, numbers are assigned in Settings > Calling as before.

@@ -13,6 +13,7 @@ import { getTwentyClient } from '@/lib/twenty';
 import { recentEvents } from '@/lib/engine/ingest';
 import { Badge, Card, KeyValue, Surface, Tabs, ViewHeader, Empty, Count } from '@/components/ui';
 import { UsersPanel } from '@/components/settings/users-panel';
+import { h00ksConfigured, h00ksStatus } from '@/lib/calls/h00ks';
 import { leaverHasWork, leaverWork } from '@/lib/outreach/ownership';
 import { BlockedAccountsPanel } from '@/components/settings/blocked-accounts-panel';
 import { NonProspectRulesForm } from '@/components/settings/non-prospect-rules-form';
@@ -179,6 +180,13 @@ async function UsersTab({ selfId }: { selfId: string }) {
   const { microsoft } = await signInMethods();
   // N089: what each active member holds, for the Remove access dialog.
   const holds = await leaverWork(users.filter((u) => u.active).map((u) => u.id));
+  // With h00ks, a leaver's number is released there, so Remove access does not ask about it.
+  const h00ks = h00ksConfigured();
+  const holdsOf = (id: string) => {
+    const w = holds.get(id);
+    const held = w && h00ks ? { ...w, callerNumber: null } : w;
+    return held && leaverHasWork(held) ? held : null;
+  };
   return (
     <UsersPanel
       selfId={selfId}
@@ -193,8 +201,8 @@ async function UsersTab({ selfId }: { selfId: string }) {
         openWork: u._count.enrollments,
         openPodIds: [...new Set(u.enrollments.flatMap((e) => e.podId ? [e.podId] : []))],
         podIds: u.pods.map((p) => p.podId),
-        work: holds.get(u.id) && leaverHasWork(holds.get(u.id)!) ? holds.get(u.id)! : null,
-        callerNumber: u.callerNumber,
+        work: holdsOf(u.id),
+        callerNumber: h00ks ? null : u.callerNumber,
         coldContacts: holds.get(u.id)?.contacts ?? 0,
       }))}
       pods={pods.map((p) => ({
@@ -538,7 +546,7 @@ async function CallingTab({ timezone }: { timezone: string }) {
         ...(last.lastError ? [{ k: 'Twilio said', v: <span className="text-red-700">{last.lastError}</span> }] : []),
       ]} /></div>
     </Card>
-    <Card title="Numbers and reps">
+    {h00ksConfigured() ? <H00ksNumbers users={users} timezone={timezone} /> : <Card title="Numbers and reps">
       <div className="space-y-2 p-4 text-[13px]">
         {numbersError ? <p className="text-red-700">{numbersError}</p> : null}
         {numbers.map((n) => {
@@ -554,9 +562,28 @@ async function CallingTab({ timezone }: { timezone: string }) {
           return without.length ? <p className="border-t border-line pt-2 text-[12.5px] text-ink-600">Reps without a calling line: {without.map((u) => u.name).join(', ')}.</p> : null;
         })() : null}
       </div>
-    </Card>
+    </Card>}
     <Card title="Connects and conversations"><CallingSettingsForm c={settings.calling} /></Card>
   </div>;
+}
+
+/** Settings > Calling with h00ks (owner, 12 Nov 2026): the numbers as h00ks assigns them, read only. */
+async function H00ksNumbers({ users, timezone }: { users: { id: string; name: string; callerNumber: string | null; role: string }[]; timezone: string }) {
+  const status = await h00ksStatus();
+  const holders = users.filter((u) => u.callerNumber).sort((a, b) => a.name.localeCompare(b.name));
+  const without = users.filter((u) => u.role !== 'ADMIN' && !u.callerNumber);
+  return <Card title="Numbers and reps">
+    <div className="space-y-3 p-4 text-[13px]">
+      <p className="text-ink-600">Numbers are assigned in the h00ks dialpad admin. Cadence copies them every 2 minutes, matching people by email; a change counts from then, so earlier calls keep their rep.</p>
+      <KeyValue items={[
+        { k: 'Last copied', v: status.lastOkAt ? formatInstant(new Date(status.lastOkAt), timezone) : <Empty /> },
+        ...(status.lastError ? [{ k: 'h00ks said', v: <span className="text-red-700">{status.lastError}</span> }] : []),
+      ]} />
+      {holders.length ? <table className="w-full"><tbody className="divide-y divide-line">{holders.map((u) => <tr key={u.id}><td className="py-1.5 pr-4 tabular-nums">{u.callerNumber}</td><td className="py-1.5 text-ink-700">{u.name}</td></tr>)}</tbody></table> : <p className="text-ink-500">Nobody has a number yet.</p>}
+      {status.unmatched.length ? <p className="border-t border-line pt-2 text-[12.5px] text-amber-800">h00ks gives a number to people with no Cadence user under that email: {status.unmatched.map((m) => `${m.name ?? m.email ?? 'someone'} (${m.email ?? 'no email'}, ${m.number})`).join('; ')}. Make the email the same in both to match them.</p> : null}
+      {without.length ? <p className="border-t border-line pt-2 text-[12.5px] text-ink-600">Reps without a calling line: {without.map((u) => u.name).join(', ')}.</p> : null}
+    </div>
+  </Card>;
 }
 
 /** Settings > Cold outreach (PLAN 4.7): admins change it; anyone else reads it (B215). */
