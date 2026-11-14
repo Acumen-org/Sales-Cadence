@@ -31,6 +31,8 @@ COPY . .
 # T24: the app runs as the image's unprivileged `node` user; only Next's runtime cache (.next) and
 # corepack's pnpm need to be writable by it.
 RUN NODE_OPTIONS=--max-old-space-size=1536 pnpm build \
+ # The server code must not need a dev dependency the prune is about to remove (14 Nov: postcss).
+ && node scripts/check-server-requires.mjs \
  && pnpm prune --prod \
  && pnpm store prune \
  && rm -rf /root/.cache /root/.npm .git e2e .screens \

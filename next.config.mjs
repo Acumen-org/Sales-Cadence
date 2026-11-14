@@ -12,7 +12,10 @@ const cpus = Number(process.env.NEXT_BUILD_CPUS ?? 1);
 const nextConfig = {
   reactStrictMode: true,
   distDir: process.env.NEXT_DIST_DIR || '.next',
-  serverExternalPackages: ['@prisma/client', 'bcryptjs'],
+  // sanitize-html is loaded from node_modules at run time, so its own postcss comes with it. Bundled,
+  // it left a bare require('postcss') behind, and postcss is only a dev dependency: the production
+  // image prunes it and every page sharing that chunk crashed (14 Nov, MODULE_NOT_FOUND).
+  serverExternalPackages: ['@prisma/client', 'bcryptjs', 'sanitize-html'],
   outputFileTracingRoot: path.dirname(fileURLToPath(import.meta.url)),
   poweredByHeader: false,
   compress: true,
