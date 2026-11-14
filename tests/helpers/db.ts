@@ -7,12 +7,14 @@ import { invalidateSettingsCache } from '@/lib/settings';
 import { getMockTwentyClient } from '@/lib/twenty/mock-client';
 
 const TABLES = [
+  'ApiRateHit',
   'LinkedInFollowUp',
   'LinkedInLink',
   'LinkedInEvent',
   'LinkedInAccount',
   'ApiRequestLog',
   'ApiKey',
+  'SignInAttempt',
   'Ticket',
   'Notification',
   'SandboxMoveItem',

@@ -6,15 +6,15 @@ import { externalPeopleWhere } from '../internal-organizations';
 import { optionLabel } from '../twenty/labels';
 import { prisma } from '../db';
 import { logAudit, type AuditActor } from '../audit';
-import { diffDays, isLocalDate, localDateToInstant, todayIn, type LocalDate } from '../dates';
+import { addDays, diffDays, isLocalDate, localDateToInstant, todayIn, type LocalDate } from '../dates';
 import { cachedPersonName, ensurePeopleCached } from '../person-cache';
-import { getSettings } from '../settings';
+import { effectiveDailyCap, getSettings } from '../settings';
 import { getTwentyClient, type TwentyClient } from '../twenty';
 import type { TwentyPerson } from '../twenty/types';
 import { findDateWithCapacity, reserve, type DayLoad } from './caps';
 import { nextWorkingDay } from './clock';
 import { workspaceTimezone } from '../workspace';
-import { advanceEnrollment, cancelOpenTasks, isUniqueViolation, syncCancelled, type EngineContext } from './tasks';
+import { advanceEnrollment, cancelOpenTasks, foLoad, isUniqueViolation, syncCancelled, type EngineContext } from './tasks';
 import { loadSyncTasks, syncTaskRescheduled, syncTaskResolved, syncTasksCreated } from './sync-out';
 import { refillDraftsFor } from '../sequences/refill-drafts';
 
@@ -341,7 +341,10 @@ export async function pauseEnrollment(enrollmentId: string, opts: { reason: stri
   const now = opts.now ?? new Date();
   const e = await loadEnrollment(enrollmentId);
   if (e.status !== 'ACTIVE') return e;
-  const updated = await prisma.enrollment.update({ where: { id: enrollmentId }, data: { status: 'PAUSED', pausedAt: now, pauseReason: opts.reason } });
+  // P07: only while still Active. A reply, opt-out or exit recorded since the read above wins.
+  const claimed = await prisma.enrollment.updateMany({ where: { id: enrollmentId, status: 'ACTIVE' }, data: { status: 'PAUSED', pausedAt: now, pauseReason: opts.reason } });
+  const updated = await loadEnrollment(enrollmentId);
+  if (!claimed.count) return updated;
   await logAudit({ entityType: 'enrollment', entityId: enrollmentId, action: 'paused', actor: opts.actor, details: { reason: opts.reason } });
   return updated;
 }
@@ -368,11 +371,31 @@ export async function resumeEnrollment(enrollmentId: string, opts: { actor: Audi
     const movedIds: string[] = [];
     if (!e.scheduleDates.length && settings.rules.clockMode === 'shift') {
       const pending = await tx.task.findMany({ where: { enrollmentId, state: 'PENDING' } });
+      // P17: overdue steps brought back to today respect each rep's daily cap, a whole step to a day,
+      // rather than landing all on today. Each rep's load is locked last, as step generation does.
+      const capDay = new Map<string, LocalDate>();
+      const overdue = pending.filter((t) => t.dueDate < today);
+      const foIds = [...new Set(overdue.map((t) => t.foUserId))].sort();
+      for (const foId of foIds) {
+        await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext(${`fo:${foId}`}))`;
+        const fo = foId === e.foUserId ? e.fo : await tx.user.findUnique({ where: { id: foId } });
+        const load = await foLoad(tx, foId, today);
+        const steps = new Map<number, number>();
+        for (const t of overdue) if (t.foUserId === foId) steps.set(t.stepIndex, (steps.get(t.stepIndex) ?? 0) + 1);
+        for (const [stepIndex, n] of [...steps].sort((a, b) => a[0] - b[0])) {
+          const day = fo ? findDateWithCapacity(today, n, effectiveDailyCap(fo, settings.rules), load, settings.rules.workingDays) : nextWorkingDay(today, settings.rules.workingDays);
+          reserve(load, day, n);
+          capDay.set(`${foId}:${stepIndex}`, day);
+        }
+      }
       for (const t of pending) {
-        const target = nextWorkingDay(t.dueDate < today ? today : t.dueDate, settings.rules.workingDays);
-        if (target !== t.dueDate || t.snoozedTo) {
-          await tx.task.update({ where: { id: t.id }, data: { dueDate: target, dueAt: localDateToInstant(target, workspaceTimezone(), 9), snoozedTo: null } });
-          movedIds.push(t.id);
+        const target = t.dueDate < today ? capDay.get(`${t.foUserId}:${t.stepIndex}`)! : nextWorkingDay(t.dueDate, settings.rules.workingDays);
+        // P05: the pause is added to the clock above, so the held step's planned date moves with it;
+        // otherwise its lateness, measured from the planned date when it is done, counts the pause again.
+        const plannedDate = pausedDays ? addDays(t.plannedDate, pausedDays) : t.plannedDate;
+        if (target !== t.dueDate || t.snoozedTo || plannedDate !== t.plannedDate) {
+          await tx.task.update({ where: { id: t.id }, data: { dueDate: target, dueAt: localDateToInstant(target, workspaceTimezone(), 9), snoozedTo: null, plannedDate } });
+          if (target !== t.dueDate || t.snoozedTo) movedIds.push(t.id);
         }
       }
     }
@@ -433,7 +456,9 @@ export async function markReplied(
     if (settings.rules.companyReplyPausesColleagues && e.companyId) {
       const colleagues = await tx.enrollment.findMany({ where: { companyId: e.companyId, status: 'ACTIVE', id: { not: enrollmentId } } });
       for (const c of colleagues) {
-        await tx.enrollment.update({ where: { id: c.id }, data: { status: 'PAUSED', pausedAt: opts.at, pauseReason: `colleague_replied:${e.personId}` } });
+        // P07: a colleague whose own reply or exit landed meanwhile is left as it ended.
+        const claimed = await tx.enrollment.updateMany({ where: { id: c.id, status: 'ACTIVE' }, data: { status: 'PAUSED', pausedAt: opts.at, pauseReason: `colleague_replied:${e.personId}` } });
+        if (!claimed.count) continue;
         await logAudit({ entityType: 'enrollment', entityId: c.id, action: 'paused', actor: opts.actor, details: { reason: 'colleague_replied', colleagueEnrollmentId: enrollmentId } }, tx);
         pausedColleagues += 1;
       }

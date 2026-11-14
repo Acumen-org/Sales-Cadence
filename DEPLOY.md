@@ -76,10 +76,11 @@ docker compose up -d --build                # deploy an update
 
 - **Health check:** `GET /api/health` returns `{"ok":true,"db":"up","worker":"up"}`; `GET /api/health/worker` fails when the worker is stale.
 - **Backup:** only Postgres holds state. With Compose: `docker compose exec db pg_dump -U cadence cadence | gzip > backup.sql.gz`, nightly. Production: the Nomad job in "Backups" below. Everything else is rebuildable from git.
-- **Restart safety:** both processes are stateless; the worker's jobs are idempotent, so a restart mid-job is harmless.
+- **Restart safety:** both processes are stateless and the worker's jobs are idempotent. On a stop the worker finishes its current pass first (up to the stop time Nomad allows, see "Stop time" below). If it is killed mid-pass, a CRM move or write it had claimed waits about 10 minutes for the claim to expire and is then tried again, so a write Twenty had taken but Cadence had not yet recorded can appear twice.
 - **Secrets:** `.env` only. `TWENTY_API_KEY` grants full CRM access, so keep the file `chmod 600`. Sessions are database tokens; there is no signing secret.
-- **Lost admin password:** `docker compose exec web pnpm admin:password -- <email> <new password>` sets a new one and signs that account out everywhere.
-- **Scaling:** one web container handles this workload comfortably. If it ever needs more, run several `web` containers behind the proxy; the worker must stay a **single** instance (it is the scheduler).
+- **Lost admin password:** `docker compose exec web pnpm admin:password -- <email>`, then type the new password and press Enter (read from input, so it stays out of the shell history and the process list). It signs that account out everywhere.
+- **Scaling:** one web container handles this workload comfortably. If it ever needs more, run several `web` containers behind the proxy; the worker must stay a **single** instance (it is the scheduler). It holds a lease in the database while it runs (Setting `workerLease`), so a second copy waits, logging `another worker holds the lease`, until the first stops; a crashed worker's lease runs out after two minutes.
+- **Never** `pnpm db:push` or `pnpm db:reset` against a real database: push drops the hand-written unique indexes the migrations make, reset empties everything. Both refuse to run where `NODE_ENV=production`.
 
 ## Production on Nomad: emergency steps
 
@@ -151,6 +152,41 @@ deploy until the migration is resolved.
    - all of it applied (the process died after the SQL finished):
      `pnpm exec prisma migrate resolve --applied <name>`.
 4. Redeploy: re-run the CI deploy, or `nomad job run -var="image_tag=<tag>" nomad/cadence.hcl`.
+
+### Writing a migration
+
+A roll-back (`auto_revert`, `nomad job revert`) swaps the image, never the schema, so the previous
+release must run on the new tables. Every migration is therefore additive, and
+`tests/migration-rules.test.ts` fails CI otherwise:
+
+- No dropped or renamed table or column, no changed column type, no `SET NOT NULL` on an existing
+  column, no new `NOT NULL` column without a default. Remove something in a later release, once no
+  running image reads it, and mark that file with a line `-- contract: <why it is safe now>`.
+- `IF NOT EXISTS` wherever Postgres allows it, so a migration cut off part-way can run again.
+- A unique index only after removing duplicates in the same migration, under a lock.
+- On a big table, an index goes in a migration of its own holding the single statement
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS ...` (Prisma cannot run `CONCURRENTLY` beside other
+  statements). Rewriting every row of a big table makes the release's downtime grow with the data.
+- Name new folders after the newest one on `main`, so they sort last.
+
+### Stop time, pool, worker lease
+
+- The worker gets `kill_timeout = "5m"` to finish its pass after the stop signal, but the Nomad
+  client caps it at its own `max_kill_timeout` (30 s by default). To let it finish a long pass, set
+  `max_kill_timeout = "5m"` in the `client` block of worker-5's Nomad config and restart the client.
+- Each task's pool size comes from `DATABASE_CONNECTION_LIMIT` / `DATABASE_POOL_TIMEOUT` in the job
+  template, added to `DATABASE_URL` by the app with `?` or `&` as needed, so the stored address may
+  carry its own parameters (`?sslmode=require`). An image older than this change ignores them and uses
+  Prisma's default pool.
+- A worker that cannot get the lease (another worker is running against the same database) waits and
+  logs `another worker holds the lease`; its heartbeat then goes stale and Nomad restarts it.
+
+### CI pins and notifications
+
+- Deploy outcomes are posted to the incoming webhook in the GitHub secret `DEPLOY_NOTIFY_WEBHOOK`
+  (Teams or Mattermost). Until it is set the `notify` job only writes a warning in the run.
+- `hashicorp/setup-nomad@main` and `version: latest` in `.github/workflows/ci.yml` should be pinned:
+  the action to a full commit SHA, the version to the cluster's (`nomad version` on a server).
 
 ### Backups
 
@@ -225,18 +261,21 @@ Restart the Nomad client after changing it. CI's push to Harbor uses the GitHub 
 
 ### Admin locked out
 
-- Lost password: `nomad alloc exec -task web "$ALLOC" pnpm admin:password -- <email> '<new password>'`.
-  It signs that account out everywhere.
+- Lost password: `nomad alloc exec -i -t -task web "$ALLOC" pnpm admin:password -- <email>`, then type the
+  new password and press Enter. It signs that account out everywhere.
 - No admin account left (removed, or nobody knows which): set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in
   `nomad/jobs/cadence` to a new address and a strong password. The web restarts and the seed creates
-  that account as an admin (it only ever creates an account that does not exist).
+  that account as an admin (it only ever creates an account that does not exist). Once that admin can sign
+  in, delete the `ADMIN_PASSWORD` item again: with it unset and an active admin present the seed creates
+  nothing, so no first password sits in the variable for good. A seed that fails is logged and the web
+  starts anyway.
 - Microsoft sign-in broken (an expired secret, usually): set `PASSWORD_SIGN_IN=true` in
   `nomad/jobs/cadence`, sign in with a password, fix Settings > Sign-in, then remove the item.
 
 ## Gotchas
 
 - Sign-in is Microsoft once an admin saves the app registration under Settings > Sign-in (or the server sets `MICROSOFT_CLIENT_ID`, `MICROSOFT_TENANT_ID`, `MICROSOFT_CLIENT_SECRET`). The registration needs `<APP_URL>/api/auth/microsoft/callback` as a Web redirect URI. Passwords keep working until the first Microsoft sign-in succeeds, then stop. If Microsoft sign-in ever breaks (an expired client secret is the usual cause), set `PASSWORD_SIGN_IN=true` to let the old passwords in while it is fixed.
-- The webhook endpoint is public. Set `TWENTY_WEBHOOK_SECRET` (HMAC) or at least `CADENCE_WEBHOOK_TOKEN`, otherwise anything can POST to it.
+- The webhook endpoint is public. Set `TWENTY_WEBHOOK_SECRET` (HMAC) or at least `CADENCE_WEBHOOK_TOKEN`. With neither, a production server refuses every POST unless `CADENCE_WEBHOOK_OPEN=1` (exactly `1`); outside production anything can POST to it.
 - `SEED_PROFILE=core` in production. Leaving `demo` in creates sixteen "Dummy" people.
 - Node 22 in the image (sanitize-html needs 22.12 or later); the host's Node version is irrelevant since everything runs in Docker.
 - A Teams recording's SharePoint sharing link plays in Cadence once the app registration saved under Settings > Sign-in holds the Microsoft Graph **application** permission `Files.Read.All`, with admin consent. Cadence then asks Graph which file the link points to and plays it through SharePoint's own player, the link Share > Embed gives; meetings saved earlier get theirs within the hour. Settings > Sign-in > SharePoint recordings says whether it works and, when it does not, Microsoft's reason. Without the permission a sharing link opens in SharePoint, as before.

@@ -89,7 +89,8 @@ export async function listCampaigns(user: SessionUser, filters: CampaignListFilt
   // The Campaigns section lists CRM campaigns; Sandbox > Campaigns asks for its own.
   const where: Prisma.CampaignWhereInput = { AND: [campaignScope(user), { audience: filters.audience ?? 'CRM' }] };
   const and = where.AND as Prisma.CampaignWhereInput[];
-  if (filters.q?.trim()) and.push({ OR: filters.q.trim().split(/\s+/).slice(0, 6).map((term) => ({ name: { contains: term, mode: 'insensitive' as const } })) });
+  // R13: every word must match, as on People and Accounts.
+  if (filters.q?.trim()) and.push({ AND: filters.q.trim().split(/\s+/).slice(0, 6).map((term) => ({ name: { contains: term, mode: 'insensitive' as const } })) });
   if (filters.podId) and.push({ podId: filters.podId });
   if (filters.sequenceId) and.push({ sequenceId: filters.sequenceId });
   if (filters.statuses?.length) and.push({ status: { in: filters.statuses } });
@@ -102,10 +103,13 @@ export async function listCampaigns(user: SessionUser, filters: CampaignListFilt
   if (filters.to) and.push({ startDate: { lte: filters.to } });
   const campaigns = (await prisma.campaign.findMany({ where, include: { sequence: { select: { name: true, steps: true } }, pod: { select: { name: true } } }, orderBy: [{ status: 'asc' }, { startDate: 'desc' }, { createdAt: 'desc' }] }))
     .filter((c) => !foPeople || !['DRAFT', 'PENDING_APPROVAL', 'SCHEDULED'].includes(c.status) || (c.plannerDraft ? (c.plannerDraft as CampaignDraft).fos.some(f => f.id === filters.foUserId) : c.personIds.some((id) => foPeople.has(id))));
-  const [groups, touches] = await Promise.all([
+  const [groups, touches, repliedGroups] = await Promise.all([
     prisma.enrollment.groupBy({ by: ['campaignId', 'campaignRun', 'status'], where: { campaignId: { in: campaigns.map((c) => c.id) } }, _count: { _all: true } }),
     touchesByCampaign(campaigns.map((c) => c.id)),
+    // R12: Replied is everyone who replied, as the campaign page counts it, including those who went on to a meeting.
+    prisma.enrollment.groupBy({ by: ['campaignId', 'campaignRun'], where: { campaignId: { in: campaigns.map((c) => c.id) }, repliedAt: { not: null } }, _count: { _all: true } }),
   ]);
+  const repliedOf = (c: { id: string; runNumber: number }) => repliedGroups.find((g) => g.campaignId === c.id && g.campaignRun === c.runNumber)?._count._all ?? 0;
   return campaigns.map((c) => ({
     calendarPlan: Boolean(c.plannerDraft),
     id: c.id,
@@ -136,7 +140,7 @@ export async function listCampaigns(user: SessionUser, filters: CampaignListFilt
       }
       return { done: t.done, open: t.open, planned };
     })(),
-    ...summarise(groups.filter((g) => g.campaignId === c.id && g.campaignRun === c.runNumber)),
+    ...(() => { const s = summarise(groups.filter((g) => g.campaignId === c.id && g.campaignRun === c.runNumber)); return { ...s, counts: { ...s.counts, replied: repliedOf(c) } }; })(),
   }));
 }
 

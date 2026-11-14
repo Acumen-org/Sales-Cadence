@@ -39,6 +39,11 @@ export type TaskListRow = {
   chips?: Cue[];
 };
 
+/** The ticked ids that are still open rows of the list (R01). */
+export function liveSelection(ticked: ReadonlySet<string>, pendingRows: ReadonlyArray<{ id: string }>): Set<string> {
+  return new Set(pendingRows.filter((r) => ticked.has(r.id)).map((r) => r.id));
+}
+
 type Props = {
   rows: TaskListRow[];
   selectedId: string | null;
@@ -59,7 +64,7 @@ type Props = {
 export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispositions, skipReasons, fos, nextWorkingDay, canPickSnoozeDate, bulkEnabled, canReassign = true }: Props) {
   const router = useRouter();
   const hrefFor = (id: string) => hrefTemplate.replace('__ID__', encodeURIComponent(id));
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [ticked, setSelected] = useState<Set<string>>(new Set());
   const [op, setOp] = useState<'complete' | 'skip' | 'snooze' | 'reassign'>('complete');
   const [reasonKey, setReasonKey] = useState(skipReasons[0]?.key ?? 'other');
   const [disposition, setDisposition] = useState(dispositions[0]?.key ?? '');
@@ -69,11 +74,14 @@ export function TaskList({ rows, selectedId, today, showFo, hrefTemplate, dispos
   const [result, setResult] = useState<ActionResult | null>(null);
 
   const pendingRows = rows.filter((r) => r.state === 'PENDING');
+  // R01: only ticked rows still listed and still open count, so the bar, the boxes and Apply always agree
+  // after a filter change, Load more or a refresh that removed some of them.
+  const selected = liveSelection(ticked, pendingRows);
   const allSelected = pendingRows.length > 0 && pendingRows.slice(0, 200).every((r) => selected.has(r.id));
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(pendingRows.slice(0, 200).map((r) => r.id)));
   const toggleOne = (id: string) =>
     setSelected((s) => {
-      const n = new Set(s);
+      const n = liveSelection(s, pendingRows);
       if (n.has(id)) n.delete(id);
       else if (n.size < 200) n.add(id);
       return n;

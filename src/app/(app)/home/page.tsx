@@ -50,7 +50,8 @@ async function HomeContent() {
   const user = await requireUser();
   const h = await buildHome(user);
   const first = user.name.split(/\s+/)[0];
-  const mine = `fo=${encodeURIComponent(user.id)}`;
+  // R05: Home counts the reader's work in every pod, so its links open Tasks on every pod too.
+  const mine = `pod=&fo=${encodeURIComponent(user.id)}`;
   // B094: the tab the panel shows; the user's own most urgent tab when it lists their work.
   const focusTab = h.my.focusTab;
   const completed = h.my.completedToday;
