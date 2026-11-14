@@ -35,7 +35,7 @@ In Twenty: **Settings > Developers > Webhooks > Create webhook**.
 
   If your Twenty only offers "all objects", that is fine: Cadence ignores objects it does not track.
 
-With neither a secret nor a token configured, a production server (`NODE_ENV=production`) refuses every POST with 401 unless `CADENCE_WEBHOOK_OPEN=1` (exactly `1`) says unsigned events are intended; only do that on a private network. Outside production an unprotected endpoint accepts any POST.
+With neither a secret nor a token configured the endpoint accepts any POST. Only do that on a private network.
 
 Cadence stores every event once (object + id + updatedAt), so Twenty retries and duplicate deliveries are harmless. Settings > Activity log shows what arrived and what it did.
 

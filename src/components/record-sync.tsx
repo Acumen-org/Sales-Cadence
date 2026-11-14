@@ -12,7 +12,7 @@ export function RecordSync({ kind, id }: { kind: 'person' | 'company'; id: strin
   const router = useRouter();
   useEffect(() => {
     let live = true;
-    fetch(`/api/record-sync?kind=${kind}&id=${encodeURIComponent(id)}`, { method: 'POST', cache: 'no-store' })
+    fetch(`/api/record-sync?kind=${kind}&id=${encodeURIComponent(id)}`, { cache: 'no-store' })
       .then((res) => (res.ok ? (res.json() as Promise<{ changed?: boolean }>) : null))
       .then((r) => { if (live && r?.changed) router.refresh(); })
       .catch(() => { /* the next visit asks again */ });

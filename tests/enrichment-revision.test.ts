@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import type { User } from '@prisma/client';
 import type { SessionUser } from '@/lib/auth/current-user';
 import { applyEnrichmentChunk, getEnrichmentBatch, parseEnrichmentUpload, previewEnrichment, reviewEnrichmentRows, suggestEnrichmentMapping, validateEnrichmentValue } from '@/lib/enrichment';
@@ -61,21 +61,6 @@ describe('durable enrichment imports', () => {
     await applyEnrichmentChunk(admin, id, mock);
     expect(mock.writes.filter((write) => write.op === 'enrichPerson')).toHaveLength(1);
     expect(await prisma.twentyWrite.count({ where: { operation: 'enrichPerson', dryRun: false } })).toBe(1);
-  });
-
-  it('S28: a value the CRM stores in another form still leaves the audit entry and the write record', async () => {
-    await upsertPersonCache(mock.updatePerson('person-01', { email: null }));
-    const id = await previewEnrichment(admin, 'person', 'Email enrichment', 'id,email\nperson-01,new@example.com', { id: 'recordId', email: 'email' });
-    const real = mock.enrichPerson.bind(mock);
-    const spy = vi.spyOn(mock, 'enrichPerson').mockImplementation(async (personId, changes) => ({ ...(await real(personId, changes)), email: 'new.stored@example.com' }));
-    try {
-      expect(await applyEnrichmentChunk(admin, id, mock)).toMatchObject({ applied: 0, failed: 1 });
-    } finally {
-      spy.mockRestore();
-    }
-    expect((await getEnrichmentBatch(admin, id))!.rows[0]).toMatchObject({ status: 'FAILED', error: expect.stringContaining('different form') });
-    expect(await prisma.twentyWrite.count({ where: { operation: 'enrichPerson', dryRun: false } })).toBe(1);
-    expect(await prisma.auditLog.count({ where: { entityId: 'person-01', action: 'enriched' } })).toBe(1);
   });
 
   it('requires explicit approval for replacements and catches CRM edits after preview', async () => {

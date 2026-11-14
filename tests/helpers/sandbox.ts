@@ -7,11 +7,11 @@ import { handleCheck, handleOwners, handlePing, handlePush, handleStatus } from 
 
 export const KEY = 'test-bellwether-key-0123456789abcdef0123456789';
 
-export function enableBellwether(previous?: string): Promise<void> {
+export function enableBellwether(previous?: string) {
   process.env.BELLWETHER_API_KEY = KEY;
   if (previous) process.env.BELLWETHER_API_KEY_PREVIOUS = previous; else delete process.env.BELLWETHER_API_KEY_PREVIOUS;
   resetEnvCache();
-  return resetRateLimits();
+  resetRateLimits();
 }
 
 export function disableBellwether() {
@@ -76,7 +76,7 @@ export async function owners(init: Init = {}) {
 }
 export async function ping(init: Init = {}) {
   const res = await handlePing(request('/ping', null, init, 'GET'));
-  return { status: res.status, headers: res.headers, body: (await res.json()) as Body };
+  return { status: res.status, body: (await res.json()) as Body };
 }
 
 /** A sandbox contact that passes every CRM-ready rule, owned by `ownerId` in `podId`. */

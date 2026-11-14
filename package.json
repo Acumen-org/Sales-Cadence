@@ -18,7 +18,7 @@
     "test:e2e": "pnpm build && node -e \"require('fs').rmSync('.pgdata-e2e',{recursive:true,force:true})\" && playwright test",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
-    "db:push": "node -e \"if(process.env.NODE_ENV==='production'){console.error('db:push is refused in production: it drops what the migrations made. Use prisma migrate deploy.');process.exit(2)}\" && prisma db push",
+    "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "db:reset": "tsx scripts/reset-data.ts",
     "admin:password": "tsx scripts/reset-admin-password.ts",

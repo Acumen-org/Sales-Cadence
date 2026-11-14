@@ -11,7 +11,7 @@ import { AddFoPanel } from '@/components/campaigns/add-fo-panel';
 import type { CampaignDraft } from '@/lib/campaign-planner';
 import { prisma } from '@/lib/db';
 import { barColour } from '@/lib/bar-colour';
-import { addDays, diffDays, formatLocalDate, startOfLocalDay, todayIn } from '@/lib/dates';
+import { addDays, diffDays, formatLocalDate, todayIn } from '@/lib/dates';
 import { workspaceTimezone } from '@/lib/workspace';
 import { cachedPersonName } from '@/lib/person-cache';
 import { planCampaignCapacity } from '@/lib/engine/capacity';
@@ -88,8 +88,8 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
     proposed ? prisma.personCache.findMany({ where: { id: { in: campaign.personIds } }, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }], select: { id: true, firstName: true, lastName: true, companyName: true, email: true } }) : Promise.resolve([]),
     // The same preview the launch will run, so an approver sees who would be left out and why.
     proposed ? previewEnrollment({ personIds: campaign.personIds, sequenceId: campaign.sequenceId, podId: campaign.podId, campaignId: id, startDate: campaign.startDate, assignment: { mode: 'OWNER' }, dailyRampByFo: capacity ? Object.fromEntries(capacity.perFo.map((f) => [f.id, f.rate])) : null, lastStartDate: capacity?.lastStart ?? null, actor: userActor(user) }).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })) : Promise.resolve(null),
-    // Replies that happened inside the window, for the people in the campaign; R16: days are the workspace's, not UTC's.
-    enrollments.length ? prisma.touch.count({ where: { direction: 'INBOUND', personId: { in: enrollments.map((e) => e.personId!) }, occurredAt: { gte: startOfLocalDay(campaign.startDate, workspaceTimezone()), ...(campaign.endDate ? { lt: startOfLocalDay(addDays(campaign.endDate, 1), workspaceTimezone()) } : {}) } } }) : Promise.resolve(0),
+    // Replies that happened inside the window, for the people in the campaign.
+    enrollments.length ? prisma.touch.count({ where: { direction: 'INBOUND', personId: { in: enrollments.map((e) => e.personId!) }, occurredAt: { gte: new Date(`${campaign.startDate}T00:00:00Z`), ...(campaign.endDate ? { lte: new Date(`${addDays(campaign.endDate, 1)}T00:00:00Z`) } : {}) } } }) : Promise.resolve(0),
   ]);
   const previewError = preview && 'error' in preview ? preview.error : campaign.sequence.archived ? 'The sequence is archived; restore it or pick another before launch.' : null;
   const ready = preview && !('error' in preview) ? preview : null;
@@ -103,9 +103,7 @@ export default async function CampaignDetailPage({ params, searchParams }: { par
   const historyFiltered = history.filter((e) => !q || `${cachedPersonName(e.person!)} ${e.person!.companyName ?? ''}`.toLowerCase().includes(q));
   const historyPages = Math.max(1, Math.ceil(historyFiltered.length / AUDIENCE_PAGE));
   const historyPage = historyFiltered.slice((page - 1) * AUDIENCE_PAGE, page * AUDIENCE_PAGE);
-  // R15: the page links carry the search as it was typed, not lower-cased.
-  const typed = (sp.q ?? '').trim();
-  const pageHref = (n: number) => `/campaigns/${id}?${new URLSearchParams({ ...(typed ? { q: typed } : {}), page: String(n) }).toString()}`;
+  const pageHref = (n: number) => `/campaigns/${id}?${new URLSearchParams({ ...(q ? { q } : {}), page: String(n) }).toString()}`;
 
   // The bar: start, last start, today, end.
   const total = campaign.endDate ? diffDays(campaign.startDate, campaign.endDate) + 1 : null;

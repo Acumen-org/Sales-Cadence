@@ -1,7 +1,6 @@
 import { prisma } from './db';
 import type { SessionUser } from './auth/current-user';
 import { isAdmin } from './auth/rbac';
-import { logAudit, userActor } from './audit';
 
 /**
  * Most-important people. Twenty says who they are (the `MIP` tag); the pod says how much each one
@@ -33,10 +32,7 @@ export async function setMipStars(user: SessionUser, personId: string, stars: nu
   if (!person || person.deletedAt) throw new Error('This person is not in the directory.');
   if (!isMip(person.tags)) throw new Error('Only someone tagged MIP in the CRM can be starred.');
   if (!canRate(await ratablePodOwners(user), person.podOwner)) throw new Error("Only that pod, or an admin, can star this person.");
-  const before = (await prisma.mipStars.findUnique({ where: { personId }, select: { stars: true } }))?.stars ?? 0;
-  if (stars === 0) await prisma.mipStars.deleteMany({ where: { personId } });
-  else await prisma.mipStars.upsert({ where: { personId }, create: { personId, stars, updatedById: user.id }, update: { stars, updatedById: user.id } });
-  // S31: who changed the stars, from what to what, a clear included.
-  if (before !== stars) await logAudit({ entityType: 'person', entityId: personId, action: 'mip_stars_set', actor: userActor(user), details: { from: before, to: stars } });
+  if (stars === 0) { await prisma.mipStars.deleteMany({ where: { personId } }); return { stars: 0 }; }
+  await prisma.mipStars.upsert({ where: { personId }, create: { personId, stars, updatedById: user.id }, update: { stars, updatedById: user.id } });
   return { stars };
 }

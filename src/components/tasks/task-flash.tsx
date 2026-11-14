@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { IconAlert, IconCheck, IconClose } from '@/components/icons';
-import { dropFlashFromAddress } from '@/components/flash';
 
 /** How a flash reads: done, done with some left out, or refused (`?flashTone=warn|error`). */
 export type FlashTone = 'ok' | 'warn' | 'error';
@@ -36,7 +35,7 @@ export function TaskFlash({ message, tone = 'ok' }: { message: string; tone?: Fl
   useEffect(() => {
     setVisible(true);
     if (tone !== 'ok') return;
-    const t = setTimeout(() => { setVisible(false); dropFlashFromAddress(); }, 4500);
+    const t = setTimeout(() => setVisible(false), 4500);
     return () => clearTimeout(t);
   }, [message, tone]);
 

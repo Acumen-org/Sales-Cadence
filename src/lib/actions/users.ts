@@ -63,7 +63,7 @@ export async function createUserAction(formData: FormData): Promise<ActionResult
   const d = parsed.data;
   // With Microsoft sign-in the new member signs in with their work account: no password to set.
   const password = !d.password && (await signInMethods()).microsoft ? null : d.password ?? '';
-  const weak = password === null ? null : validatePasswordStrength(password, { admin: d.role === 'ADMIN' });
+  const weak = password === null ? null : validatePasswordStrength(password);
   if (weak) return { ok: false, error: weak };
   if (needsPod(d.role) && !d.podIds.length) return { ok: false, error: 'This role works in a pod: choose at least one.' };
   const existing = await prisma.user.findUnique({ where: { email: d.email } });
@@ -75,7 +75,7 @@ export async function createUserAction(formData: FormData): Promise<ActionResult
     // sets everything an enabled account needs rather than sending the admin to Restore and Edit.
     await prisma.user.update({
       where: { id: existing.id },
-      data: { name: d.name, role: d.role, roleAssigned: true, passwordHash, active: true, accessRemovedAt: null, timezone: workspaceTimezone(), dailyCap: null, twentyMemberId: existing.twentyMemberId ?? await resolveMember(d.email), pods: { deleteMany: {}, create: d.podIds.map((podId) => ({ podId })) } },
+      data: { name: d.name, role: d.role, roleAssigned: true, passwordHash, active: true, timezone: workspaceTimezone(), dailyCap: null, twentyMemberId: existing.twentyMemberId ?? await resolveMember(d.email), pods: { deleteMany: {}, create: d.podIds.map((podId) => ({ podId })) } },
     });
     await logAudit({ entityType: 'user', entityId: existing.id, action: 'enabled', actor: userActor(admin), details: { role: d.role, pods: d.podIds } });
     refresh();
@@ -107,7 +107,7 @@ export async function updateUserAction(formData: FormData): Promise<ActionResult
   if (linked && linked.id !== userId) return { ok: false, error: 'That CRM email is already linked to another team member.' };
   let passwordHash: string | undefined;
   if (d.password) {
-    const weak = validatePasswordStrength(d.password, { admin: d.role === 'ADMIN' }); if (weak) return { ok: false, error: weak };
+    const weak = validatePasswordStrength(d.password); if (weak) return { ok: false, error: weak };
     passwordHash = await hashPassword(d.password);
   }
   const result = await prisma.$transaction(async (tx): Promise<ActionResult> => {
@@ -176,8 +176,7 @@ export async function setUserAccessAction(formData: FormData): Promise<ActionRes
       }
       const left = await tx.enrollment.findMany({ where: { foUserId: userId, status: { in: ['ACTIVE', 'PAUSED'] } }, select: { id: true } });
       const enrollmentIds = left.map((enrollment) => enrollment.id);
-      // P09: only the leaver's own steps; one they delegated to a colleague stays with that colleague.
-      pending.push(...await tx.task.findMany({ where: { enrollmentId: { in: enrollmentIds }, state: 'PENDING', foUserId: userId }, include: syncTaskInclude }));
+      pending.push(...await tx.task.findMany({ where: { enrollmentId: { in: enrollmentIds }, state: 'PENDING' }, include: syncTaskInclude }));
       await tx.enrollment.updateMany({ where: { id: { in: enrollmentIds }, foUserId: userId, status: { in: ['ACTIVE', 'PAUSED'] } }, data: { foUserId: replacementId } });
       for (const task of pending) await tx.task.updateMany({ where: { id: task.id, state: 'PENDING' }, data: { foUserId: replacementId, dueAt: localDateToInstant(task.snoozedTo ?? task.dueDate, workspaceTimezone(), 9), twentyTaskId: null } });
       for (const enrollment of left) await logAudit({ entityType: 'enrollment', entityId: enrollment.id, action: 'reassigned', actor: userActor(admin), details: { from: userId, to: replacementId, reason: 'team_access_removed' } }, tx);
@@ -186,16 +185,7 @@ export async function setUserAccessAction(formData: FormData): Promise<ActionRes
       await tx.user.update({ where: { id: userId }, data: { callerNumber: null } });
       await logAudit({ entityType: 'user', entityId: userId, action: 'caller_number_released', actor: userActor(admin), details: { number: existing.callerNumber, to: null } }, tx);
     }
-    if (!restore) {
-      // P09: steps colleagues delegated to the leaver go back to the FO of their own enrollment.
-      const delegatedIn = await tx.task.findMany({ where: { foUserId: userId, state: 'PENDING', enrollment: { foUserId: { not: userId } } }, include: syncTaskInclude });
-      for (const task of delegatedIn) {
-        await tx.task.updateMany({ where: { id: task.id, state: 'PENDING', foUserId: userId }, data: { foUserId: task.enrollment.foUserId, dueAt: localDateToInstant(task.snoozedTo ?? task.dueDate, workspaceTimezone(), 9), twentyTaskId: null } });
-        await logAudit({ entityType: 'task', entityId: task.id, action: 'delegated', actor: userActor(admin), details: { from: userId, to: task.enrollment.foUserId, reason: 'team_access_removed' } }, tx);
-      }
-      pending.push(...delegatedIn);
-    }
-    await tx.user.update({ where: { id: userId }, data: { active: restore, accessRemovedAt: restore ? null : new Date(), timezone: workspaceTimezone() } });
+    await tx.user.update({ where: { id: userId }, data: { active: restore, timezone: workspaceTimezone() } });
     if (!restore) await tx.session.deleteMany({ where: { userId } });
     await logAudit({ entityType: 'user', entityId: userId, action: restore ? 'restored' : 'removed', actor: userActor(admin), details: { replacementId: replacementId || null, transferredEnrollments: restore ? 0 : open.length, ...(handed ? { coldContacts: handed.contacts, leftForLeaders: handed.leftForLeaders, nextSteps: handed.coldNextSteps + handed.crmNextActionIds.length, forms: handed.forms, number: handed.number } : {}) } }, tx);
     return { error: null, tasks: pending, handed, to: replacement?.name ?? null };

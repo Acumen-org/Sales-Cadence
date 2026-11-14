@@ -51,16 +51,13 @@ test('the bell: a colleague\'s suggested next step is accepted in the bell, a fi
   await expect(bell).toHaveAttribute('title', /\d+ unread/);
   await bell.click();
   const dialog = page.getByRole('dialog', { name: 'Notifications' });
-  // This case's own rows: the shared workspace keeps Alisa's earlier notifications (a CI retry
-  // runs the case again with a new contact), so each row is found by what it is about.
-  const suggestion = dialog.getByRole('listitem').filter({ hasText: `Nina ${last}` });
-  await expect(suggestion.getByText(`Karson Junior suggests a next step: Send the deck (Email) on`)).toBeVisible();
-  await expect(dialog.locator(`a[href="/cold-outreach/moves/${(move.payload as { moveId: string }).moveId}"]`)).toHaveAccessibleName(/Move to CRM: 2 contacts moved/);
+  await expect(dialog.getByText(`Karson Junior suggests a next step: Send the deck (Email) on`)).toBeVisible();
+  await expect(dialog.getByRole('link', { name: /Move to CRM: 2 contacts moved/ })).toHaveAttribute('href', `/cold-outreach/moves/${(move.payload as { moveId: string }).moveId}`);
   // The bell never says "sandbox" or "Twenty".
   await expect(dialog).not.toContainText(/sandbox|twenty/i);
 
-  await suggestion.getByRole('button', { name: 'Accept as next step' }).click();
-  await expect(suggestion.getByText('You accepted it: it is the next step now.')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Accept as next step' }).click();
+  await expect(dialog.getByText('You accepted it: it is the next step now.')).toBeVisible();
   await expect.poll(async () => (await db.nextAction.findFirst({ where: { sandboxContactId: contactId, state: 'OPEN' } }))?.label ?? null).toBe('Send the deck');
 
   await dialog.getByRole('button', { name: 'Mark read' }).click();

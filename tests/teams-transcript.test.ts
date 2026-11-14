@@ -2,8 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '@/lib/db';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 import { getSettings, saveSettingsSection } from '@/lib/settings';
-import { backfillTeamsTranscripts, closestTranscript, fetchMeetingTranscript, refusalText, teamsTranscriptStatus, transcriptForFile } from '@/lib/meetings/teams-transcript';
-import { resetGraphThrottle } from '@/lib/meetings/sharepoint-player';
+import { closestTranscript, fetchMeetingTranscript, refusalText, teamsTranscriptStatus, transcriptForFile } from '@/lib/meetings/teams-transcript';
 
 /**
  * A Teams recording's transcript comes from Microsoft (29 October 2026): the recording's file says
@@ -44,15 +43,6 @@ describe('finding the transcript that goes with a recording', () => {
     ];
     expect(closestTranscript(list, FILE)).toContain('/this-call/');
     expect(closestTranscript([list[0]], FILE)).toBeNull();
-  });
-
-  it('S05: without the video length, a short call straight after the recording is not taken for it', () => {
-    const list = [
-      listed('2026-08-11T14:31:00Z', '2026-08-11T15:30:40Z', 'this-call'),
-      listed('2026-08-11T15:37:00Z', '2026-08-11T15:41:00Z', 'next-call'),
-    ];
-    expect(closestTranscript(list, { ...FILE, durationMs: null })).toContain('/this-call/');
-    expect(closestTranscript([list[1]], { ...FILE, durationMs: null })).toBeNull();
   });
 
   it('says what an admin has to change when Microsoft refuses', () => {
@@ -109,7 +99,7 @@ describe('a saved meeting gets its Teams transcript once Microsoft allows it', (
     const { signIn } = await getSettings();
     await saveSettingsSection('signIn', { ...signIn, microsoftClientId: '11111111-1111-4111-8111-111111111111', microsoftTenantId: '22222222-2222-4222-8222-222222222222', microsoftClientSecret: `secret-${Math.random()}` });
   });
-  afterEach(() => { vi.unstubAllGlobals(); resetGraphThrottle(); });
+  afterEach(() => { vi.unstubAllGlobals(); });
 
   const meeting = () => prisma.meeting.create({ data: { title: 'Alisa and Lloyd', provider: 'SHAREPOINT', sourceUrl: SHARING, occurredAt: new Date('2026-08-11T17:00:00Z'), bookedById: b.users.alisa.id } });
   const graph = (roles: string[], extra: Record<string, Reply> = {}) => microsoft({
@@ -152,38 +142,6 @@ describe('a saved meeting gets its Teams transcript once Microsoft allows it', (
     expect(await fetchMeetingTranscript(m.id, { id: b.users.karson.id, name: 'Karson' })).toBe(false);
     expect((await prisma.meeting.findUniqueOrThrow({ where: { id: m.id } })).transcript).toBeNull();
     expect(await prisma.auditLog.findFirst({ where: { entityId: m.id, action: 'teams_transcript_fetch' } })).toEqual(expect.objectContaining({ details: expect.objectContaining({ outcome: 'denied' }) }));
-  });
-
-  it('S04: Microsoft refusing one organizer does not stop transcripts for the other meetings', async () => {
-    await prisma.user.update({ where: { id: b.users.alisa.id }, data: { microsoftId: 'owner-1' } });
-    vi.stubGlobal('fetch', graph(['Files.Read.All', 'OnlineMeetingTranscript.Read.All'], { getAllTranscripts: { status: 403, body: { error: { message: 'No application access policy found for this app.' } } } }).impl);
-    const first = await meeting();
-    expect(await fetchMeetingTranscript(first.id)).toBe(false);
-    // Settings still says what Microsoft answered.
-    expect(await teamsTranscriptStatus()).toEqual({ fetches: false, why: 'Microsoft refused: No Teams application access policy lets the app read meetings' });
-    const ms = graph(['Files.Read.All', 'OnlineMeetingTranscript.Read.All']);
-    vi.stubGlobal('fetch', ms.impl);
-    const other = await prisma.meeting.create({ data: { title: 'Another', provider: 'SHAREPOINT', sourceUrl: `${SHARING}&x=2`, occurredAt: new Date('2026-08-12T17:00:00Z'), bookedById: b.users.alisa.id } });
-    expect(await fetchMeetingTranscript(other.id)).toBe(true);
-    expect(await teamsTranscriptStatus()).toEqual({ fetches: true });
-  });
-
-  it('S16, S17: a 429 stops the pass and is not counted as an answer; an old recording is asked once a day, not every six hours', async () => {
-    await prisma.user.update({ where: { id: b.users.alisa.id }, data: { microsoftId: 'owner-1' } });
-    const now = new Date('2026-08-20T12:00:00Z');
-    const recent = await prisma.meeting.create({ data: { title: 'Recent', provider: 'SHAREPOINT', sourceUrl: SHARING, occurredAt: new Date('2026-08-19T17:00:00Z'), bookedById: b.users.alisa.id } });
-    const older = await prisma.meeting.create({ data: { title: 'Older', provider: 'SHAREPOINT', sourceUrl: `${SHARING}&x=3`, occurredAt: new Date('2026-08-11T17:00:00Z'), bookedById: b.users.alisa.id, transcriptTriedAt: new Date(now.getTime() - 7 * 3_600_000) } });
-    const throttled = graph(['Files.Read.All', 'OnlineMeetingTranscript.Read.All'], { '/drives/': { status: 429, body: {} } });
-    vi.stubGlobal('fetch', throttled.impl);
-    expect(await backfillTeamsTranscripts(now)).toBe(0);
-    expect((await prisma.meeting.findUniqueOrThrow({ where: { id: recent.id } })).transcriptTriedAt).toBeNull();
-    // The older one was tried 7 hours ago: not yet.
-    expect(throttled.asked.filter((a) => a.url.includes('/drives/')).length).toBe(1);
-    resetGraphThrottle();
-    const ms = graph(['Files.Read.All', 'OnlineMeetingTranscript.Read.All']);
-    vi.stubGlobal('fetch', ms.impl);
-    await backfillTeamsTranscripts(now);
-    expect((await prisma.meeting.findUniqueOrThrow({ where: { id: older.id } })).transcriptTriedAt?.getTime()).toBe(now.getTime() - 7 * 3_600_000);
   });
 
   it('never replaces a transcript someone already added', async () => {

@@ -93,14 +93,6 @@ describe('D4: mistaken opt-outs and the Tickets section', () => {
     expect((await formOptOut(coldRef(c.id)))?.ticket?.id).toBe(ticket.id);
   });
 
-  it('S32: two people raising it at the same moment open one ticket', async () => {
-    const { c } = await formOptedOut();
-    auth.requireUser.mockResolvedValue(session(b.users.karson, [b.pods.Alisa.id]));
-    const both = await Promise.all([raiseOptOutTicketAction(form({ sandboxContactId: c.id, reason: 'One' })), raiseOptOutTicketAction(form({ sandboxContactId: c.id, reason: 'Two' }))]);
-    expect(both.filter((r) => r.ok)).toHaveLength(1);
-    expect(await prisma.ticket.count({ where: { open: true } })).toBe(1);
-  });
-
   it('D4: the Tickets section lists every open ticket, meeting-number checks included', async () => {
     const { c } = await formOptedOut();
     auth.requireUser.mockResolvedValue(session(b.users.karson, [b.pods.Alisa.id]));

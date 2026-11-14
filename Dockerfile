@@ -28,27 +28,18 @@ RUN pnpm prisma generate
 
 COPY . .
 # 1536 MB ceiling keeps the build inside a 2 GB box (with ~400 MB left for the OS and Postgres).
-# T24: the app runs as the image's unprivileged `node` user; only Next's runtime cache (.next) and
-# corepack's pnpm need to be writable by it.
 RUN NODE_OPTIONS=--max-old-space-size=1536 pnpm build \
  && pnpm prune --prod \
  && pnpm store prune \
- && rm -rf /root/.cache /root/.npm .git e2e .screens \
- && mkdir -p /pnpm \
- && chown -R node:node /app/.next /corepack /pnpm
-
-USER node
+ && rm -rf /root/.cache /root/.npm .git e2e .screens
 
 # The entrypoint runs migrations, the seed and the worker, so prune must not have taken those
-# away. Fail the build here rather than at container start. Run as `node`, as the containers are.
+# away. Fail the build here rather than at container start.
 RUN node -e "require.resolve('next'); require.resolve('@prisma/client')" \
  && COREPACK_ENABLE_NETWORK=0 pnpm --version \
  && test -x node_modules/.bin/prisma \
  && test -f node_modules/tsx/dist/cli.mjs \
- && node --import tsx -e "0" \
- && test -f node_modules/next/dist/bin/next \
- && test -f .next/BUILD_ID \
- && test -w .next
+ && test -f .next/BUILD_ID
 
 EXPOSE 3000
 CMD ["sh", "docker/entrypoint.sh", "web"]

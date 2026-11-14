@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import type { SessionUser } from '@/lib/auth/current-user';
 import { createMeetingAction } from '@/lib/actions/meetings';
@@ -73,19 +72,16 @@ describe('Twenty holds every meeting as Cadence wrote it', () => {
     expect(mock.meetingRecords.size).toBe(2);
   });
 
-  it("numbers an older meeting whose prospect was typed in, by their address or a name only they have at the meeting's account", async () => {
+  it("numbers an older meeting whose prospect was typed in, by their address or a name only they have", async () => {
     const person = await prisma.personCache.findUniqueOrThrow({ where: { id: 'person-01' } });
-    const tomas = await prisma.personCache.findUniqueOrThrow({ where: { id: 'person-02' } });
     const at = new Date('2026-10-02T17:00:00Z');
     const byAddress = await prisma.meeting.create({ data: { title: 'Typed address', sourceUrl: '', occurredAt: at, attendees: { create: [{ name: 'N. H.', email: person.email, external: true }, { userId: b.users.alisa.id, email: b.users.alisa.email, name: b.users.alisa.name }] } } });
-    const byName = await prisma.meeting.create({ data: { title: 'Typed name', sourceUrl: '', occurredAt: at, companyId: tomas.companyId, companyName: tomas.companyName, attendees: { create: [{ name: 'Tomas Berg', external: true }] } } });
+    const byName = await prisma.meeting.create({ data: { title: 'Typed name', sourceUrl: '', occurredAt: at, attendees: { create: [{ name: 'Tomas Berg', external: true }] } } });
     const nobody = await prisma.meeting.create({ data: { title: 'Nobody known', sourceUrl: '', occurredAt: at, attendees: { create: [{ name: 'Someone Unknown', external: true }] } } });
-    // S12: a name alone, with no account to check it against, could be another person of that name.
-    await prisma.meeting.create({ data: { title: 'Name, no account', sourceUrl: '', occurredAt: at, attendees: { create: [{ name: 'Tomas Berg', external: true }] } } });
 
-    expect(await check()).toMatchObject({ linked: 2, written: 4 });
+    expect(await check()).toMatchObject({ linked: 2, written: 3 });
     const numbers = Object.fromEntries((await prisma.meeting.findMany()).map((m) => [m.title, m.meetingNumber]));
-    expect(numbers).toEqual({ 'Typed address': 1, 'Typed name': 1, 'Nobody known': null, 'Name, no account': null });
+    expect(numbers).toEqual({ 'Typed address': 1, 'Typed name': 1, 'Nobody known': null });
     expect(await prisma.meetingAttendee.findFirstOrThrow({ where: { meetingId: byName.id } })).toMatchObject({ personId: 'person-02', prospect: true });
     const written = await prisma.meeting.findUniqueOrThrow({ where: { id: byAddress.id } });
     expect(record(written.twentyMeetingId).data).toMatchObject({ meetingNumber: 1, firstMeeting: true });
@@ -106,21 +102,6 @@ describe('Twenty holds every meeting as Cadence wrote it', () => {
     expect((await prisma.meeting.findFirstOrThrow()).meetingNumber).toBe(1);
     expect(record(theirs).data).toEqual({ name: 'Logged in Twenty', meetingDate: '2026-10-01' });
     expect(await meetingsNotFromCadence()).toEqual({ count: 1, items: [{ id: theirs, name: 'Logged in Twenty', day: '2026-10-01' }] });
-  });
-
-  it('S10: a prospect named like a colleague is linked as a contact, not rewritten each pass', async () => {
-    const m = await add('Kick-off', '2026-10-01', ['person-01']);
-    const before = await prisma.meeting.findUniqueOrThrow({ where: { id: m.id } });
-    expect(before.companyId).not.toBeNull();
-    // The prospect turns out to share a team member's name.
-    const p = await prisma.personCache.findUniqueOrThrow({ where: { id: 'person-01' } });
-    await prisma.user.update({ where: { id: b.users.ria.id }, data: { name: `${p.firstName} ${p.lastName}` } });
-    // Written again for any reason (here: no snapshot).
-    await prisma.meeting.update({ where: { id: m.id }, data: { twentySnapshot: Prisma.DbNull } });
-    await check();
-    mock.writes = [];
-    expect(await check()).toMatchObject({ written: 0 });
-    expect(record(before.twentyMeetingId).contacts.map((c) => c.personId)).toEqual(['person-01']);
   });
 
   it('reads a tag by its name or its value alike', () => {

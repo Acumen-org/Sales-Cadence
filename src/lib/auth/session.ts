@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { cookies } from 'next/headers';
 import { prisma } from '../db';
 import { env } from '../env';
@@ -15,41 +15,12 @@ export const SESSION_COOKIE = 'cadence_session';
 const SESSION_HOURS = 24;
 const REMEMBERED_DAYS = 30;
 
-/**
- * Audit Q12: the database keeps a hash of each session token, never the token, so a copy of the
- * Session table opens nothing. Stored hashes carry a prefix so a token from before this change
- * (stored as it was) can be told apart and re-keyed on its next use.
- */
-const HASHED = 'h:';
-export const storedToken = (token: string) => `${HASHED}${createHash('sha256').update(token).digest('hex')}`;
-
-/** A cookie value that may name a row stored before Q12 (never one shaped like a stored hash). */
-export const mayBeLegacyToken = (token: string) => !token.startsWith(HASHED);
-
-/**
- * A row found by its pre-Q12 token is re-keyed to the hash at once. One atomic update: when two
- * requests race, the loser matches no row (it is already re-keyed) and reads the row by its hash.
- */
-export async function rekeySession(id: string, token: string): Promise<void> {
-  await prisma.session.updateMany({ where: { id, token }, data: { token: storedToken(token) } });
-}
-
-/**
- * Audit Q13: the cookie is Secure unless the setting says otherwise. Left unset, it follows the
- * address the app is served at: https means Secure.
- */
-export function cookieSecure(): boolean {
-  const raw = process.env.COOKIE_SECURE;
-  if (raw === undefined || raw === '') return env().APP_URL.startsWith('https:');
-  return env().COOKIE_SECURE;
-}
-
 /** A new session row and the cookie that carries it, for a caller that sets cookies on its own response. */
 export async function startSession(userId: string, remember = false) {
   const token = randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + (remember ? REMEMBERED_DAYS * 86_400_000 : SESSION_HOURS * 3_600_000));
-  await prisma.session.create({ data: { token: storedToken(token), userId, expiresAt } });
-  return { name: SESSION_COOKIE, value: token, options: { httpOnly: true, sameSite: 'lax' as const, secure: cookieSecure(), path: '/', expires: expiresAt } };
+  await prisma.session.create({ data: { token, userId, expiresAt } });
+  return { name: SESSION_COOKIE, value: token, options: { httpOnly: true, sameSite: 'lax' as const, secure: env().COOKIE_SECURE, path: '/', expires: expiresAt } };
 }
 
 export async function createSession(userId: string, remember = false): Promise<string> {
@@ -68,7 +39,7 @@ export async function destroySession(): Promise<void> {
   const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;
   if (token) {
-    await prisma.session.deleteMany({ where: { token: { in: token.startsWith(HASHED) ? [storedToken(token)] : [storedToken(token), token] } } });
+    await prisma.session.deleteMany({ where: { token } });
   }
   jar.set(SESSION_COOKIE, '', { httpOnly: true, sameSite: 'lax', path: '/', maxAge: 0 });
 }

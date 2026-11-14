@@ -1,5 +1,5 @@
 import { prisma } from './db';
-import { diffDays, todayIn } from './dates';
+import { todayIn } from './dates';
 import { workspaceTimezone } from './workspace';
 
 /*
@@ -37,46 +37,6 @@ export async function nightlyDue(now: Date, hour: number): Promise<boolean> {
   const local = Number(new Intl.DateTimeFormat('en-GB', { timeZone: workspaceTimezone(), hour: '2-digit', hour12: false }).format(now));
   if (local < hour) return false;
   return (await readNightly())?.day !== todayIn(workspaceTimezone(), now);
-}
-
-/** P13: a run marked as started this long ago with no end died with its worker, and may be claimed again. */
-export const NIGHTLY_STALE_MS = 3 * 60 * 60_000;
-
-/**
- * P13: tonight's run, claimed under a lock, so two workers alive at once (a deploy overlap) never both
- * run it: the second finds it finished today or running elsewhere. Null when it is not this worker's.
- */
-export async function claimNightly(now: Date): Promise<Date | null> {
-  const today = todayIn(workspaceTimezone(), now);
-  return prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext('nightly-claim'))`;
-    const marker = ((await tx.setting.findUnique({ where: { key: NIGHTLY_MARKER } }))?.value ?? {}) as NightlyMarker;
-    if (marker.day === today) return null;
-    const since = marker.running?.startedAt ? Date.parse(marker.running.startedAt) : NaN;
-    if (Number.isFinite(since) && Date.now() - since < NIGHTLY_STALE_MS) return null;
-    const started = new Date();
-    const json = JSON.parse(JSON.stringify({ ...marker, running: { startedAt: started.toISOString() } }));
-    await tx.setting.upsert({ where: { key: NIGHTLY_MARKER }, create: { key: NIGHTLY_MARKER, value: json }, update: { value: json } });
-    return started;
-  });
-}
-
-/** P14: a worker stopping mid-run gives the run back, so the next worker runs it at once. */
-async function releaseNightly(started: Date) {
-  await prisma.$transaction(async (tx) => {
-    await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtext('nightly-claim'))`;
-    const marker = ((await tx.setting.findUnique({ where: { key: NIGHTLY_MARKER } }))?.value ?? {}) as NightlyMarker;
-    if (marker.running?.startedAt !== started.toISOString()) return;
-    await tx.setting.update({ where: { key: NIGHTLY_MARKER }, data: { value: JSON.parse(JSON.stringify({ ...marker, running: null })) } });
-  });
-}
-
-/** The day of the last finished run, so tonight's reconcile reaches back over any days it missed (P31). */
-export async function nightlyLookbackDays(now: Date, minimum: number): Promise<number> {
-  const last = (await readNightly())?.day;
-  if (!last) return minimum;
-  const missed = diffDays(last, todayIn(workspaceTimezone(), now));
-  return Math.min(90, Math.max(minimum, missed + 1));
 }
 
 /** The marker says a run is in progress, since now; the last finished run stays as it was. */
@@ -125,7 +85,6 @@ export function nightlyLoop(opts: { hour: number; jobs: () => NightlyJob[]; log?
   /** The day this process started a run, or found one finished: never twice a day (B214). */
   let doneDay: string | null = null;
   let crmBusy = false;
-  let startedAt: Date | null = null;
   return {
     /** Starts the run when due; true when it started one. Never waits for the jobs themselves. */
     async poke(now: Date): Promise<boolean> {
@@ -140,20 +99,13 @@ export function nightlyLoop(opts: { hour: number; jobs: () => NightlyJob[]; log?
       } finally {
         checking = false;
       }
-      // Marked as running before the tick goes on, so the health card never reads it as not run.
-      // P13: claimed, not just written: another worker running it, or done with it, keeps it.
-      const started = await claimNightly(now);
-      if (!started) return false;
       doneDay = today;
-      startedAt = started;
+      // Marked as running before the tick goes on, so the health card never reads it as not run.
+      const started = await markNightlyStarted();
       running = runNightly(now, opts.jobs(), { log: opts.log, onCrm: (busy) => { crmBusy = busy; } }, started)
         .catch((error) => opts.log?.('nightly failed', error))
-        .finally(() => { running = null; startedAt = null; });
+        .finally(() => { running = null; });
       return true;
-    },
-    /** P14: stopping while a run is in progress: give the run back for the next worker, rather than hold the stop for it. */
-    async release(): Promise<void> {
-      if (running && startedAt) await releaseNightly(startedAt);
     },
     /** A nightly CRM job is running: the tick's continuous CRM sync skips its turn. */
     get crmBusy() { return crmBusy; },

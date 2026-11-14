@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
 import { databaseNow } from '../db';
-import { env } from '../env';
-import { clientIp } from '../public-api/keys';
 import { apiError, authorize, checkContacts, contractOf, CONTRACTS, databaseDown, errorBody, MAX_BATCH, ownersList, pushAnswerFor, pushWithIdempotency, rateLimit, readJson, validateEnvelope, type ApiError } from './bellwether-api';
 import { decodeCursor, iso, statusByIds, statusChangedSince } from './status';
 import { suppressContacts, validateSuppress } from './bellwether-suppress';
@@ -23,8 +21,6 @@ export function errorResponse(e: ApiError): NextResponse {
 const ok = (body: unknown) => NextResponse.json(body, { status: 200, headers: JSON_HEADERS });
 const isError = (v: unknown): v is ApiError => Boolean(v && typeof v === 'object' && 'code' in v && 'status' in v);
 const contractOfRequest = (req: Request) => contractOf(req.headers.get('x-cadence-contract'));
-/** The caller's address, as the read API reads it (behind API_TRUSTED_PROXY_HOPS proxies); null when unknown. */
-const callerOf = (req: Request) => clientIp(req.headers, env().API_TRUSTED_PROXY_HOPS);
 
 /**
  * B012: 503 only when Cadence's database is really unreachable (Prisma's connection codes, a refused
@@ -44,7 +40,7 @@ async function guarded(work: () => Promise<NextResponse>): Promise<NextResponse>
 /** Every caller learns the contract versions here, before it sends X-Cadence-Contract (PLAN 7.3). */
 export async function handlePing(req: Request): Promise<NextResponse> {
   return guarded(async () => {
-    const denied = await authorize(req.headers.get('x-cadence-api-key'), callerOf(req));
+    const denied = await authorize(req.headers.get('x-cadence-api-key'));
     if (denied) return errorResponse(denied);
     return ok({ ok: true, version: '1', sandboxEnabled: true, maxBatch: MAX_BATCH, serverTime: iso(await databaseNow()), contracts: [...CONTRACTS] });
   });
@@ -53,7 +49,7 @@ export async function handlePing(req: Request): Promise<NextResponse> {
 export async function handlePush(req: Request): Promise<NextResponse> {
   return guarded(async () => {
     const key = req.headers.get('x-cadence-api-key');
-    const denied = (await authorize(key, callerOf(req))) ?? (await rateLimit('push', key ?? ''));
+    const denied = (await authorize(key)) ?? rateLimit('push', key ?? '');
     if (denied) return errorResponse(denied);
     const read = await readJson(req);
     if (isError(read)) return errorResponse(read);
@@ -69,7 +65,7 @@ export async function handleCheck(req: Request): Promise<NextResponse> {
   return guarded(async () => {
     const key = req.headers.get('x-cadence-api-key');
     // The check counts against the push limit (14.14).
-    const denied = (await authorize(key, callerOf(req))) ?? (await rateLimit('push', key ?? ''));
+    const denied = (await authorize(key)) ?? rateLimit('push', key ?? '');
     if (denied) return errorResponse(denied);
     const read = await readJson(req);
     if (isError(read)) return errorResponse(read);
@@ -83,7 +79,7 @@ export async function handleCheck(req: Request): Promise<NextResponse> {
 export async function handleSuppress(req: Request): Promise<NextResponse> {
   return guarded(async () => {
     const key = req.headers.get('x-cadence-api-key');
-    const denied = (await authorize(key, callerOf(req))) ?? (await rateLimit('push', key ?? ''));
+    const denied = (await authorize(key)) ?? rateLimit('push', key ?? '');
     if (denied) return errorResponse(denied);
     const read = await readJson(req);
     if (isError(read)) return errorResponse(read);
@@ -97,7 +93,7 @@ export async function handleSuppress(req: Request): Promise<NextResponse> {
 export async function handleOwners(req: Request): Promise<NextResponse> {
   return guarded(async () => {
     const key = req.headers.get('x-cadence-api-key');
-    const denied = (await authorize(key, callerOf(req))) ?? (await rateLimit('status', key ?? ''));
+    const denied = (await authorize(key)) ?? rateLimit('status', key ?? '');
     if (denied) return errorResponse(denied);
     return ok(await ownersList());
   });
@@ -106,7 +102,7 @@ export async function handleOwners(req: Request): Promise<NextResponse> {
 export async function handleStatus(req: Request): Promise<NextResponse> {
   return guarded(async () => {
     const key = req.headers.get('x-cadence-api-key');
-    const denied = (await authorize(key, callerOf(req))) ?? (await rateLimit('status', key ?? ''));
+    const denied = (await authorize(key)) ?? rateLimit('status', key ?? '');
     if (denied) return errorResponse(denied);
     const read = await readJson(req);
     if (isError(read)) return errorResponse(read);

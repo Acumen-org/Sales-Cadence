@@ -62,8 +62,7 @@ export async function CampaignsScreen({ user, sp, audience, title, base, fixed =
   for (const c of all) byTab[TAB_OF[c.status] ?? 'finished'].push(c);
   const asked = sp[tabParam];
   const requested = asked === 'upcoming' || asked === 'active' || asked === 'finished' ? asked : null;
-  // R14: with no tab asked for, open the first that holds a match, so a search for a finished campaign shows it.
-  const tab: Tab = requested ?? (byTab.active.length ? 'active' : byTab.upcoming.length ? 'upcoming' : byTab.finished.length ? 'finished' : 'upcoming');
+  const tab: Tab = requested ?? (byTab.active.length ? 'active' : 'upcoming');
   const rows = byTab[tab];
   const query = new URLSearchParams(fixed);
   for (const [k, v] of Object.entries({ q: sp.q, pod: podId, sequence: sp.sequence, product, fo: foId, from: sp.from, to: sp.to })) if (v) query.set(k, v);

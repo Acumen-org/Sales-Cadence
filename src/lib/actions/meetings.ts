@@ -22,8 +22,7 @@ import { extractRecordingUrl, parseMeetingLink } from '../meetings/providers';
 import { sharePointPlayer, sharePointRecording, needsPlayer } from '../meetings/sharepoint-player';
 import { detectTranscriptFormat, parseTranscript } from '../meetings/transcript';
 import { getMeetingAnalyzer, MeetingAnalysisSchema } from '../meetings/analysis';
-import { meetingDay, meetingDayInstant, parseMeetingDay } from '../meetings/day';
-import { transcriptKey } from '../meetings/transcript-key';
+import { meetingDayInstant, parseMeetingDay } from '../meetings/day';
 import type { ActionResult } from './users';
 import { issueText } from '../form-errors';
 import { externalPeopleWhere } from '../internal-organizations';
@@ -71,20 +70,12 @@ export async function toggleMeetingProductAction(formData: FormData): Promise<Ac
   // The caller says what it wants, not "flip it": two tabs open on the same meeting must not be
   // able to ask for opposite things and both be told they succeeded.
   const want = String(formData.get('on') ?? '') === 'true';
-  // S19: saved only over the list it was read from; a tag someone else set meanwhile is read again, not dropped.
-  let current = meeting.products;
-  let ordered: string[] = current;
-  for (let attempt = 0; ; attempt++) {
-    const products = want ? [...current, product] : current.filter((p) => p !== product);
-    if (!products.length) return { ok: false, error: `${optionLabel(product)} is the only product on this meeting, and a meeting needs one. Add the right product first, then remove ${optionLabel(product)}.` };
-    // Stored in the order the list defines, so two meetings with the same tags read the same.
-    ordered = PRODUCTS.filter((p) => products.includes(p));
-    if ((await prisma.meeting.updateMany({ where: { id, products: { equals: current } }, data: { products: ordered } })).count) break;
-    const again = await prisma.meeting.findUnique({ where: { id }, select: { products: true } });
-    if (!again || attempt >= 4) return { ok: false, error: 'Someone else changed this meeting’s products at the same moment. Try again.' };
-    current = again.products;
-  }
-  if (want !== current.includes(product)) {
+  const products = want ? [...meeting.products, product] : meeting.products.filter((p) => p !== product);
+  if (!products.length) return { ok: false, error: `${optionLabel(product)} is the only product on this meeting, and a meeting needs one. Add the right product first, then remove ${optionLabel(product)}.` };
+  // Stored in the order the list defines, so two meetings with the same tags read the same.
+  const ordered = PRODUCTS.filter((p) => products.includes(p));
+  await prisma.meeting.update({ where: { id }, data: { products: ordered } });
+  if (want !== meeting.products.includes(product)) {
     await logAudit({ entityType: 'meeting', entityId: id, action: want ? 'product_added' : 'product_removed', actor: userActor(user), details: { product } });
     await afterResponse(() => pushMeetingToCrm(id));
   }
@@ -136,15 +127,12 @@ async function meetingPeople(formData: FormData, hostUserId: string | null, keep
   const prospectIds = idList(formData, 'prospectsJson');
   if (!teamIds.length) return { error: 'Choose who from the team was on the call.' };
   if (!prospectIds.length) return { error: 'Choose the prospects the meeting was with.' };
-  const [users, people, outside] = await Promise.all([
+  const [users, people] = await Promise.all([
     prisma.user.findMany({ where: { id: { in: teamIds }, active: true }, select: { id: true } }),
     prisma.personCache.findMany({ where: { id: { in: prospectIds }, deletedAt: null }, select: { id: true } }),
-    // S13: a prospect is someone outside the team, as the picker offers them, not any CRM record.
-    externalPeopleWhere({ keepBlocked: true }).then(async (notTeam) => prisma.personCache.count({ where: { AND: [{ id: { in: prospectIds }, deletedAt: null }, notTeam] } })),
   ]);
   if (users.length !== teamIds.length) return { error: 'Someone chosen from the team no longer has access to Cadence. Remove them and try again.' };
   if (people.length !== prospectIds.length) return { error: 'A prospect chosen is no longer in the CRM. Remove them and try again.' };
-  if (outside !== prospectIds.length) return { error: 'A prospect chosen is on our team or at one of our own companies. Choose the people the meeting was with.' };
   let resolved: Awaited<ReturnType<typeof resolveAttendees>>;
   try {
     resolved = await resolveAttendees([
@@ -232,33 +220,28 @@ export async function createMeetingAction(formData: FormData): Promise<ActionRes
   const company = await meetingCompany(prospectIds);
   const transcript = d.transcript?.trim() || resolved?.transcript || null;
 
-  // S21: the meeting, its number checks and its audit entry are saved together or not at all, so a
-  // failed audit write never reports an error for a meeting that was saved (and a retry never duplicates it).
-  const checks = idList(formData, 'numberChecksJson');
-  const meeting = await prisma.$transaction(async (tx) => {
-    const created = await tx.meeting.create({
-      data: {
-        title: d.title,
-        bookedById: d.bookedById,
-        provider: link?.provider ?? 'OTHER',
-        sourceUrl: d.sourceUrl.trim(),
-        embedUrl: link?.embedUrl ?? player?.embedUrl ?? null,
-        mediaUrl,
-        occurredAt,
-        companyId: company.id,
-        companyName: company.name,
-        products: d.products,
-        transcript,
-        transcriptFormat: transcript ? detectTranscriptFormat(transcript) : null,
-        createdById: user.id,
-        attendees: { create: attendees },
-      },
-    });
-    // A number someone doubted while adding it is checked against this meeting.
-    if (checks.length) await tx.meetingNumberTicket.updateMany({ where: { id: { in: checks }, raisedById: user.id, meetingId: null }, data: { meetingId: created.id } });
-    await logAudit({ entityType: 'meeting', entityId: created.id, action: 'created', actor: userActor(user), details: { title: created.title, provider: created.provider, attendees: attendees.length, prospects: prospectIds.length } }, tx);
-    return created;
+  const meeting = await prisma.meeting.create({
+    data: {
+      title: d.title,
+      bookedById: d.bookedById,
+      provider: link?.provider ?? 'OTHER',
+      sourceUrl: d.sourceUrl.trim(),
+      embedUrl: link?.embedUrl ?? player?.embedUrl ?? null,
+      mediaUrl,
+      occurredAt,
+      companyId: company.id,
+      companyName: company.name,
+      products: d.products,
+      transcript,
+      transcriptFormat: transcript ? detectTranscriptFormat(transcript) : null,
+      createdById: user.id,
+      attendees: { create: attendees },
+    },
   });
+  // A number someone doubted while adding it is checked against this meeting.
+  const checks = idList(formData, 'numberChecksJson');
+  if (checks.length) await prisma.meetingNumberTicket.updateMany({ where: { id: { in: checks }, raisedById: user.id, meetingId: null }, data: { meetingId: meeting.id } });
+  await logAudit({ entityType: 'meeting', entityId: meeting.id, action: 'created', actor: userActor(user), details: { title: meeting.title, provider: meeting.provider, attendees: attendees.length, prospects: prospectIds.length } });
   // Numbered, then written to Twenty with the meetings whose numbers it moved.
   await afterMeetingChange(meeting.id, prospectIds, !transcript && needsPlayer(meeting.sourceUrl), user);
   revalidatePath('/meetings');
@@ -295,14 +278,7 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
   if ('error' in people) return { ok: false, error: people.error };
   const { attendees, prospectIds } = people;
   const company = await meetingCompany(prospectIds);
-  let transcript = d.transcript?.trim() || resolved?.transcript || null;
-  // S18: a transcript that arrived (from Teams, or pasted by a colleague) while this form was open
-  // is kept when the form left its transcript as it was, and not silently replaced when it did not.
-  const opened = formData.get('transcriptKey');
-  if (typeof opened === 'string' && opened && transcriptKey(existing.transcript) !== opened) {
-    if (transcriptKey(d.transcript) === opened) transcript = existing.transcript;
-    else if (transcriptKey(transcript) !== transcriptKey(existing.transcript)) return { ok: false, error: 'The transcript changed while you had this form open. Reload the page to see it, then make your change again.' };
-  }
+  const transcript = d.transcript?.trim() || resolved?.transcript || null;
 
   await prisma.$transaction(async (tx) => {
     await tx.meetingAttendee.deleteMany({ where: { meetingId: id } });
@@ -328,11 +304,7 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
       },
     });
   });
-  // S20: what changed, old and new, for the fields that decide credit and numbering.
-  const was = { title: existing.title, bookedById: existing.bookedById, day: meetingDay(existing.occurredAt), sourceUrl: existing.sourceUrl, products: existing.products.join(','), prospects: [...new Set(prospectsOf(existing.attendees))].sort().join(',') };
-  const now = { title: d.title, bookedById: d.bookedById, day, sourceUrl: d.sourceUrl.trim(), products: d.products.join(','), prospects: [...new Set(prospectIds)].sort().join(',') };
-  const changes = Object.fromEntries((Object.keys(was) as (keyof typeof was)[]).filter((k) => was[k] !== now[k]).map((k) => [k, { from: was[k], to: now[k] }]));
-  await logAudit({ entityType: 'meeting', entityId: id, action: 'updated', actor: userActor(user), details: { changes, transcriptChanged: transcript !== existing.transcript } });
+  await logAudit({ entityType: 'meeting', entityId: id, action: 'updated', actor: userActor(user) });
   // Everyone it was with before and after: a prospect taken off moves their later meetings down.
   await afterMeetingChange(id, [...prospectIds, ...prospectsOf(existing.attendees)], !transcript && needsPlayer(d.sourceUrl), user);
   revalidatePath('/meetings');

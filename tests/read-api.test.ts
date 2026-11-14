@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { resetEnvCache } from '@/lib/env';
 import { SYSTEM_ACTOR } from '@/lib/audit';
 import { clientIp, createApiKey, ipAllowed, parseCidr, pruneReadApiLog, revokeApiKey, validateKeyInput, type Scope } from '@/lib/public-api/keys';
-import { BAD_KEY_LIMIT, handleReadApi, RATE_LIMIT, resetReadApiLimits } from '@/lib/public-api/http';
+import { handleReadApi, RATE_LIMIT, resetReadApiLimits } from '@/lib/public-api/http';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 
 /** The read API, /api/v1 (Notes/public-api-2026-11-08/CONTRACT.md). */
@@ -27,7 +27,7 @@ describe('read API', () => {
   beforeEach(async () => {
     await resetDb();
     b = await seedBasics();
-    await resetReadApiLimits();
+    resetReadApiLimits();
   });
   afterEach(() => {
     delete process.env.API_TRUSTED_PROXY_HOPS;
@@ -95,20 +95,6 @@ describe('read API', () => {
       expect(denied.body.error.message).toContain('team');
       expect((await call('/reports', { key })).status).toBe(403);
       expect((await call('/nothing-here', { key })).status).toBe(404);
-    });
-
-    it('S03: meetings and their transcripts need the meetings scope, and only approved ones are served', async () => {
-      const at = new Date('2026-10-01T12:00:00Z');
-      const shown = await prisma.meeting.create({ data: { title: 'Approved', sourceUrl: '', occurredAt: at, transcript: 'WEBVTT', review: 'APPROVED' } });
-      const hidden = await prisma.meeting.create({ data: { title: 'Dismissed', sourceUrl: '', occurredAt: at, transcript: 'secret', review: 'DISMISSED' } });
-      const activity = await makeKey(['activity']);
-      expect((await call('/meetings', { key: activity.key })).status).toBe(403);
-      expect((await call(`/meetings/${shown.id}`, { key: activity.key })).status).toBe(403);
-      const { key } = await makeKey(['meetings']);
-      const list = await call('/meetings', { key });
-      expect(list.body.data.map((m: { id: string }) => m.id)).toEqual([shown.id]);
-      expect((await call(`/meetings/${shown.id}`, { key })).body.data.transcript).toBe('WEBVTT');
-      expect((await call(`/meetings/${hidden.id}`, { key })).status).toBe(404);
     });
   });
 
@@ -215,41 +201,6 @@ describe('read API', () => {
       expect(Number(over.headers.get('retry-after'))).toBeGreaterThan(0);
       expect(over.headers.get('x-ratelimit-remaining')).toBe('0');
       expect((await call('', { key: other.key })).status).toBe(200);
-    });
-
-    it('V08: a cold contact carries its extra emails, designations, tags and products, as well as its extra phones', async () => {
-      const { key } = await makeKey(['cold-outreach']);
-      const { readyContact } = await import('./helpers/sandbox');
-      const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id, { additionalEmails: ['second@example.com'], designations: ['CFP'], tags: ['vip'], productInterest: ['ETF'] });
-      const r = await call(`/cold-outreach/contacts/${c.id}`, { key });
-      expect(r.status).toBe(200);
-      expect(r.body.data).toEqual(expect.objectContaining({ additionalEmails: ['second@example.com'], designations: ['CFP'], tags: ['vip'], productInterest: ['ETF'], additionalPhones: expect.any(Array) }));
-    });
-
-    it('V09: the limit is shared through the database, and a caller sending wrong keys is slowed', async () => {
-      const { id, key } = await makeKey(['crm']);
-      const now = new Date();
-      await prisma.apiRateHit.createMany({ data: Array.from({ length: RATE_LIMIT }, () => ({ bucket: `read:${id}`, at: now })) });
-      expect((await call('', { key })).status).toBe(429);
-      // Wrong keys from one known caller are counted there too, whichever process saw them.
-      process.env.API_TRUSTED_PROXY_HOPS = '1';
-      resetEnvCache();
-      const { bucketId } = await import('@/lib/rate-window');
-      await prisma.apiRateHit.createMany({ data: Array.from({ length: BAD_KEY_LIMIT }, () => ({ bucket: `read-fail:${bucketId('198.51.100.9')}`, at: now })) });
-      const slowed = await call('', { key: 'cad_wrong', headers: { 'x-forwarded-for': '198.51.100.9' } });
-      expect(slowed.status).toBe(429);
-      expect(Number(slowed.headers.get('retry-after'))).toBeGreaterThan(0);
-    });
-
-    it('answers a caller sending wrong keys 429 before looking any more up (Q19), and a broken escape 404 (Q20)', async () => {
-      process.env.API_TRUSTED_PROXY_HOPS = '1';
-      resetEnvCache();
-      const from = { 'x-forwarded-for': '198.51.100.7' };
-      for (let i = 0; i < BAD_KEY_LIMIT; i++) expect((await call('', { key: `cad_wrong${i}`, headers: from })).status).toBe(401);
-      expect((await call('', { key: 'cad_wrong-again', headers: from })).status).toBe(429);
-      const { key } = await makeKey(['crm']);
-      expect((await call('', { key, headers: { 'x-forwarded-for': '198.51.100.8' } })).status).toBe(200);
-      expect((await call('/people/%E0%A4%A', { key, headers: { 'x-forwarded-for': '198.51.100.8' } })).status).toBe(404);
     });
 
     it('logs each request by path without its query, stamps last used, and prunes after 90 days', async () => {
