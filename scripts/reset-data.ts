@@ -34,6 +34,12 @@ const TABLES = [
 
 async function main() {
   const force = process.argv.includes('--yes');
+  // T21: never by accident inside a production container (NODE_ENV=production there).
+  if (env().NODE_ENV === 'production' && !process.argv.includes('--production')) {
+    console.error('Refusing: NODE_ENV is production. This empties the whole database. Add --production only if that is really meant.');
+    process.exitCode = 2;
+    return;
+  }
   const adminEmail = env().ADMIN_EMAIL.toLowerCase();
   const [users, people, campaigns] = await Promise.all([
     prisma.user.count({ where: { email: { not: adminEmail } } }),

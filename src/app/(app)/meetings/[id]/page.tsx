@@ -37,6 +37,8 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
   // A sharing link Cadence found SharePoint's player for reads as that player, not as the link.
   const player = meeting.embedUrl && !link.embedUrl ? parseMeetingLink(meeting.embedUrl) : link;
   const analysis = parseAnalysis(meeting.analysis);
+  // S27: an analysis "in progress" for over ten minutes was cut off (a restart): offered again.
+  const analysisStale = meeting.analysisStatus === 'PENDING' && meeting.updatedAt.getTime() < Date.now() - 10 * 60_000;
   // Who spoke how much, from the transcript as it stands - the same normalised cues the reader sees.
   const liveTalk = meeting.transcript ? talkShare(parseTranscript(meeting.transcript, (meeting.transcriptFormat as never) ?? undefined).cues) : [];
   const mayEdit = await canManageMeetingAction(id);
@@ -135,10 +137,10 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
           <MeetingAnalysisPanel
             meetingId={meeting.id}
             analysis={analysis}
-            status={meeting.analysisStatus}
+            status={analysisStale ? 'FAILED' : meeting.analysisStatus}
             model={meeting.analysisModel}
             analysedAt={meeting.analysedAt}
-            error={meeting.analysisError}
+            error={analysisStale ? 'The analysis stopped before it finished. Run it again.' : meeting.analysisError}
             hasTranscript={Boolean(meeting.transcript)}
             canRun={mayEdit}
             talkShare={liveTalk}

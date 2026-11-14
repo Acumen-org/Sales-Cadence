@@ -93,9 +93,11 @@ export type AccountFilters = {
   dir?: SortDirection;
   /** 1-based page of ACCOUNTS_PAGE_SIZE rows. Omit for every row (the Home tiles and counts). */
   page?: number;
+  /** R17: the people a pod or FO filter means; `peopleInFilter` counts them at the accounts in view. */
+  peopleWhere?: Prisma.PersonCacheWhereInput[];
 };
 
-export type AccountList = { rows: AccountListRow[]; total: number; mine: number; people: number; inSequence: number; /** Accounts with at least one person in a campaign. */ inCampaign: number; engaged: number };
+export type AccountList = { rows: AccountListRow[]; total: number; mine: number; people: number; inSequence: number; /** Accounts with at least one person in a campaign. */ inCampaign: number; engaged: number; /** R17: with `peopleWhere`, those people at the accounts in view. */ peopleInFilter?: number };
 
 /** Company ids reached through their people, for one filter. */
 async function companiesThroughPeople(where: Prisma.PersonCacheWhereInput): Promise<string[]> {
@@ -138,20 +140,21 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
   // table and nothing here needs it.
   const companies = (await prisma.companyCache.findMany({ where, select: { id: true, name: true, sortName: true, domain: true, industry: true, city: true, ownerMemberId: true }, orderBy: [{ sortName: { sort: 'asc', nulls: 'last' } }, { domain: { sort: 'asc', nulls: 'last' } }] })).filter((company) => !isInternalCompany(company, rules) && !blocked.has(company.id) && !isNotAccount(company, rules));
   const ids = companies.map((c) => c.id);
-  if (!ids.length) return { rows: [], total: 0, mine: 0, people: 0, inSequence: 0, inCampaign: 0, engaged: 0 };
+  if (!ids.length) return { rows: [], total: 0, mine: 0, people: 0, inSequence: 0, inCampaign: 0, engaged: 0, ...(opts.peopleWhere?.length ? { peopleInFilter: 0 } : {}) };
 
   const upcoming = await prisma.campaign.findMany({ where: { status: { in: ['DRAFT', 'PENDING_APPROVAL', 'SCHEDULED'] } }, select: { personIds: true } });
   const upcomingIds = new Set(upcoming.flatMap((c) => c.personIds));
   const upcomingByCompany = upcomingIds.size ? new Map<string, number>() : null;
   if (upcomingByCompany) {
-    const rows = await prisma.personCache.findMany({ where: { id: { in: [...upcomingIds] }, companyId: { in: ids }, deletedAt: null, enrollments: { none: { status: { in: ['ACTIVE', 'PAUSED'] } } } }, select: { companyId: true } });
+    const rows = await prisma.personCache.findMany({ where: { AND: [await externalPeopleWhere()], id: { in: [...upcomingIds] }, companyId: { in: ids }, deletedAt: null, enrollments:{ none: { status: { in: ['ACTIVE', 'PAUSED'] } } } }, select: { companyId: true } });
     for (const r of rows) upcomingByCompany.set(r.companyId!, (upcomingByCompany.get(r.companyId!) ?? 0) + 1);
   }
   const [peopleRows, enrollRows, touchRows, meetingRows, members, replyRows] = await Promise.all([
     // People at an account are the directory's people: a colleague filed under a prospect's company in
     // Twenty is not one of its prospects, and this is what lets "with an account" and "without" add up.
     prisma.personCache.groupBy({ by: ['companyId'], where: { AND: [await externalPeopleWhere(), { companyId: { in: ids }, deletedAt: null }] }, _count: { _all: true } }),
-    prisma.enrollment.groupBy({ by: ['companyId', 'status'], where: { companyId: { in: ids } }, _count: { _all: true } }),
+    // R18: "in a campaign" counts the same people as the People column (external, not deleted), each once.
+    prisma.personCache.groupBy({ by: ['companyId'], where: { AND: [await externalPeopleWhere(), { companyId: { in: ids }, deletedAt: null, enrollments: { some: { status: { in: ['ACTIVE', 'PAUSED'] } } } }] }, _count: { _all: true } }),
     prisma.$queryRaw<Array<{ companyId: string; last: Date }>>`
       SELECT p."companyId" AS "companyId", MAX(t."occurredAt") AS last
       FROM "Touch" t JOIN "PersonCache" p ON p.id = t."personId"
@@ -172,14 +175,8 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
   const lastBy = new Map(touchRows.map((r) => [r.companyId, r.last]));
   const meetingsBy = new Map(meetingRows.map((r) => [r.companyId, r._count._all]));
   const memberName = new Map(members.map((m) => [m.twentyMemberId!, m.name]));
-  const enrollBy = new Map<string, { inSequence: number; replied: number }>();
-  for (const r of enrollRows) {
-    if (!r.companyId) continue;
-    const row = enrollBy.get(r.companyId) ?? { inSequence: 0, replied: 0 };
-    if (r.status === 'ACTIVE' || r.status === 'PAUSED') row.inSequence += r._count._all;
-    if (r.status === 'REPLIED' || r.status === 'MEETING') row.replied += r._count._all;
-    enrollBy.set(r.companyId, row);
-  }
+  const enrollBy = new Map<string, { inSequence: number }>();
+  for (const r of enrollRows) if (r.companyId) enrollBy.set(r.companyId, { inSequence: r._count._all });
 
   // "Mine": I own the account in Twenty, or I work someone in it.
   const myPeople = await prisma.personCache.findMany({
@@ -229,7 +226,8 @@ export async function listAccounts(user: SessionUser, opts: AccountFilters = {})
   }
   const byCampaign = opts.campaign === 'any' ? rows.filter((r) => r.inSequence > 0) : opts.campaign === 'all' ? rows.filter((r) => r.people > 0 && r.inSequence >= r.people) : opts.campaign === 'none' ? rows.filter((r) => r.inSequence === 0) : rows;
   const scoped = opts.scope === 'mine' ? byCampaign.filter((r) => r.mine) : byCampaign;
-  const summary = { total: scoped.length, mine: rows.filter((r) => r.mine).length, people: scoped.reduce((n, a) => n + a.people, 0), inSequence: scoped.reduce((n, a) => n + a.inSequence, 0), inCampaign: scoped.filter((a) => a.inSequence > 0).length, engaged: scoped.filter((a) => a.replied > 0 || a.meetings > 0).length };
+  const peopleInFilter = opts.peopleWhere?.length ? await prisma.personCache.count({ where: { AND: [await externalPeopleWhere(), { companyId: { in: scoped.map((r) => r.id) }, deletedAt: null }, ...opts.peopleWhere] } }) : undefined;
+  const summary = { total: scoped.length, mine: rows.filter((r) => r.mine).length, people: scoped.reduce((n, a) => n + a.people, 0), inSequence: scoped.reduce((n, a) => n + a.inSequence, 0), inCampaign: scoped.filter((a) => a.inSequence > 0).length, engaged: scoped.filter((a) => a.replied > 0 || a.meetings > 0).length, ...(peopleInFilter === undefined ? {} : { peopleInFilter }) };
   const start = (Math.max(1, opts.page ?? 1) - 1) * ACCOUNTS_PAGE_SIZE;
   const pageRows = opts.page ? scoped.slice(start, start + ACCOUNTS_PAGE_SIZE) : scoped;
   const [associations, pods] = await Promise.all([

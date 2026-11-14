@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { env } from '@/lib/env';
 import { safeReturnPath } from '@/lib/auth/redirect';
+import { cookieSecure } from '@/lib/auth/session';
 import { authorizeUrl, microsoftConfig, newSignInAttempt } from '@/lib/auth/microsoft';
 import { ATTEMPT_COOKIE, encodeAttempt } from './attempt';
 
@@ -16,6 +17,6 @@ export async function GET(req: NextRequest) {
     state: attempt.state, nonce: attempt.nonce, verifier: attempt.verifier,
     next: safeReturnPath(req.nextUrl.searchParams.get('next') ?? undefined),
     remember: req.nextUrl.searchParams.get('remember') === 'on',
-  }), { httpOnly: true, sameSite: 'lax', secure: env().COOKIE_SECURE, path: '/api/auth/microsoft', maxAge: 600 });
+  }), { httpOnly: true, sameSite: 'lax', secure: cookieSecure(), path: '/api/auth/microsoft', maxAge: 600 });
   return res;
 }

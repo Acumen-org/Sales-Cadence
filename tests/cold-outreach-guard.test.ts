@@ -109,6 +109,14 @@ describe('the guard (PLAN 8.1)', () => {
     expect(canAct(a, s, 'erase').ok).toBe(true);
   });
 
+  it("Q-X1: a leader gives an unclaimed contact only in their own pods (or one with no pod)", () => {
+    for (const role of ['SENIOR_FO', 'SALES_LEADER', 'POD_MANAGER'] as Role[]) {
+      const a = actor(role);
+      expect(canAct(a, subject(a, 'unclaimed', { podId: 'pod-b', podName: 'Pod B' }), 'assign', { toUserId: a.id }).ok).toBe(false);
+      expect(canAct(a, subject(a, 'unclaimed', { podId: null, podName: null }), 'assign', { toUserId: a.id }).ok).toBe(true);
+    }
+  });
+
   it('N017: an owner who has left counts as no owner, so the pod can work the contact', () => {
     const a = actor('JUNIOR_FO');
     expect(canAct(a, subject(a, 'colleague'), 'note').ok).toBe(false);

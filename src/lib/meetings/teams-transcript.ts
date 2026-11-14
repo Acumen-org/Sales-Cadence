@@ -2,7 +2,7 @@ import { prisma } from '../db';
 import { logAudit, type AuditActor } from '../audit';
 import { env } from '../env';
 import { microsoftConfig } from '../auth/microsoft';
-import { currentToken, needsPlayer, noteFor, sharePointRecording, standingRefusal, type AppToken, type RecordingFile } from './sharepoint-player';
+import { currentToken, graphThrottled, needsPlayer, noteFor, noteThrottle, sharePointRecording, standingRefusal, type AppToken, type RecordingFile } from './sharepoint-player';
 import { detectTranscriptFormat } from './transcript';
 import { pushMeetingToCrm } from './crm';
 
@@ -36,7 +36,8 @@ const HOUR = 3_600_000;
 const graphUrl = () => env().MICROSOFT_GRAPH_URL.replace(/\/+$/, '');
 export const mayReadTranscripts = (roles: string[]) => roles.includes(TRANSCRIPT_ROLE);
 
-type Answer = { text: string } | { refused: string } | { denied: string } | null;
+/** `wide`: the refusal applies to every transcript (S04), not only to this recording or organizer. */
+type Answer = { text: string } | { refused: string; wide: boolean } | { denied: string } | null;
 /** Who will see the transcript: their Microsoft id and their name as Teams writes it. */
 export type TranscriptViewer = { microsoftId: string | null; name: string };
 type GraphError = { error?: { code?: unknown; message?: unknown; innerError?: { code?: unknown } } };
@@ -50,11 +51,24 @@ export function refusalText(body: GraphError, status: number): string {
   return message;
 }
 
+/**
+ * S04: whether a refusal stops every transcript. Only a tenant-wide switch or a token Microsoft will
+ * not accept does; "forbidden" for one organizer (for example one the Teams application access
+ * policy does not cover) is that recording's answer, and the others are still asked.
+ */
+export function refusalIsWide(body: GraphError, status: number): boolean {
+  return status === 401 || String(body.error?.innerError?.code ?? '') === 'GraphAccessToTranscriptsDisabled';
+}
+const refusal = (body: GraphError, status: number) => ({ refused: refusalText(body, status), wide: refusalIsWide(body, status) });
+
 const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
 async function getJson(url: string, token: string, fetchImpl: typeof fetch): Promise<{ status: number; body: Record<string, unknown> } | null> {
+  if (graphThrottled()) return null;
   try {
     const res = await fetchImpl(url, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    // S16: a 429 stops this pass; Retry-After is kept.
+    if (noteThrottle(res)) return null;
     return { status: res.status, body: (await res.json().catch(() => ({}))) as Record<string, unknown> };
   } catch {
     return null;
@@ -78,6 +92,9 @@ export function closestTranscript(list: Listed[], file: RecordingFile): string |
 /** The online meeting a transcript belongs to: Graph says so, or its content address does. */
 const meetingIdOf = (t: { url: string; meetingId: unknown }) => (typeof t.meetingId === 'string' && t.meetingId ? t.meetingId : /\/onlineMeetings\/([^/]+)\/transcripts\//.exec(t.url)?.[1] ?? null);
 
+/** S05: a transcript that began this long after the recording was saved belongs to a later meeting. */
+const STARTED_AFTER_MS = 5 * 60_000;
+
 function closestEntry(list: Listed[], file: RecordingFile): { url: string; meetingId: unknown } | null {
   const end = new Date(file.createdAt).getTime();
   const start = end - (file.durationMs ?? 0);
@@ -86,7 +103,10 @@ function closestEntry(list: Listed[], file: RecordingFile): { url: string; meeti
     const from = new Date(String(t.createdDateTime ?? '')).getTime();
     const to = new Date(String(t.endDateTime ?? t.createdDateTime ?? '')).getTime();
     if (typeof t.transcriptContentUrl !== 'string' || !Number.isFinite(from) || !Number.isFinite(to)) continue;
-    const gap = Math.abs(from - start) + Math.abs(to - end);
+    if (from > end + STARTED_AFTER_MS) continue;
+    // S05: without the video's length its start is unknown, so only the ends are compared: a short
+    // call the organizer held straight after would otherwise sit closer than the recorded meeting.
+    const gap = file.durationMs ? Math.abs(from - start) + Math.abs(to - end) : Math.abs(to - end);
     if (gap <= MATCH_WINDOW_MS && (!best || gap < best.gap)) best = { url: t.transcriptContentUrl, gap, meetingId: t.meetingId };
   }
   return best ? { url: best.url, meetingId: best.meetingId } : null;
@@ -109,14 +129,16 @@ const spokeIn = (text: string, name: string) => Boolean(name.trim()) && new RegE
 async function transcriptContent(url: string, token: string, fetchImpl: typeof fetch): Promise<Answer> {
   for (const accept of ['text/vtt', 'application/vnd.microsoft.graph.transcript+text']) {
     let res: Response;
+    if (graphThrottled()) return null;
     try { res = await fetchImpl(url, { headers: { authorization: `Bearer ${token}`, accept }, signal: AbortSignal.timeout(TIMEOUT_MS) }); } catch { return null; }
+    if (noteThrottle(res)) return null;
     if (res.ok) {
       const text = (await res.text()).trim();
       return text ? { text } : null;
     }
     const body = (await res.json().catch(() => ({}))) as GraphError;
     if (res.status === 403 && String(body.error?.innerError?.code ?? '') === 'SpeakerAttributionNotAllowed') continue;
-    return res.status === 401 || res.status === 403 ? { refused: refusalText(body, res.status) } : null;
+    return res.status === 401 || res.status === 403 ? refusal(body, res.status) : null;
   }
   return null;
 }
@@ -132,11 +154,18 @@ export async function transcriptForFile(file: RecordingFile, organizers: string[
   if (!Number.isFinite(end)) return null;
   const from = iso(end - (file.durationMs ?? 0) - 2 * HOUR);
   const to = iso(end + 2 * HOUR);
+  let lastRefusal: Answer = null;
   for (const id of ids) {
     const user = encodeURIComponent(id);
     const listed = await getJson(`${base}/v1.0/users/${user}/onlineMeetings/getAllTranscripts(meetingOrganizerUserId='${user}',startDateTime=${from},endDateTime=${to})`, token, fetchImpl);
     if (!listed) continue;
-    if (listed.status === 401 || listed.status === 403) return { refused: refusalText(listed.body as GraphError, listed.status) };
+    if (listed.status === 401 || listed.status === 403) {
+      const no = refusal(listed.body as GraphError, listed.status);
+      // S04: one organizer refused is not every organizer refused.
+      if (no.wide) return no;
+      lastRefusal = no;
+      continue;
+    }
     if (listed.status !== 200) continue;
     const found = closestEntry((listed.body.value as Listed[] | undefined) ?? [], file);
     if (!found) continue;
@@ -149,7 +178,7 @@ export async function transcriptForFile(file: RecordingFile, organizers: string[
     // Else only a speaker the transcript itself names; nothing is handed over otherwise.
     return viewers.some((v) => spokeIn(answer.text, v.name)) ? answer : { denied: 'Nobody who will see this transcript was on the meeting.' };
   }
-  return null;
+  return lastRefusal;
 }
 
 /** May Cadence ask Microsoft for transcripts now: the permission granted, and no refusal standing. */
@@ -157,7 +186,7 @@ async function transcriptToken(): Promise<AppToken | null> {
   const c = await microsoftConfig();
   if (!c) return null;
   const token = await currentToken(c);
-  if ('error' in token || !mayReadTranscripts(token.roles) || (await standingRefusal(token.roles, REFUSED)) !== null) return null;
+  if ('error' in token || !mayReadTranscripts(token.roles) || (await standingRefusal(token.roles, REFUSED, true)) !== null) return null;
   return token;
 }
 
@@ -224,6 +253,8 @@ export async function fetchMeetingTranscript(meetingId: string, by: { id: string
   const team = [...new Set([meeting.bookedById, ...meeting.attendees.map((a) => a.userId)].filter((id): id is string => Boolean(id)))];
   const viewer = by?.id ?? meeting.createdById ?? meeting.bookedById;
   const text = await teamsTranscript(meeting.sourceUrl, team, { actor: by ? { type: 'USER', id: by.id, label: by.name ?? by.id } : { type: 'SYSTEM', label: 'Cadence' }, viewerIds: viewer ? [viewer] : [], meetingId });
+  // S16: a throttled ask was not an answer: the meeting is asked again at the next pass.
+  if (!text && graphThrottled()) return false;
   await prisma.meeting.update({ where: { id: meetingId }, data: { transcriptTriedAt: new Date() } });
   if (!text) return false;
   // Only into a meeting that still has none: a transcript someone pasted meanwhile stays.
@@ -242,13 +273,21 @@ export async function backfillTeamsTranscripts(now = new Date()): Promise<number
     where: {
       review: 'APPROVED', provider: 'SHAREPOINT', transcript: null,
       sourceUrl: { contains: '.sharepoint.com', mode: 'insensitive' },
-      occurredAt: { gte: new Date(now.getTime() - 90 * 24 * HOUR) },
-      OR: [{ transcriptTriedAt: null }, { transcriptTriedAt: { lt: new Date(now.getTime() - 6 * HOUR) } }],
+      // S17: Teams finishes a transcript within hours or never: every six hours for the first two
+      // days, then once a day, and not at all after thirty.
+      occurredAt: { gte: new Date(now.getTime() - 30 * 24 * HOUR) },
+      OR: [
+        { transcriptTriedAt: null },
+        { occurredAt: { gte: new Date(now.getTime() - 2 * 24 * HOUR) }, transcriptTriedAt: { lt: new Date(now.getTime() - 6 * HOUR) } },
+        { transcriptTriedAt: { lt: new Date(now.getTime() - 24 * HOUR) } },
+      ],
     },
     orderBy: { occurredAt: 'desc' }, take: 25, select: { id: true },
   });
   let found = 0;
   for (const m of meetings) {
+    // S16: Microsoft asked Cadence to slow down; the rest wait for the next pass.
+    if (graphThrottled()) break;
     if (!(await fetchMeetingTranscript(m.id))) continue;
     found++;
     // Twenty keeps the transcript too.

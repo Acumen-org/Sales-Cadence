@@ -63,7 +63,7 @@ export function PlannedCampaignDetail({ campaign: c, manager, editor = manager, 
     {launchError && <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-5"><h2 className="font-semibold">This campaign did not start</h2><p className="mt-2 text-sm">{launchError}</p>{editor && editable && <Link href={`/campaigns/${c.id}/edit`} className="btn-secondary mt-3">Review campaign</Link>}</div>}
     {notes}
     {late > 0 && <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-5"><p className="font-medium">{late} {late === 1 ? (cold ? 'contact has an overdue step' : 'person has an overdue step') : cold ? 'contacts have overdue steps' : 'people have overdue steps'}</p></div>}
-    {people.launched && <div className="grid grid-cols-2 gap-3 lg:grid-cols-4"><Stat label={cold ? 'Contacts' : 'People'} value={people.total} /><Stat label="Steps completed" value={completed} /><Stat label="Replies" value={replies} /><Stat label="Meetings" value={meetings} /></div>}
+    {people.launched && <div className="grid grid-cols-2 gap-3 lg:grid-cols-4"><Stat label={cold ? 'Contacts' : 'People'} value={people.stats.people ?? people.total} /><Stat label="Steps completed" value={completed} /><Stat label="Replies" value={replies} /><Stat label="Meetings" value={meetings} /></div>}
     {addFo}
     {plan && <section className="surface p-5"><CampaignCalendarView draft={draft} calendar={plan} /></section>}
     {manager && !cold && people.launched && people.stats.finished > 0 && <CampaignControls calendar campaignId={c.id} status={c.status} sequences={[]} currentSequenceId={c.sequenceId} defaultName={`${c.name} - follow-up`} today={todayIn(workspaceTimezone())} />}

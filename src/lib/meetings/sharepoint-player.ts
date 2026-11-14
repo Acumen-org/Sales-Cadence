@@ -97,11 +97,13 @@ export type Recording = Player & { file: RecordingFile | null };
  */
 export async function recordingFromGraph(url: string, token: string, fetchImpl: typeof fetch = fetch, base = graphUrl()): Promise<Recording | { refused: string } | null> {
   let res: Response;
+  if (graphThrottled()) return null;
   try {
     res = await fetchImpl(`${base}/v1.0/shares/${encodeSharingUrl(url)}/driveItem?$select=name,file,sharepointIds,createdDateTime,video,parentReference`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(TIMEOUT_MS) });
   } catch {
     return null;
   }
+  if (noteThrottle(res)) return null;
   const body = (await res.json().catch(() => ({}))) as { name?: unknown; file?: { mimeType?: unknown }; sharepointIds?: { siteUrl?: unknown; listItemUniqueId?: unknown }; createdDateTime?: unknown; video?: { duration?: unknown }; parentReference?: { driveId?: unknown }; error?: { message?: unknown } };
   if (res.status === 401 || res.status === 403) return { refused: String(body.error?.message ?? res.status).split(/\r?\n/)[0] };
   if (!res.ok) return null;
@@ -144,13 +146,33 @@ export async function currentToken(c: MicrosoftConfig, fresh = false): Promise<A
 
 const sameRoles = (a: string[], b: string[]) => [...a].sort().join(' ') === [...b].sort().join(' ');
 
-/** Microsoft's refusal, while the app still has the permissions it was refused with. */
-export async function standingRefusal(roles: string[], key = REFUSED): Promise<string | null> {
+/**
+ * Microsoft's refusal, while the app still has the permissions it was refused with. `gating`: only a
+ * refusal that applies to every request (S04); one that concerned a single recording or organizer
+ * is shown in Settings but does not stop Cadence asking about the others.
+ */
+export async function standingRefusal(roles: string[], key = REFUSED, gating = false): Promise<string | null> {
   const row = await prisma.setting.findUnique({ where: { key } });
-  const value = row?.value as { message?: unknown; roles?: unknown } | undefined;
+  const value = row?.value as { message?: unknown; roles?: unknown; wide?: unknown } | undefined;
   if (!value || !Array.isArray(value.roles) || !sameRoles(value.roles.map(String), roles)) return null;
+  if (gating && value.wide === false) return null;
   return String(value.message ?? '');
 }
+
+/**
+ * S16: Microsoft said "too many requests". Until its Retry-After passes (at least a minute), this
+ * process asks Graph nothing more for meetings.
+ */
+let throttledUntil = 0;
+export function noteThrottle(res: { status: number; headers: Headers }, now = Date.now()): boolean {
+  if (res.status !== 429 && res.status !== 503) return false;
+  const after = Number(res.headers.get('retry-after'));
+  throttledUntil = Math.max(throttledUntil, now + Math.min(3_600_000, Math.max(60_000, Number.isFinite(after) ? after * 1000 : 0)));
+  return true;
+}
+export const graphThrottled = (now = Date.now()) => now < throttledUntil;
+/** For tests. */
+export function resetGraphThrottle() { throttledUntil = 0; }
 
 async function noteAnswer(answer: Player | { refused: string } | null, roles: string[]) {
   return noteFor(REFUSED, answer, roles);
@@ -159,7 +181,7 @@ async function noteAnswer(answer: Player | { refused: string } | null, roles: st
 /** Keep Microsoft's refusal under `key` with the permissions it came under; any success clears it. */
 export async function noteFor(key: string, answer: object | null, roles: string[]) {
   if (answer && 'refused' in answer && typeof answer.refused === 'string') {
-    const value = { message: answer.refused, roles, at: new Date().toISOString() };
+    const value = { message: answer.refused, roles, at: new Date().toISOString(), wide: !('wide' in answer) || answer.wide !== false };
     await prisma.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
   } else if (answer) {
     await prisma.setting.deleteMany({ where: { key } });
@@ -230,6 +252,8 @@ export async function backfillSharePointPlayers(): Promise<number | null> {
     // No player yet, or one an earlier build framed that SharePoint refuses: the sharing link itself.
     if (!needsPlayer(m.sourceUrl) || (m.embedUrl && parseMeetingLink(m.embedUrl).embedUrl)) continue;
     const answer = await playerFromGraph(m.sourceUrl.trim(), token.value);
+    // S16: Microsoft asked Cadence to slow down: the rest wait for the next hourly pass.
+    if (graphThrottled()) return null;
     await noteAnswer(answer, token.roles);
     if (answer && 'refused' in answer) return null;
     // Only where nobody changed the meeting's link meanwhile.

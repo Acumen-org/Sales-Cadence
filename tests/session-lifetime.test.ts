@@ -27,20 +27,20 @@ describe('session lifetime', () => {
   });
 
   it('lasts a day by default', async () => {
-    const { createSession } = await import('@/lib/auth/session');
+    const { createSession, storedToken } = await import('@/lib/auth/session');
     const before = Date.now();
     const token = await createSession(userId);
-    const session = await prisma.session.findUniqueOrThrow({ where: { token } });
+    const session = await prisma.session.findUniqueOrThrow({ where: { token: storedToken(token) } });
     const life = session.expiresAt.getTime() - before;
     expect(life).toBeGreaterThan(23 * HOUR);
     expect(life).toBeLessThanOrEqual(DAY + HOUR);
   });
 
   it('lasts a month when the person asked to be remembered', async () => {
-    const { createSession } = await import('@/lib/auth/session');
+    const { createSession, storedToken } = await import('@/lib/auth/session');
     const before = Date.now();
     const token = await createSession(userId, true);
-    const session = await prisma.session.findUniqueOrThrow({ where: { token } });
+    const session = await prisma.session.findUniqueOrThrow({ where: { token: storedToken(token) } });
     expect(session.expiresAt.getTime() - before).toBeGreaterThan(29 * DAY);
   });
 

@@ -20,7 +20,8 @@ export type CampaignPeoplePage = {
   page: number;
   pages: number;
   /** finished: people whose outreach has ended, the ones a follow-up can reach. */
-  stats: { completedSteps: number; late: number; replies: number; meetings: number; finished: number };
+  /** people: everyone in the launched campaign, whatever the search (R03), so the tiles describe the same group. */
+  stats: { completedSteps: number; late: number; replies: number; meetings: number; finished: number; people?: number };
 };
 
 /**
@@ -40,8 +41,9 @@ export async function campaignPeoplePage(campaign: { id: string; personIds: stri
   if (launched) {
     const where: Prisma.EnrollmentWhereInput = { campaignId: campaign.id, ...(search ? { person: search } : {}) };
     const today = todayIn(workspaceTimezone());
-    const [total, replies, meetings, late, states, finished] = await Promise.all([
+    const [total, everyone, replies, meetings, late, states, finished] = await Promise.all([
       prisma.enrollment.count({ where }),
+      prisma.enrollment.count({ where: { campaignId: campaign.id } }),
       prisma.enrollment.count({ where: { campaignId: campaign.id, repliedAt: { not: null } } }),
       prisma.enrollment.count({ where: { campaignId: campaign.id, ...CAMPAIGN_MEETING } }),
       // Overdue the way Tasks counts it: by the day a step is worked (its snoozed day, if snoozed),
@@ -59,7 +61,7 @@ export async function campaignPeoplePage(campaign: { id: string; personIds: stri
     const page = Math.min(requested, pages);
     const enrollments = await prisma.enrollment.findMany({ where, include: { person: true, fo: { select: { name: true } } }, orderBy: [{ startDate: 'asc' }, { id: 'asc' }], skip: (page - 1) * CAMPAIGN_PEOPLE_PAGE, take: CAMPAIGN_PEOPLE_PAGE });
     return {
-      launched, total, page, pages, stats: { completedSteps, late: late.length, replies, meetings, finished },
+      launched, total, page, pages, stats: { completedSteps, late: late.length, replies, meetings, finished, people: everyone },
       rows: enrollments.map((e) => ({ id: e.id, personId: e.personId!, href: subjectHref(personRef(e.personId!)), name: cachedPersonName(e.person!), company: e.person!.companyName, fo: e.fo.name, flowId: flowOf(e.personId!), step: Math.max(0, e.currentStep + 1), status: e.status, exitReason: e.exitReason })),
     };
   }
@@ -104,8 +106,9 @@ async function coldCampaignPeoplePage(campaign: { id: string; personIds: string[
   if (launched) {
     const where: Prisma.EnrollmentWhereInput = { campaignId: campaign.id, ...(search ? { sandboxContact: search } : {}) };
     const today = todayIn(workspaceTimezone());
-    const [total, replies, meetings, late, done, finished] = await Promise.all([
+    const [total, everyone, replies, meetings, late, done, finished] = await Promise.all([
       prisma.enrollment.count({ where }),
+      prisma.enrollment.count({ where: { campaignId: campaign.id } }),
       prisma.enrollment.count({ where: { campaignId: campaign.id, repliedAt: { not: null } } }),
       prisma.enrollment.count({ where: { campaignId: campaign.id, ...CAMPAIGN_MEETING } }),
       prisma.task.findMany({ where: { enrollment: { campaignId: campaign.id, status: 'ACTIVE' }, state: 'PENDING', OR: [{ snoozedTo: null, dueDate: { lt: today } }, { snoozedTo: { not: null, lt: today } }] }, distinct: ['enrollmentId'], select: { enrollmentId: true } }),
@@ -121,7 +124,7 @@ async function coldCampaignPeoplePage(campaign: { id: string; personIds: string[
       include: { sandboxContact: { select: { id: true, firstName: true, lastName: true, companyName: true } }, fo: { select: { name: true } }, tasks: { where: { state: 'PENDING' }, orderBy: [{ dueDate: 'asc' }, { stepIndex: 'asc' }, { actionIndex: 'asc' }], take: 1, select: { label: true, dueDate: true, snoozedTo: true } } },
     });
     return {
-      launched, total, page, pages, stats: { completedSteps: [...byStep.values()].filter((set) => set.size === 1 && set.has('DONE')).length, late: late.length, replies, meetings, finished },
+      launched, total, page, pages, stats: { completedSteps: [...byStep.values()].filter((set) => set.size === 1 && set.has('DONE')).length, late: late.length, replies, meetings, finished, people: everyone },
       rows: enrollments.map((e) => {
         const next = e.tasks[0];
         const id = e.sandboxContactId ?? e.id;

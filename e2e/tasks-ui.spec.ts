@@ -173,7 +173,8 @@ test('task flow is a different screen from the list', async ({ page }) => {
   // Flow: no list, a progress rail, and a way back.
   await expect(page.getByLabel(/^Select /)).toHaveCount(0);
   await expect(page.getByText(/^Task flow$/).first()).toBeVisible();
-  await expect(page.getByText(/^\d+ \/ \d+$/).first()).toBeVisible();
+  // R07: the counter says what it counts, "1 / 5 steps, 2 other tasks".
+  await expect(page.getByText(/^\d+ \/ \d+ steps?(, \d+ other tasks?)?$/).first()).toBeVisible();
   await expect(page.getByRole('link', { name: 'Back to list' })).toBeVisible();
   await logout(page);
 });
