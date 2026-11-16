@@ -20,16 +20,18 @@ const meetingForm = (team: string[] = [b.users.ria.id], prospects: string[] = ['
 beforeEach(async () => { await resetDb(); b = await seedBasics(); auth.user.mockResolvedValue(session(b.users.ria)); });
 
 describe('meeting attendees', () => {
-  it('keeps Biz Ops read-only even for meetings they created before a role change', async () => {
+  it('lets Biz Ops add meetings and change their own but not others (owner, 16 November 2026)', async () => {
     await createMeetingAction(meetingForm());
-    const meeting = await prisma.meeting.findFirstOrThrow();
-    auth.user.mockResolvedValue({ ...session(b.users.ria), role: 'BIZ_OPS' });
-    expect((await createMeetingAction(meetingForm())).ok).toBe(false);
-    expect(await canManageMeetingAction(meeting.id)).toBe(false);
-    const edit = meetingForm(); edit.set('meetingId', meeting.id);
+    const others = await prisma.meeting.findFirstOrThrow();
+    auth.user.mockResolvedValue({ ...session(b.users.karson), role: 'BIZ_OPS' });
+    expect((await createMeetingAction(meetingForm())).ok).toBe(true);
+    const own = await prisma.meeting.findFirstOrThrow({ where: { createdById: b.users.karson.id } });
+    expect(await canManageMeetingAction(own.id)).toBe(true);
+    expect(await canManageMeetingAction(others.id)).toBe(false);
+    const edit = meetingForm(); edit.set('meetingId', others.id);
     expect((await updateMeetingAction(edit)).ok).toBe(false);
-    expect((await updateMeetingAttendeesAction(form({ meetingId: meeting.id, teamJson: JSON.stringify([b.users.ria.id]), prospectsJson: '["person-02"]' }))).ok).toBe(false);
-    expect(await prisma.meeting.count()).toBe(1);
+    expect((await updateMeetingAttendeesAction(form({ meetingId: others.id, teamJson: JSON.stringify([b.users.ria.id]), prospectsJson: '["person-02"]' }))).ok).toBe(false);
+    expect(await prisma.meeting.count()).toBe(2);
   });
   it('resolves prospects and team members by their records, and marks each prospect', async () => {
     await prisma.personCache.update({ where: { id: 'person-01' }, data: { email: null } });

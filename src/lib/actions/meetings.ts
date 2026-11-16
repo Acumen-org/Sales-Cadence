@@ -206,7 +206,7 @@ const prospectsOf = (attendees: { personId: string | null; prospect: boolean }[]
 
 export async function createMeetingAction(formData: FormData): Promise<ActionResult> {
   const user = await requireUser();
-  if (!canCreateMeeting(user)) return { ok: false, error: 'Biz Ops has read-only access to meetings.' };
+  if (!canCreateMeeting(user)) return { ok: false, error: 'You cannot add meetings.' };
   const parsed = readForm(formData);
   if (!parsed.success) return { ok: false, error: issueText(parsed.error.issues) };
   const d = parsed.data;
@@ -495,7 +495,7 @@ const GENERIC = /^(join conversation|join (our )?(cloud hd )?video meeting|video
  */
 export async function inspectMeetingLinkAction(raw: string, exceptMeetingId?: string | null): Promise<{ ok: true; data: LinkSuggestion } | { ok: false; error: string }> {
   const user = await requireUser();
-  if (!canCreateMeeting(user)) return { ok: false, error: 'Biz Ops has read-only access to meetings.' };
+  if (!canCreateMeeting(user)) return { ok: false, error: 'You cannot add meetings.' };
   const url = extractRecordingUrl(String(raw ?? ''));
   const link = parseMeetingLink(url);
   if (link.provider === 'OTHER' && link.note?.includes('does not look like a URL')) return { ok: false, error: link.note };
@@ -533,7 +533,7 @@ export async function inspectMeetingLinkAction(raw: string, exceptMeetingId?: st
  */
 export async function linkTranscriptAction(raw: string, teamUserIds: string[] = []): Promise<{ ok: true; transcript: string | null } | { ok: false; error: string }> {
   const user = await requireUser();
-  if (!canCreateMeeting(user)) return { ok: false, error: 'Biz Ops has read-only access to meetings.' };
+  if (!canCreateMeeting(user)) return { ok: false, error: 'You cannot add meetings.' };
   const ids = IdList.safeParse(teamUserIds);
   const found = await sharePointRecording(extractRecordingUrl(String(raw ?? '')));
   // S01: the transcript is for the user asking, and only when they were on that meeting; logged.
@@ -546,7 +546,7 @@ export async function linkTranscriptAction(raw: string, teamUserIds: string[] = 
  */
 export async function peopleFromTranscriptAction(raw: string): Promise<{ ok: true; team: TeamOption[]; prospects: ProspectOption[] } | { ok: false; error: string }> {
   const user = await requireUser();
-  if (!canCreateMeeting(user)) return { ok: false, error: 'Biz Ops has read-only access to meetings.' };
+  if (!canCreateMeeting(user)) return { ok: false, error: 'You cannot add meetings.' };
   const { cues } = parseTranscript(String(raw ?? ''));
   const bare = (name: string) => name.replace(/\s*\([^)]*\)\s*$/, '').trim();
   const speakers = [...new Set(cues.map((c) => c.speaker).filter((s): s is string => Boolean(s)).map(bare).filter(Boolean))].slice(0, 50);
