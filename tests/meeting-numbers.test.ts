@@ -151,9 +151,9 @@ describe('"Think this is wrong?"', () => {
     const raised = await raiseNumberCheckAction({ personId: 'person-01', day: '2026-10-08', shownNumber: 1, expectedNumber: 3, note: 'We met twice before Cadence' });
     expect(raised.ok).toBe(true);
     expect(await prisma.meetingNumberTicket.findFirstOrThrow()).toMatchObject({ personId: 'person-01', meetingId: null, meetingDay: '2026-10-08', shownNumber: 1, expectedNumber: 3, note: 'We met twice before Cadence', open: true, raisedById: b.users.karson.id });
-    // Biz Ops cannot add meetings, so they never raise one; they check them.
+    // Biz Ops adds meetings like everyone (owner, 16 November 2026), so they may raise one too.
     auth.user.mockResolvedValue({ ...session(b.users.karson), role: 'BIZ_OPS' });
-    expect((await raiseNumberCheckAction({ personId: 'person-01', day: '2026-10-08', shownNumber: 1, expectedNumber: 2 })).ok).toBe(false);
+    expect((await raiseNumberCheckAction({ personId: 'person-01', day: '2026-10-08', shownNumber: 1, expectedNumber: 2 })).ok).toBe(true);
   });
 
   it('is attached to the meeting it was raised on once that meeting is saved', async () => {

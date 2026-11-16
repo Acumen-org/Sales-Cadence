@@ -1411,3 +1411,8 @@ Plan: `Notes/linkedin-2026-11-12/PLAN.md`. Console developer's spec: https://cla
 - **Who.** Who gets it follows the LinkedIn follow-up rules. A cold contact nobody owns waits in Cold outreach > Needs an owner. An "Also in CRM" contact's reply is the CRM person's.
 - **Done.** The next email seen going to them closes it (wherever `closeEmailNextAction` runs), or Done, Snooze or Not needed by hand.
 - **Where it lives.** The same table as the LinkedIn follow-ups (`LinkedInFollowUp`, kind `EMAIL_REPLY`), counted under Emails in Tasks. LinkedIn figures in Reports leave it out.
+
+## Everyone adds meetings, Biz Ops included (16 November 2026)
+
+- **Owner:** "anyone, including biz ops, can view meetings and add meetings." `canCreateMeeting` is true for every role, so Biz Ops sees Add meeting, opens the form, reads a pasted link and raises a meeting-number check like everyone else.
+- **Changing a saved meeting** is unchanged: the person who recorded it, admins, and the Senior FOs, Sales Leaders and Pod Managers of a pod whose contact attended. A Biz Ops user can therefore edit or delete the meetings they added themselves.

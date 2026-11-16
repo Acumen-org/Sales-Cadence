@@ -34,7 +34,7 @@ export const isPodLeader = (a: Actor) => isSeniorFo(a) || isSalesLeader(a) || is
  * Everyone reads every pod. The owner's rule (12 September 2026): an FO in Alisa's pod opens each
  * section with Alisa's pod and their own name already selected, and may clear both and see all of
  * it. Reading was never the same test as writing, and the write gates below still ask who leads
- * which pod. Biz Ops is the role that only reads.
+ * which pod. Biz Ops reads everything else, and adds meetings like everyone.
  */
 export const canSeeAllPods = (_a: Actor) => true;
 /** Roles that do or run sales work, and so belong to at least one pod. */
@@ -103,7 +103,11 @@ export function canViewTasksOf(a: Actor, foUserId: string, podId: string | null)
 }
 
 export const canEditSequences = (a: Actor) => isAdmin(a) || isPodLeader(a);
-export const canCreateMeeting = (a: Actor) => !isBizOps(a);
+/**
+ * Everyone views and adds meetings, Biz Ops included (owner, 16 November 2026). Changing a saved
+ * meeting stays with the person who recorded it, admins, and the leaders of an attending pod.
+ */
+export const canCreateMeeting = (_a: Actor) => true;
 export const canManageSettings = (a: Actor) => isAdmin(a);
 export const canManageUsers = (a: Actor) => isAdmin(a);
 export const canManageCampaigns = (a: Actor, podId?: string | null) => canEnroll(a, podId);
@@ -206,8 +210,7 @@ export function whyNotManageEnrollment(a: Actor, podName: string, foName?: strin
 }
 
 /** `what` is the action, as in "delete this meeting". */
-export function whyNotManageMeeting(a: Actor, what: string): string {
-  if (isBizOps(a)) return bizOpsReads('meetings');
+export function whyNotManageMeeting(_a: Actor, what: string): string {
   return `Only the person who recorded this meeting, admins, and the Senior FOs, Sales Leaders and Pod Managers of a pod whose contact attended can ${what}.`;
 }
 

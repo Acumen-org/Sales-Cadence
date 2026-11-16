@@ -15,6 +15,7 @@ import {
   canManageUsers,
   canSnoozeFreely,
   canViewReports,
+  canCreateMeeting,
   visiblePodIds,
   canSeeAllPods,
   defaultFilters,
@@ -30,6 +31,9 @@ const manager: Actor = { id: 'manager', role: 'POD_MANAGER', podIds: ['pod-a'] }
 const ops: Actor = { id: 'ops', role: 'BIZ_OPS', podIds: [] };
 
 describe('rbac', () => {
+  it('everyone adds meetings, Biz Ops included (owner, 16 November 2026)', () => {
+    for (const a of [admin, leader, senior, junior, manager, ops]) expect(canCreateMeeting(a)).toBe(true);
+  });
   it('a Pod Manager runs their own pod like a Sales Leader, and no other', () => {
     expect(canManagePod(manager, 'pod-a')).toBe(true);
     expect(canManagePod(manager, 'pod-z')).toBe(false);

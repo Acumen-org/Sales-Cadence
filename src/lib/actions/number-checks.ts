@@ -33,7 +33,7 @@ const Raise = z.object({
 
 export async function raiseNumberCheckAction(input: z.input<typeof Raise>): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const user = await requireUser();
-  if (!canCreateMeeting(user)) return { ok: false, error: 'Biz Ops has read-only access to meetings.' };
+  if (!canCreateMeeting(user)) return { ok: false, error: 'You cannot add meetings.' };
   const parsed = Raise.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? 'Check the details and try again.' };
   const d = parsed.data;

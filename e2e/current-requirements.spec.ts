@@ -83,8 +83,9 @@ test('Pod Manager and Biz Ops seats work with their distinct write permissions',
     // A fresh context on a busy runner: give the first list render room.
     await expect(seat.getByRole('link', { name: title, exact: true })).toBeVisible({ timeout: 20_000 });
     if (role === 'ops') {
-      await expect(seat.getByRole('link', { name: 'Add meeting', exact: true })).toHaveCount(0);
-      await seat.goto('/meetings/new'); await expect(seat).toHaveURL(/\/meetings$/);
+      // Biz Ops adds meetings like everyone (owner, 16 November 2026).
+      await expect(seat.getByRole('link', { name: 'Add meeting', exact: true })).toBeVisible();
+      await seat.goto('/meetings/new'); await expect(seat).toHaveURL(/\/meetings\/new$/);
       await seat.goto(meetingUrl);
       await seat.getByRole('button', { name: 'Add to favourites', exact: true }).click();
       await expect(seat.getByRole('button', { name: 'Favourite', exact: true })).toBeVisible();
