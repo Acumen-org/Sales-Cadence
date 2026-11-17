@@ -2,10 +2,10 @@ import { prisma } from '@/lib/db';
 import { env } from '@/lib/env';
 import { formatInstant } from '@/lib/dates';
 import { getSettings } from '@/lib/settings';
-import { feedConfigured, feedStatus } from '@/lib/linkedin/console';
+import { consoleKey, feedConfigured, feedStatus } from '@/lib/linkedin/console';
 import { slugOf } from '@/lib/linkedin/keys';
 import { Badge, Card, Count, Empty, KeyValue, Notice } from '@/components/ui';
-import { LinkedInRulesForm } from '@/components/settings/linkedin-settings';
+import { LinkedInKeyForm, LinkedInRulesForm } from '@/components/settings/linkedin-settings';
 
 /** The results an admin should look at: Cadence did nothing with these events. */
 const NEEDS_A_LOOK = ['ambiguous_crm', 'do_not_contact', 'waiting_profile', 'no_profile'];
@@ -63,6 +63,11 @@ export async function LinkedInTab({ timezone }: { timezone: string }) {
     }),
   ]);
   const webhookUrl = `${e.APP_URL.replace(/\/+$/, '')}/api/webhooks/linkedin`;
+  const key = await consoleKey();
+  const configured = await feedConfigured();
+  // Never to the browser: the rules form gets the rules only.
+  const { consoleApiKey, ...rules } = settings.linkedin;
+  void consoleApiKey;
   const lastEventAt = last._max.receivedAt;
   const now = Date.now();
 
@@ -74,12 +79,12 @@ export async function LinkedInTab({ timezone }: { timezone: string }) {
         <div className="p-4">
           <KeyValue items={[
             { k: 'Console address', v: setBadge(Boolean(e.LINKEDIN_CONSOLE_URL?.trim())) },
-            { k: 'Feed key', v: setBadge(Boolean(e.LINKEDIN_CONSOLE_API_KEY)) },
+            { k: 'Feed key', v: key ? <span className="flex flex-wrap items-center gap-2">{setBadge(true)}<span className="text-[12px] text-ink-500">{key.from === 'server' ? 'on the server' : 'entered on this page'}</span></span> : setBadge(false) },
             { k: 'Webhook secret', v: setBadge(Boolean(e.LINKEDIN_CONSOLE_WEBHOOK_SECRET)) },
             { k: 'Webhook URL', v: <span className="flex flex-wrap items-center gap-2"><code className="text-[12px]">{webhookUrl}</code><span className="text-[12px] text-ink-500">Give this to the Console developer.</span></span> },
             {
               k: 'Feed',
-              v: !feedConfigured()
+              v: !configured
                 ? <span className="flex flex-wrap items-center gap-2"><Badge>Off</Badge><span className="text-[12.5px] text-ink-600">Needs the Console address and the feed key.</span></span>
                 : feed.error
                   ? <span className="flex flex-wrap items-center gap-2"><Badge tone="red">Failing</Badge><span className="text-[12.5px] text-red-700">{feed.error}</span>{feed.at ? <span className="text-[12px] text-ink-500">tried {formatInstant(new Date(feed.at), timezone)}</span> : null}</span>
@@ -93,7 +98,9 @@ export async function LinkedInTab({ timezone }: { timezone: string }) {
         </div>
       </Card>
 
-      <Card title="Rules"><LinkedInRulesForm s={settings.linkedin} /></Card>
+      <Card title="Feed key"><div className="p-4"><LinkedInKeyForm state={key?.from ?? null} /></div></Card>
+
+      <Card title="Rules"><LinkedInRulesForm s={rules} /></Card>
 
       <Card title="Accounts" flush>
         {accounts.length ? (

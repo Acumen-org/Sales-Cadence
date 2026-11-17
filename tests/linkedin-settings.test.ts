@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { User } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import type { SessionUser } from '@/lib/auth/current-user';
@@ -20,7 +20,9 @@ vi.mock('@/lib/auth/current-user', async () => {
   };
 });
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }));
-const { saveLinkedInSettingsAction } = await import('@/lib/actions/settings');
+const { saveLinkedInKeyAction, saveLinkedInSettingsAction } = await import('@/lib/actions/settings');
+const { consoleKey } = await import('@/lib/linkedin/console');
+const { resetEnvCache } = await import('@/lib/env');
 
 const asUser = (user: User): SessionUser => ({ ...user, podIds: [], pods: [] });
 
@@ -48,7 +50,7 @@ describe('LinkedIn settings', () => {
     const r = await saveLinkedInSettingsAction(form(VALID));
     expect(r).toEqual({ ok: true, message: 'LinkedIn settings saved.' });
     invalidateSettingsCache();
-    expect((await getSettings()).linkedin).toEqual(VALID);
+    expect((await getSettings()).linkedin).toEqual({ ...VALID, consoleApiKey: '' });
     const audit = await prisma.auditLog.findFirst({ where: { entityType: 'settings', entityId: 'linkedin', action: 'updated' } });
     expect(audit).not.toBeNull();
   });
@@ -80,5 +82,45 @@ describe('LinkedIn settings', () => {
     auth.user.mockResolvedValue(asUser(b.users.alisa));
     await expect(saveLinkedInSettingsAction(form(VALID))).rejects.toThrow('Admin only.');
     expect(await prisma.setting.findUnique({ where: { key: 'linkedin' } })).toBeNull();
+  });
+});
+
+/** Settings > LinkedIn: the Console's feed key, entered here (owner, 17 Nov 2026), kept only if the Console accepts it. */
+describe('LinkedIn feed key in Settings', () => {
+  let b: Basics;
+  const answers = vi.fn();
+  beforeEach(async () => {
+    await resetDb(); b = await seedBasics();
+    auth.user.mockResolvedValue(asUser(b.users.ria));
+    vi.stubEnv('LINKEDIN_CONSOLE_URL', 'https://console.example');
+    vi.stubEnv('LINKEDIN_CONSOLE_API_KEY', '');
+    resetEnvCache();
+    answers.mockReset();
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: { headers: Record<string, string> }) => answers(init.headers.authorization)));
+  });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); resetEnvCache(); });
+  const ok = () => new Response(JSON.stringify({ accounts: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] }), { status: 200 });
+
+  it('a key the Console accepts is kept, never audited in full, and survives saving the rules', async () => {
+    answers.mockImplementation(async (auth: string) => (auth === 'Bearer ext_good' ? ok() : new Response('{}', { status: 401 })));
+    expect(await saveLinkedInKeyAction(form({ consoleApiKey: 'ext_bad' }))).toEqual({ ok: false, error: 'The LinkedIn Console refused the feed key (wrong, or revoked).' });
+    expect(await consoleKey()).toBeNull();
+    expect(await saveLinkedInKeyAction(form({ consoleApiKey: ' ext_good ' }))).toMatchObject({ ok: true, message: expect.stringContaining('3 LinkedIn accounts') });
+    expect(await consoleKey()).toEqual({ key: 'ext_good', from: 'settings' });
+    const audits = await prisma.auditLog.findMany({ where: { entityType: 'settings', entityId: 'linkedin' } });
+    expect(JSON.stringify(audits)).not.toContain('ext_good');
+    await saveLinkedInSettingsAction(form(VALID));
+    invalidateSettingsCache();
+    expect(await consoleKey()).toEqual({ key: 'ext_good', from: 'settings' });
+    expect(await saveLinkedInKeyAction(form({ remove: '1' }))).toEqual({ ok: true, message: 'Feed key removed.' });
+    expect(await consoleKey()).toBeNull();
+  });
+
+  it('a key on the server wins; only an admin sets one', async () => {
+    vi.stubEnv('LINKEDIN_CONSOLE_API_KEY', 'ext_server');
+    resetEnvCache();
+    expect(await consoleKey()).toEqual({ key: 'ext_server', from: 'server' });
+    auth.user.mockResolvedValue(asUser(b.users.alisa));
+    await expect(saveLinkedInKeyAction(form({ consoleApiKey: 'ext_good' }))).rejects.toThrow('Admin only.');
   });
 });
