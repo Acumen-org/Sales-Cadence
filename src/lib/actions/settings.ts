@@ -1,5 +1,6 @@
 'use server';
 
+import { checkConsoleKey } from '../linkedin/console';
 import { revalidatePath } from 'next/cache';
 import { requireAdmin } from '../auth/current-user';
 import { logAudit, userActor } from '../audit';
@@ -233,10 +234,37 @@ export async function saveLinkedInSettingsAction(formData: FormData): Promise<Ac
     inviteWeeklyLimit: num('inviteWeeklyLimit'),
   });
   if (!parsed.success) return { ok: false, error: linkedInIssues(parsed.error.issues) };
-  await saveSettingsSection('linkedin', parsed.data);
-  await logAudit({ entityType: 'settings', entityId: 'linkedin', action: 'updated', actor: userActor(admin), details: parsed.data });
+  // The feed key is set on its own (saveLinkedInKeyAction): saving the rules keeps it.
+  const { consoleApiKey, ...rules } = parsed.data;
+  void consoleApiKey;
+  await saveSettingsSection('linkedin', { ...rules, consoleApiKey: (await getSettings()).linkedin.consoleApiKey });
+  await logAudit({ entityType: 'settings', entityId: 'linkedin', action: 'updated', actor: userActor(admin), details: rules });
   revalidatePath('/settings');
   return { ok: true, message: 'LinkedIn settings saved.' };
+}
+
+/**
+ * Settings > LinkedIn: the Console's feed key, entered here instead of on the server (owner, 17 Nov 2026). It is
+ * tried against the Console first and kept only if the Console accepts it; it is never shown again or audited.
+ */
+export async function saveLinkedInKeyAction(formData: FormData): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  const current = (await getSettings()).linkedin;
+  if (formData.get('remove')) {
+    await saveSettingsSection('linkedin', { ...current, consoleApiKey: '' });
+    await logAudit({ entityType: 'settings', entityId: 'linkedin', action: 'updated', actor: userActor(admin), details: { consoleApiKey: 'removed' } });
+    revalidatePath('/settings');
+    return { ok: true, message: 'Feed key removed.' };
+  }
+  const key = String(formData.get('consoleApiKey') ?? '').trim();
+  if (!key) return { ok: false, error: 'Paste the key from the LinkedIn Console (Settings > Integrations > External API keys).' };
+  if (key.length > 500 || /\s/.test(key)) return { ok: false, error: 'That does not look like a Console key.' };
+  const check = await checkConsoleKey(key);
+  if (!check.ok) return { ok: false, error: check.error };
+  await saveSettingsSection('linkedin', { ...current, consoleApiKey: key });
+  await logAudit({ entityType: 'settings', entityId: 'linkedin', action: 'updated', actor: userActor(admin), details: { consoleApiKey: 'set', accounts: check.accounts } });
+  revalidatePath('/settings');
+  return { ok: true, message: `Key saved. The Console sees ${check.accounts} LinkedIn ${check.accounts === 1 ? 'account' : 'accounts'}; Cadence reads its feed within 2 minutes.` };
 }
 
 /** Settings > Cold outreach: run the CRM cleanup now instead of waiting for the worker's next five minutes. */

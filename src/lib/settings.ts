@@ -218,6 +218,11 @@ export const LinkedInSettingsSchema = z.object({
   messageAfterAcceptDays: z.number().int().min(0).max(10).default(2),
   /** Requests per account per 7 days before Cadence warns (LinkedIn's own limit is about 100). */
   inviteWeeklyLimit: z.number().int().min(10).max(200).default(80),
+  /**
+   * The LinkedIn Console's read-only feed key, entered in Settings > LinkedIn (owner, 17 Nov 2026: no Nomad step).
+   * Stored like the Twenty key; never sent to a browser. LINKEDIN_CONSOLE_API_KEY, when set, wins.
+   */
+  consoleApiKey: z.string().trim().max(500).default(''),
 });
 
 // .prefault, not .default: Zod 4 returns a default as given, so only a parsed {} fills in each

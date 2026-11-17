@@ -1,5 +1,6 @@
 import { prisma } from '../db';
 import { env } from '../env';
+import { getSettings } from '../settings';
 import { consoleUrl } from './keys';
 import { storeEvents } from './events';
 
@@ -12,14 +13,35 @@ import { storeEvents } from './events';
 const CURSOR_KEY = 'linkedinFeedCursor';
 const FETCH_TIMEOUT_MS = 20_000;
 
-export function feedConfigured(): boolean {
-  return Boolean(consoleUrl() && env().LINKEDIN_CONSOLE_API_KEY);
+/** Where the feed key comes from: the server's environment (wins), Settings > LinkedIn, or nowhere. */
+export async function consoleKey(): Promise<{ key: string; from: 'server' | 'settings' } | null> {
+  const fromEnv = env().LINKEDIN_CONSOLE_API_KEY?.trim();
+  if (fromEnv) return { key: fromEnv, from: 'server' };
+  const fromSettings = (await getSettings()).linkedin.consoleApiKey;
+  return fromSettings ? { key: fromSettings, from: 'settings' } : null;
 }
 
-async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${consoleUrl()}${path}`, { headers: { authorization: `Bearer ${env().LINKEDIN_CONSOLE_API_KEY}`, accept: 'application/json' }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-  if (!res.ok) throw new Error(`LinkedIn Console ${path.split('?')[0]} answered ${res.status}`);
+export async function feedConfigured(): Promise<boolean> {
+  return Boolean(consoleUrl() && (await consoleKey()));
+}
+
+async function get<T>(path: string, key?: string): Promise<T> {
+  const k = key ?? (await consoleKey())?.key ?? '';
+  const res = await fetch(`${consoleUrl()}${path}`, { headers: { authorization: `Bearer ${k}`, accept: 'application/json' }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  if (!res.ok) throw new Error(res.status === 401 ? 'The LinkedIn Console refused the feed key (wrong, or revoked).' : `LinkedIn Console ${path.split('?')[0]} answered ${res.status}`);
   return (await res.json()) as T;
+}
+
+/** Try a key before keeping it: the Console's accounts list. Returns how many accounts it sees, or why not. */
+export async function checkConsoleKey(key: string): Promise<{ ok: true; accounts: number } | { ok: false; error: string }> {
+  if (!consoleUrl()) return { ok: false, error: 'The Console address (LINKEDIN_CONSOLE_URL) is not set on the server.' };
+  try {
+    const body = await get<{ accounts?: unknown[] } | unknown[]>('/api/ext/v1/accounts', key);
+    const list = Array.isArray(body) ? body : Array.isArray(body.accounts) ? body.accounts : [];
+    return { ok: true, accounts: list.length };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 export type FeedStatus = { cursor: string | null; at: string | null; error: string | null; stored?: number };
@@ -36,7 +58,7 @@ async function saveStatus(s: FeedStatus) {
 
 /** Read the feed from the cursor on, a few pages at a time. Returns how many new events were kept. */
 export async function pollFeed(now = new Date(), maxPages = 5): Promise<{ ran: boolean; stored: number; error?: string }> {
-  if (!feedConfigured()) return { ran: false, stored: 0 };
+  if (!(await feedConfigured())) return { ran: false, stored: 0 };
   const status = await feedStatus();
   let cursor = status.cursor ?? '0';
   let stored = 0;
