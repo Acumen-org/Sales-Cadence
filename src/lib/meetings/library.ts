@@ -147,10 +147,11 @@ async function saveConfig(c: LibraryConfig) {
   await prisma.setting.upsert({ where: { key: LIBRARY_KEY }, create: { key: LIBRARY_KEY, value: c }, update: { value: c } });
 }
 
-async function libraryToken(): Promise<AppToken | { error: string }> {
+async function libraryToken(fresh = false): Promise<AppToken | { error: string }> {
   const c = await microsoftConfig();
   if (!c) return { error: 'Microsoft sign-in is not set up.' };
-  const token = await currentToken(c);
+  // "Save and check" asks Microsoft for a new token, so a permission the admin just granted shows at once.
+  const token = await currentToken(c, fresh);
   if ('error' in token) return { error: `Microsoft gave Cadence no token: ${token.error}` };
   if (!mayReadFiles(token.roles)) return { error: 'The app needs the Files.Read.All application permission to read the recordings people paste.' };
   // The permissions Microsoft put in the token, so an admin sees what is missing without guessing.
@@ -161,7 +162,7 @@ async function libraryToken(): Promise<AppToken | { error: string }> {
 /** Save the library's address and check it: Cadence finds the site and can write to it. */
 export async function setLibrary(siteUrl: string, fetchImpl: typeof fetch = fetch): Promise<LibraryConfig> {
   const at = new Date().toISOString();
-  const token = await libraryToken();
+  const token = await libraryToken(true);
   let config: LibraryConfig = { siteUrl };
   if ('error' in token) config.check = { at, ok: false, why: token.error };
   else {
