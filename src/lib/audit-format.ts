@@ -165,6 +165,8 @@ const TITLES: Record<string, string> = {
   mail_message_skipped: 'A mailbox message could not be read and was set aside',
   teams_transcript_fetch: 'Teams transcript asked of Microsoft',
   recording_looked_up: 'Recording looked up in Microsoft 365',
+  recording_copied: 'Recording copied to the company library',
+  queued_existing: 'Existing recordings queued for the company library',
   mip_stars_set: 'Most-important-person stars changed',
   suppression_widened: 'Old opt-outs covered on every key',
   suppression_rerun_crm: 'Suppression list checked against the CRM',

@@ -35,6 +35,8 @@ import { missingMeetingTags } from '@/lib/meetings/crm';
 import { meetingsNotFromCadence } from '@/lib/meetings/crm-check';
 import { sharePointPlayerStatus } from '@/lib/meetings/sharepoint-player';
 import { teamsTranscriptStatus } from '@/lib/meetings/teams-transcript';
+import { libraryConfig, libraryCounts } from '@/lib/meetings/library';
+import { MeetingLibraryForm } from '@/components/settings/meeting-library-form';
 import { graphMailState } from '@/lib/mail/graph-mail';
 import { getTwilioReader, twilioStatus } from '@/lib/calls/twilio';
 import { importStatus } from '@/lib/calls/import';
@@ -251,8 +253,36 @@ async function SignInTab() {
         </div>
         {fromServer ? null : <SignInForm clientId={signIn.microsoftClientId} tenantId={signIn.microsoftTenantId} hasSecret={Boolean(signIn.microsoftClientSecret)} />}
       </Card>
+      {methods.microsoft ? <MeetingLibraryCard tz={tz} /> : null}
       {mail.enabled ? <MailTrackingCard mail={mail} tz={tz} /> : null}
     </div>
+  );
+}
+
+/**
+ * The Meeting Recordings library (src/lib/meetings/library.ts): every OneDrive or SharePoint recording
+ * added to Cadence is copied there, where everyone in the company can watch it and it does not expire.
+ */
+async function MeetingLibraryCard({ tz }: { tz: string }) {
+  const [config, counts] = await Promise.all([libraryConfig(), libraryCounts()]);
+  const check = config?.check;
+  return (
+    <Card title="Meeting Recordings library">
+      <div className="space-y-3 p-4">
+        <p className="text-[13px] text-ink-600">Every Teams recording added to Cadence is copied into this SharePoint library, where everyone in the company can watch it and Teams does not delete it. The pasted link stays on the meeting.</p>
+        <KeyValue items={[
+          { k: 'Library', v: config ? <span className="font-mono text-[12.5px]">{config.siteUrl}</span> : <Badge>Not set</Badge> },
+          ...(check ? [{ k: 'Check', v: check.ok ? <span className="flex flex-wrap items-center gap-2"><Badge tone="green">Cadence can copy recordings here</Badge><span className="text-[12.5px] text-ink-500">{formatInstant(new Date(check.at), tz)}</span></span> : <span className="flex flex-wrap items-center gap-2"><Badge tone="amber">Cannot copy</Badge><span className="text-[12.5px] text-ink-600">{check.why}</span></span> }] : []),
+          { k: 'Recordings', v: `${counts.done} in the library · ${counts.waiting} waiting · ${counts.failed.length}${counts.failed.length === 20 ? '+' : ''} not copied` },
+        ]} />
+        {counts.failed.length ? (
+          <ul className="space-y-1 text-[12.5px]">
+            {counts.failed.map((f) => <li key={f.id}><Link href={`/meetings/${f.id}`} className="text-brand-700 hover:underline">{f.title}</Link><span className="text-ink-600">: {f.error ?? 'no reason given'}</span></li>)}
+          </ul>
+        ) : null}
+      </div>
+      <MeetingLibraryForm siteUrl={config?.siteUrl ?? ''} ready={Boolean(check?.ok)} />
+    </Card>
   );
 }
 

@@ -20,6 +20,8 @@ export type MeetingFormValues = {
   id?: string;
   title: string;
   sourceUrl: string;
+  /** The meeting was not recorded, or was held in person: no link is asked for. */
+  notRecorded?: boolean;
   /** The player the saved link plays through, when Cadence found one. */
   embedUrl?: string | null;
   mediaUrl?: string | null;
@@ -65,6 +67,7 @@ function Preview({ embedUrl, mediaUrl, title }: { embedUrl: string | null; media
 export function MeetingForm({ fos, initial, mode }: { fos: { id: string; name: string }[]; initial: MeetingFormValues; mode: 'create' | 'edit' }) {
   const router = useRouter();
   const [url, setUrl] = useState(initial.sourceUrl);
+  const [notRecorded, setNotRecorded] = useState(Boolean(initial.notRecorded));
   const [title, setTitle] = useState(initial.title);
   const [occurredAt, setOccurredAt] = useState(initial.occurredAt);
   const [people, setPeople] = useState<PeopleValue>({ bookedById: initial.bookedById, team: initial.team, prospects: initial.prospects });
@@ -86,8 +89,9 @@ export function MeetingForm({ fos, initial, mode }: { fos: { id: string; name: s
   const state = useRef({ title, occurredAt, transcript, people });
   state.current = { title, occurredAt, transcript, people };
 
-  const parsed = url.trim() ? parseMeetingLink(url) : null;
+  const parsed = url.trim() && !notRecorded ? parseMeetingLink(url) : null;
   const invalid = Boolean(parsed?.note?.includes('does not look like a URL'));
+  const joinLink = Boolean(parsed?.isJoinLink);
   const saved = Boolean(initial.sourceUrl && url.trim() === initial.sourceUrl);
   const embedUrl = suggestion?.embedUrl ?? parsed?.embedUrl ?? (saved ? initial.embedUrl ?? null : null);
   const mediaUrl = suggestion?.mediaUrl ?? parsed?.mediaUrl ?? (saved ? initial.mediaUrl ?? null : null);
@@ -171,6 +175,7 @@ export function MeetingForm({ fos, initial, mode }: { fos: { id: string; name: s
 
   const lines = transcript.trim() ? parseTranscript(transcript).cues.length : 0;
   const missing = [
+    !notRecorded && !url.trim() && 'recording link',
     !title.trim() && 'title',
     !occurredAt && 'date',
     !people.bookedById && 'booked by',
@@ -191,25 +196,34 @@ export function MeetingForm({ fos, initial, mode }: { fos: { id: string; name: s
       {initial.id ? <input type="hidden" name="meetingId" value={initial.id} /> : null}
 
       <section className="space-y-3 pb-6">
-        <h2 id="recording-heading" className="text-[14px] font-medium text-ink-900">Recording</h2>
-        <div className="relative">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center"><h2 id="recording-heading" className="text-[14px] font-medium text-ink-900">Recording</h2><span className="ml-0.5 text-[12px] leading-4 text-red-600" aria-hidden>*</span></div>
+          <label className="ml-auto flex cursor-pointer items-center gap-2 text-[13px] font-normal text-ink-700">
+            <input type="checkbox" name="notRecorded" checked={notRecorded} onChange={(e) => { setNotRecorded(e.target.checked); setError(null); setExisting(null); }} className="h-4 w-4 rounded" />
+            Not recorded or in person
+          </label>
+        </div>
+        <div className={clsx('relative', notRecorded && 'opacity-50')}>
           <input
             id="meeting-link"
             name="sourceUrl"
-            aria-label="Recording or meeting link"
+            aria-label="Recording link"
+            aria-required={!notRecorded}
+            disabled={notRecorded}
             value={url}
             onChange={(e) => setUrl(extractRecordingUrl(e.target.value))}
             onPaste={(e) => { e.preventDefault(); pasted(e.clipboardData.getData('text')); }}
             onBlur={() => { if (url.trim() !== lastRead.current) read(url); }}
-            placeholder="Paste the recording link or its embed code"
-            className="!h-11 !pr-10 !text-[14px]"
+            placeholder={notRecorded ? 'No recording for this meeting' : 'Paste the recording link from OneDrive'}
+            className="!h-11 !pr-10 !text-[14px] disabled:cursor-not-allowed disabled:bg-canvas"
             autoFocus={mode === 'create' && !initial.sourceUrl}
           />
-          {url ? <button type="button" aria-label="Clear the link" onClick={clearLink} className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-ink-400 hover:bg-canvas hover:text-ink-700"><IconClose size={14} /></button> : null}
+          {url && !notRecorded ? <button type="button" aria-label="Clear the link" onClick={clearLink} className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-ink-400 hover:bg-canvas hover:text-ink-700"><IconClose size={14} /></button> : null}
         </div>
 
         {error ? <p role="alert" className="text-[13px] text-red-700">{error}</p> : null}
         {invalid ? <p role="alert" className="text-[13px] text-red-700">{parsed?.note}</p> : null}
+        {joinLink ? <p role="alert" className="text-[13px] text-red-700">That is a link to join the meeting, not its recording. Paste the recording link from OneDrive.</p> : null}
 
         {existing ? (
           <div role="status" className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
@@ -293,7 +307,7 @@ export function MeetingForm({ fos, initial, mode }: { fos: { id: string; name: s
       </section>
 
       <div className="flex flex-wrap items-center gap-3 pt-6">
-        <button type="submit" className="btn-primary" disabled={(mode === 'create' && Boolean(existing)) || missing.length > 0 || invalid}>
+        <button type="submit" className="btn-primary" disabled={(mode === 'create' && Boolean(existing)) || missing.length > 0 || invalid || joinLink}>
           {mode === 'create' ? 'Add meeting' : 'Save changes'}
         </button>
         <Link href={initial.id ? `/meetings/${initial.id}` : '/meetings'} className="btn-secondary">

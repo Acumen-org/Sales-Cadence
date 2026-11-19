@@ -20,6 +20,7 @@ import { pushMeetingToCrm, removeMeetingFromCrm } from '../meetings/crm';
 import { afterResponse } from '../engine/sync-out';
 import { extractRecordingUrl, parseMeetingLink } from '../meetings/providers';
 import { sharePointPlayer, sharePointRecording, needsPlayer } from '../meetings/sharepoint-player';
+import { libraryFieldsFor } from '../meetings/library';
 import { detectTranscriptFormat, parseTranscript } from '../meetings/transcript';
 import { getMeetingAnalyzer, MeetingAnalysisSchema } from '../meetings/analysis';
 import { meetingDay, meetingDayInstant, parseMeetingDay } from '../meetings/day';
@@ -185,10 +186,15 @@ const MeetingSchema = z.object({
   // one is required (owner, 29 October 2026).
   products: z.array(z.string()).default([]).transform((v) => PRODUCTS.filter((p) => v.includes(p))).refine((v) => v.length > 0, 'Choose the products the meeting was about.'),
   transcript: z.string().max(2_000_000).optional().nullable(),
-});
+  notRecorded: z.boolean(),
+}).transform((d) => (d.notRecorded ? { ...d, sourceUrl: '' } : d))
+  // The recording is mandatory (owner, 17 November 2026), unless the meeting was not recorded or was in person.
+  .refine((d) => d.notRecorded || d.sourceUrl !== '', { message: 'Paste the recording link, or tick "Not recorded or in person".', path: ['sourceUrl'] })
+  .refine((d) => d.notRecorded || !parseMeetingLink(d.sourceUrl).isJoinLink, { message: 'That is a link to join the meeting, not its recording. Paste the recording link from OneDrive.', path: ['sourceUrl'] });
 
 function readForm(formData: FormData) {
   return MeetingSchema.safeParse({
+    notRecorded: formData.get('notRecorded') === 'on',
     title: formData.get('title'),
     sourceUrl: formData.get('sourceUrl') ?? '',
     bookedById: formData.get('bookedById'),
@@ -244,6 +250,8 @@ export async function createMeetingAction(formData: FormData): Promise<ActionRes
         sourceUrl: d.sourceUrl.trim(),
         embedUrl: link?.embedUrl ?? player?.embedUrl ?? null,
         mediaUrl,
+        notRecorded: d.notRecorded,
+        ...libraryFieldsFor(d.sourceUrl),
         occurredAt,
         companyId: company.id,
         companyName: company.name,
@@ -316,6 +324,8 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
         sourceUrl: d.sourceUrl.trim(),
         embedUrl: link?.embedUrl ?? keptPlayer ?? player?.embedUrl ?? null,
         mediaUrl,
+        notRecorded: d.notRecorded,
+        ...libraryFieldsFor(d.sourceUrl, existing),
         occurredAt,
         companyId: company.id,
         companyName: company.name,

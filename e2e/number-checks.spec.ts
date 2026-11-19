@@ -16,6 +16,7 @@ async function signIn(page: Page, email: string, password: string) {
 test('a doubted meeting number reaches Biz Ops, who sets it and closes the check', async ({ page }) => {
   await signIn(page, 'alisa@cadence.local', 'password123');
   await page.goto('/meetings/new');
+  await page.getByLabel('Not recorded or in person').check();
   await page.getByLabel('Title').fill('E2E number check');
   await page.getByLabel('Date', { exact: true }).fill('2026-10-02');
   await page.getByRole('combobox', { name: 'Find a prospect in the CRM' }).fill('Dummy Three');

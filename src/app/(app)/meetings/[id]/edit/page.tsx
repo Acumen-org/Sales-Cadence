@@ -36,6 +36,7 @@ export default async function EditMeetingPage({ params }: { params: Promise<{ id
               bookedById: meeting.bookedById ?? '',
               title: meeting.title,
               sourceUrl: meeting.sourceUrl,
+              notRecorded: meeting.notRecorded,
               embedUrl: meeting.embedUrl,
               mediaUrl: meeting.mediaUrl,
               occurredAt: meetingDay(meeting.occurredAt),
