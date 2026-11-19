@@ -199,7 +199,7 @@ export function MeetingForm({ fos, initial, mode }: { fos: { id: string; name: s
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center"><h2 id="recording-heading" className="text-[14px] font-medium text-ink-900">Recording</h2><span className="ml-0.5 text-[12px] leading-4 text-red-600" aria-hidden>*</span></div>
           <label className="ml-auto flex cursor-pointer items-center gap-2 text-[13px] font-normal text-ink-700">
-            <input type="checkbox" name="notRecorded" checked={notRecorded} onChange={(e) => { setNotRecorded(e.target.checked); setError(null); }} className="h-4 w-4 rounded" />
+            <input type="checkbox" name="notRecorded" checked={notRecorded} onChange={(e) => { setNotRecorded(e.target.checked); setError(null); setExisting(null); }} className="h-4 w-4 rounded" />
             Not recorded or in person
           </label>
         </div>
