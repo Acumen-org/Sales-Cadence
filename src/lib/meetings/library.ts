@@ -153,7 +153,8 @@ async function libraryToken(): Promise<AppToken | { error: string }> {
   const token = await currentToken(c);
   if ('error' in token) return { error: `Microsoft gave Cadence no token: ${token.error}` };
   if (!mayReadFiles(token.roles)) return { error: 'The app needs the Files.Read.All application permission to read the recordings people paste.' };
-  if (!token.roles.includes(SITE_ROLE)) return { error: 'The app needs the Sites.Selected application permission, with write access granted on the library site.' };
+  // The permissions Microsoft put in the token, so an admin sees what is missing without guessing.
+  if (!token.roles.includes(SITE_ROLE)) return { error: `The app needs the Sites.Selected application permission (with admin consent), and write access granted on the library site. Microsoft's token for the app holds: ${token.roles.join(', ') || 'no application permissions'}.` };
   return token;
 }
 
