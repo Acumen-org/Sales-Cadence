@@ -619,6 +619,23 @@ model Meeting {
   embedUrl         String?
   /// Direct media file (mp4/webm) when known, played with a <video> element.
   mediaUrl         String?
+  /// Ticked on the form: the meeting was not recorded, or was held in person, so it has no link.
+  notRecorded      Boolean         @default(false)
+  /// The company's copy of a OneDrive/SharePoint recording (src/lib/meetings/library.ts): PENDING,
+  /// COPYING, DONE or FAILED; null when the link is not one Cadence copies. The pasted link stays in
+  /// sourceUrl, because the Teams transcript is found from the original file.
+  libraryStatus     String?
+  libraryError      String?
+  libraryTries      Int            @default(0)
+  /// When the next attempt may start.
+  libraryNextAt     DateTime?
+  /// Microsoft's address for following a copy in progress.
+  libraryMonitorUrl String?
+  libraryItemId     String?
+  /// The copy in the Meeting Recordings library, and the player SharePoint gives for it.
+  libraryUrl        String?
+  libraryEmbedUrl   String?
+  libraryCopiedAt   DateTime?
   occurredAt       DateTime
   durationSec      Int?
   companyId        String?

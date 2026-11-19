@@ -3,6 +3,7 @@ import { backfillMeetingsToCrm, meetingSchemaShape, missingMeetingTags, missingT
 import { backfillTeamsTranscripts } from '../lib/meetings/teams-transcript';
 import { MEETINGS_CHANGED_KEY, checkMeetingsInCrm } from '../lib/meetings/crm-check';
 import { backfillSharePointPlayers } from '../lib/meetings/sharepoint-player';
+import { runLibraryCopies } from '../lib/meetings/library';
 import { retryFailedWrites, sweepUnwrittenSyncs } from '../lib/engine/sync-retry';
 import { pruneActivityEvents, sweepUnprocessedEvents } from '../lib/engine/ingest';
 import { prisma } from '../lib/db';
@@ -203,6 +204,13 @@ async function sharePointPlayers(now:number){
  try{const played=await backfillSharePointPlayers();if(played===null)return;log('SharePoint recordings that now play',played);await prisma.setting.upsert({where:{key},create:{key,value:{at:new Date().toISOString(),played}},update:{value:{at:new Date().toISOString(),played}}});sharePointPlayersAt=Infinity;}catch(error){log('SharePoint players failed',error);}
 }
 /**
+ * Meeting recordings copied into the company's Meeting Recordings library (src/lib/meetings/library.ts):
+ * each tick follows the copies Microsoft is making and starts the next ones.
+ */
+async function libraryCopies(now:number){
+ try{const r=await runLibraryCopies(now);if(r&&(r.started||r.copied||r.failed))log('meeting recordings library',r);}catch(error){log('meeting recordings library failed',error);}
+}
+/**
  * N18: the CRM sync, the meeting checks and the meeting rewrites run in a loop of their own beside the
  * tick, as the nightly does, so a long one (a full listing, a rewrite of every meeting) never holds
  * up the scheduler, the write retries, moves, call import or mailbox reading.
@@ -234,6 +242,7 @@ async function tick(){
    await nightly.poke(new Date(now)).catch((error)=>log('nightly failed to start',error));
    await sharePointPlayers(now);
    await teamsTranscripts(now);
+   await libraryCopies(now);
    await phoneE164Backfill();
    await coldOutreachBackfill();
    await coldOutreachRelease();

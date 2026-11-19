@@ -14,7 +14,7 @@ test('an uploaded VTT follows real media playback and timestamps seek the player
   await page.getByRole('button', { name: /^Sign in/ }).click(); await page.waitForURL(/home/);
   await page.goto('/meetings/new');
   await page.getByLabel('Title', { exact: true }).fill('Playback regression');
-  await page.getByLabel('Recording or meeting link').fill('https://recordings.example.test/sample.wav');
+  await page.getByLabel('Recording link').fill('https://recordings.example.test/sample.wav');
   await page.getByLabel('Date', { exact: true }).fill('2026-09-20');
   await page.getByRole('combobox', { name: 'Find a prospect in the CRM' }).fill('Dummy One');
   await page.getByRole('listbox', { name: 'Find a prospect in the CRM results' }).getByRole('option', { name: /Dummy One/ }).click({ timeout: 20_000 });

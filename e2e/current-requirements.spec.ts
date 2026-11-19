@@ -67,7 +67,7 @@ test('Pod Manager and Biz Ops seats work with their distinct write permissions',
   const title = `Audit shared meeting${test.info().retry ? ` ${test.info().retry}` : ''}`;
   await page.goto('/meetings/new');
   await page.getByLabel('Title', { exact: true }).fill(title);
-  await page.getByLabel('Recording or meeting link').fill('https://example.com/audit.mp4');
+  await page.getByLabel('Recording link').fill('https://example.com/audit.mp4');
   await page.getByLabel('Booked by').selectOption({ index: 1 });
   await page.getByRole('combobox', { name: 'Find a prospect in the CRM' }).fill('Dummy One');
   await page.getByRole('listbox', { name: 'Find a prospect in the CRM results' }).getByRole('option', { name: /Dummy One/ }).click({ timeout: 20_000 });

@@ -199,7 +199,7 @@ export function meetingFacts(schema: TwentyMeetingSchema, data: Record<string, u
 
 const meetingSelect = {
   id: true, title: true, sourceUrl: true, occurredAt: true, products: true, companyId: true, companyName: true, twentyNoteId: true, twentyMeetingId: true, review: true,
-  meetingNumber: true,
+  meetingNumber: true, libraryStatus: true, libraryUrl: true,
   bookedBy: { select: { name: true, twentyMemberId: true } },
   attendees: { select: { name: true, email: true, personId: true, userId: true, external: true, prospect: true, person: { select: { firstName: true, lastName: true } } } },
 } as const;
@@ -209,8 +209,10 @@ const meetingSelect = {
  * caller can keep it for a retry. Returns the record's id (or the note's, without a Meetings object).
  */
 export async function syncMeetingToCrm(meetingId: string): Promise<string | null> {
-  const meeting = await prisma.meeting.findUnique({ where: { id: meetingId }, select: meetingSelect });
-  if (!meeting || meeting.review !== 'APPROVED') return null;
+  const row = await prisma.meeting.findUnique({ where: { id: meetingId }, select: meetingSelect });
+  if (!row || row.review !== 'APPROVED') return null;
+  // The recording Twenty links to is the company's copy once it is made: everyone can open it.
+  const meeting = { ...row, sourceUrl: row.libraryStatus === 'DONE' && row.libraryUrl ? row.libraryUrl : row.sourceUrl };
   const client = await getTwentyClient();
   const schema = await client.meetingSchema();
   if (schema) {

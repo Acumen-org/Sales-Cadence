@@ -7,6 +7,7 @@ import { logAudit, userActor } from '../audit';
 import { env } from '../env';
 import { trustedLoginUrl } from '../auth/microsoft';
 import { getSettings, saveSettingsSection } from '../settings';
+import { libraryConfig, normaliseSiteUrl, queueExistingRecordings, setLibrary } from '../meetings/library';
 import type { ActionResult } from './users';
 
 // Any 8-4-4-4-12 hex id, as Zod 3's uuid() took; Zod 4's uuid() also wants RFC version bits.
@@ -51,4 +52,26 @@ export async function saveSignInSettingsAction(formData: FormData): Promise<Acti
   revalidatePath('/settings');
   revalidatePath('/login');
   return { ok: true, message: 'Sign-in saved.' };
+}
+
+/** The Meeting Recordings library's address, saved and checked: Cadence finds the site and can write to it. */
+export async function saveMeetingLibraryAction(formData: FormData): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  const siteUrl = normaliseSiteUrl(String(formData.get('siteUrl') ?? ''));
+  if (!siteUrl) return { ok: false, error: 'Paste the SharePoint site address, like https://contoso.sharepoint.com/sites/MeetingRecordings.' };
+  const config = await setLibrary(siteUrl);
+  await logAudit({ entityType: 'settings', entityId: 'meetingLibrary', action: 'updated', actor: userActor(admin), details: { siteUrl, ok: config.check?.ok ?? false } });
+  revalidatePath('/settings');
+  return config.check?.ok ? { ok: true, message: 'Library saved. Cadence can copy recordings into it.' } : { ok: false, error: config.check?.why ?? 'The library could not be checked.' };
+}
+
+/** Every recording already in Cadence, queued for the library (failed ones tried again). */
+export async function copyExistingRecordingsAction(): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  const config = await libraryConfig();
+  if (!config?.check?.ok) return { ok: false, error: 'Save a library Cadence can write to first.' };
+  const queued = await queueExistingRecordings();
+  await logAudit({ entityType: 'settings', entityId: 'meetingLibrary', action: 'queued_existing', actor: userActor(admin), details: { queued } });
+  revalidatePath('/settings');
+  return { ok: true, message: queued ? `${queued} ${queued === 1 ? 'recording' : 'recordings'} queued. The worker copies two every couple of minutes.` : 'Nothing to copy: every recording is in the library or waiting.' };
 }

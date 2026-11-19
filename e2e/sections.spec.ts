@@ -115,7 +115,7 @@ test('a meeting plays in the app with its transcript and no analysis until a mod
   await loginAs(page, 'Alisa');
   await page.goto('/meetings/new');
   // The link is read as it is typed: a media file plays here, and the form shows it playing.
-  await page.getByLabel('Recording or meeting link').fill('https://files.example.com/e2e/recording.mp4');
+  await page.getByLabel('Recording link').fill('https://files.example.com/e2e/recording.mp4');
   await expect(page.getByText('Plays in Cadence', { exact: true })).toBeVisible();
   await expect(page.getByText(/Media file/)).toBeVisible();
   await expect(page.locator('form video')).toHaveCount(1);
@@ -196,7 +196,7 @@ test('a Zoom recording link is offered as a link-out, not a broken frame', async
   await loginAs(page, 'Alisa');
   await page.goto('/meetings/new');
   await page.getByLabel('Title').fill('E2E zoom review');
-  await page.getByLabel('Recording or meeting link').fill('https://acme.zoom.us/rec/share/e2e');
+  await page.getByLabel('Recording link').fill('https://acme.zoom.us/rec/share/e2e');
   await expect(page.getByText('Opens in Zoom', { exact: true })).toBeVisible();
   await page.getByLabel('Date', { exact: true }).fill('2026-09-08');
   await page.getByRole('combobox', { name: 'Find a prospect in the CRM' }).fill('Dummy Two');
@@ -338,7 +338,7 @@ test('a recording Twenty holds on a person is added from their page, pre-filled'
   // still says when it happened - Twenty has no meeting time and Cadence does not invent one.
   await page.goto('/meetings/new?personId=dummy-04');
   await expect(page.getByLabel('Title')).toHaveValue(/Dummy Four/);
-  await expect(page.getByLabel('Recording or meeting link')).toHaveValue(/ForBiggerMeetings\.mp4/);
+  await expect(page.getByLabel('Recording link')).toHaveValue(/ForBiggerMeetings\.mp4/);
   // The person is already a prospect, and whoever adds it is on the team.
   await expect(page.getByRole('list', { name: 'Prospects' })).toContainText('Dummy Four');
   await expect(page.getByRole('list', { name: 'Our team on the call' })).toContainText('Alisa Senior');

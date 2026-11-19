@@ -36,6 +36,12 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
   const link = parseMeetingLink(meeting.sourceUrl);
   // A sharing link Cadence found SharePoint's player for reads as that player, not as the link.
   const player = meeting.embedUrl && !link.embedUrl ? parseMeetingLink(meeting.embedUrl) : link;
+  // The company's copy, once made, is what plays and what opens: everyone can see it and it does not
+  // expire (src/lib/meetings/library.ts). A direct SharePoint file of the original gives way to it.
+  const copied = meeting.libraryStatus === 'DONE' && meeting.libraryEmbedUrl ? { url: meeting.libraryUrl ?? meeting.sourceUrl, embedUrl: meeting.libraryEmbedUrl } : null;
+  const mediaUrl = copied && meeting.mediaUrl && /\.sharepoint\.com/i.test(new URL(meeting.mediaUrl, 'https://x').hostname) ? null : meeting.mediaUrl;
+  const openUrl = copied?.url ?? meeting.sourceUrl;
+  const libraryWords: Record<string, string> = { DONE: 'Saved to the company library', PENDING: 'Waiting to be copied to the company library', COPYING: 'Being copied to the company library', FAILED: 'Not copied to the company library' };
   const analysis = parseAnalysis(meeting.analysis);
   // S27: an analysis "in progress" for over ten minutes was cut off (a restart): offered again.
   const analysisStale = meeting.analysisStatus === 'PENDING' && meeting.updatedAt.getTime() < Date.now() - 10 * 60_000;
@@ -68,9 +74,9 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
           actions={
             <>
               <FavouriteButton meetingId={meeting.id} favourite={meeting.favourites.length > 0} />
-              {meeting.sourceUrl ? (
-                <a href={meeting.sourceUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm">
-                  <IconExternal size={13} /> Open original
+              {openUrl ? (
+                <a href={openUrl} target="_blank" rel="noreferrer" className="btn-secondary btn-sm">
+                  <IconExternal size={13} /> {copied ? 'Open recording' : 'Open original'}
                 </a>
               ) : null}
               {mayEdit ? (
@@ -95,7 +101,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
         <div className="space-y-5 rounded-xl border border-line bg-white p-5">
           <RecordFields className="lg:grid-cols-6" items={[
             { label: 'Date', value: formatLocalDate(meetingDay(meeting.occurredAt), 'long') },
-            { label: 'Platform', value: meeting.sourceUrl ? platformLabel(meeting.provider, meeting.sourceUrl) : null },
+            { label: 'Platform', value: meeting.sourceUrl ? platformLabel(meeting.provider, meeting.sourceUrl) : meeting.notRecorded ? 'Not recorded or in person' : null },
             { label: 'Account', value: meeting.companyId ? <Link href={`/accounts/${meeting.companyId}`} className="text-brand-700 hover:underline">{meeting.companyName}</Link> : meeting.companyName ?? null },
             { label: 'Booked by', value: meeting.bookedBy?.name ?? null },
             { label: 'Added by', value: meeting.createdBy?.name ?? null },
@@ -108,11 +114,11 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
           <MeetingStage
             title={meeting.title}
             provider={meeting.provider}
-            sourceUrl={meeting.sourceUrl}
-            embedUrl={meeting.embedUrl}
-            mediaUrl={meeting.mediaUrl}
-            providerLabel={link.label}
-            providerNote={player.note}
+            sourceUrl={openUrl}
+            embedUrl={copied?.embedUrl ?? meeting.embedUrl}
+            mediaUrl={mediaUrl}
+            providerLabel={copied ? 'Meeting Recordings library' : link.label}
+            providerNote={copied ? null : player.note}
             isJoinLink={link.isJoinLink}
             transcript={meeting.transcript}
             transcriptFormat={meeting.transcriptFormat}
@@ -190,7 +196,9 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
             <div className="p-4">
               <KeyValue
                 items={[
-                  { k: 'Provider', v: link.label },
+                  { k: 'Provider', v: meeting.sourceUrl ? link.label : meeting.notRecorded ? 'Not recorded or in person' : 'No link' },
+                  ...(meeting.libraryStatus ? [{ k: 'Company library', v: <span className="space-y-1"><Badge tone={meeting.libraryStatus === 'DONE' ? 'green' : meeting.libraryStatus === 'FAILED' ? 'amber' : 'gray'}>{libraryWords[meeting.libraryStatus] ?? meeting.libraryStatus}</Badge>{meeting.libraryError && meeting.libraryStatus !== 'DONE' ? <span className="block text-[12px] text-ink-600">{meeting.libraryError}</span> : null}</span> }] : []),
+                  ...(copied && meeting.sourceUrl ? [{ k: 'Original', v: <a href={meeting.sourceUrl} target="_blank" rel="noreferrer" className="text-brand-700 hover:underline">Organizer&apos;s OneDrive</a> }] : []),
                 ]}
               />
             </div>
