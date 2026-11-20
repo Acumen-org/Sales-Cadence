@@ -133,6 +133,10 @@ const TITLES: Record<string, string> = {
   transcript_saved: 'Transcript saved',
   prospects_linked: 'Prospects linked to the meeting',
   crm_duplicate_removed: 'A duplicate of the meeting removed from the CRM',
+  // Meetings with no recording (owner, 20 Nov 2026).
+  declined: 'Meeting declined: out of Cadence and the CRM',
+  added_back: 'Declined meeting added back',
+  crm_declined_removed: 'A declined meeting removed from the CRM',
   plan_updated: 'Sequence plan updated',
   // Administration (not in Activity, but never a raw name).
   'user:created': 'Team member added',

@@ -107,7 +107,7 @@ describe('D4: mistaken opt-outs and the Tickets section', () => {
     await raiseOptOutTicketAction(form({ sandboxContactId: c.id, reason: 'Wrong outcome' }));
     await prisma.meetingNumberTicket.create({ data: { personId: 'person-01', meetingDay: '2026-11-03', shownNumber: 2, expectedNumber: 1, note: 'First meeting', raisedById: b.users.alisa.id } });
     const open = await listTickets(true);
-    expect(open.map((r) => [r.kindLabel, r.href.split('/')[1]])).toEqual([['Opt-out', 'tickets'], ['Meeting number', 'meetings']]);
+    expect(open.map((r) => [r.kindLabel, r.href.split('/')[1]])).toEqual([['Opt-out', 'tickets'], ['Meeting number', 'tickets']]);
     expect(await openTicketCount()).toBe(2);
   });
 
