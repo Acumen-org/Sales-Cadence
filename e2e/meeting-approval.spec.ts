@@ -106,5 +106,7 @@ test('a reached call can end with no next step, and the form asks why', async ({
   await expect(form).toContainText('Say why there is no next step.');
   await why.fill('A one-off call about event tickets');
   await form.getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByText('Saved. No next step is set.')).toBeVisible();
+  // The call's note says why, on the person's activity (a live refresh can redraw the dialog over
+  // its "Saved" line, so the note is what is checked).
+  await expect(page.getByText('No next step: A one-off call about event tickets').first()).toBeVisible();
 });
