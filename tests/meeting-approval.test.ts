@@ -168,6 +168,20 @@ describe('approve and decline', () => {
     expect(await createMeetingAction(form({ occurredAt: '2026-11-13' }))).toMatchObject({ ok: true });
   });
 
+  it('the genuine meeting beside a declined duplicate stays editable; moving another onto it is refused', async () => {
+    const genuine = await add(b.users.karson, { title: 'Recorded call', sourceUrl: 'https://acumen.zoom.us/rec/share/abc' });
+    const dupe = await add(b.users.karson, { title: 'Duplicate entry', occurredAt: '2026-11-10' });
+    as(sam);
+    expect(await declineMeetingAction(payload(dupe.meeting.id, { reason: 'Duplicate of the recorded call' }))).toMatchObject({ ok: true });
+    as(b.users.karson);
+    const edit = form({ title: 'Recorded call, renamed', sourceUrl: 'https://acumen.zoom.us/rec/share/abc' }); edit.set('meetingId', genuine.meeting.id);
+    expect(await updateMeetingAction(edit)).toMatchObject({ ok: true });
+    const other = await add(b.users.karson, { title: 'Later call', occurredAt: '2026-11-20', sourceUrl: 'https://acumen.zoom.us/rec/share/zzz' });
+    as(b.users.karson);
+    const onto = form({ title: 'Later call', occurredAt: '2026-11-10', sourceUrl: 'https://acumen.zoom.us/rec/share/zzz' }); onto.set('meetingId', other.meeting.id);
+    expect(await updateMeetingAction(onto)).toMatchObject({ ok: false, error: expect.stringContaining('was declined') });
+  });
+
   it('only the Sales Leader, Biz Ops or an admin adds a declined meeting back; it counts and goes to the CRM again', async () => {
     const { meeting } = await add(b.users.karson);
     as(sam);

@@ -184,11 +184,11 @@ export async function askForApproval(meetingId: string, from: { id: string }): P
 }
 
 /** The approvers' bell lines for this meeting say how it was settled. */
-async function settleAsks(meetingId: string, resolution: 'approved' | 'declined' | 'link_added', now: Date, tx: Tx = prisma) {
+async function settleAsks(meetingId: string, resolution: 'approved' | 'declined' | 'link_added' | 'deleted', now: Date, tx: Tx = prisma) {
   await tx.notification.updateMany({ where: { kind: 'meeting_approval', resolution: null, payload: { path: ['meetingId'], equals: meetingId } }, data: { resolution, resolvedAt: now } });
 }
-export async function settleApprovalAsks(meetingId: string, now = new Date()) {
-  await settleAsks(meetingId, 'link_added', now);
+export async function settleApprovalAsks(meetingId: string, resolution: 'link_added' | 'deleted' = 'link_added', now = new Date()) {
+  await settleAsks(meetingId, resolution, now);
 }
 
 /**

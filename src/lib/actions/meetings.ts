@@ -320,7 +320,11 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
     if (transcriptKey(d.transcript) === opened) transcript = existing.transcript;
     else if (transcriptKey(transcript) !== transcriptKey(existing.transcript)) return { ok: false, error: 'The transcript changed while you had this form open. Reload the page to see it, then make your change again.' };
   }
-  const declined = await declinedTwin(prospectIds, occurredAt, id);
+  // Only a change of day or prospects can turn this meeting into one that was declined: the genuine
+  // meeting beside a declined duplicate stays editable.
+  const before = new Set(prospectsOf(existing.attendees));
+  const moved = existing.occurredAt.getTime() !== occurredAt.getTime() || prospectIds.some((p) => !before.has(p));
+  const declined = moved ? await declinedTwin(prospectIds, occurredAt, id) : null;
   if (declined) return { ok: false, error: declined };
   const approval = await approvalForSave({ sourceUrl: d.sourceUrl, bookedById: d.bookedById }, existing, toActor(user));
 
@@ -415,6 +419,7 @@ export async function deleteMeetingAction(formData: FormData): Promise<ActionRes
   if (!existing || existing.review === 'DISMISSED') return { ok: false, error: 'Meeting not found.' };
   if (!(await mayManageMeeting(user, existing))) return { ok: false, error: whyNotManageMeeting(toActor(user), 'delete this meeting') };
   await prisma.meeting.delete({ where: { id } });
+  if (existing.approval === 'WAITING') await settleApprovalAsks(id, 'deleted');
   await logAudit({ entityType: 'meeting', entityId: id, action: 'deleted', actor: userActor(user), details: { title: existing.title } });
   await afterResponse(() => removeMeetingFromCrm(existing));
   // Its prospects' later meetings each move down one.

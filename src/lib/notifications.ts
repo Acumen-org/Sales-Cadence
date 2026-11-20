@@ -195,7 +195,7 @@ export function bellWords(n: Pick<Row, 'id' | 'kind' | 'personId' | 'sandboxCont
     case 'meeting_approval': {
       // Owner, 20 Nov 2026: a meeting with no recording waits for the booker's Sales Leader (or an admin).
       const day = str(p.day), booked = str(p.bookedBy);
-      const settled: Record<string, string> = { approved: 'It was approved.', declined: 'It was declined.', link_added: 'A recording link was added, so it needs no approval now.' };
+      const settled: Record<string, string> = { approved: 'It was approved.', declined: 'It was declined.', link_added: 'A recording link was added, so it needs no approval now.', deleted: 'It was deleted.' };
       return {
         kind, name: str(p.title) ?? 'A meeting', company: null,
         title: `${from} added a meeting with no recording${day && isLocalDate(day) ? ` on ${formatLocalDate(day)}` : ''}${booked ? `, booked by ${booked}` : ''}. Approve or decline it.`,
