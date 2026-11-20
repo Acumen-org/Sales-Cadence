@@ -216,8 +216,8 @@ describe('calls: audit fixes of 12 Nov', () => {
 
   it('M33, M46: an unanswered outcome keeps no rating, and notes too long are refused, not cut', () => {
     const ctx = { rules: DEFAULT_SETTINGS.rules, today: '2026-11-03' as never };
-    expect(validateCallForm({ outcome: 'no_answer', rating: 4, nextStep: 'none' }, ctx)).toEqual(expect.objectContaining({ ok: true, value: expect.objectContaining({ rating: null }) }));
-    expect(validateCallForm({ outcome: 'no_answer', notes: 'x'.repeat(10_001), nextStep: 'none' }, ctx)).toEqual(expect.objectContaining({ ok: false, field: 'notes' }));
+    expect(validateCallForm({ outcome: 'no_answer', rating: 4, nextStep: 'none', noNextStepReason: 'A one-off call' }, ctx)).toEqual(expect.objectContaining({ ok: true, value: expect.objectContaining({ rating: null }) }));
+    expect(validateCallForm({ outcome: 'no_answer', notes: 'x'.repeat(10_001), nextStep: 'none', noNextStepReason: 'A one-off call' }, ctx)).toEqual(expect.objectContaining({ ok: false, field: 'notes' }));
   });
 
   it('M34: a time typed just after the clock goes back is the right hour', () => {

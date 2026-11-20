@@ -35,7 +35,7 @@ describe('outreach metrics and the subject layer', () => {
     expect(cold).toEqual(expect.objectContaining({ audience: 'SANDBOX', podId: b.pods.Alisa.id }));
     await recordCallTouch(cold);
     expect((await prisma.touch.findFirstOrThrow({ where: { sandboxContactId: c.id } })).audience).toBe('SANDBOX');
-    await submitCallForm(cold.id, { outcome: 'no_answer', nextStep: 'none' }, alisa());
+    await submitCallForm(cold.id, { outcome: 'no_answer', nextStep: 'none', noNextStepReason: 'A one-off call' }, alisa());
     expect((await prisma.callForm.findUniqueOrThrow({ where: { callId: cold.id } })).audience).toBe('SANDBOX');
     const crm = await logManualCall({ userId: b.users.alisa.id, personId: 'person-01' });
     expect(crm).toEqual(expect.objectContaining({ audience: 'CRM', podId: b.pods.Alisa.id }));

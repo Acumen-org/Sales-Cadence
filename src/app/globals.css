@@ -329,6 +329,18 @@
   .table-meetings td[data-label="Favourite"]::before, .table-meetings td[data-label="Meeting"]::before { display: none; }
 }
 
+/* Meetings > Approval: the same cards as the meetings list on a narrow screen. */
+.table-approvals td { overflow-wrap: break-word; }
+@media (max-width: 1100px) {
+  .table-approvals colgroup, .table-approvals thead { display: none; }
+  .table-approvals, .table-approvals tbody { display: block; }
+  .table-approvals tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px; border-bottom: 1px solid #e2e8e5; gap: 8px; }
+  .table-approvals tbody td { display: block; min-width: 0; padding: 4px 8px; border: 0; }
+  .table-approvals td::before { content: attr(data-label); display: block; font-size: 11px; color: #687b75; margin-bottom: 4px; }
+  .table-approvals td[data-label="Meeting"], .table-approvals td[data-label="Decision"], .table-approvals td[data-label="Why"], .table-approvals td[data-label="Add back"] { grid-column: 1 / -1; }
+  .table-approvals td[data-label="Meeting"]::before, .table-approvals td[data-label="Decision"]::before, .table-approvals td[data-label="Add back"]::before { display: none; }
+}
+
 /* ---------- the embed-link walkthrough (components/meetings/embed-guide.tsx), a 12s loop ---------- */
 .eg-stage { position: relative; height: 176px; overflow: hidden; border-radius: 10px; background: #f5f6f4; font-size: 10.5px; color: #3c4a44; }
 .eg-window { position: absolute; inset: 6px; border: 1px solid #e3e8e2; border-radius: 8px; background: #fff; }

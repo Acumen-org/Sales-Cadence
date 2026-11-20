@@ -6,10 +6,10 @@ import { mayManageForm } from '@/lib/calls/form-tools';
 import { formHolderOf } from '@/lib/calls/form-holder';
 import { callOwnerId, HIDDEN_CALL, mayHearCall } from '@/lib/calls/access';
 import { prisma } from '@/lib/db';
-import { formatInstant, formatLocalDate } from '@/lib/dates';
+import { formatInstant } from '@/lib/dates';
 import { getSettings } from '@/lib/settings';
 import { callOutcomes } from '@/lib/engine/outcomes';
-import { NEXT_STEP_LABELS } from '@/lib/sandbox/history-notes';
+import { nextStepWords } from '@/lib/sandbox/history-notes';
 import { coldRef, personRef, subjectHref } from '@/lib/subject';
 import { optionLabels } from '@/lib/twenty/labels';
 import { Badge, Notice, RecordFields, Surface, ViewHeader } from '@/components/ui';
@@ -82,7 +82,7 @@ export default async function CallPage({ params }: { params: Promise<{ id: strin
           <RecordFields items={[
             { label: 'Outcome', value: outcome },
             { label: 'Rating', value: call.form.rating ? `${call.form.rating}/5` : null },
-            { label: 'Next step', value: `${call.form.nextStepLabel ?? NEXT_STEP_LABELS[call.form.nextStep] ?? call.form.nextStep}${call.form.nextStepDate ? `, ${formatLocalDate(call.form.nextStepDate, 'long')}` : ''}` },
+            { label: 'Next step', value: nextStepWords(call.form) },
             { label: 'Interest', value: call.form.interest },
             { label: 'Decision maker', value: call.form.decisionMaker },
             { label: 'Products discussed', value: optionLabels(call.form.productsDiscussed) || null },

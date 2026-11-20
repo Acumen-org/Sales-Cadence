@@ -174,6 +174,8 @@ model User {
   enrichmentMarks EnrichmentMark[] @relation("EnrichmentAssignee")
   mipStars        MipStars[]       @relation("MipStarsBy")
   bookedMeetings  Meeting[]        @relation("MeetingBookedBy")
+  meetingsApproved Meeting[]       @relation("MeetingApprovedBy")
+  meetingsDeclined Meeting[]       @relation("MeetingDeclinedBy")
   numberTicketsRaised   MeetingNumberTicket[] @relation("NumberTicketRaisedBy")
   numberTicketsResolved MeetingNumberTicket[] @relation("NumberTicketResolvedBy")
   sandboxContacts SandboxContact[] @relation("SandboxOwner")
@@ -609,6 +611,14 @@ enum MeetingReview {
   DISMISSED
 }
 
+/// A meeting with no recording link waits for the booked-by FO's Sales Leader (or an admin): owner,
+/// 20 November 2026. It counts and is in the CRM while it waits; a decline takes it out of both.
+enum MeetingApproval {
+  WAITING
+  APPROVED
+  DECLINED
+}
+
 model Meeting {
   id               String          @id @default(uuid())
   title            String
@@ -681,6 +691,19 @@ model Meeting {
   review           MeetingReview   @default(APPROVED)
   reviewedById     String?
   reviewedAt       DateTime?
+  /// No recording link: the Sales Leader's approval (src/lib/meetings/approval.ts). Null when none is
+  /// needed (it has a link, or it was saved before approvals began). A decline also sets review to
+  /// DISMISSED, so every list, report and the CRM drop it, and nothing brings it back but an add-back.
+  approval         MeetingApproval?
+  /// Who approved it or added it back, and when.
+  approvalById     String?
+  approvalBy       User?           @relation("MeetingApprovedBy", fields: [approvalById], references: [id], onDelete: SetNull)
+  approvalAt       DateTime?
+  /// Who declined it, when and why; kept after an add-back, for the history.
+  declinedById     String?
+  declinedBy       User?           @relation("MeetingDeclinedBy", fields: [declinedById], references: [id], onDelete: SetNull)
+  declinedAt       DateTime?
+  declineReason    String?
   createdAt        DateTime        @default(now())
   favourites       MeetingFavourite[]
   updatedAt        DateTime        @updatedAt
@@ -693,6 +716,7 @@ model Meeting {
   @@index([companyId, occurredAt])
   @@index([createdById])
   @@index([review, occurredAt])
+  @@index([approval, occurredAt])
   @@index([analysisStatus])
   @@index([twentyMeetingId])
   /// T34: made by the migration 20260929000000_meeting_booked_by; named here so the two agree.
@@ -1440,6 +1464,8 @@ model CallForm {
   nextActionId      String?
   /// The next step's "What" (N043), as its next action reads.
   nextStepLabel     String?
+  /// Why the rep chose no next step when other steps were open to them (owner, 20 November 2026).
+  noNextStepReason  String?
   /// What leaders look at (B025, B029): long_voicemail | no_conversation | called_opted_out.
   flags             String[] @default([])
   /// CRM contact: at once. Sandbox contact: when moved.

@@ -15,7 +15,7 @@ import type { ActionResult } from './users';
 /**
  * "Think this is wrong?" on a meeting number (owner, 30 October 2026). Whoever adds a meeting can
  * say the number shown for a prospect looks wrong, with what it should be or what they know; Biz
- * Ops sees it under Meetings > Number checks, looks at every meeting with that prospect, sets the
+ * Ops sees it under Tickets, looks at every meeting with that prospect, sets the
  * number on one if it is wrong (the meetings after it count on from there, and Twenty hears about
  * each one that moved), and closes it with what they found.
  */
@@ -47,7 +47,7 @@ export async function raiseNumberCheckAction(input: z.input<typeof Raise>): Prom
   if (!person) return { ok: false, error: 'That prospect is no longer in the CRM.' };
   const ticket = await prisma.meetingNumberTicket.create({ data: { personId: d.personId, meetingId: meeting?.id ?? null, meetingDay: day, shownNumber: d.shownNumber, expectedNumber: d.expectedNumber ?? null, note: d.note || null, raisedById: user.id } });
   await logAudit({ entityType: 'numberCheck', entityId: ticket.id, action: 'raised', actor: userActor(user), details: { personId: d.personId, shown: d.shownNumber, expected: d.expectedNumber ?? null } });
-  revalidatePath('/meetings/checks');
+  revalidatePath('/tickets', 'layout');
   return { ok: true, id: ticket.id };
 }
 
@@ -65,12 +65,12 @@ export async function setMeetingNumberAction(formData: FormData): Promise<Action
   const changed = await renumberProspects([row.personId]);
   await logAudit({ entityType: 'meeting', entityId: row.meetingId, action: number === null ? 'number_cleared' : 'number_set', actor: userActor(user), details: { personId: row.personId, from: row.numberSetTo, to: number } });
   await afterResponse(async () => { for (const id of changed) await pushMeetingToCrm(id); });
-  revalidatePath('/meetings/checks', 'layout');
+  revalidatePath('/tickets', 'layout');
   revalidatePath('/meetings');
   return { ok: true, message: number === null ? 'Counted again from the meetings before it.' : changed.length ? `Set. ${changed.length} ${changed.length === 1 ? 'meeting' : 'meetings'} renumbered.` : 'Set. No number changed.' };
 }
 
-/** Close a check with what was found; the person who raised it sees the answer under Number checks. */
+/** Close a check with what was found; the person who raised it sees the answer on the check's page. */
 export async function closeNumberCheckAction(formData: FormData): Promise<ActionResult> {
   const user = await requireUser();
   if (!canCheckMeetingNumbers(toActor(user))) return { ok: false, error: NOT_ALLOWED };
@@ -79,7 +79,6 @@ export async function closeNumberCheckAction(formData: FormData): Promise<Action
   const { count } = await prisma.meetingNumberTicket.updateMany({ where: { id, open: true }, data: { open: false, resolvedById: user.id, resolvedAt: new Date(), resolution: resolution || null } });
   if (!count) return { ok: false, error: 'This check is already closed.' };
   await logAudit({ entityType: 'numberCheck', entityId: id, action: 'closed', actor: userActor(user), details: { resolution: resolution || null } });
-  revalidatePath('/meetings/checks', 'layout');
   revalidatePath('/tickets', 'layout');
   return { ok: true, message: 'Closed.', redirectTo: '/tickets' };
 }
@@ -92,6 +91,6 @@ export async function reopenNumberCheckAction(formData: FormData): Promise<Actio
   const { count } = await prisma.meetingNumberTicket.updateMany({ where: { id, open: false }, data: { open: true, resolvedById: null, resolvedAt: null } });
   if (!count) return { ok: false, error: 'This check is already open.' };
   await logAudit({ entityType: 'numberCheck', entityId: id, action: 'reopened', actor: userActor(user) });
-  revalidatePath('/meetings/checks', 'layout');
+  revalidatePath('/tickets', 'layout');
   return { ok: true, message: 'Open again.' };
 }

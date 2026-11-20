@@ -1349,7 +1349,7 @@ Built on the local branch `outreach-sandbox` from Rahul's brief of 2 November an
   - Removing or erasing a cold contact discards their calls still waiting for a form ("The contact
     was removed, so the call needs no form."); a migration does the same for removals made before.
   - Meetings has no Number checks list any more: Tickets (admins and Biz Ops only) lists them with
-    the other tickets. /meetings/checks opens Tickets; one check still opens at /meetings/checks/[id].
+    the other tickets. /meetings/checks opens Tickets; one check opens at /tickets/checks/[id] (moved 20 Nov 2026).
   - Cold outreach has no Tasks tab: cold work is done from Tasks with everything else. The old
     address opens /tasks, and the sidebar's Cold outreach count is gone (Tasks counts it).
   - Cold outreach's step strip is gone. The contacts list shows four pills (My contacts, or All for
@@ -1416,3 +1416,23 @@ Plan: `Notes/linkedin-2026-11-12/PLAN.md`. Console developer's spec: https://cla
 
 - **Owner:** "anyone, including biz ops, can view meetings and add meetings." `canCreateMeeting` is true for every role, so Biz Ops sees Add meeting, opens the form, reads a pasted link and raises a meeting-number check like everyone else.
 - **Changing a saved meeting** is unchanged: the person who recorded it, admins, and the Senior FOs, Sales Leaders and Pod Managers of a pod whose contact attended. A Biz Ops user can therefore edit or delete the meetings they added themselves.
+
+## Meetings with no recording need the Sales Leader's approval (20 November 2026)
+
+- **Owner:** "meetings without any recording link need approval from the sales leader ... If declined, biz ops is notified and the booked by FO is notified for a reason that will be recorded. Declined meetings should retract from the CRM and should not be added back unless sales leader or biz ops adds it back. Approval power is only for the sales leader of that pod ... Also, the admin has this power too." Where it shows: a tab in Meetings, `/meetings/approval`.
+- **Who decides.** The Sales Leaders of the booked-by FO's pods, and admins (`canApproveMeeting`). Not Pod Managers or Senior FOs. A Sales Leader never decides a meeting they booked; a pod with no Sales Leader asks the admins. Whoever adds a meeting they could approve (an admin, or the pod's Sales Leader) approves it by adding it.
+- **While it waits** it counts and is in the CRM (`Meeting.approval = WAITING`, `review` stays APPROVED), with a "Waiting for approval" badge, a count on Meetings in the sidebar and a bell line for each approver.
+- **Decline** needs a reason. It sets `review = DISMISSED` (so every list, report, number and the API drop it), removes its CRM record, numbers its prospects again, and tells Biz Ops, the booked-by FO and whoever added it, with the reason. The meetings check also removes any CRM record of a declined meeting left behind. A meeting with the same prospect on the same day cannot be saved again; a declined meeting cannot be edited.
+- **Add back:** that Sales Leader, Biz Ops or an admin, from the Declined tab or the meeting's page. It counts and goes to the CRM again; the booked-by FO is told.
+- **When it asks.** Only when a meeting is saved without a link for the first time (new, or its link taken off). Meetings saved before 20 Nov 2026 without a link are not asked about. A link added to a waiting meeting settles it.
+- **Tabs.** Sales Leaders and admins see All meetings, Waiting for approval and Declined; Biz Ops see All meetings and Declined. Everyone else sees Meetings without tabs.
+
+## Number checks live under Tickets (20 November 2026)
+
+- **Owner:** "/meetings/checks was replaced by /ticket page ... Please remove /meetings/checks." The list page is gone; a check's own page moved to `/tickets/checks/[id]`. Old links redirect (`next.config.mjs`).
+
+## A call can end with no next step, with the reason (20 November 2026)
+
+- **Owner:** Alyssa called Sue Herzog, a one-off call with no next step, and could not save the form without one ("add that option but also make it mandatory to give a reason"). The form had refused No further action after a reached call; she had to type a dated "No Follow Up" step.
+- **Now** No further action is offered after any outcome except Meeting booked, and choosing it asks "Why no next step" (required, up to 500 characters), reached or not. Where the form allows nothing else (Not interested, Asked not to be contacted, Wrong number, nobody matched, a contact who can take no next step) no reason is asked.
+- **The reason** is kept on the form (`CallForm.noNextStepReason`) and reads "No next step: why" on the call, the cold contact's history and the CRM note. A cold contact left this way is Closed ("Closed · No next step"), not under Needs a next step, until someone sets a new next step.

@@ -39,6 +39,30 @@ export function deleteMeetingConfirm(m: { title?: string | null; inCrm: boolean 
   };
 }
 
+/** Owner, 20 Nov 2026: a meeting with no recording, declined by its Sales Leader or an admin. */
+export function declineMeetingConfirm(m: { title: string; bookedBy: string | null }): ConfirmOptions {
+  return {
+    title: `Decline "${m.title}"?`,
+    effects: [
+      'It leaves Cadence: the meetings list, Reports and every meeting number.',
+      'Its record in the CRM is removed.',
+      `Biz Ops and ${m.bookedBy ?? 'the FO who booked it'} are told, with your reason.`,
+      'Nobody can add it again as a new meeting. Its Sales Leader, Biz Ops or an admin can add it back.',
+    ],
+    confirmLabel: 'Decline meeting',
+    tone: 'danger',
+    reason: { label: 'Why are you declining it?', required: true, placeholder: 'No proof the meeting took place' },
+  };
+}
+
+export function addMeetingBackConfirm(m: { title: string; bookedBy: string | null }): ConfirmOptions {
+  return {
+    title: `Add "${m.title}" back?`,
+    effects: ['It counts again: in the meetings list, Reports and its prospects\' meeting numbers.', 'It is written to the CRM again.', `${m.bookedBy ?? 'The FO who booked it'} is told.`],
+    confirmLabel: 'Add it back',
+  };
+}
+
 export function fullRefreshConfirm(): ConfirmOptions {
   return {
     title: 'Pull every person and company from the CRM?',

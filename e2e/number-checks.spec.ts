@@ -46,12 +46,17 @@ test('a doubted meeting number reaches Biz Ops, who sets it and closes the check
   // Meetings no longer has its own Number checks list (owner, 9 Nov 2026): Tickets is the one place.
   await page.goto('/meetings');
   await expect(page.getByRole('link', { name: /Number checks/ })).toHaveCount(0);
+  // /meetings/checks is gone (owner, 20 Nov 2026): old links land on Tickets.
   await page.goto('/meetings/checks');
   await expect(page).toHaveURL(/\/tickets$/);
   const row = page.getByRole('row').filter({ hasText: 'Dummy Three' }).filter({ hasText: 'Two calls before Cadence' }).first();
   await expect(row).toContainText('Meeting number');
   await row.getByRole('link', { name: 'Look into it', exact: true }).click();
-  await expect(page).toHaveURL(/\/meetings\/checks\/[0-9a-f-]+$/);
+  await expect(page).toHaveURL(/\/tickets\/checks\/[0-9a-f-]+$/);
+  // An old link to the check lands on the same check under Tickets.
+  const checkUrl = page.url();
+  await page.goto(checkUrl.replace('/tickets/checks/', '/meetings/checks/'));
+  await expect(page).toHaveURL(checkUrl);
 
   // Set on the meeting it was raised about; the meetings after it count on from there.
   const number = page.getByLabel(/^Number for E2E number check/);

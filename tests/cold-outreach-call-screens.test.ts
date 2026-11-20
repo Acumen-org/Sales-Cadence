@@ -65,6 +65,14 @@ describe('W4 screens', () => {
     expect(radio(html, 'connected')).not.toContain('checked=""');
   });
 
+  it('owner, 20 Nov 2026: a reached call offers No further action (with why); a booked meeting does not', () => {
+    const reached = draw(context({ prefill: 'connected' }));
+    expect(reached).toContain('<option value="none">No further action</option>');
+    expect(reached).toContain('Set a dated next step, or pick No further action and say why.');
+    expect(draw(context({ prefill: 'meeting_booked' }))).not.toContain('<option value="none">');
+    expect(draw(context({ prefill: 'no_answer' }))).toContain('<option value="none">No further action</option>');
+  });
+
   it('N013: the form says what the call closes, with "Not for this step"; with nothing due it is an extra call', () => {
     expect(draw(context())).toContain('Closes Call 2 of Q4 Harbor');
     expect(draw(context())).toContain('Not for this step');

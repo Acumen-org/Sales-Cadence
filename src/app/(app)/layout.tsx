@@ -2,6 +2,7 @@ import { FilterNavigationProvider } from '@/components/filter-navigation';
 import { requireUser } from '@/lib/auth/current-user';
 import { isAdmin } from '@/lib/auth/rbac';
 import { canWorkTickets, openTicketCount } from '@/lib/tickets';
+import { waitingForMe } from '@/lib/meetings/approval';
 import { prisma } from '@/lib/db';
 import { env } from '@/lib/env';
 import { todayIn } from '@/lib/dates';
@@ -27,7 +28,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const today = todayIn(user.timezone);
   // The badges count exactly what the lists they open hold (B117): Tasks holds CRM and cold work
   // together (D2), so Cold outreach carries no count of its own (owner, 9 Nov 2026: no Tasks tab there).
-  const [unread, due, needsReview, ticketsCount, pending, pendingTotal, calling] = await Promise.all([
+  const [unread, due, needsReview, ticketsCount, pending, pendingTotal, calling, approvalsCount] = await Promise.all([
     unreadNotifications(user),
     dueCounts(user.id, 'all', today),
     isAdmin(user) ? prisma.activityEvent.count({ where: { needsReview: true } }) : Promise.resolve(0),
@@ -38,6 +39,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     pendingFormCount(user.id),
     // A press of Call the import has not read back yet: "Calling Jane Doe… the form opens here" (PLAN 4.6).
     prisma.callIntent.findFirst({ where: { userId: user.id, callId: null, createdAt: { gte: new Date(Date.now() - 15 * 60_000) } }, orderBy: { createdAt: 'desc' }, select: { toNumber: true, personId: true, sandboxContactId: true } }),
+    // Meetings with no recording waiting for this Sales Leader's (or admin's) decision: Meetings > Approval.
+    waitingForMe(user),
   ]);
   const pendingCalls = pending.map((c) => {
     const who = c.person ?? c.sandboxContact;
@@ -48,7 +51,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <FilterNavigationProvider><div className="flex min-h-screen bg-canvas">
       <a href="#main-content" className="skip-link">Skip to content</a>
-      <Sidebar user={user} mode={e.TWENTY_MODE} dryRun={e.CADENCE_DRY_RUN} todayCount={due.today} overdueCount={due.overdue} ticketsCount={ticketsCount} />
+      <Sidebar user={user} mode={e.TWENTY_MODE} dryRun={e.CADENCE_DRY_RUN} todayCount={due.today} overdueCount={due.overdue} ticketsCount={ticketsCount} approvalsCount={approvalsCount} />
       <main id="main-content" tabIndex={-1} className="flex min-w-0 flex-1 flex-col outline-none">
         <LiveRefresh />
         <TopBar role={user.role} unread={unread} needsReview={needsReview} timezone={workspaceTimezone()} />

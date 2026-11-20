@@ -237,7 +237,7 @@ describe('W4: calls and the post-call form', () => {
       const call = await logManualCall({ userId: b.users.alisa.id, sandboxContactId: c.id });
       const ctx = await callFormContext(call.id, { id: b.users.alisa.id, timezone: 'Europe/London' });
       expect(ctx.ok && ctx.context.who).toEqual(expect.objectContaining({ active: false, standing: expect.stringContaining('asked not to be contacted') }));
-      await submitCallForm(call.id, { outcome: 'no_answer', nextStep: 'none' }, alisa());
+      await submitCallForm(call.id, { outcome: 'no_answer', nextStep: 'none', noNextStepReason: 'A one-off call' }, alisa());
       expect((await prisma.callForm.findUniqueOrThrow({ where: { callId: call.id } })).flags).toEqual(['called_opted_out']);
     });
 
@@ -283,13 +283,13 @@ describe('W4: calls and the post-call form', () => {
   describe('the form', () => {
     it('B025: from 30 seconds of talk, No answer and Busy are refused; Voicemail and Gatekeeper are fine; a long voicemail is flagged to leaders', () => {
       const ctx = { rules, today: '2026-11-03', talkSec: 192, connectSeconds: 30 };
-      expect(validateCallForm({ outcome: 'no_answer', nextStep: 'none' }, ctx)).toEqual(expect.objectContaining({ ok: false, field: 'outcome', error: expect.stringContaining('This call lasted 3m 12s') }));
-      expect(validateCallForm({ outcome: 'busy', nextStep: 'none' }, ctx).ok).toBe(false);
-      expect(validateCallForm({ outcome: 'voicemail', nextStep: 'none' }, ctx).ok).toBe(true);
-      expect(validateCallForm({ outcome: 'gatekeeper', nextStep: 'none' }, ctx).ok).toBe(true);
-      expect(validateCallForm({ outcome: 'no_conversation', nextStep: 'none' }, ctx)).toEqual(expect.objectContaining({ ok: false, field: 'notes' }));
-      expect(validateCallForm({ outcome: 'no_conversation', notes: 'A fax machine', nextStep: 'none' }, ctx).ok).toBe(true);
-      expect(validateCallForm({ outcome: 'no_answer', nextStep: 'none' }, { ...ctx, talkSec: 12 }).ok).toBe(true);
+      expect(validateCallForm({ outcome: 'no_answer', nextStep: 'none', noNextStepReason: 'A one-off call' }, ctx)).toEqual(expect.objectContaining({ ok: false, field: 'outcome', error: expect.stringContaining('This call lasted 3m 12s') }));
+      expect(validateCallForm({ outcome: 'busy', nextStep: 'none', noNextStepReason: 'A one-off call' }, ctx).ok).toBe(false);
+      expect(validateCallForm({ outcome: 'voicemail', nextStep: 'none', noNextStepReason: 'A one-off call' }, ctx).ok).toBe(true);
+      expect(validateCallForm({ outcome: 'gatekeeper', nextStep: 'none', noNextStepReason: 'A one-off call' }, ctx).ok).toBe(true);
+      expect(validateCallForm({ outcome: 'no_conversation', nextStep: 'none', noNextStepReason: 'A one-off call' }, ctx)).toEqual(expect.objectContaining({ ok: false, field: 'notes' }));
+      expect(validateCallForm({ outcome: 'no_conversation', notes: 'A fax machine', nextStep: 'none', noNextStepReason: 'A one-off call' }, ctx).ok).toBe(true);
+      expect(validateCallForm({ outcome: 'no_answer', nextStep: 'none', noNextStepReason: 'A one-off call' }, { ...ctx, talkSec: 12 }).ok).toBe(true);
     });
 
     it('B025: talk time is the answered leg\'s, not the dialpad\'s ringing; a long voicemail goes to the pod\'s leaders', async () => {
@@ -363,7 +363,7 @@ describe('W4: calls and the post-call form', () => {
         if (gone === 'opted_out') await optOutContact(c.id, { source: 'contact_page', actor: userActor(b.users.alisa) });
         else await prisma.sandboxContact.update({ where: { id: c.id }, data: { status: gone === 'removed' ? 'REMOVED' : 'MOVED' } });
         // The form offers only No further action; what was said still saves.
-        const r = await submitCallForm(call.id, { outcome: 'connected', rating: 3, notes: 'They picked up anyway', nextStep: 'none' }, alisa());
+        const r = await submitCallForm(call.id, { outcome: 'connected', rating: 3, notes: 'They picked up anyway', nextStep: 'none', noNextStepReason: 'A one-off call' }, alisa());
         expect(r).toEqual(expect.objectContaining({ ok: true }));
         expect(await prisma.callForm.count({ where: { callId: call.id } })).toBe(1);
         expect(await prisma.nextAction.count({ where: { sandboxContactId: c.id, state: 'OPEN' } })).toBe(0);

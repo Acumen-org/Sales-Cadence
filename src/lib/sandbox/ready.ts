@@ -78,7 +78,7 @@ export function readyLabel(r: Readiness): string {
 export type MoveSignal = {
   /** The positive outcome that makes a contact with complete details "Ready to move", in words; null when none. */
   positive: string | null;
-  /** "Not interested" or "Wrong number" was the last word, with no next step set since: the contact is Closed. */
+  /** "Not interested", "Wrong number" or a chosen No next step (with its reason) was the last word, with no next step set since: the contact is Closed. */
   closed: { outcome: string; at: Date | null } | null;
 };
 
@@ -96,7 +96,7 @@ export async function moveSignals(contactIds: string[]): Promise<Map<string, Mov
   const out = new Map<string, MoveSignal>();
   if (!contactIds.length) return out;
   const [forms, replies, enrollments, meetings, contacts, nexts] = await Promise.all([
-    prisma.callForm.findMany({ where: { call: { sandboxContactId: { in: contactIds } } }, select: { outcome: true, interest: true, submittedAt: true, call: { select: { sandboxContactId: true } } }, orderBy: { submittedAt: 'asc' } }),
+    prisma.callForm.findMany({ where: { call: { sandboxContactId: { in: contactIds } } }, select: { outcome: true, interest: true, submittedAt: true, nextStep: true, noNextStepReason: true, call: { select: { sandboxContactId: true } } }, orderBy: { submittedAt: 'asc' } }),
     prisma.sandboxEmail.findMany({ where: { sandboxContactId: { in: contactIds }, kind: 'REPLY' }, select: { sandboxContactId: true }, distinct: ['sandboxContactId'] }),
     prisma.enrollment.findMany({ where: { sandboxContactId: { in: contactIds }, status: { in: ['REPLIED', 'MEETING'] } }, select: { sandboxContactId: true, status: true } }),
     prisma.nextAction.findMany({ where: { sandboxContactId: { in: contactIds }, kind: 'MEETING', state: { in: ['OPEN', 'DONE'] } }, select: { sandboxContactId: true } }),
@@ -111,7 +111,10 @@ export async function moveSignals(contactIds: string[]): Promise<Map<string, Mov
     const next = nexts.find((n) => n.sandboxContactId === c.id);
     // A next step set after the closing outcome reopens the contact (D3).
     const reopened = Boolean(next && (!lastAt || next.updatedAt > lastAt));
-    const closed = lastOutcome && CLOSING.has(lastOutcome) && !reopened ? { outcome: CLOSING_WORDS[lastOutcome] ?? lastOutcome, at: lastAt ?? null } : null;
+    // Owner, 20 Nov 2026: a call ended with No further action and its reason closes the contact too, so it
+    // does not wait under Needs a next step for ever.
+    const noNext = latest?.nextStep === 'none' && latest.noNextStepReason ? latest : null;
+    const closed = !reopened && lastOutcome && CLOSING.has(lastOutcome) ? { outcome: CLOSING_WORDS[lastOutcome] ?? lastOutcome, at: lastAt ?? null } : !reopened && noNext ? { outcome: 'No next step', at: noNext.submittedAt } : null;
     let positive: string | null = null;
     if (!closed) {
       if (mine.some((f) => f.outcome === 'meeting_booked') || meetings.some((m) => m.sandboxContactId === c.id) || enrollments.some((e) => e.sandboxContactId === c.id && e.status === 'MEETING')) positive = 'Meeting booked';

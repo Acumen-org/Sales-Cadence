@@ -36,6 +36,14 @@ const nextConfig = {
   // server's log lines are what there is to read during an incident.
   typescript: { ignoreBuildErrors: process.env.SKIP_TYPE_CHECK === 'true' },
   eslint: { ignoreDuringBuilds: process.env.SKIP_TYPE_CHECK === 'true' },
+  // Number checks live under Tickets (owner, 20 Nov 2026: /meetings/checks is gone). Links already
+  // sent (the bell, emails, bookmarks) land on the same check there.
+  async redirects() {
+    return [
+      { source: '/meetings/checks', destination: '/tickets', permanent: true },
+      { source: '/meetings/checks/:id', destination: '/tickets/checks/:id', permanent: true },
+    ];
+  },
   // Audit Q16: security headers on every answer. The policy is deliberately narrow (no script-src:
   // Next's own inline scripts would need nonces): no other site may frame Cadence, no plugins, no
   // <base> rewriting. HSTS is ignored by browsers on plain http, so local runs are unaffected.

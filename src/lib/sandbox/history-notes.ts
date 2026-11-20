@@ -26,6 +26,12 @@ const minutes = (sec: number | null) => (sec == null ? null : sec < 60 ? `${sec}
 
 export const NEXT_STEP_LABELS: Record<string, string> = { call_again: 'Call again', email: 'Email', linkedin: 'LinkedIn', meeting: 'Meeting', keep: 'Kept the current next step', campaign: 'The campaign continues', none: 'No further action' };
 
+/** A form's next step in words, everywhere it is shown: "Email, Thu, 19 Nov 2026" or "No next step: a one-off call". */
+export function nextStepWords(f: { nextStep: string; nextStepLabel: string | null; nextStepDate: string | null; noNextStepReason?: string | null }, dateStyle: Parameters<typeof formatLocalDate>[1] = 'long'): string {
+  if (f.nextStep === 'none' && f.noNextStepReason) return `No next step: ${f.noNextStepReason}`;
+  return `${f.nextStepLabel ?? NEXT_STEP_LABELS[f.nextStep] ?? f.nextStep}${f.nextStepDate ? `, ${formatLocalDate(f.nextStepDate, dateStyle)}` : ''}`;
+}
+
 /** One call with its form, as a note: `[Cadence] Call 14 Oct 2026 by Alyssa - Connected (4/5)`. */
 export async function callNoteDraft(callId: string, prefix?: string): Promise<NoteDraft | null> {
   const call = await prisma.callLog.findUnique({ where: { id: callId }, include: { form: true, user: { select: { name: true } } } });
@@ -39,7 +45,7 @@ export async function callNoteDraft(callId: string, prefix?: string): Promise<No
   const f = call.form;
   const lines = [
     `Outcome: ${outcome}${f.rating ? ` (${f.rating}/5)` : ''}`,
-    `Next step: ${f.nextStepLabel ?? NEXT_STEP_LABELS[f.nextStep] ?? f.nextStep}${f.nextStepDate ? `, ${formatLocalDate(f.nextStepDate, 'long')}` : ''}`,
+    `Next step: ${nextStepWords(f)}`,
     ...(f.interest ? [`Interest: ${f.interest}`] : []),
     ...(f.decisionMaker ? [`Decision maker: ${f.decisionMaker}`] : []),
     ...(f.productsDiscussed.length ? [`Products discussed: ${optionLabels(f.productsDiscussed)}`] : []),

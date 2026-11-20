@@ -31,7 +31,7 @@ import { refreshMeetingAccounts } from './account';
 /** Writes per pass; the rest follow at the next tick. Twenty allows 100 requests a minute. */
 const MAX_WRITES = 60;
 
-export type MeetingsInCrmStats = { read: number; linked: number; written: number; waiting: number; notFromCadence: number; duplicatesRemoved?: number };
+export type MeetingsInCrmStats = { read: number; linked: number; written: number; waiting: number; notFromCadence: number; duplicatesRemoved?: number; /** Records of declined meetings taken out of the CRM. */ declinedRemoved?: number };
 
 /**
  * N15: a record that still differs from what Cadence wrote, though nobody has changed it since Cadence
@@ -129,7 +129,7 @@ export async function checkMeetingsInCrm(options: { client?: TwentyClient } = {}
   moved.push(...(await refreshMeetingAccounts()));
 
   // What Twenty holds against what Cadence wrote.
-  const meetings = await prisma.meeting.findMany({ select: { id: true, review: true, meetingNumber: true, twentyMeetingId: true, twentySnapshot: true, twentySyncedAt: true, attendees: { where: { prospect: true }, select: { personId: true } } } });
+  const meetings = await prisma.meeting.findMany({ select: { id: true, review: true, approval: true, meetingNumber: true, twentyMeetingId: true, twentySnapshot: true, twentySyncedAt: true, attendees: { where: { prospect: true }, select: { personId: true } } } });
   const byRecord = new Map(records.map((r) => [r.id, r]));
   const byCadenceId = new Map(records.flatMap((r) => { const id = cadenceIdOf(f, r); return id ? [[id, r] as const] : []; }));
   const stale: string[] = [];
@@ -175,6 +175,18 @@ export async function checkMeetingsInCrm(options: { client?: TwentyClient } = {}
       await logAudit({ entityType: 'meeting', entityId: cadenceIdOf(f, r)!, action: 'crm_duplicate_removed', actor: SYSTEM_ACTOR, details: { twentyMeetingId: r.id } });
     } catch (err) {
       console.warn(`[meetings] could not remove duplicate CRM meeting ${r.id}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  // Owner, 20 Nov 2026: a declined meeting is out of the CRM. A record of one left there (its delete
+  // failed, or a write was in flight when it was declined) is removed here.
+  const declined = new Set(meetings.filter((m) => m.approval === 'DECLINED' && m.review === 'DISMISSED').map((m) => m.id));
+  for (const r of records.filter((x) => { const id = cadenceIdOf(f, x); return Boolean(id && declined.has(id)); }).slice(0, 10)) {
+    try {
+      await client.deleteMeetingRecord(schema, r.id);
+      stats.declinedRemoved = (stats.declinedRemoved ?? 0) + 1;
+      await logAudit({ entityType: 'meeting', entityId: cadenceIdOf(f, r)!, action: 'crm_declined_removed', actor: SYSTEM_ACTOR, details: { twentyMeetingId: r.id } });
+    } catch (err) {
+      console.warn(`[meetings] could not remove declined CRM meeting ${r.id}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
   const approved = new Set(meetings.filter((m) => m.review === 'APPROVED').map((m) => m.id));

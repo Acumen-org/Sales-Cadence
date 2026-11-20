@@ -27,7 +27,7 @@ describe('the post-call form (plan section 10)', () => {
         expect(validateCallForm({ ...base, nextStep: step, nextStepDate: null }, { rules, today })).toEqual(expect.objectContaining({ ok: false, field: 'nextStepDate' }));
         expect(validateCallForm({ ...base, nextStep: step }, { rules, today })).toEqual(expect.objectContaining({ ok: true, value: expect.objectContaining({ nextStep: step, nextStepDate: '2026-11-05' }) }));
       }
-      expect(validateCallForm({ ...base, nextStep: 'none', nextStepDate: '2026-11-05' }, { rules, today })).toEqual(expect.objectContaining({ ok: true, value: expect.objectContaining({ nextStep: 'none', nextStepDate: null }) }));
+      expect(validateCallForm({ ...base, nextStep: 'none', noNextStepReason: 'A one-off call', nextStepDate: '2026-11-05' }, { rules, today })).toEqual(expect.objectContaining({ ok: true, value: expect.objectContaining({ nextStep: 'none', noNextStepReason: 'A one-off call', nextStepDate: null }) }));
       expect(validateCallForm({ ...base, nextStep: 'later' }, { rules, today })).toEqual(expect.objectContaining({ ok: false, field: 'nextStep' }));
       expect(validateCallForm({ ...base, nextStepDate: '2026-11-02' }, { rules, today })).toEqual(expect.objectContaining({ ok: false, error: 'The next step cannot be in the past.' }));
     });
@@ -71,7 +71,7 @@ describe('the post-call form (plan section 10)', () => {
     it('lets only the rep who made the call fill in its form', async () => {
       const contact = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
       const call = await logManualCall({ userId: b.users.alisa.id, sandboxContactId: contact.id });
-      const r = await submitCallForm(call.id, { outcome: 'no_answer', nextStep: 'none' }, { id: b.users.karson.id, name: 'Karson', timezone: 'Europe/London' });
+      const r = await submitCallForm(call.id, { outcome: 'no_answer', nextStep: 'none', noNextStepReason: 'A one-off call' }, { id: b.users.karson.id, name: 'Karson', timezone: 'Europe/London' });
       expect(r).toEqual({ ok: false, error: 'Only the rep who made this call can fill in its form.' });
     });
 

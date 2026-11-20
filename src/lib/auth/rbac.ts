@@ -209,6 +209,29 @@ export function whyNotManageEnrollment(a: Actor, podName: string, foName?: strin
   return foName ? `Only ${foName}, whose task this is, ${leadersOf(podName)}, and admins can change this person's sequence.` : `Only ${leadersOf(podName)}, and admins, can change this person's sequence.`;
 }
 
+/*
+ * Meetings with no recording link (owner, 20 November 2026): the Sales Leader of the pod of the FO
+ * who booked it approves or declines it, and admins may. Pod Managers and Senior FOs do not. A Sales
+ * Leader never decides on a meeting they booked themselves: another Sales Leader of the pod, or an
+ * admin, does. Biz Ops, admins and those Sales Leaders may add a declined meeting back.
+ */
+export type MeetingApprovalRef = { bookedById: string | null; /** The booked-by FO's pods. */ bookerPodIds: readonly string[] };
+export function canApproveMeeting(a: Actor, m: MeetingApprovalRef): boolean {
+  if (isAdmin(a)) return true;
+  return isSalesLeader(a) && !!m.bookedById && m.bookedById !== a.id && m.bookerPodIds.some((p) => a.podIds.includes(p));
+}
+export const canAddBackMeeting = (a: Actor, m: MeetingApprovalRef) => isBizOps(a) || canApproveMeeting(a, m);
+/** Who sees Meetings > Approval: those who decide, and Biz Ops, who see the declined ones. */
+export const canSeeMeetingApprovals = (a: Actor) => isAdmin(a) || isSalesLeader(a) || isBizOps(a);
+/** Who is shown the meetings waiting for a decision (Biz Ops only see the declined ones). */
+export const decidesMeetings = (a: Actor) => isAdmin(a) || isSalesLeader(a);
+
+export function whyNotApproveMeeting(a: Actor, m: MeetingApprovalRef, bookerName: string | null): string | null {
+  if (canApproveMeeting(a, m)) return null;
+  if (isSalesLeader(a) && m.bookedById === a.id) return 'You booked this meeting, so another Sales Leader of your pod, or an admin, decides on it.';
+  return `Only the Sales Leader of ${bookerName ? `${bookerName}'s` : 'the booking FO\'s'} pod, and admins, can approve or decline this meeting.`;
+}
+
 /** `what` is the action, as in "delete this meeting". */
 export function whyNotManageMeeting(_a: Actor, what: string): string {
   return `Only the person who recorded this meeting, admins, and the Senior FOs, Sales Leaders and Pod Managers of a pod whose contact attended can ${what}.`;

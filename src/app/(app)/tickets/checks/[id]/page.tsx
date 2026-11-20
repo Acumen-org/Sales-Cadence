@@ -15,7 +15,8 @@ import { CloseCheckForm, ReopenCheckButton, SetNumberForm } from '@/components/m
 const nth = (n: number) => `${ordinal(n)} meeting`;
 
 /**
- * One number check: what was raised, every meeting with that prospect in order with the number
+ * One number check, under Tickets (it was /meetings/checks/[id] until 20 Nov 2026; old links redirect
+ * here, next.config.mjs): what was raised, every meeting with that prospect in order with the number
  * each carries, a number Biz Ops can set on any of them (the ones after count on from it), and the
  * check closed with what was found.
  */
@@ -28,7 +29,7 @@ export default async function NumberCheckPage({ params }: { params: Promise<{ id
   });
   if (!check) notFound();
   const checker = canCheckMeetingNumbers(user);
-  if (!checker && check.raisedById !== user.id) redirect('/meetings');
+  if (!checker && check.raisedById !== user.id) redirect('/home');
   const rows = await prisma.meetingAttendee.findMany({
     where: { personId: check.personId, prospect: true, meeting: { review: 'APPROVED' } },
     select: { id: true, meetingNumber: true, numberSetTo: true, meeting: { select: { id: true, title: true, occurredAt: true, createdAt: true, meetingNumber: true, bookedBy: { select: { name: true } } } } },
