@@ -29,7 +29,7 @@ import { coldCues, type ColdCue } from './cues';
 import { latestMoves, type ContactMove } from './moves-query';
 import { crmChecklist, type ChecklistItem } from './ready';
 import { countryChoices, linkedinHref, readExtraPhones } from './normalize';
-import { NEXT_STEP_LABELS } from './history-notes';
+import { nextStepWords } from './history-notes';
 import { PRODUCT_VALUES } from './bellwether-api';
 import { detailsVersion } from './contacts';
 import { campaignHolds } from './campaigns';
@@ -385,7 +385,7 @@ export async function loadContactPage(id: string, user: SessionUser, now = new D
         title: `${c.direction === 'OUTBOUND' ? 'Call' : `Call from ${firstName} (incoming)`}${c.talkSec ? ` · ${Math.floor(c.talkSec / 60)}m ${c.talkSec % 60}s` : ''} by ${c.user?.name ?? 'an unknown rep'}${outcome ? ` · ${outcome}` : c.formDueAt && !c.formDoneAt ? ' · form due' : ''}`,
         // N051: the form's notes and the recording only for the rep, the owner and Reports viewers.
         detail: c.form?.notes ? (heard ? c.form.notes : HIDDEN_CALL) : null,
-        fields: c.form ? [...(c.form.rating ? [{ label: 'Rating', value: `${c.form.rating}/5` }] : []), ...(c.form.interest ? [{ label: 'Interest', value: c.form.interest }] : []), { label: 'Next', value: `${c.form.nextStepLabel ?? NEXT_STEP_LABELS[c.form.nextStep] ?? c.form.nextStep}${c.form.nextStepDate ? `, ${formatLocalDate(c.form.nextStepDate)}` : ''}` }] : [],
+        fields: c.form ? [...(c.form.rating ? [{ label: 'Rating', value: `${c.form.rating}/5` }] : []), ...(c.form.interest ? [{ label: 'Interest', value: c.form.interest }] : []), { label: 'Next', value: nextStepWords(c.form, 'short') }] : [],
         recordingHref: c.recordingSid && heard ? `/api/calls/${c.id}/recording` : null,
       };
     }),

@@ -99,6 +99,7 @@ export async function submitCallFormAction(formData: FormData): Promise<ActionRe
     decisionMaker: String(formData.get('decisionMaker') ?? '') || null,
     what: String(formData.get('what') ?? '') || null,
     meetingTime: String(formData.get('meetingTime') ?? '') || null,
+    noNextStepReason: String(formData.get('noNextStepReason') ?? '') || null,
     closes: formData.has('closes') ? String(formData.get('closes') ?? '') || 'none' : null,
     claim: formData.has('claimShown') ? formData.get('claim') === '1' : null,
     newOwnerId: String(formData.get('newOwnerId') ?? '') || null,

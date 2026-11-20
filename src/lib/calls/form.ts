@@ -30,7 +30,7 @@ import { assignContact } from '../sandbox/contacts';
  * complete only once it is in. It says which step the call closes and closes it first (a repeating
  * next action rolls on: N054), then sets what happens next, worked out from the outcome:
  *   - not reached, in a campaign: the campaign continues, with no parallel next step (B023);
- *   - reached: the campaign ends as a reply, and a dated next step is needed;
+ *   - reached: the campaign ends as a reply, and a dated next step is needed, or No further action with why (owner, 20 Nov 2026);
  *   - Meeting booked: a meeting on a day, with its time (B028, B183), and Add meeting / Move to CRM after (N061);
  *   - Not interested, Wrong number, Asked not to be contacted: the Stop group (N042). An opt-out ends
  *     the campaign as Opted out, never Replied (B091);
@@ -87,6 +87,8 @@ export type CallFormInput = {
   what?: string | null;
   /** B183: a meeting's time, HH:MM in the rep's zone. */
   meetingTime?: string | null;
+  /** Why there is no next step, when the rep chose No further action (owner, 20 Nov 2026). */
+  noNextStepReason?: string | null;
   /** What the call closes: `task:<id>`, `next:<id>`, or `none` ("Not for this step"). Absent: the step it is linked to. */
   closes?: string | null;
   /** B092: an unclaimed contact is claimed by the form's next step unless the rep unticks it. */
@@ -96,8 +98,17 @@ export type CallFormInput = {
 };
 export type CallFormValue = {
   outcome: string; rating: number | null; notes: string | null; nextStep: NextStepKey; nextStepDate: string | null; interest: string | null;
-  productsDiscussed: string[]; decisionMaker: string | null; what: string | null; meetingTime: string | null;
+  productsDiscussed: string[]; decisionMaker: string | null; what: string | null; meetingTime: string | null; noNextStepReason: string | null;
 };
+
+/**
+ * Owner, 20 Nov 2026 (Alyssa's one-off call with Sue Herzog): a rep may end any call with no next step,
+ * reached or not, but must say why. Where the form leaves no other choice (a Stop outcome, nobody
+ * matched, a contact who can take no next step) No further action needs no reason: the outcome is it.
+ */
+export function noNextStepNeedsReason(o: { key: string; answered: boolean; badPhone: boolean }, ctx: { noSubject?: boolean; subjectGone?: boolean }): boolean {
+  return !ctx.noSubject && !ctx.subjectGone && outcomeGroup(o) !== 'stop';
+}
 
 export type FormRulesContext = {
   rules: RulesSettings;
@@ -144,9 +155,13 @@ export function validateCallForm(input: CallFormInput, ctx: FormRulesContext): {
   } else if (outcome.key === 'meeting_booked') {
     // B028: a booked meeting is never "No further action".
     if (!dated(step.key)) return { ok: false, error: 'A booked meeting needs its day: pick Meeting and its date.', field: 'nextStep' };
-  } else if (group === 'reached' && !dated(step.key) && step.key !== 'keep') {
-    return { ok: false, error: 'They answered, so the campaign ends: set a dated next step.', field: 'nextStep' };
+  } else if (group === 'reached' && !dated(step.key) && step.key !== 'keep' && step.key !== 'none') {
+    return { ok: false, error: 'They answered, so the campaign ends: set a dated next step, or pick No further action and say why.', field: 'nextStep' };
   }
+  const reasonNeeded = step.key === 'none' && noNextStepNeedsReason(outcome, ctx);
+  const reason = input.noNextStepReason?.trim().replace(/\s+/g, ' ') || null;
+  if (reasonNeeded && !reason) return { ok: false, error: 'Say why there is no next step.', field: 'noNextStepReason' };
+  if (reasonNeeded && reason!.length > 500) return { ok: false, error: 'Keep the reason under 500 characters.', field: 'noNextStepReason' };
   if (step.key === 'campaign' && !ctx.subjectGone) {
     if (!ctx.inCampaign) return { ok: false, error: 'This contact is not in a running campaign. Pick another next step.', field: 'nextStep' };
     if (group !== 'not_reached') return { ok: false, error: 'They were reached, so the campaign ends. Pick a dated next step.', field: 'nextStep' };
@@ -163,7 +178,7 @@ export function validateCallForm(input: CallFormInput, ctx: FormRulesContext): {
   if (what && what.length > 200) return { ok: false, error: 'Keep the next step under 200 characters.', field: 'what' };
   if (input.interest && !(INTEREST as readonly string[]).includes(input.interest)) return { ok: false, error: 'Interest is hot, warm or cold.', field: 'interest' };
   if (input.decisionMaker && !(DECISION_MAKER as readonly string[]).includes(input.decisionMaker)) return { ok: false, error: 'Decision maker is yes, no or unknown.', field: 'decisionMaker' };
-  return { ok: true, value: { outcome: outcome.key, rating: outcome.answered ? rating : null, notes, nextStep: step.key as NextStepKey, nextStepDate: dated(step.key) ? date : null, interest: input.interest || null, productsDiscussed: [...new Set(input.productsDiscussed ?? [])].slice(0, 10), decisionMaker: input.decisionMaker || null, what: dated(step.key) ? what : null, meetingTime } };
+  return { ok: true, value: { outcome: outcome.key, rating: outcome.answered ? rating : null, notes, nextStep: step.key as NextStepKey, nextStepDate: dated(step.key) ? date : null, interest: input.interest || null, productsDiscussed: [...new Set(input.productsDiscussed ?? [])].slice(0, 10), decisionMaker: input.decisionMaker || null, what: dated(step.key) ? what : null, meetingTime, noNextStepReason: reasonNeeded ? reason : null } };
 }
 
 const pendingInclude = { person: { select: { firstName: true, lastName: true } }, sandboxContact: { select: { firstName: true, lastName: true } } } as const;
@@ -313,7 +328,7 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
     const claimed = await tx.callLog.updateMany({ where: { id: callId, formDoneAt: null, discardedAt: null }, data: { formDoneAt: now, formDueAt: call.formDueAt ?? now, ...(call.direction === 'INBOUND' ? {} : linkData(closes)) } });
     if (!claimed.count) return null;
     const audience = call.audience ?? await audienceFor(subject, tx);
-    return tx.callForm.create({ data: { callId, userId: user.id, outcome: v.outcome, rating: v.rating, notes: v.notes, nextStep: v.nextStep, nextStepDate: v.nextStepDate, nextStepLabel: v.what, interest: v.interest, productsDiscussed: v.productsDiscussed, decisionMaker: v.decisionMaker, flags, submittedAt: now, audience } });
+    return tx.callForm.create({ data: { callId, userId: user.id, outcome: v.outcome, rating: v.rating, notes: v.notes, nextStep: v.nextStep, nextStepDate: v.nextStepDate, nextStepLabel: v.what, noNextStepReason: v.noNextStepReason, interest: v.interest, productsDiscussed: v.productsDiscussed, decisionMaker: v.decisionMaker, flags, submittedAt: now, audience } });
   });
   if (!form) return { ok: false, error: 'This call already has its form: it was saved, perhaps in another tab. Copy anything you typed that is not in it.' };
   if (flags.includes('long_voicemail')) await flagToLeaders(call, user, `${user.name} left a ${talkWords(call.talkSec)} voicemail for ${name}.`);
@@ -403,7 +418,7 @@ export async function submitCallForm(callId: string, input: CallFormInput, user:
   }
   // Bellwether shows the last outcome (contract 1.1): its 10-minute read finds the contact by statusChangedAt (B061, B062).
   if (subject.sandboxContactId) await prisma.sandboxContact.updateMany({ where: { id: subject.sandboxContactId }, data: { lastActivityAt: now, lastOutcome: v.outcome, lastOutcomeAt: now, statusChangedAt: await databaseNow() } });
-  await logAudit({ entityType: 'call', entityId: callId, action: 'call_form_submitted', actor, details: { outcome: v.outcome, nextStep: v.nextStep, nextStepDate: v.nextStepDate, closes: closes ? `${closes.kind}:${closes.id}` : null, flags } });
+  await logAudit({ entityType: 'call', entityId: callId, action: 'call_form_submitted', actor, details: { outcome: v.outcome, nextStep: v.nextStep, nextStepDate: v.nextStepDate, noNextStepReason: v.noNextStepReason, closes: closes ? `${closes.kind}:${closes.id}` : null, flags } });
 
   // The result says what happens next (B182): "Saved. Next: Email 2 of Q4 Harbor on Thu, 5 Nov 2026."
   const next = hasSubject && !stop ? await nextWords(subject) : null;

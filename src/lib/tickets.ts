@@ -11,7 +11,7 @@ import type { GuardActor } from './outreach/guard';
  * Tickets (D4, owner 5 November 2026): a question someone raises for Biz Ops, who look into it and
  * close it with a note. Two kinds today, in one list: "Think this is wrong?" on an opt-out that came
  * from the post-call form (Ticket, kind OPT_OUT), and the meeting-number checks (MeetingNumberTicket,
- * src/lib/actions/number-checks.ts), whose own page stays where it was.
+ * src/lib/actions/number-checks.ts), whose own page is /tickets/checks/[id].
  *
  * A form opt-out can be lifted by any admin at any time with no reason, or by Biz Ops when they close
  * its ticket. Every lift goes through liftOptOut: audited with who and when, it removes only that
@@ -58,7 +58,7 @@ export async function listTickets(open: boolean): Promise<TicketRow[]> {
       const ref = t.personId ? personRef(t.personId) : t.sandboxContactId ? coldRef(t.sandboxContactId) : null;
       return { key: `ticket:${t.id}`, kind: t.kind === 'OPT_OUT' ? 'opt_out' as const : 'meeting_number' as const, kindLabel: t.kind === 'OPT_OUT' ? 'Opt-out' : 'Meeting number', name: who ? `${who.firstName} ${who.lastName}`.trim() || 'Removed contact' : 'Removed contact', firm: who?.companyName ?? null, subjectHref: ref ? subjectHref(ref) : null, href: `/tickets/${t.id}`, what: t.note, raisedBy: t.raisedBy?.name ?? null, raisedAt: t.createdAt, open: t.open, resolution: t.resolution, resolvedBy: t.resolvedBy?.name ?? null, resolvedAt: t.resolvedAt, outcome: t.outcome };
     }),
-    ...checks.map((c) => ({ key: `check:${c.id}`, kind: 'meeting_number' as const, kindLabel: 'Meeting number', name: `${c.person.firstName} ${c.person.lastName}`.trim() || 'Unnamed contact', firm: c.person.companyName, subjectHref: subjectHref(personRef(c.personId)), href: `/meetings/checks/${c.id}`, what: c.note, raisedBy: c.raisedBy?.name ?? null, raisedAt: c.createdAt, open: c.open, resolution: c.resolution, resolvedBy: c.resolvedBy?.name ?? null, resolvedAt: c.resolvedAt, outcome: null })),
+    ...checks.map((c) => ({ key: `check:${c.id}`, kind: 'meeting_number' as const, kindLabel: 'Meeting number', name: `${c.person.firstName} ${c.person.lastName}`.trim() || 'Unnamed contact', firm: c.person.companyName, subjectHref: subjectHref(personRef(c.personId)), href: `/tickets/checks/${c.id}`, what: c.note, raisedBy: c.raisedBy?.name ?? null, raisedAt: c.createdAt, open: c.open, resolution: c.resolution, resolvedBy: c.resolvedBy?.name ?? null, resolvedAt: c.resolvedAt, outcome: null })),
   ];
   return rows.sort((a, b) => (open ? a.raisedAt.getTime() - b.raisedAt.getTime() : (b.resolvedAt ?? b.raisedAt).getTime() - (a.resolvedAt ?? a.raisedAt).getTime()));
 }

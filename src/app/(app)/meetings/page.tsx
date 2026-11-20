@@ -4,7 +4,9 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { optionLabel } from '@/lib/twenty/labels';
 import type { Prisma } from '@prisma/client';
-import { requireUser } from '@/lib/auth/current-user';
+import { requireUser, toActor } from '@/lib/auth/current-user';
+import { meetingsTabCounts } from '@/lib/meetings/approval';
+import { MeetingsTabs } from '@/components/meetings/meetings-tabs';
 import { NUMBERING_STARTS_WORDS, ordinal } from '@/lib/meetings/numbering';
 import { canCreateMeeting, ROLES_NEEDING_POD } from '@/lib/auth/rbac';
 import { attendeeIsExternal, meetingReadWhere } from '@/lib/meetings-query';
@@ -54,7 +56,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
   const where: Prisma.MeetingWhereInput = { AND: filters };
   const filtered = Boolean(who || product || from || to || favourites || booked);
 
-  const { rules } = await getSettings();
+  const [{ rules }, tabCounts] = await Promise.all([getSettings(), meetingsTabCounts(toActor(user))]);
   const externalCount = (attendees: { email: string | null; external: boolean; userId: string | null }[]) => attendees.filter((a) => attendeeIsExternal(a, rules.internalDomains)).length;
   const [meetings, total] = await Promise.all([
     prisma.meeting.findMany({
@@ -73,6 +75,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
         products: true,
         meetingNumber: true,
         transcript: true,
+        approval: true,
         createdBy: { select: { name: true } },
         bookedBy: { select: { name: true } },
         analysisStatus: true,
@@ -104,7 +107,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
     <PageFrame className="space-y-3 px-6 pb-8 pt-2">
       <Surface flush>
         <ViewHeader
-          title="All meetings"
+          title={tabCounts ? 'Meetings' : 'All meetings'}
           caret
           meta={`${total} meeting${total === 1 ? '' : 's'}`}
           actions={
@@ -115,6 +118,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
             </>
           }
         />
+        {tabCounts ? <div className="mb-3"><MeetingsTabs current="all" counts={tabCounts} /></div> : null}
         <Toolbar>
           <MeetingsToolbar who={who} product={product} from={from} to={to} favourites={favourites} products={PRODUCTS} booked={booked} fos={fos} />
         </Toolbar>
@@ -150,7 +154,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
                   <tr key={m.id}>
                     <td data-label="Favourite" className="!pr-0"><FavouriteButton meetingId={m.id} favourite={m.favourites.length > 0} compact /></td>
                     <td data-label="Meeting">
-                      <IdentityCell name={m.title} href={`/meetings/${m.id}`} sub={platformLabel(m.provider, m.sourceUrl)} />
+                      <IdentityCell name={m.title} href={`/meetings/${m.id}`} sub={m.approval === 'WAITING' ? <span className="flex flex-wrap items-center gap-1.5">{platformLabel(m.provider, m.sourceUrl)}<Badge tone="amber">Waiting for approval</Badge></span> : platformLabel(m.provider, m.sourceUrl)} />
                     </td>
                     <td data-label="When" className="text-[12.5px]"><time className="block font-medium text-ink-900">{formatLocalDate(meetingDay(m.occurredAt), 'long')}</time>{m.meetingNumber ? <Badge tone={m.meetingNumber === 1 ? 'green' : 'gray'} className="mt-1">{m.meetingNumber === 1 ? 'First meeting' : `${ordinal(m.meetingNumber)} meeting`}</Badge> : m.attendees.some((a) => a.prospect) ? <Badge tone="gray" className="mt-1">Before {NUMBERING_STARTS_WORDS}, not counted</Badge> : <Badge tone="amber" className="mt-1">No prospect, no number</Badge>}</td>
                     <td data-label="Account" className="break-words text-[12.5px]">

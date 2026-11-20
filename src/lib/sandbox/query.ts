@@ -263,7 +263,7 @@ const EMPTY_WORDS: Record<ListView, { title: string; hint: string }> = {
   unclaimed: { title: 'Nothing to claim', hint: 'New contacts arrive from Bellwether. Unclaimed ones wait here for a rep.' },
   ready: { title: 'Nobody is ready to move yet', hint: 'A contact is ready with complete CRM details and a positive outcome: connected with warm or hot interest, a meeting booked, or a reply.' },
   in_crm: { title: 'No contacts already in the CRM', hint: 'When the CRM gains someone who is also here, outreach stops and the contact shows here, ready to be moved.' },
-  closed: { title: 'No closed contacts', hint: 'After Not interested, or Wrong number with no other way to reach them, a contact is closed until someone sets a new next step.' },
+  closed: { title: 'No closed contacts', hint: 'After Not interested, Wrong number with no other way to reach them, or a call ended with no next step (and why), a contact is closed until someone sets a new next step.' },
   all: { title: 'No contacts in Cold outreach yet', hint: 'Contacts arrive from Bellwether, or add one by hand.' },
   moved: { title: 'Nobody moved to the CRM yet', hint: 'When a contact is ready, select it and choose Move to CRM.' },
   dnc_removed: { title: 'Nobody marked Do not contact or removed', hint: 'Contacts who ask not to be contacted, and contacts removed from the list, show here.' },

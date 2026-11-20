@@ -41,7 +41,7 @@ const GROUPS = [
   ] },
 ];
 
-type Props = { user: SessionUser; mode: 'mock' | 'graphql'; dryRun: boolean; todayCount: number; overdueCount: number; /** Open tickets of every kind, for Biz Ops and admins. */ ticketsCount?: number };
+type Props = { user: SessionUser; mode: 'mock' | 'graphql'; dryRun: boolean; todayCount: number; overdueCount: number; /** Open tickets of every kind, for Biz Ops and admins. */ ticketsCount?: number; /** Meetings with no recording waiting for this Sales Leader's or admin's decision. */ approvalsCount?: number };
 
 export function Sidebar(props: Props) {
   const [open, setOpen] = useState(false);
@@ -52,7 +52,7 @@ export function Sidebar(props: Props) {
   </>;
 }
 
-function SidebarContent({ user, mode, dryRun, todayCount, overdueCount, ticketsCount = 0, close }: Props & { close?: () => void }) {
+function SidebarContent({ user, mode, dryRun, todayCount, overdueCount, ticketsCount = 0, approvalsCount = 0, close }: Props & { close?: () => void }) {
   const pathname = usePathname();
   // A page of one section under another's address (a cold campaign under /campaigns) names its section.
   const section = useActiveSection();
@@ -73,6 +73,7 @@ function SidebarContent({ user, mode, dryRun, todayCount, overdueCount, ticketsC
               <Opening />
               <Icon size={18} /> <span>{item.label}</span>
               {item.href === '/tasks' && todayCount + overdueCount > 0 ? <span className={clsx('ml-auto rounded-md px-1.5 py-0.5 text-[10px] tabular-nums', overdueCount ? 'bg-red-400/20 text-red-200' : 'bg-white/10 text-[#dfefc1]')} title={overdueCount ? `${overdueCount} overdue` : undefined}>{todayCount + overdueCount}</span> : null}
+              {item.href === '/meetings' && approvalsCount > 0 ? <span className="ml-auto rounded-md bg-amber-300/20 px-1.5 py-0.5 text-[10px] tabular-nums text-amber-100" title={`${approvalsCount} ${approvalsCount === 1 ? 'meeting waits' : 'meetings wait'} for your approval`}>{approvalsCount}</span> : null}
               {item.href === '/tickets' && ticketsCount > 0 ? <span className="ml-auto rounded-md bg-amber-300/20 px-1.5 py-0.5 text-[10px] tabular-nums text-amber-100" title={`${ticketsCount} ${ticketsCount === 1 ? 'ticket' : 'tickets'} open`}>{ticketsCount}</span> : null}
             </Link>;
           })}</div>

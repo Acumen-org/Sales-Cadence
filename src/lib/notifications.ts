@@ -20,13 +20,16 @@ import { COLD_CONTACT_BASE, coldRef, personRef, subjectHref } from './subject';
  *   move_finished         a Move to CRM is done, with its counts (S3, B036)
  *   retention_warning     some of the owner's cold contacts are due for removal (S2, N032)
  *   health_alert          a line of the cold outreach health card turned amber, for admins (PLAN 4.7)
+ *   meeting_approval      a meeting with no recording waits for its Sales Leader (or an admin) to decide
+ *   meeting_declined      a meeting was declined: Biz Ops, the booked-by FO and whoever added it are told why
+ *   meeting_added_back    a declined meeting was added back, for the booked-by FO and whoever added it
  *
  * Read and unread work as they always have: "Mark read" marks everything up to the moment the list
  * was opened (`User.notificationsReadAt`); a Notification row also keeps its own `readAt`, set then
  * or when it is answered (a suggestion accepted or dismissed).
  */
 
-export type NotificationKind = 'reply' | 'bounce' | 'possible_bounce' | 'compliance_alert' | 'next_step_suggestion' | 'call_flag' | 'move_finished' | 'retention_warning' | 'campaign_published' | 'campaign_back_to_draft' | 'health_alert' | 'campaign_launch_failed';
+export type NotificationKind = 'reply' | 'bounce' | 'possible_bounce' | 'compliance_alert' | 'next_step_suggestion' | 'call_flag' | 'move_finished' | 'retention_warning' | 'campaign_published' | 'campaign_back_to_draft' | 'health_alert' | 'campaign_launch_failed' | 'meeting_approval' | 'meeting_declined' | 'meeting_added_back';
 
 type Tx = Prisma.TransactionClient | typeof prisma;
 
@@ -188,6 +191,30 @@ export function bellWords(n: Pick<Row, 'id' | 'kind' | 'personId' | 'sandboxCont
       // P11: a scheduled campaign could not start; it is tried again each hour, and at once after an edit.
       const campaignId = str(p.campaignId);
       return { kind, name: str(p.name) ?? 'A campaign', company: null, title: 'This scheduled campaign could not start', detail: str(p.text), href: campaignId ? `/campaigns/${campaignId}` : null, linkLabel: 'Open the campaign' };
+    }
+    case 'meeting_approval': {
+      // Owner, 20 Nov 2026: a meeting with no recording waits for the booker's Sales Leader (or an admin).
+      const day = str(p.day), booked = str(p.bookedBy);
+      const settled: Record<string, string> = { approved: 'It was approved.', declined: 'It was declined.', link_added: 'A recording link was added, so it needs no approval now.' };
+      return {
+        kind, name: str(p.title) ?? 'A meeting', company: null,
+        title: `${from} added a meeting with no recording${day && isLocalDate(day) ? ` on ${formatLocalDate(day)}` : ''}${booked ? `, booked by ${booked}` : ''}. Approve or decline it.`,
+        detail: n.resolution ? settled[n.resolution] ?? null : p.admins ? 'Their pod has no Sales Leader, so the admins decide.' : null,
+        href: n.resolution ? null : '/meetings/approval', linkLabel: n.resolution ? '' : 'Open Approval',
+      };
+    }
+    case 'meeting_declined': {
+      const day = str(p.day), meetingId = str(p.meetingId);
+      return {
+        kind, name: str(p.title) ?? 'A meeting', company: null,
+        title: `${from} declined this meeting${day && isLocalDate(day) ? ` on ${formatLocalDate(day)}` : ''}: it is out of Cadence and the CRM`,
+        detail: `Why: ${str(p.reason) ?? 'no reason given'}`,
+        href: meetingId ? `/meetings/${meetingId}` : null, linkLabel: 'Open the meeting',
+      };
+    }
+    case 'meeting_added_back': {
+      const meetingId = str(p.meetingId);
+      return { kind, name: str(p.title) ?? 'A meeting', company: null, title: `${from} added this declined meeting back: it counts again`, detail: null, href: meetingId ? `/meetings/${meetingId}` : null, linkLabel: 'Open the meeting' };
     }
     case 'retention_warning': {
       const count = num(p.count);

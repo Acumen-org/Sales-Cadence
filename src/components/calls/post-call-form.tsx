@@ -24,7 +24,7 @@ const DATED = new Set(['call_again', 'email', 'linkedin', 'meeting']);
 const STEP_LABELS: Record<string, string> = { call_again: 'Call again', email: 'Email', linkedin: 'LinkedIn', meeting: 'Meeting', keep: 'Keep the current next step', campaign: 'The campaign continues', none: 'No further action' };
 const draftKey = (callId: string) => `cadence.callForm.${callId}`;
 
-type Draft = { outcome: string; notes: string; rating: number | null; step: string; date: string; time: string; what: string; interest: string; decisionMaker: string; products: string[] };
+type Draft = { outcome: string; notes: string; rating: number | null; step: string; date: string; time: string; what: string; interest: string; decisionMaker: string; products: string[]; /** Why there is no next step. */ why?: string };
 
 export function readDraft(callId: string): Partial<Draft> | null {
   try { const raw = window.localStorage.getItem(draftKey(callId)); return raw ? JSON.parse(raw) as Partial<Draft> : null; } catch { return null; }
@@ -42,7 +42,7 @@ export function startingValues(c: CallFormContext, draft: Partial<Draft> | null)
   const o = c.outcomes.find((x) => x.key === first && !x.disabled);
   return {
     outcome: o?.key ?? '', rating: draft?.rating ?? null, notes: draft?.notes ?? '', step: draft?.step || defaultStep(o, c), stepTouched: Boolean(draft?.step), date: draft?.date ?? c.defaultDate, time: draft?.time ?? '',
-    what: draft?.what ?? '', whatTouched: Boolean(draft?.what), interest: draft?.interest ?? '', decisionMaker: draft?.decisionMaker ?? '', products: draft?.products ?? [],
+    what: draft?.what ?? '', whatTouched: Boolean(draft?.what), why: draft?.why ?? '', interest: draft?.interest ?? '', decisionMaker: draft?.decisionMaker ?? '', products: draft?.products ?? [],
     closes: c.closes.linked?.key ?? (c.closes.choices.length ? '' : 'none'),
   };
 }
@@ -89,6 +89,8 @@ export function PostCallForm({ callId, onClose, initial }: { callId: string; onC
   const [time, setTime] = useState('');
   const [what, setWhat] = useState('');
   const [whatTouched, setWhatTouched] = useState(false);
+  // Owner, 20 Nov 2026: No further action says why, unless the outcome left no other choice.
+  const [why, setWhy] = useState(start0?.why ?? '');
   const [closes, setCloses] = useState<string | null>(start0?.closes ?? null);
   const [claim, setClaim] = useState(true);
   // Owner, 10 Nov 2026: the form can give an owned cold contact to someone in its pod; '' keeps the owner.
@@ -110,7 +112,7 @@ export function PostCallForm({ callId, onClose, initial }: { callId: string; onC
     if (!r.ok) return;
     const v = startingValues(r.context, readDraft(callId));
     setOutcome(v.outcome); setRating(v.rating); setNotes(v.notes); setStep(v.step); setStepTouched(v.stepTouched); setDate(v.date); setTime(v.time);
-    setWhat(v.what); setWhatTouched(v.whatTouched); setInterest(v.interest); setDecisionMaker(v.decisionMaker); setProducts(v.products); setCloses(v.closes);
+    setWhat(v.what); setWhatTouched(v.whatTouched); setWhy(v.why); setInterest(v.interest); setDecisionMaker(v.decisionMaker); setProducts(v.products); setCloses(v.closes);
   }, [callId]);
   useEffect(() => { void load(); }, [load]);
 
@@ -123,8 +125,8 @@ export function PostCallForm({ callId, onClose, initial }: { callId: string; onC
   }, [ctx]);
   // B087: what is typed survives closing the form and a refresh, until the form is in.
   useEffect(() => {
-    if (ctx && !saved) writeDraft(callId, { outcome, notes, rating, step: stepTouched ? step : '', date, time, what: whatTouched ? what : '', interest, decisionMaker, products });
-  }, [callId, ctx, saved, outcome, notes, rating, step, stepTouched, date, time, what, whatTouched, interest, decisionMaker, products]);
+    if (ctx && !saved) writeDraft(callId, { outcome, notes, rating, step: stepTouched ? step : '', date, time, what: whatTouched ? what : '', interest, decisionMaker, products, why });
+  }, [callId, ctx, saved, outcome, notes, rating, step, stepTouched, date, time, what, whatTouched, interest, decisionMaker, products, why]);
 
   if (!loaded) return <p className="text-[13px] text-ink-500" role="status">Opening the form</p>;
   if (!loaded.ok || !ctx) {
@@ -154,13 +156,15 @@ export function PostCallForm({ callId, onClose, initial }: { callId: string; onC
   const chosen = ctx.outcomes.find((o) => o.key === outcome);
   const reached = chosen?.answered ?? false;
   const first = ctx.who?.firstName ?? 'them';
-  const steps = !ctx.who || !ctx.who.active ? ['none'] : chosen?.key === 'do_not_contact' || chosen?.key === 'not_interested' ? ['none'] : chosen?.group === 'stop' ? ['email', 'linkedin', 'none'] : [...(ctx.open ? ['keep'] : []), ...(ctx.campaign && !reached ? ['campaign'] : []), 'call_again', 'email', 'linkedin', 'meeting', ...(reached ? [] : ['none'])];
+  const steps = !ctx.who || !ctx.who.active ? ['none'] : chosen?.key === 'do_not_contact' || chosen?.key === 'not_interested' ? ['none'] : chosen?.group === 'stop' ? ['email', 'linkedin', 'none'] : [...(ctx.open ? ['keep'] : []), ...(ctx.campaign && !reached ? ['campaign'] : []), 'call_again', 'email', 'linkedin', 'meeting', ...(chosen?.key === 'meeting_booked' ? [] : ['none'])];
   const stepWords = (key: string) => key === 'keep' && ctx.open ? `Keep: ${ctx.open.words}${ctx.open.repeats ? ' (repeats)' : ''}` : key === 'campaign' && ctx.campaign ? `The campaign continues${ctx.campaign.next ? `: next is ${ctx.campaign.next}` : ''}` : ctx.campaign && !reached && DATED.has(key) && key !== 'meeting' ? `Take ${first} out: ${STEP_LABELS[key].toLowerCase()}` : STEP_LABELS[key];
   // N043 (PLAN 4.6): "What" starts as "Follow up: <first line of the notes>", for the rep to edit.
   const firstLine = notes.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
   const whatShown = whatTouched ? what : DATED.has(step) && firstLine ? `Follow up: ${firstLine}`.slice(0, 200) : '';
   const needsReason = outcome === 'no_conversation';
-  const missing = !outcome ? 'Pick what happened.' : reached && !rating ? 'Rate the call.' : (reached || needsReason) && !notes.trim() ? needsReason ? 'Say why there was no conversation.' : 'Write what was said.' : !steps.includes(step) ? 'Pick the next step.' : DATED.has(step) && !date ? 'Pick the day of the next step.' : closes === '' ? 'Say which step this call closes, or none.' : null;
+  // Mirrors noNextStepNeedsReason (src/lib/calls/form.ts): a chosen No further action says why.
+  const whyNeeded = step === 'none' && Boolean(ctx.who?.active) && chosen?.group !== 'stop';
+  const missing = !outcome ? 'Pick what happened.' : reached && !rating ? 'Rate the call.' : (reached || needsReason) && !notes.trim() ? needsReason ? 'Say why there was no conversation.' : 'Write what was said.' : !steps.includes(step) ? 'Pick the next step.' : DATED.has(step) && !date ? 'Pick the day of the next step.' : whyNeeded && !why.trim() ? 'Say why there is no next step.' : closes === '' ? 'Say which step this call closes, or none.' : null;
 
   const pick = async (o: FormOutcomeView) => {
     if (o.group === 'stop' && o.key !== outcome) {
@@ -232,7 +236,7 @@ export function PostCallForm({ callId, onClose, initial }: { callId: string; onC
     <fieldset className="space-y-2">
       <legend className="mb-1 text-[13px] font-semibold text-ink-900">What happens next</legend>
       {chosen?.key === 'do_not_contact' ? <Notice tone="error"><span className="block font-medium">This ends:</span><ul className="mt-1 list-disc pl-5">{stopEffects(chosen, ctx).map((e) => <li key={e}>{e}</li>)}</ul></Notice> : null}
-      {reached && chosen?.group === 'reached' && ctx.campaign ? <p className="text-[12.5px] text-ink-600">{first} answered, so {ctx.campaign.name} ends. Set a dated next step.</p> : null}
+      {reached && chosen?.group === 'reached' && ctx.campaign ? <p className="text-[12.5px] text-ink-600">{first} answered, so {ctx.campaign.name} ends. Set a dated next step, or pick No further action and say why.</p> : null}
       <div className="flex flex-wrap items-end gap-2">
         <label className="block text-xs text-ink-500">Next step<select name="nextStep" value={steps.includes(step) ? step : ''} onChange={(e) => { setStep(e.target.value); setStepTouched(true); }} className="mt-1 max-w-full">{!steps.includes(step) ? <option value="" disabled>Pick one</option> : null}{steps.map((s) => <option key={s} value={s}>{stepWords(s)}</option>)}</select></label>
         {DATED.has(step) ? <label className="block text-xs text-ink-500">Day<input type="date" name="nextStepDate" value={date} min={ctx.today} onChange={(e) => setDate(e.target.value)} className="mt-1" /></label> : null}
@@ -240,6 +244,7 @@ export function PostCallForm({ callId, onClose, initial }: { callId: string; onC
         {step === 'meeting' ? <label className="block text-xs text-ink-500">Time (optional)<input type="time" name="meetingTime" value={time} onChange={(e) => setTime(e.target.value)} className="mt-1" /></label> : null}
       </div>
       {DATED.has(step) ? <label className="block text-xs text-ink-500">What<input value={whatShown} maxLength={200} placeholder={STEP_LABELS[step]} onChange={(e) => { setWhat(e.target.value); setWhatTouched(true); }} className="mt-1 w-full" /></label> : null}
+      {whyNeeded ? <label className="block text-xs text-ink-500">Why no next step <span className="text-red-700">*</span><textarea name="noNextStepReason" rows={2} maxLength={500} value={why} placeholder="A one-off call: she only needed the event tickets" onChange={(e) => setWhy(e.target.value)} className="mt-1 w-full" /></label> : null}
       {step === 'none' && ctx.open ? <p className="text-[12.5px] text-ink-600">No further action cancels the open next step ({ctx.open.words}).</p> : null}
       {step === 'keep' && ctx.open?.repeats ? <p className="text-[12.5px] text-ink-600">This call counts as done for the repeating step; it rolls on to its next date.</p> : null}
       {DATED.has(step) && ctx.open?.repeats ? <p className="text-[12.5px] text-amber-800">{ctx.open.words} repeats. This one-off step replaces it, and it stops repeating. Pick Keep to keep it.</p> : null}
