@@ -72,7 +72,7 @@ test('a meeting with no recording waits for the Sales Leader, who declines it; B
   await expect(row).toContainText('Karson Junior');
   await row.getByRole('button', { name: 'Decline' }).click();
   const dialog = page.getByRole('dialog');
-  await expect(dialog).toContainText('Its record in the CRM is removed.');
+  await expect(dialog).toContainText('It never goes to the CRM');
   await expect(dialog.getByRole('button', { name: 'Decline meeting' })).toBeDisabled();
   await dialog.getByLabel('Why are you declining it?').fill('No proof it took place');
   await dialog.getByRole('button', { name: 'Decline meeting' }).click();

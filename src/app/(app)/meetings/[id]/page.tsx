@@ -81,7 +81,7 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
           shape="square"
           badges={
             <>
-              {n ? <Badge tone={n === 1 ? 'green' : 'gray'}>{n === 1 ? 'First meeting' : `Follow-up · ${ordinal(n)} meeting`}</Badge> : prospects.length ? <Badge tone="gray">Before {NUMBERING_STARTS_WORDS}, not counted</Badge> : <Badge tone="amber">No prospect, no number</Badge>}
+              {n ? <Badge tone={n === 1 ? 'green' : 'gray'}>{n === 1 ? 'First meeting' : `Follow-up · ${ordinal(n)} meeting`}</Badge> : meeting.approval === 'WAITING' || declined ? null : prospects.length ?<Badge tone="gray">Before {NUMBERING_STARTS_WORDS}, not counted</Badge> : <Badge tone="amber">No prospect, no number</Badge>}
               {externals.length ? <Badge tone="green">{externals.length} external</Badge> : <Badge tone="gray">{meeting.attendees.length ? 'Internal only' : 'No attendees'}</Badge>}
               {meeting.transcript ? <Badge tone="blue">Transcript</Badge> : null}
               {approval?.state === 'WAITING' ? <Badge tone="amber">Waiting for approval</Badge> : approval?.state === 'DECLINED' ? <Badge tone="red">Declined</Badge> : null}
@@ -117,7 +117,7 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
         <div className="px-6 pt-3">
           <Notice tone="warn">
             <div className="flex flex-wrap items-center justify-between gap-3" role="region" aria-label="Approval">
-              <span><span className="font-medium">Waiting for approval.</span> This meeting has no recording link, so {approval.approvers} approves or declines it. It counts and is in the CRM until then.</span>
+              <span><span className="font-medium">Waiting for approval.</span> This meeting has no recording link, so {approval.approvers} approves or declines it. Until then it has no meeting number and is not in the CRM.</span>
               {approval.mayDecide || approval.mayAddLink ? (
                 <span className="flex flex-wrap items-start gap-1.5">
                   {approval.mayDecide ? <>

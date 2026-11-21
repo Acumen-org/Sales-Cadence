@@ -12,9 +12,11 @@ import { pushMeetingToCrm, removeMeetingFromCrm } from './crm';
 /*
  * Meetings with no recording link (owner, 20 November 2026). A meeting saved without a recording
  * link (ticked "Not recorded or in person") waits for the Sales Leader of the booked-by FO's pod, or
- * an admin, to approve or decline it. While it waits it counts and is in the CRM like any other.
+ * an admin, to approve or decline it. While it waits it shows in Cadence's lists with its badge, but
+ * has no meeting number and is not in the CRM (owner, 21 Nov 2026: "they get counted in the CRM only
+ * when they are approved"; meetings/counted.ts).
  *
- *   - Approve: it stays as it is.
+ *   - Approve: it is numbered with its prospects and written to the CRM.
  *   - Decline (with a reason): it leaves every list, report and number, and the CRM (review becomes
  *     DISMISSED, as a removed calendar meeting always was). Biz Ops and the booked-by FO are told why.
  *     Nobody can save it again as a new meeting; only its Sales Leader, Biz Ops or an admin can add it
@@ -224,7 +226,7 @@ export const APPROVAL_BACKFILL_FROM: LocalDate = '2026-11-01';
 export async function askForMeetingsSince(from: LocalDate = APPROVAL_BACKFILL_FROM, actor: AuditActor = SYSTEM_ACTOR): Promise<{ waiting: number; asked: number }> {
   const candidates = await prisma.meeting.findMany({
     where: { approval: null, review: 'APPROVED', occurredAt: { gte: new Date(meetingDayInstant(from).getTime() - 86_400_000) } },
-    select: { id: true, title: true, occurredAt: true, sourceUrl: true, bookedById: true, createdById: true, bookedBy: { select: { name: true } } },
+    select: { id: true, title: true, occurredAt: true, sourceUrl: true, bookedById: true, createdById: true, bookedBy: { select: { name: true } }, attendees: { where: { prospect: true }, select: { personId: true } } },
     orderBy: { occurredAt: 'asc' },
   });
   let waiting = 0;
@@ -244,8 +246,32 @@ export async function askForMeetingsSince(from: LocalDate = APPROVAL_BACKFILL_FR
     if (bells === null) continue;
     waiting++;
     asked += bells;
+    // Out of the CRM and its number until approved; its prospects' other meetings move up.
+    await renumberAround(m.id, prospectIdsOf(m));
   }
   return { waiting, asked };
+}
+
+export const WAITING_OUT_OF_CRM = 'meetingsWaitingOutOfCrm20261121';
+
+/**
+ * Once (owner, 21 Nov 2026): meetings already waiting for approval were numbered and written to the
+ * CRM while they waited. Each loses its number and its CRM record until approved, and its prospects'
+ * other meetings are numbered again and rewritten. Idempotent: a meeting with no record and no
+ * number is left as it is.
+ */
+export async function takeWaitingOutOfCrm(): Promise<{ meetings: number; removed: number }> {
+  const rows = await prisma.meeting.findMany({
+    where: { ...WAITING_WHERE, OR: [{ twentyMeetingId: { not: null } }, { twentyNoteId: { not: null } }, { meetingNumber: { not: null } }, { attendees: { some: { meetingNumber: { not: null } } } }] },
+    select: { id: true, twentyMeetingId: true, twentyNoteId: true, attendees: { where: { prospect: true }, select: { personId: true } } },
+    orderBy: { occurredAt: 'asc' },
+  });
+  let removed = 0;
+  for (const m of rows) {
+    if (m.twentyMeetingId || m.twentyNoteId) removed++;
+    await renumberAround(m.id, prospectIdsOf(m));
+  }
+  return { meetings: rows.length, removed };
 }
 
 /** The approvers' bell lines for this meeting say how it was settled. */
@@ -304,7 +330,9 @@ export async function approveMeeting(id: string, user: Decider, actor: AuditActo
     return true;
   });
   if (!done) return { ok: false, error: 'Someone decided on this meeting a moment ago. Reload to see what they chose.' };
-  return { ok: true, message: `Approved "${m.title}".` };
+  // Approved, it counts: numbered with its prospects and written to the CRM (owner, 21 Nov 2026).
+  await renumberAround(id, prospectIdsOf(m));
+  return { ok: true, message: `Approved "${m.title}". It is numbered and in the CRM now.` };
 }
 
 export async function declineMeeting(id: string, reason: string, user: Decider, actor: AuditActor, now = new Date()): Promise<ApprovalResult> {

@@ -29,7 +29,7 @@ import { purgeOldPushes, sweepStuckPushes } from '../lib/sandbox/bellwether-api'
 import { importTwilioCalls } from '../lib/calls/import';
 import { runGraphMail } from '../lib/mail/graph-mail';
 import { COLD_OUTREACH_BACKFILL, runColdOutreachBackfill } from '../lib/outreach/backfills';
-import { APPROVAL_BACKFILL, askForMeetingsSince } from '../lib/meetings/approval';
+import { APPROVAL_BACKFILL, askForMeetingsSince, takeWaitingOutOfCrm, WAITING_OUT_OF_CRM } from '../lib/meetings/approval';
 import { nightlyLookbackDays, nightlyLoop } from '../lib/nightly';
 import { getSettings } from '../lib/settings';
 import { ringHealth } from '../lib/outreach/health';
@@ -124,6 +124,16 @@ async function meetingApprovalBackfill(){
  if(meetingApprovalBackfillChecked)return;meetingApprovalBackfillChecked=true;
  if(await prisma.setting.findUnique({where:{key:APPROVAL_BACKFILL}}))return;
  try{const stats=await askForMeetingsSince();log('meetings sent for approval',stats);const value={at:new Date().toISOString(),...stats};await prisma.setting.upsert({where:{key:APPROVAL_BACKFILL},create:{key:APPROVAL_BACKFILL,value},update:{value}});}catch(error){log('meeting approval backfill failed',error);}
+}
+/**
+ * Once (owner, 21 Nov 2026): meetings waiting for approval leave the CRM and lose their number until
+ * approved; their prospects' other meetings are numbered again. Runs after the approval backfill.
+ */
+let waitingOutOfCrmChecked=false;
+async function waitingOutOfCrm(){
+ if(waitingOutOfCrmChecked)return;waitingOutOfCrmChecked=true;
+ if(await prisma.setting.findUnique({where:{key:WAITING_OUT_OF_CRM}}))return;
+ try{const stats=await takeWaitingOutOfCrm();log('waiting meetings taken out of the CRM',stats);const value={at:new Date().toISOString(),...stats};await prisma.setting.upsert({where:{key:WAITING_OUT_OF_CRM},create:{key:WAITING_OUT_OF_CRM,value},update:{value}});}catch(error){log('waiting meetings out of the CRM failed',error);}
 }
 /**
  * Once, after the backfill: the rest of the release's clean-up of the data since 3 Nov (PLAN 9.7):
@@ -258,6 +268,7 @@ async function tick(){
    await phoneE164Backfill();
    await coldOutreachBackfill();
    await meetingApprovalBackfill();
+   await waitingOutOfCrm();
    await coldOutreachRelease();
    await sandboxJobs(now);
    try{const retried=await retryFailedWrites();if(retried.retried)log('twenty write retry',retried);}catch(error){log('twenty write retry failed',error);}

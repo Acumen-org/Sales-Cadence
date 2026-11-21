@@ -389,7 +389,7 @@ export async function addRecordingLinkAction(formData: FormData): Promise<Action
   const user = await requireUser();
   const id = String(formData.get('meetingId') ?? '');
   const raw = String(formData.get('reason') ?? formData.get('sourceUrl') ?? '').trim();
-  const existing = await prisma.meeting.findUnique({ where: { id }, select: { id: true, title: true, approval: true, review: true, bookedById: true, sourceUrl: true, transcript: true, companyId: true, bookedBy: { select: { name: true } } } });
+  const existing = await prisma.meeting.findUnique({ where: { id }, select: { id: true, title: true, approval: true, review: true, bookedById: true, sourceUrl: true, transcript: true, companyId: true, bookedBy: { select: { name: true } }, attendees: { select: { personId: true, prospect: true } } } });
   if (!existing) return { ok: false, error: 'Meeting not found.' };
   if (existing.bookedById !== user.id) return { ok: false, error: `Only ${existing.bookedBy?.name ?? 'the FO who booked it'}, who booked this meeting, can add its recording link. Its Sales Leader or an admin approves or declines it.` };
   if (existing.approval !== 'WAITING' || existing.review !== 'APPROVED') return { ok: false, error: existing.approval === 'DECLINED' ? 'This meeting was declined. Its Sales Leader, Biz Ops or an admin can add it back.' : 'This meeting is not waiting for approval any more.' };
@@ -427,8 +427,9 @@ export async function addRecordingLinkAction(formData: FormData): Promise<Action
   });
   if (!done) return { ok: false, error: 'Someone decided on this meeting a moment ago. Reload to see what they chose.' };
   await settleApprovalAsks(id, 'link_added', now);
-  // Written to the CRM with its link; a SharePoint recording gets its Teams transcript first.
-  await afterMeetingChange(id, [], !transcript && needsPlayer(url), user);
+  // It counts now: numbered with its prospects and written to the CRM with its link; a SharePoint
+  // recording gets its Teams transcript first.
+  await afterMeetingChange(id, prospectsOf(existing.attendees), !transcript && needsPlayer(url), user);
   revalidatePath('/meetings');
   revalidatePath('/meetings/approval');
   revalidatePath(`/meetings/${id}`);

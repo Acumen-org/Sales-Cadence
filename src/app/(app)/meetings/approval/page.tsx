@@ -31,8 +31,8 @@ export default async function MeetingApprovalPage({ searchParams }: { searchPara
   const whose = isAdmin(actor) || isBizOps(actor) ? 'every pod' : 'your pods';
   const intro = view === 'waiting'
     ? decidesMeetings(actor)
-      ? `Meetings saved with no recording link. They count and are in the CRM until declined. You see ${whose}.`
-      : `Meetings saved with no recording link, from ${whose}. Their Sales Leader or an admin approves or declines them; until then they count and are in the CRM. If you booked one, add its recording link to take it off this list.`
+      ? `Meetings saved with no recording link, from ${whose}. They get their meeting number and go to the CRM once approved.`
+      : `Meetings saved with no recording link, from ${whose}. Their Sales Leader or an admin approves or declines them; until then they have no meeting number and are not in the CRM. If you booked one, add its recording link to take it off this list.`
     : `Declined meetings from ${whose}. They are out of Cadence and the CRM. Nobody can add one again as a new meeting; its Sales Leader, Biz Ops or an admin can add it back here.`;
 
   return (

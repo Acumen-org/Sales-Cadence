@@ -1,5 +1,7 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { env } from '../env';
+import { COUNTED_WHERE, isCounted } from './counted';
 import { getSettings, isExternalEmail } from '../settings';
 import { getTwentyClient, type TwentyClient } from '../twenty';
 import type { TwentyMeetingSchema, TwentyTagField } from '../twenty/types';
@@ -209,8 +211,18 @@ const meetingSelect = {
  * caller can keep it for a retry. Returns the record's id (or the note's, without a Meetings object).
  */
 export async function syncMeetingToCrm(meetingId: string): Promise<string | null> {
-  const row = await prisma.meeting.findUnique({ where: { id: meetingId }, select: meetingSelect });
+  const row = await prisma.meeting.findUnique({ where: { id: meetingId }, select: { ...meetingSelect, approval: true } });
   if (!row || row.review !== 'APPROVED') return null;
+  // Waiting for approval: not in the CRM until approved (owner, 21 Nov 2026). One written before is
+  // taken out; its ids are cleared first, so a failed delete is retried from the outbox and swept by
+  // the meetings check, and the meeting is written fresh once approved.
+  if (!isCounted(row)) {
+    if (row.twentyMeetingId || row.twentyNoteId) {
+      await prisma.meeting.update({ where: { id: meetingId }, data: { twentyMeetingId: null, twentyNoteId: null, twentySnapshot: Prisma.DbNull, twentySyncedAt: null } });
+      await removeMeetingFromCrm({ twentyMeetingId: row.twentyMeetingId, twentyNoteId: row.twentyNoteId });
+    }
+    return null;
+  }
   // The recording Twenty links to is the company's copy once it is made: everyone can open it.
   const meeting = { ...row, sourceUrl: row.libraryStatus === 'DONE' && row.libraryUrl ? row.libraryUrl : row.sourceUrl };
   const client = await getTwentyClient();
@@ -303,7 +315,7 @@ export function meetingSchemaShape(schema: TwentyMeetingSchema): string {
 export async function backfillMeetingsToCrm(options: { all?: boolean; pauseMs?: number } = {}): Promise<number | null> {
   const client = await getTwentyClient();
   if (!(await client.meetingSchema())) return null;
-  const pending = await prisma.meeting.findMany({ where: { review: 'APPROVED', ...(options.all ? {} : { twentyMeetingId: null }) }, orderBy: { occurredAt: 'asc' }, select: { id: true } });
+  const pending = await prisma.meeting.findMany({ where: { ...COUNTED_WHERE, ...(options.all ? {} : { twentyMeetingId: null }) }, orderBy: { occurredAt: 'asc' }, select: { id: true } });
   for (const [i, m] of pending.entries()) {
     // S09: paced, so a rewrite of every meeting stays under Twenty's 100 requests a minute.
     if (i && options.pauseMs) await new Promise((resolve) => setTimeout(resolve, options.pauseMs));

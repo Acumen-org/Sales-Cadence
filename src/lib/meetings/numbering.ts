@@ -1,6 +1,7 @@
 import { prisma } from '../db';
 import { meetingDay, meetingDayInstant, parseMeetingDay } from './day';
 import { isCountedDay } from './numbering-start';
+import { COUNTED_WHERE, isCounted } from './counted';
 
 export { NUMBERING_STARTS, NUMBERING_STARTS_WORDS, isCountedDay } from './numbering-start';
 
@@ -56,9 +57,10 @@ export async function renumberProspects(personIds: Iterable<string | null | unde
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${LOCK})`;
     const found = await tx.meetingAttendee.findMany({
       where: { personId: { in: ids }, prospect: true },
-      select: { id: true, personId: true, meetingId: true, meetingNumber: true, numberSetTo: true, meeting: { select: { occurredAt: true, createdAt: true, review: true } } },
+      select: { id: true, personId: true, meetingId: true, meetingNumber: true, numberSetTo: true, meeting: { select: { occurredAt: true, createdAt: true, review: true, approval: true } } },
     });
-    const rows: Row[] = found.map((a) => ({ id: a.id, personId: a.personId!, meetingId: a.meetingId, meetingNumber: a.meetingNumber, numberSetTo: a.numberSetTo, occurredAt: a.meeting.occurredAt, createdAt: a.meeting.createdAt, approved: a.meeting.review === 'APPROVED' }));
+    // A meeting waiting for approval is numbered once it is approved (meetings/counted.ts).
+    const rows: Row[] = found.map((a) => ({ id: a.id, personId: a.personId!, meetingId: a.meetingId, meetingNumber: a.meetingNumber, numberSetTo: a.numberSetTo, occurredAt: a.meeting.occurredAt, createdAt: a.meeting.createdAt, approved: isCounted(a.meeting) }));
     const numbers = numberRows(rows);
     const changed = new Set<string>();
     for (const r of rows) {
@@ -69,9 +71,9 @@ export async function renumberProspects(personIds: Iterable<string | null | unde
     }
     // Each meeting these people were on: the highest of all its prospects' numbers, theirs or not.
     const meetingIds = [...new Set(rows.map((r) => r.meetingId))];
-    const meetings = await tx.meeting.findMany({ where: { id: { in: meetingIds } }, select: { id: true, meetingNumber: true, review: true, attendees: { where: { prospect: true }, select: { meetingNumber: true } } } });
+    const meetings = await tx.meeting.findMany({ where: { id: { in: meetingIds } }, select: { id: true, meetingNumber: true, review: true, approval: true, attendees: { where: { prospect: true }, select: { meetingNumber: true } } } });
     for (const m of meetings) {
-      const top = m.review === 'APPROVED' ? Math.max(0, ...m.attendees.map((a) => a.meetingNumber ?? 0)) || null : null;
+      const top = isCounted(m) ? Math.max(0, ...m.attendees.map((a) => a.meetingNumber ?? 0)) || null : null;
       if (top === m.meetingNumber) continue;
       await tx.meeting.update({ where: { id: m.id }, data: { meetingNumber: top } });
       changed.add(m.id);
@@ -103,7 +105,7 @@ export async function upcomingNumbers(personIds: string[], day: string, exceptMe
   const self = exceptMeetingId ? await prisma.meeting.findUnique({ where: { id: exceptMeetingId }, select: { createdAt: true } }) : null;
   const addedAt = self?.createdAt ?? new Date();
   const found = await prisma.meetingAttendee.findMany({
-    where: { personId: { in: ids }, prospect: true, meeting: { review: 'APPROVED' } },
+    where: { personId: { in: ids }, prospect: true, meeting: COUNTED_WHERE },
     select: { id: true, personId: true, meetingId: true, meetingNumber: true, numberSetTo: true, meeting: { select: { occurredAt: true, createdAt: true } } },
   });
   return ids.map((personId) => {

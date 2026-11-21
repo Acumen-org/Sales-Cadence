@@ -44,8 +44,8 @@ export function declineMeetingConfirm(m: { title: string; bookedBy: string | nul
   return {
     title: `Decline "${m.title}"?`,
     effects: [
-      'It leaves Cadence: the meetings list, Reports and every meeting number.',
-      'Its record in the CRM is removed.',
+      'It leaves Cadence: the meetings list and Reports.',
+      'It never goes to the CRM, and never gets a meeting number.',
       `Biz Ops and ${m.bookedBy ?? 'the FO who booked it'} are told, with your reason.`,
       'Nobody can add it again as a new meeting. Its Sales Leader, Biz Ops or an admin can add it back.',
     ],

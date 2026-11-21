@@ -9,6 +9,7 @@ import { meetingFacts, pushMeetingToCrm, type MeetingFacts } from './crm';
 import { meetingDay } from './day';
 import { renumberProspects } from './numbering';
 import { refreshMeetingAccounts } from './account';
+import { isCounted } from './counted';
 
 /**
  * Twenty keeps the record and Cadence writes it (owner, 2 November 2026: "Cadence is not a record
@@ -31,7 +32,7 @@ import { refreshMeetingAccounts } from './account';
 /** Writes per pass; the rest follow at the next tick. Twenty allows 100 requests a minute. */
 const MAX_WRITES = 60;
 
-export type MeetingsInCrmStats = { read: number; linked: number; written: number; waiting: number; notFromCadence: number; duplicatesRemoved?: number; /** Records of declined meetings taken out of the CRM. */ declinedRemoved?: number };
+export type MeetingsInCrmStats = { read: number; linked: number; written: number; waiting: number; notFromCadence: number; duplicatesRemoved?: number; /** Records of declined meetings taken out of the CRM. */ declinedRemoved?: number; /** Records of meetings waiting for approval taken out. */ waitingRemoved?: number };
 
 /**
  * N15: a record that still differs from what Cadence wrote, though nobody has changed it since Cadence
@@ -136,7 +137,7 @@ export async function checkMeetingsInCrm(options: { client?: TwentyClient } = {}
   const recordOf = new Map<string, string>();
   const nowMs = Date.now();
   for (const m of meetings) {
-    if (m.review !== 'APPROVED') continue;
+    if (!isCounted(m)) continue;
     const r = (m.twentyMeetingId ? byRecord.get(m.twentyMeetingId) : undefined) ?? byCadenceId.get(m.id);
     if (r) recordOf.set(m.id, r.id);
     if (r && r.id !== m.twentyMeetingId) await prisma.meeting.update({ where: { id: m.id }, data: { twentyMeetingId: r.id } });
@@ -177,19 +178,25 @@ export async function checkMeetingsInCrm(options: { client?: TwentyClient } = {}
       console.warn(`[meetings] could not remove duplicate CRM meeting ${r.id}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  // Owner, 20 Nov 2026: a declined meeting is out of the CRM. A record of one left there (its delete
-  // failed, or a write was in flight when it was declined) is removed here.
-  const declined = new Set(meetings.filter((m) => m.approval === 'DECLINED' && m.review === 'DISMISSED').map((m) => m.id));
-  for (const r of records.filter((x) => { const id = cadenceIdOf(f, x); return Boolean(id && declined.has(id)); }).slice(0, 10)) {
+  // Owner, 20 and 21 Nov 2026: a declined meeting is out of the CRM, and one waiting for approval is
+  // not in it yet. A record of either left there (its delete failed, or a write was in flight when
+  // it was declined or sent for approval) is removed here.
+  const outOfCrm = new Map(meetings.filter((m) => (m.approval === 'DECLINED' && m.review === 'DISMISSED') || (m.approval === 'WAITING' && m.review === 'APPROVED')).map((m) => [m.id, m.approval]));
+  for (const r of records.filter((x) => { const id = cadenceIdOf(f, x); return Boolean(id && outOfCrm.has(id)); }).slice(0, 25)) {
+    const id = cadenceIdOf(f, r)!;
+    const waiting = outOfCrm.get(id) === 'WAITING';
     try {
       await client.deleteMeetingRecord(schema, r.id);
-      stats.declinedRemoved = (stats.declinedRemoved ?? 0) + 1;
-      await logAudit({ entityType: 'meeting', entityId: cadenceIdOf(f, r)!, action: 'crm_declined_removed', actor: SYSTEM_ACTOR, details: { twentyMeetingId: r.id } });
+      if (waiting) {
+        stats.waitingRemoved = (stats.waitingRemoved ?? 0) + 1;
+        await prisma.meeting.updateMany({ where: { id, twentyMeetingId: r.id }, data: { twentyMeetingId: null, twentySnapshot: Prisma.DbNull, twentySyncedAt: null } });
+      } else stats.declinedRemoved = (stats.declinedRemoved ?? 0) + 1;
+      await logAudit({ entityType: 'meeting', entityId: id, action: waiting ? 'crm_waiting_removed' : 'crm_declined_removed', actor: SYSTEM_ACTOR, details: { twentyMeetingId: r.id } });
     } catch (err) {
-      console.warn(`[meetings] could not remove declined CRM meeting ${r.id}: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[meetings] could not remove ${waiting ? 'waiting' : 'declined'} CRM meeting ${r.id}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  const approved = new Set(meetings.filter((m) => m.review === 'APPROVED').map((m) => m.id));
+  const approved = new Set(meetings.filter(isCounted).map((m) => m.id));
   const queue = [...new Set([...first, ...moved, ...stale])].filter((id) => approved.has(id) && !pending.has(id));
   for (const id of queue.slice(0, MAX_WRITES)) {
     await pushMeetingToCrm(id);

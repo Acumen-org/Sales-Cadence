@@ -222,9 +222,10 @@ describe('approve and decline', () => {
   it('declining needs a reason, takes it out of Cadence and the CRM, and tells Biz Ops and the FO why', async () => {
     const { meeting } = await add(b.users.karson);
     await prisma.meeting.update({ where: { id: meeting.id }, data: { twentyMeetingId: 'tw-meeting-1' } });
-    // A later meeting with the same prospect is the 2nd until the first is declined.
+    // A later meeting with the same prospect is the 1st: one waiting for approval is not numbered (owner, 21 Nov 2026).
     const later = await add(b.users.karson, { title: 'Second call', occurredAt: '2026-11-12', sourceUrl: 'https://acumen.zoom.us/rec/share/xyz' });
-    expect((await prisma.meeting.findUniqueOrThrow({ where: { id: later.meeting.id } })).meetingNumber).toBe(2);
+    expect((await prisma.meeting.findUniqueOrThrow({ where: { id: meeting.id } })).meetingNumber).toBeNull();
+    expect((await prisma.meeting.findUniqueOrThrow({ where: { id: later.meeting.id } })).meetingNumber).toBe(1);
 
     as(sam);
     expect(await declineMeetingAction(payload(meeting.id, { reason: '  ' }))).toMatchObject({ ok: false, error: expect.stringContaining('Say why') });
