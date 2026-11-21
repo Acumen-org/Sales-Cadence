@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { requireUser, toActor, type SessionUser } from '../auth/current-user';
-import { isAdmin, isPodLeader, canCreateMeeting, ROLES_NEEDING_POD, whyNotManageMeeting } from '../auth/rbac';
+import { isAdmin, isPodLeader, canApproveMeeting, canCreateMeeting, ROLES_NEEDING_POD, whyNotManageMeeting } from '../auth/rbac';
 import { logAudit, userActor } from '../audit';
 import { inspectLink } from '../meetings/resolve-media';
 import { resolveAttendees, type AttendeeSelection } from '../meetings/attendees';
@@ -21,7 +21,7 @@ import { afterResponse } from '../engine/sync-out';
 import { extractRecordingUrl, parseMeetingLink } from '../meetings/providers';
 import { sharePointPlayer, sharePointRecording, needsPlayer } from '../meetings/sharepoint-player';
 import { libraryFieldsFor } from '../meetings/library';
-import { approvalForSave, askForApproval, declinedTwin, settleApprovalAsks } from '../meetings/approval';
+import { approvalForSave, askForApproval, bookerPodIds, declinedTwin, settleApprovalAsks } from '../meetings/approval';
 import { detectTranscriptFormat, parseTranscript } from '../meetings/transcript';
 import { getMeetingAnalyzer, MeetingAnalysisSchema } from '../meetings/analysis';
 import { meetingDay, meetingDayInstant, parseMeetingDay } from '../meetings/day';
@@ -327,6 +327,12 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
   const declined = moved ? await declinedTwin(prospectIds, occurredAt, id) : null;
   if (declined) return { ok: false, error: declined };
   const approval = await approvalForSave({ sourceUrl: d.sourceUrl, bookedById: d.bookedById }, existing, toActor(user));
+  // Owner, 21 Nov 2026: only the FO named in Booked by takes a waiting meeting out of approval with a
+  // link. Those who decide on it (its Sales Leader, an admin) may too: they could approve it anyway.
+  if (approval.cleared && existing.bookedById !== user.id && !canApproveMeeting(toActor(user), { bookedById: existing.bookedById, bookerPodIds: await bookerPodIds(existing.bookedById) })) {
+    const booker = existing.bookedById ? (await prisma.user.findUnique({ where: { id: existing.bookedById }, select: { name: true } }))?.name : null;
+    return { ok: false, error: `This meeting is waiting for approval. Only ${booker ?? 'the FO who booked it'}, who booked it, can add its recording link; its Sales Leader or an admin can approve or decline it.` };
+  }
 
   await prisma.$transaction(async (tx) => {
     await tx.meetingAttendee.deleteMany({ where: { meetingId: id } });
@@ -371,6 +377,63 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
   if (existing.companyId) revalidatePath(`/accounts/${existing.companyId}`);
   if (company.id) revalidatePath(`/accounts/${company.id}`);
   return { ok: true, message: asked ? `Saved. ${asked}` : 'Saved.' };
+}
+
+/**
+ * Owner, 21 Nov 2026: the FO named in Booked by may add the recording link to their meeting waiting
+ * for approval, from Meetings > Waiting for approval or the meeting itself. With a link there is
+ * nothing to approve, so it leaves the list and the approvers' bell lines say why. The link is read
+ * as the meeting form reads it. The link comes as `reason`, from the confirm dialog's box.
+ */
+export async function addRecordingLinkAction(formData: FormData): Promise<ActionResult> {
+  const user = await requireUser();
+  const id = String(formData.get('meetingId') ?? '');
+  const raw = String(formData.get('reason') ?? formData.get('sourceUrl') ?? '').trim();
+  const existing = await prisma.meeting.findUnique({ where: { id }, select: { id: true, title: true, approval: true, review: true, bookedById: true, sourceUrl: true, transcript: true, companyId: true, bookedBy: { select: { name: true } } } });
+  if (!existing) return { ok: false, error: 'Meeting not found.' };
+  if (existing.bookedById !== user.id) return { ok: false, error: `Only ${existing.bookedBy?.name ?? 'the FO who booked it'}, who booked this meeting, can add its recording link. Its Sales Leader or an admin approves or declines it.` };
+  if (existing.approval !== 'WAITING' || existing.review !== 'APPROVED') return { ok: false, error: existing.approval === 'DECLINED' ? 'This meeting was declined. Its Sales Leader, Biz Ops or an admin can add it back.' : 'This meeting is not waiting for approval any more.' };
+  const url = raw ? extractRecordingUrl(raw).trim() : '';
+  if (!url) return { ok: false, error: 'Paste the recording link.' };
+  if (url.length > 8192 || !/^https?:\/\/\S+$/i.test(url)) return { ok: false, error: 'Use an http or https recording link.' };
+  const link = parseMeetingLink(url);
+  if (link.isJoinLink) return { ok: false, error: 'That is a link to join the meeting, not its recording. Paste the recording link from OneDrive.' };
+  if (link.provider === 'OTHER' && link.note?.includes('does not look like a URL')) return { ok: false, error: link.note };
+  const [resolved, player] = await Promise.all([
+    !link.mediaUrl ? inspectLink(url) : null,
+    !link.embedUrl ? sharePointPlayer(url) : null,
+  ]);
+  const transcript = existing.transcript || resolved?.transcript || null;
+  const now = new Date();
+  const done = await prisma.$transaction(async (tx) => {
+    // Only while it still waits: a decision made a moment ago stands.
+    const r = await tx.meeting.updateMany({
+      where: { id, approval: 'WAITING', review: 'APPROVED' },
+      data: {
+        editedAt: now,
+        provider: link.provider,
+        sourceUrl: url,
+        embedUrl: link.embedUrl ?? player?.embedUrl ?? null,
+        mediaUrl: link.mediaUrl ?? resolved?.mediaUrl ?? null,
+        notRecorded: false,
+        ...libraryFieldsFor(url, existing),
+        ...(transcript !== existing.transcript ? { transcript, transcriptFormat: transcript ? detectTranscriptFormat(transcript) : null } : {}),
+        approval: null, approvalById: null, approvalAt: null,
+      },
+    });
+    if (!r.count) return false;
+    await logAudit({ entityType: 'meeting', entityId: id, action: 'recording_link_added', actor: userActor(user), details: { title: existing.title, changes: { sourceUrl: { from: existing.sourceUrl, to: url } } } }, tx);
+    return true;
+  });
+  if (!done) return { ok: false, error: 'Someone decided on this meeting a moment ago. Reload to see what they chose.' };
+  await settleApprovalAsks(id, 'link_added', now);
+  // Written to the CRM with its link; a SharePoint recording gets its Teams transcript first.
+  await afterMeetingChange(id, [], !transcript && needsPlayer(url), user);
+  revalidatePath('/meetings');
+  revalidatePath('/meetings/approval');
+  revalidatePath(`/meetings/${id}`);
+  if (existing.companyId) revalidatePath(`/accounts/${existing.companyId}`);
+  return { ok: true, message: `Recording link added to "${existing.title}". It needs no approval now.` };
 }
 
 export async function updateMeetingAttendeesAction(formData: FormData): Promise<ActionResult> {

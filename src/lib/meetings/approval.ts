@@ -1,11 +1,11 @@
 import { Prisma, type MeetingApproval } from '@prisma/client';
 import { prisma } from '../db';
-import { logAudit, type AuditActor } from '../audit';
+import { logAudit, SYSTEM_ACTOR, type AuditActor } from '../audit';
 import { notify } from '../notifications';
-import { formatLocalDate } from '../dates';
+import { formatLocalDate, type LocalDate } from '../dates';
 import { afterResponse } from '../engine/sync-out';
 import { canAddBackMeeting, canApproveMeeting, decidesMeetings, isAdmin, isBizOps, isSalesLeader, whyNotApproveMeeting, type Actor } from '../auth/rbac';
-import { meetingDay } from './day';
+import { meetingDay, meetingDayInstant } from './day';
 import { renumberProspects } from './numbering';
 import { pushMeetingToCrm, removeMeetingFromCrm } from './crm';
 
@@ -23,7 +23,11 @@ import { pushMeetingToCrm, removeMeetingFromCrm } from './crm';
  * Who is asked: the active Sales Leaders of the booked-by FO's pods, never the booker themselves.
  * When a pod has none, every active admin is asked. Whoever adds a meeting they may approve themselves
  * (an admin, or the pod's Sales Leader adding an FO's meeting) approves it by adding it.
- * Meetings saved before approvals began have no approval and are never asked about.
+ * Meetings saved without a link from 1 November on were sent for approval once, when this came in
+ * (owner, 21 Nov 2026: askForMeetingsSince); older ones have no approval and are never asked about.
+ *
+ * Everyone in the booked-by FO's pods sees its waiting and declined meetings and only reads them
+ * (owner, 21 Nov 2026). The FO named in Booked by may add its recording link, which settles it.
  */
 
 type Tx = Prisma.TransactionClient | typeof prisma;
@@ -57,33 +61,41 @@ export function approverWords(a: { names: string[]; admins: boolean }): string {
 }
 
 /**
- * The meetings this reader decides on or sees declined: everything for admins and Biz Ops; for a Sales
- * Leader, those booked by someone else in their pods. Null: none. The nav badge and the lists use it.
+ * The meetings this reader decides on: everything for admins; for a Sales Leader, those booked by
+ * someone else in their pods. Null: none. The nav badge uses it.
  */
 export function approvalScope(a: Actor): Prisma.MeetingWhereInput | null {
-  if (isAdmin(a) || isBizOps(a)) return {};
+  if (isAdmin(a)) return {};
   if (isSalesLeader(a) && a.podIds.length) return { bookedById: { not: a.id }, bookedBy: { pods: { some: { podId: { in: a.podIds }, pod: { archived: false } } } } };
   return null;
+}
+
+/**
+ * The waiting and declined meetings this reader sees (owner, 21 Nov 2026: everyone in the pod sees
+ * them, and only reads): everything for admins and Biz Ops; for anyone else, the meetings they booked
+ * and those booked by anyone in their pods.
+ */
+export function approvalViewScope(a: Actor): Prisma.MeetingWhereInput {
+  if (isAdmin(a) || isBizOps(a)) return {};
+  return { OR: [{ bookedById: a.id }, ...(a.podIds.length ? [{ bookedBy: { pods: { some: { podId: { in: a.podIds }, pod: { archived: false } } } } }] : [])] };
 }
 
 export const WAITING_WHERE: Prisma.MeetingWhereInput = { approval: 'WAITING', review: 'APPROVED' };
 export const DECLINED_WHERE: Prisma.MeetingWhereInput = { approval: 'DECLINED', review: 'DISMISSED' };
 
-/** Meetings waiting for this reader's decision, for the badge. Biz Ops decide none. */
+/** Meetings waiting for this reader's decision, for the badge. Biz Ops and FOs decide none. */
 export async function waitingForMe(a: Actor): Promise<number> {
   const scope = decidesMeetings(a) ? approvalScope(a) : null;
   return scope ? prisma.meeting.count({ where: { AND: [WAITING_WHERE, scope] } }) : 0;
 }
 
-export async function declinedCount(a: Actor): Promise<number> {
-  const scope = approvalScope(a);
-  return scope ? prisma.meeting.count({ where: { AND: [DECLINED_WHERE, scope] } }) : 0;
-}
-
-/** Meetings' tab counts for this reader; null when they see no tabs. */
-export async function meetingsTabCounts(a: Actor): Promise<{ decides: boolean; waiting: number; declined: number } | null> {
-  if (!approvalScope(a) || !(decidesMeetings(a) || isBizOps(a))) return null;
-  const [waiting, declined] = await Promise.all([waitingForMe(a), declinedCount(a)]);
+/** Meetings' tab counts for this reader: what the Waiting and Declined lists hold for them. */
+export async function meetingsTabCounts(a: Actor): Promise<{ decides: boolean; waiting: number; declined: number }> {
+  const scope = approvalViewScope(a);
+  const [waiting, declined] = await Promise.all([
+    prisma.meeting.count({ where: { AND: [WAITING_WHERE, scope] } }),
+    prisma.meeting.count({ where: { AND: [DECLINED_WHERE, scope] } }),
+  ]);
   return { decides: decidesMeetings(a), waiting, declined };
 }
 
@@ -101,19 +113,26 @@ export type ApprovalRow = {
   id: string; title: string; day: string; createdAt: Date; companyId: string | null; companyName: string | null; products: string[];
   bookedBy: string | null; pods: string[]; addedBy: string | null; prospects: { id: string | null; name: string }[];
   declinedBy: string | null; declinedAt: Date | null; declineReason: string | null;
+  /** Who decides a waiting one: "Sam Leader", "an admin". */
+  deciders: string | null;
   mayDecide: boolean; mayAddBack: boolean;
+  /** Only the FO named in Booked by may add the recording link here (owner, 21 Nov 2026). */
+  mayAddLink: boolean;
 };
 
-/** One page of the Waiting or Declined list, oldest waiting first and newest declined first. */
-export async function approvalList(a: Actor, view: 'waiting' | 'declined', take = 200): Promise<ApprovalRow[]> {
-  const scope = approvalScope(a);
-  if (!scope || (view === 'waiting' && !decidesMeetings(a))) return [];
+/** One page of the Waiting or Declined list, oldest meeting first while waiting and newest declined first. */
+export async function approvalList(a: Actor, view: 'waiting' | 'declined', take = 1000): Promise<ApprovalRow[]> {
   const rows = await prisma.meeting.findMany({
-    where: { AND: [view === 'waiting' ? WAITING_WHERE : DECLINED_WHERE, scope] },
-    orderBy: view === 'waiting' ? [{ createdAt: 'asc' }, { id: 'asc' }] : [{ declinedAt: 'desc' }, { id: 'desc' }],
+    where: { AND: [view === 'waiting' ? WAITING_WHERE : DECLINED_WHERE, approvalViewScope(a)] },
+    orderBy: view === 'waiting' ? [{ occurredAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }] : [{ declinedAt: 'desc' }, { id: 'desc' }],
     take,
     select: rowSelect,
   });
+  // Who decides, once per booker.
+  const deciders = new Map<string, string>();
+  if (view === 'waiting') {
+    for (const booker of new Set(rows.map((m) => m.bookedById ?? ''))) deciders.set(booker, approverWords(await meetingApprovers(booker || null)));
+  }
   return rows.map((m) => {
     const ref = { bookedById: m.bookedById, bookerPodIds: (m.bookedBy?.pods ?? []).filter((p) => !p.pod.archived).map((p) => p.podId) };
     return {
@@ -121,10 +140,15 @@ export async function approvalList(a: Actor, view: 'waiting' | 'declined', take 
       bookedBy: m.bookedBy?.name ?? null, pods: (m.bookedBy?.pods ?? []).filter((p) => !p.pod.archived).map((p) => p.pod.name), addedBy: m.createdBy?.name ?? null,
       prospects: m.attendees.map((p) => ({ id: p.personId, name: (p.person ? `${p.person.firstName} ${p.person.lastName}`.trim() : '') || p.name || p.email || 'Unnamed prospect' })),
       declinedBy: m.declinedBy?.name ?? null, declinedAt: m.declinedAt, declineReason: m.declineReason,
+      deciders: deciders.get(m.bookedById ?? '') ?? null,
       mayDecide: m.approval === 'WAITING' && canApproveMeeting(a, ref), mayAddBack: m.approval === 'DECLINED' && canAddBackMeeting(a, ref),
+      mayAddLink: mayAddRecordingLink(a, m),
     };
   });
 }
+
+/** The FO named in Booked by may add the recording link to their waiting meeting, and nobody else here. */
+export const mayAddRecordingLink = (a: Actor, m: { approval: MeetingApproval | null; bookedById: string | null }) => m.approval === 'WAITING' && !!m.bookedById && m.bookedById === a.id;
 
 /** What the meeting page shows about the approval, and what this reader may do there. */
 export async function approvalPanel(a: Actor, m: { id: string; approval: MeetingApproval | null; bookedById: string | null; createdById: string | null }) {
@@ -140,13 +164,18 @@ export async function approvalPanel(a: Actor, m: { id: string; approval: Meeting
     declinedBy: row?.declinedBy?.name ?? null, declinedAt: row?.declinedAt ?? null, declineReason: row?.declineReason ?? null,
     mayDecide: m.approval === 'WAITING' && canApproveMeeting(a, ref),
     mayAddBack: m.approval === 'DECLINED' && canAddBackMeeting(a, ref),
+    mayAddLink: mayAddRecordingLink(a, m),
   };
 }
 
-/** Whether this reader may open a declined meeting: whoever may add it back, its booker and whoever added it. */
+/**
+ * Whether this reader may open a declined meeting: whoever may add it back, its booker, whoever added
+ * it, and everyone in the booker's pods (they read it, as on Meetings > Declined).
+ */
 export async function mayOpenDeclined(a: Actor, m: { bookedById: string | null; createdById: string | null }): Promise<boolean> {
   if (m.bookedById === a.id || m.createdById === a.id) return true;
-  return canAddBackMeeting(a, { bookedById: m.bookedById, bookerPodIds: await bookerPodIds(m.bookedById) });
+  const pods = await bookerPodIds(m.bookedById);
+  return pods.some((p) => a.podIds.includes(p)) || canAddBackMeeting(a, { bookedById: m.bookedById, bookerPodIds: pods });
 }
 
 /**
@@ -181,6 +210,42 @@ export async function askForApproval(meetingId: string, from: { id: string }): P
   const approvers = await meetingApprovers(m.bookedById);
   await notify(approvers.ids.filter((id) => id !== from.id), { kind: 'meeting_approval', fromUserId: from.id, payload: { meetingId, title: m.title, day: meetingDay(m.occurredAt), bookedBy: m.bookedBy?.name ?? null, admins: approvers.admins } });
   return `It has no recording, so ${approverWords(approvers)} will approve it.`;
+}
+
+export const APPROVAL_BACKFILL = 'meetingApprovalBackfill20261121';
+export const APPROVAL_BACKFILL_FROM: LocalDate = '2026-11-01';
+
+/**
+ * Owner, 21 Nov 2026: every meeting on or after 1 November with no recording link waits for approval,
+ * those saved before approvals began on 20 November too. The worker runs it once. Idempotent: only a
+ * meeting with no approval yet moves, so one already approved, declined or asked about is left alone,
+ * and its approvers are asked once.
+ */
+export async function askForMeetingsSince(from: LocalDate = APPROVAL_BACKFILL_FROM, actor: AuditActor = SYSTEM_ACTOR): Promise<{ waiting: number; asked: number }> {
+  const candidates = await prisma.meeting.findMany({
+    where: { approval: null, review: 'APPROVED', occurredAt: { gte: new Date(meetingDayInstant(from).getTime() - 86_400_000) } },
+    select: { id: true, title: true, occurredAt: true, sourceUrl: true, bookedById: true, createdById: true, bookedBy: { select: { name: true } } },
+    orderBy: { occurredAt: 'asc' },
+  });
+  let waiting = 0;
+  let asked = 0;
+  const approversOf = new Map<string, Awaited<ReturnType<typeof meetingApprovers>>>();
+  for (const m of candidates) {
+    if (meetingDay(m.occurredAt) < from || !lacksRecording(m.sourceUrl)) continue;
+    const key = m.bookedById ?? '';
+    if (!approversOf.has(key)) approversOf.set(key, await meetingApprovers(m.bookedById));
+    const approvers = approversOf.get(key)!;
+    const bells = await prisma.$transaction(async (tx) => {
+      const r = await tx.meeting.updateMany({ where: { id: m.id, approval: null, review: 'APPROVED' }, data: { approval: 'WAITING', approvalById: null, approvalAt: null } });
+      if (!r.count) return null;
+      await logAudit({ entityType: 'meeting', entityId: m.id, action: 'approval_asked', actor, details: { title: m.title, from } }, tx);
+      return notify(approvers.ids.filter((id) => id !== m.createdById), { kind: 'meeting_approval', fromUserId: m.createdById, payload: { meetingId: m.id, title: m.title, day: meetingDay(m.occurredAt), bookedBy: m.bookedBy?.name ?? null, admins: approvers.admins } }, tx);
+    });
+    if (bells === null) continue;
+    waiting++;
+    asked += bells;
+  }
+  return { waiting, asked };
 }
 
 /** The approvers' bell lines for this meeting say how it was settled. */

@@ -4,6 +4,7 @@ import { expect, test, type Page } from '@playwright/test';
  * Owner, 20 November 2026.
  *  - A meeting with no recording link waits for the Sales Leader of the booking FO's pod, under
  *    Meetings > Waiting for approval; a decline asks why, takes it out, and Biz Ops can add it back.
+ *  - Owner, 21 Nov: everyone in the pod reads those lists; the FO who booked it may add its link.
  *  - A reached call can end with no next step, but the form asks why (Alyssa's one-off call).
  */
 const PASSWORD = 'password123';
@@ -26,28 +27,38 @@ async function sound(page: Page) {
   expect(overflow, `${page.url()} scrolls sideways by ${overflow}px`).toBeLessThanOrEqual(1);
 }
 
-test('a meeting with no recording waits for the Sales Leader, who declines it; Biz Ops adds it back', async ({ page }) => {
-  const title = `E2E no recording ${Date.now()}`;
-  await signIn(page, 'karson@cadence.local');
+/** Karson adds a meeting with no recording, on a day of its own (a declined twin would refuse it). */
+async function addUnrecorded(page: Page, title: string, day: string) {
   await page.goto('/meetings/new');
   await page.getByLabel('Not recorded or in person').check();
   await page.getByLabel('Title').fill(title);
-  await page.getByLabel('Date', { exact: true }).fill('2026-10-06');
+  await page.getByLabel('Date', { exact: true }).fill(day);
   await page.getByRole('combobox', { name: 'Find a prospect in the CRM' }).fill('Dummy Four');
   await page.getByRole('listbox', { name: 'Find a prospect in the CRM results' }).getByRole('option', { name: /^Dummy Four / }).click({ timeout: 20_000 });
   await page.getByRole('group', { name: 'Products' }).getByText('Acubooth', { exact: true }).click();
   await page.getByRole('button', { name: 'Add meeting', exact: true }).click();
   await expect(page).toHaveURL(/\/meetings\/[0-9a-f-]+$/);
+}
+
+test('a meeting with no recording waits for the Sales Leader, who declines it; Biz Ops adds it back', async ({ page }) => {
+  const title = `E2E no recording ${Date.now()}`;
+  await signIn(page, 'karson@cadence.local');
+  await addUnrecorded(page, title, '2026-10-06');
   const approval = page.getByRole('region', { name: 'Approval' });
   await expect(approval).toContainText('Waiting for approval.');
   await expect(approval).toContainText('Leigh Leader approves or declines it');
   await expect(approval.getByRole('button', { name: 'Approve' })).toHaveCount(0);
-  // An FO has no Approval tabs, and the address sends them back to Meetings.
+  await expect(approval.getByRole('button', { name: 'Add recording link' })).toBeVisible();
+  // An FO reads Waiting for approval (owner, 21 Nov 2026) and decides nothing there.
   await page.goto('/meetings');
-  await expect(page.getByRole('link', { name: /Waiting for approval/ })).toHaveCount(0);
   await expect(page.getByRole('row').filter({ hasText: title })).toContainText('Waiting for approval');
-  await page.goto('/meetings/approval');
-  await expect(page).toHaveURL(/\/meetings$/);
+  await page.getByRole('link', { name: /Waiting for approval/ }).click();
+  await expect(page).toHaveURL(/\/meetings\/approval$/);
+  await sound(page);
+  const mine = page.getByRole('row').filter({ hasText: title });
+  await expect(mine).toContainText('Waiting for Leigh Leader');
+  await expect(mine.getByRole('button', { name: 'Approve' })).toHaveCount(0);
+  await expect(mine.getByRole('button', { name: 'Decline' })).toHaveCount(0);
   await signOut(page);
 
   // The Sales Leader of Karson's pod: a count on Meetings, and the meeting under Waiting for approval.
@@ -76,9 +87,7 @@ test('a meeting with no recording waits for the Sales Leader, who declines it; B
 
   // Biz Ops see the declined meetings (and decide nothing), and may add one back.
   await signIn(page, 'bea@cadence.local');
-  await page.goto('/meetings/approval');
-  await expect(page).toHaveURL(/\/meetings\/approval$/);
-  await expect(page.getByRole('link', { name: /Waiting for approval/ })).toHaveCount(0);
+  await page.goto('/meetings/approval?view=declined');
   await sound(page);
   const declined = page.getByRole('row').filter({ hasText: title });
   await declined.getByRole('button', { name: 'Add back' }).click();
@@ -86,6 +95,26 @@ test('a meeting with no recording waits for the Sales Leader, who declines it; B
   await expect(page.getByText(/Added "E2E no recording/).first()).toBeVisible();
   await page.goto('/meetings');
   await expect(page.getByRole('row').filter({ hasText: title })).toHaveCount(1);
+});
+
+test('the FO who booked it adds the recording link, and it leaves Waiting for approval', async ({ page }) => {
+  const title = `E2E add link ${Date.now()}`;
+  await signIn(page, 'karson@cadence.local');
+  await addUnrecorded(page, title, '2026-10-08');
+  await page.goto('/meetings/approval');
+  const row = page.getByRole('row').filter({ hasText: title });
+  await row.getByRole('button', { name: 'Add recording link' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('it leaves Waiting for approval');
+  await expect(dialog.getByRole('button', { name: 'Add link' })).toBeDisabled();
+  await dialog.getByLabel(/Recording link/).fill('https://acumen.zoom.us/rec/share/e2e-add-link');
+  await dialog.getByRole('button', { name: 'Add link' }).click();
+  await expect(page.getByText(/Recording link added to "E2E add link/).first()).toBeVisible();
+  await expect(page.getByRole('row').filter({ hasText: title })).toHaveCount(0);
+  await page.goto('/meetings');
+  const listed = page.getByRole('row').filter({ hasText: title });
+  await expect(listed).toHaveCount(1);
+  await expect(listed).not.toContainText('Waiting for approval');
 });
 
 test('a reached call can end with no next step, and the form asks why', async ({ page }) => {

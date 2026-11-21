@@ -14,6 +14,10 @@ export type ConfirmReason = {
   /** Required: the confirm button stays off until something is written. */
   required?: boolean;
   placeholder?: string;
+  /** Longer than a reason, as a pasted link can be (500 when not said). */
+  maxLength?: number;
+  /** Said under the box while a required answer is missing ("Write the reason to go on." when not said). */
+  missingHint?: string;
 };
 
 export type ConfirmOptions = {
@@ -53,10 +57,10 @@ export function ConfirmDialog({ title, effects = [], body, confirmLabel = 'Confi
       {body ? <div className="text-[13px] text-ink-700">{body}</div> : null}
       {children}
       {reason ? <label className="block text-xs text-ink-500">{reason.label}{reason.required ? <span className="text-red-700"> (required)</span> : null}
-        <textarea data-autofocus rows={2} maxLength={500} value={text} placeholder={reason.placeholder} onChange={(e) => setText(e.target.value)} className="mt-1 w-full" />
+        <textarea data-autofocus rows={2} maxLength={reason.maxLength ?? 500} value={text} placeholder={reason.placeholder} onChange={(e) => setText(e.target.value)} className="mt-1 w-full" />
       </label> : null}
       {error ? <p role="alert" className="text-[13px] text-red-700">{error}</p> : null}
-      {missing ? <p className="text-[12px] text-ink-500">Write the reason to go on.</p> : null}
+      {missing ? <p className="text-[12px] text-ink-500">{reason?.missingHint ?? 'Write the reason to go on.'}</p> : null}
       <div className="flex justify-end gap-2">
         <button type="button" className="btn-secondary" disabled={pending} onClick={onCancel}>{cancelLabel}</button>
         <button type="submit" className={tone === 'danger' ? 'btn-danger' : 'btn-primary'} disabled={pending || missing || confirmDisabled}>{pending ? 'Working' : confirmLabel}</button>

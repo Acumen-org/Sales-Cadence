@@ -107,7 +107,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
     <PageFrame className="space-y-3 px-6 pb-8 pt-2">
       <Surface flush>
         <ViewHeader
-          title={tabCounts ? 'Meetings' : 'All meetings'}
+          title="Meetings"
           caret
           meta={`${total} meeting${total === 1 ? '' : 's'}`}
           actions={
@@ -118,7 +118,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
             </>
           }
         />
-        {tabCounts ? <div className="mb-3"><MeetingsTabs current="all" counts={tabCounts} /></div> : null}
+        <div className="mb-3"><MeetingsTabs current="all" counts={tabCounts} /></div>
         <Toolbar>
           <MeetingsToolbar who={who} product={product} from={from} to={to} favourites={favourites} products={PRODUCTS} booked={booked} fos={fos} />
         </Toolbar>

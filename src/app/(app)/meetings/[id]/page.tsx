@@ -5,7 +5,7 @@ import { notFound } from 'next/navigation';
 import { requireUser, toActor } from '@/lib/auth/current-user';
 import { approvalPanel, mayOpenDeclined } from '@/lib/meetings/approval';
 import { addMeetingBackAction, approveMeetingAction, declineMeetingAction } from '@/lib/actions/meeting-approval';
-import { addMeetingBackConfirm, declineMeetingConfirm } from '@/lib/confirms';
+import { addMeetingBackConfirm, addRecordingLinkConfirm, declineMeetingConfirm } from '@/lib/confirms';
 import { workspaceTimezone } from '@/lib/workspace';
 import { Flash } from '@/components/flash';
 import { prisma } from '@/lib/db';
@@ -16,7 +16,7 @@ import { meetingDay } from '@/lib/meetings/day';
 import { parseAnalysis } from '@/lib/meetings/analysis';
 import { parseTranscript, talkShare } from '@/lib/meetings/transcript';
 import { parseMeetingLink, platformLabel } from '@/lib/meetings/providers';
-import { canManageMeetingAction, deleteMeetingAction, saveTranscriptAction } from '@/lib/actions/meetings';
+import { addRecordingLinkAction, canManageMeetingAction, deleteMeetingAction, saveTranscriptAction } from '@/lib/actions/meetings';
 import { ActionButton, ActionForm } from '@/components/action-form';
 import { attendeeIsExternal } from '@/lib/meetings-query';
 import { MeetingAnalysisPanel } from '@/components/meetings/meeting-analysis';
@@ -34,7 +34,8 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
   const sp = await searchParams;
   const meeting = await prisma.meeting.findFirst({
     // Scoped, not merely fetched: a transcript is a prospect conversation. Never one removed; a declined
-    // one only for those who may add it back, its booker and whoever added it (owner, 20 Nov 2026).
+    // one only for those who may add it back, its booker, whoever added it and the booker's pods
+    // (owner, 20 and 21 Nov 2026).
     where: { id, OR: [{ review: 'APPROVED' }, { review: 'DISMISSED', approval: 'DECLINED' }] },
     include: { attendees: { orderBy: [{ host: 'desc' }, { external: 'asc' }, { name: 'asc' }], include: { person: { select: { companyName: true } } } }, createdBy: { select: { name: true } }, bookedBy: { select: { name: true } }, favourites: { where: { userId: user.id }, select: { userId: true } } },
   });
@@ -117,10 +118,13 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
           <Notice tone="warn">
             <div className="flex flex-wrap items-center justify-between gap-3" role="region" aria-label="Approval">
               <span><span className="font-medium">Waiting for approval.</span> This meeting has no recording link, so {approval.approvers} approves or declines it. It counts and is in the CRM until then.</span>
-              {approval.mayDecide ? (
+              {approval.mayDecide || approval.mayAddLink ? (
                 <span className="flex flex-wrap items-start gap-1.5">
-                  <ActionButton action={approveMeetingAction} payload={{ meetingId: meeting.id }} className="btn-primary btn-sm" flash>Approve</ActionButton>
-                  <ActionButton action={declineMeetingAction} payload={{ meetingId: meeting.id }} className="btn-secondary btn-sm text-red-700" confirm={declineMeetingConfirm({ title: meeting.title, bookedBy: meeting.bookedBy?.name ?? null })} flash>Decline</ActionButton>
+                  {approval.mayDecide ? <>
+                    <ActionButton action={approveMeetingAction} payload={{ meetingId: meeting.id }} className="btn-primary btn-sm" flash>Approve</ActionButton>
+                    <ActionButton action={declineMeetingAction} payload={{ meetingId: meeting.id }} className="btn-secondary btn-sm text-red-700" confirm={declineMeetingConfirm({ title: meeting.title, bookedBy: meeting.bookedBy?.name ?? null })} flash>Decline</ActionButton>
+                  </> : null}
+                  {approval.mayAddLink ? <ActionButton action={addRecordingLinkAction} payload={{ meetingId: meeting.id }} className="btn-secondary btn-sm" confirm={addRecordingLinkConfirm({ title: meeting.title })} flash>Add recording link</ActionButton> : null}
                 </span>
               ) : null}
             </div>

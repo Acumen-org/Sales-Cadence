@@ -221,9 +221,7 @@ export function canApproveMeeting(a: Actor, m: MeetingApprovalRef): boolean {
   return isSalesLeader(a) && !!m.bookedById && m.bookedById !== a.id && m.bookerPodIds.some((p) => a.podIds.includes(p));
 }
 export const canAddBackMeeting = (a: Actor, m: MeetingApprovalRef) => isBizOps(a) || canApproveMeeting(a, m);
-/** Who sees Meetings > Approval: those who decide, and Biz Ops, who see the declined ones. */
-export const canSeeMeetingApprovals = (a: Actor) => isAdmin(a) || isSalesLeader(a) || isBizOps(a);
-/** Who is shown the meetings waiting for a decision (Biz Ops only see the declined ones). */
+/** Who decides on some meetings (everyone else reads their pods' waiting and declined ones, owner 21 Nov 2026). */
 export const decidesMeetings = (a: Actor) => isAdmin(a) || isSalesLeader(a);
 
 export function whyNotApproveMeeting(a: Actor, m: MeetingApprovalRef, bookerName: string | null): string | null {

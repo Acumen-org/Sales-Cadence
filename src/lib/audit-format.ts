@@ -137,6 +137,8 @@ const TITLES: Record<string, string> = {
   declined: 'Meeting declined: out of Cadence and the CRM',
   added_back: 'Declined meeting added back',
   crm_declined_removed: 'A declined meeting removed from the CRM',
+  approval_asked: 'Meeting sent for approval: no recording link',
+  recording_link_added: 'Recording link added: no approval needed',
   plan_updated: 'Sequence plan updated',
   // Administration (not in Activity, but never a raw name).
   'user:created': 'Team member added',

@@ -29,6 +29,7 @@ import { purgeOldPushes, sweepStuckPushes } from '../lib/sandbox/bellwether-api'
 import { importTwilioCalls } from '../lib/calls/import';
 import { runGraphMail } from '../lib/mail/graph-mail';
 import { COLD_OUTREACH_BACKFILL, runColdOutreachBackfill } from '../lib/outreach/backfills';
+import { APPROVAL_BACKFILL, askForMeetingsSince } from '../lib/meetings/approval';
 import { nightlyLookbackDays, nightlyLoop } from '../lib/nightly';
 import { getSettings } from '../lib/settings';
 import { ringHealth } from '../lib/outreach/health';
@@ -112,6 +113,17 @@ async function coldOutreachBackfill(){
  if(coldOutreachBackfillChecked)return;coldOutreachBackfillChecked=true;
  if(await prisma.setting.findUnique({where:{key:COLD_OUTREACH_BACKFILL}}))return;
  try{const stats=await runColdOutreachBackfill();log('cold outreach backfill',stats);const value={at:new Date().toISOString(),...stats};await prisma.setting.upsert({where:{key:COLD_OUTREACH_BACKFILL},create:{key:COLD_OUTREACH_BACKFILL,value},update:{value}});}catch(error){log('cold outreach backfill failed',error);}
+}
+/**
+ * Once (owner, 21 Nov 2026): every meeting from 1 November with no recording link waits for its Sales
+ * Leader's approval, those saved before approvals began too (src/lib/meetings/approval.ts). Idempotent,
+ * so a run that fails part way runs again at the next start.
+ */
+let meetingApprovalBackfillChecked=false;
+async function meetingApprovalBackfill(){
+ if(meetingApprovalBackfillChecked)return;meetingApprovalBackfillChecked=true;
+ if(await prisma.setting.findUnique({where:{key:APPROVAL_BACKFILL}}))return;
+ try{const stats=await askForMeetingsSince();log('meetings sent for approval',stats);const value={at:new Date().toISOString(),...stats};await prisma.setting.upsert({where:{key:APPROVAL_BACKFILL},create:{key:APPROVAL_BACKFILL,value},update:{value}});}catch(error){log('meeting approval backfill failed',error);}
 }
 /**
  * Once, after the backfill: the rest of the release's clean-up of the data since 3 Nov (PLAN 9.7):
@@ -245,6 +257,7 @@ async function tick(){
    await libraryCopies(now);
    await phoneE164Backfill();
    await coldOutreachBackfill();
+   await meetingApprovalBackfill();
    await coldOutreachRelease();
    await sandboxJobs(now);
    try{const retried=await retryFailedWrites();if(retried.retried)log('twenty write retry',retried);}catch(error){log('twenty write retry failed',error);}

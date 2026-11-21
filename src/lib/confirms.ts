@@ -55,6 +55,16 @@ export function declineMeetingConfirm(m: { title: string; bookedBy: string | nul
   };
 }
 
+/** Owner, 21 Nov 2026: the FO who booked a meeting waiting for approval adds its recording link. */
+export function addRecordingLinkConfirm(m: { title: string }): ConfirmOptions {
+  return {
+    title: `Add the recording link to "${m.title}"?`,
+    effects: ['With a recording, it needs no approval: it leaves Waiting for approval.', 'The link is saved on the meeting and written to the CRM.'],
+    confirmLabel: 'Add link',
+    reason: { label: 'Recording link', required: true, placeholder: 'Paste the recording link from OneDrive, SharePoint or Zoom', maxLength: 8192, missingHint: 'Paste the recording link to go on.' },
+  };
+}
+
 export function addMeetingBackConfirm(m: { title: string; bookedBy: string | null }): ConfirmOptions {
   return {
     title: `Add "${m.title}" back?`,

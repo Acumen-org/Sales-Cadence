@@ -1,16 +1,17 @@
 import { notFound, redirect } from 'next/navigation';
-import { requireUser } from '@/lib/auth/current-user';
-import { ROLES_NEEDING_POD } from '@/lib/auth/rbac';
+import { requireUser, toActor } from '@/lib/auth/current-user';
+import { canApproveMeeting, ROLES_NEEDING_POD } from '@/lib/auth/rbac';
+import { bookerPodIds } from '@/lib/meetings/approval';
 import { prisma } from '@/lib/db';
 import { canManageMeetingAction } from '@/lib/actions/meetings';
 import { MeetingForm } from '@/components/meetings/meeting-form';
-import { PageHeader, Surface } from '@/components/ui';
+import { Notice, PageHeader, Surface } from '@/components/ui';
 import { meetingDay } from '@/lib/meetings/day';
 import { transcriptKey } from '@/lib/meetings/transcript-key';
 import { prospectOptions, teamOptions } from '@/lib/meetings/people-search';
 
 export default async function EditMeetingPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireUser();
+  const user = await requireUser();
   const { id } = await params;
   const [meeting, fos] = await Promise.all([
     prisma.meeting.findUnique({ where: { id }, include: { attendees: true } }),
@@ -22,11 +23,17 @@ export default async function EditMeetingPage({ params }: { params: Promise<{ id
     teamOptions(meeting.attendees.flatMap((a) => (a.userId ? [a.userId] : []))),
     prospectOptions(meeting.attendees.flatMap((a) => (a.prospect && a.personId ? [a.personId] : []))),
   ]);
+  // Owner, 21 Nov 2026: only the FO named in Booked by (or whoever decides) adds the link that takes a
+  // waiting meeting out of approval. Said here, before anyone pastes one.
+  const waitingNotMine = meeting.approval === 'WAITING' && meeting.bookedById !== user.id
+    && !canApproveMeeting(toActor(user), { bookedById: meeting.bookedById, bookerPodIds: await bookerPodIds(meeting.bookedById) });
+  const booker = waitingNotMine ? fos.find((f) => f.id === meeting.bookedById)?.name : null;
 
   return (
     <>
       <PageHeader title="Edit meeting" subtitle={meeting.title} />
-      <div className="max-w-4xl px-6 pb-8 pt-2">
+      <div className="max-w-4xl space-y-3 px-6 pb-8 pt-2">
+        {waitingNotMine ? <Notice tone="warn">This meeting is waiting for approval. Only {booker ?? 'the FO who booked it'}, who booked it, can add its recording link; you can change everything else.</Notice> : null}
         <Surface>
           <MeetingForm
             mode="edit"

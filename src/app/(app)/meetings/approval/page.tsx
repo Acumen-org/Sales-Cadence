@@ -1,11 +1,11 @@
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
 import { requireUser, toActor } from '@/lib/auth/current-user';
-import { canCreateMeeting, canSeeMeetingApprovals, decidesMeetings } from '@/lib/auth/rbac';
+import { canCreateMeeting, decidesMeetings, isAdmin, isBizOps } from '@/lib/auth/rbac';
 import { formatInstant, formatLocalDate } from '@/lib/dates';
 import { approvalList, meetingsTabCounts, type ApprovalRow } from '@/lib/meetings/approval';
 import { addMeetingBackAction, approveMeetingAction, declineMeetingAction } from '@/lib/actions/meeting-approval';
-import { addMeetingBackConfirm, declineMeetingConfirm } from '@/lib/confirms';
+import { addRecordingLinkAction } from '@/lib/actions/meetings';
+import { addMeetingBackConfirm, addRecordingLinkConfirm, declineMeetingConfirm } from '@/lib/confirms';
 import { workspaceTimezone } from '@/lib/workspace';
 import { PageFrame } from '@/components/page-frame';
 import { ActionButton } from '@/components/action-form';
@@ -15,22 +15,25 @@ import { IconCalendar, IconPlus } from '@/components/icons';
 import { Empty, EmptyState, IdentityCell, Surface, ViewHeader } from '@/components/ui';
 
 /**
- * Meetings > Approval (owner, 20 Nov 2026). A meeting saved with no recording link waits here for the
- * Sales Leader of the booked-by FO's pod, or an admin, to approve or decline it; a Sales Leader sees
- * only their own pods' FOs. Declined meetings are listed under Declined, for Biz Ops too, and can be
- * added back from there.
+ * Meetings > Approval (owner, 20 and 21 Nov 2026). A meeting saved with no recording link waits here for
+ * the Sales Leader of the booked-by FO's pod, or an admin, to approve or decline it. Everyone in the
+ * pod sees its waiting and declined meetings and only reads them; the FO named in Booked by may add
+ * the recording link, which takes it off the list. Declined meetings are added back from Declined.
  */
 export default async function MeetingApprovalPage({ searchParams }: { searchParams: Promise<{ view?: string; flash?: string; flashTone?: string }> }) {
   const user = await requireUser();
   const actor = toActor(user);
-  if (!canSeeMeetingApprovals(actor)) redirect('/meetings');
   const counts = await meetingsTabCounts(actor);
-  if (!counts) redirect('/meetings');
-  // Biz Ops decide nothing, so their Approval opens on the declined meetings.
   const sp = await searchParams;
-  const view = sp.view === 'declined' || !decidesMeetings(actor) ? 'declined' : 'waiting';
+  const view = sp.view === 'declined' ? 'declined' : 'waiting';
   const rows = await approvalList(actor, view);
   const tz = workspaceTimezone();
+  const whose = isAdmin(actor) || isBizOps(actor) ? 'every pod' : 'your pods';
+  const intro = view === 'waiting'
+    ? decidesMeetings(actor)
+      ? `Meetings saved with no recording link. They count and are in the CRM until declined. You see ${whose}.`
+      : `Meetings saved with no recording link, from ${whose}. Their Sales Leader or an admin approves or declines them; until then they count and are in the CRM. If you booked one, add its recording link to take it off this list.`
+    : `Declined meetings from ${whose}. They are out of Cadence and the CRM. Nobody can add one again as a new meeting; its Sales Leader, Biz Ops or an admin can add it back here.`;
 
   return (
     <PageFrame className="space-y-3 px-6 pb-8 pt-2">
@@ -42,11 +45,7 @@ export default async function MeetingApprovalPage({ searchParams }: { searchPara
           actions={canCreateMeeting(actor) ? <Link href="/meetings/new" className="btn-primary"><IconPlus size={14} /> Add meeting</Link> : null}
         />
         <MeetingsTabs current={view} counts={counts} />
-        <p className="px-5 pt-3 text-[12.5px] text-ink-600">
-          {view === 'waiting'
-            ? 'Meetings saved with no recording link. They count and are in the CRM until declined. You see the ones booked by FOs in your pods.'
-            : 'Declined meetings are out of Cadence and the CRM. Nobody can add one again as a new meeting; adding it back here makes it count again.'}
-        </p>
+        <p className="px-5 pt-3 text-[12.5px] text-ink-600">{intro}</p>
         {rows.length === 0 ? (
           <EmptyState
             icon={<IconCalendar size={20} />}
@@ -87,12 +86,16 @@ function WaitingTable({ rows, tz }: { rows: ApprovalRow[]; tz: string }) {
               <span className="block text-[12px] text-ink-500">{formatInstant(r.createdAt, tz)}</span>
             </td>
             <td data-label="Decision">
-              {r.mayDecide ? (
+              {r.mayDecide || r.mayAddLink ? (
                 <div className="flex flex-wrap items-start gap-1.5">
-                  <ActionButton action={approveMeetingAction} payload={{ meetingId: r.id }} className="btn-primary btn-sm" flash>Approve</ActionButton>
-                  <ActionButton action={declineMeetingAction} payload={{ meetingId: r.id }} className="btn-secondary btn-sm text-red-700" confirm={declineMeetingConfirm({ title: r.title, bookedBy: r.bookedBy })} flash>Decline</ActionButton>
+                  {r.mayDecide ? <>
+                    <ActionButton action={approveMeetingAction} payload={{ meetingId: r.id }} className="btn-primary btn-sm" flash>Approve</ActionButton>
+                    <ActionButton action={declineMeetingAction} payload={{ meetingId: r.id }} className="btn-secondary btn-sm text-red-700" confirm={declineMeetingConfirm({ title: r.title, bookedBy: r.bookedBy })} flash>Decline</ActionButton>
+                  </> : null}
+                  {r.mayAddLink ? <ActionButton action={addRecordingLinkAction} payload={{ meetingId: r.id }} className={r.mayDecide ? 'btn-ghost btn-sm' : 'btn-secondary btn-sm'} confirm={addRecordingLinkConfirm({ title: r.title })} flash>Add recording link</ActionButton> : null}
                 </div>
-              ) : <span className="text-[12px] text-ink-500">You booked it, so another Sales Leader of your pod, or an admin, decides.</span>}
+              ) : null}
+              {!r.mayDecide ? <span className={`block text-[12px] text-ink-500${r.mayAddLink ? ' mt-1.5' : ''}`}>Waiting for {r.deciders ?? 'its Sales Leader'}.</span> : null}
             </td>
           </tr>
         ))}
