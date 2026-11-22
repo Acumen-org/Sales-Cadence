@@ -160,7 +160,7 @@ function Wins({ s, now }: { s: Scoreboard; now: number }) {
             </li>
           ))}
         </ul>
-      ) : <p className="text-[12.5px] text-ink-500">No meetings booked in the last two weeks yet. Be the first.</p>}
+      ) : <p className="text-[12.5px] text-ink-500">Nothing booked in the last two weeks yet. Be the first.</p>}
     </section>
   );
 }
