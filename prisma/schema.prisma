@@ -142,6 +142,11 @@ model User {
   aliases        String[]  @default([])
   timezone       String    @default("America/Chicago")
   notificationsReadAt DateTime?
+  /// What the bell sends by email (owner, 21 Nov 2026): smart (what needs action within minutes, in
+  /// work hours, and the rest in a morning digest), digest (the morning digest only), or off.
+  emailNotifications String    @default("smart")
+  /// The workspace day (YYYY-MM-DD) this person's last morning digest was for, so one is sent once.
+  lastDigestOn   String?
   /// Per-user override of the daily action cap. Null = use the global setting.
   dailyCap       Int?
   active         Boolean   @default(true)
@@ -184,6 +189,38 @@ model User {
   ticketsResolved       Ticket[]              @relation("TicketResolvedBy")
   notifications         Notification[]        @relation("NotificationFor")
   linkedinFollowUps     LinkedInFollowUp[]    @relation("LinkedInFollowUpFo")
+  kudosGiven            MeetingKudos[]        @relation("KudosGiven")
+  notificationEmails    NotificationEmail[]
+}
+
+/// A colleague's 👏 on a meeting someone booked (owner, 21 Nov 2026: Meetings, gamified). One each.
+model MeetingKudos {
+  meetingId String
+  meeting   Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation("KudosGiven", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([meetingId, userId])
+  @@index([userId])
+}
+
+/// One email Cadence sent a teammate about their bell (owner, 21 Nov 2026), or tried to.
+model NotificationEmail {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// instant | digest | test
+  kind            String
+  subject         String
+  notificationIds String[] @default([])
+  /// SENT | FAILED
+  status          String
+  error           String?
+  createdAt       DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
 }
 
 model Session {
@@ -706,6 +743,7 @@ model Meeting {
   declineReason    String?
   createdAt        DateTime        @default(now())
   favourites       MeetingFavourite[]
+  kudos            MeetingKudos[]
   updatedAt        DateTime        @updatedAt
 
   attendees MeetingAttendee[]
@@ -1737,10 +1775,14 @@ model Notification {
   /// accepted | dismissed, and when.
   resolution       String?
   resolvedAt       DateTime?
+  /// When it went out by email, alone or in a digest; or when the email pass decided it never will
+  /// (read in Cadence first, settled, the person's emails off). Null: not looked at yet.
+  emailedAt        DateTime?
   createdAt        DateTime  @default(now())
 
   @@index([userId, createdAt])
   @@index([userId, readAt])
+  @@index([emailedAt, createdAt])
 }
 
 /// A key an admin made in Settings > API keys for a script or tool to read Cadence through /api/v1

@@ -387,3 +387,13 @@
   .eg-stage *, .eg-step { animation: none !important; }
   .eg-dialog { opacity: 1; } .eg-cursor { display: none; } .eg-step { color: #3c4a44; }
 }
+
+/* Meetings, gamified (owner, 21 Nov 2026): the card after a meeting is saved rises into place. */
+@keyframes celebrate-in {
+  from { transform: translateY(16px) scale(0.97); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.celebrate-in { animation: celebrate-in 0.35s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .celebrate-in { animation: none; }
+}

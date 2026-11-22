@@ -280,7 +280,8 @@ export async function createMeetingAction(formData: FormData): Promise<ActionRes
   revalidatePath('/meetings');
   revalidatePath('/home');
   if (company.id) revalidatePath(`/accounts/${company.id}`);
-  return { ok: true, message: asked ? `Meeting added. ${asked}` : 'Meeting added.', redirectTo: `/meetings/${meeting.id}` };
+  // The meeting opens with its celebration (owner, 21 Nov 2026: gamified).
+  return { ok: true, message: asked ? `Meeting added. ${asked}` : 'Meeting added.', redirectTo: `/meetings/${meeting.id}?celebrate=1` };
 }
 
 export async function updateMeetingAction(formData: FormData): Promise<ActionResult> {

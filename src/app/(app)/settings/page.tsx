@@ -8,6 +8,8 @@ import { requireUser } from '@/lib/auth/current-user';
 import { isAdmin } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
 import { env } from '@/lib/env';
+import { renderBellEmail } from '@/lib/bell-email/template';
+import { EmailSettingsForm, MeetingsSettingsForm, SendTestEmailButton } from '@/components/settings/meetings-email-settings';
 import { getSettings, getTwentySchema } from '@/lib/settings';
 import { getTwentyClient } from '@/lib/twenty';
 import { recentEvents } from '@/lib/engine/ingest';
@@ -57,6 +59,7 @@ const TABS = [
   { key: 'users', label: 'Team & pods' },
   { key: 'signin', label: 'Sign-in' },
   { key: 'calling', label: 'Calling' },
+  { key: 'meetings', label: 'Meetings and email' },
   { key: COLD_OUTREACH_SETTINGS_TAB, label: 'Cold outreach' },
   { key: 'linkedin', label: 'LinkedIn' },
   { key: 'blocked', label: 'Blocked accounts' },
@@ -104,6 +107,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       {tab === 'users' ? <UsersTab selfId={user.id} /> : null}
       {tab === 'signin' ? <SignInTab /> : null}
       {tab === 'calling' ? <CallingTab timezone={user.timezone} /> : null}
+      {tab === 'meetings' ? <MeetingsEmailTab timezone={user.timezone} /> : null}
       {/* Cold outreach asks the CRM for its options, so it follows the page in the same way. */}
       {tab === COLD_OUTREACH_SETTINGS_TAB ? <Suspense fallback={loading}><ColdOutreachTab admin timezone={user.timezone} /></Suspense> : null}
       {tab === 'linkedin' ? <Suspense fallback={loading}><LinkedInTab timezone={user.timezone} /></Suspense> : null}
@@ -544,6 +548,41 @@ async function ActivityTab() {
       </Card>
     </div>
   );
+}
+
+/**
+ * Settings > Meetings and email (owner, 21 Nov 2026): the company's monthly meeting target, and the
+ * bell by email: the sender mailbox, the hours, a test, the last emails, and a preview.
+ */
+async function MeetingsEmailTab({ timezone }: { timezone: string }) {
+  const settings = await getSettings();
+  const [recent, failed, sent24h, modes] = await Promise.all([
+    prisma.notificationEmail.findMany({ orderBy: { createdAt: 'desc' }, take: 8, select: { id: true, kind: true, subject: true, status: true, error: true, createdAt: true, user: { select: { name: true } } } }),
+    prisma.notificationEmail.count({ where: { status: 'FAILED', createdAt: { gte: new Date(Date.now() - 86_400_000) } } }),
+    prisma.notificationEmail.count({ where: { status: 'SENT', createdAt: { gte: new Date(Date.now() - 86_400_000) } } }),
+    prisma.user.groupBy({ by: ['emailNotifications'], where: { active: true }, _count: { _all: true } }),
+  ]);
+  const preview = renderBellEmail({ kind: 'digest', firstName: 'Karson', appUrl: env().APP_URL, timezone, extras: { approvalsWaiting: 2, crmReplies: 1 }, items: [
+    { kind: 'meeting_approval', name: 'Intro call with Acme', company: null, title: 'Alisa Senior added a meeting with no recording, booked by Karson Junior. Approve or decline it.', detail: null, href: '/meetings/approval', linkLabel: 'Open Approval', at: new Date() },
+    { kind: 'meeting_kudos', name: 'Pricing walk-through', company: null, title: '👏 Leigh Leader cheered the meeting you booked', detail: null, href: '/meetings', linkLabel: 'Open the meeting', at: new Date() },
+  ] });
+  const count = (mode: string) => modes.find((m) => m.emailNotifications === mode)?._count._all ?? 0;
+  return <div className="space-y-3">
+    <Card title="Meeting target"><MeetingsSettingsForm m={settings.meetings} /></Card>
+    <Card title="Email from Cadence" actions={settings.email.senderMailbox ? <SendTestEmailButton /> : null}>
+      <EmailSettingsForm s={settings.email} />
+      <div className="border-t border-line p-4"><KeyValue items={[
+        { k: 'Status', v: settings.email.enabled ? <Badge tone="green">On</Badge> : <Badge>Off</Badge> },
+        { k: 'Last 24 hours', v: `${sent24h} sent${failed ? `, ${failed} failed` : ''}` },
+        { k: 'People who chose', v: `${count('smart')} what needs them plus a summary, ${count('digest')} summary only, ${count('off')} no emails` },
+      ]} /></div>
+      {recent.length ? <div className="border-t border-line p-4"><h3 className="mb-2 text-[12px] font-medium text-ink-500">Latest emails</h3><ul className="space-y-1.5 text-[12.5px]">{recent.map((r) => <li key={r.id} className="flex flex-wrap items-baseline gap-x-2"><Badge tone={r.status === 'SENT' ? 'green' : 'red'}>{r.status === 'SENT' ? 'Sent' : 'Failed'}</Badge><span className="text-ink-900">{r.user.name}</span><span className="text-ink-600">{r.subject}</span><span className="text-ink-400">{formatInstant(r.createdAt, timezone)}</span>{r.error ? <span className="basis-full text-red-700">{r.error}</span> : null}</li>)}</ul></div> : null}
+    </Card>
+    <Card title="What a morning summary looks like">
+      {/* Cadence's own sample, escaped by the template; drawn in place (a frame is refused by the page's policy). */}
+      <div className="p-4"><div className="overflow-hidden rounded-lg border border-line" dangerouslySetInnerHTML={{ __html: preview.html.replace(/^[\s\S]*?<body[^>]*>/i, '').replace(/<\/body>[\s\S]*$/i, '') }} /></div>
+    </Card>
+  </div>;
 }
 
 async function CallingTab({ timezone }: { timezone: string }) {

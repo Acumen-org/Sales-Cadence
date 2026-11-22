@@ -2,7 +2,7 @@
 
 Cadence is a self-hosted, multi-user sales sequencer that sits beside a self-hosted [Twenty CRM](https://twenty.com). Twenty stays the system of record. Cadence is the daily work surface for the outreach team (FOs): it decides who each FO touches today and on which channel, tracks multi-step campaigns across hundreds of people and several pods, and marks steps complete by observing activity that Twenty already syncs.
 
-Cadence never sends email or automates LinkedIn. Humans do every touch.
+Cadence never emails a prospect or automates LinkedIn. Humans do every touch. The only email it sends is a teammate's own notifications, once an admin switches that on (DECISIONS.md, "The bell by email").
 
 Current requirement-by-requirement findings and live deployment limitations: [CURRENT-REQUIREMENTS-AUDIT.md](CURRENT-REQUIREMENTS-AUDIT.md).
 

@@ -29,6 +29,7 @@ import { purgeOldPushes, sweepStuckPushes } from '../lib/sandbox/bellwether-api'
 import { importTwilioCalls } from '../lib/calls/import';
 import { runGraphMail } from '../lib/mail/graph-mail';
 import { COLD_OUTREACH_BACKFILL, runColdOutreachBackfill } from '../lib/outreach/backfills';
+import { runBellEmail } from '../lib/bell-email/run';
 import { APPROVAL_BACKFILL, askForMeetingsSince, takeWaitingOutOfCrm, WAITING_OUT_OF_CRM } from '../lib/meetings/approval';
 import { nightlyLookbackDays, nightlyLoop } from '../lib/nightly';
 import { getSettings } from '../lib/settings';
@@ -78,7 +79,7 @@ const nightly=nightlyLoop({hour:config.RECONCILE_HOUR,log,jobs:()=>{
  * when GRAPH_MAIL_ENABLED is set. Moves to the CRM go at every tick, paced under Twenty's limit.
  * Every 5 minutes: the sandbox CRM cleanup (src/lib/sandbox/crm-cleanup.ts).
  */
-let callsAt=0;let mailAt=0;let crmCleanupAt=0;let healthAt=0;
+let callsAt=0;let mailAt=0;let bellEmailAt=0;let crmCleanupAt=0;let healthAt=0;
 /** M31: calls are read first in each pass, so forms open within the 2 minutes the screen promises whatever runs after. */
 async function callsImport(now:number){
  if(now>=callsAt){callsAt=now+120_000;try{const synced=await syncH00ksNumbers();if(synced.ran&&(synced.changed.length||synced.identitiesAdded||synced.error))log('h00ks numbers',{changed:synced.changed.map((c)=>`${c.name}: ${c.from??'none'} -> ${c.to??'none'}`),identitiesAdded:synced.identitiesAdded,unmatched:synced.unmatched.length,error:synced.error});}catch(error){log('h00ks numbers failed',error);}try{const stats=await importTwilioCalls();if(stats.ran&&(stats.created||stats.forms||stats.recordings||stats.error))log('twilio import',stats);}catch(error){log('twilio import failed',error);}}
@@ -93,6 +94,8 @@ async function sandboxJobs(now:number){
  if(now>=crmCleanupAt){crmCleanupAt=now+CLEANUP_EVERY_MS;try{const stats=await cleanupSandboxCrmPeople();if(stats.removed||stats.kept||stats.dryRun||stats.errors)log('sandbox CRM cleanup',stats);}catch(error){log('sandbox CRM cleanup failed',error);}}
  // Every 5 minutes: the health card (PLAN 4.7); a line that turns amber rings the admins once.
  if(now>=healthAt){healthAt=now+300_000;try{const rang=await ringHealth(new Date(now));if(rang.length)log('health card amber',rang);}catch(error){log('health check failed',error);}}
+ // Every minute: the bell by email (owner, 21 Nov 2026; off until Settings turns it on).
+ if(now>=bellEmailAt){bellEmailAt=now+60_000;try{const stats=await runBellEmail(new Date(now));if(stats.instant||stats.digests||stats.failed)log('bell emails',stats);}catch(error){log('bell emails failed',error);}}
  if(now>=mailAt){mailAt=now+120_000;try{const stats=await runGraphMail();if(stats.ran&&(stats.sent||stats.replies||stats.bounces||stats.possibleBounces||stats.alerts||stats.resets||stats.errors.length))log('graph mail',stats);}catch(error){log('graph mail failed',error);}}
 }
 /** Once: E.164 copies of the phones already cached, so calls and pushes match CRM people by number. */

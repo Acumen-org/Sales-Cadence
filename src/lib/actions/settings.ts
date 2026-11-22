@@ -7,8 +7,9 @@ import { logAudit, userActor } from '../audit';
 import { cleanupSandboxCrmPeople } from '../sandbox/crm-cleanup';
 import { crmCheckWords, CRM_CHECK_RUNNING, RUN_NOW_BUDGET_MS, runCrmCheck } from '../sandbox/crm-check';
 import { crmValueChoices, crmValueRefusal } from '../sandbox/cold-settings';
-import { CallingSettingsSchema, getSettings, LinkedInSettingsSchema, MatchingSettingsSchema, RulesSettingsSchema, SandboxSettingsSchema, saveSettingsSection, SyncSettingsSchema, TwentySettingsSchema } from '../settings';
+import { CallingSettingsSchema, EmailSettingsSchema, getSettings, LinkedInSettingsSchema, MeetingsSettingsSchema, MatchingSettingsSchema, RulesSettingsSchema, SandboxSettingsSchema, saveSettingsSection, SyncSettingsSchema, TwentySettingsSchema } from '../settings';
 import { applyNeverProspectRule } from '../non-prospects';
+import { prisma } from '../db';
 import type { ActionResult } from './users';
 import { issueText } from '../form-errors';
 
@@ -188,6 +189,39 @@ export async function saveSandboxSettingsAction(formData: FormData): Promise<Act
   await logAudit({ entityType: 'settings', entityId: 'sandbox', action: 'updated', actor: userActor(admin), details: parsed.data });
   revalidatePath('/settings');
   return { ok: true, message: 'Cold outreach settings saved.' };
+}
+
+/** Settings > Meetings and email: the company's monthly meeting target (owner, 21 Nov 2026). */
+export async function saveMeetingsSettingsAction(formData: FormData): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  const parsed = MeetingsSettingsSchema.safeParse({ monthlyGoal: Number(formData.get('monthlyGoal')) });
+  if (!parsed.success) return { ok: false, error: 'The monthly target is a whole number of meetings, from 1 to 200.' };
+  await saveSettingsSection('meetings', parsed.data);
+  await logAudit({ entityType: 'settings', entityId: 'meetings', action: 'updated', actor: userActor(admin), details: parsed.data });
+  revalidatePath('/settings');
+  revalidatePath('/meetings');
+  return { ok: true, message: 'Meeting target saved.' };
+}
+
+/** Settings > Meetings and email: the bell by email (owner, 21 Nov 2026). */
+export async function saveEmailSettingsAction(formData: FormData): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  const num = (k: string) => (formData.get(k) ? Number(formData.get(k)) : undefined);
+  const parsed = EmailSettingsSchema.safeParse({
+    enabled: bool(formData.get('enabled')),
+    senderMailbox: String(formData.get('senderMailbox') ?? '').trim().toLowerCase(),
+    digestHour: num('digestHour'), urgentDelayMinutes: num('urgentDelayMinutes'), workStartHour: num('workStartHour'), workEndHour: num('workEndHour'),
+  });
+  if (!parsed.success) return { ok: false, error: issues(parsed.error) };
+  if (parsed.data.senderMailbox && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(parsed.data.senderMailbox)) return { ok: false, error: 'The sender mailbox is an email address, like cadence@yourcompany.com.' };
+  if (parsed.data.enabled && !parsed.data.senderMailbox) return { ok: false, error: 'Name the mailbox Cadence sends from before turning emails on.' };
+  const wasOn = (await getSettings()).email.enabled;
+  await saveSettingsSection('email', parsed.data);
+  // Turned on: what rang while emails were off is old news, never a burst of emails.
+  if (parsed.data.enabled && !wasOn) await prisma.notification.updateMany({ where: { emailedAt: null }, data: { emailedAt: new Date() } });
+  await logAudit({ entityType: 'settings', entityId: 'email', action: 'updated', actor: userActor(admin), details: parsed.data });
+  revalidatePath('/settings');
+  return { ok: true, message: parsed.data.enabled ? 'Email settings saved. Emails are on.' : 'Email settings saved. Emails are off.' };
 }
 
 /** Settings > Calling: what counts as a connect and a conversation. */

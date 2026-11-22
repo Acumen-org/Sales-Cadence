@@ -4,6 +4,8 @@ import { ProductTags } from '@/components/meetings/product-tags';
 import { notFound } from 'next/navigation';
 import { requireUser, toActor } from '@/lib/auth/current-user';
 import { approvalPanel, mayOpenDeclined } from '@/lib/meetings/approval';
+import { celebrationFor } from '@/lib/meetings/scoreboard';
+import { Celebration } from '@/components/meetings/celebration';
 import { addMeetingBackAction, approveMeetingAction, declineMeetingAction } from '@/lib/actions/meeting-approval';
 import { addMeetingBackConfirm, addRecordingLinkConfirm, declineMeetingConfirm } from '@/lib/confirms';
 import { workspaceTimezone } from '@/lib/workspace';
@@ -28,7 +30,7 @@ import { deleteMeetingConfirm } from '@/lib/confirms';
 import { prospectOptions, teamOptions } from '@/lib/meetings/people-search';
 import { Avatar, Badge, Card, EmptyState, Field, KeyValue, Notice, RecordFields, RecordHeader } from '@/components/ui';
 
-export default async function MeetingPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ flash?: string; flashTone?: string }> }) {
+export default async function MeetingPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ flash?: string; flashTone?: string; celebrate?: string }> }) {
   const user = await requireUser();
   const { id } = await params;
   const sp = await searchParams;
@@ -45,6 +47,8 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
   if (declined && !(await mayOpenDeclined(actor, meeting))) notFound();
   const approval = await approvalPanel(actor, meeting);
   const tz = workspaceTimezone();
+  // Just saved (owner, 21 Nov 2026: gamified): what it did for the month.
+  const celebration = sp.celebrate === '1' ? await celebrationFor(meeting.id, actor) : null;
 
   const link = parseMeetingLink(meeting.sourceUrl);
   // A sharing link Cadence found SharePoint's player for reads as that player, not as the link.
@@ -75,6 +79,7 @@ export default async function MeetingPage({ params, searchParams }: { params: Pr
   return (
     <>
       {sp.flash ? <Flash message={sp.flash} tone={sp.flashTone === 'error' ? 'error' : 'ok'} /> : null}
+      {celebration ? <Celebration {...celebration} /> : null}
       <div className="px-6 pt-2">
         <RecordHeader
           name={meeting.title}

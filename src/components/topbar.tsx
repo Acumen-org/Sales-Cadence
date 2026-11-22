@@ -29,6 +29,7 @@ const SECTIONS: Record<string, string> = {
   'cold-outreach': 'Cold outreach',
   tickets: 'Tickets',
   calls: 'Calls',
+  'email-preferences': 'Email preferences',
 };
 
 export function TopBar({ role, unread, needsReview, timezone }: Props) {

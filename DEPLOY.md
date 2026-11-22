@@ -329,3 +329,37 @@ One-off steps before the pilot:
    running). The worker's nightly run then checks every sandbox contact against Twenty (plan
    section 8.10) and logs `sandbox crm check` with the counts.
 
+
+## Email from Cadence (the bell by email, 21 November 2026)
+
+Cadence emails each teammate what is in their own bell (Settings > Meetings and email). It sends
+as one Microsoft 365 mailbox through Graph `sendMail`, with `Mail.Send` scoped to that one mailbox.
+Cadence never emails a prospect. It stays off until an admin turns it on.
+
+IT, once (Exchange Online PowerShell, as an Exchange admin):
+
+1. Create a shared mailbox for Cadence, for example `cadence@yourcompany.com` (Exchange admin
+   center > Recipients > Mailboxes > Add a shared mailbox). A shared mailbox needs no licence.
+2. Give the Cadence app (its Application (client) ID is in Settings > Sign-in) `Mail.Send` for that
+   mailbox only, with RBAC for Applications. Do not add `Mail.Send` in the Entra admin center: an
+   Entra grant reaches every mailbox, and an application access policy limits all of the app's
+   mail permissions together, so it would also let Cadence send as the sales mailboxes it reads.
+
+   ```powershell
+   Connect-ExchangeOnline
+   # Once per app; skip if Get-ServicePrincipal already lists it (the Mail.Read setup may have made it).
+   New-ServicePrincipal -AppId <application-client-id> -ObjectId <enterprise-application-object-id> -DisplayName "Cadence"
+   New-ManagementScope -Name "Cadence sender" -RecipientRestrictionFilter "PrimarySmtpAddress -eq 'cadence@yourcompany.com'"
+   New-ManagementRoleAssignment -App <application-client-id> -Role "Application Mail.Send" -CustomResourceScope "Cadence sender"
+   Test-ServicePrincipalAuthorization -Identity <application-client-id> -Resource cadence@yourcompany.com    # Application Mail.Send: InScope True
+   Test-ServicePrincipalAuthorization -Identity <application-client-id> -Resource someone.else@yourcompany.com   # Application Mail.Send: InScope False
+   ```
+
+   A change can take up to an hour to apply. If the sales mailboxes' `Mail.Read` was limited with an
+   application access policy, check that the Cadence mailbox is not refused by it: the test email in
+   the next step shows Microsoft's answer word for word.
+
+Then an admin, in Settings > Meetings and email: enter the mailbox, Save, press "Send me a test",
+and once it arrives tick "Email teammates their notifications" and Save. The last emails and any
+failure show on the same page. Each teammate chooses for themselves at `/email-preferences` (also
+"Email me" in the bell).

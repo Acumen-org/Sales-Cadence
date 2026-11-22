@@ -225,6 +225,29 @@ export const LinkedInSettingsSchema = z.object({
   consoleApiKey: z.string().trim().max(500).default(''),
 });
 
+/** Meetings, gamified (owner, 21 Nov 2026): one company target, the same for every FO. */
+export const MeetingsSettingsSchema = z.object({
+  /** Meetings each FO aims to book in a month; only approved or recorded meetings count toward it. */
+  monthlyGoal: z.number().int().min(1).max(200).default(8),
+});
+
+/**
+ * The bell by email (owner, 21 Nov 2026). Off until an admin turns it on, once IT has given the
+ * Microsoft app Mail.Send for the sender mailbox only. Each person picks smart, digest or off.
+ */
+export const EmailSettingsSchema = z.object({
+  enabled: z.boolean().default(false),
+  /** The Microsoft 365 mailbox Cadence sends from, e.g. cadence@company.com. */
+  senderMailbox: z.string().trim().max(200).default(''),
+  /** The morning digest's hour, in each person's own time zone, on weekdays. */
+  digestHour: z.number().int().min(5).max(11).default(8),
+  /** Something that needs action is emailed this many minutes after it rings, unless read by then. */
+  urgentDelayMinutes: z.number().int().min(2).max(120).default(10),
+  /** Work hours for urgent emails, in each person's time zone; outside them it waits for the digest. */
+  workStartHour: z.number().int().min(5).max(12).default(8),
+  workEndHour: z.number().int().min(13).max(23).default(19),
+});
+
 // .prefault, not .default: Zod 4 returns a default as given, so only a parsed {} fills in each
 // section's own defaults (what .default({}) did in Zod 3).
 export const SettingsSchema = z.object({
@@ -236,6 +259,8 @@ export const SettingsSchema = z.object({
   sandbox: SandboxSettingsSchema.prefault({}),
   calling: CallingSettingsSchema.prefault({}),
   linkedin: LinkedInSettingsSchema.prefault({}),
+  meetings: MeetingsSettingsSchema.prefault({}),
+  email: EmailSettingsSchema.prefault({}),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;
@@ -246,6 +271,8 @@ export type SyncSettings = Settings['sync'];
 export type SandboxSettings = Settings['sandbox'];
 export type CallingSettings = Settings['calling'];
 export type LinkedInSettings = Settings['linkedin'];
+export type MeetingsSettings = Settings['meetings'];
+export type EmailSettings = Settings['email'];
 
 export const DEFAULT_SETTINGS: Settings = SettingsSchema.parse({});
 

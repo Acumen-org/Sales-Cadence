@@ -23,13 +23,14 @@ import { COLD_CONTACT_BASE, coldRef, personRef, subjectHref } from './subject';
  *   meeting_approval      a meeting with no recording waits for its Sales Leader (or an admin) to decide
  *   meeting_declined      a meeting was declined: Biz Ops, the booked-by FO and whoever added it are told why
  *   meeting_added_back    a declined meeting was added back, for the booked-by FO and whoever added it
+ *   meeting_kudos         a colleague's ðŸ‘ on a meeting you booked (Meetings > Recent wins)
  *
  * Read and unread work as they always have: "Mark read" marks everything up to the moment the list
  * was opened (`User.notificationsReadAt`); a Notification row also keeps its own `readAt`, set then
  * or when it is answered (a suggestion accepted or dismissed).
  */
 
-export type NotificationKind = 'reply' | 'bounce' | 'possible_bounce' | 'compliance_alert' | 'next_step_suggestion' | 'call_flag' | 'move_finished' | 'retention_warning' | 'campaign_published' | 'campaign_back_to_draft' | 'health_alert' | 'campaign_launch_failed' | 'meeting_approval' | 'meeting_declined' | 'meeting_added_back';
+export type NotificationKind = 'reply' | 'bounce' | 'possible_bounce' | 'compliance_alert' | 'next_step_suggestion' | 'call_flag' | 'move_finished' | 'retention_warning' | 'campaign_published' | 'campaign_back_to_draft' | 'health_alert' | 'campaign_launch_failed' | 'meeting_approval' | 'meeting_declined' | 'meeting_added_back' | 'meeting_kudos';
 
 type Tx = Prisma.TransactionClient | typeof prisma;
 
@@ -216,6 +217,11 @@ export function bellWords(n: Pick<Row, 'id' | 'kind' | 'personId' | 'sandboxCont
       const meetingId = str(p.meetingId);
       return { kind, name: str(p.title) ?? 'A meeting', company: null, title: `${from} added this declined meeting back: it counts again`, detail: null, href: meetingId ? `/meetings/${meetingId}` : null, linkLabel: 'Open the meeting' };
     }
+    case 'meeting_kudos': {
+      // Owner, 21 Nov 2026: a colleague's ðŸ‘ on a meeting you booked.
+      const meetingId = str(p.meetingId);
+      return { kind, name: str(p.title) ?? 'A meeting', company: null, title: `ðŸ‘ ${from} cheered the meeting you booked`, detail: null, href: meetingId ? `/meetings/${meetingId}` : null, linkLabel: 'Open the meeting' };
+    }
     case 'retention_warning': {
       const count = num(p.count);
       const due = str(p.firstDueOn);
@@ -235,7 +241,7 @@ export function bellWords(n: Pick<Row, 'id' | 'kind' | 'personId' | 'sandboxCont
 }
 
 /** Names for a page of rows, in three reads. */
-async function namesFor(rows: Row[]): Promise<Names> {
+export async function namesFor(rows: Row[]): Promise<Names> {
   const contactIds = new Set<string>();
   for (const r of rows) {
     if (r.sandboxContactId) contactIds.add(r.sandboxContactId);

@@ -7,6 +7,8 @@ import type { Prisma } from '@prisma/client';
 import { requireUser, toActor } from '@/lib/auth/current-user';
 import { meetingsTabCounts } from '@/lib/meetings/approval';
 import { MeetingsTabs } from '@/components/meetings/meetings-tabs';
+import { ScoreboardPanel } from '@/components/meetings/scoreboard';
+import { scoreboard } from '@/lib/meetings/scoreboard';
 import { NUMBERING_STARTS_WORDS, ordinal } from '@/lib/meetings/numbering';
 import { canCreateMeeting, ROLES_NEEDING_POD } from '@/lib/auth/rbac';
 import { attendeeIsExternal, meetingReadWhere } from '@/lib/meetings-query';
@@ -56,7 +58,8 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
   const where: Prisma.MeetingWhereInput = { AND: filters };
   const filtered = Boolean(who || product || from || to || favourites || booked);
 
-  const [{ rules }, tabCounts] = await Promise.all([getSettings(), meetingsTabCounts(toActor(user))]);
+  // The scoreboard heads the first page of every meeting (owner, 21 Nov 2026), not a search.
+  const [{ rules }, tabCounts, board] = await Promise.all([getSettings(), meetingsTabCounts(toActor(user)), page === 1 && !filtered ? scoreboard(toActor(user)) : null]);
   const externalCount = (attendees: { email: string | null; external: boolean; userId: string | null }[]) => attendees.filter((a) => attendeeIsExternal(a, rules.internalDomains)).length;
   const [meetings, total] = await Promise.all([
     prisma.meeting.findMany({
@@ -105,6 +108,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
 
   return (
     <PageFrame className="space-y-3 px-6 pb-8 pt-2">
+      {board ? <ScoreboardPanel s={board} now={Date.now()} /> : null}
       <Surface flush>
         <ViewHeader
           title="Meetings"
