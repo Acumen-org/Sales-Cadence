@@ -2,29 +2,34 @@ import Link from 'next/link';
 import clsx from 'clsx';
 import type { ReactNode } from 'react';
 import type { MonthProgress, Scoreboard } from '@/lib/meetings/scoreboard';
+import type { LocalDate } from '@/lib/dates';
 import { ordinal } from '@/lib/meetings/numbering';
+import { barColour } from '@/lib/bar-colour';
 import { Avatar } from '@/components/ui';
+import { IconStar } from '@/components/icons';
 import { KudosButton } from '@/components/meetings/kudos-button';
 
 /**
- * The top of Meetings (owner, 21 and 22 Nov 2026: gamified, so people feel encouraged to book, and
- * every figure plain): the month against its target with where it should be by today, the pod race
- * against each pod's own target, the top three bookers (each opens their meetings), and recent wins.
+ * The top of Meetings (owner, 21 to 23 Nov 2026: gamified, fun, simple and useful; no emojis): last
+ * month's best as an honour, the month as the platform's progress bar with its next mark, the pod
+ * race with the top three bookers (each opens their meetings), and recent wins.
  */
 export function ScoreboardPanel({ s, now, admin = false }: { s: Scoreboard; now: number; admin?: boolean }) {
   return (
-    <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)_minmax(0,1fr)]" aria-label="Meetings scoreboard" role="region">
-      {s.me ? <YourMonth s={s} me={s.me} /> : <TeamMonth s={s} admin={admin} />}
-      <PodRace s={s} />
-      <Wins s={s} now={now} />
+    <div className="space-y-3" aria-label="Meetings scoreboard" role="region">
+      {s.champions ? <Champions c={s.champions} month={s.month.label} /> : null}
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)_minmax(0,1fr)]">
+        {s.me ? <YourMonth s={s} me={s.me} /> : <TeamMonth s={s} admin={admin} />}
+        <PodRace s={s} />
+        <Wins s={s} now={now} />
+      </div>
     </div>
   );
 }
 
-/** The meetings that count, booked by this person this month: what their number is made of. */
-export const countedHref = (s: Pick<Scoreboard, 'month'>, userId: string) => `/meetings?booked=${encodeURIComponent(userId)}&from=${s.month.first}&to=${s.month.last}&counted=1`;
-
-const BADGE_ICON: Record<string, string> = { board: '🎯', first: '🤝', hattrick: '🎩', streak: '🔥', goal: '🏆', best: '⭐' };
+/** The meetings that count, booked by this person in a month: what their number is made of. */
+const rangeHref = (first: LocalDate, last: LocalDate, userId: string) => `/meetings?booked=${encodeURIComponent(userId)}&from=${first}&to=${last}&counted=1`;
+export const countedHref = (s: Pick<Scoreboard, 'month'>, userId: string) => rangeHref(s.month.first, s.month.last, userId);
 
 function CardHead({ title, aside }: { title: string; aside?: ReactNode }) {
   return (
@@ -38,94 +43,134 @@ function CardHead({ title, aside }: { title: string; aside?: ReactNode }) {
 const daysLeft = (n: number) => <span className="shrink-0 rounded-full bg-canvas px-2 py-0.5 text-[11.5px] tabular-nums text-ink-600">{n <= 1 ? 'Last day' : `${n} days left`}</span>;
 
 /**
- * The month so far, as a picture (owner, 22 Nov 2026: "simple and nice, make the space worth it"):
- * the green line is the running total of meetings booked; the dashed line is the steady pace that
- * reaches the target on the last day. Under the dashed line is behind, over it is ahead; today's gap
- * is drawn between the two dots.
+ * Last month's best (owner, 23 Nov 2026: "give regards to top pod and performer from last month,
+ * and it should look good enough that people want to be in that place"). The sidebar's evergreen
+ * and lime, so it reads as the house's own honour board; a light passes over it once on opening.
  */
-function MonthChart({ p, target, days, month }: { p: MonthProgress; target: number; days: number; month: string }) {
-  const W = 320, H = 104, top = 8, bottom = 3;
-  const day = p.daily.length;
-  const booked = p.daily[day - 1] ?? 0;
-  const max = Math.max(target, booked, 1);
-  const x = (d: number) => (d / days) * W;
-  const y = (v: number) => H - bottom - (v / max) * (H - top - bottom);
-  const line = [[0, 0], ...p.daily.map((v, i) => [i + 1, v])].map(([d, v]) => `${x(d).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-  const short = month.slice(0, 3);
+function Champions({ c, month }: { c: NonNullable<Scoreboard['champions']>; month: string }) {
+  const p = c.performer;
+  return (
+    <section aria-label={`${c.label}'s best`} className="champions relative overflow-hidden rounded-2xl bg-[#192c28] px-5 py-4 text-white">
+      <IconStar size={150} filled className="pointer-events-none absolute -right-6 -top-8 text-white/[0.04]" />
+      <div className="relative flex flex-wrap items-center gap-x-10 gap-y-4">
+        <div className="min-w-[10rem]">
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#d5e9ad]"><IconStar size={13} filled />{c.label}&apos;s best</p>
+          <p className="mt-1 text-[12.5px] text-white/60">Lead {month} to take their place.</p>
+        </div>
+        <Link href={rangeHref(c.first, c.last, p.userId)} title={`Open the ${p.meetings} meetings ${p.name} booked in ${c.label}`} className="group flex min-w-0 items-center gap-3.5">
+          <span className="relative shrink-0">
+            <Avatar name={p.name} shape="circle" size={50} className="ring-2 ring-[#d5e9ad] ring-offset-2 ring-offset-[#192c28]" />
+            <span aria-hidden className="absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full bg-[#d5e9ad] text-[#192c28]"><IconStar size={11} filled /></span>
+          </span>
+          <span className="min-w-0">
+            <span className="block text-[10.5px] font-semibold uppercase tracking-[0.12em] text-white/55">Top performer</span>
+            <span className="block truncate text-[18px] font-semibold leading-tight tracking-[-0.01em] group-hover:underline">{p.name}</span>
+            <span className="block truncate text-[12.5px] tabular-nums text-white/70">{p.meetings} meeting{p.meetings === 1 ? '' : 's'}{p.firstMeetings ? ` · ${p.firstMeetings} first` : ''}{p.pod ? ` · ${p.pod}` : ''}</span>
+          </span>
+        </Link>
+        {c.pod ? (
+          <div className="flex min-w-0 items-center gap-3.5">
+            <span aria-hidden className="flex shrink-0 pl-1.5">
+              {c.pod.people.slice(0, 4).map((n) => <Avatar key={n} name={n} shape="circle" size={34} className="-ml-1.5 ring-2 ring-[#192c28]" />)}
+              {c.pod.people.length > 4 ? <span className="-ml-1.5 grid h-[34px] w-[34px] place-items-center rounded-full bg-white/10 text-[11px] font-medium ring-2 ring-[#192c28]">+{c.pod.people.length - 4}</span> : null}
+            </span>
+            <span className="min-w-0">
+              <span className="block text-[10.5px] font-semibold uppercase tracking-[0.12em] text-white/55">Top pod</span>
+              <span className="block truncate text-[18px] font-semibold leading-tight tracking-[-0.01em]">{c.pod.name}</span>
+              <span className="block truncate text-[12.5px] tabular-nums text-white/70">{c.pod.meetings} meeting{c.pod.meetings === 1 ? '' : 's'} · {c.pod.perFo} per FO</span>
+            </span>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The platform's progress bar (as on Home: the line-coloured track, the fill darkening as it fills),
+ * with the marks under it. On opening it grows to today's mark, then its edge keeps leaning on
+ * toward the next one until the target is reached (globals.css: bar-grow, bar-lean; both stay still
+ * for anyone who asked for less motion).
+ */
+function GoalBar({ value, target, milestones, label, size = 'lg' }: { value: number; target: number; milestones?: number[]; label: string; size?: 'lg' | 'sm' }) {
+  const fraction = target ? Math.min(1, value / target) : 0;
+  // Never a sliver too thin to see: 1 of 72 still shows.
+  const width = value > 0 ? Math.max(3, fraction * 100) : 0;
+  const at = (m: number) => `${(m / target) * 100}%`;
   return (
     <div>
-      <div className="mb-1.5 flex items-center justify-between gap-2 text-[11px] text-ink-500">
-        <span className="inline-flex items-center gap-1.5"><span aria-hidden className="h-[3px] w-3.5 rounded-full bg-brand-500" />booked</span>
-        <span className="inline-flex items-center gap-1.5"><span aria-hidden className="w-3.5 border-t-2 border-dotted border-ink-300" />on pace for {target}</span>
+      <div className={clsx('relative overflow-hidden rounded-full bg-line', size === 'lg' ? 'h-2.5' : 'h-1.5')} role="img" aria-label={label}>
+        <div className="bar-grow relative h-full rounded-full" style={{ width: `${width}%`, background: barColour(fraction) }}>
+          {value < target && size === 'lg' ? <span aria-hidden className="bar-lean" /> : null}
+        </div>
+        {milestones?.filter((m) => m < target).map((m) => <span key={m} aria-hidden className="absolute inset-y-0 w-[2px] -translate-x-1/2 bg-white" style={{ left: at(m) }} />)}
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full overflow-visible" role="img" aria-label={p.status}>
-        <line x1={0} y1={y(0)} x2={W} y2={y(0)} className="stroke-line" strokeWidth={1} />
-        <line x1={0} y1={y(target)} x2={W} y2={y(target)} className="stroke-line" strokeWidth={1} strokeDasharray="1 4" />
-        <line x1={0} y1={y(0)} x2={W} y2={y(target)} className="stroke-ink-300" strokeWidth={1.5} strokeDasharray="2 4" strokeLinecap="round" />
-        <polygon points={`0,${y(0)} ${line} ${x(day).toFixed(1)},${y(0)}`} className="fill-brand-100/70" />
-        <polyline points={line} fill="none" className="stroke-brand-500" strokeWidth={2.25} strokeLinejoin="round" strokeLinecap="round" />
-        {p.state === 'behind' ? <line x1={x(day)} y1={y(booked) - 5} x2={x(day)} y2={y(p.pace) + 5} className="stroke-amber-400" strokeWidth={2} strokeLinecap="round" /> : null}
-        {p.state !== 'reached' ? <circle cx={x(day)} cy={y(p.pace)} r={3.5} className="fill-white stroke-ink-400" strokeWidth={1.5} /> : null}
-        <circle cx={x(day)} cy={y(booked)} r={4.5} className={p.state === 'reached' ? 'fill-amber-400 stroke-white' : 'fill-brand-600 stroke-white'} strokeWidth={2} />
-      </svg>
-      <div className="mt-1 flex justify-between text-[11px] tabular-nums text-ink-400"><span>1 {short}</span><span>{days} {short}</span></div>
+      {milestones ? (
+        <div aria-hidden className="relative mt-1.5 h-4 text-[11px] tabular-nums">
+          {milestones.map((m) => (
+            <span key={m} className={clsx('absolute top-0', m === target ? 'right-0' : '-translate-x-1/2', value >= m ? 'font-semibold text-brand-700' : 'text-ink-400')} style={m === target ? undefined : { left: at(m) }}>{m}</span>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function StatePill({ p, booked }: { p: MonthProgress; booked: number }) {
-  if (p.state === 'reached') return <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[12px] font-medium text-amber-900">🏆 Target reached</span>;
-  if (p.state === 'ahead') return <span className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[12px] font-medium text-emerald-800">On pace{booked > p.pace ? ` · ${booked - p.pace} ahead` : ''}</span>;
-  return <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[12px] font-medium text-amber-900">Behind pace · {p.pace - booked} short</span>;
-}
-
-function Chip({ children, tone = 'plain', href, title }: { children: ReactNode; tone?: 'plain' | 'warn'; href?: string; title?: string }) {
-  const cls = clsx('inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] tabular-nums', tone === 'warn' ? 'bg-amber-50 text-amber-900 hover:bg-amber-100' : 'bg-canvas text-ink-700');
-  return href ? <Link href={href} title={title} className={cls}>{children}</Link> : <span title={title} className={cls}>{children}</span>;
-}
-
-function MonthCard({ label, title, s, booked, target, p, chips, rule, footer }: { label: string; title: string; s: Scoreboard; booked: number; target: number; p: MonthProgress; chips: ReactNode; rule: ReactNode; footer?: ReactNode }) {
+function GoalCard({ label, title, s, booked, target, p, extra, foot }: { label: string; title: string; s: Scoreboard; booked: number; target: number; p: MonthProgress; extra?: ReactNode; foot: ReactNode }) {
   return (
     <section className="surface flex flex-col gap-3 p-4" aria-label={label}>
       <CardHead title={title} aside={daysLeft(s.month.daysLeft)} />
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-baseline gap-1.5" title="Approved or recorded meetings count. Those waiting for approval count once approved.">
-          <span className="text-[38px] font-semibold leading-none tracking-[-0.04em] tabular-nums text-ink-900">{booked}</span>
-          <span className="text-[20px] font-medium leading-none tabular-nums text-ink-400">/ {target}</span>
-          <span className="ml-1 text-[12.5px] text-ink-500">booked</span>
-        </div>
-        <StatePill p={p} booked={booked} />
-      </div>
-      <MonthChart p={p} target={target} days={s.month.days} month={s.month.label} />
-      <p className="text-[13px] font-medium text-ink-900">{p.state === 'reached' ? (booked > target ? `${booked - target} over target` : 'Right on target') : `${p.toGo} to go · about ${p.perDay} a working day`}</p>
-      <div className="flex flex-wrap gap-1.5">{chips}</div>
-      {footer}
-      <p className="mt-auto text-[11.5px] text-ink-500">{rule}</p>
+      <p className="flex items-baseline gap-1.5">
+        <span className={clsx('text-[38px] font-semibold leading-none tracking-[-0.04em] tabular-nums', booked >= target ? 'text-brand-700' : 'text-ink-900')}>{booked}</span>{' '}
+        <span className="text-[14px] text-ink-500">of {target} booked</span>
+      </p>
+      <GoalBar value={booked} target={target} milestones={p.milestones} label={`${booked} of ${target} booked. ${p.next}`} />
+      <p className="text-[13px] font-medium text-ink-900">{p.next}</p>
+      {extra}
+      <p className="mt-auto text-[11.5px] text-ink-500">{foot}</p>
     </section>
+  );
+}
+
+function Waiting({ n, mine }: { n: number; mine: boolean }) {
+  if (!n) return null;
+  return (
+    <Link href="/meetings/approval" className="-mt-1 text-[12.5px] text-amber-800 hover:underline">
+      {n} waiting for approval: {mine ? `add the recording link to count ${n === 1 ? 'it' : 'them'} now` : `${n === 1 ? 'it counts' : 'they count'} once approved`}
+    </Link>
   );
 }
 
 function YourMonth({ s, me }: { s: Scoreboard; me: NonNullable<Scoreboard['me']> }) {
   return (
-    <MonthCard
+    <GoalCard
       label="Your month" title={`Your ${s.month.label}`} s={s} booked={me.meetings} target={s.goal} p={me}
-      chips={<>
-        <Chip><b className="font-semibold text-ink-900">{me.firstMeetings}</b> first meeting{me.firstMeetings === 1 ? '' : 's'}</Chip>
-        <Chip>{me.rank ? <><b className="font-semibold text-ink-900">#{me.rank}</b> of {me.of}</> : 'Not ranked yet'}</Chip>
-        <Chip>🔥 <span><b className="font-semibold text-ink-900">{me.streakWeeks}</b>-week streak</span></Chip>
-        {me.waiting ? <Chip tone="warn" href="/meetings/approval" title="Add the recording link to count it now">{me.waiting} waiting for approval</Chip> : null}
-      </>}
-      footer={
-        <ul className="flex flex-wrap gap-1.5" aria-label="Badges this month">
-          {me.badges.map((b) => (
-            <li key={b.key} title={`${b.label}: ${b.hint}${b.earned ? ' (earned)' : ''}`} className={clsx('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11.5px]', b.earned ? 'border-amber-200 bg-amber-50 font-medium text-amber-900' : 'border-ink-200/70 bg-[#f8faf9] text-ink-400')}>
-              <span aria-hidden className={b.earned ? '' : 'opacity-40 grayscale'}>{BADGE_ICON[b.key]}</span>{b.label}<span className="sr-only">{b.earned ? ', earned' : `, not yet: ${b.hint}`}</span>
+      extra={<><Waiting n={me.waiting} mine /><WeekRow w={s.week} /></>}
+      foot={<>Target: {s.goal} a month{me.best ? ` · your best: ${me.best.count} in ${me.best.label}` : ''}</>}
+    />
+  );
+}
+
+/** This week, day by day, for the same people as the month: a goal that is always still winnable. */
+function WeekRow({ w }: { w: Scoreboard['week'] }) {
+  return (
+    <div className="flex items-end justify-between gap-3 border-t border-line pt-3" aria-label={`This week: ${w.total} booked`} role="group">
+      <div className="min-w-0">
+        <p className="text-[11.5px] font-medium text-ink-500">This week</p>
+        <ol className="mt-1.5 flex flex-wrap gap-1.5">
+          {w.days.map((d) => (
+            <li key={d.day} className={clsx('flex w-10 flex-col items-center rounded-lg py-1', d.today ? 'bg-brand-50 ring-1 ring-brand-200' : 'bg-canvas')}>
+              <span className="text-[10.5px] text-ink-500">{d.label}</span>
+              <span className={clsx('text-[14px] font-semibold tabular-nums', d.future ? 'text-ink-300' : d.count ? 'text-ink-900' : 'text-ink-400')}>{d.future && !d.count ? '–' : d.count}</span>
             </li>
           ))}
-        </ul>
-      }
-      rule={<>Target: {s.goal} a month{me.best ? ` · your best: ${me.best.count} in ${me.best.label}` : ''}</>}
-    />
+        </ol>
+      </div>
+      <p className="shrink-0 text-right">
+        <span className="block text-[22px] font-semibold leading-none tabular-nums text-ink-900">{w.total}</span>
+        <span className="text-[11.5px] text-ink-500">booked</span>
+      </p>
+    </div>
   );
 }
 
@@ -133,35 +178,31 @@ function TeamMonth({ s, admin }: { s: Scoreboard; admin: boolean }) {
   const t = s.team;
   const whose = t.pods ? (t.pods === 1 ? 'Your pod' : 'Your pods') : 'Team';
   return (
-    <MonthCard
+    <GoalCard
       label={`${whose} this month`} title={`${whose} · ${s.month.label}`} s={s} booked={t.meetings} target={t.target} p={t}
-      chips={<>
-        <Chip><b className="font-semibold text-ink-900">{t.firstMeetings}</b> first meeting{t.firstMeetings === 1 ? '' : 's'}</Chip>
-        <Chip><b className="font-semibold text-ink-900">{t.meetings - t.firstMeetings}</b> follow-up{t.meetings - t.firstMeetings === 1 ? '' : 's'}</Chip>
-        {t.waiting ? <Chip tone="warn" href="/meetings/approval" title="They count once approved">{t.waiting} waiting for approval</Chip> : null}
-      </>}
-      rule={<>Target: {s.goal} per FO × {t.fos} FO{t.fos === 1 ? '' : 's'}{admin ? <> · <Link href="/settings?tab=meetings" className="text-brand-700 hover:underline">Change</Link></> : null}</>}
+      extra={<><Waiting n={t.waiting} mine={false} /><WeekRow w={s.week} /></>}
+      foot={<>Target: {s.goal} per FO × {t.fos} FO{t.fos === 1 ? '' : 's'}{admin ? <> · <Link href="/settings?tab=meetings" className="text-brand-700 hover:underline">Change</Link></> : null}</>}
     />
   );
 }
 
-const MEDALS = ['🥇', '🥈', '🥉'];
+/** First, second and third: gold, silver and bronze tints, with the number on them. */
+const PLACE = ['bg-[#f5e3a8] text-[#6b4f00]', 'bg-[#e3e8e6] text-[#3b4744]', 'bg-[#f0d9c6] text-[#7a4421]'];
 
 function PodRace({ s }: { s: Scoreboard }) {
+  const me = s.me;
   return (
     <section className="surface flex flex-col gap-3 p-4" aria-label="Pod race">
       <CardHead title="Pod race" aside={<span className="text-[11.5px] text-ink-500">booked of each pod&apos;s target</span>} />
       {s.pods.length ? (
         <ol className="space-y-2.5">
-          {s.pods.slice(0, 5).map((p, i) => (
+          {s.pods.slice(0, 5).map((p) => (
             <li key={p.id} className="text-[12.5px]">
-              <div className="flex items-baseline justify-between gap-2">
-                <span className={clsx('min-w-0 truncate', p.yours ? 'font-semibold text-ink-900' : 'text-ink-700')}>{i === 0 && p.meetings ? '👑 ' : ''}{p.name}{p.yours ? <span className="ml-1.5 rounded-full bg-brand-50 px-1.5 text-[11px] font-medium text-brand-800">Your pod</span> : null}</span>
+              <div className="mb-1 flex items-baseline justify-between gap-2">
+                <span className={clsx('min-w-0 truncate', p.yours ? 'font-semibold text-ink-900' : 'text-ink-700')}>{p.name}{p.yours ? <span className="ml-1.5 rounded-full bg-brand-50 px-1.5 text-[11px] font-medium text-brand-800">Your pod</span> : null}</span>
                 <span className="shrink-0 tabular-nums text-ink-600"><span className="font-semibold text-ink-900">{p.meetings}</span> of {p.target}</span>
               </div>
-              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[#eef2ef]" role="img" aria-label={`${p.name}: ${p.meetings} of ${p.target} booked`}>
-                <div className={clsx('h-full rounded-full', p.share >= 1 ? 'bg-amber-400' : p.yours ? 'bg-brand-600' : 'bg-brand-300')} style={{ width: `${Math.min(100, Math.round(p.share * 100))}%` }} />
-              </div>
+              <GoalBar value={p.meetings} target={p.target} size="sm" label={`${p.name}: ${p.meetings} of ${p.target} booked`} />
               <span className="mt-0.5 block text-[11px] tabular-nums text-ink-500">{Math.round(p.share * 100)}% · {p.perFo} per FO · {p.fos} FO{p.fos === 1 ? '' : 's'}</span>
             </li>
           ))}
@@ -174,8 +215,7 @@ function PodRace({ s }: { s: Scoreboard }) {
             {s.top.map((t, i) => (
               <li key={t.userId}>
                 <Link href={countedHref(s, t.userId)} title={`Open the ${t.meetings} meeting${t.meetings === 1 ? '' : 's'} ${t.name} booked this month`} aria-label={`${ordinal(i + 1)}: ${t.name}, ${t.meetings} booked this month. Open their meetings`} className="-mx-1.5 flex items-center gap-2 rounded-md px-1.5 py-0.5 text-[12.5px] hover:bg-canvas">
-                  <span aria-hidden className="w-4 text-center">{MEDALS[i]}</span>
-                  <span className="sr-only">{ordinal(i + 1)}:</span>
+                  <span aria-hidden className={clsx('grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10.5px] font-bold tabular-nums', PLACE[i])}>{i + 1}</span>
                   <Avatar name={t.name} shape="circle" size={22} />
                   <span className={clsx('min-w-0 flex-1 truncate', t.you ? 'font-semibold text-ink-900' : 'text-ink-800')}>{t.name}{t.you ? ' (you)' : ''}</span>
                   <span className="shrink-0 tabular-nums text-ink-600"><span className="font-semibold text-ink-900">{t.meetings}</span> booked{t.firstMeetings ? <span className="text-ink-400"> · {t.firstMeetings} first</span> : null}</span>
@@ -183,7 +223,13 @@ function PodRace({ s }: { s: Scoreboard }) {
               </li>
             ))}
           </ol>
-        ) : <p className="text-[12.5px] text-ink-500">Nobody on the board yet this month: the first meeting takes gold.</p>}
+        ) : <p className="text-[12.5px] text-ink-500">Nobody on the board yet this month: the first meeting takes first place.</p>}
+        {me && !s.top.some((t) => t.you) ? (
+          <p className="mt-1.5 flex items-center gap-2 border-t border-dashed border-line pt-1.5 text-[12.5px] text-ink-700">
+            <span className="font-semibold text-ink-900">You</span>
+            <span className="tabular-nums">{me.rank ? `${ordinal(me.rank)} of ${me.of} · ${me.meetings} booked` : 'Not on the board yet this month'}</span>
+          </p>
+        ) : null}
       </div>
     </section>
   );

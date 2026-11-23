@@ -87,7 +87,7 @@ describe('the bell by email', () => {
     expect(mail.subject).toBe('Your Cadence summary: 1 update');
     expect(mail.html).toContain('1 meeting waiting for your approval');
     expect(mail.html).toContain('Cheer');
-    expect(mail.html).toContain('👏 A colleague cheered');
+    expect(mail.html).toContain('A colleague cheered');
     expect((await prisma.user.findUniqueOrThrow({ where: { id: sam.id } })).lastDigestOn).toBe('2026-11-25');
     // Once a day.
     const before = fakeOutbox().length;

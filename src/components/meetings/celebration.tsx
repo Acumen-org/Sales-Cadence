@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import clsx from 'clsx';
+import { IconCheck, IconClock, IconStar } from '@/components/icons';
 
 const COLOURS = ['#2f8a70', '#50a68b', '#f5b942', '#f59e0b', '#82c4ac', '#e86f5a', '#6d8bd8'];
 
@@ -56,7 +58,9 @@ export function Celebration({ title, line, counted, firstMeeting }: { title: str
       {open ? (
         <div role="status" className="fixed inset-x-4 bottom-5 z-[61] mx-auto max-w-md sm:inset-x-auto sm:left-1/2 sm:w-[28rem] sm:-translate-x-1/2">
           <div className="celebrate-in surface flex items-start gap-3 p-4 shadow-[0_18px_40px_-18px_rgba(25,43,41,0.45)]">
-            <span aria-hidden className="mt-0.5 text-[26px] leading-none">{counted ? (firstMeeting ? '🤝' : '🎉') : '⏳'}</span>
+            <span aria-hidden className={clsx('grid h-9 w-9 shrink-0 place-items-center rounded-full', counted ? 'bg-brand-50 text-brand-700' : 'bg-amber-50 text-amber-700')}>
+              {counted ? (firstMeeting ? <IconStar size={18} filled /> : <IconCheck size={18} />) : <IconClock size={18} />}
+            </span>
             <div className="min-w-0 flex-1">
               <p className="text-[14px] font-semibold text-ink-900">{title}</p>
               <p className="mt-0.5 text-[12.5px] text-ink-600">{line}</p>

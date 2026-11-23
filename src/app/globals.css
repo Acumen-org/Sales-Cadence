@@ -397,3 +397,35 @@
 @media (prefers-reduced-motion: reduce) {
   .celebrate-in { animation: none; }
 }
+
+/*
+ * The scoreboard's bars (owner, 23 Nov 2026): on opening, each grows from nothing to today's mark;
+ * then the edge of the month's bar leans on toward the next mark, a lighter tongue of the same green
+ * that reaches out and settles back, every couple of seconds, until the target is reached.
+ */
+@keyframes bar-grow { from { width: 0; } }
+.bar-grow { animation: bar-grow 1.2s cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes bar-lean {
+  0%, 60%, 100% { transform: translateX(-70%); opacity: 0; }
+  25% { opacity: 0.75; }
+  38% { transform: translateX(0); opacity: 0.6; }
+}
+.bar-lean {
+  position: absolute; top: 0; bottom: 0; left: 100%; width: 22px; margin-left: -8px;
+  border-radius: 9999px; background: inherit;
+  -webkit-mask-image: linear-gradient(90deg, #000 35%, transparent);
+  mask-image: linear-gradient(90deg, #000 35%, transparent);
+  animation: bar-lean 2.4s ease-in-out 1.3s infinite both;
+}
+/* Last month's best: a light passes over it once. */
+@keyframes champions-sheen { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+.champions::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(105deg, transparent 35%, rgba(213, 233, 173, 0.14) 50%, transparent 65%);
+  animation: champions-sheen 1.8s ease-out 0.5s both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bar-grow { animation: none; }
+  .bar-lean { display: none; }
+  .champions::after { display: none; }
+}

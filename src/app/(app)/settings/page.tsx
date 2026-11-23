@@ -565,7 +565,7 @@ async function MeetingsEmailTab({ timezone }: { timezone: string }) {
   ]);
   const preview = renderBellEmail({ kind: 'digest', firstName: 'Karson', appUrl: env().APP_URL, timezone, extras: { approvalsWaiting: 2, crmReplies: 1 }, items: [
     { kind: 'meeting_approval', name: 'Intro call with Acme', company: null, title: 'Alisa Senior added a meeting with no recording, booked by Karson Junior. Approve or decline it.', detail: null, href: '/meetings/approval', linkLabel: 'Open Approval', at: new Date() },
-    { kind: 'meeting_kudos', name: 'Pricing walk-through', company: null, title: '👏 Leigh Leader cheered the meeting you booked', detail: null, href: '/meetings', linkLabel: 'Open the meeting', at: new Date() },
+    { kind: 'meeting_kudos', name: 'Pricing walk-through', company: null, title: 'Leigh Leader cheered the meeting you booked', detail: null, href: '/meetings', linkLabel: 'Open the meeting', at: new Date() },
   ] });
   const count = (mode: string) => modes.find((m) => m.emailNotifications === mode)?._count._all ?? 0;
   const audit = await lastMeetingsCrmAudit();

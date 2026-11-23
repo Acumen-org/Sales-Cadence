@@ -1,8 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 
 /**
- * Owner, 21 Nov 2026: Meetings, gamified (your month, the pod race, recent wins with a 👏, a
- * celebration after saving), and the bell by email (each person picks how it emails them).
+ * Owner, 21 to 23 Nov 2026: Meetings, gamified (your month on a bar with its next mark, the pod
+ * race, recent wins with a cheer, a celebration after saving), and the bell by email (each person
+ * picks how it emails them).
  */
 const PASSWORD = 'password123';
 
@@ -36,10 +37,11 @@ test('a booked meeting is celebrated, scores on the board, and a colleague cheer
 
   await page.getByRole('link', { name: 'See the scoreboard' }).click();
   const month = page.getByRole('region', { name: 'Your month' });
-  await expect(month).toContainText(/\/ \d+\s*booked/);
+  await expect(month).toContainText(/\d+ of \d+ booked/);
   await expect(month).toContainText(/Target: \d+ a month/);
-  await expect(month.getByRole('img', { name: /(On pace|Behind pace|Target reached)/ })).toBeVisible();
-  await expect(month.getByRole('list', { name: 'Badges this month' })).toContainText('On the board');
+  // The bar says where the month is and the next mark; so does the line under it.
+  await expect(month.getByRole('img', { name: /\d+ of \d+ booked\. (Next: \d+ more to reach|Target reached)/ })).toBeVisible();
+  await expect(month).toContainText(/Next: \d+ more to reach|Target reached/);
   await expect(page.getByRole('region', { name: 'Pod race' })).toContainText('Your pod');
   await expect(page.getByRole('region', { name: 'Recent wins' })).toContainText('You booked');
   await noSideScroll(page);
@@ -51,7 +53,13 @@ test('a booked meeting is celebrated, scores on the board, and a colleague cheer
   // A Sales Leader sees their pods' month, and cheers Karson's meeting from Recent wins.
   await signIn(page, 'leigh@cadence.local');
   await page.goto('/meetings');
-  await expect(page.getByRole('region', { name: /Your pods? this month/ })).toContainText(/Target: \d+ per FO × \d+ FOs?/);
+  const pods = page.getByRole('region', { name: /Your pods? this month/ });
+  await expect(pods).toContainText(/Target: \d+ per FO × \d+ FOs?/);
+  // This week, day by day, adds up to the number beside it.
+  const week = pods.getByRole('group', { name: /^This week: \d+ booked$/ });
+  const weekTotal = Number((await week.getAttribute('aria-label'))!.match(/(\d+) booked/)![1]);
+  const dayCounts = (await week.locator('li span:last-child').allInnerTexts()).map((t) => Number(t) || 0);
+  expect(dayCounts.reduce((a, n) => a + n, 0)).toBe(weekTotal);
   // A top booker's name opens the meetings behind their number: as many rows as the number says.
   const top = page.getByRole('region', { name: 'Pod race' }).getByRole('link', { name: /booked this month\. Open their meetings/ }).first();
   const booked = Number((await top.getAttribute('aria-label'))!.match(/, (\d+) booked this month/)![1]);

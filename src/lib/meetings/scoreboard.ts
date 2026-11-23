@@ -13,24 +13,30 @@ import { NUMBERING_STARTS } from './numbering-start';
  * What scores is a meeting that counts (approved, or recorded: meetings/counted.ts), credited once to
  * the FO who booked it, by the month it took place in, in the workspace's time zone.
  *
- *   - Your month: meetings against the company target (Settings > Meetings), first meetings, a weekly
- *     streak, your best month, and badges for this month.
+ *   - Your month: meetings against the company target (Settings > Meetings) on a bar with a quarter,
+ *     half and three quarters marked, and the next mark in words (owner, 23 Nov 2026).
+ *   - The team's month the same way, with this week's days under it: a goal that is always winnable.
+ *   - Last month's best: the top performer and the top pod, as an honour (owner, 23 Nov 2026).
  *   - Pod race: pods ranked by meetings per FO, so a small pod races a big one fairly.
  *   - Top bookers: the top three by name, and each person's own rank. Nobody sees the full table
  *     (owner: "pods ranked, own rank").
- *   - Recent wins: the meetings booked lately, with a colleague's 👏.
+ *   - Recent wins: the meetings booked lately, with a colleague's cheer.
  */
 
 const FO_ROLES: Role[] = ['JUNIOR_FO', 'SENIOR_FO'];
 const WINS_DAYS = 14;
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export type ScoreBadge = { key: string; label: string; hint: string; earned: boolean };
 /**
  * How a month stands: pace is where it should be by today, state reached, ahead or behind it,
- * 	oGo and perDay what is left and about how many a working day, daily the running total on each
- * day so far (day 1 first), for the chart; status says it all in one sentence, for screen readers.
+ * toGo and perDay what is left and about how many a working day; status says it in one sentence.
+ * milestones are the marks on the bar (a quarter, half, three quarters, the target) and next names
+ * the next one to reach, in words.
  */
-export type MonthProgress = { pace: number; status: string; state: 'reached' | 'ahead' | 'behind'; toGo: number; perDay: number; daily: number[] };
+export type MonthProgress = { pace: number; status: string; state: 'reached' | 'ahead' | 'behind'; toGo: number; perDay: number; milestones: number[]; next: string };
+/** One day of this week: Monday to Friday always, Saturday and Sunday only when a meeting is on them. */
+export type WeekDay = { day: LocalDate; label: string; count: number; today: boolean; future: boolean };
 export type Scoreboard = {
   /** `day` of `days` is today; `workdaysLeft` counts today, Monday to Friday. */
   month: { first: LocalDate; last: LocalDate; label: string; daysLeft: number; day: number; days: number; workdaysLeft: number };
@@ -39,10 +45,21 @@ export type Scoreboard = {
   me: null | {
     meetings: number; firstMeetings: number; waiting: number; streakWeeks: number;
     best: { count: number; label: string } | null;
-    rank: number | null; of: number; badges: ScoreBadge[]; next: string;
+    rank: number | null; of: number; badges: ScoreBadge[];
   } & MonthProgress;
   /** The month of the pods a leader leads (`pods`: how many), or of everyone (`pods`: 0). `fos`: Junior and Senior FOs in it. */
   team: { meetings: number; firstMeetings: number; target: number; bookers: number; pods: number; fos: number; waiting: number } & MonthProgress;
+  /** This week's meetings, Monday first, for the month card's people (an FO's own; a leader's or admin's team); `total` is the sum of the days shown. */
+  week: { days: WeekDay[]; total: number };
+  /**
+   * Last month's best, for everyone to see: the FO who booked the most, and the pod that booked the
+   * most of its own target (as in the pod race). Null when nothing counted last month.
+   */
+  champions: null | {
+    label: string; first: LocalDate; last: LocalDate;
+    performer: { userId: string; name: string; meetings: number; firstMeetings: number; pod: string | null };
+    pod: null | { id: string; name: string; meetings: number; fos: number; perFo: number; people: string[] };
+  };
   top: { userId: string; name: string; meetings: number; firstMeetings: number; pod: string | null; you: boolean }[];
   /** `target`: the pod's FOs times the target; `share`: how much of it is booked (0 to 1+). */
   pods: { id: string; name: string; meetings: number; fos: number; perFo: number; target: number; share: number; yours: boolean }[];
@@ -100,12 +117,30 @@ export function paceWords(s: { meetings: number; target: number; pace: number; w
   return `Behind pace by ${s.pace - s.meetings}: ${s.pace} by today keeps the month on track. ${left} more by ${s.lastLabel} is about ${perDay} a working day.`;
 }
 
-export function nextWords(s: { meetings: number; best: { count: number; label: string } | null }, goal: number): string {
-  if (s.meetings === 0) return `Book your first meeting of the month: the goal is ${goal}.`;
-  if (s.meetings < goal) { const n = goal - s.meetings; return `${n} more ${n === 1 ? 'meeting reaches' : 'meetings reach'} this month's goal of ${goal}.`; }
-  if (s.best && s.meetings <= s.best.count) { const n = s.best.count - s.meetings + 1; return `Goal reached. ${n} more ${n === 1 ? 'beats' : 'beat'} your best month (${s.best.count} in ${s.best.label}).`; }
-  return 'Goal reached, and your best month yet. Keep it going.';
+/** The marks on the bar: a quarter, half and three quarters of the target, and the target; never 0, never twice. */
+export function milestonesFor(target: number): number[] {
+  return [...new Set([0.25, 0.5, 0.75, 1].map((f) => Math.max(1, Math.round(target * f))))];
 }
+
+/**
+ * The next mark, in words: the same sentence all month with the numbers changing. Past the target,
+ * an FO hears about their best month (`best`: null for the team, or before they have one).
+ */
+export function nextWords(s: { meetings: number; target: number; best?: { count: number; label: string } | null }): string {
+  const { meetings, target } = s;
+  if (meetings === 0) return `The first meeting of the month starts the bar. The target is ${target}.`;
+  if (meetings < target) {
+    const mark = milestonesFor(target).find((m) => m > meetings)!;
+    const name = mark === target ? `the target of ${mark}` : mark === Math.max(1, Math.round(target / 2)) ? `halfway (${mark})` : String(mark);
+    return `Next: ${mark - meetings} more to reach ${name}.`;
+  }
+  if (s.best && meetings <= s.best.count) { const n = s.best.count - meetings + 1; return `Target reached. ${n} more ${n === 1 ? 'beats' : 'beat'} your best month (${s.best.count} in ${s.best.label}).`; }
+  if (s.best) return 'Target reached, and your best month yet.';
+  return 'Target reached. Every meeting from here is extra.';
+}
+
+/** Rank for last month's honour: most meetings, then most first meetings, then whoever got there first. */
+const honourOrder = <T extends { meetings: number; firstMeetings: number; reachedAt: number }>(a: T, b: T) => b.meetings - a.meetings || b.firstMeetings - a.firstMeetings || a.reachedAt - b.reachedAt;
 
 export async function scoreboard(user: { id: string; role: Role; podIds: string[] }, now = new Date()): Promise<Scoreboard> {
   const tz = workspaceTimezone();
@@ -114,8 +149,11 @@ export async function scoreboard(user: { id: string; role: Role; podIds: string[
   const after = nextMonth(first);
   const [from, until] = [startOfLocalDay(first, tz), startOfLocalDay(after, tz)];
   const { meetings: { monthlyGoal: goal } } = await getSettings();
+  // This week, Monday to Sunday, whichever months it straddles; and last month, for its honours.
+  const monday = weekOf(today);
+  const lastFirst = monthStart(addDays(first, -1));
 
-  const [month, people, pods, waitingRows, mine, wins] = await Promise.all([
+  const [month, people, pods, waitingRows, mine, wins, weekRows, lastMonth] = await Promise.all([
     prisma.meeting.findMany({ where: { AND: [COUNTED_WHERE, { bookedById: { not: null }, occurredAt: { gte: from, lt: until } }] }, select: { bookedById: true, meetingNumber: true, occurredAt: true } }),
     prisma.user.findMany({ where: { active: true, role: { in: ROLES_NEEDING_POD } }, select: { id: true, name: true, role: true, pods: { where: { pod: { archived: false } }, select: { podId: true, pod: { select: { name: true } } } } } }),
     prisma.pod.findMany({ where: { archived: false }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
@@ -128,6 +166,9 @@ export async function scoreboard(user: { id: string; role: Role; podIds: string[
       orderBy: { createdAt: 'desc' }, take: 8,
       select: { id: true, title: true, companyName: true, meetingNumber: true, createdAt: true, bookedById: true, bookedBy: { select: { name: true } }, _count: { select: { kudos: true } }, kudos: { where: { userId: user.id }, select: { userId: true } } },
     }),
+    prisma.meeting.findMany({ where: { AND: [COUNTED_WHERE, { bookedById: { not: null }, occurredAt: { gte: startOfLocalDay(monday, tz), lt: startOfLocalDay(addDays(monday, 7), tz) } }] }, select: { bookedById: true, occurredAt: true } }),
+    // The booker's name comes with the meeting, so someone switched off since still gets their honour.
+    prisma.meeting.findMany({ where: { AND: [COUNTED_WHERE, { bookedById: { not: null }, occurredAt: { gte: startOfLocalDay(lastFirst, tz), lt: from } }] }, select: { bookedById: true, meetingNumber: true, occurredAt: true, bookedBy: { select: { name: true } } } }),
   ]);
 
   // Everyone who books, scored.
@@ -148,16 +189,13 @@ export async function scoreboard(user: { id: string; role: Role; podIds: string[
   let workdaysLeft = 0;
   for (let d = today; d <= last; d = addDays(d, 1)) if (dayOfWeek(d) >= 1 && dayOfWeek(d) <= 5) workdaysLeft++;
   const lastLabel = `${Number(last.slice(8))} ${monthLabel(first, false).slice(0, 3)}`;
-  const progress = (rows: { occurredAt: Date }[], target: number): MonthProgress => {
-    const meetings = rows.length;
+  const progress = (meetings: number, target: number, best: { count: number; label: string } | null = null): MonthProgress => {
     const pace = paceFor(target, day, days);
-    // The running total on each day so far; a meeting dated later this month counts from today.
-    const perDayCount = Array.from({ length: day }, () => 0);
-    for (const r of rows) perDayCount[Math.min(day, Number(meetingDay(r.occurredAt).slice(8))) - 1]++;
-    let sum = 0;
-    const daily = perDayCount.map((n) => (sum += n));
     const toGo = Math.max(0, target - meetings);
-    return { pace, status: paceWords({ meetings, target, pace, workdaysLeft, lastLabel }), state: meetings >= target ? 'reached' : meetings >= pace ? 'ahead' : 'behind', toGo, perDay: toGo ? Math.ceil(toGo / Math.max(1, workdaysLeft)) : 0, daily };
+    return {
+      pace, status: paceWords({ meetings, target, pace, workdaysLeft, lastLabel }), state: meetings >= target ? 'reached' : meetings >= pace ? 'ahead' : 'behind',
+      toGo, perDay: toGo ? Math.ceil(toGo / Math.max(1, workdaysLeft)) : 0, milestones: milestonesFor(target), next: nextWords({ meetings, target, best }),
+    };
   };
 
   // Pods: meetings booked by anyone in the pod, against its own target (its FOs times the target).
@@ -184,10 +222,9 @@ export async function scoreboard(user: { id: string; role: Role; podIds: string[
     const streak = streakWeeks(booked, today);
     me = {
       ...own, waiting: waitingRows.filter((w) => w.bookedById === user.id).length, streakWeeks: streak, best,
-      ...progress(month.filter((m) => m.bookedById === user.id), goal),
+      ...progress(own.meetings, goal, best),
       rank: own.meetings > 0 ? rankOf(ordered, own) : null, of: rows.length,
       badges: badgesFor({ ...own, bestWeek: Math.max(0, ...byWeek.values()), streakWeeks: streak, best: best?.count ?? null }, goal),
-      next: nextWords({ meetings: own.meetings, best }, goal),
     };
   }
 
@@ -197,6 +234,47 @@ export async function scoreboard(user: { id: string; role: Role; podIds: string[
   const teamMonth = month.filter((m) => teamPeople.has(m.bookedById!));
   const foCount = people.filter((p) => inTeam(p) && FO_ROLES.includes(p.role)).length;
   const teamTarget = goal * Math.max(1, foCount);
+
+  // This week's days for the same people as the month card: an FO's own, or the team's.
+  const weekPeople = books ? new Set([user.id]) : teamPeople;
+  const perDay = new Map<LocalDate, number>();
+  for (const m of weekRows) if (weekPeople.has(m.bookedById!)) perDay.set(meetingDay(m.occurredAt), (perDay.get(meetingDay(m.occurredAt)) ?? 0) + 1);
+  const weekDays: WeekDay[] = Array.from({ length: 7 }, (_, i) => addDays(monday, i))
+    .filter((d, i) => i < 5 || (perDay.get(d) ?? 0) > 0)
+    .map((d) => ({ day: d, label: DAY_NAMES[dayOfWeek(d)], count: perDay.get(d) ?? 0, today: d === today, future: d > today }));
+
+  // Last month's best. Pods are today's pods, with the people in them today.
+  let champions: Scoreboard['champions'] = null;
+  if (lastMonth.length) {
+    const byFo = new Map<string, { userId: string; name: string; meetings: number; firstMeetings: number; reachedAt: number }>();
+    for (const m of lastMonth) {
+      const row = byFo.get(m.bookedById!) ?? { userId: m.bookedById!, name: m.bookedBy?.name ?? 'Someone', meetings: 0, firstMeetings: 0, reachedAt: 0 };
+      row.meetings++;
+      if (m.meetingNumber === 1) row.firstMeetings++;
+      row.reachedAt = Math.max(row.reachedAt, m.occurredAt.getTime());
+      byFo.set(row.userId, row);
+    }
+    const top = [...byFo.values()].sort(honourOrder)[0];
+    const lastPods = pods.map((pod) => {
+      const members = people.filter((p) => p.pods.some((x) => x.podId === pod.id));
+      const fos = members.filter((p) => FO_ROLES.includes(p.role)).length;
+      const theirs = members.map((p) => byFo.get(p.id)).filter((r): r is NonNullable<typeof r> => !!r);
+      const meetings = theirs.reduce((n, r) => n + r.meetings, 0);
+      return {
+        id: pod.id, name: pod.name, meetings, fos, perFo: Math.round((meetings / Math.max(1, fos)) * 10) / 10,
+        share: meetings / (goal * Math.max(1, fos)), firstMeetings: theirs.reduce((n, r) => n + r.firstMeetings, 0), reachedAt: Math.max(0, ...theirs.map((r) => r.reachedAt)),
+        // Whoever booked most last month first, then the rest of the pod.
+        people: members.filter((p) => FO_ROLES.includes(p.role) || byFo.has(p.id)).sort((a, b) => (byFo.get(b.id)?.meetings ?? 0) - (byFo.get(a.id)?.meetings ?? 0) || a.name.localeCompare(b.name)).map((p) => p.name),
+      };
+    }).filter((p) => p.meetings > 0).sort((a, b) => b.share - a.share || honourOrder(a, b));
+    const bestPod = lastPods[0];
+    champions = {
+      label: monthLabel(lastFirst, false), first: lastFirst, last: addDays(first, -1),
+      performer: { userId: top.userId, name: top.name, meetings: top.meetings, firstMeetings: top.firstMeetings, pod: people.find((p) => p.id === top.userId)?.pods[0]?.pod.name ?? null },
+      pod: bestPod ? { id: bestPod.id, name: bestPod.name, meetings: bestPod.meetings, fos: bestPod.fos, perFo: bestPod.perFo, people: bestPod.people } : null,
+    };
+  }
+
   return {
     month: { first, last, label: monthLabel(first, false), daysLeft: Math.max(0, diffDays(today, after)), day, days, workdaysLeft },
     goal,
@@ -205,8 +283,10 @@ export async function scoreboard(user: { id: string; role: Role; podIds: string[
       meetings: teamMonth.length, firstMeetings: teamMonth.filter((m) => m.meetingNumber === 1).length, target: teamTarget,
       bookers: ordered.filter((r) => teamPeople.has(r.userId)).length, pods: leads ? user.podIds.length : 0, fos: foCount,
       waiting: waitingRows.filter((w) => w.bookedById && teamPeople.has(w.bookedById)).length,
-      ...progress(teamMonth, teamTarget),
+      ...progress(teamMonth.length, teamTarget),
     },
+    week: { days: weekDays, total: weekDays.reduce((n, d) => n + d.count, 0) },
+    champions,
     top: ordered.slice(0, 3).map((r) => ({ ...r, you: r.userId === user.id })),
     pods: podRows,
     wins: wins.map((w) => ({ meetingId: w.id, title: w.title, company: w.companyName, bookedBy: w.bookedBy?.name ?? 'Someone', bookedById: w.bookedById!, number: w.meetingNumber, at: w.createdAt, kudos: w._count.kudos, kudosByMe: w.kudos.length > 0, mine: w.bookedById === user.id })),

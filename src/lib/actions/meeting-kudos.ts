@@ -9,7 +9,7 @@ import { isCounted } from '../meetings/counted';
 export type KudosResult = { ok: true; kudos: number; mine: boolean } | { ok: false; error: string };
 
 /**
- * A colleague's 👏 on a meeting someone booked (owner, 21 Nov 2026: Meetings, gamified). Pressed again,
+ * A colleague's cheer on a meeting someone booked (owner, 21 Nov 2026: Meetings, gamified). Pressed again,
  * it is taken back. Never on your own meeting; the booker's bell rings once per colleague.
  */
 export async function toggleKudosAction(meetingId: string): Promise<KudosResult> {
@@ -22,7 +22,7 @@ export async function toggleKudosAction(meetingId: string): Promise<KudosResult>
   if (had) await prisma.meetingKudos.delete({ where: key });
   else {
     const made = await prisma.meetingKudos.createMany({ data: [{ meetingId, userId: user.id }], skipDuplicates: true });
-    // The bell rings the first time only: a 👏 taken back and given again is not news.
+    // The bell rings the first time only: a cheer taken back and given again is not news.
     const before = made.count ? await prisma.notification.count({ where: { userId: m.bookedById ?? '', kind: 'meeting_kudos', fromUserId: user.id, payload: { path: ['meetingId'], equals: meetingId } } }) : 1;
     if (!before) await notify([m.bookedById], { kind: 'meeting_kudos', fromUserId: user.id, payload: { meetingId, title: m.title } });
   }

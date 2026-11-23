@@ -23,7 +23,7 @@ import { COLD_CONTACT_BASE, coldRef, personRef, subjectHref } from './subject';
  *   meeting_approval      a meeting with no recording waits for its Sales Leader (or an admin) to decide
  *   meeting_declined      a meeting was declined: Biz Ops, the booked-by FO and whoever added it are told why
  *   meeting_added_back    a declined meeting was added back, for the booked-by FO and whoever added it
- *   meeting_kudos         a colleague's 👏 on a meeting you booked (Meetings > Recent wins)
+ *   meeting_kudos         a colleague's cheer on a meeting you booked (Meetings > Recent wins)
  *
  * Read and unread work as they always have: "Mark read" marks everything up to the moment the list
  * was opened (`User.notificationsReadAt`); a Notification row also keeps its own `readAt`, set then
@@ -218,9 +218,9 @@ export function bellWords(n: Pick<Row, 'id' | 'kind' | 'personId' | 'sandboxCont
       return { kind, name: str(p.title) ?? 'A meeting', company: null, title: `${from} added this declined meeting back: it counts again`, detail: null, href: meetingId ? `/meetings/${meetingId}` : null, linkLabel: 'Open the meeting' };
     }
     case 'meeting_kudos': {
-      // Owner, 21 Nov 2026: a colleague's 👏 on a meeting you booked.
+      // Owner, 21 Nov 2026: a colleague's cheer on a meeting you booked (no emoji since 23 Nov).
       const meetingId = str(p.meetingId);
-      return { kind, name: str(p.title) ?? 'A meeting', company: null, title: `👏 ${from} cheered the meeting you booked`, detail: null, href: meetingId ? `/meetings/${meetingId}` : null, linkLabel: 'Open the meeting' };
+      return { kind, name: str(p.title) ?? 'A meeting', company: null, title: `${from} cheered the meeting you booked`, detail: null, href: meetingId ? `/meetings/${meetingId}` : null, linkLabel: 'Open the meeting' };
     }
     case 'retention_warning': {
       const count = num(p.count);
