@@ -77,7 +77,10 @@ describe('the scoreboard', () => {
     expect(s.goal).toBe(4);
     // 20 November: day 20 of 30; Friday 20th plus the six weekdays after it.
     expect(s.month).toMatchObject({ first: '2026-11-01', last: '2026-11-30', label: 'November', daysLeft: 11, day: 20, days: 30, workdaysLeft: 7 });
-    expect(s.me).toMatchObject({ pace: 3, status: 'On pace: right where the month should be today (3). 1 more to reach 4.' });
+    expect(s.me).toMatchObject({ pace: 3, status: 'On pace: right where the month should be today (3). 1 more to reach 4.', state: 'ahead', toGo: 1, perDay: 1 });
+    // The chart: Karson's running total each day so far (3rd, 10th and 17th).
+    expect(s.me!.daily).toHaveLength(20);
+    expect([s.me!.daily[1], s.me!.daily[2], s.me!.daily[9], s.me!.daily[16], s.me!.daily[19]]).toEqual([0, 1, 2, 3, 3]);
     expect(s.me).toMatchObject({ meetings: 3, firstMeetings: 2, waiting: 1, streakWeeks: 3, rank: 1, best: { count: 1, label: 'October' } });
     expect(s.me!.badges.filter((x) => x.earned).map((x) => x.key)).toEqual(['board', 'first', 'streak', 'best']);
     expect(s.me!.next).toBe("1 more meeting reaches this month's goal of 4.");

@@ -36,8 +36,9 @@ test('a booked meeting is celebrated, scores on the board, and a colleague cheer
 
   await page.getByRole('link', { name: 'See the scoreboard' }).click();
   const month = page.getByRole('region', { name: 'Your month' });
-  await expect(month).toContainText(/of \d+ meetings booked/);
-  await expect(month).toContainText(/Target: \d+ meetings a month for each FO/);
+  await expect(month).toContainText(/\/ \d+\s*booked/);
+  await expect(month).toContainText(/Target: \d+ a month/);
+  await expect(month.getByRole('img', { name: /(On pace|Behind pace|Target reached)/ })).toBeVisible();
   await expect(month.getByRole('list', { name: 'Badges this month' })).toContainText('On the board');
   await expect(page.getByRole('region', { name: 'Pod race' })).toContainText('Your pod');
   await expect(page.getByRole('region', { name: 'Recent wins' })).toContainText('You booked');
@@ -50,7 +51,7 @@ test('a booked meeting is celebrated, scores on the board, and a colleague cheer
   // A Sales Leader sees their pods' month, and cheers Karson's meeting from Recent wins.
   await signIn(page, 'leigh@cadence.local');
   await page.goto('/meetings');
-  await expect(page.getByRole('region', { name: /Your pods? this month/ })).toContainText(/Target: \d+ meetings a month for each of the \d+ FOs? in your pods?/);
+  await expect(page.getByRole('region', { name: /Your pods? this month/ })).toContainText(/Target: \d+ per FO × \d+ FOs?/);
   // A top booker's name opens the meetings behind their number: as many rows as the number says.
   const top = page.getByRole('region', { name: 'Pod race' }).getByRole('link', { name: /booked this month\. Open their meetings/ }).first();
   const booked = Number((await top.getAttribute('aria-label'))!.match(/, (\d+) booked this month/)![1]);

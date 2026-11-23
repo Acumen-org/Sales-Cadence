@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import clsx from 'clsx';
 import type { ReactNode } from 'react';
-import type { Scoreboard } from '@/lib/meetings/scoreboard';
+import type { MonthProgress, Scoreboard } from '@/lib/meetings/scoreboard';
 import { ordinal } from '@/lib/meetings/numbering';
 import { Avatar } from '@/components/ui';
 import { KudosButton } from '@/components/meetings/kudos-button';
@@ -38,49 +38,69 @@ function CardHead({ title, aside }: { title: string; aside?: ReactNode }) {
 const daysLeft = (n: number) => <span className="shrink-0 rounded-full bg-canvas px-2 py-0.5 text-[11.5px] tabular-nums text-ink-600">{n <= 1 ? 'Last day' : `${n} days left`}</span>;
 
 /**
- * Booked against the target, with a mark where the month should be by today. The bar is the target;
- * the fill is what is booked; the tick is today's pace.
+ * The month so far, as a picture (owner, 22 Nov 2026: "simple and nice, make the space worth it"):
+ * the green line is the running total of meetings booked; the dashed line is the steady pace that
+ * reaches the target on the last day. Under the dashed line is behind, over it is ahead; today's gap
+ * is drawn between the two dots.
  */
-function TargetBar({ booked, target, pace, day, days }: { booked: number; target: number; pace: number; day: number; days: number }) {
-  const reached = booked >= target;
-  const fill = Math.min(100, Math.round((booked / Math.max(1, target)) * 100));
-  const tick = Math.min(100, Math.round((day / Math.max(1, days)) * 100));
+function MonthChart({ p, target, days, month }: { p: MonthProgress; target: number; days: number; month: string }) {
+  const W = 320, H = 104, top = 8, bottom = 3;
+  const day = p.daily.length;
+  const booked = p.daily[day - 1] ?? 0;
+  const max = Math.max(target, booked, 1);
+  const x = (d: number) => (d / days) * W;
+  const y = (v: number) => H - bottom - (v / max) * (H - top - bottom);
+  const line = [[0, 0], ...p.daily.map((v, i) => [i + 1, v])].map(([d, v]) => `${x(d).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const short = month.slice(0, 3);
   return (
     <div>
-      <div className="relative h-2.5 rounded-full bg-[#e9eeea]" role="img" aria-label={`${booked} of ${target} booked; ${pace} by today keeps the month on track`}>
-        <div className={clsx('h-full rounded-full transition-[width] duration-700', reached ? 'bg-amber-400' : booked >= pace ? 'bg-brand-500' : 'bg-brand-400')} style={{ width: `${fill}%` }} />
-        {!reached ? <span aria-hidden className="absolute -top-1 h-[18px] w-0.5 rounded-full bg-ink-700" style={{ left: `calc(${tick}% - 1px)` }} /> : null}
+      <div className="mb-1.5 flex items-center justify-between gap-2 text-[11px] text-ink-500">
+        <span className="inline-flex items-center gap-1.5"><span aria-hidden className="h-[3px] w-3.5 rounded-full bg-brand-500" />booked</span>
+        <span className="inline-flex items-center gap-1.5"><span aria-hidden className="w-3.5 border-t-2 border-dotted border-ink-300" />on pace for {target}</span>
       </div>
-      {/* The tick's label sits under it, turned to whichever side has room; the target is in the line above. */}
-      <div className="relative mt-1.5 h-4 text-[11px] tabular-nums text-ink-500">
-        {!reached ? <span className={clsx('absolute whitespace-nowrap font-medium text-ink-700', tick > 55 ? '-translate-x-full pr-1' : 'pl-1')} style={{ left: `${tick}%` }}>by today: {pace}</span> : <span className="absolute left-0 font-medium text-amber-800">target reached</span>}
-      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full overflow-visible" role="img" aria-label={p.status}>
+        <line x1={0} y1={y(0)} x2={W} y2={y(0)} className="stroke-line" strokeWidth={1} />
+        <line x1={0} y1={y(target)} x2={W} y2={y(target)} className="stroke-line" strokeWidth={1} strokeDasharray="1 4" />
+        <line x1={0} y1={y(0)} x2={W} y2={y(target)} className="stroke-ink-300" strokeWidth={1.5} strokeDasharray="2 4" strokeLinecap="round" />
+        <polygon points={`0,${y(0)} ${line} ${x(day).toFixed(1)},${y(0)}`} className="fill-brand-100/70" />
+        <polyline points={line} fill="none" className="stroke-brand-500" strokeWidth={2.25} strokeLinejoin="round" strokeLinecap="round" />
+        {p.state === 'behind' ? <line x1={x(day)} y1={y(booked) - 5} x2={x(day)} y2={y(p.pace) + 5} className="stroke-amber-400" strokeWidth={2} strokeLinecap="round" /> : null}
+        {p.state !== 'reached' ? <circle cx={x(day)} cy={y(p.pace)} r={3.5} className="fill-white stroke-ink-400" strokeWidth={1.5} /> : null}
+        <circle cx={x(day)} cy={y(booked)} r={4.5} className={p.state === 'reached' ? 'fill-amber-400 stroke-white' : 'fill-brand-600 stroke-white'} strokeWidth={2} />
+      </svg>
+      <div className="mt-1 flex justify-between text-[11px] tabular-nums text-ink-400"><span>1 {short}</span><span>{days} {short}</span></div>
     </div>
   );
 }
 
-function Figure({ value, label }: { value: ReactNode; label: string }) {
-  return (
-    <div className="min-w-0">
-      <div className="text-[17px] font-semibold leading-tight tracking-[-0.02em] tabular-nums text-ink-900">{value}</div>
-      <div className="mt-0.5 text-[11.5px] text-ink-500">{label}</div>
-    </div>
-  );
+function StatePill({ p, booked }: { p: MonthProgress; booked: number }) {
+  if (p.state === 'reached') return <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[12px] font-medium text-amber-900">🏆 Target reached</span>;
+  if (p.state === 'ahead') return <span className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[12px] font-medium text-emerald-800">On pace{booked > p.pace ? ` · ${booked - p.pace} ahead` : ''}</span>;
+  return <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[12px] font-medium text-amber-900">Behind pace · {p.pace - booked} short</span>;
 }
 
-function MonthCard({ title, s, booked, target, pace, status, rule, figures, footer, label }: { title: string; s: Scoreboard; booked: number; target: number; pace: number; status: string; rule: ReactNode; figures: ReactNode; footer?: ReactNode; label: string }) {
+function Chip({ children, tone = 'plain', href, title }: { children: ReactNode; tone?: 'plain' | 'warn'; href?: string; title?: string }) {
+  const cls = clsx('inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] tabular-nums', tone === 'warn' ? 'bg-amber-50 text-amber-900 hover:bg-amber-100' : 'bg-canvas text-ink-700');
+  return href ? <Link href={href} title={title} className={cls}>{children}</Link> : <span title={title} className={cls}>{children}</span>;
+}
+
+function MonthCard({ label, title, s, booked, target, p, chips, rule, footer }: { label: string; title: string; s: Scoreboard; booked: number; target: number; p: MonthProgress; chips: ReactNode; rule: ReactNode; footer?: ReactNode }) {
   return (
     <section className="surface flex flex-col gap-3 p-4" aria-label={label}>
       <CardHead title={title} aside={daysLeft(s.month.daysLeft)} />
-      <div className="flex items-end gap-2">
-        <span className="text-[34px] font-semibold leading-none tracking-[-0.04em] tabular-nums text-ink-900">{booked}</span>
-        <span className="pb-1 text-[13px] text-ink-600">of {target} meetings booked</span>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-baseline gap-1.5" title="Approved or recorded meetings count. Those waiting for approval count once approved.">
+          <span className="text-[38px] font-semibold leading-none tracking-[-0.04em] tabular-nums text-ink-900">{booked}</span>
+          <span className="text-[20px] font-medium leading-none tabular-nums text-ink-400">/ {target}</span>
+          <span className="ml-1 text-[12.5px] text-ink-500">booked</span>
+        </div>
+        <StatePill p={p} booked={booked} />
       </div>
-      <TargetBar booked={booked} target={target} pace={pace} day={s.month.day} days={s.month.days} />
-      <p className="text-[13px] font-medium text-ink-900">{status}</p>
-      <div className="grid grid-cols-3 gap-2 border-t border-line pt-3">{figures}</div>
-      <p className="text-[11.5px] text-ink-500">{rule}</p>
+      <MonthChart p={p} target={target} days={s.month.days} month={s.month.label} />
+      <p className="text-[13px] font-medium text-ink-900">{p.state === 'reached' ? (booked > target ? `${booked - target} over target` : 'Right on target') : `${p.toGo} to go · about ${p.perDay} a working day`}</p>
+      <div className="flex flex-wrap gap-1.5">{chips}</div>
       {footer}
+      <p className="mt-auto text-[11.5px] text-ink-500">{rule}</p>
     </section>
   );
 }
@@ -88,13 +108,13 @@ function MonthCard({ title, s, booked, target, pace, status, rule, figures, foot
 function YourMonth({ s, me }: { s: Scoreboard; me: NonNullable<Scoreboard['me']> }) {
   return (
     <MonthCard
-      label="Your month" title={`Your ${s.month.label}`} s={s} booked={me.meetings} target={s.goal} pace={me.pace} status={me.status}
-      figures={<>
-        <Figure value={me.firstMeetings} label={me.firstMeetings === 1 ? 'first meeting' : 'first meetings'} />
-        <Figure value={me.rank ? `#${me.rank}` : '–'} label={me.rank ? `of ${me.of} who book` : 'not on the board yet'} />
-        <Figure value={me.streakWeeks ? `🔥 ${me.streakWeeks}` : '0'} label={me.streakWeeks === 1 ? 'week in a row' : 'weeks in a row'} />
+      label="Your month" title={`Your ${s.month.label}`} s={s} booked={me.meetings} target={s.goal} p={me}
+      chips={<>
+        <Chip><b className="font-semibold text-ink-900">{me.firstMeetings}</b> first meeting{me.firstMeetings === 1 ? '' : 's'}</Chip>
+        <Chip>{me.rank ? <><b className="font-semibold text-ink-900">#{me.rank}</b> of {me.of}</> : 'Not ranked yet'}</Chip>
+        <Chip>🔥 <span><b className="font-semibold text-ink-900">{me.streakWeeks}</b>-week streak</span></Chip>
+        {me.waiting ? <Chip tone="warn" href="/meetings/approval" title="Add the recording link to count it now">{me.waiting} waiting for approval</Chip> : null}
       </>}
-      rule={<>Target: {s.goal} meetings a month for each FO. Approved or recorded meetings count.{me.best ? ` Your best month: ${me.best.count} in ${me.best.label}.` : ''}{me.waiting ? <> <Link href="/meetings/approval" className="text-amber-800 underline decoration-amber-300 underline-offset-2">{me.waiting} more waiting for approval</Link>: add the recording link to count {me.waiting === 1 ? 'it' : 'them'} now.</> : null}</>}
       footer={
         <ul className="flex flex-wrap gap-1.5" aria-label="Badges this month">
           {me.badges.map((b) => (
@@ -104,6 +124,7 @@ function YourMonth({ s, me }: { s: Scoreboard; me: NonNullable<Scoreboard['me']>
           ))}
         </ul>
       }
+      rule={<>Target: {s.goal} a month{me.best ? ` · your best: ${me.best.count} in ${me.best.label}` : ''}</>}
     />
   );
 }
@@ -113,13 +134,13 @@ function TeamMonth({ s, admin }: { s: Scoreboard; admin: boolean }) {
   const whose = t.pods ? (t.pods === 1 ? 'Your pod' : 'Your pods') : 'Team';
   return (
     <MonthCard
-      label={`${whose} this month`} title={`${whose} · ${s.month.label}`} s={s} booked={t.meetings} target={t.target} pace={t.pace} status={t.status}
-      figures={<>
-        <Figure value={t.firstMeetings} label={t.firstMeetings === 1 ? 'first meeting' : 'first meetings'} />
-        <Figure value={t.meetings - t.firstMeetings} label={t.meetings - t.firstMeetings === 1 ? 'follow-up' : 'follow-ups'} />
-        <Figure value={t.waiting} label="waiting for approval" />
+      label={`${whose} this month`} title={`${whose} · ${s.month.label}`} s={s} booked={t.meetings} target={t.target} p={t}
+      chips={<>
+        <Chip><b className="font-semibold text-ink-900">{t.firstMeetings}</b> first meeting{t.firstMeetings === 1 ? '' : 's'}</Chip>
+        <Chip><b className="font-semibold text-ink-900">{t.meetings - t.firstMeetings}</b> follow-up{t.meetings - t.firstMeetings === 1 ? '' : 's'}</Chip>
+        {t.waiting ? <Chip tone="warn" href="/meetings/approval" title="They count once approved">{t.waiting} waiting for approval</Chip> : null}
       </>}
-      rule={<>Target: {s.goal} meetings a month for each of the {t.fos} FO{t.fos === 1 ? '' : 's'}{t.pods ? ` in ${t.pods === 1 ? 'your pod' : 'your pods'}` : ''} = {t.target}. {t.bookers} {t.bookers === 1 ? 'person has' : 'people have'} booked. Approved or recorded meetings count; those waiting count once approved.{admin ? <> <Link href="/settings?tab=meetings" className="text-brand-700 underline decoration-brand-200 underline-offset-2">Change the target</Link></> : null}</>}
+      rule={<>Target: {s.goal} per FO × {t.fos} FO{t.fos === 1 ? '' : 's'}{admin ? <> · <Link href="/settings?tab=meetings" className="text-brand-700 hover:underline">Change</Link></> : null}</>}
     />
   );
 }
