@@ -2,37 +2,85 @@
  * The bell by email (owner, 21 Nov 2026: "a nice html email that shows the contents and links it to
  * Cadence"). Tables and inline styles, so Outlook, Gmail and phones draw it the same; 600px wide,
  * readable without images (there are none). Every item links to the thing in Cadence.
+ *
+ * Dark mode (owner, 23 Nov 2026: "nice in light mode, it would be nice if it looked better in dark
+ * mode"). Light is all inline, so nothing depends on a style block. Dark is drawn by a style block
+ * of class rules, twice: once for mail apps that tell the email they are dark (Apple Mail, Outlook
+ * for Mac, iOS), once for Outlook on the web and the new Outlook, which mark the parts they recolour
+ * with data-ogsc (text) and data-ogsb (background). Gmail and classic Outlook recolour by themselves.
  */
 
 export type EmailItem = { kind: string; name: string; company: string | null; title: string; detail: string | null; href: string | null; linkLabel: string; at: Date };
 export type EmailExtras = { approvalsWaiting?: number; crmReplies?: number };
 export type RenderedEmail = { subject: string; html: string; text: string };
 
-const KIND_LABEL: Record<string, { label: string; colour: string; bg: string }> = {
-  meeting_approval: { label: 'Approval needed', colour: '#92400e', bg: '#fef3c7' },
-  meeting_declined: { label: 'Meeting declined', colour: '#991b1b', bg: '#fee2e2' },
-  meeting_added_back: { label: 'Meeting added back', colour: '#1d4a3f', bg: '#d8eee5' },
-  meeting_kudos: { label: 'Cheer', colour: '#92400e', bg: '#fef3c7' },
-  reply: { label: 'Reply', colour: '#1d4a3f', bg: '#d8eee5' },
-  bounce: { label: 'Bounced', colour: '#991b1b', bg: '#fee2e2' },
-  possible_bounce: { label: 'Possible bounce', colour: '#92400e', bg: '#fef3c7' },
-  compliance_alert: { label: 'Compliance', colour: '#991b1b', bg: '#fee2e2' },
-  call_flag: { label: 'Call flagged', colour: '#92400e', bg: '#fef3c7' },
-  health_alert: { label: 'Health check', colour: '#991b1b', bg: '#fee2e2' },
-  campaign_launch_failed: { label: 'Campaign', colour: '#991b1b', bg: '#fee2e2' },
-  campaign_published: { label: 'Campaign', colour: '#1d4a3f', bg: '#d8eee5' },
-  campaign_back_to_draft: { label: 'Campaign', colour: '#92400e', bg: '#fef3c7' },
-  next_step_suggestion: { label: 'Suggested next step', colour: '#1e3a8a', bg: '#dbeafe' },
-  move_finished: { label: 'Moved to the CRM', colour: '#1d4a3f', bg: '#d8eee5' },
-  retention_warning: { label: 'Cold outreach', colour: '#92400e', bg: '#fef3c7' },
+type Tone = 'amber' | 'red' | 'green' | 'blue' | 'grey';
+/** Label colours: light text and background, then the same in dark. */
+const TONES: Record<Tone, { colour: string; bg: string; darkColour: string; darkBg: string }> = {
+  amber: { colour: '#92400e', bg: '#fef3c7', darkColour: '#f3c66b', darkBg: '#3a2c0e' },
+  red: { colour: '#991b1b', bg: '#fee2e2', darkColour: '#f6a8a8', darkBg: '#3d1a1a' },
+  green: { colour: '#1d4a3f', bg: '#d8eee5', darkColour: '#9fdcc4', darkBg: '#14382e' },
+  blue: { colour: '#1e3a8a', bg: '#dbeafe', darkColour: '#aac5f4', darkBg: '#1a2a4a' },
+  grey: { colour: '#40514d', bg: '#eef2ef', darkColour: '#c3cec9', darkBg: '#26302c' },
 };
-const kindOf = (k: string) => KIND_LABEL[k] ?? { label: 'Update', colour: '#40514d', bg: '#eef2ef' };
+
+const KIND_LABEL: Record<string, { label: string; tone: Tone }> = {
+  meeting_approval: { label: 'Approval needed', tone: 'amber' },
+  meeting_declined: { label: 'Meeting declined', tone: 'red' },
+  meeting_added_back: { label: 'Meeting added back', tone: 'green' },
+  meeting_kudos: { label: 'Cheer', tone: 'amber' },
+  reply: { label: 'Reply', tone: 'green' },
+  bounce: { label: 'Bounced', tone: 'red' },
+  possible_bounce: { label: 'Possible bounce', tone: 'amber' },
+  compliance_alert: { label: 'Compliance', tone: 'red' },
+  call_flag: { label: 'Call flagged', tone: 'amber' },
+  health_alert: { label: 'Health check', tone: 'red' },
+  campaign_launch_failed: { label: 'Campaign', tone: 'red' },
+  campaign_published: { label: 'Campaign', tone: 'green' },
+  campaign_back_to_draft: { label: 'Campaign', tone: 'amber' },
+  next_step_suggestion: { label: 'Suggested next step', tone: 'blue' },
+  move_finished: { label: 'Moved to the CRM', tone: 'green' },
+  retention_warning: { label: 'Cold outreach', tone: 'amber' },
+};
+const kindOf = (k: string) => KIND_LABEL[k] ?? { label: 'Update', tone: 'grey' as Tone };
+
+/** The dark palette. Light colours live inline next to each part. */
+const DARK = {
+  canvas: '#0f1513', card: '#171f1c', line: '#2b3632', heading: '#e9f0ed', text: '#d2dcd8', muted: '#9aaaa4',
+  link: '#74d1ad', mark: '#74d1ad', banner: '#12302a', bannerText: '#c4e6d8',
+};
+
+function darkRules(scope: (cls: string, attr: 'c' | 'b') => string): string {
+  const bg = (cls: string, v: string) => `${scope(cls, 'b')}{background:${v}!important;background-color:${v}!important}`;
+  const fg = (cls: string, v: string) => `${scope(cls, 'c')}{color:${v}!important}`;
+  return [
+    bg('cd-canvas', DARK.canvas), fg('cd-canvas', DARK.muted),
+    bg('cd-card', DARK.card), `${scope('cd-card', 'b')}{border-color:${DARK.line}!important}`,
+    `${scope('cd-item', 'b')}{border-color:${DARK.line}!important}`,
+    fg('cd-h', DARK.heading), fg('cd-t', DARK.text), fg('cd-m', DARK.muted),
+    fg('cd-link', DARK.link), fg('cd-mark', DARK.mark),
+    bg('cd-banner', DARK.banner), fg('cd-banner', DARK.bannerText),
+    ...(Object.keys(TONES) as Tone[]).flatMap((t) => [bg(`cd-${t}`, TONES[t].darkBg), fg(`cd-${t}`, TONES[t].darkColour)]),
+  ].join('\n');
+}
+
+/** Two blocks: Gmail drops a whole block it cannot read, so the Outlook rules stand apart. */
+const DARK_STYLE = `<style>
+:root{color-scheme:light dark;supported-color-schemes:light dark}
+@media (prefers-color-scheme:dark){
+${darkRules((cls) => `.${cls}`)}
+}
+</style>
+<style>
+${darkRules((cls, attr) => `[data-ogs${attr}] .${cls},.${cls}[data-ogs${attr}]`)}
+</style>`;
 
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 const abs = (appUrl: string, href: string | null) => `${appUrl.replace(/\/+$/, '')}${href && href.startsWith('/') ? href : '/home'}`;
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
+const FONT = `-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif`;
 
 function when(at: Date, timezone: string) {
   return new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'short', hour: 'numeric', minute: '2-digit' }).format(at);
@@ -40,19 +88,20 @@ function when(at: Date, timezone: string) {
 
 function itemHtml(i: EmailItem, appUrl: string, timezone: string) {
   const k = kindOf(i.kind);
-  const who = `${escapeHtml(i.name)}${i.company ? `<span style="color:#65736e;font-weight:400"> · ${escapeHtml(i.company)}</span>` : ''}`;
+  const tone = TONES[k.tone];
+  const who = `${escapeHtml(i.name)}${i.company ? `<span class="cd-m" style="color:#65736e;font-weight:400"> · ${escapeHtml(i.company)}</span>` : ''}`;
   return `
   <tr><td style="padding:0 0 12px 0">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e3e8e2;border-radius:12px;border-collapse:separate">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="cd-item" style="border:1px solid #e3e8e2;border-radius:12px;border-collapse:separate">
       <tr><td style="padding:16px 18px">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-          <td style="font:600 11px/16px -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"><span style="display:inline-block;padding:2px 8px;border-radius:999px;background:${k.bg};color:${k.colour}">${escapeHtml(k.label)}</span></td>
-          <td align="right" style="font:400 12px/16px -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#73817a">${escapeHtml(when(i.at, timezone))}</td>
+          <td style="font:600 11px/16px ${FONT}"><span class="cd-${k.tone}" style="display:inline-block;padding:2px 8px;border-radius:999px;background:${tone.bg};color:${tone.colour}">${escapeHtml(k.label)}</span></td>
+          <td align="right" class="cd-m" style="font:400 12px/16px ${FONT};color:#73817a">${escapeHtml(when(i.at, timezone))}</td>
         </tr></table>
-        <div style="margin-top:10px;font:600 14px/20px -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#192b29">${who}</div>
-        <div style="margin-top:4px;font:400 14px/21px -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#2b3c39">${escapeHtml(i.title)}</div>
-        ${i.detail ? `<div style="margin-top:6px;font:400 13px/19px -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#576661">${escapeHtml(clip(i.detail, 600))}</div>` : ''}
-        <div style="margin-top:14px"><a href="${escapeHtml(abs(appUrl, i.href))}" style="display:inline-block;padding:8px 14px;border-radius:9px;background:#24735e;color:#ffffff;text-decoration:none;font:600 13px/18px -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">${escapeHtml(i.linkLabel || 'Open in Cadence')} &rarr;</a></div>
+        <div class="cd-h" style="margin-top:10px;font:600 14px/20px ${FONT};color:#192b29">${who}</div>
+        <div class="cd-t" style="margin-top:4px;font:400 14px/21px ${FONT};color:#2b3c39">${escapeHtml(i.title)}</div>
+        ${i.detail ? `<div class="cd-m" style="margin-top:6px;font:400 13px/19px ${FONT};color:#576661">${escapeHtml(clip(i.detail, 600))}</div>` : ''}
+        <div style="margin-top:14px"><a href="${escapeHtml(abs(appUrl, i.href))}" style="display:inline-block;padding:8px 14px;border-radius:9px;background:#24735e;color:#ffffff;text-decoration:none;font:600 13px/18px ${FONT}">${escapeHtml(i.linkLabel || 'Open in Cadence')} &rarr;</a></div>
       </td></tr>
     </table>
   </td></tr>`;
@@ -89,25 +138,27 @@ export function renderBellEmail(opts: { kind: 'instant' | 'digest' | 'test'; fir
       ? n === 1 ? 'This needs you in Cadence.' : 'These need you in Cadence.'
       : 'Here is what came in since your last summary.';
   const waiting: string[] = [];
-  if (extras.approvalsWaiting) waiting.push(`<a href="${escapeHtml(abs(appUrl, '/meetings/approval'))}" style="color:#24735e;font-weight:600;text-decoration:none">${extras.approvalsWaiting} meeting${extras.approvalsWaiting === 1 ? '' : 's'} waiting for your approval</a>`);
-  if (extras.crmReplies) waiting.push(`<a href="${escapeHtml(abs(appUrl, '/home'))}" style="color:#24735e;font-weight:600;text-decoration:none">${extras.crmReplies} repl${extras.crmReplies === 1 ? 'y' : 'ies'} from your CRM contacts</a>`);
+  if (extras.approvalsWaiting) waiting.push(`<a href="${escapeHtml(abs(appUrl, '/meetings/approval'))}" class="cd-link" style="color:#24735e;font-weight:600;text-decoration:none">${extras.approvalsWaiting} meeting${extras.approvalsWaiting === 1 ? '' : 's'} waiting for your approval</a>`);
+  if (extras.crmReplies) waiting.push(`<a href="${escapeHtml(abs(appUrl, '/home'))}" class="cd-link" style="color:#24735e;font-weight:600;text-decoration:none">${extras.crmReplies} repl${extras.crmReplies === 1 ? 'y' : 'ies'} from your CRM contacts</a>`);
 
   const html = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"><title>${escapeHtml(subject)}</title></head>
-<body style="margin:0;padding:0;background:#f5f6f4">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark"><title>${escapeHtml(subject)}</title>
+${DARK_STYLE}
+</head>
+<body class="cd-canvas" style="margin:0;padding:0;background:#f5f6f4">
 <div style="display:none;max-height:0;overflow:hidden;color:#f5f6f4">${escapeHtml(n ? items.map((i) => i.title).join(' · ').slice(0, 140) : intro)}</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f6f4"><tr><td align="center" style="padding:28px 12px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="cd-canvas" style="background:#f5f6f4"><tr><td align="center" style="padding:28px 12px">
   <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px">
-    <tr><td style="padding:0 6px 14px 6px;font:700 20px/24px -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#24735e;letter-spacing:-0.02em">cadence<span style="color:#82c4ac">.</span></td></tr>
-    <tr><td style="background:#ffffff;border-radius:16px;padding:26px 24px 14px 24px;border:1px solid #e3e8e2">
-      <div style="font:600 18px/26px -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#192b29">Hi ${escapeHtml(opts.firstName)},</div>
-      <div style="margin:4px 0 18px 0;font:400 14px/21px -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#576661">${escapeHtml(intro)}</div>
-      ${waiting.length ? `<div style="margin:0 0 16px 0;padding:12px 14px;border-radius:12px;background:#edf7f3;font:400 13px/20px -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1d4a3f">Waiting for you: ${waiting.join(' · ')}</div>` : ''}
+    <tr><td class="cd-mark" style="padding:0 6px 18px 6px;font:600 32px/36px ${FONT};color:#24735e;letter-spacing:-0.05em">cadence<span style="color:#82c4ac">.</span></td></tr>
+    <tr><td class="cd-card" style="background:#ffffff;border-radius:16px;padding:26px 24px 14px 24px;border:1px solid #e3e8e2">
+      <div class="cd-h" style="font:600 18px/26px ${FONT};color:#192b29">Hi ${escapeHtml(opts.firstName)},</div>
+      <div class="cd-m" style="margin:4px 0 18px 0;font:400 14px/21px ${FONT};color:#576661">${escapeHtml(intro)}</div>
+      ${waiting.length ? `<div class="cd-banner" style="margin:0 0 16px 0;padding:12px 14px;border-radius:12px;background:#edf7f3;font:400 13px/20px ${FONT};color:#1d4a3f">Waiting for you: ${waiting.join(' · ')}</div>` : ''}
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${items.map((i) => itemHtml(i, appUrl, timezone)).join('')}</table>
     </td></tr>
-    <tr><td style="padding:16px 8px 0 8px;font:400 12px/18px -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#73817a">
+    <tr><td class="cd-m" style="padding:16px 8px 0 8px;font:400 12px/18px ${FONT};color:#73817a">
       You get these because they are in your bell in Cadence. Only what you may see is sent.
-      <a href="${escapeHtml(abs(appUrl, '/email-preferences'))}" style="color:#24735e">Choose how Cadence emails you</a>.
+      <a href="${escapeHtml(abs(appUrl, '/email-preferences'))}" class="cd-link" style="color:#24735e">Choose how Cadence emails you</a>.
     </td></tr>
   </table>
 </td></tr></table>

@@ -155,4 +155,12 @@ describe('the bell by email', () => {
     expect(mail.html).toContain('https://cadence.example/people/p1');
     expect(mail.text).toContain('https://cadence.example/people/p1');
   });
+
+  it('the email has its own dark colours, for mail apps in dark mode and for Outlook on the web', () => {
+    const mail = renderBellEmail({ kind: 'test', firstName: 'Sam', appUrl: 'https://cadence.example', timezone: 'UTC', items: [{ kind: 'meeting_approval', name: 'Intro', company: null, title: 'Approve it', detail: null, href: '/meetings/approval', linkLabel: 'Open', at: new Date() }] });
+    expect(mail.html).toContain('<meta name="color-scheme" content="light dark">');
+    expect(mail.html).toMatch(/@media \(prefers-color-scheme:dark\)\{[\s\S]*\.cd-card\{background:#171f1c!important/);
+    expect(mail.html).toContain('[data-ogsb] .cd-card,.cd-card[data-ogsb]{background:#171f1c!important');
+    expect(mail.html).toContain('class="cd-amber"');
+  });
 });
