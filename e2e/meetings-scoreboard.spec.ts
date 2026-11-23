@@ -38,10 +38,10 @@ test('a booked meeting is celebrated, scores on the board, and a colleague cheer
   await page.getByRole('link', { name: 'See the scoreboard' }).click();
   const month = page.getByRole('region', { name: 'Your month' });
   await expect(month).toContainText(/\d+ of \d+ booked/);
-  await expect(month).toContainText(/Target: \d+ a month/);
-  // The bar says where the month is and the next mark; so does the line under it.
-  await expect(month.getByRole('img', { name: /\d+ of \d+ booked\. (Next: \d+ more to reach|Target reached)/ })).toBeVisible();
-  await expect(month).toContainText(/Next: \d+ more to reach|Target reached/);
+  await expect(month).toContainText(/Your goal: \d+ meetings booked this month/);
+  // The bar says where the month is and the next named mark; so does the line under it.
+  await expect(month.getByRole('img', { name: /\d+ of \d+ booked\. (Next milestone: |Goal reached)/ })).toBeVisible();
+  await expect(month).toContainText(/Next milestone: (Quarter way|Halfway|Final stretch|the goal) \(\d+\)\. \d+ more to go\.|Goal reached/);
   await expect(page.getByRole('region', { name: 'Pod race' })).toContainText('Your pod');
   await expect(page.getByRole('region', { name: 'Recent wins' })).toContainText('You booked');
   await noSideScroll(page);
@@ -54,7 +54,7 @@ test('a booked meeting is celebrated, scores on the board, and a colleague cheer
   await signIn(page, 'leigh@cadence.local');
   await page.goto('/meetings');
   const pods = page.getByRole('region', { name: /Your pods? this month/ });
-  await expect(pods).toContainText(/Target: \d+ per FO × \d+ FOs?/);
+  await expect(pods).toContainText(/Goal: \d+ meetings booked per FO each month · \d+ FOs?/);
   // This week, day by day, adds up to the number beside it.
   const week = pods.getByRole('group', { name: /^This week: \d+ booked$/ });
   const weekTotal = Number((await week.getAttribute('aria-label'))!.match(/(\d+) booked/)![1]);

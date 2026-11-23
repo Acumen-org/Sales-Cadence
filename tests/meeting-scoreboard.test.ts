@@ -42,19 +42,20 @@ describe('the rules', () => {
     expect(earned({ meetings: 9, firstMeetings: 2, bestWeek: 3, streakWeeks: 3, best: 7 })).toEqual(['board', 'first', 'hattrick', 'streak', 'goal', 'best']);
   });
 
-  it('the bar is marked at a quarter, half, three quarters and the target, and the next mark is named', () => {
-    expect(milestonesFor(72)).toEqual([18, 36, 54, 72]);
-    expect(milestonesFor(8)).toEqual([2, 4, 6, 8]);
-    // A small target never shows a mark twice, or at 0.
-    expect(milestonesFor(2)).toEqual([1, 2]);
-    expect(milestonesFor(1)).toEqual([1]);
-    expect(nextWords({ meetings: 0, target: 8 })).toBe('The first meeting of the month starts the bar. The target is 8.');
-    expect(nextWords({ meetings: 3, target: 8 })).toBe('Next: 1 more to reach halfway (4).');
-    expect(nextWords({ meetings: 8, target: 72 })).toBe('Next: 10 more to reach 18.');
-    expect(nextWords({ meetings: 7, target: 8 })).toBe('Next: 1 more to reach the target of 8.');
-    expect(nextWords({ meetings: 8, target: 8 })).toBe('Target reached. Every meeting from here is extra.');
-    expect(nextWords({ meetings: 8, target: 8, best: { count: 9, label: 'October' } })).toBe('Target reached. 2 more beat your best month (9 in October).');
-    expect(nextWords({ meetings: 10, target: 8, best: { count: 9, label: 'October' } })).toBe('Target reached, and your best month yet.');
+  it('the bar has named marks (quarter way, halfway, final stretch, the goal), and the next one is named', () => {
+    const at = (target: number) => milestonesFor(target).map((m) => `${m.name} ${m.at}`);
+    expect(at(90)).toEqual(['Quarter way 23', 'Halfway 45', 'Final stretch 68', 'Goal 90']);
+    expect(at(10)).toEqual(['Quarter way 3', 'Halfway 5', 'Final stretch 8', 'Goal 10']);
+    // A small goal never shows a mark twice, or at 0: the later name wins.
+    expect(at(2)).toEqual(['Halfway 1', 'Goal 2']);
+    expect(at(1)).toEqual(['Goal 1']);
+    expect(nextWords({ meetings: 0, target: 10 })).toBe('Next milestone: Quarter way (3). 3 more to go.');
+    expect(nextWords({ meetings: 9, target: 90 })).toBe('Next milestone: Quarter way (23). 14 more to go.');
+    expect(nextWords({ meetings: 3, target: 10 })).toBe('Next milestone: Halfway (5). 2 more to go.');
+    expect(nextWords({ meetings: 9, target: 10 })).toBe('Next milestone: the goal (10). 1 more to go.');
+    expect(nextWords({ meetings: 10, target: 10 })).toBe('Goal reached. Every meeting from here is extra.');
+    expect(nextWords({ meetings: 10, target: 10, best: { count: 11, label: 'October' } })).toBe('Goal reached. 2 more beat your best month (11 in October).');
+    expect(nextWords({ meetings: 12, target: 10, best: { count: 11, label: 'October' } })).toBe('Goal reached, and your best month yet.');
   });
 });
 
@@ -91,8 +92,8 @@ describe('the scoreboard', () => {
     expect(s.me).toMatchObject({ pace: 3, status: 'On pace: right where the month should be today (3). 1 more to reach 4.', state: 'ahead', toGo: 1, perDay: 1 });
     expect(s.me).toMatchObject({ meetings: 3, firstMeetings: 2, waiting: 1, streakWeeks: 3, rank: 1, best: { count: 1, label: 'October' } });
     expect(s.me!.badges.filter((x) => x.earned).map((x) => x.key)).toEqual(['board', 'first', 'streak', 'best']);
-    expect(s.me!.milestones).toEqual([1, 2, 3, 4]);
-    expect(s.me!.next).toBe('Next: 1 more to reach the target of 4.');
+    expect(s.me!.milestones.map((m) => m.at)).toEqual([1, 2, 3, 4]);
+    expect(s.me!.next).toBe('Next milestone: the goal (4). 1 more to go.');
     // Karson's own week (Monday 16th to Friday 20th): K third on the 17th; Saturday and Sunday have none, so they are not shown.
     expect(s.week.days.map((d) => [d.label, d.count, d.today, d.future])).toEqual([['Mon', 0, false, false], ['Tue', 1, false, false], ['Wed', 0, false, false], ['Thu', 0, false, false], ['Fri', 0, true, false]]);
     expect(s.week.total).toBe(1);
@@ -169,5 +170,37 @@ describe('the scoreboard', () => {
     expect(await celebrationFor(m.id, karson, now)).toMatchObject({ counted: true, firstMeeting: true, title: 'A first meeting!', line: expect.stringContaining("That's 1 meeting this month.") });
     expect(await celebrationFor(waiting.id, karson, now)).toMatchObject({ counted: false, line: expect.stringContaining('Add the recording link') });
     expect(await celebrationFor(m.id, { id: b.users.daniel.id, role: 'JUNIOR_FO', podIds: [] }, now)).toBeNull();
+    // Saved for someone else while it waits: only they can add the link, so the words say so.
+    const forKarson = await meeting('For K', b.users.karson.id, '2026-11-18', { approval: 'WAITING', sourceUrl: '', createdById: sam.id });
+    expect(await celebrationFor(forKarson.id, { id: sam.id, role: 'SALES_LEADER', podIds: [b.pods.Alisa.id] }, now)).toMatchObject({ counted: false, line: `It counts once it is approved, or once ${b.users.karson.name} adds the recording link.` });
+    // A meeting from last month counts there, not toward this month's bar.
+    const october = await meeting('K October', b.users.karson.id, '2026-10-30', { meetingNumber: 2 });
+    expect(await celebrationFor(october.id, karson, now)).toMatchObject({ counted: true, line: "It counts toward October 2026: that's 1 meeting there." });
+  });
+
+  it('the board holds up at the edges: unassigned sign-ins, ties, pods without FOs, someone switched off', async () => {
+    // A first Microsoft sign-in waits as a Junior FO with no role assigned: not an FO, not on the board.
+    await prisma.user.create({ data: { email: 'new@cadence.local', name: 'New Person', role: 'JUNIOR_FO', roleAssigned: false, passwordHash: 'x', pods: { create: [{ podId: b.pods.Alisa.id }] } } });
+    // A pod with only its leader in it.
+    const solo = await prisma.pod.create({ data: { name: 'Pod Solo', podOwnerValue: 'SOLO' } });
+    const lead = await prisma.user.create({ data: { email: 'solo@cadence.local', name: 'Solo Leader', role: 'SALES_LEADER', passwordHash: 'x', pods: { create: [{ podId: solo.id }] } } });
+    await meeting('Solo 1', lead.id, '2026-11-03', { meetingNumber: 1 }, 'person-05');
+    // Karson and Daniel tie on two, one first each; Alisa and the solo leader tie on one first meeting.
+    await meeting('K a', b.users.karson.id, '2026-11-03', { meetingNumber: 1 }, 'person-01');
+    await meeting('K b', b.users.karson.id, '2026-11-04', { meetingNumber: 2 }, 'person-01');
+    await meeting('D a', b.users.daniel.id, '2026-11-05', { meetingNumber: 1 }, 'person-02');
+    await meeting('D b', b.users.daniel.id, '2026-11-06', { meetingNumber: 2 }, 'person-02');
+    await meeting('A a', b.users.alisa.id, '2026-11-07', { meetingNumber: 1 }, 'person-03');
+    const s = await scoreboard({ id: b.users.ria.id, role: 'ADMIN', podIds: [] }, now);
+    expect(s.team.fos).toBe(5);
+    expect(s.top.map((t) => [t.name, t.place])).toEqual([[b.users.daniel.name, 1], [b.users.karson.name, 1], [b.users.alisa.name, 3]]);
+    expect(s.pods.map((p) => p.name)).not.toContain('Pod Solo');
+    // October's best was switched off since: the honour goes to someone the board can open.
+    await meeting('D Oct', b.users.daniel.id, '2026-10-10', { meetingNumber: 1 }, 'person-04');
+    await meeting('D Oct 2', b.users.daniel.id, '2026-10-11', { meetingNumber: 2 }, 'person-04');
+    await meeting('K Oct', b.users.karson.id, '2026-10-12', { meetingNumber: 1 }, 'person-06');
+    await prisma.user.update({ where: { id: b.users.daniel.id }, data: { active: false } });
+    const after = await scoreboard({ id: b.users.ria.id, role: 'ADMIN', podIds: [] }, now);
+    expect(after.champions!.performer).toMatchObject({ name: b.users.karson.name, meetings: 1 });
   });
 });

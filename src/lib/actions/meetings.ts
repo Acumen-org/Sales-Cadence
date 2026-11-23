@@ -335,7 +335,11 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
     return { ok: false, error: `This meeting is waiting for approval. Only ${booker ?? 'the FO who booked it'}, who booked it, can add its recording link; its Sales Leader or an admin can approve or decline it.` };
   }
 
-  await prisma.$transaction(async (tx) => {
+  // Approved or declined while this form was open: save nothing, or a declined meeting would lose
+  // its decline and drop out of every list (the row is held from here until the save is done).
+  const stillAsWas = await prisma.$transaction(async (tx) => {
+    const held = await tx.meeting.updateMany({ where: { id, approval: existing.approval, review: existing.review }, data: { editedAt: new Date() } });
+    if (!held.count) return false;
     await tx.meetingAttendee.deleteMany({ where: { meetingId: id } });
     await tx.meeting.update({
       where: { id },
@@ -361,7 +365,9 @@ export async function updateMeetingAction(formData: FormData): Promise<ActionRes
         attendees: { create: attendees },
       },
     });
+    return true;
   });
+  if (!stillAsWas) return { ok: false, error: 'This meeting was approved or declined while you were editing it. Reload the page to see it, then make your change again.' };
   // S20: what changed, old and new, for the fields that decide credit and numbering.
   const was = { title: existing.title, bookedById: existing.bookedById, day: meetingDay(existing.occurredAt), sourceUrl: existing.sourceUrl, products: existing.products.join(','), prospects: [...new Set(prospectsOf(existing.attendees))].sort().join(',') };
   const now = { title: d.title, bookedById: d.bookedById, day, sourceUrl: d.sourceUrl.trim(), products: d.products.join(','), prospects: [...new Set(prospectIds)].sort().join(',') };

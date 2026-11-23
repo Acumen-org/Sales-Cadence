@@ -424,7 +424,16 @@
   background: linear-gradient(105deg, transparent 35%, rgba(213, 233, 173, 0.14) 50%, transparent 65%);
   animation: champions-sheen 1.8s ease-out 0.5s both;
 }
+/* A cheer given: its sparkle pops and turns a little. */
+@keyframes cheer-pop {
+  0% { transform: scale(1) rotate(0); }
+  40% { transform: scale(1.45) rotate(-14deg); }
+  70% { transform: scale(0.92) rotate(6deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+.cheer-pop { animation: cheer-pop 0.45s ease-out; }
 @media (prefers-reduced-motion: reduce) {
+  .cheer-pop { animation: none; }
   .bar-grow { animation: none; }
   .bar-lean { display: none; }
   .champions::after { display: none; }

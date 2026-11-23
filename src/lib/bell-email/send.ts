@@ -1,6 +1,7 @@
 import { env } from '../env';
 import { microsoftConfig } from '../auth/microsoft';
 import { currentToken } from '../meetings/sharepoint-player';
+import type { InlineImage } from './template';
 
 /*
  * How a bell email leaves (owner, 21 Nov 2026: "a new Cadence mailbox"): Microsoft Graph's sendMail,
@@ -11,7 +12,8 @@ import { currentToken } from '../meetings/sharepoint-player';
  * Tests and the demo workspace use an outbox in memory instead (CADENCE_FAKE_MAIL=1, or under test).
  */
 
-export type OutgoingMail = { from: string; to: string; subject: string; html: string; text: string };
+/** `images`: pictures sent inside the email (the wordmark), shown where the html says cid:<id>. */
+export type OutgoingMail = { from: string; to: string; subject: string; html: string; text: string; images?: InlineImage[] };
 export type SendResult = { ok: true } | { ok: false; error: string; permanent: boolean };
 
 const g = globalThis as unknown as { __cadenceFakeMail?: OutgoingMail[] };
@@ -32,7 +34,11 @@ export async function sendMail(mail: OutgoingMail, fetcher: typeof fetch = fetch
       method: 'POST',
       headers: { authorization: `Bearer ${token.value}`, 'content-type': 'application/json' },
       body: JSON.stringify({
-        message: { subject: mail.subject, body: { contentType: 'HTML', content: mail.html }, toRecipients: [{ emailAddress: { address: mail.to } }] },
+        message: {
+          subject: mail.subject, body: { contentType: 'HTML', content: mail.html }, toRecipients: [{ emailAddress: { address: mail.to } }],
+          // Inline attachments: shown in the email, never as files to download, and no "download pictures" prompt.
+          ...(mail.images?.length ? { attachments: mail.images.map((i) => ({ '@odata.type': '#microsoft.graph.fileAttachment', name: `${i.id}.png`, contentType: i.contentType, contentBytes: i.base64, contentId: i.id, isInline: true })) } : {}),
+        },
         saveToSentItems: false,
       }),
     });

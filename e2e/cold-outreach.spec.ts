@@ -16,7 +16,7 @@ import { PrismaClient } from '@prisma/client';
  */
 test.describe.configure({ mode: 'serial' });
 
-const db = new PrismaClient({ datasourceUrl: 'postgresql://postgres:postgres@localhost:5435/cadence' });
+const db = new PrismaClient({ datasourceUrl: `postgresql://postgres:postgres@localhost:${process.env.E2E_DB_PORT ?? '5435'}/cadence` });
 test.afterAll(async () => db.$disconnect());
 
 const KEY = 'e2e-bellwether-key-not-a-secret-000000000000';

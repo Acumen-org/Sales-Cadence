@@ -10,7 +10,7 @@ import { MeetingsTabs } from '@/components/meetings/meetings-tabs';
 import { ScoreboardPanel } from '@/components/meetings/scoreboard';
 import { scoreboard } from '@/lib/meetings/scoreboard';
 import { NUMBERING_STARTS_WORDS, ordinal } from '@/lib/meetings/numbering';
-import { canCreateMeeting, isAdmin, ROLES_NEEDING_POD } from '@/lib/auth/rbac';
+import { canCreateMeeting, ROLES_NEEDING_POD } from '@/lib/auth/rbac';
 import { COUNTED_WHERE } from '@/lib/meetings/counted';
 import { attendeeIsExternal, meetingReadWhere } from '@/lib/meetings-query';
 import { getSettings } from '@/lib/settings';
@@ -36,7 +36,8 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
   const from = isLocalDate(sp.from) ? sp.from! : '';
   const to = isLocalDate(sp.to) ? sp.to! : '';
   const favourites = sp.fav === '1';
-  const fos = await prisma.user.findMany({ where: { active: true, role: { in: ROLES_NEEDING_POD } }, select: { id: true, name: true }, orderBy: { name: 'asc' } });
+  // The same people the scoreboard scores, so a name on it always opens their meetings.
+  const fos = await prisma.user.findMany({ where: { active: true, roleAssigned: true, role: { in: ROLES_NEEDING_POD } }, select: { id: true, name: true }, orderBy: { name: 'asc' } });
   const booked = fos.some((f) => f.id === sp.booked) ? sp.booked! : '';
 
   const readable = await meetingReadWhere(user);
@@ -68,7 +69,9 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
   const [meetings, total] = await Promise.all([
     prisma.meeting.findMany({
       where,
-      orderBy: { occurredAt: 'desc' },
+      // A meeting has a day, not a time, so a day's meetings tie: the newest saved first, then the id,
+      // so no meeting repeats or goes missing between pages.
+      orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
       select: {
@@ -113,7 +116,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
 
   return (
     <PageFrame className="space-y-3 px-6 pb-8 pt-2">
-      {board ? <ScoreboardPanel s={board} now={Date.now()} admin={isAdmin(toActor(user))} /> : null}
+      {board ? <ScoreboardPanel s={board} now={Date.now()} /> : null}
       <Surface flush>
         <ViewHeader
           title="Meetings"

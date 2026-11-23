@@ -1,34 +1,42 @@
+import { WORDMARK_DARK, WORDMARK_LIGHT, type Wordmark } from './wordmark';
+
 /*
  * The bell by email (owner, 21 Nov 2026: "a nice html email that shows the contents and links it to
- * Cadence"). Tables and inline styles, so Outlook, Gmail and phones draw it the same; 600px wide,
- * readable without images (there are none). Every item links to the thing in Cadence.
+ * Cadence"). Tables and inline styles, so Outlook, Gmail and phones draw it the same; 600px wide.
+ * Every item links to the thing in Cadence.
  *
- * Dark mode (owner, 23 Nov 2026: "nice in light mode, it would be nice if it looked better in dark
- * mode"). Light is all inline, so nothing depends on a style block. Dark is drawn by a style block
- * of class rules, twice: once for mail apps that tell the email they are dark (Apple Mail, Outlook
- * for Mac, iOS), once for Outlook on the web and the new Outlook, which mark the parts they recolour
- * with data-ogsc (text) and data-ogsb (background). Gmail and classic Outlook recolour by themselves.
+ * The look is "Option A, a clean letter" (owner, 23 Nov 2026): the Cadence wordmark large at the
+ * top, then each item as its own section with a button. Three rules keep it right in every mail app:
+ *   - Sizes are written out (font-size, font-weight, line-height), never the `font` shorthand, which
+ *     Outlook drops, taking every size with it.
+ *   - Every surface is pure white. Outlook's dark mode re-tints any colour we give a background, but
+ *     turns white into its own dark grey, cleanly.
+ *   - Dark mode changes text and line colours only, and swaps the wordmark for the app's white one:
+ *     by the media query (Apple Mail, iOS, Outlook for Mac) and by the attributes Outlook on the web
+ *     and the new Outlook put on what they recolour ([data-ogsc] / [data-ogsb], descendant form only).
  */
 
 export type EmailItem = { kind: string; name: string; company: string | null; title: string; detail: string | null; href: string | null; linkLabel: string; at: Date };
 export type EmailExtras = { approvalsWaiting?: number; crmReplies?: number };
-export type RenderedEmail = { subject: string; html: string; text: string };
+/** A picture sent inside the email, shown where the html says cid:<id>. */
+export type InlineImage = { id: string; contentType: 'image/png'; base64: string };
+export type RenderedEmail = { subject: string; html: string; text: string; images: InlineImage[] };
 
 type Tone = 'amber' | 'red' | 'green' | 'blue' | 'grey';
-/** Label colours: light text and background, then the same in dark. */
-const TONES: Record<Tone, { colour: string; bg: string; darkColour: string; darkBg: string }> = {
-  amber: { colour: '#92400e', bg: '#fef3c7', darkColour: '#f3c66b', darkBg: '#3a2c0e' },
-  red: { colour: '#991b1b', bg: '#fee2e2', darkColour: '#f6a8a8', darkBg: '#3d1a1a' },
-  green: { colour: '#1d4a3f', bg: '#d8eee5', darkColour: '#9fdcc4', darkBg: '#14382e' },
-  blue: { colour: '#1e3a8a', bg: '#dbeafe', darkColour: '#aac5f4', darkBg: '#1a2a4a' },
-  grey: { colour: '#40514d', bg: '#eef2ef', darkColour: '#c3cec9', darkBg: '#26302c' },
+/** Label colours: on white, then in dark mode. */
+const TONES: Record<Tone, [string, string]> = {
+  amber: ['#9a5b00', '#f2c46a'],
+  red: ['#b42318', '#f6a8a8'],
+  green: ['#1f6b57', '#8ad6b8'],
+  blue: ['#1e4fa8', '#aac5f4'],
+  grey: ['#4d5d58', '#c3cec9'],
 };
 
 const KIND_LABEL: Record<string, { label: string; tone: Tone }> = {
   meeting_approval: { label: 'Approval needed', tone: 'amber' },
   meeting_declined: { label: 'Meeting declined', tone: 'red' },
   meeting_added_back: { label: 'Meeting added back', tone: 'green' },
-  meeting_kudos: { label: 'Cheer', tone: 'amber' },
+  meeting_kudos: { label: 'Cheer', tone: 'green' },
   reply: { label: 'Reply', tone: 'green' },
   bounce: { label: 'Bounced', tone: 'red' },
   possible_bounce: { label: 'Possible bounce', tone: 'amber' },
@@ -44,35 +52,32 @@ const KIND_LABEL: Record<string, { label: string; tone: Tone }> = {
 };
 const kindOf = (k: string) => KIND_LABEL[k] ?? { label: 'Update', tone: 'grey' as Tone };
 
-/** The dark palette. Light colours live inline next to each part. */
-const DARK = {
-  canvas: '#0f1513', card: '#171f1c', line: '#2b3632', heading: '#e9f0ed', text: '#d2dcd8', muted: '#9aaaa4',
-  link: '#74d1ad', mark: '#74d1ad', banner: '#12302a', bannerText: '#c4e6d8',
-};
+/** Light colours, inline; their dark partners, by class. */
+const C = { ink: '#16302a', text: '#2b3c39', muted: '#5f6e69', line: '#e3e8e5', brand: '#1f6b57' };
+const D = { page: '#1f2422', ink: '#f1f5f3', text: '#d9e1de', muted: '#a9b6b1', line: '#3b4541', brand: '#7fd3b3' };
 
-function darkRules(scope: (cls: string, attr: 'c' | 'b') => string): string {
-  const bg = (cls: string, v: string) => `${scope(cls, 'b')}{background:${v}!important;background-color:${v}!important}`;
-  const fg = (cls: string, v: string) => `${scope(cls, 'c')}{color:${v}!important}`;
-  return [
-    bg('cd-canvas', DARK.canvas), fg('cd-canvas', DARK.muted),
-    bg('cd-card', DARK.card), `${scope('cd-card', 'b')}{border-color:${DARK.line}!important}`,
-    `${scope('cd-item', 'b')}{border-color:${DARK.line}!important}`,
-    fg('cd-h', DARK.heading), fg('cd-t', DARK.text), fg('cd-m', DARK.muted),
-    fg('cd-link', DARK.link), fg('cd-mark', DARK.mark),
-    bg('cd-banner', DARK.banner), fg('cd-banner', DARK.bannerText),
-    ...(Object.keys(TONES) as Tone[]).flatMap((t) => [bg(`cd-${t}`, TONES[t].darkBg), fg(`cd-${t}`, TONES[t].darkColour)]),
-  ].join('\n');
+function darkRules(sel: (attr: 'c' | 'b', cls: string) => string): string {
+  const rules: string[] = [];
+  const text = (cls: string, v: string) => rules.push(`${sel('c', cls)}{color:${v}!important}`);
+  const line = (cls: string, v: string) => rules.push(`${sel('b', cls)}{border-color:${v}!important}`);
+  text('cd-ink', D.ink); text('cd-text', D.text); text('cd-muted', D.muted); text('cd-link', D.brand);
+  for (const t of Object.keys(TONES) as Tone[]) text(`cd-${t}`, TONES[t][1]);
+  line('cd-line', D.line); line('cd-accent', D.brand);
+  // The app's own white wordmark in place of the evergreen one.
+  rules.push(`${sel('c', 'cd-logo-light')}{display:none!important}`);
+  rules.push(`${sel('c', 'cd-logo-dark')}{display:block!important;max-height:none!important;overflow:visible!important}`);
+  return rules.join('\n');
 }
-
-/** Two blocks: Gmail drops a whole block it cannot read, so the Outlook rules stand apart. */
+/** Two blocks: Gmail drops a whole block it cannot read, so Outlook's rules stand apart. */
 const DARK_STYLE = `<style>
 :root{color-scheme:light dark;supported-color-schemes:light dark}
 @media (prefers-color-scheme:dark){
-${darkRules((cls) => `.${cls}`)}
+.cd-page{background-color:${D.page}!important}
+${darkRules((_, cls) => `.${cls}`)}
 }
 </style>
 <style>
-${darkRules((cls, attr) => `[data-ogs${attr}] .${cls},.${cls}[data-ogs${attr}]`)}
+${darkRules((attr, cls) => `[data-ogs${attr}] .${cls}`)}
 </style>`;
 
 export function escapeHtml(s: string): string {
@@ -81,30 +86,37 @@ export function escapeHtml(s: string): string {
 const abs = (appUrl: string, href: string | null) => `${appUrl.replace(/\/+$/, '')}${href && href.startsWith('/') ? href : '/home'}`;
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
 const FONT = `-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif`;
+/** A text style written out in full, the way every mail app reads it. */
+const type = (size: number, weight: number, lineHeight: number, colour: string, extra = '') =>
+  `font-family:${FONT};font-size:${size}px;font-weight:${weight};line-height:${lineHeight}px;color:${colour};${extra}`;
 
 function when(at: Date, timezone: string) {
   return new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'short', hour: 'numeric', minute: '2-digit' }).format(at);
 }
 
+function button(href: string, label: string) {
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:16px"><tr><td bgcolor="${C.brand}" style="border-radius:10px;background-color:${C.brand}"><a href="${escapeHtml(href)}" style="display:inline-block;padding:10px 18px;border-radius:10px;${type(14, 600, 20, '#ffffff', 'text-decoration:none')}">${escapeHtml(label)} &rarr;</a></td></tr></table>`;
+}
+
 function itemHtml(i: EmailItem, appUrl: string, timezone: string) {
   const k = kindOf(i.kind);
-  const tone = TONES[k.tone];
-  const who = `${escapeHtml(i.name)}${i.company ? `<span class="cd-m" style="color:#65736e;font-weight:400"> · ${escapeHtml(i.company)}</span>` : ''}`;
   return `
-  <tr><td style="padding:0 0 12px 0">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="cd-item" style="border:1px solid #e3e8e2;border-radius:12px;border-collapse:separate">
-      <tr><td style="padding:16px 18px">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-          <td style="font:600 11px/16px ${FONT}"><span class="cd-${k.tone}" style="display:inline-block;padding:2px 8px;border-radius:999px;background:${tone.bg};color:${tone.colour}">${escapeHtml(k.label)}</span></td>
-          <td align="right" class="cd-m" style="font:400 12px/16px ${FONT};color:#73817a">${escapeHtml(when(i.at, timezone))}</td>
-        </tr></table>
-        <div class="cd-h" style="margin-top:10px;font:600 14px/20px ${FONT};color:#192b29">${who}</div>
-        <div class="cd-t" style="margin-top:4px;font:400 14px/21px ${FONT};color:#2b3c39">${escapeHtml(i.title)}</div>
-        ${i.detail ? `<div class="cd-m" style="margin-top:6px;font:400 13px/19px ${FONT};color:#576661">${escapeHtml(clip(i.detail, 600))}</div>` : ''}
-        <div style="margin-top:14px"><a href="${escapeHtml(abs(appUrl, i.href))}" style="display:inline-block;padding:8px 14px;border-radius:9px;background:#24735e;color:#ffffff;text-decoration:none;font:600 13px/18px ${FONT}">${escapeHtml(i.linkLabel || 'Open in Cadence')} &rarr;</a></div>
-      </td></tr>
-    </table>
-  </td></tr>`;
+    <tr><td class="cd-line" style="border-top:1px solid ${C.line};padding:22px 0 24px 0">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+        <td><span class="cd-${k.tone}" style="${type(11, 700, 16, TONES[k.tone][0], 'letter-spacing:0.8px;text-transform:uppercase')}">&#9679;&nbsp; ${escapeHtml(k.label)}</span></td>
+        <td align="right" class="cd-muted" style="${type(12, 400, 16, C.muted)}">${escapeHtml(when(i.at, timezone))}</td>
+      </tr></table>
+      <div class="cd-ink" style="margin-top:10px;${type(17, 600, 24, C.ink)}">${escapeHtml(i.name)}${i.company ? `<span class="cd-muted" style="${type(17, 400, 24, C.muted)}"> · ${escapeHtml(i.company)}</span>` : ''}</div>
+      <div class="cd-text" style="margin-top:4px;${type(15, 400, 23, C.text)}">${escapeHtml(i.title)}</div>
+      ${i.detail ? `<div class="cd-muted" style="margin-top:6px;${type(14, 400, 21, C.muted)}">${escapeHtml(clip(i.detail, 600))}</div>` : ''}
+      ${button(abs(appUrl, i.href), i.linkLabel || 'Open in Cadence')}
+    </td></tr>`;
+}
+
+/** The wordmark: light by default; the dark one waits hidden until a dark mode rule shows it. */
+function wordmarkHtml(src: (w: Wordmark) => string) {
+  const img = (w: Wordmark) => `<img src="${src(w)}" width="${w.width}" height="${w.height}" alt="cadence." style="display:block;border:0;outline:none;width:${w.width}px;height:${w.height}px;${type(36, 600, 40, C.brand)}">`;
+  return `<div class="cd-logo-light">${img(WORDMARK_LIGHT)}</div><!--[if !mso]><!--><div class="cd-logo-dark" style="display:none;max-height:0;overflow:hidden;mso-hide:all">${img(WORDMARK_DARK)}</div><!--<![endif]-->`;
 }
 
 /** A subject that says what to do first, then what it is about. */
@@ -122,8 +134,11 @@ function shortSubject(i: EmailItem): string {
   }
 }
 
-/** One email: urgent items as they need someone, or the morning summary. */
-export function renderBellEmail(opts: { kind: 'instant' | 'digest' | 'test'; firstName: string; items: EmailItem[]; extras?: EmailExtras; appUrl: string; timezone: string }): RenderedEmail {
+/**
+ * One email: urgent items as they need someone, or the morning summary. `images: 'inline'` puts the
+ * wordmark in the html itself (for a preview in a page); by default it is sent alongside (cid:).
+ */
+export function renderBellEmail(opts: { kind: 'instant' | 'digest' | 'test'; firstName: string; items: EmailItem[]; extras?: EmailExtras; appUrl: string; timezone: string; images?: 'attached' | 'inline' }): RenderedEmail {
   const { items, appUrl, timezone } = opts;
   const extras = opts.extras ?? {};
   const n = items.length;
@@ -137,29 +152,27 @@ export function renderBellEmail(opts: { kind: 'instant' | 'digest' | 'test'; fir
     : opts.kind === 'instant'
       ? n === 1 ? 'This needs you in Cadence.' : 'These need you in Cadence.'
       : 'Here is what came in since your last summary.';
+  const linkStyle = type(15, 600, 23, C.brand, 'text-decoration:none');
   const waiting: string[] = [];
-  if (extras.approvalsWaiting) waiting.push(`<a href="${escapeHtml(abs(appUrl, '/meetings/approval'))}" class="cd-link" style="color:#24735e;font-weight:600;text-decoration:none">${extras.approvalsWaiting} meeting${extras.approvalsWaiting === 1 ? '' : 's'} waiting for your approval</a>`);
-  if (extras.crmReplies) waiting.push(`<a href="${escapeHtml(abs(appUrl, '/home'))}" class="cd-link" style="color:#24735e;font-weight:600;text-decoration:none">${extras.crmReplies} repl${extras.crmReplies === 1 ? 'y' : 'ies'} from your CRM contacts</a>`);
+  if (extras.approvalsWaiting) waiting.push(`<a href="${escapeHtml(abs(appUrl, '/meetings/approval'))}" class="cd-link" style="${linkStyle}">${extras.approvalsWaiting} meeting${extras.approvalsWaiting === 1 ? '' : 's'} waiting for your approval</a>`);
+  if (extras.crmReplies) waiting.push(`<a href="${escapeHtml(abs(appUrl, '/home'))}" class="cd-link" style="${linkStyle}">${extras.crmReplies} repl${extras.crmReplies === 1 ? 'y' : 'ies'} from your CRM contacts</a>`);
+  const inline = opts.images === 'inline';
+  const src = (w: Wordmark) => (inline ? `data:image/png;base64,${w.png}` : `cid:${w.id}`);
 
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark"><title>${escapeHtml(subject)}</title>
 ${DARK_STYLE}
 </head>
-<body class="cd-canvas" style="margin:0;padding:0;background:#f5f6f4">
-<div style="display:none;max-height:0;overflow:hidden;color:#f5f6f4">${escapeHtml(n ? items.map((i) => i.title).join(' · ').slice(0, 140) : intro)}</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="cd-canvas" style="background:#f5f6f4"><tr><td align="center" style="padding:28px 12px">
+<body class="cd-page" style="margin:0;padding:0;background-color:#ffffff">
+<div style="display:none;max-height:0;overflow:hidden;color:#ffffff">${escapeHtml(n ? items.map((i) => i.title).join(' · ').slice(0, 140) : intro)}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#ffffff" class="cd-page" style="background-color:#ffffff;color:${C.ink}"><tr><td align="center" style="padding:36px 20px 40px 20px">
   <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px">
-    <tr><td class="cd-mark" style="padding:0 6px 18px 6px;font:600 32px/36px ${FONT};color:#24735e;letter-spacing:-0.05em">cadence<span style="color:#82c4ac">.</span></td></tr>
-    <tr><td class="cd-card" style="background:#ffffff;border-radius:16px;padding:26px 24px 14px 24px;border:1px solid #e3e8e2">
-      <div class="cd-h" style="font:600 18px/26px ${FONT};color:#192b29">Hi ${escapeHtml(opts.firstName)},</div>
-      <div class="cd-m" style="margin:4px 0 18px 0;font:400 14px/21px ${FONT};color:#576661">${escapeHtml(intro)}</div>
-      ${waiting.length ? `<div class="cd-banner" style="margin:0 0 16px 0;padding:12px 14px;border-radius:12px;background:#edf7f3;font:400 13px/20px ${FONT};color:#1d4a3f">Waiting for you: ${waiting.join(' · ')}</div>` : ''}
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${items.map((i) => itemHtml(i, appUrl, timezone)).join('')}</table>
-    </td></tr>
-    <tr><td class="cd-m" style="padding:16px 8px 0 8px;font:400 12px/18px ${FONT};color:#73817a">
-      You get these because they are in your bell in Cadence. Only what you may see is sent.
-      <a href="${escapeHtml(abs(appUrl, '/email-preferences'))}" class="cd-link" style="color:#24735e">Choose how Cadence emails you</a>.
-    </td></tr>
+    <tr><td style="padding:0 0 26px 0">${wordmarkHtml(src)}</td></tr>
+    <tr><td class="cd-ink" style="${type(22, 600, 30, C.ink)}">Hi ${escapeHtml(opts.firstName)},</td></tr>
+    <tr><td class="cd-muted" style="padding:6px 0 22px 0;${type(15, 400, 23, C.muted)}">${escapeHtml(intro)}</td></tr>
+    ${waiting.length ? `<tr><td style="padding:0 0 26px 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td class="cd-accent" style="border-left:3px solid ${C.brand};padding:4px 0 4px 14px;${type(15, 400, 23, C.text)}"><span class="cd-text">Waiting for you:</span> ${waiting.join(' <span class="cd-muted">·</span> ')}</td></tr></table></td></tr>` : ''}
+    ${items.map((i) => itemHtml(i, appUrl, timezone)).join('')}
+    <tr><td class="cd-line cd-muted" style="border-top:1px solid ${C.line};padding:20px 0 0 0;${type(12, 400, 19, C.muted)}">You get these because they are in your bell in Cadence. Only what you may see is sent. <a href="${escapeHtml(abs(appUrl, '/email-preferences'))}" class="cd-link" style="color:${C.brand}">Choose how Cadence emails you</a>.</td></tr>
   </table>
 </td></tr></table>
 </body></html>`;
@@ -171,5 +184,6 @@ ${DARK_STYLE}
     ...items.flatMap((i) => [`- ${kindOf(i.kind).label}: ${i.name}${i.company ? ` (${i.company})` : ''}`, `  ${i.title}`, ...(i.detail ? [`  ${clip(i.detail, 300)}`] : []), `  ${abs(appUrl, i.href)}`, '']),
     `Choose how Cadence emails you: ${abs(appUrl, '/email-preferences')}`,
   ].join('\n');
-  return { subject, html, text };
+  const images: InlineImage[] = inline ? [] : [WORDMARK_LIGHT, WORDMARK_DARK].map((w) => ({ id: w.id, contentType: 'image/png', base64: w.png }));
+  return { subject, html, text, images };
 }

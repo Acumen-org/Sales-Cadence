@@ -50,6 +50,8 @@ describe('the bell by email', () => {
     expect(mail.html).toContain('Approve or decline it.');
     expect(mail.html).toContain('http://localhost:3100/meetings/approval');
     expect(mail.html).toContain('Hi Alisa,');
+    // The wordmark travels with the email, so it shows without a "download pictures" prompt.
+    expect(mail.images?.map((i) => i.id)).toEqual(['cadence-wordmark-light', 'cadence-wordmark-dark']);
     const row = (id: string) => prisma.notification.findUniqueOrThrow({ where: { id } });
     expect((await row(approval.id)).emailedAt).not.toBeNull();
     expect((await row(fresh.id)).emailedAt).toBeNull();
@@ -156,11 +158,26 @@ describe('the bell by email', () => {
     expect(mail.text).toContain('https://cadence.example/people/p1');
   });
 
-  it('the email has its own dark colours, for mail apps in dark mode and for Outlook on the web', () => {
+  it('the email reads the same in every mail app: sizes written out, white surfaces, dark mode by text and lines only', () => {
     const mail = renderBellEmail({ kind: 'test', firstName: 'Sam', appUrl: 'https://cadence.example', timezone: 'UTC', items: [{ kind: 'meeting_approval', name: 'Intro', company: null, title: 'Approve it', detail: null, href: '/meetings/approval', linkLabel: 'Open', at: new Date() }] });
+    // Outlook drops the `font` shorthand, and every size with it.
+    expect(mail.html).not.toMatch(/[;"]font:/);
+    expect(mail.html).toContain('font-size:22px;font-weight:600');
+    // Dark mode never gives a background a colour of its own in Outlook (it re-tints them); only text, lines and the wordmark change.
     expect(mail.html).toContain('<meta name="color-scheme" content="light dark">');
-    expect(mail.html).toMatch(/@media \(prefers-color-scheme:dark\)\{[\s\S]*\.cd-card\{background:#171f1c!important/);
-    expect(mail.html).toContain('[data-ogsb] .cd-card,.cd-card[data-ogsb]{background:#171f1c!important');
-    expect(mail.html).toContain('class="cd-amber"');
+    expect(mail.html).toContain('[data-ogsc] .cd-amber{color:#f2c46a!important}');
+    expect(mail.html).toContain('[data-ogsb] .cd-line{border-color:#3b4541!important}');
+    expect(mail.html).toContain('[data-ogsc] .cd-logo-dark{display:block!important');
+    expect(mail.html).not.toMatch(/\[data-ogs[bc]\][^{]*\{background/);
+    // Only the descendant form, the one Outlook is known to honour.
+    expect(mail.html).not.toMatch(/\.cd-[a-z-]+\[data-ogs/);
+    // The wordmark is sent inside the email, in light and dark, and shown by cid.
+    expect(mail.images.map((i) => i.id)).toEqual(['cadence-wordmark-light', 'cadence-wordmark-dark']);
+    expect(mail.html).toContain('src="cid:cadence-wordmark-light"');
+    expect(mail.html).toContain('src="cid:cadence-wordmark-dark"');
+    // A preview in a page carries the pictures in the html instead.
+    const preview = renderBellEmail({ kind: 'digest', images: 'inline', firstName: 'Sam', appUrl: 'https://cadence.example', timezone: 'UTC', items: [] });
+    expect(preview.images).toEqual([]);
+    expect(preview.html).toContain('src="data:image/png;base64,');
   });
 });

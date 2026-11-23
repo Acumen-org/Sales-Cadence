@@ -1,7 +1,7 @@
 ﻿import {PrismaClient} from '@prisma/client';
 import {expect,type Page} from '@playwright/test';
 export async function beginStudio(page: Page, label: string, options: {count?:number;startDate?:string;endDate?:string}={}) {
- const db=new PrismaClient({datasourceUrl:'postgresql://postgres:postgres@localhost:5435/cadence'});
+ const db=new PrismaClient({datasourceUrl:`postgresql://postgres:postgres@localhost:${process.env.E2E_DB_PORT ?? '5435'}/cadence`});
  const count=options.count??4;
  try {
   const fo=await db.user.findUniqueOrThrow({where:{email:'alisa@cadence.local'}});

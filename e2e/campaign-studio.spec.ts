@@ -2,7 +2,7 @@ import {beginStudio} from './studio-helper';
 import { test, expect, type Page } from '@playwright/test';
 import { PrismaClient } from '@prisma/client';
 
-const db = new PrismaClient({ datasourceUrl: 'postgresql://postgres:postgres@localhost:5435/cadence' });
+const db = new PrismaClient({ datasourceUrl: `postgresql://postgres:postgres@localhost:${process.env.E2E_DB_PORT ?? '5435'}/cadence` });
 test.afterAll(async () => db.$disconnect());
 async function login(page: Page, email = 'admin@cadence.local') {
   await page.goto('/login'); await page.getByLabel('Email', { exact:true }).fill(email);

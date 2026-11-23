@@ -1,25 +1,26 @@
 import Link from 'next/link';
 import clsx from 'clsx';
 import type { ReactNode } from 'react';
-import type { MonthProgress, Scoreboard } from '@/lib/meetings/scoreboard';
+import type { Milestone, MonthProgress, Scoreboard } from '@/lib/meetings/scoreboard';
 import type { LocalDate } from '@/lib/dates';
 import { ordinal } from '@/lib/meetings/numbering';
 import { barColour } from '@/lib/bar-colour';
 import { Avatar } from '@/components/ui';
 import { IconStar } from '@/components/icons';
 import { KudosButton } from '@/components/meetings/kudos-button';
+import { FitList } from '@/components/meetings/fit-list';
 
 /**
  * The top of Meetings (owner, 21 to 23 Nov 2026: gamified, fun, simple and useful; no emojis): last
  * month's best as an honour, the month as the platform's progress bar with its next mark, the pod
  * race with the top three bookers (each opens their meetings), and recent wins.
  */
-export function ScoreboardPanel({ s, now, admin = false }: { s: Scoreboard; now: number; admin?: boolean }) {
+export function ScoreboardPanel({ s, now }: { s: Scoreboard; now: number }) {
   return (
     <div className="space-y-3" aria-label="Meetings scoreboard" role="region">
       {s.champions ? <Champions c={s.champions} month={s.month.label} /> : null}
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)_minmax(0,1fr)]">
-        {s.me ? <YourMonth s={s} me={s.me} /> : <TeamMonth s={s} admin={admin} />}
+        {s.me ? <YourMonth s={s} me={s.me} /> : <TeamMonth s={s} />}
         <PodRace s={s} />
         <Wins s={s} now={now} />
       </div>
@@ -57,7 +58,7 @@ function Champions({ c, month }: { c: NonNullable<Scoreboard['champions']>; mont
           <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#d5e9ad]"><IconStar size={13} filled />{c.label}&apos;s best</p>
           <p className="mt-1 text-[12.5px] text-white/60">Lead {month} to take their place.</p>
         </div>
-        <Link href={rangeHref(c.first, c.last, p.userId)} title={`Open the ${p.meetings} meetings ${p.name} booked in ${c.label}`} className="group flex min-w-0 items-center gap-3.5">
+        <Link href={rangeHref(c.first, c.last, p.userId)} title={`Open the ${p.meetings} meeting${p.meetings === 1 ? '' : 's'} ${p.name} booked in ${c.label}`} className="group flex min-w-0 items-center gap-3.5">
           <span className="relative shrink-0">
             <Avatar name={p.name} shape="circle" size={50} className="ring-2 ring-[#d5e9ad] ring-offset-2 ring-offset-[#192c28]" />
             <span aria-hidden className="absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full bg-[#d5e9ad] text-[#192c28]"><IconStar size={11} filled /></span>
@@ -71,7 +72,7 @@ function Champions({ c, month }: { c: NonNullable<Scoreboard['champions']>; mont
         {c.pod ? (
           <div className="flex min-w-0 items-center gap-3.5">
             <span aria-hidden className="flex shrink-0 pl-1.5">
-              {c.pod.people.slice(0, 4).map((n) => <Avatar key={n} name={n} shape="circle" size={34} className="-ml-1.5 ring-2 ring-[#192c28]" />)}
+              {c.pod.people.slice(0, 4).map((n, i) => <Avatar key={`${i}-${n}`} name={n} shape="circle" size={34} className="-ml-1.5 ring-2 ring-[#192c28]" />)}
               {c.pod.people.length > 4 ? <span className="-ml-1.5 grid h-[34px] w-[34px] place-items-center rounded-full bg-white/10 text-[11px] font-medium ring-2 ring-[#192c28]">+{c.pod.people.length - 4}</span> : null}
             </span>
             <span className="min-w-0">
@@ -92,7 +93,7 @@ function Champions({ c, month }: { c: NonNullable<Scoreboard['champions']>; mont
  * toward the next one until the target is reached (globals.css: bar-grow, bar-lean; both stay still
  * for anyone who asked for less motion).
  */
-function GoalBar({ value, target, milestones, label, size = 'lg' }: { value: number; target: number; milestones?: number[]; label: string; size?: 'lg' | 'sm' }) {
+function GoalBar({ value, target, milestones, label, size = 'lg' }: { value: number; target: number; milestones?: Milestone[]; label: string; size?: 'lg' | 'sm' }) {
   const fraction = target ? Math.min(1, value / target) : 0;
   // Never a sliver too thin to see: 1 of 72 still shows.
   const width = value > 0 ? Math.max(3, fraction * 100) : 0;
@@ -103,12 +104,17 @@ function GoalBar({ value, target, milestones, label, size = 'lg' }: { value: num
         <div className="bar-grow relative h-full rounded-full" style={{ width: `${width}%`, background: barColour(fraction) }}>
           {value < target && size === 'lg' ? <span aria-hidden className="bar-lean" /> : null}
         </div>
-        {milestones?.filter((m) => m < target).map((m) => <span key={m} aria-hidden className="absolute inset-y-0 w-[2px] -translate-x-1/2 bg-white" style={{ left: at(m) }} />)}
+        {milestones?.filter((m) => m.at < target).map((m) => <span key={m.at} aria-hidden className="absolute inset-y-0 w-[2px] -translate-x-1/2 bg-white" style={{ left: at(m.at) }} />)}
       </div>
       {milestones ? (
-        <div aria-hidden className="relative mt-1.5 h-4 text-[11px] tabular-nums">
-          {milestones.map((m) => (
-            <span key={m} className={clsx('absolute top-0', m === target ? 'right-0' : '-translate-x-1/2', value >= m ? 'font-semibold text-brand-700' : 'text-ink-400')} style={m === target ? undefined : { left: at(m) }}>{m}</span>
+        // Each mark's name and number sit just left of its tick, in the stretch of bar that leads to
+        // it, so they never run into each other however narrow the card. A mark reached is green.
+        <div aria-hidden className="mt-1.5 flex text-[11px] leading-[14px]">
+          {milestones.map((m, i) => (
+            <span key={m.at} className={clsx('min-w-0 pr-1 text-right last:pr-0', value >= m.at ? 'text-brand-700' : 'text-ink-500')} style={{ width: `${((m.at - (milestones[i - 1]?.at ?? 0)) / target) * 100}%` }}>
+              <span className={clsx('block', value >= m.at ? 'font-semibold' : 'font-medium')}>{m.name}</span>
+              <span className="block tabular-nums text-ink-400">{m.at}</span>
+            </span>
           ))}
         </div>
       ) : null}
@@ -116,10 +122,13 @@ function GoalBar({ value, target, milestones, label, size = 'lg' }: { value: num
   );
 }
 
-function GoalCard({ label, title, s, booked, target, p, extra, foot }: { label: string; title: string; s: Scoreboard; booked: number; target: number; p: MonthProgress; extra?: ReactNode; foot: ReactNode }) {
+function GoalCard({ label, title, s, booked, target, goal, p, extra, foot }: { label: string; title: string; s: Scoreboard; booked: number; target: number; goal: ReactNode; p: MonthProgress; extra?: ReactNode; foot?: ReactNode }) {
   return (
     <section className="surface flex flex-col gap-3 p-4" aria-label={label}>
-      <CardHead title={title} aside={daysLeft(s.month.daysLeft)} />
+      <div className="space-y-1">
+        <CardHead title={title} aside={daysLeft(s.month.daysLeft)} />
+        <p className="text-[12.5px] text-ink-600">{goal}</p>
+      </div>
       <p className="flex items-baseline gap-1.5">
         <span className={clsx('text-[38px] font-semibold leading-none tracking-[-0.04em] tabular-nums', booked >= target ? 'text-brand-700' : 'text-ink-900')}>{booked}</span>{' '}
         <span className="text-[14px] text-ink-500">of {target} booked</span>
@@ -127,7 +136,7 @@ function GoalCard({ label, title, s, booked, target, p, extra, foot }: { label: 
       <GoalBar value={booked} target={target} milestones={p.milestones} label={`${booked} of ${target} booked. ${p.next}`} />
       <p className="text-[13px] font-medium text-ink-900">{p.next}</p>
       {extra}
-      <p className="mt-auto text-[11.5px] text-ink-500">{foot}</p>
+      {foot ? <p className="mt-auto text-[11.5px] text-ink-500">{foot}</p> : null}
     </section>
   );
 }
@@ -136,7 +145,7 @@ function Waiting({ n, mine }: { n: number; mine: boolean }) {
   if (!n) return null;
   return (
     <Link href="/meetings/approval" className="-mt-1 text-[12.5px] text-amber-800 hover:underline">
-      {n} waiting for approval: {mine ? `add the recording link to count ${n === 1 ? 'it' : 'them'} now` : `${n === 1 ? 'it counts' : 'they count'} once approved`}
+      {n} {n === 1 ? 'meeting' : 'meetings'} this month waiting for approval: {mine ? `add the recording link to count ${n === 1 ? 'it' : 'them'} now` : `${n === 1 ? 'it counts' : 'they count'} once approved`}
     </Link>
   );
 }
@@ -145,8 +154,9 @@ function YourMonth({ s, me }: { s: Scoreboard; me: NonNullable<Scoreboard['me']>
   return (
     <GoalCard
       label="Your month" title={`Your ${s.month.label}`} s={s} booked={me.meetings} target={s.goal} p={me}
+      goal={<>Your goal: <b className="font-semibold text-ink-900">{s.goal} meetings booked</b> this month</>}
       extra={<><Waiting n={me.waiting} mine /><WeekRow w={s.week} /></>}
-      foot={<>Target: {s.goal} a month{me.best ? ` · your best: ${me.best.count} in ${me.best.label}` : ''}</>}
+      foot={me.best ? <>Your best month: {me.best.count} in {me.best.label}</> : null}
     />
   );
 }
@@ -174,14 +184,14 @@ function WeekRow({ w }: { w: Scoreboard['week'] }) {
   );
 }
 
-function TeamMonth({ s, admin }: { s: Scoreboard; admin: boolean }) {
+function TeamMonth({ s }: { s: Scoreboard }) {
   const t = s.team;
   const whose = t.pods ? (t.pods === 1 ? 'Your pod' : 'Your pods') : 'Team';
   return (
     <GoalCard
       label={`${whose} this month`} title={`${whose} · ${s.month.label}`} s={s} booked={t.meetings} target={t.target} p={t}
+      goal={<>Goal: <b className="font-semibold text-ink-900">{s.goal} meetings booked per FO</b> each month · {t.fos ? `${t.fos} FO${t.fos === 1 ? '' : 's'}` : 'no FOs yet'}</>}
       extra={<><Waiting n={t.waiting} mine={false} /><WeekRow w={s.week} /></>}
-      foot={<>Target: {s.goal} per FO × {t.fos} FO{t.fos === 1 ? '' : 's'}{admin ? <> · <Link href="/settings?tab=meetings" className="text-brand-700 hover:underline">Change</Link></> : null}</>}
     />
   );
 }
@@ -191,15 +201,20 @@ const PLACE = ['bg-[#f5e3a8] text-[#6b4f00]', 'bg-[#e3e8e6] text-[#3b4744]', 'bg
 
 function PodRace({ s }: { s: Scoreboard }) {
   const me = s.me;
+  const shown = s.pods.filter((p, i) => i < 5 || p.yours);
   return (
     <section className="surface flex flex-col gap-3 p-4" aria-label="Pod race">
       <CardHead title="Pod race" aside={<span className="text-[11.5px] text-ink-500">booked of each pod&apos;s target</span>} />
       {s.pods.length ? (
         <ol className="space-y-2.5">
-          {s.pods.slice(0, 5).map((p) => (
+          {shown.map((p) => (
             <li key={p.id} className="text-[12.5px]">
               <div className="mb-1 flex items-baseline justify-between gap-2">
-                <span className={clsx('min-w-0 truncate', p.yours ? 'font-semibold text-ink-900' : 'text-ink-700')}>{p.name}{p.yours ? <span className="ml-1.5 rounded-full bg-brand-50 px-1.5 text-[11px] font-medium text-brand-800">Your pod</span> : null}</span>
+                <span className="flex min-w-0 items-baseline gap-1.5">
+                  {s.pods.indexOf(p) >= 5 ? <span className="shrink-0 tabular-nums text-ink-400">{ordinal(s.pods.indexOf(p) + 1)}</span> : null}
+                  <span className={clsx('min-w-0 truncate', p.yours ? 'font-semibold text-ink-900' : 'text-ink-700')}>{p.name}</span>
+                  {p.yours ? <span className="shrink-0 rounded-full bg-brand-50 px-1.5 text-[11px] font-medium text-brand-800">Your pod</span> : null}
+                </span>
                 <span className="shrink-0 tabular-nums text-ink-600"><span className="font-semibold text-ink-900">{p.meetings}</span> of {p.target}</span>
               </div>
               <GoalBar value={p.meetings} target={p.target} size="sm" label={`${p.name}: ${p.meetings} of ${p.target} booked`} />
@@ -212,10 +227,10 @@ function PodRace({ s }: { s: Scoreboard }) {
         <h4 className="mb-1.5 text-[11.5px] font-medium text-ink-500">Top bookers this month</h4>
         {s.top.length ? (
           <ol className="space-y-1">
-            {s.top.map((t, i) => (
+            {s.top.map((t) => (
               <li key={t.userId}>
-                <Link href={countedHref(s, t.userId)} title={`Open the ${t.meetings} meeting${t.meetings === 1 ? '' : 's'} ${t.name} booked this month`} aria-label={`${ordinal(i + 1)}: ${t.name}, ${t.meetings} booked this month. Open their meetings`} className="-mx-1.5 flex items-center gap-2 rounded-md px-1.5 py-0.5 text-[12.5px] hover:bg-canvas">
-                  <span aria-hidden className={clsx('grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10.5px] font-bold tabular-nums', PLACE[i])}>{i + 1}</span>
+                <Link href={countedHref(s, t.userId)} title={`Open the ${t.meetings} meeting${t.meetings === 1 ? '' : 's'} ${t.name} booked this month`} aria-label={`${ordinal(t.place)}: ${t.name}, ${t.meetings} booked this month. Open their meetings`} className="-mx-1.5 flex items-center gap-2 rounded-md px-1.5 py-0.5 text-[12.5px] hover:bg-canvas">
+                  <span aria-hidden className={clsx('grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10.5px] font-bold tabular-nums', PLACE[Math.min(t.place, 3) - 1])}>{t.place}</span>
                   <Avatar name={t.name} shape="circle" size={22} />
                   <span className={clsx('min-w-0 flex-1 truncate', t.you ? 'font-semibold text-ink-900' : 'text-ink-800')}>{t.name}{t.you ? ' (you)' : ''}</span>
                   <span className="shrink-0 tabular-nums text-ink-600"><span className="font-semibold text-ink-900">{t.meetings}</span> booked{t.firstMeetings ? <span className="text-ink-400"> · {t.firstMeetings} first</span> : null}</span>
@@ -250,8 +265,8 @@ function Wins({ s, now }: { s: Scoreboard; now: number }) {
     <section className="surface flex flex-col gap-3 p-4" aria-label="Recent wins">
       <CardHead title="Recent wins" aside={<span className="text-[11.5px] text-ink-500">last two weeks</span>} />
       {s.wins.length ? (
-        <ul className="space-y-2.5">
-          {s.wins.slice(0, 6).map((w) => (
+        <FitList stacked={7} label="Meetings booked lately">
+          {s.wins.map((w) => (
             <li key={w.meetingId} className="flex items-center gap-2.5">
               <Avatar name={w.bookedBy} shape="circle" size={28} />
               <div className="min-w-0 flex-1 text-[12.5px] leading-[1.35]">
@@ -263,7 +278,7 @@ function Wins({ s, now }: { s: Scoreboard; now: number }) {
               <KudosButton meetingId={w.meetingId} count={w.kudos} mine={w.kudosByMe} own={w.mine} who={w.bookedBy} />
             </li>
           ))}
-        </ul>
+        </FitList>
       ) : <p className="text-[12.5px] text-ink-500">Nothing booked in the last two weeks yet. Be the first.</p>}
     </section>
   );

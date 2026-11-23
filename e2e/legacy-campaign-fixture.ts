@@ -4,7 +4,7 @@ import { addDays, localDateToInstant, todayIn } from '../src/lib/dates';
 
 /** Upgrade fixture only: exercise already-running campaigns without recreating the retired UI. */
 export async function seedLegacyCampaign(name: string, personIds: string[]) {
-  const db = new PrismaClient({ datasourceUrl: 'postgresql://postgres:postgres@localhost:5435/cadence' });
+  const db = new PrismaClient({ datasourceUrl: `postgresql://postgres:postgres@localhost:${process.env.E2E_DB_PORT ?? '5435'}/cadence` });
   try {
     // Run again on the same workspace (a CI retry), the campaign is already there with its people
     // enrolled, and enrolling them twice is refused by design: reuse it.

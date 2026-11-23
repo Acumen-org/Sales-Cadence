@@ -148,7 +148,7 @@ export async function runBellEmail(now = new Date(), send: typeof sendMail = sen
 /** Send one email and record it; the notifications it carried are marked as emailed. */
 async function deliver(u: { id: string; name: string; email: string }, kind: 'instant' | 'digest', rows: Row[], items: EmailItem[], extras: EmailExtras, s: EmailSettings, appUrl: string, timezone: string, now: Date, send: typeof sendMail): Promise<boolean> {
   const mail = renderBellEmail({ kind, firstName: firstName(u.name), items, extras, appUrl, timezone });
-  const r = await send({ from: s.senderMailbox, to: u.email, subject: mail.subject, html: mail.html, text: mail.text });
+  const r = await send({ from: s.senderMailbox, to: u.email, subject: mail.subject, html: mail.html, text: mail.text, images: mail.images });
   await prisma.notificationEmail.create({ data: { userId: u.id, kind, subject: mail.subject, notificationIds: rows.map((x) => x.id), status: r.ok ? 'SENT' : 'FAILED', error: r.ok ? null : `${r.permanent ? BLOCKED : ''}${r.error}`, createdAt: now } });
   if (r.ok) await mark(rows.map((x) => x.id), now);
   if (!r.ok && r.permanent) throw new Blocked(r.error);
@@ -164,7 +164,7 @@ export async function sendTestEmail(user: { id: string; name: string; email: str
     { kind: 'reply', name: 'Pat One', company: 'Acme', title: 'Replied to your email: "Thanks, Thursday works"', detail: null, href: '/home', linkLabel: 'Open their emails', at: new Date() },
   ];
   const mail = renderBellEmail({ kind: 'test', firstName: firstName(user.name), items: sample, extras: { approvalsWaiting: 2 }, appUrl: env().APP_URL, timezone: 'America/Chicago' });
-  const r = await sendMail({ from: s.senderMailbox, to: user.email, subject: mail.subject, html: mail.html, text: mail.text });
+  const r = await sendMail({ from: s.senderMailbox, to: user.email, subject: mail.subject, html: mail.html, text: mail.text, images: mail.images });
   await prisma.notificationEmail.create({ data: { userId: user.id, kind: 'test', subject: mail.subject, status: r.ok ? 'SENT' : 'FAILED', error: r.ok ? null : r.error } });
   return r.ok ? { ok: true } : { ok: false, error: r.error };
 }

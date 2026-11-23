@@ -17,12 +17,20 @@ export function Celebration({ title, line, counted, firstMeeting }: { title: str
   const canvas = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    const url = new URL(window.location.href);
-    if (url.searchParams.has('celebrate')) { url.searchParams.delete('celebrate'); window.history.replaceState(window.history.state, '', url.toString()); }
+    // The router writes the address of the page it just opened in its own effect, which can run after
+    // this one and put ?celebrate=1 back (seen in the walkthroughs, 23 Nov 2026), so the address is
+    // cleaned again once the router has settled. Cleaning a clean address does nothing.
+    const clean = () => {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has('celebrate')) { url.searchParams.delete('celebrate'); window.history.replaceState(window.history.state, '', url.toString()); }
+    };
+    clean();
+    const settled = [setTimeout(clean, 300), setTimeout(clean, 1500)];
+    const stopCleaning = () => settled.forEach(clearTimeout);
     const c = canvas.current;
-    if (!counted || !c || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (!counted || !c || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return stopCleaning;
     const ctx = c.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) return stopCleaning;
     const dpr = window.devicePixelRatio || 1;
     const w = (c.width = window.innerWidth * dpr);
     const h = (c.height = window.innerHeight * dpr);
@@ -49,7 +57,7 @@ export function Celebration({ title, line, counted, firstMeeting }: { title: str
       else ctx.clearRect(0, 0, w, h);
     };
     raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    return () => { cancelAnimationFrame(raf); stopCleaning(); };
   }, [counted, firstMeeting]);
 
   return (
