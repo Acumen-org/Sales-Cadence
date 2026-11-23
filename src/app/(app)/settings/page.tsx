@@ -9,7 +9,8 @@ import { isAdmin } from '@/lib/auth/rbac';
 import { prisma } from '@/lib/db';
 import { env } from '@/lib/env';
 import { renderBellEmail } from '@/lib/bell-email/template';
-import { EmailSettingsForm, MeetingsSettingsForm, SendTestEmailButton } from '@/components/settings/meetings-email-settings';
+import { AuditCrmButton, EmailSettingsForm, MeetingsSettingsForm, SendTestEmailButton } from '@/components/settings/meetings-email-settings';
+import { lastMeetingsCrmAudit } from '@/lib/meetings/crm-audit';
 import { getSettings, getTwentySchema } from '@/lib/settings';
 import { getTwentyClient } from '@/lib/twenty';
 import { recentEvents } from '@/lib/engine/ingest';
@@ -567,8 +568,34 @@ async function MeetingsEmailTab({ timezone }: { timezone: string }) {
     { kind: 'meeting_kudos', name: 'Pricing walk-through', company: null, title: '👏 Leigh Leader cheered the meeting you booked', detail: null, href: '/meetings', linkLabel: 'Open the meeting', at: new Date() },
   ] });
   const count = (mode: string) => modes.find((m) => m.emailNotifications === mode)?._count._all ?? 0;
+  const audit = await lastMeetingsCrmAudit();
+  const AUDIT_WORDS: Record<string, string> = { number_differs: 'Number differs', first_differs: 'First Meeting box differs', day_differs: 'Date differs', missing: 'Missing from the CRM', waiting_in_crm: 'Waiting for approval, but in the CRM', declined_in_crm: 'Declined or removed, but in the CRM', deleted_in_crm: 'Deleted in Cadence, but in the CRM', duplicate: 'Duplicate record' };
   return <div className="space-y-3">
     <Card title="Meeting target"><MeetingsSettingsForm m={settings.meetings} /></Card>
+    <Card title="Meeting numbers in the CRM" actions={<AuditCrmButton />}>
+      <div className="space-y-3 p-4 text-[13px]">
+        <p className="text-[12.5px] text-ink-600">Reads every record in the CRM&apos;s Meetings object and compares it with Cadence: that each meeting that counts is there once, with the same number, First Meeting box and date, and that no meeting waiting for approval, declined or deleted is there. It only reads; the meetings check puts a difference right within ten minutes.</p>
+        {audit ? <>
+          <KeyValue items={[
+            { k: 'Checked', v: formatInstant(new Date(audit.at), timezone) },
+            { k: 'In the CRM', v: `${audit.records} records: ${audit.fromCadence} written by Cadence, ${audit.notFromCadence} added in the CRM by hand` },
+            { k: 'Meetings that count', v: `${audit.counted} in Cadence; ${audit.matched} match the CRM exactly` },
+            { k: 'Result', v: audit.problems.length ? <Badge tone="amber">{audit.problems.length} difference{audit.problems.length === 1 ? '' : 's'}</Badge> : <Badge tone="green">Every meeting matches</Badge> },
+            ...(!audit.fields.meetingNumber ? [{ k: 'Note', v: 'The CRM has no Meeting Number field, so numbers could not be compared.' }] : []),
+          ]} />
+          {audit.problems.length ? <table className="table table-dense w-full table-fixed">
+            <thead><tr><th>Meeting</th><th style={{ width: '13%' }}>Date</th><th style={{ width: '22%' }}>What</th><th style={{ width: '16%' }}>Cadence</th><th style={{ width: '16%' }}>CRM</th></tr></thead>
+            <tbody>{audit.problems.slice(0, 100).map((p, i) => <tr key={i}>
+              <td className="break-words">{p.meetingId && p.kind !== 'deleted_in_crm' ? <Link href={`/meetings/${p.meetingId}`} className="font-medium text-ink-900 hover:text-brand-700">{p.title}</Link> : <span className="font-medium text-ink-900">{p.title}</span>}{p.bookedBy ? <span className="block text-[12px] text-ink-500">{p.bookedBy}</span> : null}</td>
+              <td className="text-[12.5px]">{p.day ? formatLocalDate(p.day, 'short') : <Empty />}</td>
+              <td className="text-[12.5px]">{AUDIT_WORDS[p.kind] ?? p.kind}</td>
+              <td className="text-[12.5px]">{p.cadence ?? <Empty />}</td>
+              <td className="text-[12.5px]">{p.crm ?? <Empty />}</td>
+            </tr>)}</tbody>
+          </table> : null}
+        </> : <p className="text-ink-500">Not checked yet.</p>}
+      </div>
+    </Card>
     <Card title="Email from Cadence" actions={settings.email.senderMailbox ? <SendTestEmailButton /> : null}>
       <EmailSettingsForm s={settings.email} />
       <div className="border-t border-line p-4"><KeyValue items={[

@@ -4,7 +4,7 @@ import { ActionButton, ActionForm } from '@/components/action-form';
 import { Field } from '@/components/ui';
 import { Check } from '@/components/settings/settings-forms';
 import { saveEmailSettingsAction, saveMeetingsSettingsAction } from '@/lib/actions/settings';
-import { sendTestEmailAction } from '@/lib/actions/bell-email';
+import { auditMeetingsInCrmAction, sendTestEmailAction } from '@/lib/actions/bell-email';
 import type { EmailSettings, MeetingsSettings } from '@/lib/settings';
 
 /** The company's monthly meeting target, the same for every FO (owner, 21 Nov 2026). */
@@ -41,6 +41,10 @@ export function EmailSettingsForm({ s }: { s: EmailSettings }) {
     </div>
     <div className="flex justify-end"><button type="submit" className="btn-primary btn-sm">Save</button></div>
   </ActionForm>;
+}
+
+export function AuditCrmButton() {
+  return <ActionButton action={async () => auditMeetingsInCrmAction()} payload={{}} className="btn-secondary btn-sm" refresh>Check the CRM now</ActionButton>;
 }
 
 export function SendTestEmailButton() {

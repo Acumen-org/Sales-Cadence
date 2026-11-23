@@ -10,7 +10,8 @@ import { MeetingsTabs } from '@/components/meetings/meetings-tabs';
 import { ScoreboardPanel } from '@/components/meetings/scoreboard';
 import { scoreboard } from '@/lib/meetings/scoreboard';
 import { NUMBERING_STARTS_WORDS, ordinal } from '@/lib/meetings/numbering';
-import { canCreateMeeting, ROLES_NEEDING_POD } from '@/lib/auth/rbac';
+import { canCreateMeeting, isAdmin, ROLES_NEEDING_POD } from '@/lib/auth/rbac';
+import { COUNTED_WHERE } from '@/lib/meetings/counted';
 import { attendeeIsExternal, meetingReadWhere } from '@/lib/meetings-query';
 import { getSettings } from '@/lib/settings';
 import { prisma } from '@/lib/db';
@@ -22,11 +23,11 @@ import { PillList } from '@/components/pill-list';
 import { FavouriteButton } from '@/components/meetings/favourite-button';
 import { platformLabel } from '@/lib/meetings/providers';
 import { IconCalendar, IconPlus } from '@/components/icons';
-import { Badge, Empty, EmptyState, IdentityCell, Surface, Toolbar, ViewHeader } from '@/components/ui';
+import { Badge, Empty, EmptyState, IdentityCell, Notice, Surface, Toolbar, ViewHeader } from '@/components/ui';
 
 const PAGE_SIZE = 50;
 
-export default async function MeetingsPage({ searchParams }: { searchParams: Promise<{ page?: string; who?: string; product?: string; from?: string; to?: string; fav?: string; booked?: string }> }) {
+export default async function MeetingsPage({ searchParams }: { searchParams: Promise<{ page?: string; who?: string; product?: string; from?: string; to?: string; fav?: string; booked?: string; counted?: string }> }) {
   const user = await requireUser();
   const sp = await searchParams;
   const page = Math.max(1, Number.parseInt(sp.page ?? '1', 10) || 1);
@@ -55,8 +56,11 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
   if (to) filters.push({ occurredAt: { lt: startOfLocalDay(addDays(to, 1), user.timezone) } });
   if (favourites) filters.push({ favourites: { some: { userId: user.id } } });
   if (booked) filters.push({ bookedById: booked });
+  // From the scoreboard (owner, 22 Nov 2026): only the meetings that count, so the list matches its number.
+  const counted = sp.counted === '1';
+  if (counted) filters.push(COUNTED_WHERE);
   const where: Prisma.MeetingWhereInput = { AND: filters };
-  const filtered = Boolean(who || product || from || to || favourites || booked);
+  const filtered = Boolean(who || product || from || to || favourites || booked || counted);
 
   // The scoreboard heads the first page of every meeting (owner, 21 Nov 2026), not a search.
   const [{ rules }, tabCounts, board] = await Promise.all([getSettings(), meetingsTabCounts(toActor(user)), page === 1 && !filtered ? scoreboard(toActor(user)) : null]);
@@ -100,6 +104,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
     if (to) p.set('to', to);
     if (favourites) p.set('fav', '1');
     if (booked) p.set('booked', booked);
+    if (counted) p.set('counted', '1');
     p.set('page', String(n));
     return `/meetings?${p.toString()}`;
   };
@@ -108,7 +113,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
 
   return (
     <PageFrame className="space-y-3 px-6 pb-8 pt-2">
-      {board ? <ScoreboardPanel s={board} now={Date.now()} /> : null}
+      {board ? <ScoreboardPanel s={board} now={Date.now()} admin={isAdmin(toActor(user))} /> : null}
       <Surface flush>
         <ViewHeader
           title="Meetings"
@@ -126,6 +131,16 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Pro
         <Toolbar>
           <MeetingsToolbar who={who} product={product} from={from} to={to} favourites={favourites} products={PRODUCTS} booked={booked} fos={fos} />
         </Toolbar>
+        {counted ? (
+          <div className="px-4 pb-3">
+            <Notice tone="info">
+              <span className="flex flex-wrap items-center justify-between gap-2">
+                <span>Showing the meetings that count on the scoreboard{booked ? ` for ${fos.find((f) => f.id === booked)?.name ?? 'this FO'}` : ''}{from && to ? `, ${formatLocalDate(from, 'short')} to ${formatLocalDate(to, 'short')}` : ''}: approved or recorded. Meetings waiting for approval are left out.</span>
+                <Link href={pageHref(1).replace('counted=1&', '').replace('&counted=1', '')} className="font-medium underline underline-offset-2">Show all their meetings</Link>
+              </span>
+            </Notice>
+          </div>
+        ) : null}
 
         {meetings.length === 0 ? (
           <EmptyState

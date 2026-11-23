@@ -36,7 +36,8 @@ test('a booked meeting is celebrated, scores on the board, and a colleague cheer
 
   await page.getByRole('link', { name: 'See the scoreboard' }).click();
   const month = page.getByRole('region', { name: 'Your month' });
-  await expect(month).toContainText(/of \d+/);
+  await expect(month).toContainText(/of \d+ meetings booked/);
+  await expect(month).toContainText(/Target: \d+ meetings a month for each FO/);
   await expect(month.getByRole('list', { name: 'Badges this month' })).toContainText('On the board');
   await expect(page.getByRole('region', { name: 'Pod race' })).toContainText('Your pod');
   await expect(page.getByRole('region', { name: 'Recent wins' })).toContainText('You booked');
@@ -49,7 +50,15 @@ test('a booked meeting is celebrated, scores on the board, and a colleague cheer
   // A Sales Leader sees their pods' month, and cheers Karson's meeting from Recent wins.
   await signIn(page, 'leigh@cadence.local');
   await page.goto('/meetings');
-  await expect(page.getByRole('region', { name: /Your pods?'? month/ })).toBeVisible();
+  await expect(page.getByRole('region', { name: /Your pods? this month/ })).toContainText(/Target: \d+ meetings a month for each of the \d+ FOs? in your pods?/);
+  // A top booker's name opens the meetings behind their number: as many rows as the number says.
+  const top = page.getByRole('region', { name: 'Pod race' }).getByRole('link', { name: /booked this month\. Open their meetings/ }).first();
+  const booked = Number((await top.getAttribute('aria-label'))!.match(/, (\d+) booked this month/)![1]);
+  await top.click();
+  await expect(page).toHaveURL(/booked=.*&from=\d{4}-\d{2}-01&to=\d{4}-\d{2}-\d{2}&counted=1/);
+  await expect(page.getByText(/Showing the meetings that count on the scoreboard for /)).toBeVisible();
+  await expect(page.locator('table.table-meetings tbody tr')).toHaveCount(booked);
+  await page.goto('/meetings');
   const cheer = page.getByRole('region', { name: 'Recent wins' }).getByRole('button', { name: /Cheer Karson/ }).first();
   await cheer.click();
   await expect(page.getByRole('region', { name: 'Recent wins' }).getByRole('button', { name: /Take back your cheer for Karson/ }).first()).toHaveAttribute('aria-pressed', 'true');

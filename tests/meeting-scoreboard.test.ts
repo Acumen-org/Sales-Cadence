@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { User } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import type { SessionUser } from '@/lib/auth/current-user';
-import { badgesFor, celebrationFor, nextWords, rankOf, scoreboard, streakWeeks } from '@/lib/meetings/scoreboard';
+import { badgesFor, celebrationFor, nextWords, paceFor, paceWords, rankOf, scoreboard, streakWeeks } from '@/lib/meetings/scoreboard';
 import { toggleKudosAction } from '@/lib/actions/meeting-kudos';
 import { invalidateSettingsCache, saveSettingsSection } from '@/lib/settings';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
@@ -26,6 +26,14 @@ describe('the rules', () => {
   it('ranks by meetings then first meetings, and a tie shares the place', () => {
     const rows = [{ meetings: 5, firstMeetings: 1 }, { meetings: 5, firstMeetings: 3 }, { meetings: 2, firstMeetings: 2 }, { meetings: 5, firstMeetings: 1 }];
     expect(rows.map((r) => rankOf(rows, r))).toEqual([2, 1, 4, 2]);
+  });
+
+  it('the month says where it stands against today\'s pace, in the same words all month', () => {
+    expect(paceFor(64, 23, 30)).toBe(49);
+    expect(paceWords({ meetings: 8, target: 64, pace: 49, workdaysLeft: 6, lastLabel: '30 Nov' })).toBe('Behind pace by 41: 49 by today keeps the month on track. 56 more by 30 Nov is about 10 a working day.');
+    expect(paceWords({ meetings: 52, target: 64, pace: 49, workdaysLeft: 6, lastLabel: '30 Nov' })).toBe('On pace: 3 ahead of where the month should be today (49). 12 more to reach 64.');
+    expect(paceWords({ meetings: 49, target: 64, pace: 49, workdaysLeft: 6, lastLabel: '30 Nov' })).toBe('On pace: right where the month should be today (49). 15 more to reach 64.');
+    expect(paceWords({ meetings: 70, target: 64, pace: 49, workdaysLeft: 6, lastLabel: '30 Nov' })).toBe('Target reached: 70 of 64. Every meeting from here is extra.');
   });
 
   it('badges and the next step read the month', () => {
@@ -67,7 +75,9 @@ describe('the scoreboard', () => {
 
     const s = await scoreboard({ id: b.users.karson.id, role: 'JUNIOR_FO', podIds: [b.pods.Alisa.id] }, now);
     expect(s.goal).toBe(4);
-    expect(s.month).toMatchObject({ first: '2026-11-01', label: 'November', daysLeft: 11 });
+    // 20 November: day 20 of 30; Friday 20th plus the six weekdays after it.
+    expect(s.month).toMatchObject({ first: '2026-11-01', last: '2026-11-30', label: 'November', daysLeft: 11, day: 20, days: 30, workdaysLeft: 7 });
+    expect(s.me).toMatchObject({ pace: 3, status: 'On pace: right where the month should be today (3). 1 more to reach 4.' });
     expect(s.me).toMatchObject({ meetings: 3, firstMeetings: 2, waiting: 1, streakWeeks: 3, rank: 1, best: { count: 1, label: 'October' } });
     expect(s.me!.badges.filter((x) => x.earned).map((x) => x.key)).toEqual(['board', 'first', 'streak', 'best']);
     expect(s.me!.next).toBe("1 more meeting reaches this month's goal of 4.");
@@ -75,7 +85,10 @@ describe('the scoreboard', () => {
     expect(s.top.map((t) => [t.name, t.meetings, t.you])).toEqual([[b.users.karson.name, 3, true], [b.users.daniel.name, 1, false], [b.users.alisa.name, 1, false]]);
     // Pods per FO: Alisa's has Alisa (Senior FO) and Karson (Junior FO): 4 meetings / 2; Leigh's 1 / 2.
     expect(s.pods.map((p) => [p.name, p.meetings, p.fos, p.perFo, p.yours]).slice(0, 2)).toEqual([['Pod Alisa', 4, 2, 2, true], ['Pod Leigh', 1, 2, 0.5, false]]);
-    expect(s.team).toMatchObject({ meetings: 5, firstMeetings: 3, bookers: 3, pods: 0 });
+    // Five Junior and Senior FOs at 4 each: a target of 20, 13 by today (day 20 of 30).
+    expect(s.team).toMatchObject({ meetings: 5, firstMeetings: 3, bookers: 3, pods: 0, fos: 5, target: 20, waiting: 1, pace: 13 });
+    expect(s.team.status).toBe('Behind pace by 8: 13 by today keeps the month on track. 15 more by 30 Nov is about 3 a working day.');
+    expect(s.pods[0]).toMatchObject({ name: 'Pod Alisa', target: 8, share: 0.5 });
     // A Sales Leader sees their pod's month, not one of their own.
     const lead = await scoreboard({ id: sam.id, role: 'SALES_LEADER', podIds: [b.pods.Alisa.id] }, now);
     expect(lead.me).toBeNull();

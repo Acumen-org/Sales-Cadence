@@ -5,6 +5,7 @@ import { prisma } from '../db';
 import { requireAdmin, requireUser } from '../auth/current-user';
 import { logAudit, userActor } from '../audit';
 import { EMAIL_MODES, sendTestEmail } from '../bell-email/run';
+import { auditMeetingsInCrm } from '../meetings/crm-audit';
 import type { ActionResult } from './users';
 
 const WORDS: Record<string, string> = {
@@ -22,6 +23,15 @@ export async function setEmailPreferenceAction(formData: FormData): Promise<Acti
   await logAudit({ entityType: 'user', entityId: user.id, action: 'email_preference', actor: userActor(user), details: { mode } });
   revalidatePath('/email-preferences');
   return { ok: true, message: WORDS[mode] };
+}
+
+/** Settings > Meetings and email: read the CRM's meetings and compare each with Cadence (owner, 22 Nov 2026). */
+export async function auditMeetingsInCrmAction(): Promise<ActionResult> {
+  await requireAdmin();
+  const r = await auditMeetingsInCrm();
+  revalidatePath('/settings');
+  if ('error' in r) return { ok: false, error: r.error };
+  return { ok: true, message: r.problems.length ? `Checked ${r.records} CRM records: ${r.problems.length} difference${r.problems.length === 1 ? '' : 's'} listed below.` : `Checked ${r.records} CRM records: every meeting matches.` };
 }
 
 /** Settings > Meetings and email: a test email to the admin's own address. */
