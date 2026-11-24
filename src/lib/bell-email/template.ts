@@ -5,12 +5,16 @@ import { WORDMARK_DARK, WORDMARK_LIGHT, type Wordmark } from './wordmark';
  * Cadence"). Tables and inline styles, so Outlook, Gmail and phones draw it the same; 600px wide.
  * Every item links to the thing in Cadence.
  *
- * The look is "Option A, a clean letter" (owner, 23 Nov 2026): the Cadence wordmark large at the
- * top, then each item as its own section with a button. Three rules keep it right in every mail app:
+ * The look is "Option A, a clean letter" (owner, 23 Nov 2026), framed (24 Nov): the Cadence wordmark
+ * large at the top, a filled "Waiting for you" box, then each item as its own section of the frame,
+ * split edge to edge, with a plain coloured label and a button. Three rules keep it right in every
+ * mail app:
  *   - Sizes are written out (font-size, font-weight, line-height), never the `font` shorthand, which
  *     Outlook drops, taking every size with it.
  *   - Every surface is pure white. Outlook's dark mode re-tints any colour we give a background, but
- *     turns white into its own dark grey, cleanly.
+ *     turns white into its own dark grey, cleanly. The new Outlook also reads the dark-mode media
+ *     query, so the page colour set there for Apple Mail is made see-through again in Outlook (its
+ *     re-tint of that colour was the flat grey of the 23 Nov test).
  *   - Dark mode changes text and line colours only, and swaps the wordmark for the app's white one:
  *     by the media query (Apple Mail, iOS, Outlook for Mac) and by the attributes Outlook on the web
  *     and the new Outlook put on what they recolour ([data-ogsc] / [data-ogsb], descendant form only).
@@ -53,31 +57,38 @@ const KIND_LABEL: Record<string, { label: string; tone: Tone }> = {
 const kindOf = (k: string) => KIND_LABEL[k] ?? { label: 'Update', tone: 'grey' as Tone };
 
 /** Light colours, inline; their dark partners, by class. */
-const C = { ink: '#16302a', text: '#2b3c39', muted: '#5f6e69', line: '#e3e8e5', brand: '#1f6b57' };
-const D = { page: '#1f2422', ink: '#f1f5f3', text: '#d9e1de', muted: '#a9b6b1', line: '#3b4541', brand: '#7fd3b3' };
+const C = { ink: '#16302a', text: '#2b3c39', muted: '#5f6e69', line: '#d3dbd7', brand: '#1f6b57', box: '#eaf3ee', boxLabel: '#4d5d58' };
+/** `line` is what Outlook was given when it drew the bright lines the owner chose; `frame` is the same edge for Apple Mail. */
+const D = { page: '#1f2422', box: '#2a3531', ink: '#f1f5f3', text: '#d9e1de', muted: '#a9b6b1', line: '#3b4541', frame: '#6b7a75', brand: '#7fd3b3' };
 
-function darkRules(sel: (attr: 'c' | 'b', cls: string) => string): string {
+function darkRules(sel: (attr: 'c' | 'b', cls: string) => string, lineColour: string): string {
   const rules: string[] = [];
   const text = (cls: string, v: string) => rules.push(`${sel('c', cls)}{color:${v}!important}`);
   const line = (cls: string, v: string) => rules.push(`${sel('b', cls)}{border-color:${v}!important}`);
   text('cd-ink', D.ink); text('cd-text', D.text); text('cd-muted', D.muted); text('cd-link', D.brand);
   for (const t of Object.keys(TONES) as Tone[]) text(`cd-${t}`, TONES[t][1]);
-  line('cd-line', D.line); line('cd-accent', D.brand);
+  line('cd-line', lineColour);
   // The app's own white wordmark in place of the evergreen one.
   rules.push(`${sel('c', 'cd-logo-light')}{display:none!important}`);
   rules.push(`${sel('c', 'cd-logo-dark')}{display:block!important;max-height:none!important;overflow:visible!important}`);
   return rules.join('\n');
 }
-/** Two blocks: Gmail drops a whole block it cannot read, so Outlook's rules stand apart. */
+/**
+ * Two blocks: Gmail drops a whole block it cannot read, so Outlook's rules stand apart. The page and
+ * box colours are for Apple Mail and the like; in Outlook the page goes see-through, so its own dark
+ * grey (what it makes of the white shell around the page) shows instead of a re-tinted grey.
+ */
 const DARK_STYLE = `<style>
 :root{color-scheme:light dark;supported-color-schemes:light dark}
 @media (prefers-color-scheme:dark){
 .cd-page{background-color:${D.page}!important}
-${darkRules((_, cls) => `.${cls}`)}
+.cd-box{background-color:${D.box}!important}
+${darkRules((_, cls) => `.${cls}`, D.frame)}
 }
 </style>
 <style>
-${darkRules((attr, cls) => `[data-ogs${attr}] .${cls}`)}
+[data-ogsb] .cd-page{background-color:transparent!important}
+${darkRules((attr, cls) => `[data-ogs${attr}] .${cls}`, D.line)}
 </style>`;
 
 export function escapeHtml(s: string): string {
@@ -101,12 +112,12 @@ function button(href: string, label: string) {
 function itemHtml(i: EmailItem, appUrl: string, timezone: string) {
   const k = kindOf(i.kind);
   return `
-    <tr><td class="cd-line" style="border-top:1px solid ${C.line};padding:22px 0 24px 0">
+    <tr><td class="cd-line" style="border-top:1px solid ${C.line};padding:24px 32px 28px 32px">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-        <td><span class="cd-${k.tone}" style="${type(11, 700, 16, TONES[k.tone][0], 'letter-spacing:0.8px;text-transform:uppercase')}">&#9679;&nbsp; ${escapeHtml(k.label)}</span></td>
-        <td align="right" class="cd-muted" style="${type(12, 400, 16, C.muted)}">${escapeHtml(when(i.at, timezone))}</td>
+        <td class="cd-${k.tone}" style="${type(13, 600, 18, TONES[k.tone][0])}">${escapeHtml(k.label)}</td>
+        <td align="right" class="cd-muted" style="${type(12, 400, 18, C.muted)}">${escapeHtml(when(i.at, timezone))}</td>
       </tr></table>
-      <div class="cd-ink" style="margin-top:10px;${type(17, 600, 24, C.ink)}">${escapeHtml(i.name)}${i.company ? `<span class="cd-muted" style="${type(17, 400, 24, C.muted)}"> · ${escapeHtml(i.company)}</span>` : ''}</div>
+      <div class="cd-ink" style="margin-top:8px;${type(17, 600, 24, C.ink)}">${escapeHtml(i.name)}${i.company ? `<span class="cd-muted" style="${type(17, 400, 24, C.muted)}"> · ${escapeHtml(i.company)}</span>` : ''}</div>
       <div class="cd-text" style="margin-top:4px;${type(15, 400, 23, C.text)}">${escapeHtml(i.title)}</div>
       ${i.detail ? `<div class="cd-muted" style="margin-top:6px;${type(14, 400, 21, C.muted)}">${escapeHtml(clip(i.detail, 600))}</div>` : ''}
       ${button(abs(appUrl, i.href), i.linkLabel || 'Open in Cadence')}
@@ -152,10 +163,10 @@ export function renderBellEmail(opts: { kind: 'instant' | 'digest' | 'test'; fir
     : opts.kind === 'instant'
       ? n === 1 ? 'This needs you in Cadence.' : 'These need you in Cadence.'
       : 'Here is what came in since your last summary.';
-  const linkStyle = type(15, 600, 23, C.brand, 'text-decoration:none');
+  const linkStyle = type(17, 600, 25, C.brand, 'text-decoration:none');
   const waiting: string[] = [];
-  if (extras.approvalsWaiting) waiting.push(`<a href="${escapeHtml(abs(appUrl, '/meetings/approval'))}" class="cd-link" style="${linkStyle}">${extras.approvalsWaiting} meeting${extras.approvalsWaiting === 1 ? '' : 's'} waiting for your approval</a>`);
-  if (extras.crmReplies) waiting.push(`<a href="${escapeHtml(abs(appUrl, '/home'))}" class="cd-link" style="${linkStyle}">${extras.crmReplies} repl${extras.crmReplies === 1 ? 'y' : 'ies'} from your CRM contacts</a>`);
+  if (extras.approvalsWaiting) waiting.push(`<a href="${escapeHtml(abs(appUrl, '/meetings/approval'))}" class="cd-link" style="${linkStyle}">${extras.approvalsWaiting} meeting${extras.approvalsWaiting === 1 ? '' : 's'} waiting for your approval &rarr;</a>`);
+  if (extras.crmReplies) waiting.push(`<a href="${escapeHtml(abs(appUrl, '/home'))}" class="cd-link" style="${linkStyle}">${extras.crmReplies} repl${extras.crmReplies === 1 ? 'y' : 'ies'} from your CRM contacts &rarr;</a>`);
   const inline = opts.images === 'inline';
   const src = (w: Wordmark) => (inline ? `data:image/png;base64,${w.png}` : `cid:${w.id}`);
 
@@ -163,17 +174,24 @@ export function renderBellEmail(opts: { kind: 'instant' | 'digest' | 'test'; fir
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark"><title>${escapeHtml(subject)}</title>
 ${DARK_STYLE}
 </head>
-<body class="cd-page" style="margin:0;padding:0;background-color:#ffffff">
+<body style="margin:0;padding:0;background-color:#ffffff">
 <div style="display:none;max-height:0;overflow:hidden;color:#ffffff">${escapeHtml(n ? items.map((i) => i.title).join(' · ').slice(0, 140) : intro)}</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#ffffff" class="cd-page" style="background-color:#ffffff;color:${C.ink}"><tr><td align="center" style="padding:36px 20px 40px 20px">
-  <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px">
-    <tr><td style="padding:0 0 26px 0">${wordmarkHtml(src)}</td></tr>
-    <tr><td class="cd-ink" style="${type(22, 600, 30, C.ink)}">Hi ${escapeHtml(opts.firstName)},</td></tr>
-    <tr><td class="cd-muted" style="padding:6px 0 22px 0;${type(15, 400, 23, C.muted)}">${escapeHtml(intro)}</td></tr>
-    ${waiting.length ? `<tr><td style="padding:0 0 26px 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td class="cd-accent" style="border-left:3px solid ${C.brand};padding:4px 0 4px 14px;${type(15, 400, 23, C.text)}"><span class="cd-text">Waiting for you:</span> ${waiting.join(' <span class="cd-muted">·</span> ')}</td></tr></table></td></tr>` : ''}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#ffffff" style="background-color:#ffffff"><tr><td>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="cd-page" style="color:${C.ink}"><tr><td align="center" style="padding:28px 16px 36px 16px">
+  <table role="presentation" width="600" cellpadding="0" cellspacing="0" class="cd-line" style="width:100%;max-width:600px;border:1px solid ${C.line};border-radius:16px;border-collapse:separate">
+    <tr><td style="padding:30px 32px 30px 32px">
+      ${wordmarkHtml(src)}
+      <div class="cd-ink" style="margin-top:26px;${type(22, 600, 30, C.ink)}">Hi ${escapeHtml(opts.firstName)},</div>
+      <div class="cd-muted" style="margin-top:6px;${type(15, 400, 23, C.muted)}">${escapeHtml(intro)}</div>
+      ${waiting.length ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:22px"><tr><td bgcolor="${C.box}" class="cd-box" style="background-color:${C.box};border-radius:12px;padding:14px 18px 16px 18px">
+        <div class="cd-text" style="${type(12, 600, 18, C.boxLabel)}">Waiting for you</div>
+        ${waiting.map((w) => `<div style="margin-top:2px">${w}</div>`).join('')}
+      </td></tr></table>` : ''}
+    </td></tr>
     ${items.map((i) => itemHtml(i, appUrl, timezone)).join('')}
-    <tr><td class="cd-line cd-muted" style="border-top:1px solid ${C.line};padding:20px 0 0 0;${type(12, 400, 19, C.muted)}">You get these because they are in your bell in Cadence. Only what you may see is sent. <a href="${escapeHtml(abs(appUrl, '/email-preferences'))}" class="cd-link" style="color:${C.brand}">Choose how Cadence emails you</a>.</td></tr>
   </table>
+  <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px"><tr><td align="left" class="cd-muted" style="padding:18px 6px 0 6px;${type(12, 400, 19, C.muted)}">You get these because they are in your bell in Cadence. Only what you may see is sent. <a href="${escapeHtml(abs(appUrl, '/email-preferences'))}" class="cd-link" style="color:${C.brand}">Choose how Cadence emails you</a>.</td></tr></table>
+</td></tr></table>
 </td></tr></table>
 </body></html>`;
 

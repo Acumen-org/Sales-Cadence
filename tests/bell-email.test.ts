@@ -88,6 +88,7 @@ describe('the bell by email', () => {
     const mail = fakeOutbox().find((m) => m.to === 'sam@cadence.local')!;
     expect(mail.subject).toBe('Your Cadence summary: 1 update');
     expect(mail.html).toContain('1 meeting waiting for your approval');
+    expect(mail.html).toContain('class="cd-box"');
     expect(mail.html).toContain('Cheer');
     expect(mail.html).toContain('A colleague cheered');
     expect((await prisma.user.findUniqueOrThrow({ where: { id: sam.id } })).lastDigestOn).toBe('2026-11-25');
@@ -158,7 +159,7 @@ describe('the bell by email', () => {
     expect(mail.text).toContain('https://cadence.example/people/p1');
   });
 
-  it('the email reads the same in every mail app: sizes written out, white surfaces, dark mode by text and lines only', () => {
+  it('the email reads the same in every mail app: sizes written out, white surfaces, a frame, dark mode by text and lines', () => {
     const mail = renderBellEmail({ kind: 'test', firstName: 'Sam', appUrl: 'https://cadence.example', timezone: 'UTC', items: [{ kind: 'meeting_approval', name: 'Intro', company: null, title: 'Approve it', detail: null, href: '/meetings/approval', linkLabel: 'Open', at: new Date() }] });
     // Outlook drops the `font` shorthand, and every size with it.
     expect(mail.html).not.toMatch(/[;"]font:/);
@@ -168,13 +169,18 @@ describe('the bell by email', () => {
     expect(mail.html).toContain('[data-ogsc] .cd-amber{color:#f2c46a!important}');
     expect(mail.html).toContain('[data-ogsb] .cd-line{border-color:#3b4541!important}');
     expect(mail.html).toContain('[data-ogsc] .cd-logo-dark{display:block!important');
-    expect(mail.html).not.toMatch(/\[data-ogs[bc]\][^{]*\{background/);
+    // In Outlook the one background rule makes the page see-through, so Outlook's own dark grey shows.
+    expect(mail.html.match(/\[data-ogs[bc]\][^{]*\{background[^}]*\}/g)).toEqual(['[data-ogsb] .cd-page{background-color:transparent!important}']);
     // Only the descendant form, the one Outlook is known to honour.
     expect(mail.html).not.toMatch(/\.cd-[a-z-]+\[data-ogs/);
     // The wordmark is sent inside the email, in light and dark, and shown by cid.
     expect(mail.images.map((i) => i.id)).toEqual(['cadence-wordmark-light', 'cadence-wordmark-dark']);
     expect(mail.html).toContain('src="cid:cadence-wordmark-light"');
     expect(mail.html).toContain('src="cid:cadence-wordmark-dark"');
+    // The framed letter (owner, 24 Nov): plain coloured labels, no dots or spaced capitals.
+    expect(mail.html).toContain('border:1px solid #d3dbd7;border-radius:16px');
+    expect(mail.html).not.toContain('&#9679;');
+    expect(mail.html).not.toContain('text-transform:uppercase');
     // A preview in a page carries the pictures in the html instead.
     const preview = renderBellEmail({ kind: 'digest', images: 'inline', firstName: 'Sam', appUrl: 'https://cadence.example', timezone: 'UTC', items: [] });
     expect(preview.images).toEqual([]);
