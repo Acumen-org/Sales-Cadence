@@ -159,26 +159,36 @@ describe('the bell by email', () => {
     expect(mail.text).toContain('https://cadence.example/people/p1');
   });
 
-  it('the email reads the same in every mail app: sizes written out, white surfaces, a frame, dark mode by text and lines', () => {
-    const mail = renderBellEmail({ kind: 'test', firstName: 'Sam', appUrl: 'https://cadence.example', timezone: 'UTC', items: [{ kind: 'meeting_approval', name: 'Intro', company: null, title: 'Approve it', detail: null, href: '/meetings/approval', linkLabel: 'Open', at: new Date() }] });
+  it('the email reads the same in every mail app: sizes written out, a sheet on a page, dark mode for Apple Mail and Outlook apart', () => {
+    const mail = renderBellEmail({ kind: 'test', firstName: 'Sam', appUrl: 'https://cadence.example', timezone: 'UTC', extras: { approvalsWaiting: 2 }, items: [{ kind: 'meeting_approval', name: 'Intro', company: null, title: 'Approve it', detail: null, href: '/meetings/approval', linkLabel: 'Open', at: new Date() }] });
     // Outlook drops the `font` shorthand, and every size with it.
     expect(mail.html).not.toMatch(/[;"]font:/);
     expect(mail.html).toContain('font-size:22px;font-weight:600');
-    // Dark mode never gives a background a colour of its own in Outlook (it re-tints them); only text, lines and the wordmark change.
     expect(mail.html).toContain('<meta name="color-scheme" content="light dark">');
+    // The letter is a white sheet on a pale page (owner, 24 Nov), light colours inline.
+    expect(mail.html).toContain('bgcolor="#eef2f0" class="cd-page"');
+    expect(mail.html).toContain('bgcolor="#ffffff" class="cd-sheet cd-line"');
+    expect(mail.html).toContain('border:1px solid #dbe3df;border-radius:16px');
+    // Apple Mail's dark surfaces go by attribute selector, which Outlook (it renames classes) should miss.
+    expect(mail.html).toContain('[class~="cd-sheet"]{background-color:#242a28!important}');
+    expect(mail.html).not.toMatch(/@media[^}]*\n\.cd-(page|sheet|box)\{background/);
+    // Outlook's dark surfaces, one step off Apple Mail's, onto the inner layers.
+    expect(mail.html).toContain('[data-ogsb] .cd-sheet{background-color:#242a27!important}');
+    expect(mail.html).toContain('<td class="cd-sheet" style="border-radius:15px">');
     expect(mail.html).toContain('[data-ogsc] .cd-amber{color:#f2c46a!important}');
-    expect(mail.html).toContain('[data-ogsb] .cd-line{border-color:#3b4541!important}');
+    expect(mail.html).toContain('[data-ogsb] .cd-line{border-color:#343d39!important}');
     expect(mail.html).toContain('[data-ogsc] .cd-logo-dark{display:block!important');
-    // In Outlook the one background rule makes the page see-through, so Outlook's own dark grey shows.
-    expect(mail.html.match(/\[data-ogs[bc]\][^{]*\{background[^}]*\}/g)).toEqual(['[data-ogsb] .cd-page{background-color:transparent!important}']);
     // Only the descendant form, the one Outlook is known to honour.
     expect(mail.html).not.toMatch(/\.cd-[a-z-]+\[data-ogs/);
     // The wordmark is sent inside the email, in light and dark, and shown by cid.
     expect(mail.images.map((i) => i.id)).toEqual(['cadence-wordmark-light', 'cadence-wordmark-dark']);
     expect(mail.html).toContain('src="cid:cadence-wordmark-light"');
     expect(mail.html).toContain('src="cid:cadence-wordmark-dark"');
-    // The framed letter (owner, 24 Nov): plain coloured labels, no dots or spaced capitals.
-    expect(mail.html).toContain('border:1px solid #d3dbd7;border-radius:16px');
+    // Plain coloured labels; the Waiting line in plain ink, not green; no arrows anywhere (owner, 24 Nov).
+    expect(mail.html).toContain('class="cd-ink" style="font-family:');
+    expect(mail.html).toMatch(/class="cd-ink"[^>]*>2 meetings waiting for your approval<\/a>/);
+    expect(mail.html).not.toContain('&rarr;');
+    expect(mail.html).not.toContain('→');
     expect(mail.html).not.toContain('&#9679;');
     expect(mail.html).not.toContain('text-transform:uppercase');
     // A preview in a page carries the pictures in the html instead.
