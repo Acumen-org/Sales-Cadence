@@ -37,7 +37,7 @@ export async function sendMail(mail: OutgoingMail, fetcher: typeof fetch = fetch
         message: {
           subject: mail.subject, body: { contentType: 'HTML', content: mail.html }, toRecipients: [{ emailAddress: { address: mail.to } }],
           // Inline attachments: shown in the email, never as files to download, and no "download pictures" prompt.
-          ...(mail.images?.length ? { attachments: mail.images.map((i) => ({ '@odata.type': '#microsoft.graph.fileAttachment', name: `${i.id}.png`, contentType: i.contentType, contentBytes: i.base64, contentId: i.id, isInline: true })) } : {}),
+          ...(mail.images?.length ? { attachments: mail.images.map((i) => ({ '@odata.type': '#microsoft.graph.fileAttachment', name: `${i.id}.${i.contentType === 'image/gif' ? 'gif' : 'png'}`, contentType: i.contentType, contentBytes: i.base64, contentId: i.id, isInline: true })) } : {}),
         },
         saveToSentItems: false,
       }),

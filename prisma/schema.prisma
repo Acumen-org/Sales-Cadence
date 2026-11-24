@@ -141,6 +141,9 @@ model User {
   /// Extra handles that identify this user in note titles, e.g. "tw_alisa".
   aliases        String[]  @default([])
   timezone       String    @default("America/Chicago")
+  /// The time zone of this person's own computer, read when they open Cadence (owner, 24 Nov 2026). Used
+  /// only for when their notification emails arrive; null until first read: the user's timezone then.
+  emailTimezone  String?
   notificationsReadAt DateTime?
   /// What the bell sends by email (owner, 21 Nov 2026): smart (what needs action within minutes, in
   /// work hours, and the rest in a morning digest), digest (the morning digest only), or off.

@@ -15,6 +15,7 @@ import { workspaceTimezone } from '@/lib/workspace';
 import { pendingFormCount, pendingForms } from '@/lib/calls/form';
 import { callTimeWords } from '@/lib/calls/words';
 import { PendingCalls } from '@/components/calls/post-call-form';
+import { EmailTimezone } from '@/components/email-timezone';
 
 /** Who a pressed Call is ringing, for the notice that says the form will open here. */
 async function callingNameOf(intent: { toNumber: string; personId: string | null; sandboxContactId: string | null }): Promise<string> {
@@ -54,6 +55,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <Sidebar user={user} mode={e.TWENTY_MODE} dryRun={e.CADENCE_DRY_RUN} todayCount={due.today} overdueCount={due.overdue} ticketsCount={ticketsCount} approvalsCount={approvalsCount} />
       <main id="main-content" tabIndex={-1} className="flex min-w-0 flex-1 flex-col outline-none">
         <LiveRefresh />
+        <EmailTimezone saved={user.emailTimezone ?? null} />
         <TopBar role={user.role} unread={unread} needsReview={needsReview} timezone={workspaceTimezone()} />
         <PendingCalls calls={pendingCalls} total={pendingTotal} calling={callingName} />
         <div className="page-content min-w-0 flex-1">{children}</div>

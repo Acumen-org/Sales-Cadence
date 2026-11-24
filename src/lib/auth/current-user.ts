@@ -14,6 +14,8 @@ export type SessionUser = {
   /** False until an admin gives someone who joined through Microsoft their title; absent means they have one. */
   roleAssigned?: boolean;
   timezone: string;
+  /** Their computer's time zone, for when notification emails arrive only; null until first read. */
+  emailTimezone?: string | null;
   twentyMemberId: string | null;
   dailyCap: number | null;
   podIds: string[];
@@ -42,6 +44,7 @@ export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
     role: u.role,
     roleAssigned: u.roleAssigned,
     timezone: workspaceTimezone(),
+    emailTimezone: u.emailTimezone,
     twentyMemberId: u.twentyMemberId,
     dailyCap: u.dailyCap,
     podIds: u.pods.map((p) => p.podId),

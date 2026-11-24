@@ -1,4 +1,5 @@
 import { WORDMARK_DARK, WORDMARK_LIGHT, type Wordmark } from './wordmark';
+import { BAR_DARK, BAR_HEIGHT, BAR_LIGHT, BAR_WIDTH, meetingsBarGif } from './bar';
 
 /*
  * The bell by email (owner, 21 Nov 2026: "a nice html email that shows the contents and links it to
@@ -9,6 +10,7 @@ import { WORDMARK_DARK, WORDMARK_LIGHT, type Wordmark } from './wordmark';
  * filled sheet on a tinted page (white on pale green-grey; in dark mode a lifted dark sheet on a deeper
  * ground). Inside: the Cadence wordmark, a "Waiting for you" box in plain ink, then each item as its
  * own section split edge to edge, with a plain coloured label and a button. No arrows anywhere.
+ * The morning summary opens with "Your day" (24 Nov): numbers, and the month's meetings as a bar.
  * What keeps it right in every mail app:
  *   - Sizes are written out (font-size, font-weight, line-height), never the `font` shorthand, which
  *     Outlook drops, taking every size with it.
@@ -25,9 +27,17 @@ import { WORDMARK_DARK, WORDMARK_LIGHT, type Wordmark } from './wordmark';
  */
 
 export type EmailItem = { kind: string; name: string; company: string | null; title: string; detail: string | null; href: string | null; linkLabel: string; at: Date };
-export type EmailExtras = { approvalsWaiting?: number; crmReplies?: number };
+/**
+ * "Your day" at the top of the morning summary (owner, 24 Nov 2026): numbers only, each opening its
+ * page; and the month's meetings against the goal as a bar. Worked out in day.ts.
+ */
+export type DayTile = { label: string; value: number; href: string; warn?: boolean };
+export type DayFigures = { tiles: DayTile[]; meetings: null | { label: string; count: number; goal: number; foot: string; href: string } };
+export const DUE_TODAY = 'Due today';
+export const OVERDUE = 'Overdue';
+export type EmailExtras = { approvalsWaiting?: number; crmReplies?: number; day?: DayFigures };
 /** A picture sent inside the email, shown where the html says cid:<id>. */
-export type InlineImage = { id: string; contentType: 'image/png'; base64: string };
+export type InlineImage = { id: string; contentType: 'image/png' | 'image/gif'; base64: string };
 export type RenderedEmail = { subject: string; html: string; text: string; images: InlineImage[] };
 
 type Tone = 'amber' | 'red' | 'green' | 'blue' | 'grey';
@@ -74,14 +84,17 @@ function darkRules(sel: (attr: 'c' | 'b', cls: string) => string, lineColour: st
   text('cd-ink', D.ink); text('cd-text', D.text); text('cd-muted', D.muted); text('cd-link', D.brand);
   for (const t of Object.keys(TONES) as Tone[]) text(`cd-${t}`, TONES[t][1]);
   line('cd-line', lineColour);
-  // The app's own white wordmark in place of the evergreen one.
-  rules.push(`${sel('c', 'cd-logo-light')}{display:none!important}`);
-  rules.push(`${sel('c', 'cd-logo-dark')}{display:block!important;max-height:none!important;overflow:visible!important}`);
+  // The app's own white wordmark in place of the evergreen one, and the dark meetings bar.
+  for (const pic of ['logo', 'bar']) {
+    rules.push(`${sel('c', `cd-${pic}-light`)}{display:none!important}`);
+    rules.push(`${sel('c', `cd-${pic}-dark`)}{display:block!important;max-height:none!important;overflow:visible!important}`);
+  }
   return rules.join('\n');
 }
 const SURFACES = ['page', 'sheet', 'box'] as const;
 /**
- * Two blocks: Gmail drops a whole block it cannot read, so Outlook's rules stand apart. Surfaces in
+ * Three blocks: Gmail drops a whole block it cannot read, so Outlook's rules, and the one animation
+ * (the "Your day" block rising in), stand apart. Surfaces in
  * the media query go by attribute selector (Apple Mail matches them; Outlook, which renames classes,
  * should not); Outlook's go by its own attributes, onto the inner layer that has no inline colour.
  */
@@ -95,6 +108,17 @@ ${darkRules((_, cls) => `.${cls}`, D.line)}
 <style>
 ${SURFACES.map((s) => `[data-ogsb] .cd-${s}{background-color:${O[s]}!important}`).join('\n')}
 ${darkRules((attr, cls) => `[data-ogs${attr}] .${cls}`, O.line)}
+</style>
+<style>
+@keyframes cdrise{from{opacity:0;transform:translateY(6px)}}
+@media (prefers-reduced-motion:reduce){.cd-rise{animation:none!important}}
+</style>
+<style>
+@media (max-width:520px){
+.cd-pad{padding-left:20px!important;padding-right:20px!important}
+.cd-tile{padding:12px 10px 11px 12px!important}
+.cd-num{font-size:26px!important;line-height:30px!important}
+}
 </style>`;
 
 export function escapeHtml(s: string): string {
@@ -118,7 +142,7 @@ function button(href: string, label: string) {
 function itemHtml(i: EmailItem, appUrl: string, timezone: string) {
   const k = kindOf(i.kind);
   return `
-    <tr><td class="cd-line" style="border-top:1px solid ${C.line};padding:24px 32px 28px 32px">
+    <tr><td class="cd-line cd-pad" style="border-top:1px solid ${C.line};padding:24px 32px 28px 32px">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
         <td class="cd-${k.tone}" style="${type(13, 600, 18, TONES[k.tone][0])}">${escapeHtml(k.label)}</td>
         <td align="right" class="cd-muted" style="${type(12, 400, 18, C.muted)}">${escapeHtml(when(i.at, timezone))}</td>
@@ -135,6 +159,49 @@ function wordmarkHtml(src: (w: Wordmark) => string) {
   const img = (w: Wordmark) => `<img src="${src(w)}" width="${w.width}" height="${w.height}" alt="cadence." style="display:block;border:0;outline:none;width:${w.width}px;height:${w.height}px;${type(36, 600, 40, C.brand)}">`;
   return `<div class="cd-logo-light">${img(WORDMARK_LIGHT)}</div><!--[if !mso]><!--><div class="cd-logo-dark" style="display:none;max-height:0;overflow:hidden;mso-hide:all">${img(WORDMARK_DARK)}</div><!--<![endif]-->`;
 }
+
+/**
+ * "Your day": a row of numbers in outlined tiles, then the month's meetings with the animated bar.
+ * The block rises in where the mail app plays CSS animation (Apple Mail, iPhone); elsewhere it simply
+ * shows. Numbers never animate: a half-supported count could show a wrong figure.
+ */
+function dayHtml(day: DayFigures, appUrl: string, bar: ((mode: 'light' | 'dark') => string) | null) {
+  const n = day.tiles.length;
+  const tile = (t: DayTile, i: number, perRow: number) => {
+    const colour = t.warn && t.value > 0 ? TONES.amber[0] : C.ink;
+    const cls = t.warn && t.value > 0 ? 'cd-amber' : 'cd-ink';
+    // Widths in shares of the row, gaps included, so mail apps keep the gaps at every width.
+    return `${i ? '<td width="2%" style="width:2%;font-size:0;line-height:0">&nbsp;</td>' : ''}<td valign="top" width="${Math.floor((100 - (perRow - 1) * 2) / perRow)}%" class="cd-line cd-tile" style="border:1px solid ${C.line};border-radius:12px;padding:14px 16px 13px 16px">
+          <a href="${escapeHtml(abs(appUrl, t.href))}" style="display:block;text-decoration:none">
+            <div class="${cls} cd-num" style="${type(32, 700, 36, colour)}">${t.value}</div>
+            <div class="cd-muted" style="margin-top:3px;${type(13, 400, 18, C.muted)}">${escapeHtml(t.label)}</div>
+          </a>
+        </td>`;
+  };
+  // At most three to a row: four go two and two, so a phone still fits the numbers.
+  const rows = n === 4 ? [day.tiles.slice(0, 2), day.tiles.slice(2)] : [day.tiles];
+  const tiles = rows.filter((r) => r.length).map((r, ri) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:${ri ? 10 : 8}px;border-collapse:separate"><tr>${r.map((t, i) => tile(t, i, r.length)).join('')}</tr></table>`).join('');
+  const m = day.meetings;
+  // Outlined on the cell, like the tiles: Outlook coloured table and cell borders differently (24 Nov).
+  const meetings = m ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:10px;border-collapse:separate"><tr><td class="cd-line" style="border:1px solid ${C.line};border-radius:12px;padding:14px 16px 15px 16px">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+          <td valign="bottom"><a href="${escapeHtml(abs(appUrl, m.href))}" class="cd-muted" style="${type(13, 400, 18, C.muted, 'text-decoration:none')}">${escapeHtml(m.label)}</a></td>
+          <td valign="bottom" align="right" class="cd-ink" style="white-space:nowrap;${type(22, 700, 26, C.ink)}">${m.count} <span class="cd-muted" style="${type(14, 600, 26, C.muted)}">of ${m.goal}</span></td>
+        </tr></table>
+        ${bar ? `<div style="margin-top:10px;font-size:0;line-height:0"><div class="cd-bar-light">${barImg(bar('light'))}</div><!--[if !mso]><!--><div class="cd-bar-dark" style="display:none;max-height:0;overflow:hidden;mso-hide:all">${barImg(bar('dark'))}</div><!--<![endif]--></div>` : ''}
+        <div class="cd-text" style="margin-top:9px;${type(13, 400, 19, C.text)}">${escapeHtml(m.foot)}</div>
+      </td></tr></table>` : '';
+  return `<div class="cd-rise" style="margin-top:22px;animation:cdrise .5s ease-out .1s both">
+      <div class="cd-text" style="${type(12, 600, 18, C.boxLabel)}">Your day</div>
+      ${tiles}
+      ${meetings}
+    </div>`;
+}
+const barImg = (src: string) => `<img src="${src}" width="${BAR_WIDTH}" height="${BAR_HEIGHT}" alt="" style="display:block;border:0;outline:none;width:100%;max-width:${BAR_WIDTH}px;height:auto">`;
+/** The bar's share of the goal; a goal of 0 shows an empty bar. */
+const barShare = (m: NonNullable<DayFigures['meetings']>) => (m.goal > 0 ? m.count / m.goal : 0);
+const BAR_IDS = { light: 'cadence-bar-light', dark: 'cadence-bar-dark' } as const;
+const gifBase64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
 
 /** A subject that says what to do first, then what it is about. */
 function shortSubject(i: EmailItem): string {
@@ -159,16 +226,19 @@ export function renderBellEmail(opts: { kind: 'instant' | 'digest' | 'test'; fir
   const { items, appUrl, timezone } = opts;
   const extras = opts.extras ?? {};
   const n = items.length;
+  const day = extras.day && (extras.day.tiles.length || extras.day.meetings) ? extras.day : null;
+  const tile = (label: string) => day?.tiles.find((t) => t.label === label)?.value ?? 0;
+  const dayWords = [tile(DUE_TODAY) ? `${tile(DUE_TODAY)} due today` : '', tile(OVERDUE) ? `${tile(OVERDUE)} overdue` : ''].filter(Boolean).join(', ');
   const subject = opts.kind === 'test'
     ? 'Cadence emails are working'
     : opts.kind === 'instant'
       ? n === 1 ? clip(shortSubject(items[0]), 110) : `${n} things need you in Cadence`
-      : `Your Cadence summary: ${n ? `${n} update${n === 1 ? '' : 's'}` : 'what is waiting'}`;
+      : `Your Cadence summary: ${n ? `${n} update${n === 1 ? '' : 's'}` : dayWords || (day ? 'your day' : 'what is waiting')}`;
   const intro = opts.kind === 'test'
     ? 'This is a test from Settings. This is how Cadence emails look.'
     : opts.kind === 'instant'
       ? n === 1 ? 'This needs you in Cadence.' : 'These need you in Cadence.'
-      : 'Here is what came in since your last summary.';
+      : day ? (n ? 'Here is your day, and what came in since your last summary.' : 'Here is your day.') : 'Here is what came in since your last summary.';
   // The waiting lines are links in plain ink (owner, 24 Nov: not green, no arrows).
   const linkStyle = type(17, 600, 25, C.ink, 'text-decoration:none');
   const waiting: string[] = [];
@@ -176,6 +246,9 @@ export function renderBellEmail(opts: { kind: 'instant' | 'digest' | 'test'; fir
   if (extras.crmReplies) waiting.push(`<a href="${escapeHtml(abs(appUrl, '/home'))}" class="cd-ink" style="${linkStyle}">${extras.crmReplies} repl${extras.crmReplies === 1 ? 'y' : 'ies'} from your CRM contacts</a>`);
   const inline = opts.images === 'inline';
   const src = (w: Wordmark) => (inline ? `data:image/png;base64,${w.png}` : `cid:${w.id}`);
+  // The meetings bar, light and dark, drawn for this person's month.
+  const bars = day?.meetings ? { light: gifBase64(meetingsBarGif(barShare(day.meetings), BAR_LIGHT)), dark: gifBase64(meetingsBarGif(barShare(day.meetings), BAR_DARK)) } : null;
+  const barSrc = bars ? (mode: 'light' | 'dark') => (inline ? `data:image/gif;base64,${bars[mode]}` : `cid:${BAR_IDS[mode]}`) : null;
 
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark"><title>${escapeHtml(subject)}</title>
@@ -186,11 +259,12 @@ ${DARK_STYLE}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${C.page}" class="cd-page" style="background-color:${C.page}"><tr><td class="cd-page" align="center" style="padding:28px 16px 36px 16px;color:${C.ink}">
   <table role="presentation" width="600" cellpadding="0" cellspacing="0" bgcolor="${C.sheet}" class="cd-sheet cd-line" style="width:100%;max-width:600px;background-color:${C.sheet};border:1px solid ${C.edge};border-radius:16px;border-collapse:separate"><tr><td class="cd-sheet" style="border-radius:15px">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-    <tr><td style="padding:30px 32px 30px 32px">
+    <tr><td class="cd-pad" style="padding:30px 32px 30px 32px">
       ${wordmarkHtml(src)}
       <div class="cd-ink" style="margin-top:26px;${type(22, 600, 30, C.ink)}">Hi ${escapeHtml(opts.firstName)},</div>
       <div class="cd-muted" style="margin-top:6px;${type(15, 400, 23, C.muted)}">${escapeHtml(intro)}</div>
-      ${waiting.length ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${C.box}" class="cd-box" style="margin-top:22px;background-color:${C.box};border-radius:12px;border-collapse:separate"><tr><td class="cd-box" style="border-radius:12px;padding:14px 18px 16px 18px">
+      ${day ? dayHtml(day, appUrl, barSrc) : ''}
+      ${waiting.length ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${C.box}" class="cd-box" style="margin-top:${day ? 12 : 22}px;background-color:${C.box};border-radius:12px;border-collapse:separate"><tr><td class="cd-box" style="border-radius:12px;padding:14px 18px 16px 18px">
         <div class="cd-text" style="${type(12, 600, 18, C.boxLabel)}">Waiting for you</div>
         ${waiting.map((w) => `<div style="margin-top:2px">${w}</div>`).join('')}
       </td></tr></table>` : ''}
@@ -204,11 +278,19 @@ ${DARK_STYLE}
 
   const text = [
     `Hi ${opts.firstName},`, '', intro, '',
+    ...(day ? [
+      `Your day: ${day.tiles.map((t) => `${t.label} ${t.value}`).join(', ')}`,
+      ...(day.meetings ? [`${day.meetings.label}: ${day.meetings.count} of ${day.meetings.goal} (${day.meetings.foot})`] : []),
+      '',
+    ] : []),
     ...(extras.approvalsWaiting ? [`Waiting for your approval: ${extras.approvalsWaiting} meeting(s): ${abs(appUrl, '/meetings/approval')}`] : []),
     ...(extras.crmReplies ? [`Replies from your CRM contacts: ${extras.crmReplies}: ${abs(appUrl, '/home')}`] : []),
     ...items.flatMap((i) => [`- ${kindOf(i.kind).label}: ${i.name}${i.company ? ` (${i.company})` : ''}`, `  ${i.title}`, ...(i.detail ? [`  ${clip(i.detail, 300)}`] : []), `  ${abs(appUrl, i.href)}`, '']),
     `Choose how Cadence emails you: ${abs(appUrl, '/email-preferences')}`,
   ].join('\n');
-  const images: InlineImage[] = inline ? [] : [WORDMARK_LIGHT, WORDMARK_DARK].map((w) => ({ id: w.id, contentType: 'image/png', base64: w.png }));
+  const images: InlineImage[] = inline ? [] : [
+    ...[WORDMARK_LIGHT, WORDMARK_DARK].map((w): InlineImage => ({ id: w.id, contentType: 'image/png', base64: w.png })),
+    ...(bars ? (['light', 'dark'] as const).map((mode): InlineImage => ({ id: BAR_IDS[mode], contentType: 'image/gif', base64: bars[mode] })) : []),
+  ];
   return { subject, html, text, images };
 }

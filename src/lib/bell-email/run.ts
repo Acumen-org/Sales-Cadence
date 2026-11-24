@@ -5,6 +5,7 @@ import { bellWords, namesFor, notificationScope, type NotificationKind } from '.
 import { waitingForMe } from '../meetings/approval';
 import { safeTimezone, todayIn } from '../dates';
 import { renderBellEmail, type EmailItem, type EmailExtras } from './template';
+import { dayFigures, dayHasNews } from './day';
 import { sendMail } from './send';
 
 /*
@@ -23,6 +24,8 @@ import { sendMail } from './send';
 
 /** Needs someone soon: emailed within minutes, in work hours. */
 export const URGENT_KINDS: ReadonlySet<string> = new Set<NotificationKind>(['meeting_approval', 'meeting_declined', 'reply', 'bounce', 'possible_bounce', 'compliance_alert', 'call_flag', 'health_alert', 'campaign_launch_failed']);
+/** In the bell only, never emailed (owner, 24 Nov 2026: "Move to CRM finished" stays out of email). A week on, the stale pass marks them. */
+export const NOT_EMAILED_KINDS: readonly NotificationKind[] = ['move_finished'];
 export const EMAIL_MODES = ['smart', 'digest', 'off'] as const;
 export type EmailMode = (typeof EMAIL_MODES)[number];
 
@@ -51,7 +54,7 @@ const firstName = (name: string) => name.trim().split(/\s+/)[0] || 'there';
 
 type Row = Awaited<ReturnType<typeof pendingRows>>[number];
 function pendingRows(since: Date) {
-  return prisma.notification.findMany({ where: { emailedAt: null, createdAt: { gte: since } }, orderBy: { createdAt: 'asc' }, take: 2000 });
+  return prisma.notification.findMany({ where: { emailedAt: null, createdAt: { gte: since }, kind: { notIn: [...NOT_EMAILED_KINDS] } }, orderBy: { createdAt: 'asc' }, take: 2000 });
 }
 
 async function mark(ids: string[], at: Date) {
@@ -83,7 +86,7 @@ export async function runBellEmail(now = new Date(), send: typeof sendMail = sen
   // Everyone with something pending, and everyone who may get a morning summary of what is waiting.
   const users = await prisma.user.findMany({
     where: { OR: [{ id: { in: [...byUser.keys()] } }, { active: true, emailNotifications: { not: 'off' } }] },
-    select: { id: true, name: true, email: true, role: true, active: true, timezone: true, twentyMemberId: true, pods: { select: { podId: true } }, emailNotifications: true, lastDigestOn: true, notificationsReadAt: true },
+    select: { id: true, name: true, email: true, role: true, active: true, timezone: true, emailTimezone: true, twentyMemberId: true, pods: { select: { podId: true } }, emailNotifications: true, lastDigestOn: true, notificationsReadAt: true },
   });
 
   const recentFailures = new Set((await prisma.notificationEmail.findMany({ where: { status: 'FAILED', createdAt: { gte: new Date(now.getTime() - RETRY_AFTER_MS) } }, select: { userId: true } })).map((f) => f.userId));
@@ -108,7 +111,8 @@ export async function runBellEmail(now = new Date(), send: typeof sendMail = sen
     stats.skipped += seen.length;
     let open = mine.filter((r) => !seen.includes(r));
     if (recentFailures.has(u.id)) return;
-    const tz = safeTimezone(u.timezone);
+    // Their own time zone, read from their computer when they open Cadence; it only decides when emails arrive.
+    const tz = safeTimezone(u.emailTimezone ?? u.timezone);
     const viewer = { role: u.role };
 
     // Urgent, a few minutes after it rang, in work hours; when the summary is due now, it carries them.
@@ -133,9 +137,12 @@ export async function runBellEmail(now = new Date(), send: typeof sendMail = sen
         waitingForMe(actor),
         prisma.touch.count({ where: { ...notificationScope({ id: u.id, twentyMemberId: u.twentyMemberId }, now), createdAt: { gt: since } } }),
       ]);
-      const extras: EmailExtras = { approvalsWaiting, crmReplies };
+      // One person's figures failing must not stop anyone's emails: their summary goes without them.
+      const day = await dayFigures({ id: u.id, role: u.role, podIds: actor.podIds }, now).catch((err: unknown) => { console.error(`[bell-email] Your day for ${u.id} could not be worked out:`, err); return null; });
+      const extras: EmailExtras = { approvalsWaiting, crmReplies, ...(day ? { day } : {}) };
       const list = open.slice(-DIGEST_LIMIT).reverse();
-      if (list.length || approvalsWaiting || crmReplies) {
+      // Every workday while one of the day's numbers is not zero (owner, 24 Nov 2026), or something waits.
+      if (list.length || approvalsWaiting || crmReplies || (day && dayHasNews(day))) {
         const sent = await deliver(u, 'digest', open, await itemsFor(list, viewer), extras, s, appUrl, tz, now, send);
         if (!sent) { stats.failed++; return; }
         stats.digests++;
@@ -156,14 +163,16 @@ async function deliver(u: { id: string; name: string; email: string }, kind: 'in
 }
 
 /** Settings > Meetings and email: a test to the admin's own address. */
-export async function sendTestEmail(user: { id: string; name: string; email: string }): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function sendTestEmail(user: { id: string; name: string; email: string; role: import('@prisma/client').Role; podIds: string[] }): Promise<{ ok: true } | { ok: false; error: string }> {
   const { email: s } = await getSettings();
   if (!s.senderMailbox) return { ok: false, error: 'Name the mailbox Cadence sends from first, and save.' };
   const sample: EmailItem[] = [
     { kind: 'meeting_approval', name: 'Intro call with Acme', company: null, title: 'Karson added a meeting with no recording, booked by Karson Junior. Approve or decline it.', detail: null, href: '/meetings/approval', linkLabel: 'Open Approval', at: new Date() },
     { kind: 'reply', name: 'Pat One', company: 'Acme', title: 'Replied to your email: "Thanks, Thursday works"', detail: null, href: '/home', linkLabel: 'Open their emails', at: new Date() },
   ];
-  const mail = renderBellEmail({ kind: 'test', firstName: firstName(user.name), items: sample, extras: { approvalsWaiting: 2 }, appUrl: env().APP_URL, timezone: 'America/Chicago' });
+  // The admin's own "Your day", so the test shows real figures.
+  const day = await dayFigures(user).catch(() => null);
+  const mail = renderBellEmail({ kind: 'test', firstName: firstName(user.name), items: sample, extras: { approvalsWaiting: 2, ...(day ? { day } : {}) }, appUrl: env().APP_URL, timezone: 'America/Chicago' });
   const r = await sendMail({ from: s.senderMailbox, to: user.email, subject: mail.subject, html: mail.html, text: mail.text, images: mail.images });
   await prisma.notificationEmail.create({ data: { userId: user.id, kind: 'test', subject: mail.subject, status: r.ok ? 'SENT' : 'FAILED', error: r.ok ? null : r.error } });
   return r.ok ? { ok: true } : { ok: false, error: r.error };

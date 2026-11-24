@@ -27,7 +27,7 @@ const hourSelect = (name: string, value: number, from: number, to: number) => <s
  */
 export function EmailSettingsForm({ s }: { s: EmailSettings }) {
   return <ActionForm action={saveEmailSettingsAction} className="space-y-4 p-4">
-    <p className="text-[12.5px] text-ink-600">Each teammate gets only what is in their own bell, and chooses for themselves: what needs them plus a morning summary (the default), the summary only, or nothing. Times are in each person&apos;s own time zone.</p>
+    <p className="text-[12.5px] text-ink-600">Each teammate gets only what is in their own bell, and chooses for themselves: what needs them plus a morning summary (the default), the summary only, or nothing. Times are in each person&apos;s own time zone, read from their computer when they open Cadence; until then, the company&apos;s.</p>
     <Check name="enabled" label="Email teammates their notifications" checked={s.enabled} />
     <div className="grid gap-4 md:grid-cols-2">
       <Field label="Send from this mailbox" hint="A Microsoft 365 mailbox, such as cadence@yourcompany.com. IT grants the app Mail.Send for this mailbox only.">

@@ -5,6 +5,8 @@ import { digestDue, inWorkHours, runBellEmail } from '@/lib/bell-email/run';
 import { escapeHtml, renderBellEmail } from '@/lib/bell-email/template';
 import { fakeOutbox } from '@/lib/bell-email/send';
 import { saveEmailSettingsAction } from '@/lib/actions/settings';
+import { saveEmailTimezoneAction } from '@/lib/actions/bell-email';
+import { dayFigures, dayHasNews } from '@/lib/bell-email/day';
 import type { SessionUser } from '@/lib/auth/current-user';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
 
@@ -195,5 +197,77 @@ describe('the bell by email', () => {
     const preview = renderBellEmail({ kind: 'digest', images: 'inline', firstName: 'Sam', appUrl: 'https://cadence.example', timezone: 'UTC', items: [] });
     expect(preview.images).toEqual([]);
     expect(preview.html).toContain('src="data:image/png;base64,');
+  });
+
+  it('the summary goes every workday while a number of the day is not zero, with "Your day" and the meetings bar (owner, 24 Nov)', async () => {
+    await on();
+    // Sam leads Alisa's pod, where one campaign runs; nothing is in anyone's bell.
+    const sam = await prisma.user.create({ data: { email: 'sam@cadence.local', name: 'Sam Leader', role: 'SALES_LEADER', passwordHash: 'x', timezone: 'Europe/London', pods: { create: [{ podId: b.pods.Alisa.id }] } } });
+    await prisma.campaign.create({ data: { name: 'Q4 Harbor', sequenceId: b.sequence.id, podId: b.pods.Alisa.id, startDate: '2026-11-02', status: 'ACTIVE' } });
+    expect(await runBellEmail(WED_8AM)).toMatchObject({ digests: 2 });
+    // The leader (campaigns in their pods) and the admin (every campaign); FOs with every number at 0 get nothing.
+    expect(fakeOutbox().map((m) => m.to).sort()).toEqual(['ria@cadence.local', 'sam@cadence.local']);
+    const mail = fakeOutbox().find((m) => m.to === sam.email)!;
+    expect(mail.subject).toBe('Your Cadence summary: your day');
+    expect(mail.html).toContain('Here is your day.');
+    expect(mail.html).toContain('>Your day</div>');
+    expect(mail.html).toContain('Overdue in your pods');
+    expect(mail.html).toMatch(/>1<\/div>\s*<div class="cd-muted"[^>]*>Campaigns running</);
+    expect(mail.html).toContain('Your pods&#39; meetings in November');
+    expect(mail.html).toContain('href="http://localhost:3100/campaigns?tab=active"');
+    expect(mail.text).toContain('Your day: Overdue in your pods 0, Campaigns running 1');
+    // The bar is an animated picture, light and dark, swapped like the wordmark.
+    expect(mail.images?.map((i) => `${i.id} ${i.contentType}`)).toEqual(['cadence-wordmark-light image/png', 'cadence-wordmark-dark image/png', 'cadence-bar-light image/gif', 'cadence-bar-dark image/gif']);
+    expect(mail.html).toContain('src="cid:cadence-bar-dark"');
+    expect(mail.html).toContain('[data-ogsc] .cd-bar-dark{display:block!important');
+    const gif = Buffer.from(mail.images!.find((i) => i.id === 'cadence-bar-light')!.base64, 'base64');
+    expect(gif.subarray(0, 6).toString()).toBe('GIF89a');
+    expect(gif[gif.length - 1]).toBe(0x3b);
+    // It plays once: no loop instruction.
+    expect(gif.includes(Buffer.from('NETSCAPE'))).toBe(false);
+    expect(mail.html).not.toContain('&rarr;');
+  });
+
+  it('an FO\'s day: due today and overdue as on Tasks, their campaigns, and their meetings against the goal', async () => {
+    const day = await dayFigures({ id: b.users.karson.id, role: 'JUNIOR_FO', podIds: [b.pods.Alisa.id] }, WED_8AM);
+    expect(day.tiles.map((t) => t.label)).toEqual(['Due today', 'Overdue', 'Campaigns running']);
+    expect(day.tiles.find((t) => t.label === 'Overdue')).toMatchObject({ href: '/tasks?tab=overdue', warn: true });
+    expect(day.meetings).toMatchObject({ label: 'Meetings in November', count: 0, goal: 8, foot: expect.stringMatching(/^8 to go, \d+ workdays? left$/), href: '/meetings' });
+    expect(dayHasNews(day)).toBe(false);
+    const html = renderBellEmail({ kind: 'digest', firstName: 'Karson', appUrl: 'https://cadence.example', timezone: 'UTC', items: [], extras: { day: { ...day, tiles: day.tiles.map((t) => ({ ...t, value: t.label === 'Overdue' ? 3 : 12 })) } } });
+    expect(html.subject).toBe('Your Cadence summary: 12 due today, 3 overdue');
+    expect(html.html).toContain('class="cd-amber cd-num" style="font-family:');
+  });
+
+  it('"Move to CRM finished" stays in the bell and is never emailed (owner, 24 Nov)', async () => {
+    await on();
+    await prisma.user.update({ where: { id: b.users.alisa.id }, data: { emailNotifications: 'digest' } });
+    const moved = await ring(b.users.alisa.id, 'move_finished', mins(WED_8AM, 600), { text: 'Move to CRM finished: 3 moved.', moveId: 'mv-1' });
+    await ring(b.users.alisa.id, 'meeting_kudos', mins(WED_8AM, 600));
+    await runBellEmail(WED_8AM);
+    const mail = fakeOutbox().find((m) => m.to === 'alisa@cadence.local')!;
+    expect(mail.html).toContain('Cheer');
+    expect(mail.html).not.toContain('Move to CRM finished');
+    expect((await prisma.notification.findUniqueOrThrow({ where: { id: moved.id } })).emailedAt).toBeNull();
+  });
+
+  it('each person\'s emails follow the time zone of their own computer, and only their emails do', async () => {
+    await on();
+    await prisma.user.update({ where: { id: b.users.karson.id }, data: { emailNotifications: 'digest', emailTimezone: 'America/Los_Angeles' } });
+    await ring(b.users.karson.id, 'meeting_kudos', mins(WED_8AM, 600));
+    // 8am in London is midnight in Los Angeles: not yet.
+    await runBellEmail(WED_8AM);
+    expect(fakeOutbox().filter((m) => m.to === 'karson@cadence.local')).toHaveLength(0);
+    // 8am in Los Angeles.
+    await runBellEmail(new Date('2026-11-25T16:05:00Z'));
+    expect(fakeOutbox().filter((m) => m.to === 'karson@cadence.local')).toHaveLength(1);
+    // Read from the page: a real time zone is saved; anything else is ignored.
+    auth.user.mockResolvedValue({ ...b.users.karson, podIds: [], pods: [], emailTimezone: 'America/Los_Angeles' });
+    await saveEmailTimezoneAction('Asia/Kolkata');
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: b.users.karson.id } })).emailTimezone).toBe('Asia/Kolkata');
+    await saveEmailTimezoneAction('Not/A_Zone');
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: b.users.karson.id } })).emailTimezone).toBe('Asia/Kolkata');
+    // The workspace's own clock is untouched.
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: b.users.karson.id } })).timezone).toBe('Europe/London');
   });
 });

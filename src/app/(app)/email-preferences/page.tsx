@@ -13,7 +13,7 @@ import { Notice, Surface, ViewHeader } from '@/components/ui';
 export default async function EmailPreferencesPage() {
   const user = await requireUser();
   const [me, { email: s }] = await Promise.all([
-    prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: { emailNotifications: true, email: true, timezone: true } }),
+    prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: { emailNotifications: true, email: true, timezone: true, emailTimezone: true } }),
     getSettings(),
   ]);
   const hour = (h: number) => new Intl.DateTimeFormat('en-US', { hour: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(2026, 0, 1, h)));
@@ -27,7 +27,7 @@ export default async function EmailPreferencesPage() {
       <Surface flush>
         <ViewHeader title="Email from Cadence" />
         <div className="max-w-2xl space-y-4 px-5 pb-5">
-          <p className="text-[13px] text-ink-600">Cadence can email you what rings your bell, so nothing waits for you to open the app. It sends to {me.email}, at the times below in your own time zone ({me.timezone.replace(/_/g, ' ')}), and only ever what is already in your bell.</p>
+          <p className="text-[13px] text-ink-600">Cadence can email you what rings your bell, so nothing waits for you to open the app. It sends to {me.email}, at the times below in your own time zone ({(me.emailTimezone ?? me.timezone).replace(/_/g, ' ')}{me.emailTimezone ? ', from your computer' : ''}), and only ever what is already in your bell.</p>
           {!s.enabled ? <Notice tone="info">Emails are not switched on for the workspace yet. Your choice is kept for when they are.</Notice> : null}
           <ActionForm action={setEmailPreferenceAction} className="space-y-3">
             <fieldset className="space-y-2">
