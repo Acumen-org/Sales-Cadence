@@ -23,7 +23,7 @@ import { COLD_CONTACT_BASE, coldRef, personRef, subjectHref } from './subject';
  *   meeting_approval      a meeting with no recording waits for its Sales Leader (or an admin) to decide
  *   meeting_declined      a meeting was declined: Biz Ops, the booked-by FO and whoever added it are told why
  *   meeting_added_back    a declined meeting was added back, for the booked-by FO and whoever added it
- *   meeting_kudos         a colleague's cheer on a meeting you booked (Meetings > Recent wins)
+ *   meeting_kudos         a colleague's cheer on a meeting you booked (Meetings > Top bookers > Latest wins)
  *
  * Read and unread work as they always have: "Mark read" marks everything up to the moment the list
  * was opened (`User.notificationsReadAt`); a Notification row also keeps its own `readAt`, set then

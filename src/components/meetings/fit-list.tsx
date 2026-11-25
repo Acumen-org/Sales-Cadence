@@ -3,9 +3,10 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 
 /**
- * Recent wins fills its card exactly (owner, 23 Nov 2026: "should not have empty space at the
- * bottom"). Beside the other cards (three columns), the list takes the height they give the row and
- * shows as many whole rows as fit, never half of one; stacked on a phone it shows the first `stacked`.
+ * The latest wins fill their part of the card exactly (owner, 23 and 25 Nov 2026: no empty space
+ * at the bottom). Beside the other two parts, the list takes the height they give the row (at least
+ * one win's worth) and shows as many whole rows as fit, never half of one; stacked on a phone it
+ * shows the first `stacked`.
  */
 export function FitList({ children, stacked, label }: { children: ReactNode; stacked: number; label: string }) {
   const list = useRef<HTMLUListElement>(null);
@@ -35,7 +36,7 @@ export function FitList({ children, stacked, label }: { children: ReactNode; sta
     return () => { seen.disconnect(); wide.removeEventListener('change', fit); };
   }, [stacked]);
   return (
-    <div className="relative min-h-0 flex-1 lg:min-h-[180px]">
+    <div className="relative min-h-0 flex-1 lg:min-h-[64px]">
       <ul ref={list} aria-label={label} className="space-y-2.5 lg:absolute lg:inset-0 lg:overflow-hidden">{children}</ul>
     </div>
   );
