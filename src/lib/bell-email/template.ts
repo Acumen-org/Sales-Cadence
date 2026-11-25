@@ -169,7 +169,7 @@ function itemHtml(i: EmailItem, appUrl: string, timezone: string) {
  */
 const MARK_FONT = `'Inter','Inter Variable',-apple-system,BlinkMacSystemFont,'SF Pro Display','Segoe UI Variable Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif`;
 function wordmarkHtml() {
-  return `<div class="cd-mark" style="font-family:${MARK_FONT};font-size:30px;font-weight:600;line-height:34px;letter-spacing:-0.06em;color:${C.mark}">cadence<span class="cd-dot" style="color:${C.dot}">.</span></div>`;
+  return `<div class="cd-mark" style="font-family:${MARK_FONT};font-size:42px;font-weight:600;line-height:46px;letter-spacing:-0.06em;color:${C.mark}">cadence<span class="cd-dot" style="color:${C.dot}">.</span></div>`;
 }
 
 /**
