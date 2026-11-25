@@ -1,4 +1,3 @@
-import { WORDMARK_DARK, WORDMARK_LIGHT, type Wordmark } from './wordmark';
 import { BAR_DARK, BAR_HEIGHT, BAR_LIGHT, BAR_WIDTH, meetingsBarGif } from './bar';
 
 /*
@@ -8,9 +7,12 @@ import { BAR_DARK, BAR_HEIGHT, BAR_LIGHT, BAR_WIDTH, meetingsBarGif } from './ba
  *
  * The look is "Option A, a clean letter" (owner, 23 Nov 2026), on a sheet (24 Nov): the letter is a
  * filled sheet on a tinted page (white on pale green-grey; in dark mode a lifted dark sheet on a deeper
- * ground). Inside: the Cadence wordmark, a "Waiting for you" box in plain ink, then each item as its
- * own section split edge to edge, with a plain coloured label and a button. No arrows anywhere.
+ * ground). Inside: the Cadence wordmark, the greeting in one line, then each item as its own section
+ * split edge to edge, with a plain coloured label and a button. No arrows anywhere.
  * The morning summary opens with "Your day" (24 Nov): numbers, and the month's meetings as a bar.
+ * Short at the top (owner, 25 Nov: "the first part is needlessly long"): numbers without boxes, the
+ * meetings in two rows, the waiting lines in plain ink with no label over them.
+ * The same on a phone as on a computer (25 Nov): one set of sizes, no narrow-screen rules.
  * What keeps it right in every mail app:
  *   - Sizes are written out (font-size, font-weight, line-height), never the `font` shorthand, which
  *     Outlook drops, taking every size with it.
@@ -23,7 +25,12 @@ import { BAR_DARK, BAR_HEIGHT, BAR_LIGHT, BAR_WIDTH, meetingsBarGif } from './ba
  *   - Outlook on the web and the new Outlook get their own dark colours by the attributes they put on
  *     what they recolour ([data-ogsc] / [data-ogsb], descendant form), on the inner layers.
  *   - Those Outlook colours (O) sit one step off Apple Mail's (D), so a screenshot shows which rule
- *     drew each surface. Not yet confirmed in the owner's Outlook (24 Nov).
+ *     drew each surface. The owner's new Outlook drew O exactly (25 Nov screenshot).
+ *   - Lines between sections are 1px filled rows, not cell borders: the new Outlook kept cell borders
+ *     light in dark mode (a bright line on the dark sheet, 25 Nov) while filled surfaces took O.
+ *   - The wordmark is text (owner, 25 Nov: the picture "takes a second to load"; text shows at once):
+ *     the app's spacing and colours in the closest font each device has (Inter where installed, the
+ *     system's own otherwise). Only the meetings bar is a picture (the owner kept it animated).
  */
 
 export type EmailItem = { kind: string; name: string; company: string | null; title: string; detail: string | null; href: string | null; linkLabel: string; at: Date };
@@ -71,27 +78,27 @@ const KIND_LABEL: Record<string, { label: string; tone: Tone }> = {
 const kindOf = (k: string) => KIND_LABEL[k] ?? { label: 'Update', tone: 'grey' as Tone };
 
 /** Light colours, inline; their dark partners, by class. */
-const C = { ink: '#16302a', text: '#2b3c39', muted: '#5f6e69', page: '#eef2f0', sheet: '#ffffff', edge: '#dbe3df', line: '#e4eae7', brand: '#1f6b57', box: '#edf5f0', boxLabel: '#4d5d58' };
+const C = { ink: '#16302a', text: '#2b3c39', muted: '#5f6e69', page: '#eef2f0', sheet: '#ffffff', edge: '#dbe3df', line: '#e4eae7', rule: '#e4eae7', brand: '#1f6b57', box: '#edf5f0', boxLabel: '#4d5d58', mark: '#1f6b57', dot: '#82c4ac' };
 /** Dark mode, as Apple Mail draws it. */
-const D = { page: '#1a1d1c', sheet: '#242a28', box: '#2d3734', line: '#343d3a', ink: '#f1f5f3', text: '#d9e1de', muted: '#a9b6b1', brand: '#7fd3b3' };
+const D = { page: '#1a1d1c', sheet: '#242a28', box: '#2d3734', line: '#343d3a', rule: '#343d3a', ink: '#f1f5f3', text: '#d9e1de', muted: '#a9b6b1', brand: '#7fd3b3', mark: '#ffffff', dot: '#d5e9ad' };
 /** Dark mode for Outlook: the same colours one step off, so a screenshot tells the two rules apart. */
-const O = { page: '#1a1d1b', sheet: '#242a27', box: '#2d3733', line: '#343d39' };
+const O = { page: '#1a1d1b', sheet: '#242a27', box: '#2d3733', line: '#343d39', rule: '#343d39' };
 
 function darkRules(sel: (attr: 'c' | 'b', cls: string) => string, lineColour: string): string {
   const rules: string[] = [];
   const text = (cls: string, v: string) => rules.push(`${sel('c', cls)}{color:${v}!important}`);
   const line = (cls: string, v: string) => rules.push(`${sel('b', cls)}{border-color:${v}!important}`);
   text('cd-ink', D.ink); text('cd-text', D.text); text('cd-muted', D.muted); text('cd-link', D.brand);
+  // The wordmark as the app's sidebar shows it: white with the lime dot.
+  text('cd-mark', D.mark); text('cd-dot', D.dot);
   for (const t of Object.keys(TONES) as Tone[]) text(`cd-${t}`, TONES[t][1]);
   line('cd-line', lineColour);
-  // The app's own white wordmark in place of the evergreen one, and the dark meetings bar.
-  for (const pic of ['logo', 'bar']) {
-    rules.push(`${sel('c', `cd-${pic}-light`)}{display:none!important}`);
-    rules.push(`${sel('c', `cd-${pic}-dark`)}{display:block!important;max-height:none!important;overflow:visible!important}`);
-  }
+  // The dark meetings bar in place of the light one.
+  rules.push(`${sel('c', 'cd-bar-light')}{display:none!important}`);
+  rules.push(`${sel('c', 'cd-bar-dark')}{display:block!important;max-height:none!important;overflow:visible!important}`);
   return rules.join('\n');
 }
-const SURFACES = ['page', 'sheet', 'box'] as const;
+const SURFACES = ['page', 'sheet', 'box', 'rule'] as const;
 /**
  * Three blocks: Gmail drops a whole block it cannot read, so Outlook's rules, and the one animation
  * (the "Your day" block rising in), stand apart. Surfaces in
@@ -113,13 +120,7 @@ ${darkRules((attr, cls) => `[data-ogs${attr}] .${cls}`, O.line)}
 @keyframes cdrise{from{opacity:0;transform:translateY(6px)}}
 @media (prefers-reduced-motion:reduce){.cd-rise{animation:none!important}}
 </style>
-<style>
-@media (max-width:520px){
-.cd-pad{padding-left:20px!important;padding-right:20px!important}
-.cd-tile{padding:12px 10px 11px 12px!important}
-.cd-num{font-size:26px!important;line-height:30px!important}
-}
-</style>`;
+`;
 
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -136,34 +137,46 @@ function when(at: Date, timezone: string) {
 }
 
 function button(href: string, label: string) {
-  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:16px"><tr><td bgcolor="${C.brand}" style="border-radius:10px;background-color:${C.brand}"><a href="${escapeHtml(href)}" style="display:inline-block;padding:10px 18px;border-radius:10px;${type(14, 600, 20, '#ffffff', 'text-decoration:none')}">${escapeHtml(label)}</a></td></tr></table>`;
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:14px"><tr><td bgcolor="${C.brand}" style="border-radius:10px;background-color:${C.brand}"><a href="${escapeHtml(href)}" style="display:inline-block;padding:9px 16px;border-radius:10px;${type(14, 600, 20, '#ffffff', 'text-decoration:none')}">${escapeHtml(label)}</a></td></tr></table>`;
 }
+
+/** A line across the sheet: a 1px filled row (two layers, like every surface), never a cell border. */
+const RULE = `<tr><td bgcolor="${C.rule}" class="cd-rule" style="height:1px;font-size:1px;line-height:1px;background-color:${C.rule}"><div class="cd-rule" style="height:1px;font-size:1px;line-height:1px">&nbsp;</div></td></tr>`;
+/** Inside the sheet, the same on every screen. */
+const PAD = 24;
 
 function itemHtml(i: EmailItem, appUrl: string, timezone: string) {
   const k = kindOf(i.kind);
   return `
-    <tr><td class="cd-line cd-pad" style="border-top:1px solid ${C.line};padding:24px 32px 28px 32px">
+    ${RULE}
+    <tr><td class="cd-pad" style="padding:20px ${PAD}px 24px ${PAD}px">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
         <td class="cd-${k.tone}" style="${type(13, 600, 18, TONES[k.tone][0])}">${escapeHtml(k.label)}</td>
         <td align="right" class="cd-muted" style="${type(12, 400, 18, C.muted)}">${escapeHtml(when(i.at, timezone))}</td>
       </tr></table>
-      <div class="cd-ink" style="margin-top:8px;${type(17, 600, 24, C.ink)}">${escapeHtml(i.name)}${i.company ? `<span class="cd-muted" style="${type(17, 400, 24, C.muted)}"> · ${escapeHtml(i.company)}</span>` : ''}</div>
-      <div class="cd-text" style="margin-top:4px;${type(15, 400, 23, C.text)}">${escapeHtml(i.title)}</div>
-      ${i.detail ? `<div class="cd-muted" style="margin-top:6px;${type(14, 400, 21, C.muted)}">${escapeHtml(clip(i.detail, 600))}</div>` : ''}
+      <div class="cd-ink" style="margin-top:6px;${type(17, 600, 24, C.ink)}">${escapeHtml(i.name)}${i.company ? `<span class="cd-muted" style="${type(17, 400, 24, C.muted)}"> · ${escapeHtml(i.company)}</span>` : ''}</div>
+      <div class="cd-text" style="margin-top:3px;${type(15, 400, 22, C.text)}">${escapeHtml(i.title)}</div>
+      ${i.detail ? `<div class="cd-muted" style="margin-top:4px;${type(14, 400, 20, C.muted)}">${escapeHtml(clip(i.detail, 600))}</div>` : ''}
       ${button(abs(appUrl, i.href), i.linkLabel || 'Open in Cadence')}
     </td></tr>`;
 }
 
-/** The wordmark: light by default; the dark one waits hidden until a dark mode rule shows it. */
-function wordmarkHtml(src: (w: Wordmark) => string) {
-  const img = (w: Wordmark) => `<img src="${src(w)}" width="${w.width}" height="${w.height}" alt="cadence." style="display:block;border:0;outline:none;width:${w.width}px;height:${w.height}px;${type(36, 600, 40, C.brand)}">`;
-  return `<div class="cd-logo-light">${img(WORDMARK_LIGHT)}</div><!--[if !mso]><!--><div class="cd-logo-dark" style="display:none;max-height:0;overflow:hidden;mso-hide:all">${img(WORDMARK_DARK)}</div><!--<![endif]-->`;
+/**
+ * The wordmark as text, so it shows the moment the email opens (owner, 25 Nov 2026). The app's
+ * semibold with its tight spacing: Inter where the device has it, else the system's own sans (San
+ * Francisco on Apple devices, Segoe UI on Windows, Roboto on Android). Evergreen with the mint dot;
+ * in dark mode the sidebar's white with the lime dot.
+ */
+const MARK_FONT = `'Inter','Inter Variable',-apple-system,BlinkMacSystemFont,'SF Pro Display','Segoe UI Variable Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif`;
+function wordmarkHtml() {
+  return `<div class="cd-mark" style="font-family:${MARK_FONT};font-size:30px;font-weight:600;line-height:34px;letter-spacing:-0.06em;color:${C.mark}">cadence<span class="cd-dot" style="color:${C.dot}">.</span></div>`;
 }
 
 /**
- * "Your day": a row of numbers in outlined tiles, then the month's meetings with the animated bar.
- * The block rises in where the mail app plays CSS animation (Apple Mail, iPhone); elsewhere it simply
- * shows. Numbers never animate: a half-supported count could show a wrong figure.
+ * "Your day": the numbers side by side with no boxes, then the month's meetings in two rows (what and
+ * how far over its count, then the animated bar). The block rises in where the mail app plays CSS
+ * animation (Apple Mail, iPhone); elsewhere it simply shows. Numbers never animate: a half-supported
+ * count could show a wrong figure.
  */
 function dayHtml(day: DayFigures, appUrl: string, bar: ((mode: 'light' | 'dark') => string) | null) {
   const n = day.tiles.length;
@@ -171,28 +184,23 @@ function dayHtml(day: DayFigures, appUrl: string, bar: ((mode: 'light' | 'dark')
     const colour = t.warn && t.value > 0 ? TONES.amber[0] : C.ink;
     const cls = t.warn && t.value > 0 ? 'cd-amber' : 'cd-ink';
     // Widths in shares of the row, gaps included, so mail apps keep the gaps at every width.
-    return `${i ? '<td width="2%" style="width:2%;font-size:0;line-height:0">&nbsp;</td>' : ''}<td valign="top" width="${Math.floor((100 - (perRow - 1) * 2) / perRow)}%" class="cd-line cd-tile" style="border:1px solid ${C.line};border-radius:12px;padding:14px 16px 13px 16px">
+    return `${i ? '<td width="3%" style="width:3%;font-size:0;line-height:0">&nbsp;</td>' : ''}<td valign="top" width="${Math.floor((100 - (perRow - 1) * 3) / perRow)}%">
           <a href="${escapeHtml(abs(appUrl, t.href))}" style="display:block;text-decoration:none">
-            <div class="${cls} cd-num" style="${type(32, 700, 36, colour)}">${t.value}</div>
-            <div class="cd-muted" style="margin-top:3px;${type(13, 400, 18, C.muted)}">${escapeHtml(t.label)}</div>
+            <div class="${cls} cd-num" style="${type(26, 700, 30, colour)}">${t.value}</div>
+            <div class="cd-muted" style="margin-top:1px;${type(13, 400, 18, C.muted)}">${escapeHtml(t.label)}</div>
           </a>
         </td>`;
   };
   // At most three to a row: four go two and two, so a phone still fits the numbers.
   const rows = n === 4 ? [day.tiles.slice(0, 2), day.tiles.slice(2)] : [day.tiles];
-  const tiles = rows.filter((r) => r.length).map((r, ri) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:${ri ? 10 : 8}px;border-collapse:separate"><tr>${r.map((t, i) => tile(t, i, r.length)).join('')}</tr></table>`).join('');
+  const tiles = rows.filter((r) => r.length).map((r, ri) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:${ri ? 12 : 0}px"><tr>${r.map((t, i) => tile(t, i, r.length)).join('')}</tr></table>`).join('');
   const m = day.meetings;
-  // Outlined on the cell, like the tiles: Outlook coloured table and cell borders differently (24 Nov).
-  const meetings = m ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:10px;border-collapse:separate"><tr><td class="cd-line" style="border:1px solid ${C.line};border-radius:12px;padding:14px 16px 15px 16px">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-          <td valign="bottom"><a href="${escapeHtml(abs(appUrl, m.href))}" class="cd-muted" style="${type(13, 400, 18, C.muted, 'text-decoration:none')}">${escapeHtml(m.label)}</a></td>
-          <td valign="bottom" align="right" class="cd-ink" style="white-space:nowrap;${type(22, 700, 26, C.ink)}">${m.count} <span class="cd-muted" style="${type(14, 600, 26, C.muted)}">of ${m.goal}</span></td>
+  const meetings = m ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:${n ? 18 : 0}px"><tr>
+          <td valign="bottom"><a href="${escapeHtml(abs(appUrl, m.href))}" class="cd-ink" style="${type(14, 600, 20, C.ink, 'text-decoration:none')}">${escapeHtml(m.label)}</a><span class="cd-muted" style="${type(13, 400, 20, C.muted)}"> · ${escapeHtml(m.foot)}</span></td>
+          <td valign="bottom" align="right" class="cd-ink" style="white-space:nowrap;padding-left:12px;${type(22, 700, 24, C.ink)}">${m.count} <span class="cd-muted" style="${type(13, 600, 24, C.muted)}">of ${m.goal}</span></td>
         </tr></table>
-        ${bar ? `<div style="margin-top:10px;font-size:0;line-height:0"><div class="cd-bar-light">${barImg(bar('light'))}</div><!--[if !mso]><!--><div class="cd-bar-dark" style="display:none;max-height:0;overflow:hidden;mso-hide:all">${barImg(bar('dark'))}</div><!--<![endif]--></div>` : ''}
-        <div class="cd-text" style="margin-top:9px;${type(13, 400, 19, C.text)}">${escapeHtml(m.foot)}</div>
-      </td></tr></table>` : '';
-  return `<div class="cd-rise" style="margin-top:22px;animation:cdrise .5s ease-out .1s both">
-      <div class="cd-text" style="${type(12, 600, 18, C.boxLabel)}">Your day</div>
+        ${bar ? `<div style="margin-top:8px;font-size:0;line-height:0"><div class="cd-bar-light">${barImg(bar('light'))}</div><!--[if !mso]><!--><div class="cd-bar-dark" style="display:none;max-height:0;overflow:hidden;mso-hide:all">${barImg(bar('dark'))}</div><!--<![endif]--></div>` : ''}` : '';
+  return `<div class="cd-rise" style="margin-top:20px;animation:cdrise .5s ease-out .1s both">
       ${tiles}
       ${meetings}
     </div>`;
@@ -220,7 +228,7 @@ function shortSubject(i: EmailItem): string {
 
 /**
  * One email: urgent items as they need someone, or the morning summary. `images: 'inline'` puts the
- * wordmark in the html itself (for a preview in a page); by default it is sent alongside (cid:).
+ * meetings bar in the html itself (for a preview in a page); by default it is sent alongside (cid:).
  */
 export function renderBellEmail(opts: { kind: 'instant' | 'digest' | 'test'; firstName: string; items: EmailItem[]; extras?: EmailExtras; appUrl: string; timezone: string; images?: 'attached' | 'inline' }): RenderedEmail {
   const { items, appUrl, timezone } = opts;
@@ -239,13 +247,12 @@ export function renderBellEmail(opts: { kind: 'instant' | 'digest' | 'test'; fir
     : opts.kind === 'instant'
       ? n === 1 ? 'This needs you in Cadence.' : 'These need you in Cadence.'
       : day ? (n ? 'Here is your day, and what came in since your last summary.' : 'Here is your day.') : 'Here is what came in since your last summary.';
-  // The waiting lines are links in plain ink (owner, 24 Nov: not green, no arrows).
-  const linkStyle = type(17, 600, 25, C.ink, 'text-decoration:none');
+  // The waiting lines are links in plain ink (owner, 24 Nov: not green, no arrows), no label over them (25 Nov).
+  const linkStyle = type(16, 600, 24, C.ink, 'text-decoration:none');
   const waiting: string[] = [];
   if (extras.approvalsWaiting) waiting.push(`<a href="${escapeHtml(abs(appUrl, '/meetings/approval'))}" class="cd-ink" style="${linkStyle}">${extras.approvalsWaiting} meeting${extras.approvalsWaiting === 1 ? '' : 's'} waiting for your approval</a>`);
   if (extras.crmReplies) waiting.push(`<a href="${escapeHtml(abs(appUrl, '/home'))}" class="cd-ink" style="${linkStyle}">${extras.crmReplies} repl${extras.crmReplies === 1 ? 'y' : 'ies'} from your CRM contacts</a>`);
   const inline = opts.images === 'inline';
-  const src = (w: Wordmark) => (inline ? `data:image/png;base64,${w.png}` : `cid:${w.id}`);
   // The meetings bar, light and dark, drawn for this person's month.
   const bars = day?.meetings ? { light: gifBase64(meetingsBarGif(barShare(day.meetings), BAR_LIGHT)), dark: gifBase64(meetingsBarGif(barShare(day.meetings), BAR_DARK)) } : null;
   const barSrc = bars ? (mode: 'light' | 'dark') => (inline ? `data:image/gif;base64,${bars[mode]}` : `cid:${BAR_IDS[mode]}`) : null;
@@ -256,17 +263,15 @@ ${DARK_STYLE}
 </head>
 <body class="cd-page" style="margin:0;padding:0;background-color:${C.page}">
 <div style="display:none;max-height:0;overflow:hidden;color:${C.page}">${escapeHtml(n ? items.map((i) => i.title).join(' · ').slice(0, 140) : intro)}</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${C.page}" class="cd-page" style="background-color:${C.page}"><tr><td class="cd-page" align="center" style="padding:28px 16px 36px 16px;color:${C.ink}">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${C.page}" class="cd-page" style="background-color:${C.page}"><tr><td class="cd-page" align="center" style="padding:20px 12px 28px 12px;color:${C.ink}">
   <table role="presentation" width="600" cellpadding="0" cellspacing="0" bgcolor="${C.sheet}" class="cd-sheet cd-line" style="width:100%;max-width:600px;background-color:${C.sheet};border:1px solid ${C.edge};border-radius:16px;border-collapse:separate"><tr><td class="cd-sheet" style="border-radius:15px">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-    <tr><td class="cd-pad" style="padding:30px 32px 30px 32px">
-      ${wordmarkHtml(src)}
-      <div class="cd-ink" style="margin-top:26px;${type(22, 600, 30, C.ink)}">Hi ${escapeHtml(opts.firstName)},</div>
-      <div class="cd-muted" style="margin-top:6px;${type(15, 400, 23, C.muted)}">${escapeHtml(intro)}</div>
+    <tr><td class="cd-pad" style="padding:22px ${PAD}px ${PAD}px ${PAD}px">
+      ${wordmarkHtml()}
+      <div class="cd-muted" style="margin-top:16px;${type(16, 400, 24, C.muted)}"><span class="cd-ink" style="${type(16, 600, 24, C.ink)}">Hi ${escapeHtml(opts.firstName)},</span> ${escapeHtml(intro.charAt(0).toLowerCase() + intro.slice(1))}</div>
       ${day ? dayHtml(day, appUrl, barSrc) : ''}
-      ${waiting.length ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${C.box}" class="cd-box" style="margin-top:${day ? 12 : 22}px;background-color:${C.box};border-radius:12px;border-collapse:separate"><tr><td class="cd-box" style="border-radius:12px;padding:14px 18px 16px 18px">
-        <div class="cd-text" style="${type(12, 600, 18, C.boxLabel)}">Waiting for you</div>
-        ${waiting.map((w) => `<div style="margin-top:2px">${w}</div>`).join('')}
+      ${waiting.length ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${C.box}" class="cd-box" style="margin-top:${day ? 18 : 16}px;background-color:${C.box};border-radius:10px;border-collapse:separate"><tr><td class="cd-box" style="border-radius:10px;padding:11px 16px 12px 16px">
+        ${waiting.map((w, i) => `<div${i ? ' style="margin-top:4px"' : ''}>${w}</div>`).join('')}
       </td></tr></table>` : ''}
     </td></tr>
     ${items.map((i) => itemHtml(i, appUrl, timezone)).join('')}
@@ -277,7 +282,7 @@ ${DARK_STYLE}
 </body></html>`;
 
   const text = [
-    `Hi ${opts.firstName},`, '', intro, '',
+    `Hi ${opts.firstName}, ${intro.charAt(0).toLowerCase() + intro.slice(1)}`, '',
     ...(day ? [
       `Your day: ${day.tiles.map((t) => `${t.label} ${t.value}`).join(', ')}`,
       ...(day.meetings ? [`${day.meetings.label}: ${day.meetings.count} of ${day.meetings.goal} (${day.meetings.foot})`] : []),
@@ -289,7 +294,6 @@ ${DARK_STYLE}
     `Choose how Cadence emails you: ${abs(appUrl, '/email-preferences')}`,
   ].join('\n');
   const images: InlineImage[] = inline ? [] : [
-    ...[WORDMARK_LIGHT, WORDMARK_DARK].map((w): InlineImage => ({ id: w.id, contentType: 'image/png', base64: w.png })),
     ...(bars ? (['light', 'dark'] as const).map((mode): InlineImage => ({ id: BAR_IDS[mode], contentType: 'image/gif', base64: bars[mode] })) : []),
   ];
   return { subject, html, text, images };

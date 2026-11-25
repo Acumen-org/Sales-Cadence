@@ -52,8 +52,8 @@ describe('the bell by email', () => {
     expect(mail.html).toContain('Approve or decline it.');
     expect(mail.html).toContain('http://localhost:3100/meetings/approval');
     expect(mail.html).toContain('Hi Alisa,');
-    // The wordmark travels with the email, so it shows without a "download pictures" prompt.
-    expect(mail.images?.map((i) => i.id)).toEqual(['cadence-wordmark-light', 'cadence-wordmark-dark']);
+    // No pictures to fetch: the wordmark is text, and there is no meetings bar without "Your day" (owner, 25 Nov).
+    expect(mail.images).toEqual([]);
     const row = (id: string) => prisma.notification.findUniqueOrThrow({ where: { id } });
     expect((await row(approval.id)).emailedAt).not.toBeNull();
     expect((await row(fresh.id)).emailedAt).toBeNull();
@@ -161,11 +161,15 @@ describe('the bell by email', () => {
     expect(mail.text).toContain('https://cadence.example/people/p1');
   });
 
-  it('the email reads the same in every mail app: sizes written out, a sheet on a page, dark mode for Apple Mail and Outlook apart', () => {
+  it('the email reads the same in every mail app and on a phone: sizes written out, a sheet on a page, dark mode for Apple Mail and Outlook apart', () => {
     const mail = renderBellEmail({ kind: 'test', firstName: 'Sam', appUrl: 'https://cadence.example', timezone: 'UTC', extras: { approvalsWaiting: 2 }, items: [{ kind: 'meeting_approval', name: 'Intro', company: null, title: 'Approve it', detail: null, href: '/meetings/approval', linkLabel: 'Open', at: new Date() }] });
     // Outlook drops the `font` shorthand, and every size with it.
     expect(mail.html).not.toMatch(/[;"]font:/);
-    expect(mail.html).toContain('font-size:22px;font-weight:600');
+    expect(mail.html).toContain('font-size:16px;font-weight:600');
+    // The greeting in one line, short at the top (owner, 25 Nov).
+    expect(mail.html).toMatch(/>Hi Sam,<\/span> this is a test from Settings\./);
+    // One set of sizes: no narrow-screen rules, so a phone shows what a computer shows (owner, 25 Nov).
+    expect(mail.html).not.toContain('max-width:520px');
     expect(mail.html).toContain('<meta name="color-scheme" content="light dark">');
     // The letter is a white sheet on a pale page (owner, 24 Nov), light colours inline.
     expect(mail.html).toContain('bgcolor="#eef2f0" class="cd-page"');
@@ -179,24 +183,30 @@ describe('the bell by email', () => {
     expect(mail.html).toContain('<td class="cd-sheet" style="border-radius:15px">');
     expect(mail.html).toContain('[data-ogsc] .cd-amber{color:#f2c46a!important}');
     expect(mail.html).toContain('[data-ogsb] .cd-line{border-color:#343d39!important}');
-    expect(mail.html).toContain('[data-ogsc] .cd-logo-dark{display:block!important');
+    // Lines between sections are filled rows, which Outlook colours, never cell borders, which it left light (25 Nov).
+    expect(mail.html).toContain('[data-ogsb] .cd-rule{background-color:#343d39!important}');
+    expect(mail.html).toContain('[class~="cd-rule"]{background-color:#343d3a!important}');
+    expect(mail.html).not.toContain('border-top:');
     // Only the descendant form, the one Outlook is known to honour.
     expect(mail.html).not.toMatch(/\.cd-[a-z-]+\[data-ogs/);
-    // The wordmark is sent inside the email, in light and dark, and shown by cid.
-    expect(mail.images.map((i) => i.id)).toEqual(['cadence-wordmark-light', 'cadence-wordmark-dark']);
-    expect(mail.html).toContain('src="cid:cadence-wordmark-light"');
-    expect(mail.html).toContain('src="cid:cadence-wordmark-dark"');
+    // The wordmark is text, so it shows at once (owner, 25 Nov): evergreen with the mint dot; white with the lime dot in dark mode.
+    expect(mail.html).toContain('letter-spacing:-0.06em;color:#1f6b57">cadence<span class="cd-dot" style="color:#82c4ac">.</span>');
+    expect(mail.html).toContain('[data-ogsc] .cd-mark{color:#ffffff!important}');
+    expect(mail.html).toContain('.cd-dot{color:#d5e9ad!important}');
+    expect(mail.images).toEqual([]);
+    expect(mail.html).not.toContain('<img');
     // Plain coloured labels; the Waiting line in plain ink, not green; no arrows anywhere (owner, 24 Nov).
     expect(mail.html).toContain('class="cd-ink" style="font-family:');
     expect(mail.html).toMatch(/class="cd-ink"[^>]*>2 meetings waiting for your approval<\/a>/);
+    expect(mail.html).not.toContain('Waiting for you<');
     expect(mail.html).not.toContain('&rarr;');
     expect(mail.html).not.toContain('→');
     expect(mail.html).not.toContain('&#9679;');
     expect(mail.html).not.toContain('text-transform:uppercase');
     // A preview in a page carries the pictures in the html instead.
-    const preview = renderBellEmail({ kind: 'digest', images: 'inline', firstName: 'Sam', appUrl: 'https://cadence.example', timezone: 'UTC', items: [] });
+    const preview = renderBellEmail({ kind: 'digest', images: 'inline', firstName: 'Sam', appUrl: 'https://cadence.example', timezone: 'UTC', items: [], extras: { day: { tiles: [], meetings: { label: 'Meetings in November', count: 3, goal: 8, foot: '5 to go', href: '/meetings' } } } });
     expect(preview.images).toEqual([]);
-    expect(preview.html).toContain('src="data:image/png;base64,');
+    expect(preview.html).toContain('src="data:image/gif;base64,');
   });
 
   it('the summary goes every workday while a number of the day is not zero, with "Your day" and the meetings bar (owner, 24 Nov)', async () => {
@@ -209,15 +219,16 @@ describe('the bell by email', () => {
     expect(fakeOutbox().map((m) => m.to).sort()).toEqual(['ria@cadence.local', 'sam@cadence.local']);
     const mail = fakeOutbox().find((m) => m.to === sam.email)!;
     expect(mail.subject).toBe('Your Cadence summary: your day');
-    expect(mail.html).toContain('Here is your day.');
-    expect(mail.html).toContain('>Your day</div>');
+    expect(mail.html).toContain('</span> here is your day.</div>');
+    expect(mail.html).toContain('class="cd-rise"');
     expect(mail.html).toContain('Overdue in your pods');
     expect(mail.html).toMatch(/>1<\/div>\s*<div class="cd-muted"[^>]*>Campaigns running</);
     expect(mail.html).toContain('Your pods&#39; meetings in November');
     expect(mail.html).toContain('href="http://localhost:3100/campaigns?tab=active"');
     expect(mail.text).toContain('Your day: Overdue in your pods 0, Campaigns running 1');
-    // The bar is an animated picture, light and dark, swapped like the wordmark.
-    expect(mail.images?.map((i) => `${i.id} ${i.contentType}`)).toEqual(['cadence-wordmark-light image/png', 'cadence-wordmark-dark image/png', 'cadence-bar-light image/gif', 'cadence-bar-dark image/gif']);
+    // The bar is an animated picture (the owner kept it, 25 Nov), light and dark, swapped by the dark mode rules; the only pictures sent.
+    expect(mail.images?.map((i) => `${i.id} ${i.contentType}`)).toEqual(['cadence-bar-light image/gif', 'cadence-bar-dark image/gif']);
+    expect(mail.html).toMatch(/Your pods&#39; meetings in November<\/a><span class="cd-muted"[^>]*> · \d+ to go, \d+ workdays? left<\/span>/);
     expect(mail.html).toContain('src="cid:cadence-bar-dark"');
     expect(mail.html).toContain('[data-ogsc] .cd-bar-dark{display:block!important');
     const gif = Buffer.from(mail.images!.find((i) => i.id === 'cadence-bar-light')!.base64, 'base64');
