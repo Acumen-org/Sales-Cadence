@@ -9,6 +9,7 @@ import { graphMailState } from '../mail/graph-mail';
 import { NIGHTLY_SLOW_MS, readNightly } from '../nightly';
 import { COLD_CONTACT_BASE, COLD_FROM_BELLWETHER_HREF, COLD_MOVES_HREF } from '../subject';
 import { COLD_OUTREACH_SETTINGS_HREF } from '../settings-tabs';
+import { willRetry } from '../sandbox/moves-query';
 
 /*
  * The health card (cold outreach PLAN 4.7, W13): one line for each thing that can quietly stop
@@ -25,6 +26,15 @@ const DAY = 24 * 3600_000;
 export const FORM_LATE_MS = DAY;
 /** Imports that failed one after another before it is worth a bell. */
 export const IMPORTS_FAILED_IN_A_ROW = 2;
+/**
+ * ...and for how long. A few minutes of Twilio out of reach heal by themselves: the next good run
+ * reads everything the failed ones missed (owner, 25 Nov 2026: the bell kept ringing for that).
+ */
+export const IMPORT_FAILING_MS = 15 * 60_000;
+/** A failed move nothing will try again waits this long for its mover (who usually fixes it at once) before it rings. */
+export const MOVE_GRACE_MS = 30 * 60_000;
+/** A failed move the worker should try again but has not for this long (its longest wait is 30 minutes) waits for someone too. */
+export const MOVE_RETRY_STUCK_MS = 45 * 60_000;
 /** The setting that remembers which lines have rung, so each rings once until it clears. */
 export const HEALTH_KEY = 'outreachHealth';
 
@@ -35,27 +45,34 @@ const ago = (ms: number) => { const m = Math.round(ms / 60_000); return m < 90 ?
 export async function outreachHealth(now = new Date()): Promise<HealthLine[]> {
   const [stuck, failedMoves, imports, nightly, lateForms, oldestForm, mail] = await Promise.all([
     prisma.bellwetherPush.count({ where: { state: 'PROCESSING', createdAt: { lt: new Date(now.getTime() - STUCK_MS) } } }),
-    // A failed move is one that still needs someone: its contact is still here, not moved since.
-    prisma.$queryRaw<{ n: number }[]>`SELECT count(*)::int AS n FROM "SandboxMoveItem" i JOIN "SandboxContact" c ON c.id = i."sandboxContactId" JOIN "SandboxMove" m ON m.id = i."moveId"
-      WHERE i.state = 'FAILED' AND c.status = 'ACTIVE' AND m."createdAt" >= ${new Date(now.getTime() - 7 * DAY)}`.then((r) => r[0]?.n ?? 0),
+    // A failed move whose contact is still here, not moved since.
+    prisma.$queryRaw<{ state: string; failure: string | null; attempts: number; lastTry: Date }[]>`SELECT i.state, i.failure, i.attempts, COALESCE(i."claimedAt", m."createdAt") AS "lastTry"
+      FROM "SandboxMoveItem" i JOIN "SandboxContact" c ON c.id = i."sandboxContactId" JOIN "SandboxMove" m ON m.id = i."moveId"
+      WHERE i.state = 'FAILED' AND c.status = 'ACTIVE' AND m."createdAt" >= ${new Date(now.getTime() - 7 * DAY)}`,
     prisma.setting.findUnique({ where: { key: IMPORT_STATUS_KEY } }),
     readNightly(),
     prisma.callLog.count({ where: { formDueAt: { not: null, lt: new Date(now.getTime() - FORM_LATE_MS) }, formDoneAt: null, discardedAt: null } }),
     prisma.callLog.findFirst({ where: { formDueAt: { not: null }, formDoneAt: null, discardedAt: null }, orderBy: { formDueAt: 'asc' }, select: { formDueAt: true } }),
     graphMailState(now),
   ]);
-  const importState = (imports?.value ?? null) as { error?: string | null; failedInARow?: number } | null;
+  // It waits for someone only when nothing will try it again: the worker retries most failures by
+  // itself within minutes (move.ts, requeueTransientFailures), and the mover fixes the rest at once.
+  const waiting = failedMoves.filter((i) => now.getTime() - i.lastTry.getTime() >= (willRetry(i) ? MOVE_RETRY_STUCK_MS : MOVE_GRACE_MS)).length;
+  const retrying = failedMoves.filter((i) => willRetry(i)).length;
+  const importState = (imports?.value ?? null) as { at?: string; error?: string | null; failedInARow?: number; failingSince?: string | null } | null;
   const failedRuns = importState?.failedInARow ?? 0;
+  const failingSince = failedRuns ? Date.parse(importState?.failingSince ?? importState?.at ?? '') : NaN;
+  const failingFor = Number.isNaN(failingSince) ? 0 : now.getTime() - failingSince;
   const lines: HealthLine[] = [];
   lines.push(stuck
     ? { key: 'pushes', label: 'Bellwether pushes', ok: false, words: `${plural(stuck, 'push', 'pushes')} still being processed after 10 minutes.`, href: COLD_FROM_BELLWETHER_HREF }
     : { key: 'pushes', label: 'Bellwether pushes', ok: true, words: 'None stuck.', href: null });
-  lines.push(failedMoves
-    ? { key: 'moves', label: 'Moves to the CRM', ok: false, words: `${plural(failedMoves, 'move')} failed in the last 7 days and ${failedMoves === 1 ? 'waits' : 'wait'} for someone.`, href: COLD_MOVES_HREF }
-    : { key: 'moves', label: 'Moves to the CRM', ok: true, words: 'None failed.', href: null });
-  lines.push(failedRuns >= IMPORTS_FAILED_IN_A_ROW
-    ? { key: 'imports', label: 'Call import', ok: false, words: `The last ${failedRuns} imports from Twilio failed${importState?.error ? `: ${importState.error}` : '.'}`, href: '/settings?tab=calling' }
-    : { key: 'imports', label: 'Call import', ok: true, words: failedRuns ? 'The last import failed; the next one tries again.' : 'Running.', href: null });
+  lines.push(waiting
+    ? { key: 'moves', label: 'Moves to the CRM', ok: false, words: `${plural(waiting, 'move')} failed in the last 7 days and ${waiting === 1 ? 'waits' : 'wait'} for someone.`, href: COLD_MOVES_HREF }
+    : { key: 'moves', label: 'Moves to the CRM', ok: true, words: retrying ? `${plural(retrying, 'move')} failed; Cadence is trying again by itself.` : failedMoves.length ? `${plural(failedMoves.length, 'move')} failed in the last half hour.` : 'None failed.', href: null });
+  lines.push(failedRuns >= IMPORTS_FAILED_IN_A_ROW && failingFor >= IMPORT_FAILING_MS
+    ? { key: 'imports', label: 'Call import', ok: false, words: `Imports from Twilio have failed for ${ago(failingFor)}, the last ${failedRuns} in a row${importState?.error ? `: ${importState.error}` : '.'}`, href: '/settings?tab=calling' }
+    : { key: 'imports', label: 'Call import', ok: true, words: failedRuns ? `The last ${failedRuns === 1 ? 'import' : `${failedRuns} imports`} failed; the next one tries again.` : 'Running.', href: null });
   lines.push(nightlyLine(nightly, now));
   lines.push(lateForms
     ? { key: 'forms', label: 'Post-call forms', ok: false, words: `${plural(lateForms, 'form')} waiting more than 24 hours${oldestForm?.formDueAt ? `, the oldest for ${ago(now.getTime() - oldestForm.formDueAt.getTime())}` : ''}.`, href: `${COLD_CONTACT_BASE}?view=form_due` }

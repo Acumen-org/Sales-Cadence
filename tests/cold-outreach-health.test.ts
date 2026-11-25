@@ -7,6 +7,7 @@ import { workspaceTimezone } from '@/lib/workspace';
 import { NIGHTLY_MARKER, nightlyLoop, readNightly, type NightlyJob } from '@/lib/nightly';
 import { outreachHealth, ringHealth, HEALTH_KEY } from '@/lib/outreach/health';
 import { importTwilioCalls, importStatus } from '@/lib/calls/import';
+import { AUTO_RETRIES } from '@/lib/sandbox/move';
 import type { TwilioReader } from '@/lib/calls/twilio';
 import { bellWords } from '@/lib/notifications';
 import { resetDb, seedBasics, type Basics } from './helpers/db';
@@ -96,7 +97,7 @@ describe('nightly jobs and the health card (S11a)', () => {
     await prisma.bellwetherPush.create({ data: { idempotencyKey: 'k1', bodyHash: 'h', state: 'PROCESSING', pushedByEmail: 'x@acumen-strategy.com', contactCount: 1, createdAt: new Date(now.getTime() - 11 * 60_000) } });
     const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
     await prisma.sandboxMove.create({ data: { createdById: b.users.alisa.id, count: 1, state: 'DONE', createdAt: new Date(now.getTime() - 3600_000), items: { create: [{ sandboxContactId: c.id, state: 'FAILED', mode: 'create', snapshot: {}, error: 'The CRM refused the firm' }] } } });
-    await prisma.setting.create({ data: { key: 'twilioImport.status', value: { at: now.toISOString(), error: 'Twilio said 401', failedInARow: 2 } } });
+    await prisma.setting.create({ data: { key: 'twilioImport.status', value: { at: now.toISOString(), error: 'Twilio said 401', failedInARow: 9, failingSince: new Date(now.getTime() - 18 * 60_000).toISOString() } } });
     await prisma.setting.create({ data: { key: NIGHTLY_MARKER, value: { day: addDays('2026-11-10', -1), at: now.toISOString(), running: { startedAt: new Date(now.getTime() - 31 * 60_000).toISOString() } } } });
     await prisma.callLog.create({ data: { source: 'MANUAL', direction: 'OUTBOUND', status: 'COMPLETED', userId: b.users.alisa.id, sandboxContactId: c.id, startedAt: new Date(now.getTime() - 26 * 3600_000), formDueAt: new Date(now.getTime() - 25 * 3600_000) } });
     await prisma.mailboxCursor.create({ data: { userId: b.users.alisa.id, folder: 'sentitems', error: 'Access denied', errorAt: now } });
@@ -107,7 +108,7 @@ describe('nightly jobs and the health card (S11a)', () => {
     expect(words).toEqual({
       pushes: '1 push still being processed after 10 minutes.',
       moves: '1 move failed in the last 7 days and waits for someone.',
-      imports: 'The last 2 imports from Twilio failed: Twilio said 401',
+      imports: 'Imports from Twilio have failed for 18 minutes, the last 9 in a row: Twilio said 401',
       nightly: 'Still running after 31 minutes.',
       forms: '1 form waiting more than 24 hours, the oldest for 25 hours.',
       mailboxes: '1 mailbox failing to read.',
@@ -148,20 +149,55 @@ describe('nightly jobs and the health card (S11a)', () => {
     expect(await prisma.notification.count({ where: { kind: 'health_alert' } })).toBe(4);
   });
 
-  it('PLAN 4.7: the call import counts the runs that failed one after another, and a good run starts again from nought', async () => {
+  it('PLAN 4.7: the call import counts the runs that failed one after another, rings once they have failed for 15 minutes, and a good run starts again from nought', async () => {
     let fail = true;
     const reader = {
       kind: 'fake',
       listCalls: async () => { if (fail) throw new Error('Twilio said 401'); return { calls: [], nextPage: null }; },
       getCall: async () => null, listRecordings: async () => [], listNumbers: async () => [], recordingMedia: async () => new Response(null),
     } as TwilioReader;
-    await importTwilioCalls({ reader });
-    expect((await importStatus()).failedInARow).toBe(1);
-    await importTwilioCalls({ reader });
-    expect(await importStatus()).toEqual(expect.objectContaining({ failedInARow: 2, lastError: 'Twilio said 401' }));
-    expect((await outreachHealth()).find((l) => l.key === 'imports')!.ok).toBe(false);
+    const t0 = middayOn('2026-11-10');
+    const at = (min: number) => new Date(t0.getTime() + min * 60_000);
+    const imports = async (now: Date) => (await outreachHealth(now)).find((l) => l.key === 'imports')!;
+    await importTwilioCalls({ reader, now: at(0) });
+    expect(await importStatus()).toEqual(expect.objectContaining({ failedInARow: 1, failingSince: at(0).toISOString() }));
+    await importTwilioCalls({ reader, now: at(2) });
+    expect(await importStatus()).toEqual(expect.objectContaining({ failedInARow: 2, lastError: 'Twilio said 401', failingSince: at(0).toISOString() }));
+    // Owner, 25 Nov 2026: a few minutes of Twilio out of reach heal by themselves, and rang the bell each time.
+    expect(await imports(at(2))).toEqual(expect.objectContaining({ ok: true, words: 'The last 2 imports failed; the next one tries again.' }));
+    for (const min of [4, 6, 8, 10, 12, 14, 16]) await importTwilioCalls({ reader, now: at(min) });
+    expect(await imports(at(16))).toEqual(expect.objectContaining({ ok: false, words: 'Imports from Twilio have failed for 16 minutes, the last 9 in a row: Twilio said 401' }));
     fail = false;
-    await importTwilioCalls({ reader });
-    expect(await importStatus()).toEqual(expect.objectContaining({ failedInARow: 0, lastError: null }));
+    await importTwilioCalls({ reader, now: at(18) });
+    expect(await importStatus()).toEqual(expect.objectContaining({ failedInARow: 0, lastError: null, failingSince: null }));
+    expect((await imports(at(18))).ok).toBe(true);
+  });
+
+  it('PLAN 4.7: a failed move rings only when nothing will try it again: the worker\'s own retries and the mover\'s first half hour stay quiet', async () => {
+    const now = middayOn('2026-11-10');
+    await prisma.setting.create({ data: { key: NIGHTLY_MARKER, value: { day: '2026-11-10', at: now.toISOString() } } });
+    const ago = (min: number) => new Date(now.getTime() - min * 60_000);
+    const failed = async (item: { failure: string; attempts: number; claimedAt: Date }) => {
+      const c = await readyContact(b.users.alisa.id, b.pods.Alisa.id);
+      const move = await prisma.sandboxMove.create({ data: { createdById: b.users.alisa.id, count: 1, state: 'DONE', createdAt: ago(120), items: { create: [{ sandboxContactId: c.id, state: 'FAILED', mode: 'create', snapshot: {}, error: 'The CRM did not answer.', ...item }] } }, include: { items: true } });
+      return move.items[0];
+    };
+    const moves = async () => (await outreachHealth(now)).find((l) => l.key === 'moves')!;
+    // 25 Nov 2026: a move failed, the bell rang, and the worker's retry a minute later moved it.
+    const retried = await failed({ failure: 'transient', attempts: 1, claimedAt: ago(1) });
+    expect(await moves()).toEqual(expect.objectContaining({ ok: true, words: '1 move failed; Cadence is trying again by itself.' }));
+    expect(await ringHealth(now)).toEqual([]);
+    // One the worker should have tried again by now, but has not, waits for someone.
+    await prisma.sandboxMoveItem.update({ where: { id: retried.id }, data: { claimedAt: ago(46) } });
+    expect(await moves()).toEqual(expect.objectContaining({ ok: false, words: '1 move failed in the last 7 days and waits for someone.' }));
+    await prisma.sandboxMoveItem.update({ where: { id: retried.id }, data: { state: 'DONE' } });
+    // One nothing will try again (it is permanent, or its tries are spent) gives its mover half an hour.
+    const spent = await failed({ failure: 'transient', attempts: AUTO_RETRIES, claimedAt: ago(10) });
+    expect(await moves()).toEqual(expect.objectContaining({ ok: true, words: '1 move failed in the last half hour.' }));
+    await prisma.sandboxMoveItem.update({ where: { id: spent.id }, data: { claimedAt: ago(31) } });
+    expect(await moves()).toEqual(expect.objectContaining({ ok: false }));
+    await prisma.sandboxMoveItem.update({ where: { id: spent.id }, data: { state: 'DONE' } });
+    await failed({ failure: 'permanent', attempts: 1, claimedAt: ago(31) });
+    expect(await ringHealth(now)).toEqual(['moves']);
   });
 });
