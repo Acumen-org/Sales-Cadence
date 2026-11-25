@@ -14,13 +14,14 @@ import { NUMBERING_STARTS } from './numbering-start';
  * the FO who booked it, by the month it took place in, in the workspace's time zone.
  *
  *   - Your month: meetings against the company target (Settings > Meetings) on a bar with a quarter,
- *     half and three quarters marked, and the next mark in words (owner, 23 Nov 2026).
- *   - The team's month the same way, with this week's days under it: a goal that is always winnable.
+ *     half and three quarters marked, and the next mark in words (owner, 23 Nov 2026); under it the
+ *     FO's place, first meetings and this week (owner, 25 Nov 2026: "specific to that FO").
+ *   - The team's month the same way, for a leader or an admin, who book no meetings themselves.
  *   - Last month's best: the top performer and the top pod, as an honour (owner, 23 Nov 2026).
  *   - Pod race: pods ranked by meetings per FO, so a small pod races a big one fairly.
  *   - Top bookers: the top three by name, and each person's own rank. Nobody sees the full table
  *     (owner: "pods ranked, own rank").
- *   - Recent wins: the meetings booked lately, with a colleague's cheer.
+ *   - Latest wins, under the top bookers: the meetings booked lately, with a colleague's cheer.
  */
 
 const FO_ROLES: Role[] = ['JUNIOR_FO', 'SENIOR_FO'];
@@ -131,6 +132,9 @@ export function milestonesFor(target: number): Milestone[] {
   return [...byNumber.entries()].map(([at, name]) => ({ at, name }));
 }
 
+/** The mark already passed, said in words before the next one (owner, 25 Nov 2026). */
+const REACHED: Record<string, string> = { 'Quarter way': 'A quarter of the way there.', Halfway: 'Halfway there.', 'Final stretch': 'On the final stretch.' };
+
 /**
  * The next mark, in words: the same sentence all month with the numbers changing. Past the goal,
  * an FO hears about their best month (`best`: null for the team, or before they have one).
@@ -138,9 +142,11 @@ export function milestonesFor(target: number): Milestone[] {
 export function nextWords(s: { meetings: number; target: number; best?: { count: number; label: string } | null }): string {
   const { meetings, target } = s;
   if (meetings < target) {
-    const mark = milestonesFor(target).find((m) => m.at > meetings)!;
+    const marks = milestonesFor(target);
+    const mark = marks.find((m) => m.at > meetings)!;
+    const passed = marks.filter((m) => m.at <= meetings).pop();
     const left = mark.at - meetings;
-    return `Next milestone: ${mark.name === 'Goal' ? 'the goal' : mark.name} (${mark.at}). ${left} more to go.`;
+    return `${passed ? `${REACHED[passed.name]} ` : ''}${left} more to reach ${mark.name === 'Goal' ? 'the goal' : mark.name} at ${mark.at}.`;
   }
   if (s.best && meetings <= s.best.count) { const n = s.best.count - meetings + 1; return `Goal reached. ${n} more ${n === 1 ? 'beats' : 'beat'} your best month (${s.best.count} in ${s.best.label}).`; }
   if (s.best) return 'Goal reached, and your best month yet.';

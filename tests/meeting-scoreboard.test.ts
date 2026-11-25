@@ -49,10 +49,10 @@ describe('the rules', () => {
     // A small goal never shows a mark twice, or at 0: the later name wins.
     expect(at(2)).toEqual(['Halfway 1', 'Goal 2']);
     expect(at(1)).toEqual(['Goal 1']);
-    expect(nextWords({ meetings: 0, target: 10 })).toBe('Next milestone: Quarter way (3). 3 more to go.');
-    expect(nextWords({ meetings: 9, target: 90 })).toBe('Next milestone: Quarter way (23). 14 more to go.');
-    expect(nextWords({ meetings: 3, target: 10 })).toBe('Next milestone: Halfway (5). 2 more to go.');
-    expect(nextWords({ meetings: 9, target: 10 })).toBe('Next milestone: the goal (10). 1 more to go.');
+    expect(nextWords({ meetings: 0, target: 10 })).toBe('3 more to reach Quarter way at 3.');
+    expect(nextWords({ meetings: 9, target: 90 })).toBe('14 more to reach Quarter way at 23.');
+    expect(nextWords({ meetings: 3, target: 10 })).toBe('A quarter of the way there. 2 more to reach Halfway at 5.');
+    expect(nextWords({ meetings: 9, target: 10 })).toBe('On the final stretch. 1 more to reach the goal at 10.');
     expect(nextWords({ meetings: 10, target: 10 })).toBe('Goal reached. Every meeting from here is extra.');
     expect(nextWords({ meetings: 10, target: 10, best: { count: 11, label: 'October' } })).toBe('Goal reached. 2 more beat your best month (11 in October).');
     expect(nextWords({ meetings: 12, target: 10, best: { count: 11, label: 'October' } })).toBe('Goal reached, and your best month yet.');
@@ -93,7 +93,7 @@ describe('the scoreboard', () => {
     expect(s.me).toMatchObject({ meetings: 3, firstMeetings: 2, waiting: 1, streakWeeks: 3, rank: 1, best: { count: 1, label: 'October' } });
     expect(s.me!.badges.filter((x) => x.earned).map((x) => x.key)).toEqual(['board', 'first', 'streak', 'best']);
     expect(s.me!.milestones.map((m) => m.at)).toEqual([1, 2, 3, 4]);
-    expect(s.me!.next).toBe('Next milestone: the goal (4). 1 more to go.');
+    expect(s.me!.next).toBe('On the final stretch. 1 more to reach the goal at 4.');
     // Karson's own week (Monday 16th to Friday 20th): K third on the 17th; Saturday and Sunday have none, so they are not shown.
     expect(s.week.days.map((d) => [d.label, d.count, d.today, d.future])).toEqual([['Mon', 0, false, false], ['Tue', 1, false, false], ['Wed', 0, false, false], ['Thu', 0, false, false], ['Fri', 0, true, false]]);
     expect(s.week.total).toBe(1);

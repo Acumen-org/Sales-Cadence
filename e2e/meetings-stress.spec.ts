@@ -3,8 +3,8 @@ import { expect, test, type Page } from '@playwright/test';
 /**
  * Meetings, stressed (owner, 23 Nov 2026: "we added a bunch of things ... stress test the meetings
  * section"). Every seat opens Meetings with no page error and no sideways scroll, and every number on
- * the board matches what it says or opens: the month bar's own label, this week's days, each pod's
- * share, each top booker's meetings, and last month's best.
+ * the board matches what it says or opens: the month bar's own label, each pod's number of its
+ * target, each top booker's meetings, and last month's best.
  */
 const SEATS: { email: string; password?: string; card: string | RegExp }[] = [
   { email: 'karson@cadence.local', card: 'Your month' },
@@ -41,29 +41,23 @@ for (const seat of SEATS) {
     const board = page.getByRole('region', { name: 'Meetings scoreboard' });
     await expect(board).toBeVisible();
 
-    // The month card: the big number, the bar's label and the goal line agree.
+    // The month: the big number, the bar's label and the next mark agree.
     const card = board.getByRole('region', { name: seat.card });
     const bar = card.getByRole('img', { name: /^\d+ of \d+ booked\./ });
     const [, booked, target] = (await bar.getAttribute('aria-label'))!.match(/^(\d+) of (\d+) booked\./)!.map(Number);
-    await expect(card).toContainText(`${booked} of ${target} booked`);
-    await expect(card).toContainText(/goal: \d+ meetings booked/i);
-    await expect(card).toContainText(booked >= target ? /Goal reached/ : /Next milestone: (Quarter way|Halfway|Final stretch|the goal) \(\d+\)\. \d+ more to go\./);
+    await expect(card).toContainText(new RegExp(`${booked} of (your )?${target} booked`));
+    await expect(card).toContainText(booked >= target ? /Goal reached/ : /\d+ more to reach (Quarter way|Halfway|Final stretch|the goal) at \d+\./);
+    await expect(card).toContainText('booked this week');
 
-    // This week's days add up to the number beside them.
-    const week = card.getByRole('group', { name: /^This week: \d+ booked$/ });
-    const weekTotal = Number((await week.getAttribute('aria-label'))!.match(/(\d+) booked/)![1]);
-    const days = (await week.locator('li span:last-child').allInnerTexts()).map((t) => Number(t) || 0);
-    expect(days.reduce((a, n) => a + n, 0)).toBe(weekTotal);
-
-    // Each pod: its share is what it booked of its own target.
+    // Each pod: the number beside it is what its bar shows of its own target.
     const race = board.getByRole('region', { name: 'Pod race' });
     for (const label of await race.getByRole('img', { name: /: \d+ of \d+ booked$/ }).evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')!))) {
       const [, x, y] = label.match(/: (\d+) of (\d+) booked$/)!.map(Number);
       expect(y, label).toBeGreaterThan(0);
-      await expect(race).toContainText(`${Math.round((x / y) * 100)}%`);
+      await expect(race).toContainText(`${x} of ${y}`);
     }
 
-    // Recent wins fills its card with whole rows, never half of one; stacked on a phone, seven at most.
+    // The latest wins fill their part with whole rows, never half of one; stacked on a phone, three at most.
     const wins = board.getByRole('list', { name: 'Meetings booked lately' });
     const fits = async () => wins.evaluate((ul) => {
       const rows = (Array.from(ul.children) as HTMLElement[]).filter((r) => getComputedStyle(r).display !== 'none');
@@ -78,11 +72,11 @@ for (const seat of SEATS) {
     expect(await sideScroll(page)).toBeLessThanOrEqual(1);
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await sideScroll(page)).toBeLessThanOrEqual(1);
-    if (await wins.count()) await expect.poll(async () => (await fits()).shown).toBeLessThanOrEqual(7);
+    if (await wins.count()) await expect.poll(async () => (await fits()).shown).toBeLessThanOrEqual(3);
     await page.setViewportSize({ width: 1280, height: 800 });
 
     // Every name on the board opens exactly the meetings behind its number, whoever is looking.
-    const links = await race.getByRole('link', { name: /booked this month\. Open their meetings/ }).evaluateAll((els) => els.map((e) => ({ href: e.getAttribute('href')!, label: e.getAttribute('aria-label')! })));
+    const links = await board.getByRole('region', { name: 'Top bookers' }).getByRole('link', { name: /booked this month\. Open their meetings/ }).evaluateAll((els) => els.map((e) => ({ href: e.getAttribute('href')!, label: e.getAttribute('aria-label')! })));
     const champion = board.getByRole('region', { name: /'s best$/ }).getByRole('link');
     const best = (await champion.count()) ? { href: (await champion.getAttribute('href'))!, label: (await champion.getAttribute('title'))! } : null;
     for (const l of links) expect(await rowsAt(page, l.href), l.label).toBe(Number(l.label.match(/, (\d+) booked this month/)![1]));

@@ -1,9 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 
 /**
- * Owner, 21 to 23 Nov 2026: Meetings, gamified (your month on a bar with its next mark, the pod
- * race, recent wins with a cheer, a celebration after saving), and the bell by email (each person
- * picks how it emails them).
+ * Owner, 21 to 25 Nov 2026: Meetings, gamified (one card: your month on a bar with its next mark,
+ * the pod race, the top bookers with the latest wins to cheer; a celebration after saving), and the
+ * bell by email (each person picks how it emails them).
  */
 const PASSWORD = 'password123';
 
@@ -37,40 +37,37 @@ test('a booked meeting is celebrated, scores on the board, and a colleague cheer
 
   await page.getByRole('link', { name: 'See the scoreboard' }).click();
   const month = page.getByRole('region', { name: 'Your month' });
-  await expect(month).toContainText(/\d+ of \d+ booked/);
-  await expect(month).toContainText(/Your goal: \d+ meetings booked this month/);
+  await expect(month).toContainText(/\d+ of your \d+ booked/);
   // The bar says where the month is and the next named mark; so does the line under it.
-  await expect(month.getByRole('img', { name: /\d+ of \d+ booked\. (Next milestone: |Goal reached)/ })).toBeVisible();
-  await expect(month).toContainText(/Next milestone: (Quarter way|Halfway|Final stretch|the goal) \(\d+\)\. \d+ more to go\.|Goal reached/);
+  await expect(month.getByRole('img', { name: /\d+ of \d+ booked\. (.*\d+ more to reach |Goal reached)/ })).toBeVisible();
+  await expect(month).toContainText(/\d+ more to reach (Quarter way|Halfway|Final stretch|the goal) at \d+\.|Goal reached/);
+  // The FO's own place, first meetings and week along its foot.
+  await expect(month).toContainText('booked this week');
   await expect(page.getByRole('region', { name: 'Pod race' })).toContainText('Your pod');
-  await expect(page.getByRole('region', { name: 'Recent wins' })).toContainText('You booked');
+  await expect(page.getByRole('region', { name: 'Top bookers' })).toContainText('You booked');
   await noSideScroll(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await noSideScroll(page);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.getByTitle('Sign out').click();
 
-  // A Sales Leader sees their pods' month, and cheers Karson's meeting from Recent wins.
+  // A Sales Leader sees their pods' month, and cheers Karson's meeting from the latest wins.
   await signIn(page, 'leigh@cadence.local');
   await page.goto('/meetings');
   const pods = page.getByRole('region', { name: /Your pods? this month/ });
-  await expect(pods).toContainText(/Goal: \d+ meetings booked per FO each month · \d+ FOs?/);
-  // This week, day by day, adds up to the number beside it.
-  const week = pods.getByRole('group', { name: /^This week: \d+ booked$/ });
-  const weekTotal = Number((await week.getAttribute('aria-label'))!.match(/(\d+) booked/)![1]);
-  const dayCounts = (await week.locator('li span:last-child').allInnerTexts()).map((t) => Number(t) || 0);
-  expect(dayCounts.reduce((a, n) => a + n, 0)).toBe(weekTotal);
+  await expect(pods).toContainText(/\d+ per FO · \d+ FOs?/);
+  await expect(pods).toContainText('booking this month');
   // A top booker's name opens the meetings behind their number: as many rows as the number says.
-  const top = page.getByRole('region', { name: 'Pod race' }).getByRole('link', { name: /booked this month\. Open their meetings/ }).first();
+  const top = page.getByRole('region', { name: 'Top bookers' }).getByRole('link', { name: /booked this month\. Open their meetings/ }).first();
   const booked = Number((await top.getAttribute('aria-label'))!.match(/, (\d+) booked this month/)![1]);
   await top.click();
   await expect(page).toHaveURL(/booked=.*&from=\d{4}-\d{2}-01&to=\d{4}-\d{2}-\d{2}&counted=1/);
   await expect(page.getByText(/Showing the meetings that count on the scoreboard for /)).toBeVisible();
   await expect(page.locator('table.table-meetings tbody tr')).toHaveCount(booked);
   await page.goto('/meetings');
-  const cheer = page.getByRole('region', { name: 'Recent wins' }).getByRole('button', { name: /Cheer Karson/ }).first();
+  const cheer = page.getByRole('region', { name: 'Top bookers' }).getByRole('button', { name: /Cheer Karson/ }).first();
   await cheer.click();
-  await expect(page.getByRole('region', { name: 'Recent wins' }).getByRole('button', { name: /Take back your cheer for Karson/ }).first()).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('region', { name: 'Top bookers' }).getByRole('button', { name: /Take back your cheer for Karson/ }).first()).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('each person chooses how Cadence emails them', async ({ page }) => {
