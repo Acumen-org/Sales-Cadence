@@ -58,10 +58,15 @@ async function dropLease(token: string) {
   await prisma.$executeRaw`DELETE FROM "Setting" WHERE key = ${LEASE_KEY} AND value->>'token' = ${token}`;
 }
 
-export async function importStatus(): Promise<{ lastRunAt: string | null; lastError: string | null; stats: Partial<ImportStats> | null; failedInARow: number }> {
+/** What the status setting holds. `failingSince`: when the runs now failing one after another began. */
+export type ImportStatusValue = { at?: string; error?: string | null; stats?: Partial<ImportStats>; failedInARow?: number; failingSince?: string | null };
+
+export async function importStatus(): Promise<{ lastRunAt: string | null; lastError: string | null; stats: Partial<ImportStats> | null; failedInARow: number; failingSince: string | null }> {
   const row = await prisma.setting.findUnique({ where: { key: STATUS_KEY } });
-  const v = (row?.value ?? null) as { at?: string; error?: string | null; stats?: Partial<ImportStats>; failedInARow?: number } | null;
-  return { lastRunAt: v?.at ?? null, lastError: v?.error ?? null, stats: v?.stats ?? null, failedInARow: v?.failedInARow ?? 0 };
+  const v = (row?.value ?? null) as ImportStatusValue | null;
+  const failedInARow = v?.failedInARow ?? 0;
+  // A status written before failingSince was kept: the last failure is the most that can be said.
+  return { lastRunAt: v?.at ?? null, lastError: v?.error ?? null, stats: v?.stats ?? null, failedInARow, failingSince: failedInARow ? v?.failingSince ?? v?.at ?? null : null };
 }
 
 export async function importTwilioCalls(opts: { now?: Date; reader?: TwilioReader | null } = {}): Promise<ImportStats> {
@@ -150,13 +155,15 @@ export async function importTwilioCalls(opts: { now?: Date; reader?: TwilioReade
     await putSetting(WATERMARK_KEY, { at: (before ?? now).toISOString() });
     // N049: the clock for forms starts with the first run that went through, never a failed one.
     if (!(await getSetting(FORMS_FROM_KEY))) await putSetting(FORMS_FROM_KEY, { at: formsFrom });
-    await putSetting(STATUS_KEY, { at: now.toISOString(), error: null, stats, failedInARow: 0 });
+    await putSetting(STATUS_KEY, { at: now.toISOString(), error: null, stats, failedInARow: 0, failingSince: null });
     return stats;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     // Runs that failed one after another, for the health card (PLAN 4.7: two in a row ring the admins).
-    const before = (await prisma.setting.findUnique({ where: { key: STATUS_KEY } }))?.value as { failedInARow?: number } | null;
-    await putSetting(STATUS_KEY, { at: now.toISOString(), error: message.slice(0, 500), stats, failedInARow: (before?.failedInARow ?? 0) + 1 });
+    // The health card rings only once they have gone on failing for a while (IMPORT_FAILING_MS), so it keeps when they began.
+    const before = (await prisma.setting.findUnique({ where: { key: STATUS_KEY } }))?.value as ImportStatusValue | null;
+    const failingSince = before?.failedInARow ? before.failingSince ?? before.at ?? now.toISOString() : now.toISOString();
+    await putSetting(STATUS_KEY, { at: now.toISOString(), error: message.slice(0, 500), stats, failedInARow: (before?.failedInARow ?? 0) + 1, failingSince });
     await logAudit({ entityType: 'call', entityId: 'twilio-import', action: 'import_failed', actor: SYSTEM_ACTOR, details: { message: message.slice(0, 500) } }).catch(() => undefined);
     return { ...stats, error: message };
   } finally {

@@ -175,6 +175,24 @@ describe('calls: audit fixes of 12 Nov', () => {
     await expect(reader.listCalls({ after: T0 })).rejects.toThrow(/404/);
   });
 
+  it('25 Nov 2026: a dropped connection to Twilio is asked again once, a timeout is not, and the error says why', async () => {
+    const reset = () => new TypeError('fetch failed', { cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }) });
+    const reader = (answers: Array<Response | Error>) => {
+      let asked = 0;
+      const r = new TwilioRestReader({ accountSid: 'AC1', keySid: 'SK1', keySecret: 's', baseUrl: 'https://twilio.test', fetchImpl: (async () => { asked++; const a = answers.shift()!; if (a instanceof Error) throw a; return a; }) as typeof fetch });
+      return { r, asked: () => asked };
+    };
+    const once = reader([reset(), new Response(JSON.stringify({ calls: [], next_page_uri: null }), { status: 200 })]);
+    expect((await once.r.listCalls({ after: T0 })).calls).toEqual([]);
+    expect(once.asked()).toBe(2);
+    const down = reader([reset(), reset()]);
+    await expect(down.r.listCalls({ after: T0 })).rejects.toThrow('Could not reach Twilio (ECONNRESET).');
+    expect(down.asked()).toBe(2);
+    const slow = reader([new DOMException('The operation was aborted due to timeout', 'TimeoutError')]);
+    await expect(slow.r.listCalls({ after: T0 })).rejects.toThrow('Twilio did not answer within 20 seconds.');
+    expect(slow.asked()).toBe(1);
+  });
+
   it('M21: a long backlog is read a day at a time, oldest first, and the bookmark moves only as far as was read', async () => {
     const old = fake.addCall({ from: ALISA_LINE, to: '+13125550170', startTime: iso(60), endTime: iso(61), durationSec: 30 });
     const late = at(3 * 24 * 60);

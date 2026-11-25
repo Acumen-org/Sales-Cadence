@@ -53,6 +53,17 @@ const retryWaitMs = (res: Response, attempt: number) => {
   const after = Number(res.headers.get('retry-after'));
   return Math.min(Number.isFinite(after) && after >= 0 && res.headers.has('retry-after') ? after * 1000 : 1000 * (attempt + 1), 5000);
 };
+/** A request that could not reach Twilio at all is asked again this many times. */
+export const NETWORK_RETRIES = 1;
+export const NETWORK_RETRY_MS = 2000;
+const isTimeout = (err: unknown) => err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
+/** Why Twilio could not be reached, with the network's own code (ECONNRESET, ENOTFOUND, …) so the health card says it. */
+export function unreachableWords(err: unknown): string {
+  if (isTimeout(err)) return 'Twilio did not answer within 20 seconds.';
+  const cause = err instanceof Error ? (err as Error & { cause?: { code?: unknown; message?: unknown } }).cause : undefined;
+  const code = typeof cause?.code === 'string' ? cause.code : typeof cause?.message === 'string' ? cause.message : err instanceof Error ? err.message : String(err);
+  return `Could not reach Twilio (${code.slice(0, 120)}).`;
+}
 const recordingFromRaw = (r: Raw): TwilioRecording => ({ sid: String(r.sid), callSid: s(r.call_sid) ?? '', durationSec: n(r.duration), status: s(r.status) ?? 'completed', dateCreated: when(r.date_created) });
 
 export class TwilioRestReader implements TwilioReader {
@@ -67,7 +78,14 @@ export class TwilioRestReader implements TwilioReader {
   private async get(pathOrUri: string, list = false): Promise<Raw> {
     let res: Response;
     for (let attempt = 0; ; attempt++) {
-      res = await (this.cfg.fetchImpl ?? fetch)(this.url(pathOrUri), { headers: { authorization: this.auth, accept: 'application/json' }, signal: AbortSignal.timeout(20_000) });
+      try {
+        res = await (this.cfg.fetchImpl ?? fetch)(this.url(pathOrUri), { headers: { authorization: this.auth, accept: 'application/json' }, signal: AbortSignal.timeout(20_000) });
+      } catch (err) {
+        // A dropped connection (fetch's bare "fetch failed") is asked again once, after 2 seconds; a
+        // 20-second timeout is not, so a run never waits long on a Twilio that is down.
+        if (!isTimeout(err) && attempt < NETWORK_RETRIES) { await new Promise((r) => setTimeout(r, NETWORK_RETRY_MS)); continue; }
+        throw new Error(unreachableWords(err));
+      }
       // M27: a 429 or 5xx is asked again, twice at most, after Twilio's wait, instead of stopping the run.
       if ((res.status === 429 || res.status >= 500) && attempt < 2) { const wait = retryWaitMs(res, attempt); await res.text().catch(() => ''); await new Promise((r) => setTimeout(r, wait)); continue; }
       break;
