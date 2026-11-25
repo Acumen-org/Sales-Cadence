@@ -3,13 +3,13 @@
  * with some animation"). Mail apps run no script and most drop CSS animation, but nearly all play an
  * animated GIF, Outlook included. The bar grows in, leans at its leading edge like the Meetings
  * scoreboard's bars, then one light passes along it; it plays once and stays on its last frame. A
- * light and a dark one are sent, and the dark mode rules swap them like the wordmark.
+ * light and a dark one are sent, and the dark mode rules swap them.
  *
  * Drawn at twice the size shown, so it stays sharp on phones and high-density screens. Each frame
  * after the first holds only the strip that changed, which keeps the picture a few kilobytes.
  */
 
-export const BAR_WIDTH = 502;
+export const BAR_WIDTH = 550;
 export const BAR_HEIGHT = 14;
 const SCALE = 2;
 const W = BAR_WIDTH * SCALE;

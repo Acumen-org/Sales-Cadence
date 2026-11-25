@@ -12,7 +12,7 @@ import type { InlineImage } from './template';
  * Tests and the demo workspace use an outbox in memory instead (CADENCE_FAKE_MAIL=1, or under test).
  */
 
-/** `images`: pictures sent inside the email (the wordmark), shown where the html says cid:<id>. */
+/** `images`: pictures sent inside the email (the meetings bar), shown where the html says cid:<id>. */
 export type OutgoingMail = { from: string; to: string; subject: string; html: string; text: string; images?: InlineImage[] };
 export type SendResult = { ok: true } | { ok: false; error: string; permanent: boolean };
 
