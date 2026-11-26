@@ -1,4 +1,5 @@
 import { chromium } from '@playwright/test';
+import { goToPasswordSignIn } from './live-sign-in';
 
 /**
  * `pnpm exec tsx scripts/live-numbers.ts`: the figures an FO compares between pages, read from a
@@ -17,7 +18,7 @@ if (!url || !email || !password) { console.error('Set LIVE_URL, LIVE_EMAIL and L
 async function main() {
   const browser = await chromium.launch();
   const page = await browser.newContext({ viewport: { width: 1440, height: 900 } }).then((c) => c.newPage());
-  await page.goto(`${url}/login`, { waitUntil: 'networkidle' });
+  await goToPasswordSignIn(page, url);
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: /^Sign in/ }).click();

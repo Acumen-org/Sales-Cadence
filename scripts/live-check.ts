@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium, type Page } from '@playwright/test';
+import { goToPasswordSignIn } from './live-sign-in';
 
 /**
  * `pnpm live:check`: walk a running Cadence as a signed-in user and report what it shows.
@@ -58,7 +59,7 @@ async function inspect(page: Page, route: string): Promise<RouteReport> {
 async function main() {
   const browser = await chromium.launch();
   const page = await browser.newContext({ viewport: { width: 1440, height: 900 } }).then((c) => c.newPage());
-  await page.goto(`${url}/login`, { waitUntil: 'networkidle' });
+  await goToPasswordSignIn(page, url);
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: /^Sign in/ }).click();
