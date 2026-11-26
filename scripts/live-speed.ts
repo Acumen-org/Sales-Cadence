@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium, type Page } from '@playwright/test';
+import { goToPasswordSignIn } from './live-sign-in';
 
 /**
  * `pnpm exec tsx scripts/live-speed.ts`: how long a click takes to answer on a running Cadence,
@@ -38,7 +39,7 @@ async function documentTime(page: Page, href: string) {
 async function main() {
   const browser = await chromium.launch();
   const page = await browser.newContext({ viewport: { width: 1440, height: 900 } }).then((c) => c.newPage());
-  await page.goto(`${url}/login`, { waitUntil: 'networkidle' });
+  await goToPasswordSignIn(page, url);
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: /^Sign in/ }).click();
